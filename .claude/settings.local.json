@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python main_gui.py)",
+      "Bash(echo \"Exit code: $?\")",
+      "Bash(python -c \"from protocol_parser import ProtocolFrameParser; p = ProtocolFrameParser\\(\\); print\\('DI count:', len\\(p.DI_COMBINATION_MAP\\)\\); print\\('Parser count:', len\\(p._ProtocolFrameParser__get_data_content_parser.__func__\\(p, \\(0xE8,0x03,0x03,0x10\\)\\).__self__._ProtocolFrameParser__get_data_content_parser.__func__\\(p, \\(0,0,0,0\\)\\) if False else 'ok'\\)\")",
+      "Bash(python -c ':*)",
+      "mcp__sequential-thinking__sequentialthinking",
+      "Bash(python -c \"import PySide6; print\\(PySide6.__version__\\)\")",
+      "Bash(pip show:*)",
+      "Bash(pyinstaller --noconfirm --onefile --windowed --name \"南网协议解析工具\" --hidden-import=PySide6.QtWidgets --hidden-import=PySide6.QtCore --hidden-import=PySide6.QtGui main_gui.py)",
+      "Bash(python -m PyInstaller --noconfirm --onefile --windowed --name \"南网协议解析工具\" --add-data \"custom_di.json;.\" main_gui.py)",
+      "Bash(python -m PyInstaller --noconfirm --onefile --windowed --name \"南网协议解析工具\" main_gui.py)"
+    ]
+  }
+}

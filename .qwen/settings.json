@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python *)",
+      "Bash(streamlit *)",
+      "Bash(timeout *)",
+      "Bash(curl *)",
+      "Bash(findstr *)",
+      "Bash(pyinstaller *)",
+      "Bash(taskkill *)",
+      "Bash(pip show *)",
+      "Bash(pip install *)",
+      "Bash(type *)",
+      "Bash(dir)",
+      "Bash(pip uninstall *)"
+    ]
+  },
+  "$version": 3
+}
