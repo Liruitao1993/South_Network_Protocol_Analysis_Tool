@@ -130,14 +130,14 @@ class MainWindow(QMainWindow):
         self.result_table_widget.setColumnWidth(2, 180)
         self.result_table_widget.setEditTriggers(QTableWidget.NoEditTriggers)
         self.result_table_widget.setSelectionBehavior(QTableWidget.SelectRows)
-        self.result_table_widget.setAlternatingRowColors(False)
+        self.result_table_widget.setAlternatingRowColors(True)
 
         # 表格字体缩小，长帧时显示更多信息
         table_font = QFont()
-        table_font.setPointSize(9)
+        table_font.setPointSize(8)
         self.result_table_widget.setFont(table_font)
-        # 行高紧凑
-        self.result_table_widget.verticalHeader().setDefaultSectionSize(22)
+        # 行高更加紧凑
+        self.result_table_widget.verticalHeader().setDefaultSectionSize(20)
         self.result_table_widget.verticalHeader().hide()
 
         # 选中行时高亮报文字节
@@ -190,11 +190,11 @@ class MainWindow(QMainWindow):
         self.di_table.setColumnWidth(4, 200)
         self.di_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.di_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.di_table.setAlternatingRowColors(False)
+        self.di_table.setAlternatingRowColors(True)
         self.di_table.verticalHeader().hide()
-        self.di_table.verticalHeader().setDefaultSectionSize(22)
+        self.di_table.verticalHeader().setDefaultSectionSize(20)
         table_font = QFont()
-        table_font.setPointSize(9)
+        table_font.setPointSize(8)
         self.di_table.setFont(table_font)
         layout.addWidget(self.di_table)
 
@@ -464,6 +464,13 @@ class MainWindow(QMainWindow):
         self.result_table.setColumnWidth(0, 50)
         self.result_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.result_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.result_table.setAlternatingRowColors(True)
+        # 紧凑字体和行高
+        table_font = QFont()
+        table_font.setPointSize(8)
+        self.result_table.setFont(table_font)
+        self.result_table.verticalHeader().setDefaultSectionSize(20)
+        self.result_table.verticalHeader().hide()
         self.result_table.cellClicked.connect(self.show_detail_dialog)
         result_layout.addWidget(self.result_table)
 
@@ -655,6 +662,9 @@ class MainWindow(QMainWindow):
                 background-color: #ffffff;
                 color: #000000;
                 padding: 2px 4px;
+            }
+            QTableWidget::item:alternate {
+                background-color: #f8f8f8;
             }
             QTableWidget::item:selected {
                 background-color: #2196F3;
@@ -1109,10 +1119,11 @@ class MainWindow(QMainWindow):
                 detail_table.setColumnWidth(2, 180)
                 detail_table.setEditTriggers(QTableWidget.NoEditTriggers)
                 detail_table.setSelectionBehavior(QTableWidget.SelectRows)
+                detail_table.setAlternatingRowColors(True)
                 detail_table.verticalHeader().hide()
-                detail_table.verticalHeader().setDefaultSectionSize(22)
+                detail_table.verticalHeader().setDefaultSectionSize(20)
                 table_font = QFont()
-                table_font.setPointSize(9)
+                table_font.setPointSize(8)
                 detail_table.setFont(table_font)
 
                 detail_table.setRowCount(len(table_data))
@@ -1219,11 +1230,11 @@ class MainWindow(QMainWindow):
             return
 
         # 获取完整原始报文（从输入框解析得到）
-        if not hasattr(self, 'current_full_bytes'):
+        if not hasattr(self, 'current_result'):
             QMessageBox.information(self, "提示", "无法获取原始报文数据，请先解析")
             return
 
-        full_bytes = self.current_full_bytes
+        full_bytes = self.current_result
         # 提取对应范围字节（byte_end 包含在内）
         extracted_bytes = full_bytes[byte_start : byte_end + 1]
 
@@ -1233,7 +1244,7 @@ class MainWindow(QMainWindow):
 
         # 使用HDLC解析器解析提取出的APDU
         try:
-            parsed_data = self.parser.parse_apdu_to_table(bytes(extracted_bytes))
+            parsed_data = self.hdlc_parser.parse_apdu_to_table(bytes(extracted_bytes))
         except Exception as e:
             QMessageBox.critical(self, "解析错误", f"解析APDU失败:\n{str(e)}")
             return
@@ -1255,12 +1266,23 @@ class MainWindow(QMainWindow):
         layout.addWidget(hex_text)
 
         # 解析结果表格
-        from PyQt5.QtWidgets import QTableWidget, QTableWidgetItem
         table = QTableWidget()
         table.setColumnCount(4)
         table.setHorizontalHeaderLabels(["字段", "十六进制", "解析值", "说明"])
-        table.horizontalHeader().setSectionResizeMode(2, 1)
-        table.verticalHeader().setVisible(False)
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
+        table.setColumnWidth(0, 160)
+        table.setColumnWidth(1, 120)
+        table.setColumnWidth(2, 180)
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        table.setSelectionBehavior(QTableWidget.SelectRows)
+        table.setAlternatingRowColors(True)
+        table.verticalHeader().hide()
+        table.verticalHeader().setDefaultSectionSize(20)
+        table_font = QFont()
+        table_font.setPointSize(8)
+        table.setFont(table_font)
 
         for r, item in enumerate(parsed_data):
             field_name = item[0]

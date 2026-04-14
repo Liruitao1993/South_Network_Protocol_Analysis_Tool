@@ -279,14 +279,14 @@ class HDLCParser:
 
         control_byte = frame_bytes[offset]
         ctrl_type, ctrl_desc, ctrl_details = self._parse_control_field(control_byte, frame_direction)
-        
+
         table_data.append(("控制域", f"0x{control_byte:02X}", ctrl_type, ctrl_desc, offset, offset))
-        
+
         # 控制域子字段
         if ctrl_details:
-            for key, val in ctrl_details.items():
-                table_data.append((f"  {key}", "-", val, "", offset, offset))
-        
+            for field_name, raw_bit, parsed_val in ctrl_details:
+                table_data.append((f"  {field_name}", raw_bit, parsed_val, "", offset, offset))
+
         offset += 1
 
         # 计算HCS范围（格式域2字节 + 目的地址 + 源地址 + 控制域）
@@ -386,38 +386,38 @@ class HDLCParser:
     def _parse_address_field(self, data: bytes, offset: int) -> Tuple[Optional[int], int]:
         """
         解析HDLC地址域（支持扩展地址机制）
-        
+
         返回: (地址值, 地址长度)
         地址扩展规则：每个字节的LSB=0表示后面还有地址字节，LSB=1表示最后一个地址字节
-        注意：地址值需要移除LSB扩展位后组合，字节按传输顺序（大端序）
+        注意：地址值需要移除LSB扩展位后组合，第一个字节传输最低7位，最后一个字节传输最高7位
         """
         if offset >= len(data):
             return None, 0
-        
+
         address = 0
         length = 0
         shift = 0
-        
+
         while offset + length < len(data):
             byte = data[offset + length]
             length += 1
-            
+
             # LSB (bit 0) 表示是否还有扩展字节
             extension_bit = byte & 0x01
             address_value = (byte >> 1) & 0x7F  # 高7位是地址值
-            
-            # 按传输顺序组合（第一个字节是高位）
+
+            # 按传输顺序组合：第一个字节是最低7位，每增加一个字节向高位移7位
             address |= (address_value << shift)
             shift += 7
-            
-            # LSB=1表示这是最后一个地址字节
+
+            # LSB=1表示这是最后一个地址字节，停止
             if extension_bit == 0x01:
                 break
-            
-            # 安全检查：最多4字节地址
+
+            # 安全检查：最多4字节地址，如果还没遇到结束标记就停止
             if length >= 4:
                 break
-        
+
         return address, length
 
     def _format_address_description(self, address: int, length: int, role: str) -> str:
@@ -437,7 +437,7 @@ class HDLCParser:
         else:
             return f"0x{address:X} ({role}{length}字节地址)"
 
-    def _parse_control_field(self, control_byte: int, direction: str = "unknown") -> Tuple[str, str, Dict[str, str]]:
+    def _parse_control_field(self, control_byte: int, direction: str = "unknown") -> Tuple[str, str, List[Tuple[str, str, str]]]:
         """
         解析控制域
 
@@ -445,13 +445,13 @@ class HDLCParser:
             control_byte: 控制域字节
             direction: "client_to_server"(客户端发) 或 "server_to_client"(服务端发) 或 "unknown"
 
-        返回: (帧类型名称, 详细描述, 子字段字典)
+        返回: (帧类型名称, 详细描述, 子字段列表[(字段名, 原始bit显示, 解析值)])
 
         P/F位解释规则(IEC 62056):
           - 客户端发送的帧: bit4=P(Poll), P=1表示需要服务端响应
           - 服务端发送的帧: bit4=F(Final), F=1表示这是最后一帧(无后续数据)
         """
-        details = {}
+        details = []
 
         # P/F位描述根据方向不同
         def pf_desc(bit_val):
@@ -462,6 +462,17 @@ class HDLCParser:
             else:
                 return "P/F=1" if bit_val else "P/F=0"
 
+        # 生成原始bit字符串，例如 "bit7-bit5: 101"
+        def bit_range_mask(shift: int, mask: int) -> str:
+            value = (control_byte >> shift) & mask
+            bits = bin(value)[2:].zfill(bin(mask).count('1'))
+            msb = shift + bin(mask).count('1') - 1
+            lsb = shift
+            if msb == lsb:
+                return f"bit{msb}: {bits}"
+            else:
+                return f"bit{msb}-bit{lsb}: {bits}"
+
         # 判断帧类型
         # I帧：bit0=0
         if (control_byte & 0x01) == 0:
@@ -470,84 +481,84 @@ class HDLCParser:
             p_f = (control_byte >> 4) & 0x01  # P/F位
             n_s = (control_byte >> 1) & 0x07  # 发送序列号 N(S)
 
-            details = {
-                "N(R)接收序号": str(n_r),
-                "P/F位": pf_desc(p_f),
-                "N(S)发送序号": str(n_s),
-            }
+            details = [
+                ("N(R)接收序号", bit_range_mask(5, 0b111), str(n_r)),
+                ("P/F位", bit_range_mask(4, 0b1), pf_desc(p_f)),
+                ("N(S)发送序号", bit_range_mask(1, 0b111), str(n_s)),
+            ]
             return "I帧 (信息帧)", f"信息传输帧, N(S)={n_s}, N(R)={n_r}", details
-        
+
         # 检查其他帧类型（bit0=1）
         # UI帧: 0 0 0 P/F 0 0 1 1 = 0x03 (P/F=0) 或 0x0B (P/F=1)
         if (control_byte & 0xEF) == 0x03:  # 屏蔽bit4 (P/F位)
             p_f = (control_byte >> 4) & 0x01
-            details = {
-                "P/F位": pf_desc(p_f),
-            }
+            details = [
+                ("P/F位", bit_range_mask(4, 0b1), pf_desc(p_f)),
+            ]
             return "UI帧 (无编号信息)", f"无编号信息传输", details
-        
+
         # SNRM帧: 1 0 0 P 0 0 1 1 = 0x83 (P=0) 或 0x93 (P=1)
         if (control_byte & 0xEF) == 0x83:  # 屏蔽bit4 (P位)
             p = (control_byte >> 4) & 0x01
-            details = {
-                "P位(查询)": "是" if p else "否",
-            }
+            details = [
+                ("P位(查询)", bit_range_mask(4, 0b1), "是" if p else "否"),
+            ]
             return "SNRM帧", f"设置正常响应模式, P={'是' if p else '否'}", details
-        
+
         # DISC帧: 010 P 0011 = 0x43 或 0x53 (bit7=0, bit6=1, bit5=0, bit4=P, bit3-0=0011)
         if (control_byte & 0x0F) == 0x03 and (control_byte & 0xE0) in [0x40, 0x50]:
             p = (control_byte >> 4) & 0x01
-            details = {
-                "P位(查询)": "是" if p else "否",
-            }
+            details = [
+                ("P位(查询)", bit_range_mask(4, 0b1), "是" if p else "否"),
+            ]
             return "DISC帧", f"断开连接, P={'是' if p else '否'}", details
-        
+
         # UA帧: 011 F 0011 = 0x63 或 0x73 (bit7=0, bit6=1, bit5=1, bit4=F, bit3-0=0011)
         if (control_byte & 0x0F) == 0x03 and (control_byte & 0xE0) in [0x60, 0x70]:
             f = (control_byte >> 4) & 0x01
-            details = {
-                "F位(最终)": "是" if f else "否",
-            }
+            details = [
+                ("F位(最终)", bit_range_mask(4, 0b1), "是" if f else "否"),
+            ]
             return "UA帧", f"无编号确认, F={'是' if f else '否'}", details
-        
+
         # DM帧: 000 F 1111 = 0x0F 或 0x1F (bit7-4=0000/0001, bit3-0=1111)
         if (control_byte & 0x0F) == 0x0F and (control_byte & 0xE0) in [0x00, 0x10]:
             f = (control_byte >> 4) & 0x01
-            details = {
-                "F位(最终)": "是" if f else "否",
-            }
+            details = [
+                ("F位(最终)", bit_range_mask(4, 0b1), "是" if f else "否"),
+            ]
             return "DM帧", f"断开模式, F={'是' if f else '否'}", details
-        
+
         # FRMR帧: 100 F 0111 = 0x87 或 0x97 (bit7=1, bit6-5=00, bit4=F, bit3-0=0111)
         if (control_byte & 0x0F) == 0x07 and (control_byte & 0xE0) in [0x80, 0x90]:
             f = (control_byte >> 4) & 0x01
-            details = {
-                "F位(最终)": "是" if f else "否",
-            }
+            details = [
+                ("F位(最终)", bit_range_mask(4, 0b1), "是" if f else "否"),
+            ]
             return "FRMR帧", f"帧拒绝, F={'是' if f else '否'}", details
-        
+
         # RR帧: N(R) P/F 0001 (bit7-5=N(R), bit4=P/F, bit3-0=0001)
         if (control_byte & 0x0F) == 0x01:
             n_r = (control_byte >> 5) & 0x07
             p_f = (control_byte >> 4) & 0x01
-            details = {
-                "N(R)接收序号": str(n_r),
-                "P/F位": pf_desc(p_f),
-            }
+            details = [
+                ("N(R)接收序号", bit_range_mask(5, 0b111), str(n_r)),
+                ("P/F位", bit_range_mask(4, 0b1), pf_desc(p_f)),
+            ]
             return "RR帧 (接收就绪)", f"接收就绪, N(R)={n_r}", details
 
         # RNR帧: N(R) P/F 0101 (bit7-5=N(R), bit4=P/F, bit3-0=0101)
         if (control_byte & 0x0F) == 0x05:
             n_r = (control_byte >> 5) & 0x07
             p_f = (control_byte >> 4) & 0x01
-            details = {
-                "N(R)接收序号": str(n_r),
-                "P/F位": pf_desc(p_f),
-            }
+            details = [
+                ("N(R)接收序号", bit_range_mask(5, 0b111), str(n_r)),
+                ("P/F位", bit_range_mask(4, 0b1), pf_desc(p_f)),
+            ]
             return "RNR帧 (接收未就绪)", f"接收未就绪(忙), N(R)={n_r}", details
-        
+
         # 未识别类型
-        return f"未知帧(0x{control_byte:02X})", "未识别的控制域类型", {}
+        return f"未知帧(0x{control_byte:02X})", "未识别的控制域类型", []
 
     def _calculate_fcs(self, data: bytes) -> int:
         """
@@ -759,30 +770,24 @@ class HDLCParser:
         # 添加整个APDU父节点（覆盖完整字节范围），方便双击选中整个APDU进行深度解析
         # 由于解析内容会增加offset，这里先占位，解析完成后修正？不直接处理：先走一遍再添加
         if apdu_byte in self.APDU_TYPES:
-            # 先计算整个APDU占用的长度
-            from copy import copy
-            temp_offset = 0
-            # 探测解析会消耗多少字节 - 复制一份当前offset计算
-            test_data = data[apdu_start:]
-            # 跳过apdu_byte
-            temp_offset += 1
-            # 调用_parse_apdu_content，但不添加到table_data，只是为了计算消耗了多少字节
-            # 创建一个临时列表来计算偏移
-            self._parse_apdu_content(test_data[temp_offset:], [], 0, apdu_byte, 0, direction)
-            # 但这个方法不返回偏移，所以改用另一种方式：我们知道data长度，解析完后看data还剩多少
-            # 直接保存当前offset，解析完后计算
+            # 保存当前offset，解析完后计算
             original_offset = offset
             apdu_name = self.APDU_TYPES[apdu_byte]
-            offset += 1
+            offset += 1  # 跳过APDU类型字节
             # 保存当前table长度，解析后新添加的项都会缩进
             start_len = len(table_data)
-            # 解析所有子字段，都会加上"  "前缀缩进
-            self._parse_apdu_content(data[offset:], table_data, 0, apdu_byte, base_offset + offset, direction)
+            # 解析所有子字段，都会加上"  "前缀缩进，返回消耗的字节数
+            consumed = self._parse_apdu_content(data[offset:], table_data, 0, apdu_byte, base_offset + offset, direction)
+            # 更新offset：加上消耗的字节数
+            offset += consumed
             # 现在offset已经走到APDU末尾之后，计算整个APDU的字节范围
             apdu_end = base_offset + (offset - 1)
             apdu_len = offset - original_offset
             # 在所有子字段前面插入整个APDU父行（覆盖完整范围）
-            table_data.insert(start_len, ("  DLMS APDU", f"整个APDU {apdu_len}字节", f"{apdu_name}",
+            # 原始值显示APDU类型字节的十六进制，解析值显示名称+长度
+            apdu_byte_val = data[apdu_start]
+            table_data.insert(start_len, ("  DLMS APDU", f"0x{apdu_byte_val:02X}",
+                                        f"{apdu_name} (整个{apdu_len}字节)",
                                         "完整DLMS应用层协议数据单元（双击可深度解析）",
                                         base_offset + original_offset, apdu_end))
         elif apdu_byte in (0x00, 0x01):
@@ -810,18 +815,21 @@ class HDLCParser:
 
             if len(data) > offset and data[offset] in self.APDU_TYPES:
                 # 整个APDU作为父节点
-                apdu_start = offset
                 original_offset = offset
                 apdu_byte2 = data[offset]
                 apdu_name = self.APDU_TYPES[apdu_byte2]
                 offset += 1
                 start_len = len(table_data)
-                # 解析所有子字段，会自动缩进
-                self._parse_apdu_content(data[offset:], table_data, 0, apdu_byte2, base_offset + offset, direction)
+                # 解析所有子字段，会自动缩进，返回消耗的字节数
+                consumed = self._parse_apdu_content(data[offset:], table_data, 0, apdu_byte2, base_offset + offset, direction)
+                # 更新offset
+                offset += consumed
                 apdu_end = base_offset + (offset - 1)
                 apdu_len = offset - original_offset
                 # 插入父行
-                table_data.insert(start_len, ("      DLMS APDU", f"整个APDU {apdu_len}字节", f"{apdu_name}",
+                apdu_byte_val = data[apdu_start]
+                table_data.insert(start_len, ("      DLMS APDU", f"0x{apdu_byte_val:02X}",
+                                            f"{apdu_name} (整个{apdu_len}字节)",
                                             "完整DLMS应用层协议数据单元（双击可深度解析）",
                                             base_offset + original_offset, apdu_end))
         else:
@@ -1367,7 +1375,7 @@ class HDLCParser:
         return len(data)
 
     def _parse_apdu_content(self, data: bytes, table_data: list, offset: int,
-                            apdu_type: int, base_offset: int = 0, direction: str = "unknown"):
+                            apdu_type: int, base_offset: int = 0, direction: str = "unknown") -> int:
         """
         解析APDU具体内容
 
@@ -1377,9 +1385,12 @@ class HDLCParser:
             apdu_type: APDU类型码
             base_offset: 在原始帧中的偏移
             direction: "request"(客户端→服务端) 或 "response"(服务端→客户端)
+
+        返回:
+            消耗的字节数
         """
         if len(data) <= offset:
-            return
+            return 0
 
         remaining = data[offset:]
         local_offset = offset
@@ -1676,9 +1687,11 @@ class HDLCParser:
                               f"{len(remaining)}字节",
                               "关联请求/响应（BER编码）",
                               bo + local_offset, bo + min(local_offset + 19, len(remaining) - 1)))
-            # 深度解析 BER-TLV
+            # 深度解析 BER-TLV，_parse_ber_tlv 会解析完所有剩余字节
             if len(remaining) >= 2:
                 self._parse_ber_tlv(remaining, table_data, bo + local_offset)
+                # BER-TLV 解析了所有剩余字节，local_offset 加上全部长度
+                local_offset += len(remaining)
 
         # ======== 其他加密/未知类型 ========
         else:
@@ -1688,6 +1701,11 @@ class HDLCParser:
                                   f"{len(remaining)}字节",
                                   f"APDU类型 0x{apdu_type:02X} 的数据",
                                   bo + local_offset, bo + min(local_offset + 19, len(remaining) - 1)))
+                # 消耗了所有剩余字节
+                local_offset += len(remaining)
+
+        # 返回消耗的字节数
+        return local_offset - offset
 
     @staticmethod
     def _bytes_to_hex(data: bytes) -> str:
@@ -1866,19 +1884,42 @@ class HDLCParser:
             if len(apdu_data) > 0:
                 apdu_byte = apdu_data[0]
                 if apdu_byte in self.APDU_TYPES:
+                    # 添加整个APDU父行（覆盖完整范围，方便双击深度解析）
+                    original_offset = offset
                     apdu_name = self.APDU_TYPES[apdu_byte]
-                    table_data.append(("  DLMS APDU类型", f"0x{apdu_byte:02X}", apdu_name,
-                                      "DLMS应用层协议数据单元",
-                                      boffset, boffset))
-                    # 解析APDU内容
-                    self._parse_apdu_content(apdu_data[1:], table_data, 0, apdu_byte, boffset + 1)
+                    offset += 1
+                    start_len = len(table_data)
+                    # 解析APDU内容，获取消耗字节数
+                    consumed = self._parse_apdu_content(apdu_data[1:], table_data, 0, apdu_byte, boffset + 1)
+                    offset += consumed
+                    # 计算完整范围
+                    apdu_end = base_offset + (offset - 1)
+                    apdu_len = offset - original_offset
+                    # 插入父行，所有子项会自动在下面缩进
+                    # 原始值显示APDU类型字节十六进制，解析值显示名称+总长度
+                    table_data.insert(start_len, ("  DLMS APDU", f"0x{apdu_byte:02X}",
+                                                f"{apdu_name} (整个{apdu_len}字节)",
+                                                "完整DLMS应用层协议数据单元（双击可深度解析）",
+                                                boffset + original_offset, apdu_end))
+                    # 添加APDU类型行作为子项（缩进一级）
+                    table_data.insert(start_len + 1, ("    DLMS APDU类型", f"0x{apdu_byte:02X}", apdu_name,
+                                                    "DLMS应用层协议数据单元类型",
+                                                    boffset, boffset))
                 else:
-                    # BER-TLV 编码
+                    # BER-TLV 编码 - 添加整个APDU父行
                     if self._looks_like_ber_tlv(apdu_data):
-                        table_data.append(("  DLMS数据 (BER-TLV)", self._bytes_to_hex(apdu_data[:20]) + ("..." if len(apdu_data) > 20 else ""),
-                                          f"{len(apdu_data)}字节", "BER-TLV编码的DLMS数据",
-                                          boffset, min(boffset + len(apdu_data) - 1, boffset + 19)))
+                        original_offset = offset
+                        total_len = len(apdu_data)
+                        start_len = len(table_data)
+                        # 递归解析所有子项
                         self._parse_ber_tlv(apdu_data, table_data, boffset)
+                        apdu_end = boffset + (original_offset + total_len - 1)
+                        # 插入父节点
+                        first_byte = apdu_data[original_offset]
+                        table_data.insert(start_len, ("  DLMS APDU (BER-TLV)", f"0x{first_byte:02X}",
+                                                    f"BER-TLV编码 (整个{total_len}字节)",
+                                                    "完整DLMS APDU（双击可深度解析）",
+                                                    boffset + original_offset, apdu_end))
                     else:
                         table_data.append(("  DLMS数据", self._bytes_to_hex(apdu_data[:20]) + ("..." if len(apdu_data) > 20 else ""),
                                           f"{len(apdu_data)}字节", "未识别的DLMS APDU类型",
