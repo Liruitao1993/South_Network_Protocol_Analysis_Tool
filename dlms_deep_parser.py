@@ -461,9 +461,9 @@ def parse_dlms_deep(apdu_data: bytes, base_offset: int) -> List[Tuple]:
     
     apdu_type = apdu_data[0]
     
-    if apdu_type == 0xC2:  # Action-Request
+    if apdu_type == 0xC3:  # Action-Request
         return parser.parse_action_request(apdu_data[1:], base_offset + 1)
-    elif apdu_type == 0xC6:  # Action-Response
+    elif apdu_type == 0xC7:  # Action-Response
         # 类似解析
         table_data.append(("    Action-Response", f"0x{apdu_type:02X}", "操作响应", "", base_offset, base_offset))
         return table_data

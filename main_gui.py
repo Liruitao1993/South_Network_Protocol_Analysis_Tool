@@ -25,7 +25,7 @@ from hdlc_parser import HDLCParser
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("南网本地通信接口协议解析工具260409")
+        self.setWindowTitle("协议解析工具 260414")
         self.setMinimumSize(1000, 700)
 
         # 协议选择：0=南网协议，1=PLC RF协议，2=HDLC/DLMS协议
@@ -54,18 +54,7 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(15, 15, 15, 15)
         main_layout.setSpacing(15)
 
-        # 标题和协议选择行
-        title_layout = QHBoxLayout()
-
-        title_label = QLabel("南网本地通信接口协议解析工具含深化应用解析")
-        title_label.setAlignment(Qt.AlignCenter)
-        title_font = QFont()
-        title_font.setPointSize(18)
-        title_font.setBold(True)
-        title_label.setFont(title_font)
-        title_layout.addWidget(title_label, 1)
-
-        # 协议选择
+        # 协议选择行
         proto_layout = QHBoxLayout()
         proto_label = QLabel("选择协议：")
         proto_label.setFont(QFont("", 12, QFont.Bold))
@@ -75,14 +64,15 @@ class MainWindow(QMainWindow):
         self.protocol_combo.addItem("南网协议 (Q/CSG1209021-2019)")
         self.protocol_combo.addItem("PLC RF协议 (万胜海外 V1_04)")
         self.protocol_combo.addItem("HDLC/DLMS协议 (IEC 62056-46)")
-        self.protocol_combo.setMinimumWidth(300)
+        self.protocol_combo.addItem("DLMS Wrapper裸报文 (直接解析Wrapper+APDU)")
+        self.protocol_combo.addItem("DLMS-APDU裸报文 (直接解析APDU)")
+        self.protocol_combo.setMinimumWidth(450)
         self.protocol_combo.setFont(QFont("Microsoft YaHei", 11))
         # 移除焦点边框，保持简洁原生外观
         self.protocol_combo.currentIndexChanged.connect(self._on_protocol_changed)
         proto_layout.addWidget(self.protocol_combo)
 
-        title_layout.addLayout(proto_layout)
-        main_layout.addLayout(title_layout)
+        main_layout.addLayout(proto_layout)
 
         # 选项卡
         self.tab_widget = QTabWidget()
@@ -152,6 +142,8 @@ class MainWindow(QMainWindow):
 
         # 选中行时高亮报文字节
         self.result_table_widget.currentCellChanged.connect(self._highlight_bytes)
+        # 双击行时，提取该区域字节作为DLMS-APDU重新解析
+        self.result_table_widget.doubleClicked.connect(self._extract_apdu_reparse)
         # 存储每行对应的字节范围
         self._byte_ranges: list = []
 
@@ -799,8 +791,24 @@ class MainWindow(QMainWindow):
             return self.parser
         elif self.current_protocol == 1:
             return self.plc_rf_parser
-        else:  # index == 2, HDLC/DLMS协议
+        elif self.current_protocol == 2:  # HDLC/DLMS协议 (完整HDLC帧)
             return self.hdlc_parser
+        elif self.current_protocol == 3:  # DLMS Wrapper裸报文 (直接解析Wrapper+APDU)
+            # 返回一个匿名对象，调用parse_wrapper_to_table
+            class WrapperParser:
+                def __init__(self, hdlc_parser):
+                    self.hdlc_parser = hdlc_parser
+                def parse_to_table(self, data):
+                    return self.hdlc_parser.parse_wrapper_to_table(data)
+            return WrapperParser(self.hdlc_parser)
+        else:  # index == 4, DLMS-APDU裸报文 (直接解析APDU)
+            # 返回一个匿名对象，调用parse_apdu_to_table
+            class APDUParser:
+                def __init__(self, hdlc_parser):
+                    self.hdlc_parser = hdlc_parser
+                def parse_to_table(self, data):
+                    return self.hdlc_parser.parse_apdu_to_table(data)
+            return APDUParser(self.hdlc_parser)
 
     def load_example(self, data: str):
         """加载示例数据"""
@@ -1199,6 +1207,75 @@ class MainWindow(QMainWindow):
         hl_fmt.setForeground(QColor("#000000"))
         hl_fmt.setBackground(QColor(255, 235, 59, 160))  # 黄色半透明高亮
         highlight_cursor.setCharFormat(hl_fmt)
+
+    def _extract_apdu_reparse(self, index):
+        """双击表格行时，提取该行对应字节范围，弹窗深度解析DLMS-APDU"""
+        row = index.row()
+        if not self._byte_ranges or row < 0 or row >= len(self._byte_ranges):
+            return
+
+        byte_start, byte_end = self._byte_ranges[row]
+        if byte_start is None or byte_end is None:
+            return
+
+        # 获取完整原始报文（从输入框解析得到）
+        if not hasattr(self, 'current_full_bytes'):
+            QMessageBox.information(self, "提示", "无法获取原始报文数据，请先解析")
+            return
+
+        full_bytes = self.current_full_bytes
+        # 提取对应范围字节（byte_end 包含在内）
+        extracted_bytes = full_bytes[byte_start : byte_end + 1]
+
+        if len(extracted_bytes) == 0:
+            QMessageBox.information(self, "提示", "选中区域字节为空")
+            return
+
+        # 使用HDLC解析器解析提取出的APDU
+        try:
+            parsed_data = self.parser.parse_apdu_to_table(bytes(extracted_bytes))
+        except Exception as e:
+            QMessageBox.critical(self, "解析错误", f"解析APDU失败:\n{str(e)}")
+            return
+
+        # 创建弹窗显示解析结果
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"深度解析DLMS-APDU (提取 {len(extracted_bytes)} 字节)")
+        dialog.resize(900, 600)
+
+        layout = QVBoxLayout(dialog)
+
+        # 显示提取的十六进制
+        hex_text = QTextEdit()
+        hex_text.setReadOnly(True)
+        hex_text.setFont(QFont("Consolas", 10))
+        hex_text.setMaximumHeight(80)
+        hex_str = ' '.join(f'{b:02X}' for b in extracted_bytes)
+        hex_text.setText(f"提取字节: {hex_str}")
+        layout.addWidget(hex_text)
+
+        # 解析结果表格
+        from PyQt5.QtWidgets import QTableWidget, QTableWidgetItem
+        table = QTableWidget()
+        table.setColumnCount(4)
+        table.setHorizontalHeaderLabels(["字段", "十六进制", "解析值", "说明"])
+        table.horizontalHeader().setSectionResizeMode(2, 1)
+        table.verticalHeader().setVisible(False)
+
+        for r, item in enumerate(parsed_data):
+            field_name = item[0]
+            raw_hex = item[1]
+            parsed_val = str(item[2])
+            comment = item[3]
+            table.insertRow(r)
+            table.setItem(r, 0, QTableWidgetItem(field_name))
+            table.setItem(r, 1, QTableWidgetItem(raw_hex))
+            table.setItem(r, 2, QTableWidgetItem(parsed_val))
+            table.setItem(r, 3, QTableWidgetItem(comment))
+
+        layout.addWidget(table)
+        dialog.setLayout(layout)
+        dialog.exec()
 
 
 def main():
