@@ -9,21 +9,36 @@ from typing import Dict, Any
 class DLMSParser:
     """DLMS协议解析器"""
 
-    # APDU类型映射
+    # APDU类型映射（按IEC 62056标准/Green Book定义）
     APDU_TYPES = {
         0x01: "AARQ (关联请求)",
         0x02: "AARE (关联响应)",
         0x03: "RLRQ (释放请求)",
         0x04: "RLRE (释放响应)",
-        0xC0: "Get-Request",
-        0xC4: "Get-Response",
-        0xC1: "Set-Request",
-        0xC5: "Set-Response",
-        0xC2: "Action-Request",
-        0xC6: "Action-Response",
-        0xC3: "Exception-Response",
         0x0C: "Confirmed-Service-Error",
         0x0E: "General-Block-Transfer",
+        0x60: "AARQ (关联请求-BER)",
+        0x61: "AARE (关联响应-BER)",
+        0xC0: "Get-Request",
+        0xC1: "Set-Request",
+        0xC3: "Action-Request",
+        0xC4: "Get-Response",
+        0xC5: "Set-Response",
+        0xC7: "Action-Response",
+        0xC8: "Glo-Get-Request",
+        0xC9: "Glo-Set-Request",
+        0xCB: "Glo-Action-Request",
+        0xCC: "Glo-Get-Response",
+        0xCD: "Glo-Set-Response",
+        0xCF: "Glo-Action-Response",
+        0xD0: "Ded-Get-Request",
+        0xD1: "Ded-Set-Request",
+        0xD3: "Ded-Action-Request",
+        0xD4: "Ded-Get-Response",
+        0xD5: "Ded-Set-Response",
+        0xD7: "Ded-Action-Response",
+        0xE6: "Event-Notification",
+        0xE7: "Data-Notification",
     }
 
     # 数据类型映射
@@ -213,7 +228,7 @@ class DLMSParser:
                 table_data.append(("  调用ID", f"0x{invoke_id:02X}", str(invoke_id), "", offset, offset))
                 offset += 1
         
-        elif apdu_type in [0xC2, 0xC6]:  # Action-Request/Response
+        elif apdu_type in [0xC3, 0xC7]:  # Action-Request/Response
             if len(data) >= 1:
                 invoke_id = data[0]
                 table_data.append(("  调用ID", f"0x{invoke_id:02X}", str(invoke_id), "", offset, offset))
@@ -342,6 +357,11 @@ class DLMSParser:
             if len(data) >= 2 + str_len:
                 str_val = data[2:2+str_len].decode('ascii', errors='replace')
                 table_data.append((label, data[:2+str_len].hex(' ').upper(), str_val, f"Visible-String({str_len}字节)", offset, offset + 1 + str_len))
+        elif data_type == 0x0A:  # UTF8-String
+            str_len = data[1] if len(data) > 1 else 0
+            if len(data) >= 2 + str_len:
+                str_val = data[2:2+str_len].decode('utf-8', errors='replace')
+                table_data.append((label, data[:2+str_len].hex(' ').upper(), str_val, f"UTF8-String({str_len}字节)", offset, offset + 1 + str_len))
         elif data_type == 0x06:  # Octet-String
             str_len = data[1] if len(data) > 1 else 0
             if len(data) >= 2 + str_len:
