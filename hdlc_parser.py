@@ -1465,7 +1465,8 @@ class HDLCParser:
                             local_offset += 1
                             # 解析返回数据
                             if len(remaining) > 3:
-                                self._parse_dlms_value(remaining[3:], table_data, bo + local_offset, "    返回数据")
+                                consumed_data = self._parse_dlms_value(remaining[3:], table_data, bo + local_offset, "    返回数据")
+                                local_offset += consumed_data
                         elif result_tag == 0x01:
                             # Data-Access-Result 错误
                             if len(remaining) >= 4:
@@ -1479,10 +1480,22 @@ class HDLCParser:
 
                 elif resp_type == 0x02:
                     # Get-Response-With-Data-Block: block-control + payload
+                    remaining_len = len(remaining) - 2
                     table_data.append(("    返回数据(分块)",
-                                      self._bytes_to_hex(remaining[2:17]) + ("..." if len(remaining) > 17 else ""),
-                                      f"{len(remaining) - 2}字节", "分块传输数据",
-                                      bo + local_offset, bo + min(local_offset + 14, len(remaining) - 1)))
+                                      self._bytes_to_hex(remaining[2:min(17, len(remaining))]) + ("..." if len(remaining) > 17 else ""),
+                                      f"{remaining_len}字节", "分块传输数据",
+                                      bo + local_offset, bo + local_offset + remaining_len - 1))
+                    # 消耗掉所有剩余字节
+                    local_offset += remaining_len
+                else:
+                    # 未知响应类型，消耗掉所有剩余字节，作为原始数据展示
+                    remaining_len = len(remaining) - 2
+                    if remaining_len > 0:
+                        table_data.append(("    未知数据",
+                                          self._bytes_to_hex(remaining[2:min(17, len(remaining))]) + ("..." if len(remaining) > 17 else ""),
+                                          f"{remaining_len}字节", "未识别的Get-Response数据",
+                                          bo + local_offset, bo + local_offset + remaining_len - 1))
+                        local_offset += remaining_len
 
         # ======== Set-Request (0xC1) ========
         # 结构: Request-Type(1) + InvokeIdAndPriority(1) + Cosem-Attribute-Descriptor(9) + [Selective-Access] + Data
@@ -1517,7 +1530,8 @@ class HDLCParser:
 
                     # 写入数据值
                     if local_offset < len(remaining):
-                        self._parse_dlms_value(remaining[local_offset:], table_data, bo + local_offset, "    写入数据")
+                        consumed_data = self._parse_dlms_value(remaining[local_offset:], table_data, bo + local_offset, "    写入数据")
+                        local_offset += consumed_data
 
         # ======== Set-Response (0xC5) ========
         # 结构: Response-Type(1) + InvokeIdAndPriority(1) + 结果
@@ -1543,6 +1557,24 @@ class HDLCParser:
                     result_name = self.DATA_ACCESS_RESULTS.get(result, f"未知(0x{result:02X})")
                     table_data.append(("    结果", f"0x{result:02X}", result_name,
                                       "写操作结果", bo + local_offset, bo + local_offset))
+                    local_offset += 1
+                    # 如果还有剩余数据，一并展示
+                    if local_offset < len(remaining):
+                        remaining_len = len(remaining) - local_offset
+                        table_data.append(("    扩展数据",
+                                          self._bytes_to_hex(remaining[local_offset:min(local_offset + 16, len(remaining))]) + ("..." if len(remaining) - local_offset > 16 else ""),
+                                          f"{remaining_len}字节", "额外数据",
+                                          bo + local_offset, bo + len(remaining) - 1))
+                        local_offset += remaining_len
+                else:
+                    # 未知响应类型，消耗所有剩余字节
+                    remaining_len = len(remaining) - 2
+                    if remaining_len > 0:
+                        table_data.append(("    剩余数据",
+                                          self._bytes_to_hex(remaining[2:min(2 + 16, len(remaining))]) + ("..." if len(remaining) > 18 else ""),
+                                          f"{remaining_len}字节", "未识别的Set-Response数据",
+                                          bo + local_offset, bo + local_offset + remaining_len - 1))
+                        local_offset += remaining_len
 
         # ======== Action-Request (0xC3) ========
         # 结构: Request-Type(1) + InvokeIdAndPriority(1) + Cosem-Method-Descriptor(9) + [HasParameter(1) + Data]
@@ -1601,7 +1633,8 @@ class HDLCParser:
                             local_offset += 1
                             # 解析参数数据
                             if len(remaining) > 12:
-                                self._parse_dlms_value(remaining[12:], table_data, bo + local_offset, "    方法参数")
+                                consumed_data = self._parse_dlms_value(remaining[12:], table_data, bo + local_offset, "    方法参数")
+                                local_offset += consumed_data
                         elif has_param == 0x00:
                             table_data.append(("    方法参数标记", "0x00", "无参数",
                                               "无方法调用参数", bo + local_offset, bo + local_offset))
