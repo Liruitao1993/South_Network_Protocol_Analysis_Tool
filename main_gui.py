@@ -12,7 +12,8 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QTextEdit,
     QTableWidget, QTableWidgetItem, QFileDialog, QMessageBox,
-    QHeaderView, QSplitter, QGroupBox, QDialog, QTabWidget, QComboBox
+    QHeaderView, QSplitter, QGroupBox, QDialog, QTabWidget, QComboBox,
+    QListView, QFrame
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QTextCursor, QTextCharFormat, QColor
@@ -54,25 +55,32 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(15, 15, 15, 15)
         main_layout.setSpacing(15)
 
-        # 协议选择行
-        proto_layout = QHBoxLayout()
-        proto_label = QLabel("选择协议：")
-        proto_label.setFont(QFont("", 12, QFont.Bold))
+        # 协议选择分组
+        proto_group = QGroupBox("协议选择")
+        proto_layout = QHBoxLayout(proto_group)
+        proto_layout.setContentsMargins(10, 8, 10, 10)
+        proto_layout.setSpacing(10)
+
+        proto_label = QLabel("当前协议：")
+        proto_label.setFont(QFont("", 10, QFont.Bold))
+        proto_label.setFixedWidth(65)
         proto_layout.addWidget(proto_label)
 
         self.protocol_combo = QComboBox()
         self.protocol_combo.addItem("南网协议 (Q/CSG1209021-2019)")
         self.protocol_combo.addItem("PLC RF协议 (万胜海外 V1_04)")
         self.protocol_combo.addItem("HDLC/DLMS协议 (IEC 62056-46)")
-        self.protocol_combo.addItem("DLMS Wrapper裸报文 (直接解析Wrapper+APDU)")
-        self.protocol_combo.addItem("DLMS-APDU裸报文 (直接解析APDU)")
-        self.protocol_combo.setMinimumWidth(450)
-        self.protocol_combo.setFont(QFont("Microsoft YaHei", 11))
-        # 移除焦点边框，保持简洁原生外观
+        self.protocol_combo.addItem("DLMS Wrapper裸报文")
+        self.protocol_combo.addItem("DLMS-APDU裸报文")
+        self.protocol_combo.setMinimumWidth(280)
+        self.protocol_combo.setFont(QFont("Microsoft YaHei", 10))
+        # 让弹出菜单宽度自动适应最宽的文字
+        self.protocol_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self.protocol_combo.currentIndexChanged.connect(self._on_protocol_changed)
         proto_layout.addWidget(self.protocol_combo)
+        proto_layout.addStretch()
 
-        main_layout.addLayout(proto_layout)
+        main_layout.addWidget(proto_group)
 
         # 选项卡
         self.tab_widget = QTabWidget()
@@ -435,11 +443,11 @@ class MainWindow(QMainWindow):
         layout.addLayout(toolbar)
 
         # 输入区
-        input_group = QGroupBox("输入报文列表（每行一帧）")
+        input_group = QGroupBox("输入报文列表（每行一帧，自动根据当前协议识别）")
         input_layout = QVBoxLayout(input_group)
 
         self.batch_input = QTextEdit()
-        self.batch_input.setPlaceholderText("粘贴或输入报文数据，支持混杂格式，例如：\n2024-01-01 12:00:00 [RX] 68 0E 00 00 00 00 01 00 01 E8 00 05 EF 16\n[INFO] 68 0C 00 40 01 00 01 01 02 E8 2D 16")
+        self.batch_input.setPlaceholderText("粘贴或输入报文数据，支持多种协议：\n南网协议：68开头，16结束\nHDLC协议：7E开头，7E结束\n其他协议：每行一帧直接解析")
         self.batch_input.setMaximumHeight(150)
         input_layout.addWidget(self.batch_input)
 
@@ -711,47 +719,38 @@ class MainWindow(QMainWindow):
 
             /* ========== 下拉框 ========== */
             QComboBox {
-                border: none;
-                border-radius: 4px;
-                padding: 4px 8px;
+                border: 1px solid #888;
+                border-radius: 2px;
+                padding: 4px 22px 4px 6px;
                 background-color: #ffffff;
                 color: #000000;
+                min-height: 18px;
             }
             QComboBox:hover {
-                border: 1px solid #aaaaaa;
+                border: 1px solid #666;
             }
             QComboBox:focus {
-                border: 2px solid #2196F3;
-                outline: none;
+                border: 1px solid #6699cc;
             }
             QComboBox::drop-down {
                 border: none;
-                width: 20px;
+                width: 18px;
             }
-            QComboBox QListView {
+            QComboBox::down-arrow {
+                width: 0;
+                height: 0;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid #666;
+            }
+            QComboBox QAbstractItemView {
+                border: 1px solid #888;
                 background-color: #ffffff;
-                color: #000000;
-                border: 1px solid #cccccc;
-                selection-background-color: #e3f2fd;
+                selection-background-color: #80b8e8;
                 selection-color: #000000;
-                outline: none;
-                min-width: 150px;
-                padding: 2px;
             }
             QComboBox QListView::item {
-                min-height: 24px;
-                padding: 4px 8px;
-                background-color: #ffffff;
-                color: #000000;
-                border: none;
-            }
-            QComboBox QListView::item:hover {
-                background-color: #e3f2fd;
-                color: #000000;
-            }
-            QComboBox QListView::item:selected {
-                background-color: #e3f2fd;
-                color: #000000;
+                padding: 3px 6px;
             }
 
             /* ========== 复选框 / 单选框 ========== */
@@ -970,16 +969,16 @@ class MainWindow(QMainWindow):
         return frames
 
     def parse_batch(self):
-        """批量解析"""
+        """批量解析 - 支持所有协议"""
         input_text = self.batch_input.toPlainText().strip()
         if not input_text:
             QMessageBox.warning(self, "警告", "请输入报文内容！")
             return
 
-        # 智能提取帧
-        frames = self._extract_frames(input_text)
+        # 根据当前协议选择帧提取方式
+        frames = self._extract_frames_for_protocol(input_text, self.current_protocol)
         if not frames:
-            QMessageBox.warning(self, "警告", "未识别到有效的68起始帧！")
+            QMessageBox.warning(self, "警告", f"未识别到有效帧！")
             return
 
         # 清空之前的结果
@@ -992,45 +991,35 @@ class MainWindow(QMainWindow):
         for i, frame_hex in enumerate(frames):
             try:
                 frame_bytes = bytes.fromhex(frame_hex)
-                result = self.parser.parse(frame_bytes)
+                # 使用当前协议对应的解析器
+                current_parser = self._get_current_parser()
+                # 调用parse_to_table生成表格数据
+                table_data = current_parser.parse_to_table(frame_bytes)
 
-                # 提取摘要信息
-                afn = "-"
-                desc = "-"
-                direction = "-"
-                if "用户数据区" in result:
-                    user_data = result["用户数据区"]
-                    if "应用功能码(AFN)" in user_data:
-                        afn_info = user_data["应用功能码(AFN)"]
-                        afn = afn_info.get("名称", afn_info.get("原始值", "-"))
-                    if "数据标识(DI)" in user_data:
-                        di_info = user_data["数据标识(DI)"]
-                        desc = di_info.get("业务说明", "-")
+                # 从表格数据生成摘要（取前3个字段作为摘要）
+                summary = self._get_summary_from_table_data(table_data)
 
-                if "控制域" in result:
-                    ctrl = result["控制域"]
-                    if "传输方向(DIR)" in ctrl:
-                        d = ctrl["传输方向(DIR)"]["值"]
-                        direction = "↑上行" if d == 1 else "↓下行"
+                status = "成功"
+                success_count += 1
 
-                if result.get("解析状态") == "失败":
-                    status = "解析失败"
-                    fail_count += 1
-                else:
-                    status = "成功"
-                    success_count += 1
-
-                result["_input"] = frame_hex
-                result["_status"] = status
-                self.batch_results.append(result)
+                # 保存结果（表格数据可以在详情查看时使用）
+                self.batch_results.append({
+                    "_input": frame_hex,
+                    "_status": status,
+                    "_table_data": table_data,
+                    "摘要": summary
+                })
 
             except Exception as e:
                 status = "异常"
-                afn = "-"
-                desc = str(e)[:30]
-                direction = "-"
+                summary = str(e)[:50]
                 fail_count += 1
-                self.batch_results.append({"_input": frame_hex, "_status": status, "错误": str(e)})
+                self.batch_results.append({
+                    "_input": frame_hex,
+                    "_status": status,
+                    "错误": str(e),
+                    "摘要": summary
+                })
 
             # 添加到表格
             row = self.result_table.rowCount()
@@ -1042,8 +1031,8 @@ class MainWindow(QMainWindow):
                 hex_display = hex_display[:50] + "..."
             self.result_table.setItem(row, 1, QTableWidgetItem(hex_display))
             self.result_table.setItem(row, 2, QTableWidgetItem(str(len(frame_hex) // 2)))
-            self.result_table.setItem(row, 3, QTableWidgetItem(direction))
-            self.result_table.setItem(row, 4, QTableWidgetItem(f"{afn} | {desc}"))
+            self.result_table.setItem(row, 3, QTableWidgetItem("-"))  # 方向统一留空
+            self.result_table.setItem(row, 4, QTableWidgetItem(summary))
 
             status_item = QTableWidgetItem(status)
             if status == "成功":
@@ -1053,6 +1042,100 @@ class MainWindow(QMainWindow):
             self.result_table.setItem(row, 5, status_item)
 
         self.update_stats(f"解析完成：成功 {success_count} 帧，失败 {fail_count} 帧，共 {len(frames)} 帧")
+
+    def _get_summary_from_table_data(self, table_data: list) -> str:
+        """从表格数据中提取摘要信息，取重要的前几个字段拼接"""
+        if not table_data:
+            return "-"
+        # 取前4个重要字段拼接
+        summary_parts = []
+        for i, item in enumerate(table_data):
+            if i >= 4:
+                break
+            field_name = item[0]
+            parsed_val = item[2]
+            # 跳过冗余字段，只留重要的
+            if any(k in field_name for k in ["帧起始", "格式", "长度", "校验", "结束标志"]):
+                continue
+            summary_parts.append(f"{parsed_val}")
+        return " | ".join(summary_parts) if summary_parts else "-"
+
+    def _extract_frames_for_protocol(self, text: str, protocol_index: int) -> list:
+        """根据协议提取对应格式的帧"""
+        import re
+        clean = re.sub(r'[^0-9A-Fa-f]', '', text).upper()
+
+        if protocol_index == 0:
+            # 南网协议：68开头，16结束
+            return self._extract_68_frames(clean)
+        elif protocol_index == 1:
+            # PLC RF协议：尝试通用提取
+            return self._extract_generic_frames(clean, min_len=4, max_len=256)
+        elif protocol_index in (2, 3, 4):
+            # HDLC/DLMS协议：7E开头，7E结束
+            return self._extract_hdlc_frames(clean)
+        else:
+            # 通用：每行一帧
+            return [f.strip() for f in text.splitlines() if f.strip()]
+
+    def _extract_hdlc_frames(self, clean: str) -> list:
+        """提取HDLC帧（7E开头，7E结束）"""
+        frames = []
+        i = 0
+        while i < len(clean) - 3:
+            # 找下一个7E起始
+            pos = clean.find('7E', i)
+            if pos == -1:
+                break
+            # 找下一个7E结束
+            end = clean.find('7E', pos + 2)
+            if end == -1:
+                # 如果没找到结束，直接取到结尾或者最大长度
+                end = min(pos + 512, len(clean))
+            candidate = clean[pos:end + 2]
+            if len(candidate) >= 6:  # 至少3字节
+                frames.append(candidate)
+            i = end + 2
+        return frames
+
+    def _extract_68_frames(self, clean: str) -> list:
+        """提取南网68格式帧"""
+        frames = []
+        i = 0
+        while i < len(clean) - 3:
+            pos = clean.find('68', i)
+            if pos == -1:
+                break
+            if pos + 6 <= len(clean):
+                try:
+                    low_byte = int(clean[pos+2:pos+4], 16)
+                    high_byte = int(clean[pos+4:pos+6], 16)
+                    length = low_byte | (high_byte << 8)
+                    frame_hex_len = length * 2
+                    if pos + frame_hex_len <= len(clean):
+                        candidate = clean[pos:pos+frame_hex_len]
+                        if candidate[-2:] == '16':
+                            frames.append(candidate)
+                            i = pos + frame_hex_len
+                            continue
+                except (ValueError, IndexError):
+                    pass
+            # 回退到简单方案：找最近的16
+            end = clean.find('16', pos + 6)
+            if end != -1 and end - pos <= 2000:
+                candidate = clean[pos:end+2]
+                if len(candidate) >= 8:
+                    frames.append(candidate)
+                i = end + 2
+            else:
+                i = pos + 2
+        return frames
+
+    def _extract_generic_frames(self, clean: str, min_len: int = 4, max_len: int = 512) -> list:
+        """通用帧提取：按行或直接提取完整有效hex字符串"""
+        if len(clean) >= min_len * 2 and len(clean) <= max_len * 2:
+            return [clean] if len(clean) % 2 == 0 else []
+        return []
 
     def clear_batch(self):
         """清空批量解析内容"""
@@ -1102,11 +1185,17 @@ class MainWindow(QMainWindow):
             raw_label.setWordWrap(True)
             layout.addWidget(raw_label)
 
-        # 用表格显示解析结果（复用单帧解析逻辑）
+        # 用表格显示解析结果
         if "_input" in result and result.get("_status") != "异常":
             try:
-                frame_bytes = bytes.fromhex(result["_input"])
-                table_data = self.parser.parse_to_table(frame_bytes)
+                # 优先使用批量解析时已保存的表格数据
+                if "_table_data" in result:
+                    table_data = result["_table_data"]
+                else:
+                    # 否则重新用当前协议解析器解析
+                    frame_bytes = bytes.fromhex(result["_input"])
+                    current_parser = self._get_current_parser()
+                    table_data = current_parser.parse_to_table(frame_bytes)
 
                 detail_table = QTableWidget()
                 detail_table.setColumnCount(4)
