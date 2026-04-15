@@ -1948,7 +1948,7 @@ class HDLCParser:
                         self._parse_ber_tlv(apdu_data, table_data, boffset)
                         apdu_end = boffset + (original_offset + total_len - 1)
                         # 插入父节点
-                        first_byte = apdu_data[original_offset]
+                        first_byte = apdu_data[0]
                         table_data.insert(start_len, ("  DLMS APDU (BER-TLV)", f"0x{first_byte:02X}",
                                                     f"BER-TLV编码 (整个{total_len}字节)",
                                                     "完整DLMS APDU（双击可深度解析）",

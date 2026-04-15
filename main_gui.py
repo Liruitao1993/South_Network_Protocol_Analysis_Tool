@@ -1063,20 +1063,80 @@ class MainWindow(QMainWindow):
     def _extract_frames_for_protocol(self, text: str, protocol_index: int) -> list:
         """根据协议提取对应格式的帧"""
         import re
-        clean = re.sub(r'[^0-9A-Fa-f]', '', text).upper()
 
         if protocol_index == 0:
             # 南网协议：68开头，16结束
+            clean = re.sub(r'[^0-9A-Fa-f]', '', text).upper()
             return self._extract_68_frames(clean)
         elif protocol_index == 1:
             # PLC RF协议：尝试通用提取
+            clean = re.sub(r'[^0-9A-Fa-f]', '', text).upper()
             return self._extract_generic_frames(clean, min_len=4, max_len=256)
-        elif protocol_index in (2, 3, 4):
+        elif protocol_index == 2:
             # HDLC/DLMS协议：7E开头，7E结束
+            clean = re.sub(r'[^0-9A-Fa-f]', '', text).upper()
             return self._extract_hdlc_frames(clean)
+        elif protocol_index == 3:
+            # DLMS Wrapper裸报文：识别Wrapper头部(8字节)并分割
+            return self._extract_wrapper_frames(text)
+        elif protocol_index == 4:
+            # DLMS-APDU裸报文：按行分割，每行一帧
+            return [f.strip() for f in text.splitlines() if f.strip()]
         else:
             # 通用：每行一帧
             return [f.strip() for f in text.splitlines() if f.strip()]
+
+    def _extract_wrapper_frames(self, text: str) -> list:
+        """
+        从文本中提取Wrapper帧
+        Wrapper格式: 版本(2B) + 源端口(2B) + 目的端口(2B) + 长度(2B) = 8字节头部
+        版本固定为 0x0001
+        支持处理带日志前缀的格式，如 "WRAPPER[1] Sent 0001000000010000003B ..."
+        """
+        import re
+        frames = []
+
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+
+            # 提取连续的长串十六进制数据（至少16个字符）
+            # 这样 WRAPPER 中的零散字母不会被误认为数据
+            hex_matches = re.findall(r'[0-9A-Fa-f]{16,}', line)
+            if not hex_matches:
+                continue
+
+            for hex_pattern in hex_matches:
+                hex_pattern = hex_pattern.upper()
+
+                # 扫描整个十六进制字符串，寻找Wrapper头部 (0001xxxx)
+                i = 0
+                while i <= len(hex_pattern) - 16:  # 至少需要8字节(16字符)头部
+                    # 检查是否是Wrapper头部: 版本=0001
+                    if hex_pattern[i:i+4] == '0001':
+                        # 解析Wrapper头部的长度字段
+                        apdu_len = int(hex_pattern[i+12:i+16], 16)
+
+                        # 验证长度合理性（允许apdu_len=0，因为数据可能被截断）
+                        if 0 <= apdu_len <= 8192:
+                            # 计算完整帧长度: 8字节头部 + apdu_len
+                            frame_len = 16 + apdu_len * 2
+
+                            if i + frame_len <= len(hex_pattern):
+                                # 提取完整帧
+                                frame_hex = hex_pattern[i:i+frame_len]
+                                frames.append(frame_hex)
+                                i += frame_len
+                                continue
+                            else:
+                                # 数据被截断，但仍提取可用的头部+部分数据
+                                frame_hex = hex_pattern[i:]
+                                frames.append(frame_hex)
+                                break
+                    i += 2
+
+        return frames if frames else [re.sub(r'[^0-9A-Fa-f]', '', text).upper()]
 
     def _extract_hdlc_frames(self, clean: str) -> list:
         """提取HDLC帧（7E开头，7E结束）"""
