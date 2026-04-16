@@ -22,8 +22,10 @@ from PySide6.QtGui import QFont, QTextCursor, QTextCharFormat, QColor
 from protocol_parser import ProtocolFrameParser
 from plc_rf_parser import PLCRFProtocolParser
 from hdlc_parser import HDLCParser
+from dlt645_parser import DLT645Parser
 from obis_lookup import OBISLookup, get_obis_lookup
 from command_lookup import CommandLookup, get_command_lookup
+from dlt645_di_lookup import DLT645DILookup, get_dlt645_di_lookup
 
 
 APP_VERSION = "1.3.0"
@@ -99,6 +101,7 @@ class MainWindow(QMainWindow):
         self.parser = ProtocolFrameParser()
         self.plc_rf_parser = PLCRFProtocolParser()
         self.hdlc_parser = HDLCParser()
+        self.dlt645_parser = DLT645Parser()
 
         # 初始化查询器
         self.obis_lookup = get_obis_lookup()
@@ -140,6 +143,7 @@ class MainWindow(QMainWindow):
         self.protocol_combo.addItem("HDLC/DLMS协议 (IEC 62056-46)")
         self.protocol_combo.addItem("DLMS Wrapper裸报文")
         self.protocol_combo.addItem("DLMS-APDU裸报文")
+        self.protocol_combo.addItem("DLT645-2007 电表协议")
         self.protocol_combo.setMinimumWidth(280)
         self.protocol_combo.setFont(QFont("Microsoft YaHei", 10))
         # 让弹出菜单宽度自动适应最宽的文字
@@ -887,8 +891,10 @@ class MainWindow(QMainWindow):
             self.single_input.setPlaceholderText("请输入HDLC报文，例如：7E A0 07 01 01 93 ... 7E")
         elif index == 3:
             self.single_input.setPlaceholderText("请输入Wrapper报文，例如：00 01 00 02 00 1E ...")
-        else:  # index == 4, DLMS-APDU裸报文
+        elif index == 4:  # DLMS-APDU裸报文
             self.single_input.setPlaceholderText("请输入APDU报文，例如：C0 01 C1 00 ...")
+        else:  # index == 5, DLT645-2007
+            self.single_input.setPlaceholderText("请输入DLT645报文，例如：68 AA AA AA AA AA AA 68 11 04 33 33 33 33 CS 16")
 
         # 更新查询页面
         self._update_protocol_lookup_tab()
@@ -925,6 +931,324 @@ class MainWindow(QMainWindow):
             # HDLC/Wrapper/DLMS-APDU：OBIS查询
             self.tab_widget.setTabText(lookup_tab_index, "OBIS查询")
             self._create_obis_lookup_content(self.protocol_lookup_tab_layout)
+            
+        elif self.current_protocol == 5:
+            # DLT645-2007协议：DI查询
+            self.tab_widget.setTabText(lookup_tab_index, "DI查询")
+            self._create_dlt645_di_lookup_content(self.protocol_lookup_tab_layout)
+
+    def _create_dlt645_di_lookup_content(self, layout):
+        """创建DLT645-2007 DI查询页面"""
+        # 初始化DI查询器
+        self.dlt645_di_lookup = get_dlt645_di_lookup()
+
+        # 搜索栏
+        search_layout = QHBoxLayout()
+        search_label = QLabel("搜索：")
+        search_label.setFixedWidth(45)
+        self.dlt645_di_search_input = QLineEdit()
+        self.dlt645_di_search_input.setPlaceholderText("输入DI编码(如00010000)或中文关键词搜索...")
+        self.dlt645_di_search_input.textChanged.connect(self._filter_dlt645_di_table)
+        search_layout.addWidget(search_label)
+        search_layout.addWidget(self.dlt645_di_search_input)
+        layout.addLayout(search_layout)
+
+        # 统计标签
+        self.dlt645_di_stats_label = QLabel()
+        self.dlt645_di_stats_label.setStyleSheet("color: #666; font-size: 12px;")
+        layout.addWidget(self.dlt645_di_stats_label)
+
+        # 表格
+        self.dlt645_di_table = QTableWidget()
+        self.dlt645_di_table.setColumnCount(5)
+        self.dlt645_di_table.setHorizontalHeaderLabels(["DI编码", "名称", "单位", "数据类型", "长度"])
+        header = self.dlt645_di_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
+        self.dlt645_di_table.setColumnWidth(0, 100)
+        self.dlt645_di_table.setColumnWidth(1, 250)
+        self.dlt645_di_table.setColumnWidth(2, 80)
+        self.dlt645_di_table.setColumnWidth(3, 120)
+        self.dlt645_di_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.dlt645_di_table.setAlternatingRowColors(True)
+        self.dlt645_di_table.verticalHeader().hide()
+        table_font = QFont()
+        table_font.setPointSize(8)
+        self.dlt645_di_table.setFont(table_font)
+        layout.addWidget(self.dlt645_di_table)
+
+        # 加载数据
+        self._load_dlt645_di_table()
+
+    def _load_dlt645_di_table(self):
+        """加载DLT645 DI数据到表格"""
+        data = self.dlt645_di_lookup.data
+        self.dlt645_di_table.setRowCount(len(data))
+
+        for row, (di_code, di_name, unit, data_type, desc, is_custom) in enumerate(data):
+            self.dlt645_di_table.setItem(row, 0, QTableWidgetItem(di_code))
+            self.dlt645_di_table.setItem(row, 1, QTableWidgetItem(di_name))
+            self.dlt645_di_table.setItem(row, 2, QTableWidgetItem(unit))
+            self.dlt645_di_table.setItem(row, 3, QTableWidgetItem(data_type))
+            # 从 desc 中提取长度
+            length = ""
+            if "长度:" in desc:
+                length = desc.split("长度:")[1].split(",")[0].strip()
+            self.dlt645_di_table.setItem(row, 4, QTableWidgetItem(length))
+
+        self.dlt645_di_stats_label.setText(f"共 {len(data)} 条记录")
+
+    def _filter_dlt645_di_table(self, text: str):
+        """根据搜索文本过滤DLT645 DI表格"""
+        keyword = text.strip().upper()
+
+        if not keyword:
+            self._load_dlt645_di_table()
+            return
+
+        results = self.dlt645_di_lookup.search(keyword)
+        self.dlt645_di_table.setRowCount(len(results))
+
+        for row, (di_code, di_name, unit, data_type, desc, is_custom) in enumerate(results):
+            self.dlt645_di_table.setItem(row, 0, QTableWidgetItem(di_code))
+            self.dlt645_di_table.setItem(row, 1, QTableWidgetItem(di_name))
+            self.dlt645_di_table.setItem(row, 2, QTableWidgetItem(unit))
+            self.dlt645_di_table.setItem(row, 3, QTableWidgetItem(data_type))
+            length = ""
+            if "长度:" in desc:
+                length = desc.split("长度:")[1].split(",")[0].strip()
+            self.dlt645_di_table.setItem(row, 4, QTableWidgetItem(length))
+
+        self.dlt645_di_stats_label.setText(f"匹配 {len(results)} 条记录")
+
+        # 表格
+        self.dlt645_di_table = QTableWidget()
+        self.dlt645_di_table.setColumnCount(5)
+        self.dlt645_di_table.setHorizontalHeaderLabels(["DI编码", "中文名称", "数据类型", "单位", "说明"])
+        header = self.dlt645_di_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
+        self.dlt645_di_table.setColumnWidth(0, 100)
+        self.dlt645_di_table.setColumnWidth(1, 200)
+        self.dlt645_di_table.setColumnWidth(2, 100)
+        self.dlt645_di_table.setColumnWidth(3, 80)
+        self.dlt645_di_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.dlt645_di_table.setAlternatingRowColors(True)
+        self.dlt645_di_table.verticalHeader().hide()
+        table_font = QFont()
+        table_font.setPointSize(8)
+        self.dlt645_di_table.setFont(table_font)
+
+        layout.addWidget(self.dlt645_di_table)
+
+        # 按钮栏
+        btn_layout = QHBoxLayout()
+        add_di_btn = QPushButton("添加自定义DI")
+        add_di_btn.clicked.connect(self._add_dlt645_custom_di)
+        btn_layout.addWidget(add_di_btn)
+
+        del_di_btn = QPushButton("删除选中自定义DI")
+        del_di_btn.clicked.connect(self._del_dlt645_custom_di)
+        btn_layout.addWidget(del_di_btn)
+
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+
+        # 加载数据
+        self._load_dlt645_di_map_data()
+
+    def _load_dlt645_di_map_data(self):
+        """加载DLT645 DI数据到表格"""
+        data = self.dlt645_di_lookup.data
+        self.dlt645_di_table.setRowCount(len(data))
+
+        for row, (di_code, di_name, unit, data_type, desc, is_custom) in enumerate(data):
+            # DI编码
+            di_item = QTableWidgetItem(di_code)
+            if is_custom:
+                di_item.setForeground(QColor("#1976D2"))
+            self.dlt645_di_table.setItem(row, 0, di_item)
+
+            # 中文名称
+            name_item = QTableWidgetItem(("★ " if is_custom else "") + di_name)
+            if is_custom:
+                name_item.setForeground(QColor("#1976D2"))
+            self.dlt645_di_table.setItem(row, 1, name_item)
+
+            # 数据类型
+            self.dlt645_di_table.setItem(row, 2, QTableWidgetItem(data_type))
+
+            # 单位
+            self.dlt645_di_table.setItem(row, 3, QTableWidgetItem(unit))
+
+            # 说明
+            self.dlt645_di_table.setItem(row, 4, QTableWidgetItem(desc))
+
+        # 统计
+        custom_count = sum(1 for _, _, _, _, _, is_custom in data if is_custom)
+        self.dlt645_di_stats_label.setText(f"共 {len(data)} 条记录（其中自定义 {custom_count} 条）")
+
+    def _filter_dlt645_di_table(self, text: str):
+        """过滤DLT645 DI表格"""
+        keyword = text.strip().upper()
+
+        if not keyword:
+            # 显示全部
+            for row in range(self.dlt645_di_table.rowCount()):
+                self.dlt645_di_table.setRowHidden(row, False)
+            self._update_dlt645_di_stats()
+            return
+
+        match_count = 0
+        for row in range(self.dlt645_di_table.rowCount()):
+            # 收集该行的搜索文本
+            di_code = self.dlt645_di_table.item(row, 0).text()
+            di_name = self.dlt645_di_table.item(row, 1).text()
+            data_type = self.dlt645_di_table.item(row, 2).text()
+            unit = self.dlt645_di_table.item(row, 3).text()
+
+            search_text = f"{di_code} {di_name} {data_type} {unit}".upper()
+
+            if keyword in search_text:
+                self.dlt645_di_table.setRowHidden(row, False)
+                match_count += 1
+            else:
+                self.dlt645_di_table.setRowHidden(row, True)
+
+        self.dlt645_di_stats_label.setText(f"匹配 {match_count} / {self.dlt645_di_table.rowCount()} 条记录")
+
+    def _update_dlt645_di_stats(self):
+        """更新统计标签"""
+        custom_count = 0
+        for row in range(self.dlt645_di_table.rowCount()):
+            if not self.dlt645_di_table.isRowHidden(row):
+                name_item = self.dlt645_di_table.item(row, 1)
+                if name_item and name_item.text().startswith("★"):
+                    custom_count += 1
+
+        visible_count = sum(1 for row in range(self.dlt645_di_table.rowCount())
+                           if not self.dlt645_di_table.isRowHidden(row))
+        self.dlt645_di_stats_label.setText(f"显示 {visible_count} 条记录（其中自定义 {custom_count} 条）")
+
+    def _add_dlt645_custom_di(self):
+        """添加自定义DI对话框"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("添加自定义DI")
+        dialog.setMinimumWidth(400)
+        layout = QVBoxLayout(dialog)
+
+        # DI编码
+        h1 = QHBoxLayout()
+        h1.addWidget(QLabel("DI编码:"))
+        di_code_input = QLineEdit()
+        di_code_input.setPlaceholderText("如 00010000")
+        di_code_input.setMaxLength(8)
+        h1.addWidget(di_code_input)
+        layout.addLayout(h1)
+
+        # 中文名称
+        h2 = QHBoxLayout()
+        h2.addWidget(QLabel("中文名称:"))
+        name_input = QLineEdit()
+        name_input.setPlaceholderText("如：当前正向有功总电能")
+        h2.addWidget(name_input)
+        layout.addLayout(h2)
+
+        # 数据类型
+        h3 = QHBoxLayout()
+        h3.addWidget(QLabel("数据类型:"))
+        type_input = QLineEdit()
+        type_input.setPlaceholderText("如：XXXXXX.XX")
+        h3.addWidget(type_input)
+        layout.addLayout(h3)
+
+        # 单位
+        h4 = QHBoxLayout()
+        h4.addWidget(QLabel("单位:"))
+        unit_input = QLineEdit()
+        unit_input.setPlaceholderText("如：kWh")
+        h4.addWidget(unit_input)
+        layout.addLayout(h4)
+
+        # 按钮
+        btn_layout = QHBoxLayout()
+        ok_btn = QPushButton("添加")
+        cancel_btn = QPushButton("取消")
+        btn_layout.addStretch()
+        btn_layout.addWidget(ok_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+
+        ok_btn.clicked.connect(dialog.accept)
+        cancel_btn.clicked.connect(dialog.reject)
+
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        # 验证输入
+        di_code = di_code_input.text().strip().upper()
+        if len(di_code) != 8:
+            QMessageBox.warning(self, "错误", "DI编码必须是8位十六进制！")
+            return
+        try:
+            int(di_code, 16)
+        except ValueError:
+            QMessageBox.warning(self, "错误", "DI编码必须是有效的十六进制！")
+            return
+
+        name = name_input.text().strip()
+        if not name:
+            QMessageBox.warning(self, "错误", "请填写中文名称！")
+            return
+
+        data_type = type_input.text().strip()
+        unit = unit_input.text().strip()
+
+        # 检查是否已存在
+        if self.dlt645_di_lookup.get_di_info(di_code):
+            reply = QMessageBox.question(
+                self, "确认覆盖",
+                f"DI编码 {di_code} 已存在，是否覆盖？",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+        # 添加
+        if self.dlt645_di_lookup.add_custom_di(di_code, name, unit, data_type):
+            self._load_dlt645_di_map_data()
+            QMessageBox.information(self, "成功", f"已添加自定义DI: {di_code} - {name}")
+        else:
+            QMessageBox.warning(self, "错误", "添加自定义DI失败！")
+
+    def _del_dlt645_custom_di(self):
+        """删除自定义DI"""
+        row = self.dlt645_di_table.currentRow()
+        if row < 0:
+            QMessageBox.warning(self, "提示", "请先选中一条记录！")
+            return
+
+        di_code = self.dlt645_di_table.item(row, 0).text()
+        name = self.dlt645_di_table.item(row, 1).text()
+
+        # 检查是否是自定义（通过名称前缀判断）
+        if not name.startswith("★"):
+            QMessageBox.warning(self, "提示", "只能删除自定义DI（带★标记的记录）！")
+            return
+
+        reply = QMessageBox.question(
+            self, "确认删除",
+            f"确定删除自定义DI：{di_code}（{name[2:]}）？",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        if self.dlt645_di_lookup.delete_custom_di(di_code):
+            self._load_dlt645_di_map_data()
+            QMessageBox.information(self, "成功", "已删除自定义DI")
+        else:
+            QMessageBox.warning(self, "错误", "删除自定义DI失败！")
 
     @staticmethod
     def _clear_layout(layout):
@@ -1234,7 +1558,7 @@ class MainWindow(QMainWindow):
                 def parse_to_table(self, data):
                     return self.hdlc_parser.parse_wrapper_to_table(data)
             return WrapperParser(self.hdlc_parser)
-        else:  # index == 4, DLMS-APDU裸报文 (直接解析APDU)
+        elif self.current_protocol == 4:  # DLMS-APDU裸报文 (直接解析APDU)
             # 返回一个匿名对象，调用parse_apdu_to_table
             class APDUParser:
                 def __init__(self, hdlc_parser):
@@ -1242,6 +1566,51 @@ class MainWindow(QMainWindow):
                 def parse_to_table(self, data):
                     return self.hdlc_parser.parse_apdu_to_table(data)
             return APDUParser(self.hdlc_parser)
+        else:  # self.current_protocol == 5, DLT645-2007
+            class DLT645GuiParser:
+                def __init__(self, parser):
+                    self.parser = parser
+                def parse_to_table(self, data):
+                    result = self.parser.parse(data)
+                    table = []
+                    # DLT645 帧结构计算字节范围
+                    data_len = result.get('data_length', 0)
+                    total_len = 10 + data_len + 2
+
+                    for field, raw, desc in result['fields']:
+                        byte_start = 0
+                        byte_end = 0
+                        parsed_value = ''
+
+                        if '帧起始符 1' in field:
+                            byte_start, byte_end = 0, 0
+                        elif '从站地址' in field:
+                            byte_start, byte_end = 1, 6
+                        elif '帧起始符 2' in field:
+                            byte_start, byte_end = 7, 7
+                        elif '控制码' in field:
+                            byte_start, byte_end = 8, 8
+                            parsed_value = result.get('control_parsed', '')
+                        elif '数据长度' in field:
+                            byte_start, byte_end = 9, 9
+                        elif '数据标识 DI' in field:
+                            byte_start, byte_end = 10, 13
+                            di_code = result.get('di_code', '')
+                            di_desc = result.get('di_desc', '')
+                            parsed_value = f"{di_code} ({di_desc})" if di_code and di_desc else di_code
+                        elif '数据内容' in field:
+                            byte_start, byte_end = 14, 10 + data_len - 1
+                        elif '数据域' in field:
+                            byte_start, byte_end = 10, 10 + data_len - 1
+                        elif '校验和' in field:
+                            byte_start, byte_end = total_len - 2, total_len - 2
+                        elif '帧结束符' in field:
+                            byte_start, byte_end = total_len - 1, total_len - 1
+
+                        table.append((field, raw, parsed_value, desc, byte_start, byte_end))
+
+                    return table
+            return DLT645GuiParser(self.dlt645_parser)
 
     def load_example(self, data: str):
         """加载示例数据"""
@@ -1909,16 +2278,29 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "提示", "选中区域字节为空")
             return
 
-        # 使用HDLC解析器解析提取出的APDU
+        # 自动识别协议类型
+        extracted_bytes = bytes(extracted_bytes)
+        dialog_title = ""
         try:
-            parsed_data = self.hdlc_parser.parse_apdu_to_table(bytes(extracted_bytes))
+            # 先检测是否是DLT645协议帧
+            if len(extracted_bytes) >=12 and extracted_bytes[0] == 0x68 and extracted_bytes[7] == 0x68 and extracted_bytes[-1] == 0x16:
+                # DLT645协议
+                result = self.dlt645_parser.parse(extracted_bytes)
+                parsed_data = []
+                for field, raw, desc in result['fields']:
+                    parsed_data.append((field, raw, '', desc, 0, 0))
+                dialog_title = f"深度解析DLT645-2007 (提取 {len(extracted_bytes)} 字节)"
+            else:
+                # 默认DLMS APDU协议
+                parsed_data = self.hdlc_parser.parse_apdu_to_table(extracted_bytes)
+                dialog_title = f"深度解析DLMS-APDU (提取 {len(extracted_bytes)} 字节)"
         except Exception as e:
-            QMessageBox.critical(self, "解析错误", f"解析APDU失败:\n{str(e)}")
+            QMessageBox.critical(self, "解析错误", f"解析失败:\n{str(e)}")
             return
 
         # 创建弹窗显示解析结果
         dialog = QDialog(self)
-        dialog.setWindowTitle(f"深度解析DLMS-APDU (提取 {len(extracted_bytes)} 字节)")
+        dialog.setWindowTitle(dialog_title)
         dialog.resize(900, 600)
 
         layout = QVBoxLayout(dialog)

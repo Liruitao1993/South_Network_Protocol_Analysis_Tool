@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import main_gui; print\\('语法检查通过'\\)\")",
+      "Bash(python -c \"from dlt645_di_lookup import DLT645DILookup, get_dlt645_di_lookup; print\\('DLT645 DI模块加载成功'\\)\")",
+      "Bash(python -c \"import ast; tree = ast.parse\\(open\\('main_gui.py', 'r', encoding='utf-8'\\).read\\(\\)\\); methods = [n.name for n in ast.walk\\(tree\\) if isinstance\\(n, ast.FunctionDef\\)]; print\\('Methods found:', len\\(methods\\)\\); print\\('_clear_layout' in methods\\)\")",
+      "Bash(python generate_dlt645_di.py)"
+    ]
+  }
+}
