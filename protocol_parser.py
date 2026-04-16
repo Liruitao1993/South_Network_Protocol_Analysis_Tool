@@ -149,8 +149,10 @@ class ProtocolFrameParser:
             afn_key = afn_keys[0]
             afn = user_data[afn_key]
             raw = str(afn.get("原始值", "-"))
-            name = str(afn.get("名称", ""))
-            self._add_field(table_data, "应用功能码 (AFN)", raw, "", name, offset, offset)
+            # parsed_value 使用十进制值，comment 使用名称
+            val = str(afn.get("十进制", "-"))
+            desc = str(afn.get("名称", ""))
+            self._add_field(table_data, "应用功能码 (AFN)", raw, val, desc, offset, offset)
             offset += 1
 
         # 帧序列号 SEQ
@@ -418,12 +420,12 @@ class ProtocolFrameParser:
         # AFN=00H 确认/否认
         (0xE8, 0x01, 0x00, 0x01): "确认",
         (0xE8, 0x01, 0x00, 0x02): "否认",
-        
+
         # AFN=01H 初始化模块
         (0xE8, 0x02, 0x01, 0x01): "复位硬件",
         (0xE8, 0x02, 0x01, 0x02): "初始化档案",
         (0xE8, 0x02, 0x01, 0x03): "初始化任务",
-        
+
         # AFN=02H 管理任务
         (0xE8, 0x02, 0x02, 0x01): "添加任务",
         (0xE8, 0x02, 0x02, 0x02): "删除任务",
@@ -436,7 +438,7 @@ class ProtocolFrameParser:
         (0xE8, 0x02, 0x02, 0x07): "添加多播任务",
         (0xE8, 0x02, 0x02, 0x08): "启动任务",
         (0xE8, 0x02, 0x02, 0x09): "暂停任务",
-        
+
         # AFN=03H 读参数
         (0xE8, 0x00, 0x03, 0x01): "查询厂商代码和版本信息",
         (0xE8, 0x00, 0x03, 0x02): "查询本地通信模块运行模式信息",
@@ -457,7 +459,7 @@ class ProtocolFrameParser:
         (0xE8, 0x03, 0x03, 0x0D): "批量查询从节点相位信息",
         (0xE8, 0x03, 0x03, 0x0E): "查询表档案的台区识别结果",
         (0xE8, 0x03, 0x03, 0x0F): "查询多余节点的台区识别结果",
-        
+
         # AFN=04H 写参数
         (0xE8, 0x02, 0x04, 0x01): "设置主节点地址",
         (0xE8, 0x02, 0x04, 0x02): "添加从节点",
@@ -466,17 +468,17 @@ class ProtocolFrameParser:
         (0xE8, 0x02, 0x04, 0x05): "激活从节点主动注册",
         (0xE8, 0x02, 0x04, 0x06): "终止从节点主动注册",
         (0xE8, 0x02, 0x04, 0x07): "添加从节点通信地址映射表",
-        
+
         # AFN=05H 上报信息
         (0xE8, 0x05, 0x05, 0x01): "上报任务数据",
-        (0xE8, 0x05, 0x05, 0x02): "上报从节点事件",
-        (0xE8, 0x05, 0x05, 0x03): "上报从节点信息",
+        (0xE8, 0x05, 0x05, 0x02): "上报从节点",
+        (0xE8, 0x05, 0x05, 0x03): "上报从节点",
         (0xE8, 0x05, 0x05, 0x04): "上报从节点主动注册结束",
         (0xE8, 0x05, 0x05, 0x05): "上报任务状态",
-        
+
         # AFN=06H 请求信息
         (0xE8, 0x06, 0x06, 0x01): "请求集中器时间",
-        
+
         # AFN=07H 传输文件
         (0xE8, 0x02, 0x07, 0x01): "启动文件传输",
         (0xE8, 0x02, 0x07, 0x02): "传输文件内容",
@@ -529,7 +531,7 @@ class ProtocolFrameParser:
         (0xE8, 0x03, 0x10, 0x10): "查询从节点邻居表",
         (0xE8, 0x04, 0x10, 0x10): "返回查询从节点邻居表",
         (0xE8, 0x03, 0x10, 0x11): "查询主节点状态",
-        (0xE8, 0x04, 0x10, 0x11): "返回主节点状态",
+        (0xE8, 0x04, 0x10, 0x11): "返回查询主节点状态",
         (0xE8, 0x03, 0x10, 0x12): "读取入网节点信息",
         (0xE8, 0x04, 0x10, 0x12): "返回入网节点信息",
         (0xE8, 0x03, 0x10, 0x13): "读取未入网节点信息",
@@ -805,6 +807,7 @@ class ProtocolFrameParser:
             afn_name = self.AFN_MAP.get(afn, f"未知AFN({afn:02X})")
             result["应用功能码(AFN)"] = {
                 "原始值": f"0x{afn:02X}",
+                "十进制": afn,
                 "名称": afn_name
             }
             pos += 1
@@ -1851,7 +1854,7 @@ class ProtocolFrameParser:
             },
             "从节点地址": {
                 "原始值": node_addr.hex().upper(),
-                "说明": "失败从节点的地址"
+                "说明": "从节点地址"
             },
             "任务状态": {
                 "原始值": f"0x{task_status:02X}",

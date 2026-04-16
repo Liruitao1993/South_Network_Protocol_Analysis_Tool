@@ -5,6 +5,7 @@
 
 import sys
 import json
+import subprocess
 from pathlib import Path
 from typing import List, Dict, Any
 
@@ -13,7 +14,7 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QTextEdit,
     QTableWidget, QTableWidgetItem, QFileDialog, QMessageBox,
     QHeaderView, QSplitter, QGroupBox, QDialog, QTabWidget, QComboBox,
-    QListView, QFrame
+    QListView, QFrame, QMenuBar
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QTextCursor, QTextCharFormat, QColor
@@ -21,12 +22,74 @@ from PySide6.QtGui import QFont, QTextCursor, QTextCharFormat, QColor
 from protocol_parser import ProtocolFrameParser
 from plc_rf_parser import PLCRFProtocolParser
 from hdlc_parser import HDLCParser
+from obis_lookup import OBISLookup, get_obis_lookup
+from command_lookup import CommandLookup, get_command_lookup
+
+
+APP_VERSION = "1.3.0"
+
+CHANGELOG = [
+    ("1.3.0", "2026-04-16", [
+        "修复查询页面切换时按钮残留问题（递归清理layout）",
+        "修复命令字查询页缺失的4个方法（_load_command_map_data等）",
+        "修复命令字表格\"十六进制\"列显示十进制的bug，简化为2列",
+        "新增菜单栏与\"关于\"对话框",
+    ]),
+    ("1.2.0", "2026-04-16", [
+        "优化HDLC解析器，修复APDU数据解析中的索引错误",
+        "新增Wrapper帧提取功能",
+    ]),
+    ("1.1.0", "2026-04-15", [
+        "优化HDLC解析器，增强对返回数据和未知响应类型的处理",
+        "更新主界面，改善协议选择和输入提示",
+    ]),
+    ("1.0.1", "2026-04-15", [
+        "新增README文档",
+        "更新编译后的二进制文件",
+    ]),
+    ("1.0.0", "2026-04-14", [
+        "初始版本发布",
+        "支持南网协议/PLC RF/HDLC/DLMS多协议解析",
+        "单帧解析与批量解析功能",
+        "DI/命令字/OBIS查询功能",
+    ]),
+]
+
+
+def _get_git_changelog() -> list:
+    """从git日志获取变更记录，用于动态追加到CHANGELOG"""
+    try:
+        result = subprocess.run(
+            ["git", "log", "--format=%ai | %s", "-30"],
+            capture_output=True, timeout=5,
+            cwd=str(Path(__file__).parent),
+        )
+        if result.returncode != 0:
+            return []
+        for enc in ("utf-8", "gbk", "latin-1"):
+            try:
+                output = result.stdout.decode(enc)
+                break
+            except (UnicodeDecodeError, UnicodeError):
+                continue
+        else:
+            output = result.stdout.decode("utf-8", errors="replace")
+        entries = []
+        for line in output.strip().splitlines():
+            if " | " in line:
+                date_msg = line.split(" | ", 1)
+                date = date_msg[0][:10]
+                msg = date_msg[1]
+                entries.append((date, msg))
+        return entries
+    except Exception:
+        return []
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("协议解析工具 260414")
+        self.setWindowTitle(f"协议解析工具 v{APP_VERSION}")
         self.setMinimumSize(1000, 700)
 
         # 协议选择：0=南网协议，1=PLC RF协议，2=HDLC/DLMS协议
@@ -37,6 +100,10 @@ class MainWindow(QMainWindow):
         self.plc_rf_parser = PLCRFProtocolParser()
         self.hdlc_parser = HDLCParser()
 
+        # 初始化查询器
+        self.obis_lookup = get_obis_lookup()
+        self.command_lookup = get_command_lookup()
+
         # 批量解析结果缓存
         self.batch_results: List[Dict[str, Any]] = []
 
@@ -44,6 +111,7 @@ class MainWindow(QMainWindow):
         self._byte_ranges: list = []
 
         self.setup_ui()
+        self._setup_menu_bar()
         self.apply_styles()
 
     def setup_ui(self):
@@ -85,9 +153,15 @@ class MainWindow(QMainWindow):
         # 选项卡
         self.tab_widget = QTabWidget()
         self.tab_widget.addTab(self.create_single_parse_tab(), "单帧解析")
-        self.tab_widget.addTab(self.create_di_lookup_tab(), "DI查询")
+        # 查询页面根据协议动态创建
+        self.protocol_lookup_tab = QWidget()
+        self.protocol_lookup_tab_layout = QVBoxLayout(self.protocol_lookup_tab)
+        self.tab_widget.addTab(self.protocol_lookup_tab, "查询")
         self.tab_widget.addTab(self.create_batch_parse_tab(), "批量解析")
         main_layout.addWidget(self.tab_widget)
+
+        # 初始化查询页面内容
+        self._update_protocol_lookup_tab()
 
     def create_single_parse_tab(self) -> QWidget:
         """创建单帧解析标签页 - 上下布局"""
@@ -770,6 +844,33 @@ class MainWindow(QMainWindow):
                 background-color: #ffffff;
                 color: #000000;
             }
+
+            /* ========== 菜单栏 ========== */
+            QMenuBar {
+                background-color: #f5f5f5;
+                color: #000000;
+                border-bottom: 1px solid #d0d0d0;
+                padding: 2px;
+            }
+            QMenuBar::item {
+                padding: 4px 10px;
+                background-color: transparent;
+            }
+            QMenuBar::item:selected {
+                background-color: #e0e0e0;
+            }
+            QMenu {
+                background-color: #ffffff;
+                color: #000000;
+                border: 1px solid #cccccc;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 6px 30px 6px 20px;
+            }
+            QMenu::item:selected {
+                background-color: #e3f2fd;
+            }
         """)
 
     # ==================== 单帧解析功能 ====================
@@ -780,19 +881,342 @@ class MainWindow(QMainWindow):
         # 更新占位符提示
         if index == 0:
             self.single_input.setPlaceholderText("请输入十六进制报文，例如：68 0E 00 00 00 00 01 00 01 E8 00 05 EF 16")
-            # 南网协议：显示DI查询标签页
-            self.tab_widget.setTabVisible(1, True)
-            self._load_di_map_data()
         elif index == 1:
             self.single_input.setPlaceholderText("请输入PLC RF报文，例如：02 00 05 C0 20 01 00 99")
-            # PLC RF协议：隐藏DI查询标签页，显示命令字列表
-            self.tab_widget.setTabVisible(1, False)
-        else:  # index == 2, HDLC/DLMS协议
+        elif index == 2:
             self.single_input.setPlaceholderText("请输入HDLC报文，例如：7E A0 07 01 01 93 ... 7E")
-            # HDLC协议：隐藏DI查询标签页
-            self.tab_widget.setTabVisible(1, False)
+        elif index == 3:
+            self.single_input.setPlaceholderText("请输入Wrapper报文，例如：00 01 00 02 00 1E ...")
+        else:  # index == 4, DLMS-APDU裸报文
+            self.single_input.setPlaceholderText("请输入APDU报文，例如：C0 01 C1 00 ...")
+
+        # 更新查询页面
+        self._update_protocol_lookup_tab()
+
         # 清空当前结果
         self.clear_single()
+
+    def _update_protocol_lookup_tab(self):
+        """根据当前协议更新查询页面内容"""
+        # 清空当前查询页面内容（递归清除所有子layout和widget）
+        self._clear_layout(self.protocol_lookup_tab_layout)
+
+        # 更新选项卡标签
+        lookup_tab_index = self.tab_widget.indexOf(self.protocol_lookup_tab)
+
+        if self.current_protocol == 0:
+            # 南网协议：DI查询
+            self.tab_widget.setTabText(lookup_tab_index, "DI查询")
+            # 使用原有的DI查询页面创建方法
+            if hasattr(self, '_create_di_lookup_content'):
+                self._create_di_lookup_content(self.protocol_lookup_tab_layout)
+            else:
+                # 显示提示信息
+                label = QLabel("DI查询功能加载中...")
+                label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.protocol_lookup_tab_layout.addWidget(label)
+
+        elif self.current_protocol == 1:
+            # 万胜PLC RF协议：命令字查询
+            self.tab_widget.setTabText(lookup_tab_index, "命令字查询")
+            self._create_command_lookup_content(self.protocol_lookup_tab_layout)
+
+        elif self.current_protocol in (2, 3, 4):
+            # HDLC/Wrapper/DLMS-APDU：OBIS查询
+            self.tab_widget.setTabText(lookup_tab_index, "OBIS查询")
+            self._create_obis_lookup_content(self.protocol_lookup_tab_layout)
+
+    @staticmethod
+    def _clear_layout(layout):
+        """递归清除layout中的所有子layout和widget"""
+        while layout.count():
+            child = layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+            elif child.layout():
+                MainWindow._clear_layout(child.layout())
+
+    def _setup_menu_bar(self):
+        """创建菜单栏"""
+        menubar = self.menuBar()
+
+        help_menu = menubar.addMenu("帮助(&H)")
+
+        about_action = help_menu.addAction("关于(&A)")
+        about_action.triggered.connect(self._show_about_dialog)
+
+    def _show_about_dialog(self):
+        """显示"关于"对话框"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("关于")
+        dialog.setMinimumSize(520, 480)
+        dialog.setWindowFlags(dialog.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(12)
+
+        title_label = QLabel(f"协议解析工具")
+        title_label.setFont(QFont("Microsoft YaHei", 16, QFont.Bold))
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title_label)
+
+        version_label = QLabel(f"版本 {APP_VERSION}")
+        version_label.setFont(QFont("Microsoft YaHei", 11))
+        version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        version_label.setStyleSheet("color: #666;")
+        layout.addWidget(version_label)
+
+        desc_label = QLabel("支持南网协议 / PLC RF / HDLC/DLMS 多协议报文解析")
+        desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        desc_label.setWordWrap(True)
+        layout.addWidget(desc_label)
+
+        changelog_label = QLabel("版本更新记录")
+        changelog_label.setFont(QFont("Microsoft YaHei", 10, QFont.Bold))
+        layout.addWidget(changelog_label)
+
+        changelog_text = QTextEdit()
+        changelog_text.setReadOnly(True)
+        changelog_text.setFont(QFont("Microsoft YaHei", 9))
+
+        html_parts = []
+        for ver, date, items in CHANGELOG:
+            html_parts.append(f"<b>v{ver}</b> <span style='color:#888;'>({date})</span><ul>")
+            for item in items:
+                html_parts.append(f"<li>{item}</li>")
+            html_parts.append("</ul>")
+
+        git_entries = _get_git_changelog()
+        if git_entries:
+            html_parts.append("<b>Git 提交记录（最近）</b><ul>")
+            for date, msg in git_entries[:15]:
+                html_parts.append(f"<li><span style='color:#888;'>{date}</span> {msg}</li>")
+            html_parts.append("</ul>")
+
+        changelog_text.setHtml("".join(html_parts))
+        layout.addWidget(changelog_text)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        ok_btn = QPushButton("确定")
+        ok_btn.setFixedWidth(100)
+        ok_btn.clicked.connect(dialog.accept)
+        btn_layout.addWidget(ok_btn)
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+
+        dialog.exec()
+
+    def _create_di_lookup_content(self, layout):
+        """创建DI查询页面内容"""
+        # 搜索栏
+        search_layout = QHBoxLayout()
+        search_label = QLabel("搜索：")
+        search_label.setFixedWidth(45)
+        self.di_search_input = QLineEdit()
+        self.di_search_input.setPlaceholderText("输入DI编码或中文关键词搜索...")
+        self.di_search_input.textChanged.connect(self._filter_di_table)
+        search_layout.addWidget(search_label)
+        search_layout.addWidget(self.di_search_input)
+        layout.addLayout(search_layout)
+
+        # 统计标签
+        self.di_stats_label = QLabel()
+        self.di_stats_label.setStyleSheet("color: #666; font-size: 12px;")
+        layout.addWidget(self.di_stats_label)
+
+        # 表格
+        self.di_table = QTableWidget()
+        self.di_table.setColumnCount(6)
+        self.di_table.setHorizontalHeaderLabels(["DI3", "DI2", "DI1", "DI0", "AFN", "中文含义"])
+        # 设置表格样式...
+        header = self.di_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
+        self.di_table.setColumnWidth(0, 60)
+        self.di_table.setColumnWidth(1, 60)
+        self.di_table.setColumnWidth(2, 60)
+        self.di_table.setColumnWidth(3, 60)
+        self.di_table.setColumnWidth(4, 200)
+        self.di_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.di_table.setAlternatingRowColors(True)
+        self.di_table.verticalHeader().hide()
+        table_font = QFont()
+        table_font.setPointSize(8)
+        self.di_table.setFont(table_font)
+
+        layout.addWidget(self.di_table)
+
+        # 按钮栏
+        btn_layout = QHBoxLayout()
+        add_di_btn = QPushButton("添加自定义DI")
+        add_di_btn.clicked.connect(self._add_custom_di)
+        btn_layout.addWidget(add_di_btn)
+
+        del_di_btn = QPushButton("删除选中自定义DI")
+        del_di_btn.clicked.connect(self._del_custom_di)
+        btn_layout.addWidget(del_di_btn)
+
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+
+        # 加载数据
+        self._load_di_map_data()
+
+    def _create_command_lookup_content(self, layout):
+        """创建万胜PLC RF协议命令字查询页面"""
+        # 搜索栏
+        search_layout = QHBoxLayout()
+        search_label = QLabel("搜索：")
+        search_label.setFixedWidth(45)
+        self.cmd_search_input = QLineEdit()
+        self.cmd_search_input.setPlaceholderText("输入命令字编码(如1001)或关键词搜索...")
+        self.cmd_search_input.textChanged.connect(self._filter_command_table)
+        search_layout.addWidget(search_label)
+        search_layout.addWidget(self.cmd_search_input)
+        layout.addLayout(search_layout)
+
+        # 统计标签
+        self.cmd_stats_label = QLabel()
+        self.cmd_stats_label.setStyleSheet("color: #666; font-size: 12px;")
+        layout.addWidget(self.cmd_stats_label)
+
+        # 表格
+        self.cmd_table = QTableWidget()
+        self.cmd_table.setColumnCount(2)
+        self.cmd_table.setHorizontalHeaderLabels(["命令字", "功能描述"])
+        header = self.cmd_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
+        self.cmd_table.setColumnWidth(0, 100)
+        self.cmd_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.cmd_table.setAlternatingRowColors(True)
+        self.cmd_table.verticalHeader().hide()
+        table_font = QFont()
+        table_font.setPointSize(8)
+        self.cmd_table.setFont(table_font)
+
+        layout.addWidget(self.cmd_table)
+
+        # 加载数据
+        self._load_command_map_data()
+
+    def _create_obis_lookup_content(self, layout):
+        """创建OBIS查询页面（HDLC/Wrapper/DLMS-APDU协议）"""
+        # 搜索栏
+        search_layout = QHBoxLayout()
+        search_label = QLabel("搜索：")
+        search_label.setFixedWidth(45)
+        self.obis_search_input = QLineEdit()
+        self.obis_search_input.setPlaceholderText("输入OBIS码(如0.0.96.1.0.255)或关键词搜索...")
+        self.obis_search_input.textChanged.connect(self._filter_obis_table)
+        search_layout.addWidget(search_label)
+        search_layout.addWidget(self.obis_search_input)
+        layout.addLayout(search_layout)
+
+        # 统计标签
+        self.obis_stats_label = QLabel()
+        self.obis_stats_label.setStyleSheet("color: #666; font-size: 12px;")
+        layout.addWidget(self.obis_stats_label)
+
+        # 表格
+        self.obis_table = QTableWidget()
+        self.obis_table.setColumnCount(4)
+        self.obis_table.setHorizontalHeaderLabels(["OBIS码", "对象名称", "对象类型", "访问属性"])
+        header = self.obis_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
+        self.obis_table.setColumnWidth(0, 150)
+        self.obis_table.setColumnWidth(1, 200)
+        self.obis_table.setColumnWidth(2, 120)
+        self.obis_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.obis_table.setAlternatingRowColors(True)
+        self.obis_table.verticalHeader().hide()
+        table_font = QFont()
+        table_font.setPointSize(8)
+        self.obis_table.setFont(table_font)
+
+        layout.addWidget(self.obis_table)
+
+        # 加载数据
+        self._load_obis_map_data()
+
+    def _load_command_map_data(self):
+        """从命令字查询器加载数据到表格"""
+        data = self.command_lookup._data
+        self.cmd_table.setRowCount(len(data))
+        for row, (code, name, desc, is_custom) in enumerate(data):
+            self.cmd_table.setItem(row, 0, QTableWidgetItem(f"{code:04X}"))
+            name_item = QTableWidgetItem(("★ " if is_custom else "") + name)
+            if is_custom:
+                name_item.setForeground(QColor("#1976D2"))
+            self.cmd_table.setItem(row, 1, name_item)
+        self.cmd_stats_label.setText(f"共 {len(data)} 条记录")
+
+    def _filter_command_table(self, text: str):
+        """根据搜索文本过滤命令字表格"""
+        keyword = text.strip().upper()
+        if not keyword:
+            self._load_command_map_data()
+            return
+        results = self.command_lookup.search(keyword)
+        self.cmd_table.setRowCount(len(results))
+        for row, (code, name, desc, is_custom) in enumerate(results):
+            self.cmd_table.setItem(row, 0, QTableWidgetItem(f"{code:04X}"))
+            name_item = QTableWidgetItem(("★ " if is_custom else "") + name)
+            if is_custom:
+                name_item.setForeground(QColor("#1976D2"))
+            self.cmd_table.setItem(row, 1, name_item)
+        self.cmd_stats_label.setText(f"匹配 {len(results)} / {len(self.command_lookup._data)} 条记录")
+
+    def _load_obis_map_data(self):
+        """从OBIS查询器加载数据到表格"""
+        data = self.obis_lookup._data
+        self.obis_table.setRowCount(len(data))
+        for row, (obis, name, desc, is_custom) in enumerate(data):
+            obis_str = f"{obis[0]}.{obis[1]}.{obis[2]}.{obis[3]}.{obis[4]}.{obis[5]}"
+            self.obis_table.setItem(row, 0, QTableWidgetItem(obis_str))
+            name_item = QTableWidgetItem(("★ " if is_custom else "") + name)
+            if is_custom:
+                name_item.setForeground(QColor("#1976D2"))
+            self.obis_table.setItem(row, 1, name_item)
+            # 根据OBIS A值推断对象类型
+            a = obis[0]
+            type_map = {
+                0: "General", 1: "Register", 2: "ExtendedRegister",
+                3: "DemandRegister", 5: "ProfileGeneric", 7: "ScriptTable",
+                10: "Association LN", 17: "ActivityCalendar",
+                20: "DisconnectControl",
+            }
+            self.obis_table.setItem(row, 2, QTableWidgetItem(type_map.get(a, f"Type_{a}")))
+            self.obis_table.setItem(row, 3, QTableWidgetItem("Read/Write" if is_custom else "Read"))
+        self.obis_stats_label.setText(f"共 {len(data)} 条记录")
+
+    def _filter_obis_table(self, text: str):
+        """根据搜索文本过滤OBIS表格"""
+        keyword = text.strip().upper()
+        if not keyword:
+            self._load_obis_map_data()
+            return
+        results = self.obis_lookup.search(keyword)
+        self.obis_table.setRowCount(len(results))
+        for row, (obis, name, desc, is_custom) in enumerate(results):
+            obis_str = f"{obis[0]}.{obis[1]}.{obis[2]}.{obis[3]}.{obis[4]}.{obis[5]}"
+            self.obis_table.setItem(row, 0, QTableWidgetItem(obis_str))
+            name_item = QTableWidgetItem(("★ " if is_custom else "") + name)
+            if is_custom:
+                name_item.setForeground(QColor("#1976D2"))
+            self.obis_table.setItem(row, 1, name_item)
+            a = obis[0]
+            type_map = {
+                0: "General", 1: "Register", 2: "ExtendedRegister",
+                3: "DemandRegister", 5: "ProfileGeneric", 7: "ScriptTable",
+                10: "Association LN", 17: "ActivityCalendar",
+                20: "DisconnectControl",
+            }
+            self.obis_table.setItem(row, 2, QTableWidgetItem(type_map.get(a, f"Type_{a}")))
+            self.obis_table.setItem(row, 3, QTableWidgetItem("Read/Write" if is_custom else "Read"))
+        self.obis_stats_label.setText(f"匹配 {len(results)} / {len(self.obis_lookup._data)} 条记录")
 
     def _get_current_parser(self):
         """获取当前选中的解析器"""
@@ -920,51 +1344,59 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _extract_frames(text: str) -> list:
-        """从混杂文本中提取完整的68起始帧
+        """从混杂文本中提取完整的68起始帧（南网协议）
 
         预处理规则：
         1. 剔除时间戳、特殊符号前缀（[]、<>等非hex字符）
-        2. 从hex字符串中按68H起始、16H结束提取完整帧
-        3. 利用长度域校验帧完整性
+        2. 从hex字符串中按68H起始、利用长度域+校验和验证帧完整性
         """
         import re
-        # 将所有非hex字符替换为空
         clean = re.sub(r'[^0-9A-Fa-f]', '', text).upper()
 
         frames = []
         i = 0
-        while i < len(clean) - 3:
-            # 找下一个68起始
+        while i < len(clean) - 7:
             pos = clean.find('68', i)
             if pos == -1:
                 break
 
-            # 尝试按长度域解析帧边界（小端序：低字节在前）
-            if pos + 6 <= len(clean):
-                try:
-                    low_byte = int(clean[pos+2:pos+4], 16)
-                    high_byte = int(clean[pos+4:pos+6], 16)
-                    length = low_byte | (high_byte << 8)  # 小端序
-                    frame_hex_len = length * 2
+            if pos + 6 > len(clean):
+                break
 
-                    if pos + frame_hex_len <= len(clean):
-                        candidate = clean[pos:pos+frame_hex_len]
-                        if candidate[-2:] == '16':
-                            frames.append(candidate)
-                            i = pos + frame_hex_len
-                            continue
-                except (ValueError, IndexError):
-                    pass
-
-            # 长度解析失败，找最近的16结束符
-            end = clean.find('16', pos + 6)
-            if end != -1 and end - pos <= 2000:
-                candidate = clean[pos:end+2]
-                if len(candidate) >= 8:
-                    frames.append(candidate)
-                i = end + 2
-            else:
+            try:
+                low_byte = int(clean[pos + 2:pos + 4], 16)
+                high_byte = int(clean[pos + 4:pos + 6], 16)
+                length = low_byte | (high_byte << 8)
+            except ValueError:
                 i = pos + 2
+                continue
+
+            if length < 8 or length > 2048:
+                i = pos + 2
+                continue
+
+            frame_hex_len = length * 2
+            if pos + frame_hex_len > len(clean):
+                i = pos + 2
+                continue
+
+            candidate = clean[pos:pos + frame_hex_len]
+            if candidate[-2:] != '16':
+                i = pos + 2
+                continue
+
+            try:
+                frame_bytes = bytes.fromhex(candidate)
+                cs_expected = sum(frame_bytes[3:length - 1]) & 0xFF
+                cs_actual = frame_bytes[length - 1]
+                if cs_expected == cs_actual:
+                    frames.append(candidate)
+                    i = pos + frame_hex_len
+                    continue
+            except ValueError:
+                pass
+
+            i = pos + 2
 
         return frames
 
@@ -989,12 +1421,18 @@ class MainWindow(QMainWindow):
         fail_count = 0
 
         for i, frame_hex in enumerate(frames):
+            table_data = []
+            direction = "-"
             try:
                 frame_bytes = bytes.fromhex(frame_hex)
                 # 使用当前协议对应的解析器
                 current_parser = self._get_current_parser()
                 # 调用parse_to_table生成表格数据
                 table_data = current_parser.parse_to_table(frame_bytes)
+
+                # 南网协议提取方向
+                if self.current_protocol == 0:
+                    direction = self._extract_direction_from_table(table_data)
 
                 # 从表格数据生成摘要（取前3个字段作为摘要）
                 summary = self._get_summary_from_table_data(table_data)
@@ -1014,6 +1452,7 @@ class MainWindow(QMainWindow):
                 status = "异常"
                 summary = str(e)[:50]
                 fail_count += 1
+                # 异常时 table_data 为空，方向保持 "-"
                 self.batch_results.append({
                     "_input": frame_hex,
                     "_status": status,
@@ -1031,9 +1470,17 @@ class MainWindow(QMainWindow):
                 hex_display = hex_display[:50] + "..."
             self.result_table.setItem(row, 1, QTableWidgetItem(hex_display))
             self.result_table.setItem(row, 2, QTableWidgetItem(str(len(frame_hex) // 2)))
-            self.result_table.setItem(row, 3, QTableWidgetItem("-"))  # 方向统一留空
+
+            # 方向：南网协议从控制域DIR位解析，其他协议暂无
+            direction = "-"
+            if self.current_protocol == 0:
+                direction = self._extract_direction_from_table(table_data)
+            self.result_table.setItem(row, 3, QTableWidgetItem(direction))
+
+            # 业务摘要
             self.result_table.setItem(row, 4, QTableWidgetItem(summary))
 
+            # 状态
             status_item = QTableWidgetItem(status)
             if status == "成功":
                 status_item.setForeground(Qt.darkGreen)
@@ -1043,22 +1490,68 @@ class MainWindow(QMainWindow):
 
         self.update_stats(f"解析完成：成功 {success_count} 帧，失败 {fail_count} 帧，共 {len(frames)} 帧")
 
+    def _extract_direction_from_table(self, table_data: list) -> str:
+        """从南网协议表格数据中提取传输方向"""
+        # table_data 格式: (field_name, raw_value, parsed_value, comment, byte_start, byte_end)
+        # 控制域子字段"传输方向"的 field_name 为"  传输方向"（带前缀空格）
+        for item in table_data:
+            field_name = item[0]
+            parsed_val = item[2]
+            # 查找传输方向字段（去除空格后匹配）
+            if "传输方向" in field_name or "DIR" in field_name:
+                dir_code = str(parsed_val).strip()
+                if dir_code == "0":
+                    return "下行帧(集中器→模块)"
+                elif dir_code == "1":
+                    return "上行帧(模块→集中器)"
+                else:
+                    return f"未知({dir_code})"
+        return "-"
+
     def _get_summary_from_table_data(self, table_data: list) -> str:
         """从表格数据中提取摘要信息，取重要的前几个字段拼接"""
         if not table_data:
             return "-"
-        # 取前4个重要字段拼接
+
         summary_parts = []
-        for i, item in enumerate(table_data):
-            if i >= 4:
-                break
-            field_name = item[0]
-            parsed_val = item[2]
-            # 跳过冗余字段，只留重要的
-            if any(k in field_name for k in ["帧起始", "格式", "长度", "校验", "结束标志"]):
-                continue
-            summary_parts.append(f"{parsed_val}")
-        return " | ".join(summary_parts) if summary_parts else "-"
+
+        if self.current_protocol == 0:
+            # 南网协议：提取 AFN 名称（comment）、SEQ 值、DI 业务说明（comment）
+            afn_val = None
+            seq_val = None
+            di_desc = None
+            for item in table_data:
+                field_name = item[0]
+                parsed_val = item[2]
+                comment = item[3]
+                if field_name == "应用功能码 (AFN)":
+                    # AFN 的 parsed_val 为空，说明在 comment 中
+                    afn_val = comment if comment else parsed_val
+                elif field_name == "帧序列号 (SEQ)":
+                    seq_val = parsed_val
+                elif field_name == "数据标识 (DI)":
+                    # DI 的业务说明在 comment 中
+                    if comment and not di_desc:
+                        di_desc = comment
+            if di_desc:
+                summary_parts.insert(0, f"DI:{di_desc}")
+            if afn_val is not None:
+                summary_parts.append(f"AFN:{afn_val}")
+            if seq_val is not None:
+                summary_parts.append(f"SEQ:{seq_val}")
+            return " | ".join(summary_parts) if summary_parts else "-"
+
+        else:
+            # 其他协议：取前几个非冗余字段
+            for i, item in enumerate(table_data):
+                if i >= 4:
+                    break
+                field_name = item[0]
+                parsed_val = item[2]
+                if any(k in field_name for k in ["帧起始", "格式", "长度", "校验", "结束标志"]):
+                    continue
+                summary_parts.append(f"{parsed_val}")
+            return " | ".join(summary_parts) if summary_parts else "-"
 
     def _extract_frames_for_protocol(self, text: str, protocol_index: int) -> list:
         """根据协议提取对应格式的帧"""
@@ -1159,36 +1652,61 @@ class MainWindow(QMainWindow):
         return frames
 
     def _extract_68_frames(self, clean: str) -> list:
-        """提取南网68格式帧"""
+        """提取南网68格式帧（Q/CSG1209021-2019 FT1.2）
+
+        帧格式: 68H | L(2B小端) | C(1B) | 用户数据(L-6字节) | CS(1B) | 16H
+        L = 帧总字节数（含起始符、长度域、控制域、校验和、结束符）
+        验证规则:
+          1. 起始字符 = 68H
+          2. L >= 8（最小帧长度）
+          3. 帧末尾 = 16H
+          4. 校验和：从控制域到用户数据末尾的所有字节累加和 mod 256
+        """
         frames = []
         i = 0
-        while i < len(clean) - 3:
+        while i < len(clean) - 7:
+            # 找下一个 68 起始
             pos = clean.find('68', i)
             if pos == -1:
                 break
-            if pos + 6 <= len(clean):
-                try:
-                    low_byte = int(clean[pos+2:pos+4], 16)
-                    high_byte = int(clean[pos+4:pos+6], 16)
-                    length = low_byte | (high_byte << 8)
-                    frame_hex_len = length * 2
-                    if pos + frame_hex_len <= len(clean):
-                        candidate = clean[pos:pos+frame_hex_len]
-                        if candidate[-2:] == '16':
-                            frames.append(candidate)
-                            i = pos + frame_hex_len
-                            continue
-                except (ValueError, IndexError):
-                    pass
-            # 回退到简单方案：找最近的16
-            end = clean.find('16', pos + 6)
-            if end != -1 and end - pos <= 2000:
-                candidate = clean[pos:end+2]
-                if len(candidate) >= 8:
-                    frames.append(candidate)
-                i = end + 2
-            else:
+
+            # 尝试按长度域解析帧边界
+            if pos + 6 > len(clean):
                 i = pos + 2
+                continue
+
+            try:
+                low_byte = int(clean[pos + 2:pos + 4], 16)
+                high_byte = int(clean[pos + 4:pos + 6], 16)
+                length = low_byte | (high_byte << 8)
+            except ValueError:
+                i = pos + 2
+                continue
+
+            # L 至少为 8（起始1 + 长度2 + 控制1 + 校验1 + 结束1 + 用户数据至少3）
+            if length < 8 or length > 2048:
+                i = pos + 2
+                continue
+
+            frame_hex_len = length * 2
+
+            # 检查数据是否足够
+            if pos + frame_hex_len > len(clean):
+                i = pos + 2
+                continue
+
+            candidate = clean[pos:pos + frame_hex_len]
+
+            # 验证结束符 = 16H
+            if candidate[-2:] != '16':
+                i = pos + 2
+                continue
+
+            # 通过长度域和结束符验证，接受此帧（不校验CS，由解析器负责校验）
+            frames.append(candidate)
+            i = pos + frame_hex_len
+            continue
+
         return frames
 
     def _extract_generic_frames(self, clean: str, min_len: int = 4, max_len: int = 512) -> list:
