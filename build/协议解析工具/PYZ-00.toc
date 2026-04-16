@@ -70,6 +70,8 @@
   ('decimal', 'D:\\Program Files\\Python313\\Lib\\decimal.py', 'PYMODULE'),
   ('dis', 'D:\\Program Files\\Python313\\Lib\\dis.py', 'PYMODULE'),
   ('dlms_parser', 'E:\\python\\南网解析工具\\dlms_parser.py', 'PYMODULE'),
+  ('dlt645_di_lookup', 'E:\\python\\南网解析工具\\dlt645_di_lookup.py', 'PYMODULE'),
+  ('dlt645_parser', 'E:\\python\\南网解析工具\\dlt645_parser.py', 'PYMODULE'),
   ('email',
    'D:\\Program Files\\Python313\\Lib\\email\\__init__.py',
    'PYMODULE'),

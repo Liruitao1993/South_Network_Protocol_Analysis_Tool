@@ -5,7 +5,7 @@ a = Analysis(
     ['main_gui.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('custom_di.json', '.'), ('dlt645_di.json', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
