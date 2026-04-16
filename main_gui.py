@@ -28,9 +28,14 @@ from command_lookup import CommandLookup, get_command_lookup
 from dlt645_di_lookup import DLT645DILookup, get_dlt645_di_lookup
 
 
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
 
 CHANGELOG = [
+    ("1.4.0", "2026-04-16", [
+        "修复表格交替行颜色失效的问题（stylesheet优化）",
+        "新增AGENTS.md项目指南文件，便于AI辅助开发",
+        "PyInstaller打包配置修复：添加custom_di.json和dlt645_di.json到datas",
+    ]),
     ("1.3.0", "2026-04-16", [
         "修复查询页面切换时按钮残留问题（递归清理layout）",
         "修复命令字查询页缺失的4个方法（_load_command_map_data等）",
@@ -744,13 +749,15 @@ class MainWindow(QMainWindow):
                 color: #000000;
                 font-size: 9pt;
             }
-            QTableWidget::item {
+            QTableWidget::item:!alternate {
                 background-color: #ffffff;
                 color: #000000;
                 padding: 2px 4px;
             }
             QTableWidget::item:alternate {
-                background-color: #f8f8f8;
+                background-color: #e8e8e8;
+                color: #000000;
+                padding: 2px 4px;
             }
             QTableWidget::item:selected {
                 background-color: #2196F3;
