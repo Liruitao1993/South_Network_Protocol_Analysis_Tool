@@ -187,12 +187,12 @@ class ProtocolFrameParser:
                 self._add_field(table_data, "数据标识内容", "", "", "", rng[0], rng[1])
 
                 sub_offset = offset  # 子字段偏移跟踪
-                _skip_keys = {"原始值", "十进制", "说明", "描述", "值", "整数值", "业务说明", "单位", "原始字节", "原始数据", "校验结果", "解析状态", "错误信息"}
+                _skip_keys = {"原始值", "十进制", "说明", "描述", "值", "整数值", "业务说明", "单位", "原始字节", "原始数据", "校验结果", "解析状态", "错误信息", "解析值"}
 
                 for key, value in content.items():
                     if isinstance(value, dict):
                         raw = str(value.get("原始值", value.get("原始字节", "-")))
-                        val = str(value.get("十进制", value.get("说明", "-")))
+                        val = str(value.get("十进制", value.get("解析值", value.get("说明", "-"))))
                         desc = str(value.get("说明", "")) if isinstance(value.get("说明", ""), str) else ""
 
                         # 尝试从原始值推算字节长度，实现精准高亮
@@ -212,34 +212,69 @@ class ProtocolFrameParser:
                             if isinstance(sub_value, str):
                                 self._add_field(table_data, f"    {sub_key}", "-", sub_value, "", f_start, f_end, is_child=True)
                             elif isinstance(sub_value, dict):
-                                sv = sub_value.get("说明", sub_value.get("值", str(sub_value)))
-                                sd = sub_value.get("说明", "")
-                                self._add_field(table_data, f"    {sub_key}", "-", str(sv), str(sd) if sd != sv else "", f_start, f_end, is_child=True)
+                                # 检查sub_value是否是结构化字段（包含原始值、解析值、说明）
+                                if '原始值' in sub_value or '解析值' in sub_value:
+                                    # 这是标准的结构化字段，直接显示
+                                    sv_raw = str(sub_value.get("原始值", "-"))
+                                    sv_val = str(sub_value.get("解析值", sub_value.get("十进制", sub_value.get("说明", "-"))))
+                                    sv_desc = str(sub_value.get("说明", ""))
+                                    self._add_field(table_data, f"    {sub_key}", sv_raw, sv_val, sv_desc, f_start, f_end, is_child=True)
+                                else:
+                                    # 这是容器dict，显示其子字段
+                                    sv = sub_value.get("说明", sub_value.get("值", str(sub_value)))
+                                    sd = sub_value.get("说明", "")
+                                    self._add_field(table_data, f"    {sub_key}", "-", str(sv), str(sd) if sd != sv else "", f_start, f_end, is_child=True)
 
                     elif isinstance(value, list):
                         # 列表字段（如从节点列表），使用父范围
                         self._add_field(table_data, f"  {key}", f"共{len(value)}项", "", "", rng[0], rng[1], is_child=True)
                         for item in value:
                             if isinstance(item, dict):
-                                for ik, iv in item.items():
-                                    if ik in _skip_keys:
-                                        continue
-                                    if isinstance(iv, dict):
-                                        iraw = str(iv.get("原始值", iv.get("原始字节", "-")))
-                                        ival = str(iv.get("十进制", iv.get("说明", "-")))
-                                        idesc = str(iv.get("说明", "")) if isinstance(iv.get("说明", ""), str) else ""
-                                        self._add_field(table_data, f"    {ik}", iraw, ival, idesc, rng[0], rng[1], is_child=True)
-                                        # 显示dict子字段的子字段
-                                        for sik, siv in iv.items():
-                                            if sik in _skip_keys:
-                                                continue
-                                            if isinstance(siv, str):
-                                                self._add_field(table_data, f"      {sik}", "-", siv, "", rng[0], rng[1], is_child=True)
-                                            elif isinstance(siv, dict):
-                                                ssv = siv.get("说明", siv.get("值", str(siv)))
-                                                self._add_field(table_data, f"      {sik}", "-", str(ssv), "", rng[0], rng[1], is_child=True)
-                                    else:
-                                        self._add_field(table_data, f"    {ik}", str(iv), "", "", rng[0], rng[1], is_child=True)
+                                # 判断列表项是否为结构化数据（有原始值/说明等键）
+                                is_struct = self._is_structured(item)
+                                if is_struct:
+                                    # 结构化列表项：作为单行渲染
+                                    iraw = str(item.get("原始值", item.get("原始字节", "-")))
+                                    ival = str(item.get("十进制", item.get("解析值", item.get("说明", "-"))))
+                                    idesc = str(item.get("说明", "")) if isinstance(item.get("说明", ""), str) else ""
+                                    # 提取非结构化键作为额外说明
+                                    extra_parts = []
+                                    for ik, iv in item.items():
+                                        if ik not in _skip_keys and not isinstance(iv, dict):
+                                            extra_parts.append(f"{ik}: {iv}")
+                                    if extra_parts:
+                                        idesc = (idesc + "；" + "，".join(extra_parts)).strip("；")
+                                    self._add_field(table_data, f"    项", iraw, ival, idesc, rng[0], rng[1], is_child=True)
+                                    # 显示dict值的子字段（如地址）
+                                    for ik, iv in item.items():
+                                        if ik in _skip_keys:
+                                            continue
+                                        if isinstance(iv, dict) and self._is_structured(iv):
+                                            siraw = str(iv.get("原始值", iv.get("原始字节", "-")))
+                                            sival = str(iv.get("十进制", iv.get("解析值", iv.get("说明", "-"))))
+                                            sidesc = str(iv.get("说明", "")) if isinstance(iv.get("说明", ""), str) else ""
+                                            self._add_field(table_data, f"      {ik}", siraw, sival, sidesc, rng[0], rng[1], is_child=True)
+                                else:
+                                    # 非结构化列表项：逐个字段渲染
+                                    for ik, iv in item.items():
+                                        if ik in _skip_keys:
+                                            continue
+                                        if isinstance(iv, dict):
+                                            iraw = str(iv.get("原始值", iv.get("原始字节", "-")))
+                                            ival = str(iv.get("十进制", iv.get("解析值", iv.get("说明", "-"))))
+                                            idesc = str(iv.get("说明", "")) if isinstance(iv.get("说明", ""), str) else ""
+                                            self._add_field(table_data, f"    {ik}", iraw, ival, idesc, rng[0], rng[1], is_child=True)
+                                            # 显示dict子字段的子字段
+                                            for sik, siv in iv.items():
+                                                if sik in _skip_keys:
+                                                    continue
+                                                if isinstance(siv, str):
+                                                    self._add_field(table_data, f"      {sik}", "-", siv, "", rng[0], rng[1], is_child=True)
+                                                elif isinstance(siv, dict):
+                                                    ssv = siv.get("说明", siv.get("值", str(siv)))
+                                                    self._add_field(table_data, f"      {sik}", "-", str(ssv), "", rng[0], rng[1], is_child=True)
+                                        else:
+                                            self._add_field(table_data, f"    {ik}", str(iv), "", "", rng[0], rng[1], is_child=True)
                     else:
                         # 纯字符串/数值：尝试从hex字符串推算字节长度
                         str_val = str(value)
@@ -280,7 +315,7 @@ class ProtocolFrameParser:
         for key, value in content.items():
             if isinstance(value, dict):
                 raw = value.get("原始值", "-")
-                val = value.get("十进制", value.get("说明", "-"))
+                val = value.get("十进制", value.get("解析值", value.get("说明", "-")))
                 desc = value.get("说明", "") if isinstance(value.get("说明", ""), str) else ""
                 self._add_field(table_data, f"  {key}", raw, str(val), desc, is_child=True)
             else:
@@ -475,6 +510,7 @@ class ProtocolFrameParser:
         (0xE8, 0x05, 0x05, 0x03): "上报从节点",
         (0xE8, 0x05, 0x05, 0x04): "上报从节点主动注册结束",
         (0xE8, 0x05, 0x05, 0x05): "上报任务状态",
+        (0xE8, 0x05, 0x05, 0x06): "上报电能表数据",
 
         # AFN=06H 请求信息
         (0xE8, 0x06, 0x06, 0x01): "请求集中器时间",
@@ -577,6 +613,46 @@ class ProtocolFrameParser:
 
         # 请求信息（AFN=25H）
         (0xEA, 0x06, 0x25, 0x01): "查询设备类型",
+
+        # ==================== PLUZ扩展 - 读参数（AFN=03H）新增 ====================
+        (0xE8, 0x03, 0x03, 0x61): "查询从节点实时信息",
+        (0xE8, 0x04, 0x03, 0x61): "返回查询从节点实时信息",
+        (0xE8, 0x03, 0x03, 0x64): "查询设备在线状态",
+        (0xE8, 0x04, 0x03, 0x64): "返回查询设备在线状态",
+        (0xE8, 0x03, 0x03, 0x65): "查询网络拓扑信息",
+        (0xE8, 0x04, 0x03, 0x65): "返回查询网络拓扑信息",
+        (0xE8, 0x00, 0x03, 0x6A): "查询最大网络规模",
+        (0xE8, 0x00, 0x03, 0x6B): "查询最大网络级数",
+        (0xE8, 0x00, 0x03, 0x6C): "查询允许/禁止拒绝从节点信息上报",
+        (0xE8, 0x00, 0x03, 0x6D): "查询无线参数",
+        (0xE8, 0x03, 0x03, 0x6E): "查询指定从节点信息",
+        (0xE8, 0x04, 0x03, 0x6E): "返回查询指定从节点信息",
+        (0xE8, 0x00, 0x03, 0x6F): "查询主节点运行信息",
+        (0xE8, 0x03, 0x03, 0x70): "查询节点自检结果",
+        (0xE8, 0x04, 0x03, 0x70): "返回查询节点自检结果",
+        (0xE8, 0x00, 0x03, 0x72): "查询踢出后不允许入网时间",
+        (0xE8, 0x03, 0x03, 0x74): "查询运行参数信息",
+        (0xE8, 0x04, 0x03, 0x74): "返回查询运行参数信息",
+        (0xE8, 0x00, 0x03, 0x90): "查询宽带载波频段",
+        (0xE8, 0x00, 0x03, 0x91): "查询多网络信息",
+        (0xE8, 0x00, 0x03, 0x93): "查询白名单生效信息",
+        (0xE8, 0x03, 0x03, 0x96): "查询设备类型",
+        (0xE8, 0x04, 0x03, 0x96): "返回查询设备类型",
+        (0xE8, 0x00, 0x03, 0x97): "查询台区组网成功率",
+        (0xE8, 0x03, 0x03, 0x98): "查询节点信道信息",
+        (0xE8, 0x04, 0x03, 0x98): "返回查询节点信道信息",
+        (0xE8, 0x00, 0x03, 0x95): "查询并发数",
+
+        # ==================== PLUZ扩展 - 写参数（AFN=04H）新增 ====================
+        (0xE8, 0x02, 0x04, 0x6A): "设置最大网络规模",
+        (0xE8, 0x02, 0x04, 0x6B): "设置最大网络级数",
+        (0xE8, 0x02, 0x04, 0x6C): "允许/禁止拒绝从节点信息上报",
+        (0xE8, 0x02, 0x04, 0x6D): "设置无线参数",
+        (0xE8, 0x02, 0x04, 0x72): "配置踢出后不允许入网时间",
+        (0xE8, 0x02, 0x04, 0x74): "配置运行参数",
+        (0xE8, 0x02, 0x04, 0x90): "设置宽带载波频段",
+        (0xE8, 0x02, 0x04, 0x93): "允许/禁止白名单功能",
+        (0xE8, 0x02, 0x04, 0xF0): "重启节点",
     }
 
     # 错误状态字定义
@@ -938,6 +1014,7 @@ class ProtocolFrameParser:
             (0xE8, 0x05, 0x05, 0x03): self._parse_report_slave_node_info_data,      # 上报从节点信息
             (0xE8, 0x05, 0x05, 0x04): self._parse_report_reg_end_data,              # 上报从节点主动注册结束
             (0xE8, 0x05, 0x05, 0x05): self._parse_report_task_status_data,          # 上报任务状态
+            (0xE8, 0x05, 0x05, 0x06): self._parse_report_meter_data,                 # 上报电能表数据
 
             # AFN=06H 请求信息
             (0xE8, 0x06, 0x06, 0x01): self._parse_request_time_data,                # 请求集中器时间
@@ -989,6 +1066,44 @@ class ProtocolFrameParser:
             # 深化应用 - 批量查询厂商代码和版本信息（1-1.md）
             (0xE8, 0x03, 0x03, 0x12): self._parse_batch_query_vendor_info_data,   # 批量查询厂商代码和版本信息
             (0xE8, 0x04, 0x03, 0x12): self._parse_batch_return_vendor_info_data,  # 批量返回查询厂商代码和版本信息
+
+            # ==================== PLUZ扩展 - 读参数（AFN=03H）新增 ====================
+            (0xE8, 0x04, 0x03, 0x61): self._parse_return_slave_realtime_info_data,    # 返回查询从节点实时信息
+            (0xE8, 0x03, 0x03, 0x61): self._parse_query_slave_realtime_info_data,     # 查询从节点实时信息（下行）
+            (0xE8, 0x04, 0x03, 0x64): self._parse_return_device_online_status_data,   # 返回查询设备在线状态
+            (0xE8, 0x03, 0x03, 0x64): self._parse_query_device_online_status_data,    # 查询设备在线状态（下行）
+            (0xE8, 0x04, 0x03, 0x65): self._parse_return_network_topology_data,       # 返回查询网络拓扑信息
+            (0xE8, 0x03, 0x03, 0x65): self._parse_query_network_topology_data,        # 查询网络拓扑信息（下行）
+            (0xE8, 0x00, 0x03, 0x6A): self._parse_simple_bin2_data,                   # 查询最大网络规模
+            (0xE8, 0x00, 0x03, 0x6B): self._parse_simple_bin1_data,                   # 查询最大网络级数
+            (0xE8, 0x00, 0x03, 0x6C): self._parse_simple_bin1_data,                   # 查询允许/禁止拒绝从节点信息上报
+            (0xE8, 0x00, 0x03, 0x6D): self._parse_query_rf_params_data,               # 查询无线参数
+            (0xE8, 0x04, 0x03, 0x6E): self._parse_return_slave_detail_info_data,       # 返回查询指定从节点信息
+            (0xE8, 0x03, 0x03, 0x6E): self._parse_query_slave_detail_info_data,        # 查询指定从节点信息（下行）
+            (0xE8, 0x00, 0x03, 0x6F): self._parse_return_master_node_runtime_info_data, # 返回查询主节点运行信息
+            (0xE8, 0x04, 0x03, 0x70): self._parse_return_node_selfcheck_data,          # 返回查询节点自检结果
+            (0xE8, 0x03, 0x03, 0x70): self._parse_query_node_selfcheck_data,            # 查询节点自检结果（下行）
+            (0xE8, 0x00, 0x03, 0x72): self._parse_simple_bin2_data,                   # 查询踢出后不允许入网时间
+            (0xE8, 0x04, 0x03, 0x74): self._parse_return_run_params_data,             # 返回查询运行参数信息
+            (0xE8, 0x03, 0x03, 0x74): self._parse_query_run_params_data,               # 查询运行参数信息（下行）
+            (0xE8, 0x00, 0x03, 0x90): self._parse_simple_bin1_data,                   # 查询宽带载波频段
+            (0xE8, 0x04, 0x03, 0x96): self._parse_return_device_type_data,             # 返回查询设备类型
+            (0xE8, 0x03, 0x03, 0x96): self._parse_query_device_type_data,              # 查询设备类型（下行）
+            (0xE8, 0x00, 0x03, 0x97): self._parse_simple_bin2_data,                   # 查询台区组网成功率
+            (0xE8, 0x04, 0x03, 0x98): self._parse_return_node_channel_info_data,       # 返回查询节点信道信息
+            (0xE8, 0x03, 0x03, 0x98): self._parse_query_node_channel_info_data,        # 查询节点信道信息（下行）
+            (0xE8, 0x00, 0x03, 0x95): self._parse_simple_bin1_data,                   # 查询并发数
+
+            # ==================== PLUZ扩展 - 写参数（AFN=04H）新增 ====================
+            (0xE8, 0x02, 0x04, 0x6A): self._parse_simple_bin2_data,                   # 设置最大网络规模
+            (0xE8, 0x02, 0x04, 0x6B): self._parse_simple_bin2_data,                   # 设置最大网络级数
+            (0xE8, 0x02, 0x04, 0x6C): self._parse_simple_bin1_data,                   # 允许/禁止拒绝从节点信息上报
+            (0xE8, 0x02, 0x04, 0x6D): self._parse_set_rf_params_data,                  # 设置无线参数
+            (0xE8, 0x02, 0x04, 0x72): self._parse_simple_bin2_data,                   # 配置踢出后不允许入网时间
+            (0xE8, 0x02, 0x04, 0x74): self._parse_set_run_params_data,                 # 配置运行参数
+            (0xE8, 0x02, 0x04, 0x90): self._parse_simple_bin1_data,                   # 设置宽带载波频段
+            (0xE8, 0x02, 0x04, 0x93): self._parse_set_whitelist_data,                 # 允许/禁止白名单功能
+            (0xE8, 0x02, 0x04, 0xF0): self._parse_reboot_node_data,                   # 重启节点
         }
         return parsers.get(di_combination)
 
@@ -1038,8 +1153,10 @@ class ProtocolFrameParser:
     def _parse_add_task_data(self, data: bytes) -> Dict[str, Any]:
         """解析添加任务数据内容（E8 02 02 01）
 
-        格式：任务ID(2B BIN) + 任务模式字(1B BS) + 超时时间(2B BIN) + 报文长度(1B) + 报文内容(LB)
-        任务模式字: D7=任务响应标识, D4~D3=保留, D2~D0=任务优先级
+        南网格式：任务ID(2B) + 任务模式字(1B) + 超时时间(2B) + 报文长度(1B) + 报文内容(LB)
+        PLUZ格式：任务ID(2B) + 任务模式字(1B) + 超时时间(2B) + 报文长度(2B) + 报文内容(LB)
+        任务模式字: D7=任务响应标识, D6=转发标识(PLUZ扩展), D5~D4=保留, D3=保留, D2~D0=任务优先级
+        转发标识=1时，报文内容第一位为业务代码：00H=透传, 01H=精准对时, 02H=DLMS报文
         """
         if len(data) < 6:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
@@ -1047,25 +1164,64 @@ class ProtocolFrameParser:
         task_id = int.from_bytes(data[0:2], 'little')
         mode = data[2]
         timeout = int.from_bytes(data[3:5], 'little')
-        msg_len = data[5]
 
         resp_flag = (mode >> 7) & 0x01
+        fwd_flag = (mode >> 6) & 0x01
         priority = mode & 0x07
+
+        # 自动检测报文长度字段：南网1字节 vs PLUZ 2字节
+        # 优先尝试PLUZ 2字节格式（如果数据足够且长度吻合）
+        use_2byte_len = False
+        if len(data) >= 7:
+            msg_len_2b = int.from_bytes(data[5:7], 'little')
+            if msg_len_2b + 7 == len(data):
+                # PLUZ 2字节长度格式吻合
+                use_2byte_len = True
+            elif data[5] + 6 != len(data):
+                # 1字节格式也不吻合，回退到2字节格式尝试
+                use_2byte_len = True
+
+        if use_2byte_len:
+            msg_len = int.from_bytes(data[5:7], 'little')
+            content_start = 7
+        else:
+            msg_len = data[5]
+            content_start = 6
+
+        mode_desc = {
+            "原始值": f"0x{mode:02X}",
+            "任务响应标识": "需要数据返回" if resp_flag == 1 else "不需要数据返回",
+            "任务优先级": f"{priority}（{'最高' if priority == 0 else '最低' if priority == 3 else str(priority)}）"
+        }
+        if fwd_flag:
+            mode_desc["转发标识"] = "需要转发给通信模块"
 
         result = {
             "任务ID": {"原始值": data[0:2].hex().upper(), "十进制": task_id},
-            "任务模式字": {
-                "原始值": f"0x{mode:02X}",
-                "任务响应标识": "需要数据返回" if resp_flag == 1 else "不需要数据返回",
-                "任务优先级": f"{priority}（{'最高' if priority == 0 else '最低' if priority == 3 else str(priority)}）"
-            },
+            "任务模式字": mode_desc,
             "超时时间": {"原始值": data[3:5].hex().upper(), "十进制": timeout, "单位": "秒"},
-            "报文长度": {"原始值": f"0x{msg_len:02X}", "十进制": msg_len}
+            "报文长度": {"原始值": data[5:content_start].hex().upper(), "十进制": msg_len}
         }
-        if len(data) >= 6 + msg_len:
-            result["报文内容"] = data[6:6+msg_len].hex().upper()
-        elif len(data) > 6:
-            result["报文内容"] = data[6:].hex().upper()
+
+        content_data = data[content_start:]
+        if len(data) >= content_start + msg_len:
+            content_data = data[content_start:content_start + msg_len]
+        elif len(data) > content_start:
+            content_data = data[content_start:]
+
+        if fwd_flag and len(content_data) > 0:
+            biz_code = content_data[0]
+            biz_code_map = {0x00: "透传报文", 0x01: "精准对时", 0x02: "DLMS报文"}
+            result["业务代码"] = {
+                "原始值": f"0x{biz_code:02X}",
+                "说明": biz_code_map.get(biz_code, "保留")
+            }
+            result["报文内容"] = content_data.hex().upper()
+            if len(content_data) > 1:
+                result["报文有效内容"] = content_data[1:].hex().upper()
+        else:
+            result["报文内容"] = content_data.hex().upper()
+
         return result
 
     def _parse_delete_task_data(self, data: bytes) -> Dict[str, Any]:
@@ -1438,18 +1594,31 @@ class ProtocolFrameParser:
         }
 
     def _parse_query_comm_delay_data(self, data: bytes) -> Dict[str, Any]:
-        """解析查询通信延时时长数据内容"""
+        """解析查询通信延时时长下层数据内容（E8 03 03 04）
+
+        南网格式：目的地址(6B)
+        PLUZ格式：目的地址(6B) + 报文长度(2B BIN 小端)
+        """
         if len(data) < 6:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
-        return {
+        result = {
             "目的地址": data[0:6].hex().upper()
         }
+        # PLUZ扩展：包含报文长度字段（2字节）
+        if len(data) >= 8:
+            msg_len = int.from_bytes(data[6:8], 'little')
+            result["报文长度"] = {"原始值": data[6:8].hex().upper(), "十进制": msg_len}
+        return result
 
     def _parse_return_comm_delay_data(self, data: bytes) -> Dict[str, Any]:
-        """解析返回查询通信延时时长数据内容"""
+        """解析返回查询通信延时时长数据内容（E8 04 03 04）
+
+        南网格式：目的地址(6B) + 延时时长(2B)
+        PLUZ格式：目的地址(6B) + 延时时长(2B) + 报文长度(2B)
+        """
         if len(data) < 8:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
-        return {
+        result = {
             "目的地址": data[0:6].hex().upper(),
             "通信延时时长": {
                 "原始值": data[6:8].hex().upper(),
@@ -1457,6 +1626,11 @@ class ProtocolFrameParser:
                 "单位": "毫秒"
             }
         }
+        # PLUZ扩展：包含报文长度字段
+        if len(data) >= 10:
+            msg_len = int.from_bytes(data[8:10], 'little')
+            result["报文长度"] = {"原始值": data[8:10].hex().upper(), "十进制": msg_len}
+        return result
 
     def _parse_query_slave_node_count_data(self, data: bytes) -> Dict[str, Any]:
         """解析查询/返回从节点数量数据内容（E8 00 03 05）
@@ -1750,26 +1924,44 @@ class ProtocolFrameParser:
     # ==================== AFN=05H 上报信息 ====================
 
     def _parse_report_task_data(self, data: bytes) -> Dict[str, Any]:
-        """解析上报任务数据数据内容"""
+        """解析上报任务数据内容（E8 05 05 01）
+
+        南网格式：任务ID(2B) + 报文长度(1B) + 报文内容
+        PLUZ格式：任务ID(2B) + 报文长度(2B) + 报文内容
+        自动检测报文长度字段字节数。
+        """
         if len(data) < 3:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
-            
-        # 任务 ID: 2 字节 (小端序)
+
         task_id = int.from_bytes(data[0:2], 'little')
-        # 报文长度 L: 1 字节
-        msg_len = data[2]
-            
+
+        # 自动检测报文长度字段：南网1字节 vs PLUZ 2字节
+        use_2byte_len = False
+        if len(data) >= 4:
+            msg_len_2b = int.from_bytes(data[2:4], 'little')
+            if msg_len_2b + 4 == len(data):
+                use_2byte_len = True
+            elif data[2] + 3 != len(data):
+                # 1字节格式也不吻合，尝试2字节
+                use_2byte_len = True
+
+        if use_2byte_len:
+            msg_len = int.from_bytes(data[2:4], 'little')
+            content_start = 4
+        else:
+            msg_len = data[2]
+            content_start = 3
+
         result = {
             "任务 ID": {"原始值": data[0:2].hex().upper(), "十进制": task_id},
-            "报文长度": {"原始值": f"0x{data[2]:02X}", "十进制": msg_len}
+            "报文长度": {"原始值": data[2:content_start].hex().upper(), "十进制": msg_len}
         }
-            
-        # 报文内容：L 字节
-        if len(data) >= 3 + msg_len:
-            result["报文内容"] = data[3:3+msg_len].hex().upper()
+
+        if len(data) >= content_start + msg_len:
+            result["报文内容"] = data[content_start:content_start + msg_len].hex().upper()
         else:
-            result["报文内容"] = data[3:].hex().upper()
-            
+            result["报文内容"] = data[content_start:].hex().upper()
+
         return result
 
     def _parse_report_event_data(self, data: bytes) -> Dict[str, Any]:
@@ -1865,6 +2057,26 @@ class ProtocolFrameParser:
         if len(data) > 9:
             result["剩余数据"] = data[9:].hex().upper()
             
+        return result
+
+    def _parse_report_meter_data(self, data: bytes) -> Dict[str, Any]:
+        """解析上报电能表数据内容（E8 05 05 06）
+
+        PLUZ扩展 - 格式：报文长度L(2B BIN 小端) + 报文内容(L字节)
+        与上报从节点事件(E8 05 05 02)格式相同，但语义为电能表原始报文。
+        """
+        if len(data) < 2:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+
+        msg_len = int.from_bytes(data[0:2], 'little')
+        result = {
+            "报文长度": {"原始值": data[0:2].hex().upper(), "十进制": msg_len}
+        }
+        if len(data) >= 2 + msg_len:
+            result["报文内容"] = data[2:2 + msg_len].hex().upper()
+        elif len(data) > 2:
+            result["报文内容"] = data[2:].hex().upper()
+            result["说明"] = "报文内容不完整"
         return result
 
     # ==================== AFN=06H 请求信息 ====================
@@ -2391,7 +2603,7 @@ class ProtocolFrameParser:
             phase = self._parse_phase_info(data[pos+6:pos+8])
             result["从节点列表"].append({
                 "序号": i + 1,
-                "从节点地址": addr,
+                "从节点地址": {"原始值": addr},
                 "相位信息": phase
             })
             pos += 8
@@ -2420,7 +2632,7 @@ class ProtocolFrameParser:
             phase = self._parse_phase_info(data[pos+6:pos+8])
             result["从节点列表"].append({
                 "序号": i + 1,
-                "从节点地址": addr,
+                "从节点地址": {"原始值": addr},
                 "相位信息": phase
             })
             pos += 8
@@ -2471,11 +2683,696 @@ class ProtocolFrameParser:
                 pass
             result["节点列表"].append({
                 "序号": i + 1,
-                "节点地址": addr,
+                "节点地址": {"原始值": addr},
                 "节点信息": vendor_info
             })
             pos += 15
         return result
+
+    # ==================== PLUZ扩展解析方法 ====================
+
+    def _parse_simple_bin1_data(self, data: bytes) -> Dict[str, Any]:
+        """解析1字节BIN数据的通用方法（用于最大网络级数、并发数等）"""
+        if len(data) < 1:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        return {
+            "数据值": {
+                "原始值": f"0x{data[0]:02X}",
+                "十进制": data[0]
+            }
+        }
+
+    def _parse_simple_bin2_data(self, data: bytes) -> Dict[str, Any]:
+        """解析2字节BIN数据的通用方法（用于最大网络规模、台区组网成功率等）"""
+        if len(data) < 2:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        value = int.from_bytes(data[0:2], 'little')
+        return {
+            "数据值": {
+                "原始值": data[0:2].hex().upper(),
+                "十进制": value
+            }
+        }
+
+    def _parse_return_slave_realtime_info_data(self, data: bytes) -> Dict[str, Any]:
+        """解析返回查询从节点实时信息（E8 04 03 61）- 上行
+
+        格式：从节点地址(6B) + 节点运行时间(4B) + 上行通信成功率(1B) + 下行通信成功率(1B)
+              + 邻居网络总数(1B) + [邻居网络标识号(1B) + CCO地址(6B) + HPLC通信质量(1B)] * n
+        """
+        if len(data) < 13:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        pos = 0
+        addr = data[pos:pos+6][::-1].hex().upper()
+        pos += 6
+        runtime = int.from_bytes(data[pos:pos+4], 'little')
+        pos += 4
+        up_rate = data[pos]
+        pos += 1
+        down_rate = data[pos]
+        pos += 1
+        neighbor_count = data[pos]
+        pos += 1
+
+        result = {
+            "从节点地址": {"原始值": data[0:6].hex().upper(), "解析值": addr},
+            "节点运行时间": {"原始值": data[6:10].hex().upper(), "十进制": runtime, "单位": "秒"},
+            "上行通信成功率": {"原始值": f"0x{up_rate:02X}", "十进制": up_rate},
+            "下行通信成功率": {"原始值": f"0x{down_rate:02X}", "十进制": down_rate},
+            "邻居网络总数": {"原始值": f"0x{neighbor_count:02X}", "十进制": neighbor_count},
+            "邻居网络列表": []
+        }
+        for i in range(neighbor_count):
+            if pos + 8 > len(data):
+                break
+            snid = data[pos]
+            cco_addr = data[pos+1:pos+7][::-1].hex().upper()
+            hplc_quality = data[pos+7]
+            result["邻居网络列表"].append({
+                "序号": i + 1,
+                "网络标识号": {"原始值": f"0x{snid:02X}", "十进制": snid},
+                "CCO地址": {"原始值": data[pos+1:pos+7].hex().upper(), "解析值": cco_addr},
+                "HPLC通信质量": {"原始值": f"0x{hplc_quality:02X}", "十进制": hplc_quality}
+            })
+            pos += 8
+        return result
+
+    def _parse_return_device_online_status_data(self, data: bytes) -> Dict[str, Any]:
+        """解析返回查询设备在线状态（E8 04 03 64）- 上行"""
+        if len(data) < 3:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        total = int.from_bytes(data[0:2], 'little')
+        node_count = data[2]
+        result = {
+            "入网节点总数量": {"原始值": data[0:2].hex().upper(), "十进制": total},
+            "本次应答的节点数量": {"原始值": f"0x{node_count:02X}", "十进制": node_count},
+            "节点列表": []
+        }
+        pos = 3
+        for i in range(node_count):
+            if pos + 6 > len(data):
+                break
+            result["节点列表"].append({
+                "序号": i,
+                "节点地址": {"原始值": data[pos:pos+6].hex().upper(), "解析值": data[pos:pos+6][::-1].hex().upper()}
+            })
+            pos += 6
+        return result
+
+    def _parse_return_network_topology_data(self, data: bytes) -> Dict[str, Any]:
+        """解析返回查询网络拓扑信息（E8 04 03 65）- 上行"""
+        if len(data) < 5:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        total = int.from_bytes(data[0:2], 'little')
+        start_seq = int.from_bytes(data[2:4], 'little')
+        node_count = data[4]
+        result = {
+            "节点总数量": {"原始值": data[0:2].hex().upper(), "十进制": total},
+            "节点起始序号": {"原始值": data[2:4].hex().upper(), "十进制": start_seq},
+            "本次应答的节点数量": {"原始值": f"0x{node_count:02X}", "十进制": node_count},
+            "节点列表": []
+        }
+        pos = 5
+        for i in range(node_count):
+            if pos + 19 > len(data):
+                break
+            addr = data[pos:pos+6][::-1].hex().upper()
+            # 拓扑信息: 节点标识(2B) + 代理节点标识(2B) + 入网时间(4B) + 代理变更次数(2B)
+            # + 离线次数(2B) + 节点信息(1B) = 13B
+            topo = data[pos+6:pos+19]
+            node_id = int.from_bytes(topo[0:2], 'little')
+            proxy_id = int.from_bytes(topo[2:4], 'little')
+            join_time = int.from_bytes(topo[4:8], 'little')
+            proxy_changes = int.from_bytes(topo[8:10], 'little')
+            offline_count = int.from_bytes(topo[10:12], 'little')
+            node_info = topo[12]
+            node_layer = node_info & 0x0F
+            node_role = (node_info >> 4) & 0x07
+            node_channel = (node_info >> 7) & 0x01
+            role_map = {0: "无效", 1: "末梢节点(STA)", 2: "代理节点(PCO)", 4: "主节点(CCO)"}
+            channel_map = {0: "载波", 1: "无线"}
+            result["节点列表"].append({
+                "序号": start_seq + i,
+                "节点地址": {"原始值": data[pos:pos+6].hex().upper(), "解析值": addr},
+                "代理节点标识": {"原始值": topo[2:4].hex().upper(), "十进制": proxy_id},
+                "入网时间": {"原始值": topo[4:8].hex().upper(), "十进制": join_time, "单位": "秒"},
+                "代理变更次数": {"原始值": topo[8:10].hex().upper(), "十进制": proxy_changes},
+                "离线次数": {"原始值": topo[10:12].hex().upper(), "十进制": offline_count},
+                "节点层级": node_layer,
+                "节点角色": role_map.get(node_role, f"未知({node_role})"),
+                "通信信道": channel_map.get(node_channel, f"未知({node_channel})")
+            })
+            pos += 19
+        return result
+
+    def _parse_return_slave_detail_info_data(self, data: bytes) -> Dict[str, Any]:
+        """解析返回查询指定从节点信息（E8 04 03 6E）- 上行"""
+        if len(data) < 7:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        addr = data[0:6][::-1].hex().upper()
+        result = {
+            "从节点地址": {"原始值": data[0:6].hex().upper(), "解析值": addr}
+        }
+        pos = 6
+        if pos < len(data):
+            result["相位"] = {"原始值": f"0x{data[pos]:02X}", "十进制": data[pos]}
+            pos += 1
+        if pos < len(data):
+            network_status = data[pos]
+            result["网络状态"] = {"原始值": f"0x{network_status:02X}", "说明": "入网" if network_status == 1 else "离网"}
+            pos += 1
+        if pos < len(data):
+            result["载波通道接收质量"] = {"原始值": f"0x{data[pos]:02X}", "十进制": data[pos]}
+            pos += 1
+        if pos < len(data):
+            result["无线通道接收质量"] = {"原始值": f"0x{data[pos]:02X}", "十进制": data[pos]}
+            pos += 1
+        if pos < len(data):
+            reboot_reason = data[pos]
+            reason_map = {0: "正常启动", 1: "断电重启", 2: "看门狗复位", 3: "程序异常复位"}
+            result["系统启动原因"] = {"原始值": f"0x{reboot_reason:02X}", "说明": reason_map.get(reboot_reason, f"未知({reboot_reason})")}
+            pos += 1
+        if pos + 6 <= len(data):
+            result["节点模块ID"] = {"原始值": data[pos:pos+6].hex().upper()}
+            pos += 6
+        if pos < len(data):
+            result["入网次数"] = {"原始值": f"0x{data[pos]:02X}", "十进制": data[pos]}
+            pos += 1
+        if pos < len(data):
+            result["代理变更次数"] = {"原始值": f"0x{data[pos]:02X}", "十进制": data[pos]}
+            pos += 1
+        return result
+
+    def _parse_return_master_node_runtime_info_data(self, data: bytes) -> Dict[str, Any]:
+        """解析返回查询主节点运行信息（E8 00 03 6F）- 上行"""
+        if len(data) < 4:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        pos = 0
+        result = {
+            "累计运行时间": {"原始值": data[0:4].hex().upper(), "十进制": int.from_bytes(data[0:4], 'little'), "单位": "秒"}
+        }
+        pos += 4
+        if pos + 11 <= len(data):
+            result["节点模块ID"] = {"原始值": data[pos:pos+11].hex().upper()}
+            pos += 11
+        if pos + 6 <= len(data):
+            result["发现站点数最大的站点"] = {"原始值": data[pos:pos+6][::-1].hex().upper()}
+            pos += 6
+        if pos + 2 <= len(data):
+            result["最大的发现站点数"] = {"原始值": data[pos:pos+2].hex().upper(), "十进制": int.from_bytes(data[pos:pos+2], 'little')}
+            pos += 2
+        if pos < len(data):
+            reboot_reason = data[pos]
+            reason_map = {0: "正常启动", 1: "断电重启", 2: "看门狗复位", 3: "程序异常复位"}
+            result["系统启动原因"] = {"原始值": f"0x{reboot_reason:02X}", "说明": reason_map.get(reboot_reason, f"未知({reboot_reason})")}
+            pos += 1
+        if pos < len(data):
+            result["本地邻居网络个数"] = {"原始值": f"0x{data[pos]:02X}", "十进制": data[pos]}
+            pos += 1
+        # 邻居网络列表
+        neighbor_list = []
+        while pos + 8 <= len(data):
+            snid = data[pos]
+            cco_addr = data[pos+1:pos+7][::-1].hex().upper()
+            hplc_quality = data[pos+7]
+            neighbor_list.append({
+                "网络标识号": {"原始值": f"0x{snid:02X}", "十进制": snid},
+                "CCO地址": {"原始值": data[pos+1:pos+7].hex().upper(), "解析值": cco_addr},
+                "HPLC通信质量": {"原始值": f"0x{hplc_quality:02X}", "十进制": hplc_quality}
+            })
+            pos += 8
+        if neighbor_list:
+            result["邻居网络列表"] = neighbor_list
+        return result
+
+    def _parse_return_node_selfcheck_data(self, data: bytes) -> Dict[str, Any]:
+        """解析返回查询节点自检结果（E8 04 03 70）- 上行"""
+        if len(data) < 7:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        addr = data[0:6][::-1].hex().upper()
+        pos = 6
+        result = {
+            "节点地址": {"原始值": data[0:6].hex().upper(), "解析值": addr}
+        }
+        if pos < len(data):
+            zero_cross = data[pos]
+            zero_map = {0: "未知", 1: "支持过零(单相)/ABC(三相)", 2: "三相相序错误"}
+            result["过零自检结果"] = {"原始值": f"0x{zero_cross:02X}", "说明": zero_map.get(zero_cross, f"保留({zero_cross})")}
+            pos += 1
+        if pos < len(data):
+            result["串口/485不通状态"] = {"原始值": f"0x{data[pos]:02X}", "说明": {0: "正常", 1: "历史上出现过不通", 2: "目前不通"}.get(data[pos], f"未知({data[pos]})")}
+            pos += 1
+        if pos < len(data):
+            offline_reason = data[pos]
+            reason_map = {0: "未知", 1: "组网序列号变化", 2: "收不到信标帧", 3: "通信成功率为0", 4: "层级超限",
+                          5: "收到离线指示", 0x80: "厂家自定义"}
+            result["上次离网原因"] = {"原始值": f"0x{offline_reason:02X}", "说明": reason_map.get(offline_reason, f"保留({offline_reason})")}
+            pos += 1
+        if pos < len(data):
+            reset_reason = data[pos]
+            reset_map = {0: "掉电复位", 1: "复位引脚复位", 2: "升级完成复位", 3: "CCO控制重启",
+                        0x80: "厂家自定义"}
+            result["复位原因"] = {"原始值": f"0x{reset_reason:02X}", "说明": reset_map.get(reset_reason, f"保留({reset_reason})")}
+        return result
+
+    def _parse_return_run_params_data(self, data: bytes) -> Dict[str, Any]:
+        """解析返回查询运行参数信息（E8 04 03 74）- 上行"""
+        if len(data) < 7:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        addr = data[0:6][::-1].hex().upper()
+        pos = 6
+        result = {
+            "节点地址": {"原始值": data[0:6].hex().upper(), "解析值": addr}
+        }
+        if pos >= len(data):
+            return result
+        param_count = data[pos]
+        result["运行参数总数"] = {"原始值": f"0x{param_count:02X}", "十进制": param_count}
+        pos += 1
+
+        RUN_PARAM_MAP = {
+            0x01: ("从节点RF发送功率", 1),
+            0x02: ("从节点PLC发送功率", 1),
+            0x03: ("异常离网锁定时间", 2),
+            0x04: ("RF通道控制开关", 1),
+        }
+        
+        # 参数值说明映射
+        PARAM_VALUE_DESC = {
+            0x01: {0: "自动", 1: "功率等级1", 2: "功率等级2", 3: "功率等级3", 4: "功率等级4"},
+            0x02: {0: "自动", 1: "功率等级1", 2: "功率等级2", 3: "功率等级3", 4: "功率等级4"},
+            0x03: None,  # 时间值，直接使用数值
+            0x04: {0: "关闭", 1: "开启"},
+        }
+        
+        for i in range(param_count):
+            if pos + 2 > len(data):
+                break
+            param_id = data[pos]
+            pos += 1
+            param_info = RUN_PARAM_MAP.get(param_id, (f"未知参数(0x{param_id:02X})", 1))
+            param_name, param_len = param_info
+            
+            # 检查是否有数据长度字段
+            if pos >= len(data):
+                break
+            actual_len = data[pos]
+            pos += 1
+            param_data = data[pos:pos+actual_len] if pos + actual_len <= len(data) else data[pos:]
+            
+            # 提前计算参数值，用于参数组的汇总信息
+            param_int_val = 0
+            if param_data:
+                param_int_val = int.from_bytes(param_data, 'little')
+            
+            # 创建参数组，包含参数ID、长度、值三个子字段
+            param_group = {}
+            
+            # 参数组的汇总信息（用于在表格中显示为一行）
+            param_group["原始值"] = param_data.hex(' ').upper() if param_data else "-"
+            param_group["解析值"] = f"{param_name}: {param_int_val}" if param_data else "-"
+            param_group["说明"] = f"参数ID=0x{param_id:02X}"
+            
+            # 参数ID
+            param_group["参数ID"] = {
+                "原始值": f"0x{param_id:02X}",
+                "解析值": f"{param_id:02X}",
+                "说明": param_name
+            }
+            
+            # 参数值长度
+            param_group["参数值长度"] = {
+                "原始值": f"0x{actual_len:02X}",
+                "解析值": str(actual_len),
+                "说明": f"长度{actual_len}字节"
+            }
+            
+            # 参数值
+            if param_data:
+                # 尝试解析数值（小端序）
+                param_int_val = int.from_bytes(param_data, 'little')
+                param_hex = param_data.hex(' ').upper()
+                
+                # 获取参数值说明
+                value_desc = None
+                if param_id in PARAM_VALUE_DESC and PARAM_VALUE_DESC[param_id]:
+                    value_desc = PARAM_VALUE_DESC[param_id].get(param_int_val, f"未知值({param_int_val})")
+                elif param_id == 0x03:
+                    value_desc = f"默认30分钟" if param_int_val == 30 else f"{param_int_val}分钟"
+                
+                desc = value_desc if value_desc else f"{param_int_val}"
+                
+                param_group["参数值"] = {
+                    "原始值": param_hex,
+                    "解析值": str(param_int_val),
+                    "说明": desc
+                }
+            else:
+                param_group["参数值"] = {
+                    "原始值": "-",
+                    "解析值": "-",
+                    "说明": "无数据"
+                }
+            
+            # 将参数组添加到结果中（使用带序号的键名）
+            param_key = f"参数{i+1}"
+            result[param_key] = param_group
+            
+            pos += actual_len
+        return result
+
+    def _parse_set_run_params_data(self, data: bytes) -> Dict[str, Any]:
+        """解析配置运行参数（E8 02 04 74）"""
+        if len(data) < 7:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        addr = data[0:6][::-1].hex().upper()
+        pos = 6
+        result = {
+            "站点MAC地址": {"原始值": data[0:6].hex().upper(), "解析值": addr}
+        }
+        if pos >= len(data):
+            return result
+        param_count = data[pos]
+        result["配置参数总数"] = {"原始值": f"0x{param_count:02X}", "十进制": param_count}
+        pos += 1
+
+        RUN_PARAM_MAP = {
+            0x01: ("从节点RF发送功率", 1),
+            0x02: ("从节点PLC发送功率", 1),
+            0x03: ("异常离网锁定时间", 2),
+            0x04: ("RF通道控制开关", 1),
+        }
+        
+        # 参数值说明映射
+        PARAM_VALUE_DESC = {
+            0x01: {0: "自动", 1: "功率等级1", 2: "功率等级2", 3: "功率等级3", 4: "功率等级4"},
+            0x02: {0: "自动", 1: "功率等级1", 2: "功率等级2", 3: "功率等级3", 4: "功率等级4"},
+            0x03: None,  # 时间值，直接使用数值
+            0x04: {0: "关闭", 1: "开启"},
+        }
+        
+        for i in range(param_count):
+            if pos + 2 > len(data):
+                break
+            param_id = data[pos]
+            pos += 1
+            actual_len = data[pos]
+            pos += 1
+            param_info = RUN_PARAM_MAP.get(param_id, (f"未知参数(0x{param_id:02X})", 1))
+            param_name, param_len = param_info
+            param_data = data[pos:pos+actual_len] if pos + actual_len <= len(data) else data[pos:]
+            
+            # 提前计算参数值，用于参数组的汇总信息
+            param_int_val = 0
+            if param_data:
+                param_int_val = int.from_bytes(param_data, 'little')
+            
+            # 创建参数组，包含参数ID、长度、值三个子字段
+            param_group = {}
+            
+            # 参数组的汇总信息（用于在表格中显示为一行）
+            param_group["原始值"] = param_data.hex(' ').upper() if param_data else "-"
+            param_group["解析值"] = f"{param_name}: {param_int_val}" if param_data else "-"
+            param_group["说明"] = f"参数ID=0x{param_id:02X}"
+            
+            # 参数ID
+            param_group["参数ID"] = {
+                "原始值": f"0x{param_id:02X}",
+                "解析值": f"{param_id:02X}",
+                "说明": param_name
+            }
+            
+            # 参数值长度
+            param_group["参数值长度"] = {
+                "原始值": f"0x{actual_len:02X}",
+                "解析值": str(actual_len),
+                "说明": f"长度{actual_len}字节"
+            }
+            
+            # 参数值
+            if param_data:
+                # 尝试解析数值（小端序）
+                param_hex = param_data.hex(' ').upper()
+                
+                # 获取参数值说明
+                value_desc = None
+                if param_id in PARAM_VALUE_DESC and PARAM_VALUE_DESC[param_id]:
+                    value_desc = PARAM_VALUE_DESC[param_id].get(param_int_val, f"未知值({param_int_val})")
+                elif param_id == 0x03:
+                    value_desc = f"默认30分钟" if param_int_val == 30 else f"{param_int_val}分钟"
+                
+                desc = value_desc if value_desc else f"{param_int_val}"
+                
+                param_group["参数值"] = {
+                    "原始值": param_hex,
+                    "解析值": str(param_int_val),
+                    "说明": desc
+                }
+            else:
+                param_group["参数值"] = {
+                    "原始值": "-",
+                    "解析值": "-",
+                    "说明": "无数据"
+                }
+            
+            # 将参数组添加到结果中（使用带序号的键名）
+            param_key = f"参数{i+1}"
+            result[param_key] = param_group
+            
+            pos += actual_len
+        return result
+
+    # ==================== PLUZ扩展 - 下行查询参数解析器 ====================
+
+    def _parse_query_slave_realtime_info_data(self, data: bytes) -> Dict[str, Any]:
+        """解析查询从节点实时信息下行数据（E8 03 03 61）
+        格式：从节点地址(6B BIN)
+        """
+        if len(data) < 6:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        addr = data[0:6][::-1].hex().upper()
+        return {
+            "从节点地址": {"原始值": data[0:6].hex().upper(), "解析值": addr}
+        }
+
+    def _parse_query_device_online_status_data(self, data: bytes) -> Dict[str, Any]:
+        """解析查询设备在线状态下行数据（E8 03 03 64）
+        格式：节点地址(6B BIN) + 请求在线状态类型(1B BIN)
+        """
+        if len(data) < 7:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        addr = data[0:6][::-1].hex().upper()
+        req_type = data[6]
+        type_map = {0: "所有节点", 1: "在线节点", 2: "离线节点"}
+        return {
+            "节点地址": {"原始值": data[0:6].hex().upper(), "解析值": addr},
+            "请求在线状态类型": {"原始值": f"0x{req_type:02X}", "十进制": req_type, "说明": type_map.get(req_type, f"保留({req_type})")}
+        }
+
+    def _parse_query_network_topology_data(self, data: bytes) -> Dict[str, Any]:
+        """解析查询网络拓扑信息下行数据（E8 03 03 65）
+        格式：节点地址(6B BIN)
+        """
+        if len(data) < 6:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        addr = data[0:6][::-1].hex().upper()
+        return {
+            "节点地址": {"原始值": data[0:6].hex().upper(), "解析值": addr}
+        }
+
+    def _parse_query_slave_detail_info_data(self, data: bytes) -> Dict[str, Any]:
+        """解析查询指定从节点信息下行数据（E8 03 03 6E）
+        格式：从节点地址(6B BIN)
+        """
+        if len(data) < 6:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        addr = data[0:6][::-1].hex().upper()
+        return {
+            "从节点地址": {"原始值": data[0:6].hex().upper(), "解析值": addr}
+        }
+
+    def _parse_query_node_selfcheck_data(self, data: bytes) -> Dict[str, Any]:
+        """解析查询节点自检数据下行数据（E8 03 03 70）
+        格式：节点地址(6B BIN)
+        """
+        if len(data) < 6:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        addr = data[0:6][::-1].hex().upper()
+        return {
+            "节点地址": {"原始值": data[0:6].hex().upper(), "解析值": addr}
+        }
+
+    def _parse_query_run_params_data(self, data: bytes) -> Dict[str, Any]:
+        """解析查询运行参数信息下行数据（E8 03 03 74）
+        格式：节点地址(6B BIN) + 运行参数总数(1B) + 运行参数ID列表
+        """
+        if len(data) < 7:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        addr = data[0:6][::-1].hex().upper()
+        param_count = data[6]
+        result = {
+            "节点地址": {"原始值": data[0:6].hex().upper(), "解析值": addr},
+            "运行参数总数": {"原始值": f"0x{param_count:02X}", "十进制": param_count}
+        }
+        param_ids = []
+        RUN_PARAM_MAP = {
+            0x01: "从节点RF发送功率",
+            0x02: "从节点PLC发送功率",
+            0x03: "异常离网锁定时间",
+            0x04: "RF通道控制开关",
+        }
+        pos = 6
+        for i in range(param_count):
+            if pos >= len(data):
+                break
+            pos += 1
+            pid = data[pos]
+            param_name = RUN_PARAM_MAP.get(pid, f"未知参数(0x{pid:02X})")
+            param_ids.append({"参数ID": f"0x{pid:02X}", "原始值": f"0x{pid:02X}", "说明": param_name})
+            pos += 1
+            plen = data[pos]
+            param_ids.append({"参数长度": f"0x{plen:02X}", "原始值": f"0x{plen:02X}", "说明": f"{plen}字节"})
+            pos += 1
+            pvalue = data[pos:(pos+plen)]
+            pvalue_int = int().from_bytes(pvalue,'little')
+            param_ids.append({"参数值": f"0x{pvalue:02X}", "原始值": f"0x{pvalue_int}", "说明": f"{pvalue_int}分钟"})
+        if param_ids:
+            result["运行参数ID列表"] = param_ids
+            print(result["运行参数ID列表"])
+        return result
+
+    def _parse_query_device_type_data(self, data: bytes) -> Dict[str, Any]:
+        """解析查询设备类型下行数据（E8 03 03 96）
+        格式：节点起始序号(2B BIN 小端) + 节点数量(1B BIN)
+        """
+        if len(data) < 3:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        start_seq = int.from_bytes(data[0:2], 'little')
+        node_count = data[2]
+        return {
+            "节点起始序号": {"原始值": data[0:2].hex().upper(), "十进制": start_seq},
+            "节点数量": {"原始值": f"0x{node_count:02X}", "十进制": node_count}
+        }
+
+    def _parse_query_node_channel_info_data(self, data: bytes) -> Dict[str, Any]:
+        """解析查询节点信道信息下行数据（E8 03 03 98）
+        格式：节点地址(6B BIN) + 周边节点起始序号(2B BIN 小端) + 周边节点数量(1B BIN)
+        """
+        if len(data) < 9:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        addr = data[0:6][::-1].hex().upper()
+        neighbor_start = int.from_bytes(data[6:8], 'little')
+        neighbor_count = data[8]
+        return {
+            "节点地址": {"原始值": data[0:6].hex().upper(), "解析值": addr},
+            "周边节点起始序号": {"原始值": data[6:8].hex().upper(), "十进制": neighbor_start},
+            "周边节点数量": {"原始值": f"0x{neighbor_count:02X}", "十进制": neighbor_count}
+        }
+
+    # ==================== PLUZ扩展 - 其他补充方法 ====================
+
+    def _parse_query_rf_params_data(self, data: bytes) -> Dict[str, Any]:
+        """解析查询无线参数下行数据（E8 00 03 6D）
+        格式：空（无数据内容，DI2=0x00表示上下行均用，下行无数据内容）
+        """
+        if len(data) < 2:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        result = {
+            "OPTION": {"原始值": f"0x{data[0]:02X}", "十进制": data[0],
+                       "说明": {0: "OPTION1", 1: "OPTION2", 2: "OPTION3"}.get(data[0], f"保留({data[0]})")},
+            "CHANNEL": {"原始值": f"0x{data[1]:02X}", "十进制": data[1]}
+        }
+        return result
+
+    def _parse_set_rf_params_data(self, data: bytes) -> Dict[str, Any]:
+        """解析设置无线参数（E8 02 04 6D）"""
+        return self._parse_query_rf_params_data(data)
+
+    def _parse_return_device_type_data(self, data: bytes) -> Dict[str, Any]:
+        """解析返回查询设备类型（E8 04 03 96）- 上行"""
+        if len(data) < 5:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        total = int.from_bytes(data[0:2], 'little')
+        start_seq = int.from_bytes(data[2:4], 'little')
+        node_count = data[4]
+        result = {
+            "节点总数量": {"原始值": data[0:2].hex().upper(), "十进制": total},
+            "节点起始序号": {"原始值": data[2:4].hex().upper(), "十进制": start_seq},
+            "本次应答的节点数量": {"原始值": f"0x{node_count:02X}", "十进制": node_count},
+            "节点列表": []
+        }
+        dev_type_map = {0x01: "抄控器", 0x02: "集中器通信模块", 0x03: "单相电表通信模块", 0x04: "中继器", 0x07: "三相电表通信模块"}
+        pos = 5
+        for i in range(node_count):
+            if pos + 11 > len(data):
+                break
+            addr = data[pos:pos+6][::-1].hex().upper()
+            dev_type = data[pos+6]
+            offline_time = int.from_bytes(data[pos+7:pos+11], 'little')
+            result["节点列表"].append({
+                "序号": start_seq + i,
+                "节点地址": {"原始值": data[pos:pos+6].hex().upper(), "解析值": addr},
+                "设备类型": {"原始值": f"0x{dev_type:02X}", "说明": dev_type_map.get(dev_type, f"保留({dev_type})")},
+                "离线时长": {"原始值": data[pos+7:pos+11].hex().upper(), "十进制": offline_time, "单位": "秒"}
+            })
+            pos += 11
+        return result
+
+    def _parse_return_node_channel_info_data(self, data: bytes) -> Dict[str, Any]:
+        """解析返回查询节点信道信息（E8 04 03 98）- 上行"""
+        if len(data) < 13:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        addr = data[0:6][::-1].hex().upper()
+        tei = int.from_bytes(data[6:8], 'little')
+        proxy_tei = int.from_bytes(data[8:10], 'little')
+        total_neighbors = int.from_bytes(data[10:12], 'little')
+        node_count = data[12]
+        result = {
+            "本节点地址": {"原始值": data[0:6].hex().upper(), "解析值": addr},
+            "本节点标识(TEI)": {"原始值": data[6:8].hex().upper(), "十进制": tei},
+            "代理节点标识(TEI)": {"原始值": data[8:10].hex().upper(), "十进制": proxy_tei},
+            "周边节点总数": {"原始值": data[10:12].hex().upper(), "十进制": total_neighbors},
+            "本次应答的周边节点数量": {"原始值": f"0x{node_count:02X}", "十进制": node_count},
+            "周边节点列表": []
+        }
+        pos = 13
+        for i in range(node_count):
+            if pos + 3 > len(data):
+                break
+            neighbor_tei = int.from_bytes(data[pos:pos+2], 'little')
+            neighbor_lqi = data[pos+2]
+            result["周边节点列表"].append({
+                "序号": i,
+                "邻居节点标识(TEI)": {"原始值": data[pos:pos+2].hex().upper(), "十进制": neighbor_tei},
+                "链路质量指示(LQI)": {"原始值": f"0x{neighbor_lqi:02X}", "十进制": neighbor_lqi}
+            })
+            pos += 3
+        return result
+
+    def _parse_set_whitelist_data(self, data: bytes) -> Dict[str, Any]:
+        """解析允许/禁止白名单功能（E8 02 04 93）
+        格式：站点MAC地址(6B BIN) + 允许/禁止标识(1B BIN)
+        """
+        if len(data) < 7:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        addr = data[0:6][::-1].hex().upper()
+        enable = data[6]
+        enable_map = {0: "禁止白名单", 1: "允许白名单"}
+        return {
+            "站点MAC地址": {"原始值": data[0:6].hex().upper(), "解析值": addr},
+            "白名单使能": {"原始值": f"0x{enable:02X}", "十进制": enable, "说明": enable_map.get(enable, f"保留({enable})")}
+        }
+
+    def _parse_reboot_node_data(self, data: bytes) -> Dict[str, Any]:
+        """解析重启节点（E8 02 04 F0）
+        格式：节点地址(6B BIN)
+        """
+        if len(data) < 6:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        addr = data[0:6][::-1].hex().upper()
+        return {
+            "节点地址": {"原始值": data[0:6].hex().upper(), "解析值": addr}
+        }
 
     def _calculate_checksum(self, data: bytes) -> int:
         """计算校验和"""

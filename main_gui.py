@@ -216,19 +216,19 @@ class MainWindow(QMainWindow):
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(True)
         # 设置默认列宽
-        self.result_table_widget.setColumnWidth(0, 160)
-        self.result_table_widget.setColumnWidth(1, 120)
-        self.result_table_widget.setColumnWidth(2, 180)
+        self.result_table_widget.setColumnWidth(0, 130)
+        self.result_table_widget.setColumnWidth(1, 100)
+        self.result_table_widget.setColumnWidth(2, 100)
         self.result_table_widget.setEditTriggers(QTableWidget.NoEditTriggers)
         self.result_table_widget.setSelectionBehavior(QTableWidget.SelectRows)
         self.result_table_widget.setAlternatingRowColors(True)
-
-        # 表格字体缩小，长帧时显示更多信息
+        self.result_table_widget.verticalHeader().hide()
+        self.result_table_widget.verticalHeader().setDefaultSectionSize(13)
         table_font = QFont()
-        table_font.setPointSize(8)
+        table_font.setPointSize(7)
         self.result_table_widget.setFont(table_font)
-        # 行高更加紧凑
-        self.result_table_widget.verticalHeader().setDefaultSectionSize(20)
+        # 行高更紧凑
+        self.result_table_widget.verticalHeader().setDefaultSectionSize(10)
         self.result_table_widget.verticalHeader().hide()
 
         # 选中行时高亮报文字节
@@ -920,14 +920,7 @@ class MainWindow(QMainWindow):
         if self.current_protocol == 0:
             # 南网协议：DI查询
             self.tab_widget.setTabText(lookup_tab_index, "DI查询")
-            # 使用原有的DI查询页面创建方法
-            if hasattr(self, '_create_di_lookup_content'):
-                self._create_di_lookup_content(self.protocol_lookup_tab_layout)
-            else:
-                # 显示提示信息
-                label = QLabel("DI查询功能加载中...")
-                label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.protocol_lookup_tab_layout.addWidget(label)
+            self._create_di_lookup_content(self.protocol_lookup_tab_layout)
 
         elif self.current_protocol == 1:
             # 万胜PLC RF协议：命令字查询
@@ -944,408 +937,15 @@ class MainWindow(QMainWindow):
             self.tab_widget.setTabText(lookup_tab_index, "DI查询")
             self._create_dlt645_di_lookup_content(self.protocol_lookup_tab_layout)
 
-    def _create_dlt645_di_lookup_content(self, layout):
-        """创建DLT645-2007 DI查询页面"""
-        # 初始化DI查询器
-        self.dlt645_di_lookup = get_dlt645_di_lookup()
-
-        # 搜索栏
-        search_layout = QHBoxLayout()
-        search_label = QLabel("搜索：")
-        search_label.setFixedWidth(45)
-        self.dlt645_di_search_input = QLineEdit()
-        self.dlt645_di_search_input.setPlaceholderText("输入DI编码(如00010000)或中文关键词搜索...")
-        self.dlt645_di_search_input.textChanged.connect(self._filter_dlt645_di_table)
-        search_layout.addWidget(search_label)
-        search_layout.addWidget(self.dlt645_di_search_input)
-        layout.addLayout(search_layout)
-
-        # 统计标签
-        self.dlt645_di_stats_label = QLabel()
-        self.dlt645_di_stats_label.setStyleSheet("color: #666; font-size: 12px;")
-        layout.addWidget(self.dlt645_di_stats_label)
-
-        # 表格
-        self.dlt645_di_table = QTableWidget()
-        self.dlt645_di_table.setColumnCount(5)
-        self.dlt645_di_table.setHorizontalHeaderLabels(["DI编码", "名称", "单位", "数据类型", "长度"])
-        header = self.dlt645_di_table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setStretchLastSection(True)
-        self.dlt645_di_table.setColumnWidth(0, 100)
-        self.dlt645_di_table.setColumnWidth(1, 250)
-        self.dlt645_di_table.setColumnWidth(2, 80)
-        self.dlt645_di_table.setColumnWidth(3, 120)
-        self.dlt645_di_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.dlt645_di_table.setAlternatingRowColors(True)
-        self.dlt645_di_table.verticalHeader().hide()
-        table_font = QFont()
-        table_font.setPointSize(8)
-        self.dlt645_di_table.setFont(table_font)
-        layout.addWidget(self.dlt645_di_table)
-
-        # 加载数据
-        self._load_dlt645_di_table()
-
-    def _load_dlt645_di_table(self):
-        """加载DLT645 DI数据到表格"""
-        data = self.dlt645_di_lookup.data
-        self.dlt645_di_table.setRowCount(len(data))
-
-        for row, (di_code, di_name, unit, data_type, desc, is_custom) in enumerate(data):
-            self.dlt645_di_table.setItem(row, 0, QTableWidgetItem(di_code))
-            self.dlt645_di_table.setItem(row, 1, QTableWidgetItem(di_name))
-            self.dlt645_di_table.setItem(row, 2, QTableWidgetItem(unit))
-            self.dlt645_di_table.setItem(row, 3, QTableWidgetItem(data_type))
-            # 从 desc 中提取长度
-            length = ""
-            if "长度:" in desc:
-                length = desc.split("长度:")[1].split(",")[0].strip()
-            self.dlt645_di_table.setItem(row, 4, QTableWidgetItem(length))
-
-        self.dlt645_di_stats_label.setText(f"共 {len(data)} 条记录")
-
-    def _filter_dlt645_di_table(self, text: str):
-        """根据搜索文本过滤DLT645 DI表格"""
-        keyword = text.strip().upper()
-
-        if not keyword:
-            self._load_dlt645_di_table()
-            return
-
-        results = self.dlt645_di_lookup.search(keyword)
-        self.dlt645_di_table.setRowCount(len(results))
-
-        for row, (di_code, di_name, unit, data_type, desc, is_custom) in enumerate(results):
-            self.dlt645_di_table.setItem(row, 0, QTableWidgetItem(di_code))
-            self.dlt645_di_table.setItem(row, 1, QTableWidgetItem(di_name))
-            self.dlt645_di_table.setItem(row, 2, QTableWidgetItem(unit))
-            self.dlt645_di_table.setItem(row, 3, QTableWidgetItem(data_type))
-            length = ""
-            if "长度:" in desc:
-                length = desc.split("长度:")[1].split(",")[0].strip()
-            self.dlt645_di_table.setItem(row, 4, QTableWidgetItem(length))
-
-        self.dlt645_di_stats_label.setText(f"匹配 {len(results)} 条记录")
-
-        # 表格
-        self.dlt645_di_table = QTableWidget()
-        self.dlt645_di_table.setColumnCount(5)
-        self.dlt645_di_table.setHorizontalHeaderLabels(["DI编码", "中文名称", "数据类型", "单位", "说明"])
-        header = self.dlt645_di_table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setStretchLastSection(True)
-        self.dlt645_di_table.setColumnWidth(0, 100)
-        self.dlt645_di_table.setColumnWidth(1, 200)
-        self.dlt645_di_table.setColumnWidth(2, 100)
-        self.dlt645_di_table.setColumnWidth(3, 80)
-        self.dlt645_di_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.dlt645_di_table.setAlternatingRowColors(True)
-        self.dlt645_di_table.verticalHeader().hide()
-        table_font = QFont()
-        table_font.setPointSize(8)
-        self.dlt645_di_table.setFont(table_font)
-
-        layout.addWidget(self.dlt645_di_table)
-
-        # 按钮栏
-        btn_layout = QHBoxLayout()
-        add_di_btn = QPushButton("添加自定义DI")
-        add_di_btn.clicked.connect(self._add_dlt645_custom_di)
-        btn_layout.addWidget(add_di_btn)
-
-        del_di_btn = QPushButton("删除选中自定义DI")
-        del_di_btn.clicked.connect(self._del_dlt645_custom_di)
-        btn_layout.addWidget(del_di_btn)
-
-        btn_layout.addStretch()
-        layout.addLayout(btn_layout)
-
-        # 加载数据
-        self._load_dlt645_di_map_data()
-
-    def _load_dlt645_di_map_data(self):
-        """加载DLT645 DI数据到表格"""
-        data = self.dlt645_di_lookup.data
-        self.dlt645_di_table.setRowCount(len(data))
-
-        for row, (di_code, di_name, unit, data_type, desc, is_custom) in enumerate(data):
-            # DI编码
-            di_item = QTableWidgetItem(di_code)
-            if is_custom:
-                di_item.setForeground(QColor("#1976D2"))
-            self.dlt645_di_table.setItem(row, 0, di_item)
-
-            # 中文名称
-            name_item = QTableWidgetItem(("★ " if is_custom else "") + di_name)
-            if is_custom:
-                name_item.setForeground(QColor("#1976D2"))
-            self.dlt645_di_table.setItem(row, 1, name_item)
-
-            # 数据类型
-            self.dlt645_di_table.setItem(row, 2, QTableWidgetItem(data_type))
-
-            # 单位
-            self.dlt645_di_table.setItem(row, 3, QTableWidgetItem(unit))
-
-            # 说明
-            self.dlt645_di_table.setItem(row, 4, QTableWidgetItem(desc))
-
-        # 统计
-        custom_count = sum(1 for _, _, _, _, _, is_custom in data if is_custom)
-        self.dlt645_di_stats_label.setText(f"共 {len(data)} 条记录（其中自定义 {custom_count} 条）")
-
-    def _filter_dlt645_di_table(self, text: str):
-        """过滤DLT645 DI表格"""
-        keyword = text.strip().upper()
-
-        if not keyword:
-            # 显示全部
-            for row in range(self.dlt645_di_table.rowCount()):
-                self.dlt645_di_table.setRowHidden(row, False)
-            self._update_dlt645_di_stats()
-            return
-
-        match_count = 0
-        for row in range(self.dlt645_di_table.rowCount()):
-            # 收集该行的搜索文本
-            di_code = self.dlt645_di_table.item(row, 0).text()
-            di_name = self.dlt645_di_table.item(row, 1).text()
-            data_type = self.dlt645_di_table.item(row, 2).text()
-            unit = self.dlt645_di_table.item(row, 3).text()
-
-            search_text = f"{di_code} {di_name} {data_type} {unit}".upper()
-
-            if keyword in search_text:
-                self.dlt645_di_table.setRowHidden(row, False)
-                match_count += 1
-            else:
-                self.dlt645_di_table.setRowHidden(row, True)
-
-        self.dlt645_di_stats_label.setText(f"匹配 {match_count} / {self.dlt645_di_table.rowCount()} 条记录")
-
-    def _update_dlt645_di_stats(self):
-        """更新统计标签"""
-        custom_count = 0
-        for row in range(self.dlt645_di_table.rowCount()):
-            if not self.dlt645_di_table.isRowHidden(row):
-                name_item = self.dlt645_di_table.item(row, 1)
-                if name_item and name_item.text().startswith("★"):
-                    custom_count += 1
-
-        visible_count = sum(1 for row in range(self.dlt645_di_table.rowCount())
-                           if not self.dlt645_di_table.isRowHidden(row))
-        self.dlt645_di_stats_label.setText(f"显示 {visible_count} 条记录（其中自定义 {custom_count} 条）")
-
-    def _add_dlt645_custom_di(self):
-        """添加自定义DI对话框"""
-        dialog = QDialog(self)
-        dialog.setWindowTitle("添加自定义DI")
-        dialog.setMinimumWidth(400)
-        layout = QVBoxLayout(dialog)
-
-        # DI编码
-        h1 = QHBoxLayout()
-        h1.addWidget(QLabel("DI编码:"))
-        di_code_input = QLineEdit()
-        di_code_input.setPlaceholderText("如 00010000")
-        di_code_input.setMaxLength(8)
-        h1.addWidget(di_code_input)
-        layout.addLayout(h1)
-
-        # 中文名称
-        h2 = QHBoxLayout()
-        h2.addWidget(QLabel("中文名称:"))
-        name_input = QLineEdit()
-        name_input.setPlaceholderText("如：当前正向有功总电能")
-        h2.addWidget(name_input)
-        layout.addLayout(h2)
-
-        # 数据类型
-        h3 = QHBoxLayout()
-        h3.addWidget(QLabel("数据类型:"))
-        type_input = QLineEdit()
-        type_input.setPlaceholderText("如：XXXXXX.XX")
-        h3.addWidget(type_input)
-        layout.addLayout(h3)
-
-        # 单位
-        h4 = QHBoxLayout()
-        h4.addWidget(QLabel("单位:"))
-        unit_input = QLineEdit()
-        unit_input.setPlaceholderText("如：kWh")
-        h4.addWidget(unit_input)
-        layout.addLayout(h4)
-
-        # 按钮
-        btn_layout = QHBoxLayout()
-        ok_btn = QPushButton("添加")
-        cancel_btn = QPushButton("取消")
-        btn_layout.addStretch()
-        btn_layout.addWidget(ok_btn)
-        btn_layout.addWidget(cancel_btn)
-        layout.addLayout(btn_layout)
-
-        ok_btn.clicked.connect(dialog.accept)
-        cancel_btn.clicked.connect(dialog.reject)
-
-        if dialog.exec() != QDialog.Accepted:
-            return
-
-        # 验证输入
-        di_code = di_code_input.text().strip().upper()
-        if len(di_code) != 8:
-            QMessageBox.warning(self, "错误", "DI编码必须是8位十六进制！")
-            return
-        try:
-            int(di_code, 16)
-        except ValueError:
-            QMessageBox.warning(self, "错误", "DI编码必须是有效的十六进制！")
-            return
-
-        name = name_input.text().strip()
-        if not name:
-            QMessageBox.warning(self, "错误", "请填写中文名称！")
-            return
-
-        data_type = type_input.text().strip()
-        unit = unit_input.text().strip()
-
-        # 检查是否已存在
-        if self.dlt645_di_lookup.get_di_info(di_code):
-            reply = QMessageBox.question(
-                self, "确认覆盖",
-                f"DI编码 {di_code} 已存在，是否覆盖？",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
-            )
-            if reply != QMessageBox.Yes:
-                return
-
-        # 添加
-        if self.dlt645_di_lookup.add_custom_di(di_code, name, unit, data_type):
-            self._load_dlt645_di_map_data()
-            QMessageBox.information(self, "成功", f"已添加自定义DI: {di_code} - {name}")
-        else:
-            QMessageBox.warning(self, "错误", "添加自定义DI失败！")
-
-    def _del_dlt645_custom_di(self):
-        """删除自定义DI"""
-        row = self.dlt645_di_table.currentRow()
-        if row < 0:
-            QMessageBox.warning(self, "提示", "请先选中一条记录！")
-            return
-
-        di_code = self.dlt645_di_table.item(row, 0).text()
-        name = self.dlt645_di_table.item(row, 1).text()
-
-        # 检查是否是自定义（通过名称前缀判断）
-        if not name.startswith("★"):
-            QMessageBox.warning(self, "提示", "只能删除自定义DI（带★标记的记录）！")
-            return
-
-        reply = QMessageBox.question(
-            self, "确认删除",
-            f"确定删除自定义DI：{di_code}（{name[2:]}）？",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
-        )
-        if reply != QMessageBox.Yes:
-            return
-
-        if self.dlt645_di_lookup.delete_custom_di(di_code):
-            self._load_dlt645_di_map_data()
-            QMessageBox.information(self, "成功", "已删除自定义DI")
-        else:
-            QMessageBox.warning(self, "错误", "删除自定义DI失败！")
-
-    @staticmethod
-    def _clear_layout(layout):
-        """递归清除layout中的所有子layout和widget"""
-        while layout.count():
-            child = layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
-            elif child.layout():
-                MainWindow._clear_layout(child.layout())
-
-    def _setup_menu_bar(self):
-        """创建菜单栏"""
-        menubar = self.menuBar()
-
-        help_menu = menubar.addMenu("帮助(&H)")
-
-        about_action = help_menu.addAction("关于(&A)")
-        about_action.triggered.connect(self._show_about_dialog)
-
-    def _show_about_dialog(self):
-        """显示"关于"对话框"""
-        dialog = QDialog(self)
-        dialog.setWindowTitle("关于")
-        dialog.setMinimumSize(520, 480)
-        dialog.setWindowFlags(dialog.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
-
-        layout = QVBoxLayout(dialog)
-        layout.setSpacing(12)
-
-        title_label = QLabel(f"协议解析工具")
-        title_label.setFont(QFont("Microsoft YaHei", 16, QFont.Bold))
-        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title_label)
-
-        version_label = QLabel(f"版本 {APP_VERSION}")
-        version_label.setFont(QFont("Microsoft YaHei", 11))
-        version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        version_label.setStyleSheet("color: #666;")
-        layout.addWidget(version_label)
-
-        desc_label = QLabel("支持南网协议 / PLC RF / HDLC/DLMS 多协议报文解析")
-        desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        desc_label.setWordWrap(True)
-        layout.addWidget(desc_label)
-
-        changelog_label = QLabel("版本更新记录")
-        changelog_label.setFont(QFont("Microsoft YaHei", 10, QFont.Bold))
-        layout.addWidget(changelog_label)
-
-        changelog_text = QTextEdit()
-        changelog_text.setReadOnly(True)
-        changelog_text.setFont(QFont("Microsoft YaHei", 9))
-
-        html_parts = []
-        for ver, date, items in CHANGELOG:
-            html_parts.append(f"<b>v{ver}</b> <span style='color:#888;'>({date})</span><ul>")
-            for item in items:
-                html_parts.append(f"<li>{item}</li>")
-            html_parts.append("</ul>")
-
-        git_entries = _get_git_changelog()
-        if git_entries:
-            html_parts.append("<b>Git 提交记录（最近）</b><ul>")
-            for date, msg in git_entries[:15]:
-                html_parts.append(f"<li><span style='color:#888;'>{date}</span> {msg}</li>")
-            html_parts.append("</ul>")
-
-        changelog_text.setHtml("".join(html_parts))
-        layout.addWidget(changelog_text)
-
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-        ok_btn = QPushButton("确定")
-        ok_btn.setFixedWidth(100)
-        ok_btn.clicked.connect(dialog.accept)
-        btn_layout.addWidget(ok_btn)
-        btn_layout.addStretch()
-        layout.addLayout(btn_layout)
-
-        dialog.exec()
-
     def _create_di_lookup_content(self, layout):
-        """创建DI查询页面内容"""
+        """创建南网协议DI查询页面内容"""
         # 搜索栏
         search_layout = QHBoxLayout()
         search_label = QLabel("搜索：")
         search_label.setFixedWidth(45)
         self.di_search_input = QLineEdit()
-        self.di_search_input.setPlaceholderText("输入DI编码或中文关键词搜索...")
+        self.di_search_input.setPlaceholderText("输入DI编码(如E8020201)或中文关键词(如添加任务)搜索...")
+        self.di_search_input.setClearButtonEnabled(True)
         self.di_search_input.textChanged.connect(self._filter_di_table)
         search_layout.addWidget(search_label)
         search_layout.addWidget(self.di_search_input)
@@ -1360,7 +960,6 @@ class MainWindow(QMainWindow):
         self.di_table = QTableWidget()
         self.di_table.setColumnCount(6)
         self.di_table.setHorizontalHeaderLabels(["DI3", "DI2", "DI1", "DI0", "AFN", "中文含义"])
-        # 设置表格样式...
         header = self.di_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(True)
@@ -1369,13 +968,14 @@ class MainWindow(QMainWindow):
         self.di_table.setColumnWidth(2, 60)
         self.di_table.setColumnWidth(3, 60)
         self.di_table.setColumnWidth(4, 200)
-        self.di_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.di_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.di_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.di_table.setAlternatingRowColors(True)
         self.di_table.verticalHeader().hide()
+        self.di_table.verticalHeader().setDefaultSectionSize(20)
         table_font = QFont()
         table_font.setPointSize(8)
         self.di_table.setFont(table_font)
-
         layout.addWidget(self.di_table)
 
         # 按钮栏
@@ -1394,52 +994,15 @@ class MainWindow(QMainWindow):
         # 加载数据
         self._load_di_map_data()
 
-    def _create_command_lookup_content(self, layout):
-        """创建万胜PLC RF协议命令字查询页面"""
-        # 搜索栏
-        search_layout = QHBoxLayout()
-        search_label = QLabel("搜索：")
-        search_label.setFixedWidth(45)
-        self.cmd_search_input = QLineEdit()
-        self.cmd_search_input.setPlaceholderText("输入命令字编码(如1001)或关键词搜索...")
-        self.cmd_search_input.textChanged.connect(self._filter_command_table)
-        search_layout.addWidget(search_label)
-        search_layout.addWidget(self.cmd_search_input)
-        layout.addLayout(search_layout)
-
-        # 统计标签
-        self.cmd_stats_label = QLabel()
-        self.cmd_stats_label.setStyleSheet("color: #666; font-size: 12px;")
-        layout.addWidget(self.cmd_stats_label)
-
-        # 表格
-        self.cmd_table = QTableWidget()
-        self.cmd_table.setColumnCount(2)
-        self.cmd_table.setHorizontalHeaderLabels(["命令字", "功能描述"])
-        header = self.cmd_table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setStretchLastSection(True)
-        self.cmd_table.setColumnWidth(0, 100)
-        self.cmd_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.cmd_table.setAlternatingRowColors(True)
-        self.cmd_table.verticalHeader().hide()
-        table_font = QFont()
-        table_font.setPointSize(8)
-        self.cmd_table.setFont(table_font)
-
-        layout.addWidget(self.cmd_table)
-
-        # 加载数据
-        self._load_command_map_data()
-
     def _create_obis_lookup_content(self, layout):
-        """创建OBIS查询页面（HDLC/Wrapper/DLMS-APDU协议）"""
+        """创建OBIS查询页面（HDLC/Wrapper/APDU协议）"""
         # 搜索栏
         search_layout = QHBoxLayout()
         search_label = QLabel("搜索：")
-        search_label.setFixedWidth(45)
+        search_label.setFixedWidth(30)
         self.obis_search_input = QLineEdit()
         self.obis_search_input.setPlaceholderText("输入OBIS码(如0.0.96.1.0.255)或关键词搜索...")
+        self.obis_search_input.setClearButtonEnabled(True)
         self.obis_search_input.textChanged.connect(self._filter_obis_table)
         search_layout.addWidget(search_label)
         search_layout.addWidget(self.obis_search_input)
@@ -1447,7 +1010,7 @@ class MainWindow(QMainWindow):
 
         # 统计标签
         self.obis_stats_label = QLabel()
-        self.obis_stats_label.setStyleSheet("color: #666; font-size: 12px;")
+        self.obis_stats_label.setStyleSheet("color: #666; font-size: 11px;")
         layout.addWidget(self.obis_stats_label)
 
         # 表格
@@ -1457,20 +1020,257 @@ class MainWindow(QMainWindow):
         header = self.obis_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(True)
-        self.obis_table.setColumnWidth(0, 150)
-        self.obis_table.setColumnWidth(1, 200)
-        self.obis_table.setColumnWidth(2, 120)
-        self.obis_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.obis_table.setColumnWidth(0, 100)
+        self.obis_table.setColumnWidth(1, 130)
+        self.obis_table.setColumnWidth(2, 90)
+        self.obis_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.obis_table.setAlternatingRowColors(True)
         self.obis_table.verticalHeader().hide()
+        self.obis_table.verticalHeader().setDefaultSectionSize(14)
         table_font = QFont()
-        table_font.setPointSize(8)
+        table_font.setPointSize(7)
         self.obis_table.setFont(table_font)
 
         layout.addWidget(self.obis_table)
 
         # 加载数据
         self._load_obis_map_data()
+
+    def _create_dlt645_di_lookup_content(self, layout):
+        """创建DLT645-2007 DI查询页面"""
+        # 初始化DI查询器
+        self.dlt645_di_lookup = get_dlt645_di_lookup()
+
+        # 搜索栏
+        search_layout = QHBoxLayout()
+        search_label = QLabel("搜索：")
+        search_label.setFixedWidth(45)
+        self.dlt645_di_search_input = QLineEdit()
+        self.dlt645_di_search_input.setPlaceholderText("输入DI编码(如04000101)或中文关键词搜索...")
+        self.dlt645_di_search_input.setClearButtonEnabled(True)
+        self.dlt645_di_search_input.textChanged.connect(self._filter_dlt645_di_table)
+        search_layout.addWidget(search_label)
+        search_layout.addWidget(self.dlt645_di_search_input)
+        layout.addLayout(search_layout)
+
+        # 统计标签
+        self.dlt645_di_stats_label = QLabel()
+        self.dlt645_di_stats_label.setStyleSheet("color: #666; font-size: 12px;")
+        layout.addWidget(self.dlt645_di_stats_label)
+
+        # 表格
+        self.dlt645_di_table = QTableWidget()
+        self.dlt645_di_table.setColumnCount(5)
+        self.dlt645_di_table.setHorizontalHeaderLabels(["DI编码", "名称", "单位", "数据类型", "说明"])
+        header = self.dlt645_di_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
+        self.dlt645_di_table.setColumnWidth(0, 90)
+        self.dlt645_di_table.setColumnWidth(1, 180)
+        self.dlt645_di_table.setColumnWidth(2, 60)
+        self.dlt645_di_table.setColumnWidth(3, 80)
+        self.dlt645_di_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.dlt645_di_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.dlt645_di_table.setAlternatingRowColors(True)
+        self.dlt645_di_table.verticalHeader().hide()
+        self.dlt645_di_table.verticalHeader().setDefaultSectionSize(20)
+        table_font = QFont()
+        table_font.setPointSize(8)
+        self.dlt645_di_table.setFont(table_font)
+
+        layout.addWidget(self.dlt645_di_table)
+
+        # 按钮栏
+        btn_layout = QHBoxLayout()
+        add_dlt645_di_btn = QPushButton("添加自定义DI")
+        add_dlt645_di_btn.clicked.connect(self._add_dlt645_custom_di)
+        btn_layout.addWidget(add_dlt645_di_btn)
+
+        del_dlt645_di_btn = QPushButton("删除选中自定义DI")
+        del_dlt645_di_btn.clicked.connect(self._del_dlt645_custom_di)
+        btn_layout.addWidget(del_dlt645_di_btn)
+
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+
+        # 加载数据
+        self._load_dlt645_di_map_data()
+
+    def _load_dlt645_di_map_data(self):
+        """从DLT645 DI查询器加载数据到表格"""
+        data = self.dlt645_di_lookup.data
+        self._dlt645_di_data = data
+        self.dlt645_di_table.setRowCount(len(data))
+        for row, (di_code, di_name, unit, data_type, desc, is_custom) in enumerate(data):
+            self.dlt645_di_table.setItem(row, 0, QTableWidgetItem(di_code))
+            name_item = QTableWidgetItem(("★ " if is_custom else "") + di_name)
+            if is_custom:
+                name_item.setForeground(QColor("#1976D2"))
+            self.dlt645_di_table.setItem(row, 1, name_item)
+            self.dlt645_di_table.setItem(row, 2, QTableWidgetItem(unit))
+            self.dlt645_di_table.setItem(row, 3, QTableWidgetItem(data_type))
+            self.dlt645_di_table.setItem(row, 4, QTableWidgetItem(desc))
+        custom_count = sum(1 for item in data if item[5])
+        self.dlt645_di_stats_label.setText(f"共 {len(data)} 条记录（其中自定义 {custom_count} 条）")
+
+    def _filter_dlt645_di_table(self, text: str):
+        """根据搜索文本过滤DLT645 DI表格"""
+        keyword = text.strip().upper()
+        if not keyword:
+            self._load_dlt645_di_map_data()
+            return
+        results = self.dlt645_di_lookup.search(keyword)
+        self.dlt645_di_table.setRowCount(len(results))
+        for row, (di_code, di_name, unit, data_type, desc, is_custom) in enumerate(results):
+            self.dlt645_di_table.setItem(row, 0, QTableWidgetItem(di_code))
+            name_item = QTableWidgetItem(("★ " if is_custom else "") + di_name)
+            if is_custom:
+                name_item.setForeground(QColor("#1976D2"))
+            self.dlt645_di_table.setItem(row, 1, name_item)
+            self.dlt645_di_table.setItem(row, 2, QTableWidgetItem(unit))
+            self.dlt645_di_table.setItem(row, 3, QTableWidgetItem(data_type))
+            self.dlt645_di_table.setItem(row, 4, QTableWidgetItem(desc))
+        custom_count = sum(1 for item in results if item[5])
+        self.dlt645_di_stats_label.setText(f"匹配 {len(results)} / {len(self._dlt645_di_data)} 条记录（其中自定义 {custom_count} 条）")
+
+    def _add_dlt645_custom_di(self):
+        """添加DLT645自定义DI对话框"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("添加自定义DI (DLT645)")
+        dialog.setMinimumWidth(360)
+        layout = QVBoxLayout(dialog)
+
+        # DI编码
+        h1 = QHBoxLayout()
+        h1.addWidget(QLabel("DI编码:"))
+        di_code_input = QLineEdit()
+        di_code_input.setPlaceholderText("如 04000101")
+        di_code_input.setMaxLength(8)
+        h1.addWidget(di_code_input)
+        layout.addLayout(h1)
+
+        # 名称
+        h2 = QHBoxLayout()
+        h2.addWidget(QLabel("名称:"))
+        name_input = QLineEdit()
+        name_input.setPlaceholderText("如：当前正向有功总电能")
+        h2.addWidget(name_input)
+        layout.addLayout(h2)
+
+        # 单位
+        h3 = QHBoxLayout()
+        h3.addWidget(QLabel("单位:"))
+        unit_input = QLineEdit()
+        unit_input.setPlaceholderText("如：kWh（可留空）")
+        h3.addWidget(unit_input)
+        layout.addLayout(h3)
+
+        # 数据类型
+        h4 = QHBoxLayout()
+        h4.addWidget(QLabel("数据类型:"))
+        data_type_input = QLineEdit()
+        data_type_input.setPlaceholderText("如：XX（可留空）")
+        h4.addWidget(data_type_input)
+        layout.addLayout(h4)
+
+        # 按钮
+        btn_layout = QHBoxLayout()
+        ok_btn = QPushButton("添加")
+        cancel_btn = QPushButton("取消")
+        btn_layout.addStretch()
+        btn_layout.addWidget(ok_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+
+        ok_btn.clicked.connect(dialog.accept)
+        cancel_btn.clicked.connect(dialog.reject)
+
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        di_code = di_code_input.text().strip().upper()
+        name = name_input.text().strip()
+        unit = unit_input.text().strip()
+        data_type = data_type_input.text().strip()
+
+        if not di_code or not name:
+            QMessageBox.warning(self, "错误", "DI编码和名称不能为空！")
+            return
+
+        success = self.dlt645_di_lookup.add_custom_di(di_code, name, unit, data_type)
+        if success:
+            self._load_dlt645_di_map_data()
+            QMessageBox.information(self, "成功", f"已添加自定义DI: {di_code} → {name}")
+        else:
+            QMessageBox.warning(self, "错误", "添加失败，请检查DI编码格式（8位十六进制）")
+
+    def _del_dlt645_custom_di(self):
+        """删除选中的DLT645自定义DI"""
+        row = self.dlt645_di_table.currentRow()
+        if row < 0 or row >= len(self._dlt645_di_data):
+            QMessageBox.warning(self, "提示", "请先选中一条记录！")
+            return
+
+        di_code, di_name, unit, data_type, desc, is_custom = self._dlt645_di_data[row]
+
+        if not is_custom:
+            QMessageBox.warning(self, "提示", "只能删除自定义DI（蓝色★标记的记录）！")
+            return
+
+        reply = QMessageBox.question(
+            self, "确认删除",
+            f"确定删除自定义DI：{di_code} ({di_name})？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        success = self.dlt645_di_lookup.delete_custom_di(di_code)
+        if success:
+            self._load_dlt645_di_map_data()
+            QMessageBox.information(self, "成功", "已删除自定义DI")
+        else:
+            QMessageBox.warning(self, "错误", "删除失败")
+
+    def _create_command_lookup_content(self, layout):
+        """创建万胜PLC RF协议命令字查询页面"""
+        # 搜索栏
+        search_layout = QHBoxLayout()
+        search_label = QLabel("搜索：")
+        search_label.setFixedWidth(30)
+        self.cmd_search_input = QLineEdit()
+        self.cmd_search_input.setPlaceholderText("输入命令字编码或中文关键词搜索...")
+        self.cmd_search_input.setClearButtonEnabled(True)
+        self.cmd_search_input.textChanged.connect(self._filter_command_table)
+        search_layout.addWidget(search_label)
+        search_layout.addWidget(self.cmd_search_input)
+        layout.addLayout(search_layout)
+
+        # 统计标签
+        self.cmd_stats_label = QLabel()
+        self.cmd_stats_label.setStyleSheet("color: #666; font-size: 11px;")
+        layout.addWidget(self.cmd_stats_label)
+
+        # 表格
+        self.cmd_table = QTableWidget()
+        self.cmd_table.setColumnCount(2)
+        self.cmd_table.setHorizontalHeaderLabels(["命令字", "名称"])
+        header = self.cmd_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
+        self.cmd_table.setColumnWidth(0, 80)
+        self.cmd_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.cmd_table.setAlternatingRowColors(True)
+        self.cmd_table.verticalHeader().hide()
+        self.cmd_table.verticalHeader().setDefaultSectionSize(14)
+        table_font = QFont()
+        table_font.setPointSize(7)
+        self.cmd_table.setFont(table_font)
+
+        layout.addWidget(self.cmd_table)
+
+        # 加载数据
+        self._load_command_map_data()
 
     def _load_command_map_data(self):
         """从命令字查询器加载数据到表格"""
@@ -1691,6 +1491,85 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, "错误", f"保存失败：{str(e)}")
 
+    @staticmethod
+    def _clear_layout(layout):
+        """递归清除layout中的所有子layout和widget"""
+        while layout.count():
+            child = layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+            elif child.layout():
+                MainWindow._clear_layout(child.layout())
+
+    def _setup_menu_bar(self):
+        """创建菜单栏"""
+        menubar = self.menuBar()
+
+        help_menu = menubar.addMenu("帮助(&H)")
+
+        about_action = help_menu.addAction("关于(&A)")
+        about_action.triggered.connect(self._show_about_dialog)
+
+    def _show_about_dialog(self):
+        """显示"关于"对话框"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("关于")
+        dialog.setMinimumSize(520, 480)
+        dialog.setWindowFlags(dialog.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(12)
+
+        title_label = QLabel(f"协议解析工具")
+        title_label.setFont(QFont("Microsoft YaHei", 16, QFont.Bold))
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title_label)
+
+        version_label = QLabel(f"版本 2.0")
+        version_label.setFont(QFont("Microsoft YaHei", 11))
+        version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        version_label.setStyleSheet("color: #666;")
+        layout.addWidget(version_label)
+
+        desc_label = QLabel("支持南网协议 / PLC RF / HDLC/DLMS 多协议报文解析")
+        desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        desc_label.setWordWrap(True)
+        layout.addWidget(desc_label)
+
+        changelog_label = QLabel("版本更新记录")
+        changelog_label.setFont(QFont("Microsoft YaHei", 10, QFont.Bold))
+        layout.addWidget(changelog_label)
+
+        changelog_text = QTextEdit()
+        changelog_text.setReadOnly(True)
+        changelog_text.setFont(QFont("Microsoft YaHei", 9))
+
+        from datetime import date
+        today = date.today().strftime("%Y-%m-%d")
+        html_parts = []
+        html_parts.append(f"<b>v2.0 ({today})</b><ul>")
+        html_parts.append("<li>优化界面布局，提高信息密度</li>")
+        html_parts.append("<li>统一表格字体为7pt，行高压缩至13px</li>")
+        html_parts.append("</ul>")
+        html_parts.append("<b>v1.0</b><ul>")
+        html_parts.append("<li>初始版本发布</li>")
+        html_parts.append("<li>支持南网、PLC RF、HDLC/DLMS、DLT645协议</li>")
+        html_parts.append("</ul>")
+
+        changelog_text.setHtml("".join(html_parts))
+        layout.addWidget(changelog_text)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        ok_btn = QPushButton("确定")
+        ok_btn.setFixedWidth(80)
+        ok_btn.clicked.connect(dialog.accept)
+        btn_layout.addWidget(ok_btn)
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+
+        dialog.exec()
+
     # ==================== 批量解析功能 ====================
 
     def load_from_file(self):
@@ -1717,6 +1596,16 @@ class MainWindow(QMainWindow):
             self.batch_input.setPlainText(text)
             frames = self._extract_frames(text)
             self.update_stats(f"已粘贴，识别到 {len(frames)} 帧报文（点击\"开始批量解析\"执行）")
+
+    @staticmethod
+    def _clear_layout(layout):
+        """递归清除layout中的所有子layout和widget"""
+        while layout.count():
+            child = layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+            elif child.layout():
+                MainWindow._clear_layout(child.layout())
 
     @staticmethod
     def _extract_frames(text: str) -> list:
