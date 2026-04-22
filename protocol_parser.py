@@ -2260,16 +2260,77 @@ class ProtocolFrameParser:
         return result
 
     def _parse_query_multi_network_data(self, data: bytes) -> Dict[str, Any]:
-        """解析查询多网络信息数据内容（E8 00 03 91）- 下行查询，无数据域"""
-        return {"说明": "查询多网络信息，无数据内容"}
+        """解析返回多网络信息数据内容（E8 00 03 91）- 上行响应"""
+        if len(data) < 8:
+            return {
+                "原始数据": data.hex().upper(),
+                "长度": len(data),
+                "说明": f"返回多网络信息，数据长度不足（期望至少8字节，实际{len(data)}字节）"
+            }
+
+        n = data[0]
+        local_nid = data[1]
+        local_master = data[2:8]
+
+        result = {
+            "多网络节点总数量": {"原始值": f"0x{n:02X}", "十进制": n, "说明": "包含本节点和邻居网络节点总数"},
+            "本节点网络标识号": {"原始值": f"0x{local_nid:02X}", "十进制": local_nid, "说明": ""},
+            "本节点主节点地址": {"原始值": local_master.hex().upper(), "说明": "6字节BIN格式"},
+        }
+
+        offset = 8
+        for i in range(n):
+            if offset + 8 > len(data):
+                result[f"邻居网络{i+1}"] = {"说明": "数据不足，无法解析"}
+                break
+            nid = data[offset]
+            master = data[offset+1:offset+7]
+            snr = data[offset+7]
+            # SNR is signed: range -20~80 dB
+            snr_val = snr if snr <= 127 else snr - 256
+            result[f"邻居网络{i+1}标识号"] = {"原始值": f"0x{nid:02X}", "十进制": nid, "说明": ""}
+            result[f"邻居网络{i+1}主节点地址"] = {"原始值": master.hex().upper(), "说明": "6字节BIN格式"}
+            result[f"邻居网络{i+1}网间SNR"] = {"原始值": f"0x{snr:02X}", "十进制": snr_val, "说明": "单位dB，取值范围-20~80"}
+            offset += 8
+
+        return result
 
     def _parse_query_whitelist_data(self, data: bytes) -> Dict[str, Any]:
-        """解析查询白名单生效信息数据内容（E8 00 03 93）- 下行查询，无数据域"""
-        return {"说明": "查询白名单生效信息，无数据内容"}
+        """解析返回查询白名单生效信息数据内容（E8 00 03 93）- 上行响应"""
+        if len(data) < 2:
+            return {
+                "原始数据": data.hex().upper(),
+                "长度": len(data),
+                "说明": f"返回白名单生效信息，数据长度不足（期望2字节，实际{len(data)}字节）"
+            }
+        switch_map = {0: "关闭", 1: "打开"}
+        range_map = {0: "表档案", 1: "厂家自定义", 2: "表档案和厂家自定义的合集"}
+        return {
+            "白名单开关": {"原始值": f"0x{data[0]:02X}", "十进制": data[0], "说明": switch_map.get(data[0], "保留")},
+            "白名单生效范围": {"原始值": f"0x{data[1]:02X}", "十进制": data[1], "说明": range_map.get(data[1], "保留")},
+        }
 
     def _parse_query_broadband_province_data(self, data: bytes) -> Dict[str, Any]:
-        """解析查询宽带应用省份数据内容（E8 00 F0 DF）- 下行查询，无数据域"""
-        return {"说明": "查询宽带应用省份，无数据内容"}
+        """解析返回查询宽带应用省份数据内容（E8 00 F0 DF）- 上行响应"""
+        if len(data) < 1:
+            return {
+                "原始数据": data.hex().upper(),
+                "长度": len(data),
+                "说明": f"返回宽带应用省份，数据长度不足（期望至少1字节，实际{len(data)}字节）"
+            }
+        province = data[0]
+        province_map = {
+            0x01: "北京", 0x02: "天津", 0x03: "河北", 0x04: "山西", 0x05: "内蒙古",
+            0x06: "辽宁", 0x07: "吉林", 0x08: "黑龙江", 0x09: "上海", 0x0A: "江苏",
+            0x0B: "浙江", 0x0C: "安徽", 0x0D: "福建", 0x0E: "江西", 0x0F: "山东",
+            0x10: "河南", 0x11: "湖北", 0x12: "湖南", 0x13: "广东", 0x14: "广西",
+            0x15: "海南", 0x16: "重庆", 0x17: "四川", 0x18: "贵州", 0x19: "云南",
+            0x1A: "西藏", 0x1B: "陕西", 0x1C: "甘肃", 0x1D: "青海", 0x1E: "宁夏",
+            0x1F: "新疆", 0x20: "台湾", 0x21: "香港", 0x22: "澳门"
+        }
+        return {
+            "宽带应用省份": {"原始值": f"0x{province:02X}", "十进制": province, "说明": province_map.get(province, "保留")},
+        }
 
     # ==================== 深化应用 - 模块资产信息（1-1.md 表69~73）====================
 

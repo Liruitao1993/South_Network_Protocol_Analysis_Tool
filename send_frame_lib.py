@@ -1,6 +1,7 @@
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 import struct
 from protocol_tool import Frame, ControlField
+from frame_generator_schema import DI_FIELD_SCHEMA
 
 class ProtocolFrameGenerator:
     def __init__(self):
@@ -228,6 +229,204 @@ class ProtocolFrameGenerator:
         if handler:
             return handler(sub_code, **kwargs)
         raise ValueError(f"不支持的AFN和DI组合: AFN={afn}, DI={di}")
+
+    # ==================== 通用组帧引擎（基于DI_FIELD_SCHEMA） ====================
+
+    def get_supported_di_keys(self) -> List[Tuple[int, int, int, int]]:
+        """返回当前支持的DI键列表（来自DI_FIELD_SCHEMA）"""
+        return list(DI_FIELD_SCHEMA.keys())
+
+    def get_di_schema(self, di_key: Tuple[int, int, int, int]) -> Optional[Dict[str, Any]]:
+        """获取指定DI的字段Schema"""
+        return DI_FIELD_SCHEMA.get(di_key)
+
+    def generate_data(self, di_key: Tuple[int, int, int, int], field_values: Dict[str, Any]) -> bytes:
+        """根据DI字段Schema和字段值生成用户数据区字节流
+
+        Args:
+            di_key: DI四元组 (di3, di2, di1, di0)
+            field_values: 字段名 -> 值的字典
+
+        Returns:
+            打包后的用户数据区字节
+        """
+        schema = DI_FIELD_SCHEMA.get(di_key)
+        if not schema:
+            raise ValueError(f"不支持的DI组合: {di_key}")
+
+        fields = schema["fields"]
+        values: Dict[str, Any] = {}
+
+        # 第一遍：收集所有字段值（含默认值）
+        for field in fields:
+            name = field["name"]
+            val = field_values.get(name, field.get("default"))
+            if val is None:
+                if field.get("required", False):
+                    raise ValueError(f"缺少必填字段: {name}")
+                continue
+            values[name] = val
+
+        # 第二遍：处理 count_field 引用（列表字段需自动计算数量并回填）
+        for field in fields:
+            name = field["name"]
+            if field.get("type") == "list" and "count_field" in field:
+                ref_name = field["count_field"]
+                items = values.get(name, [])
+                values[ref_name] = len(items) if isinstance(items, list) else 0
+
+        # 第三遍：处理 length_field 引用（变长字段需提前计算长度并回填）
+        for field in fields:
+            name = field["name"]
+            if "length_field" in field:
+                ref_name = field["length_field"]
+                val = values.get(name)
+                if val is not None:
+                    raw_len = len(self._to_raw_bytes(field, val))
+                    values[ref_name] = raw_len
+
+        # 第四遍：按顺序打包所有字段
+        result = b""
+        for field in fields:
+            name = field["name"]
+            val = values.get(name)
+            if val is None and field.get("optional", False):
+                continue
+            result += self._pack_field(field, val)
+
+        return result
+
+    def generate_frame(self, di_key: Tuple[int, int, int, int], field_values: Dict[str, Any],
+                       src_addr: bytes = b'\x00' * 6,
+                       dst_addr: bytes = b'\x00' * 6,
+                       dir_flag: int = 0, prm: int = 1, add_flag: int = 0) -> bytes:
+        """通用组帧入口：根据DI键和字段值生成完整协议帧
+
+        Args:
+            di_key: DI四元组
+            field_values: 字段值字典
+            src_addr: 源地址（6字节），低字节在前存储时会自动反转
+            dst_addr: 目的地址（6字节），低字节在前存储时会自动反转
+            dir_flag: 传输方向（0=下行，1=上行）
+            prm: 启动标志（0=从动站，1=启动站）
+            add_flag: 地址域标识（0=不带地址，1=带地址）
+
+        Returns:
+            完整协议帧字节流
+        """
+        data = self.generate_data(di_key, field_values)
+        di3, di2, di1, di0 = di_key
+        return self._build_frame(di3, di2, di1, di0,
+                                 src_addr=src_addr, dst_addr=dst_addr, data=data,
+                                 dir_flag=dir_flag, prm=prm, add_flag=add_flag)
+
+    # ------------------- 内部打包工具方法 -------------------
+
+    def _pack_field(self, field: Dict[str, Any], value: Any) -> bytes:
+        """根据字段Schema将单个值打包为字节"""
+        if value is None:
+            return b""
+
+        ftype = field["type"]
+
+        if ftype in ("uint8", "enum"):
+            return struct.pack("B", int(value))
+
+        elif ftype == "uint16":
+            endian = field.get("endian", "big")
+            fmt = ">H" if endian == "big" else "<H"
+            return struct.pack(fmt, int(value))
+
+        elif ftype == "uint32":
+            endian = field.get("endian", "big")
+            fmt = ">I" if endian == "big" else "<I"
+            return struct.pack(fmt, int(value))
+
+        elif ftype == "bytes":
+            if isinstance(value, str):
+                value = bytes.fromhex(value.replace(" ", ""))
+            if field.get("reverse"):
+                value = value[::-1]
+            if "length" in field:
+                length = field["length"]
+                if len(value) < length:
+                    value = value + b"\x00" * (length - len(value))
+                elif len(value) > length:
+                    value = value[:length]
+            return value
+
+        elif ftype == "ascii":
+            data = value.encode("ascii", errors="ignore")
+            length = field.get("length")
+            if length:
+                data = data[:length].ljust(length, b"\x00")
+            return data
+
+        elif ftype == "bcd":
+            if isinstance(value, str):
+                data = bytes.fromhex(value.replace(" ", ""))
+            else:
+                data = bytes(value)
+            length = field.get("length")
+            if length:
+                if len(data) < length:
+                    data = data + b"\x00" * (length - len(data))
+                elif len(data) > length:
+                    data = data[:length]
+            return data
+
+        elif ftype == "list":
+            item_fields = field["item_fields"]
+            items = value if isinstance(value, list) else []
+
+            # 打包数量前缀（仅当使用 count_type 时；count_field 由外部字段负责）
+            if "count_type" in field:
+                count_type = field["count_type"]
+                if count_type == "uint8":
+                    data = struct.pack("B", len(items))
+                elif count_type == "uint16":
+                    data = struct.pack(">H", len(items))
+                else:
+                    data = b""
+            else:
+                data = b""
+
+            # 打包每一项
+            for item in items:
+                for item_field in item_fields:
+                    item_name = item_field["name"]
+                    item_val = item.get(item_name, item_field.get("default"))
+                    data += self._pack_field(item_field, item_val)
+            return data
+
+        else:
+            raise ValueError(f"不支持的字段类型: {ftype}")
+
+    def _to_raw_bytes(self, field: Dict[str, Any], value: Any) -> bytes:
+        """将值转换为原始字节（不计算固定长度填充），用于length_field长度计算"""
+        if value is None:
+            return b""
+
+        ftype = field["type"]
+        if ftype == "bytes":
+            if isinstance(value, str):
+                value = bytes.fromhex(value.replace(" ", ""))
+            if field.get("reverse"):
+                value = value[::-1]
+            return value
+
+        elif ftype == "ascii":
+            return value.encode("ascii", errors="ignore")
+
+        elif ftype == "bcd":
+            if isinstance(value, str):
+                return bytes.fromhex(value.replace(" ", ""))
+            return bytes(value)
+
+        else:
+            # 其他类型使用标准打包（uint/enum/list等长度固定或可预期）
+            return self._pack_field(field, value)
+
 
 if __name__ == "__main__":
     generator = ProtocolFrameGenerator()

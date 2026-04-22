@@ -23,14 +23,36 @@ from protocol_parser import ProtocolFrameParser
 from plc_rf_parser import PLCRFProtocolParser
 from hdlc_parser import HDLCParser
 from dlt645_parser import DLT645Parser
+from gdw10376_parser import GDW10376Parser
 from obis_lookup import OBISLookup, get_obis_lookup
 from command_lookup import CommandLookup, get_command_lookup
 from dlt645_di_lookup import DLT645DILookup, get_dlt645_di_lookup
+from gdw_afn_lookup import GDWAFNLookup, get_gdw_afn_lookup
+from frame_gen_widget import FrameGenWidget
+from serial_worker import SerialWorker
 
 
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.6.1"
 
 CHANGELOG = [
+    ("1.6.1", "2026-04-22", [
+        "协议组帧功能完善：支持88个下行DI命令",
+        "命令说明弹窗支持非模态显示，可同时编辑主窗口",
+        "字段模板表格和按钮布局优化，纵向空间更紧凑",
+        "命令说明内容来源于PLUZ计量自动化系统技术规范文档",
+        "串口通信支持配置、发送、日志和接收帧解析",
+    ]),
+    ("1.6.0", "2026-04-21", [
+        "新增国网协议(Q/GDW 10376.2-2024)解析支持",
+        "支持国网协议AFN+Fn组合查询功能",
+        "国网协议支持单帧解析、批量解析、字节高亮",
+        "支持国网协议控制域、信息域、地址域、应用数据域完整解析",
+    ]),
+    ("1.5.0", "2026-04-17", [
+        "重构主界面代码，精简655行GUI代码，优化协议解析工具结构",
+        "增强南网协议解析器，扩展控制域与用户数据区解析能力",
+        "优化PyInstaller构建配置，提升打包稳定性与兼容性",
+    ]),
     ("1.4.0", "2026-04-16", [
         "修复表格交替行颜色失效的问题（stylesheet优化）",
         "新增AGENTS.md项目指南文件，便于AI辅助开发",
@@ -99,7 +121,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"协议解析工具 v{APP_VERSION}")
         self.setMinimumSize(1000, 700)
 
-        # 协议选择：0=南网协议，1=PLC RF协议，2=HDLC/DLMS协议
+        # 协议选择：0=南网协议，1=PLC RF协议，2=HDLC/DLMS协议，3=Wrapper，4=APDU，5=DLT645，6=国网协议
         self.current_protocol = 0
 
         # 初始化解析器
@@ -107,10 +129,12 @@ class MainWindow(QMainWindow):
         self.plc_rf_parser = PLCRFProtocolParser()
         self.hdlc_parser = HDLCParser()
         self.dlt645_parser = DLT645Parser()
+        self.gdw_parser = GDW10376Parser()
 
         # 初始化查询器
         self.obis_lookup = get_obis_lookup()
         self.command_lookup = get_command_lookup()
+        self.gdw_afn_lookup = get_gdw_afn_lookup()
 
         # 批量解析结果缓存
         self.batch_results: List[Dict[str, Any]] = []
@@ -131,7 +155,11 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(15, 15, 15, 15)
         main_layout.setSpacing(15)
 
-        # 协议选择分组
+        # ========== 顶部栏：协议选择 + 串口配置 ==========
+        top_bar = QHBoxLayout()
+        top_bar.setSpacing(10)
+
+        # ---- 协议选择分组 ----
         proto_group = QGroupBox("协议选择")
         proto_layout = QHBoxLayout(proto_group)
         proto_layout.setContentsMargins(10, 8, 10, 10)
@@ -149,6 +177,7 @@ class MainWindow(QMainWindow):
         self.protocol_combo.addItem("DLMS Wrapper裸报文")
         self.protocol_combo.addItem("DLMS-APDU裸报文")
         self.protocol_combo.addItem("DLT645-2007 电表协议")
+        self.protocol_combo.addItem("国网协议 (Q/GDW 10376.2-2024)")
         self.protocol_combo.setMinimumWidth(280)
         self.protocol_combo.setFont(QFont("Microsoft YaHei", 10))
         # 让弹出菜单宽度自动适应最宽的文字
@@ -157,7 +186,55 @@ class MainWindow(QMainWindow):
         proto_layout.addWidget(self.protocol_combo)
         proto_layout.addStretch()
 
-        main_layout.addWidget(proto_group)
+        top_bar.addWidget(proto_group, 1)
+
+        # ---- 串口配置分组 ----
+        serial_group = QGroupBox("串口配置")
+        serial_layout = QHBoxLayout(serial_group)
+        serial_layout.setContentsMargins(10, 8, 10, 10)
+        serial_layout.setSpacing(8)
+
+        serial_layout.addWidget(QLabel("端口:"))
+        self.serial_port_combo = QComboBox()
+        self.serial_port_combo.setMinimumWidth(80)
+        serial_layout.addWidget(self.serial_port_combo)
+
+        serial_layout.addWidget(QLabel("波特率:"))
+        self.serial_baud_combo = QComboBox()
+        self.serial_baud_combo.addItems(["1200", "2400", "4800", "9600", "19200", "38400", "57600", "115200"])
+        self.serial_baud_combo.setCurrentText("9600")
+        self.serial_baud_combo.setMinimumWidth(80)
+        serial_layout.addWidget(self.serial_baud_combo)
+
+        serial_layout.addWidget(QLabel("校验:"))
+        self.serial_parity_combo = QComboBox()
+        self.serial_parity_combo.addItems(["无", "偶", "奇"])
+        self.serial_parity_combo.setMinimumWidth(60)
+        serial_layout.addWidget(self.serial_parity_combo)
+
+        self.serial_open_btn = QPushButton("打开串口")
+        self.serial_open_btn.setMinimumHeight(28)
+        self.serial_open_btn.setStyleSheet(
+            "QPushButton { background-color: #4CAF50; color: white; border-radius: 3px; padding: 4px 12px; font-weight: bold; }"
+            "QPushButton:disabled { background-color: #cccccc; }"
+        )
+        self.serial_open_btn.clicked.connect(self._on_serial_open_clicked)
+        serial_layout.addWidget(self.serial_open_btn)
+
+        self.serial_status_label = QLabel("未连接")
+        self.serial_status_label.setStyleSheet("color: #999; font-size: 12px;")
+        serial_layout.addWidget(self.serial_status_label)
+
+        serial_layout.addStretch()
+        top_bar.addWidget(serial_group)
+
+        main_layout.addLayout(top_bar)
+
+        # ========== 串口工作线程 ==========
+        self.serial_worker = SerialWorker()
+        self.serial_worker.connection_changed.connect(self._on_serial_connection_changed)
+        self.serial_worker.error_occurred.connect(self._on_serial_error)
+        self._refresh_serial_ports()
 
         # 选项卡
         self.tab_widget = QTabWidget()
@@ -167,7 +244,11 @@ class MainWindow(QMainWindow):
         self.protocol_lookup_tab_layout = QVBoxLayout(self.protocol_lookup_tab)
         self.tab_widget.addTab(self.protocol_lookup_tab, "查询")
         self.tab_widget.addTab(self.create_batch_parse_tab(), "批量解析")
-        main_layout.addWidget(self.tab_widget)
+        # 协议组帧页面（仅南网协议支持）
+        self.frame_gen_tab = FrameGenWidget()
+        self.frame_gen_tab.set_serial_worker(self.serial_worker)
+        self._frame_gen_tab_index = self.tab_widget.addTab(self.frame_gen_tab, "协议组帧")
+        main_layout.addWidget(self.tab_widget, 1)
 
         # 初始化查询页面内容
         self._update_protocol_lookup_tab()
@@ -530,7 +611,7 @@ class MainWindow(QMainWindow):
         input_layout = QVBoxLayout(input_group)
 
         self.batch_input = QTextEdit()
-        self.batch_input.setPlaceholderText("粘贴或输入报文数据，支持多种协议：\n南网协议：68开头，16结束\nHDLC协议：7E开头，7E结束\n其他协议：每行一帧直接解析")
+        self.batch_input.setPlaceholderText("粘贴或输入报文数据，支持多种协议：\n南网/国网协议：68开头，16结束\nHDLC协议：7E开头，7E结束\n其他协议：每行一帧直接解析")
         self.batch_input.setMaximumHeight(150)
         input_layout.addWidget(self.batch_input)
 
@@ -884,6 +965,68 @@ class MainWindow(QMainWindow):
             }
         """)
 
+    # ==================== 串口功能 ====================
+
+    def _refresh_serial_ports(self):
+        """刷新可用串口列表"""
+        self.serial_port_combo.clear()
+        ports = SerialWorker.list_ports()
+        if not ports:
+            self.serial_port_combo.addItem("无可用串口")
+            self.serial_port_combo.setEnabled(False)
+        else:
+            for p in ports:
+                self.serial_port_combo.addItem(p)
+            self.serial_port_combo.setEnabled(True)
+
+    def _on_serial_open_clicked(self):
+        """打开/关闭串口按钮点击"""
+        if self.serial_worker.is_open():
+            self.serial_worker.close_port()
+            self.serial_open_btn.setText("打开串口")
+            self.serial_open_btn.setStyleSheet(
+                "QPushButton { background-color: #4CAF50; color: white; border-radius: 3px; padding: 4px 12px; font-weight: bold; }"
+            )
+            self.serial_port_combo.setEnabled(True)
+            self.serial_baud_combo.setEnabled(True)
+            self.serial_parity_combo.setEnabled(True)
+        else:
+            port = self.serial_port_combo.currentText()
+            if not port or port == "无可用串口":
+                QMessageBox.warning(self, "警告", "请选择一个有效的串口")
+                return
+            baud = int(self.serial_baud_combo.currentText())
+            parity = self.serial_parity_combo.currentText()
+            self.serial_worker.configure(port, baudrate=baud, parity=parity)
+            if self.serial_worker.open_port():
+                self.serial_open_btn.setText("关闭串口")
+                self.serial_open_btn.setStyleSheet(
+                    "QPushButton { background-color: #f44336; color: white; border-radius: 3px; padding: 4px 12px; font-weight: bold; }"
+                )
+                self.serial_port_combo.setEnabled(False)
+                self.serial_baud_combo.setEnabled(False)
+                self.serial_parity_combo.setEnabled(False)
+
+    def _on_serial_connection_changed(self, connected: bool):
+        """串口连接状态变化回调"""
+        if connected:
+            self.serial_status_label.setText("已连接")
+            self.serial_status_label.setStyleSheet("color: #4CAF50; font-size: 12px; font-weight: bold;")
+        else:
+            self.serial_status_label.setText("未连接")
+            self.serial_status_label.setStyleSheet("color: #999; font-size: 12px;")
+            self.serial_open_btn.setText("打开串口")
+            self.serial_open_btn.setStyleSheet(
+                "QPushButton { background-color: #4CAF50; color: white; border-radius: 3px; padding: 4px 12px; font-weight: bold; }"
+            )
+            self.serial_port_combo.setEnabled(True)
+            self.serial_baud_combo.setEnabled(True)
+            self.serial_parity_combo.setEnabled(True)
+
+    def _on_serial_error(self, msg: str):
+        """串口错误回调"""
+        QMessageBox.warning(self, "串口错误", msg)
+
     # ==================== 单帧解析功能 ====================
 
     def _on_protocol_changed(self, index: int):
@@ -900,11 +1043,19 @@ class MainWindow(QMainWindow):
             self.single_input.setPlaceholderText("请输入Wrapper报文，例如：00 01 00 02 00 1E ...")
         elif index == 4:  # DLMS-APDU裸报文
             self.single_input.setPlaceholderText("请输入APDU报文，例如：C0 01 C1 00 ...")
-        else:  # index == 5, DLT645-2007
+        elif index == 5:  # DLT645-2007
             self.single_input.setPlaceholderText("请输入DLT645报文，例如：68 AA AA AA AA AA AA 68 11 04 33 33 33 33 CS 16")
+        else:  # index == 6, 国网协议
+            self.single_input.setPlaceholderText("请输入国网报文，例如：68 0F 00 43 00 00 00 00 00 00 00 00 00 03 01 00 48 16")
 
         # 更新查询页面
         self._update_protocol_lookup_tab()
+
+        # 协议组帧页面仅在南网协议下显示
+        if hasattr(self, '_frame_gen_tab_index'):
+            self.tab_widget.setTabVisible(self._frame_gen_tab_index, index == 0)
+            if index != 0:
+                self.frame_gen_tab.reset()
 
         # 清空当前结果
         self.clear_single()
@@ -936,6 +1087,189 @@ class MainWindow(QMainWindow):
             # DLT645-2007协议：DI查询
             self.tab_widget.setTabText(lookup_tab_index, "DI查询")
             self._create_dlt645_di_lookup_content(self.protocol_lookup_tab_layout)
+
+        elif self.current_protocol == 6:
+            # 国网协议：AFN查询
+            self.tab_widget.setTabText(lookup_tab_index, "AFN查询")
+            self._create_gdw_lookup_content(self.protocol_lookup_tab_layout)
+
+    def _create_gdw_lookup_content(self, layout):
+        """创建国网协议AFN查询页面内容"""
+        # 搜索栏 + 操作按钮
+        search_layout = QHBoxLayout()
+        search_label = QLabel("搜索：")
+        search_label.setFixedWidth(45)
+        self.gdw_search_input = QLineEdit()
+        self.gdw_search_input.setPlaceholderText("输入AFN(如03H)或Fn(如F1)或中文关键词搜索...")
+        self.gdw_search_input.setClearButtonEnabled(True)
+        self.gdw_search_input.textChanged.connect(self._filter_gdw_table)
+        search_layout.addWidget(search_label)
+        search_layout.addWidget(self.gdw_search_input)
+
+        # 添加自定义按钮
+        add_btn = QPushButton("添加自定义")
+        add_btn.setToolTip("添加自定义AFN+Fn组合")
+        add_btn.clicked.connect(self._add_custom_gdw_fn)
+        search_layout.addWidget(add_btn)
+
+        # 删除自定义按钮
+        del_btn = QPushButton("删除自定义")
+        del_btn.setToolTip("删除选中的自定义AFN+Fn组合")
+        del_btn.clicked.connect(self._delete_custom_gdw_fn)
+        search_layout.addWidget(del_btn)
+
+        layout.addLayout(search_layout)
+
+        # 统计标签
+        self.gdw_stats_label = QLabel()
+        self.gdw_stats_label.setStyleSheet("color: #666; font-size: 12px;")
+        layout.addWidget(self.gdw_stats_label)
+
+        # 表格
+        self.gdw_table = QTableWidget()
+        self.gdw_table.setColumnCount(4)
+        self.gdw_table.setHorizontalHeaderLabels(["AFN", "AFN名称", "Fn", "功能说明"])
+        header = self.gdw_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
+        self.gdw_table.setColumnWidth(0, 60)
+        self.gdw_table.setColumnWidth(1, 180)
+        self.gdw_table.setColumnWidth(2, 60)
+        self.gdw_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.gdw_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.gdw_table.setAlternatingRowColors(True)
+        self.gdw_table.verticalHeader().hide()
+        self.gdw_table.verticalHeader().setDefaultSectionSize(20)
+        table_font = QFont()
+        table_font.setPointSize(8)
+        self.gdw_table.setFont(table_font)
+        layout.addWidget(self.gdw_table)
+
+        # 加载数据
+        self._load_gdw_map_data()
+
+    def _load_gdw_map_data(self):
+        """从国网解析器加载AFN+Fn数据到表格（包含自定义条目）"""
+        data = self.gdw_parser.get_afn_fn_list()
+        self._gdw_data = data
+        self.gdw_table.setRowCount(len(data))
+        for row, (afn, afn_name, fn, fn_name) in enumerate(data):
+            item_afn = QTableWidgetItem(f"{afn:02X}H")
+            item_afn_name = QTableWidgetItem(afn_name)
+            item_fn = QTableWidgetItem(f"F{fn}")
+            item_fn_name = QTableWidgetItem(fn_name)
+            # 自定义条目用蓝色标记
+            is_custom = (afn in self.gdw_parser._custom_fn_map and fn in self.gdw_parser._custom_fn_map.get(afn, {}))
+            if is_custom:
+                blue_brush = QColor("#E3F2FD")
+                for item in (item_afn, item_afn_name, item_fn, item_fn_name):
+                    item.setBackground(blue_brush)
+            self.gdw_table.setItem(row, 0, item_afn)
+            self.gdw_table.setItem(row, 1, item_afn_name)
+            self.gdw_table.setItem(row, 2, item_fn)
+            self.gdw_table.setItem(row, 3, item_fn_name)
+        self.gdw_stats_label.setText(f"共 {len(data)} 条记录")
+
+    def _filter_gdw_table(self, text: str):
+        """根据搜索文本过滤国网AFN表格"""
+        keyword = text.strip().upper()
+        if not keyword:
+            self._load_gdw_map_data()
+            return
+        results = self.gdw_parser.search_afn_fn(keyword)
+        self.gdw_table.setRowCount(len(results))
+        for row, (afn, afn_name, fn, fn_name) in enumerate(results):
+            item_afn = QTableWidgetItem(f"{afn:02X}H")
+            item_afn_name = QTableWidgetItem(afn_name)
+            item_fn = QTableWidgetItem(f"F{fn}")
+            item_fn_name = QTableWidgetItem(fn_name)
+            is_custom = (afn in self.gdw_parser._custom_fn_map and fn in self.gdw_parser._custom_fn_map.get(afn, {}))
+            if is_custom:
+                blue_brush = QColor("#E3F2FD")
+                for item in (item_afn, item_afn_name, item_fn, item_fn_name):
+                    item.setBackground(blue_brush)
+            self.gdw_table.setItem(row, 0, item_afn)
+            self.gdw_table.setItem(row, 1, item_afn_name)
+            self.gdw_table.setItem(row, 2, item_fn)
+            self.gdw_table.setItem(row, 3, item_fn_name)
+        self.gdw_stats_label.setText(f"匹配 {len(results)} / {len(self._gdw_data)} 条记录")
+
+    def _add_custom_gdw_fn(self):
+        """弹出对话框添加自定义AFN+Fn"""
+        from PySide6.QtWidgets import QDialog, QFormLayout, QSpinBox, QLineEdit as QLE, QDialogButtonBox, QMessageBox
+        dialog = QDialog(self)
+        dialog.setWindowTitle("添加自定义AFN+Fn")
+        dialog.setMinimumWidth(300)
+        layout = QFormLayout(dialog)
+
+        afn_input = QSpinBox()
+        afn_input.setRange(0, 255)
+        afn_input.setPrefix("0x")
+        afn_input.setDisplayIntegerBase(16)
+        layout.addRow("AFN (十六进制):", afn_input)
+
+        fn_input = QSpinBox()
+        fn_input.setRange(1, 248)
+        layout.addRow("Fn:", fn_input)
+
+        name_input = QLE()
+        name_input.setPlaceholderText("输入功能名称")
+        layout.addRow("功能名称:", name_input)
+
+        afn_name_input = QLE()
+        afn_name_input.setPlaceholderText("可选：自定义AFN类别名称")
+        layout.addRow("AFN类别名称(可选):", afn_name_input)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addRow(buttons)
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            afn = afn_input.value()
+            fn = fn_input.value()
+            name = name_input.text().strip()
+            afn_name = afn_name_input.text().strip()
+            if not name:
+                QMessageBox.warning(self, "警告", "功能名称不能为空")
+                return
+            # Check if already exists as standard
+            if afn in self.gdw_parser.FN_MAP and fn in self.gdw_parser.FN_MAP.get(afn, {}):
+                QMessageBox.warning(self, "警告", f"AFN={afn:02X}H Fn=F{fn} 已在标准定义中存在")
+                return
+            # Add custom AFN name if provided
+            if afn_name:
+                self.gdw_parser.add_custom_afn(afn, afn_name)
+            # Add custom Fn
+            self.gdw_parser.add_custom_fn(afn, fn, name)
+            self._load_gdw_map_data()
+            self.gdw_search_input.clear()
+            QMessageBox.information(self, "成功", f"已添加自定义组合: AFN={afn:02X}H Fn=F{fn}")
+
+    def _delete_custom_gdw_fn(self):
+        """删除选中的自定义AFN+Fn"""
+        row = self.gdw_table.currentRow()
+        if row < 0:
+            QMessageBox.information(self, "提示", "请先选中要删除的自定义条目")
+            return
+        afn_text = self.gdw_table.item(row, 0).text().replace("H", "")
+        fn_text = self.gdw_table.item(row, 2).text()
+        try:
+            afn = int(afn_text, 16)
+            fn = int(fn_text.replace("F", ""))
+        except ValueError:
+            return
+        # Check if it's custom
+        is_custom = (afn in self.gdw_parser._custom_fn_map and fn in self.gdw_parser._custom_fn_map.get(afn, {}))
+        if not is_custom:
+            QMessageBox.information(self, "提示", "只能删除自定义添加的条目")
+            return
+        reply = QMessageBox.question(self, "确认删除", f"确定删除自定义组合 AFN={afn:02X}H Fn=F{fn}?",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            self.gdw_parser.remove_custom_fn(afn, fn)
+            self._load_gdw_map_data()
+            QMessageBox.information(self, "成功", "已删除自定义组合")
 
     def _create_di_lookup_content(self, layout):
         """创建南网协议DI查询页面内容"""
@@ -1373,7 +1707,7 @@ class MainWindow(QMainWindow):
                 def parse_to_table(self, data):
                     return self.hdlc_parser.parse_apdu_to_table(data)
             return APDUParser(self.hdlc_parser)
-        else:  # self.current_protocol == 5, DLT645-2007
+        elif self.current_protocol == 5:  # DLT645-2007
             class DLT645GuiParser:
                 def __init__(self, parser):
                     self.parser = parser
@@ -1418,6 +1752,8 @@ class MainWindow(QMainWindow):
 
                     return table
             return DLT645GuiParser(self.dlt645_parser)
+        elif self.current_protocol == 6:  # 国网协议
+            return self.gdw_parser
 
     def load_example(self, data: str):
         """加载示例数据"""
@@ -1695,8 +2031,8 @@ class MainWindow(QMainWindow):
                 # 调用parse_to_table生成表格数据
                 table_data = current_parser.parse_to_table(frame_bytes)
 
-                # 南网协议提取方向
-                if self.current_protocol == 0:
+                # 南网协议/国网协议提取方向
+                if self.current_protocol in (0, 6):
                     direction = self._extract_direction_from_table(table_data)
 
                 # 从表格数据生成摘要（取前3个字段作为摘要）
@@ -1736,9 +2072,9 @@ class MainWindow(QMainWindow):
             self.result_table.setItem(row, 1, QTableWidgetItem(hex_display))
             self.result_table.setItem(row, 2, QTableWidgetItem(str(len(frame_hex) // 2)))
 
-            # 方向：南网协议从控制域DIR位解析，其他协议暂无
+            # 方向：南网协议/国网协议从控制域DIR位解析，其他协议暂无
             direction = "-"
-            if self.current_protocol == 0:
+            if self.current_protocol in (0, 6):
                 direction = self._extract_direction_from_table(table_data)
             self.result_table.setItem(row, 3, QTableWidgetItem(direction))
 
@@ -1756,9 +2092,9 @@ class MainWindow(QMainWindow):
         self.update_stats(f"解析完成：成功 {success_count} 帧，失败 {fail_count} 帧，共 {len(frames)} 帧")
 
     def _extract_direction_from_table(self, table_data: list) -> str:
-        """从南网协议表格数据中提取传输方向"""
+        """从南网/国网协议表格数据中提取传输方向"""
         # table_data 格式: (field_name, raw_value, parsed_value, comment, byte_start, byte_end)
-        # 控制域子字段"传输方向"的 field_name 为"  传输方向"（带前缀空格）
+        # 控制域子字段"传输方向"的 field_name 为"  传输方向"或"  传输方向(DIR)"（带前缀空格）
         for item in table_data:
             field_name = item[0]
             parsed_val = item[2]
@@ -1806,6 +2142,29 @@ class MainWindow(QMainWindow):
                 summary_parts.append(f"SEQ:{seq_val}")
             return " | ".join(summary_parts) if summary_parts else "-"
 
+        elif self.current_protocol == 6:
+            # 国网协议：提取 AFN 名称、Fn 说明、传输方向
+            afn_name = None
+            fn_desc = None
+            dir_desc = None
+            for item in table_data:
+                field_name = item[0]
+                parsed_val = item[2]
+                comment = item[3]
+                if field_name == "应用功能码(AFN)":
+                    afn_name = comment if comment else parsed_val
+                elif field_name == "数据单元标识(DT)":
+                    fn_desc = comment if comment else parsed_val
+                elif "传输方向" in field_name:
+                    dir_desc = "下行" if str(parsed_val).strip() == "0" else "上行" if str(parsed_val).strip() == "1" else "-"
+            if dir_desc:
+                summary_parts.append(dir_desc)
+            if afn_name:
+                summary_parts.append(f"AFN:{afn_name}")
+            if fn_desc:
+                summary_parts.append(fn_desc)
+            return " | ".join(summary_parts) if summary_parts else "-"
+
         else:
             # 其他协议：取前几个非冗余字段
             for i, item in enumerate(table_data):
@@ -1822,8 +2181,8 @@ class MainWindow(QMainWindow):
         """根据协议提取对应格式的帧"""
         import re
 
-        if protocol_index == 0:
-            # 南网协议：68开头，16结束
+        if protocol_index in (0, 6):
+            # 南网协议 / 国网协议：68开头，16结束，FT1.2帧格式
             clean = re.sub(r'[^0-9A-Fa-f]', '', text).upper()
             return self._extract_68_frames(clean)
         elif protocol_index == 1:
