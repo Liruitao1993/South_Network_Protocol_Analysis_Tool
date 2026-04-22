@@ -78,6 +78,10 @@ class FrameGenWidget(QWidget):
         self.di_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.di_combo.completer().setCompletionMode(self.di_combo.completer().CompletionMode.PopupCompletion)
         self.di_combo.completer().setFilterMode(Qt.MatchFlag.MatchContains)
+        # 修复 completer 弹出列表黑色背景问题
+        self.di_combo.completer().popup().setStyleSheet(
+            "background-color: #ffffff; color: #000000; selection-background-color: #2196F3; selection-color: #ffffff;"
+        )
         self._populate_di_combo()
         self.di_combo.currentIndexChanged.connect(self._on_di_changed)
         di_layout.addWidget(self.di_combo)

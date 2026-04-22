@@ -943,7 +943,17 @@ class MainWindow(QMainWindow):
                 selection-color: #000000;
             }
             QComboBox QListView::item {
+                background-color: #ffffff;
+                color: #000000;
                 padding: 3px 6px;
+            }
+            QComboBox QListView::item:selected {
+                background-color: #80b8e8;
+                color: #000000;
+            }
+            QComboBox QListView::item:hover {
+                background-color: #e3f2fd;
+                color: #000000;
             }
 
             /* ========== 复选框 / 单选框 ========== */
