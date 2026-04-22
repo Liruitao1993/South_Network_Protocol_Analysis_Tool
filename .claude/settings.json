@@ -10,7 +10,8 @@
       "Bash(awk '/E8|7403|0xE8|0x74/{print NR\": \"$0}' e:/python/南网解析工具/protocol_parser.py)",
       "Bash(awk 'NR>=7600 && NR<=7750 && /^def /{print NR\": \"$0}' e:/python/南网解析工具/protocol_parser.py)",
       "Bash(awk 'NR>=7720 && NR<=7800 && /^def /{print NR\": \"$0}' e:/python/南网解析工具/protocol_parser.py)",
-      "Bash(awk 'NR>=7700 && NR<=7800 && /^def /{print NR\": \"$0}' e:/python/南网解析工具/protocol_parser.py)"
+      "Bash(awk 'NR>=7700 && NR<=7800 && /^def /{print NR\": \"$0}' e:/python/南网解析工具/protocol_parser.py)",
+      "Bash(git -C \"e:/python/南网解析工具\" log --oneline -15)"
     ]
   }
 }
