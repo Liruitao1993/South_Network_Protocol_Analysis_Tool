@@ -623,7 +623,53 @@ class FrameGenWidget(QWidget):
         else:
             self._field_widgets[name] = {"widget": None}
 
-        if ftype in ("uint8", "uint16", "uint32"):
+        if "sub_fields" in field:
+            sub_container = QWidget()
+            sub_layout = QHBoxLayout(sub_container)
+            sub_layout.setContentsMargins(0, 0, 0, 0)
+            sub_layout.setSpacing(4)
+            sub_widgets: Dict[str, Any] = {}
+            for sub in field["sub_fields"]:
+                sub_name = sub["name"]
+                sub_type = sub.get("type", "bytes")
+                sub_default = sub.get("default")
+                sub_desc = sub.get("description", "")
+                sub_label = QLabel(sub_name)
+                sub_label.setStyleSheet("font-size: 11px; color: #555;")
+                sub_label.setToolTip(sub_desc)
+                sub_layout.addWidget(sub_label)
+                if sub_type == "enum":
+                    combo = QComboBox()
+                    for val, text in sub.get("enum_map", {}).items():
+                        combo.addItem(f"{text} (0x{val:02X})", val)
+                    if sub_default is not None:
+                        idx = combo.findData(sub_default)
+                        if idx >= 0:
+                            combo.setCurrentIndex(idx)
+                    combo.currentIndexChanged.connect(self._schedule_realtime_update)
+                    sub_layout.addWidget(combo)
+                    sub_widgets[sub_name] = combo
+                elif sub_type in ("uint8", "uint16", "uint32"):
+                    edit = QLineEdit()
+                    if sub_default is not None:
+                        edit.setText(str(sub_default))
+                    edit.setFixedWidth(50)
+                    edit.textChanged.connect(self._schedule_realtime_update)
+                    sub_layout.addWidget(edit)
+                    sub_widgets[sub_name] = edit
+                elif sub_type == "bytes":
+                    edit = QLineEdit()
+                    if sub_default is not None:
+                        edit.setText(str(sub_default))
+                    edit.textChanged.connect(self._schedule_realtime_update)
+                    sub_layout.addWidget(edit)
+                    sub_widgets[sub_name] = edit
+            sub_layout.addStretch()
+            layout.addWidget(sub_container)
+            self._field_widgets[name]["widget"] = sub_container
+            self._field_widgets[name]["sub_widgets"] = sub_widgets
+
+        elif ftype in ("uint8", "uint16", "uint32"):
             edit = QLineEdit()
             if default is not None:
                 edit.setText(str(default))
@@ -788,7 +834,49 @@ class FrameGenWidget(QWidget):
                 widget = widget_info["widget"]
                 ftype = field["type"]
 
-                if ftype in ("uint8", "uint16", "uint32"):
+                if "sub_widgets" in widget_info:
+                    # 收集子字段值
+                    for sub_name, sub_widget in widget_info["sub_widgets"].items():
+                        sub_field = next((s for s in field.get("sub_fields", []) if s["name"] == sub_name), None)
+                        if not sub_field:
+                            continue
+                        sub_type = sub_field.get("type", "bytes")
+                        if sub_type == "enum":
+                            values[sub_name] = sub_widget.currentData()
+                        elif sub_type in ("uint8", "uint16", "uint32"):
+                            text = sub_widget.text().strip()
+                            values[sub_name] = int(text, 0) if text else 0
+                        elif sub_type == "bytes":
+                            values[sub_name] = sub_widget.text().strip()
+                    # 计算父字段值
+                    if ftype in ("uint8", "enum"):
+                        parent_val = 0
+                        for sub in field.get("sub_fields", []):
+                            sub_name = sub["name"]
+                            sub_val = values.get(sub_name, sub.get("default", 0))
+                            bit_width = sub.get("bit_width", 1)
+                            bit_offset = sub.get("bit_offset", 0)
+                            mask = (1 << bit_width) - 1
+                            parent_val |= (int(sub_val) & mask) << bit_offset
+                        values[name] = parent_val
+                    elif ftype == "bytes":
+                        parent_val = ""
+                        for sub in field.get("sub_fields", []):
+                            cond = sub.get("condition")
+                            if cond:
+                                ref_val = values.get(cond["field"])
+                                if ref_val != cond["value"]:
+                                    continue
+                            sub_name = sub["name"]
+                            sub_val = values.get(sub_name, sub.get("default", ""))
+                            sub_type = sub.get("type", "bytes")
+                            if sub_type in ("uint8", "enum"):
+                                parent_val += f"{int(sub_val):02X}"
+                            elif sub_type == "bytes":
+                                parent_val += str(sub_val)
+                        values[name] = parent_val
+
+                elif ftype in ("uint8", "uint16", "uint32"):
                     text = widget.text().strip()
                     values[name] = int(text, 0) if text else 0
                 elif ftype == "bytes":

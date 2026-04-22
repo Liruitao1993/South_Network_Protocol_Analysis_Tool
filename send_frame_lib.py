@@ -266,6 +266,11 @@ class ProtocolFrameGenerator:
                     raise ValueError(f"缺少必填字段: {name}")
                 continue
             values[name] = val
+            # 同时收集子字段值（用于sub_fields合并计算）
+            for sub in field.get("sub_fields", []):
+                sub_name = sub["name"]
+                if sub_name in field_values:
+                    values[sub_name] = field_values[sub_name]
 
         # 第二遍：处理 count_field 引用（列表字段需自动计算数量并回填）
         for field in fields:
@@ -275,7 +280,44 @@ class ProtocolFrameGenerator:
                 items = values.get(name, [])
                 values[ref_name] = len(items) if isinstance(items, list) else 0
 
-        # 第三遍：处理 length_field 引用（变长字段需提前计算长度并回填）
+        # 第三遍：处理 sub_fields（子字段合并为父字段值，需在length_field之前）
+        for field in fields:
+            name = field["name"]
+            if "sub_fields" in field:
+                parent_type = field["type"]
+                if parent_type in ("uint8", "enum", "uint16", "uint32"):
+                    parent_val = 0
+                    for sub in field["sub_fields"]:
+                        if not self._check_condition(sub, values):
+                            continue
+                        sub_name = sub["name"]
+                        sub_val = values.get(sub_name, sub.get("default", 0))
+                        bit_width = sub.get("bit_width", 1)
+                        bit_offset = sub.get("bit_offset", 0)
+                        mask = (1 << bit_width) - 1
+                        parent_val |= (int(sub_val) & mask) << bit_offset
+                    values[name] = parent_val
+                elif parent_type == "bytes":
+                    parent_val = ""
+                    for sub in field["sub_fields"]:
+                        if not self._check_condition(sub, values):
+                            continue
+                        sub_name = sub["name"]
+                        sub_val = values.get(sub_name, sub.get("default", ""))
+                        sub_type = sub.get("type", "bytes")
+                        if sub_type in ("uint8", "enum"):
+                            parent_val += f"{int(sub_val):02X}"
+                        elif sub_type == "bytes":
+                            parent_val += str(sub_val)
+                        elif sub_type in ("uint16", "uint32"):
+                            endian = sub.get("endian", "big")
+                            fmt = ">H" if endian == "big" else "<H"
+                            if sub_type == "uint32":
+                                fmt = ">I" if endian == "big" else "<I"
+                            parent_val += struct.pack(fmt, int(sub_val)).hex()
+                    values[name] = parent_val
+
+        # 第四遍：处理 length_field 引用（变长字段需提前计算长度并回填）
         for field in fields:
             name = field["name"]
             if "length_field" in field:
@@ -283,9 +325,10 @@ class ProtocolFrameGenerator:
                 val = values.get(name)
                 if val is not None:
                     raw_len = len(self._to_raw_bytes(field, val))
-                    values[ref_name] = raw_len
+                    offset = field.get("length_offset", 0)
+                    values[ref_name] = raw_len + offset
 
-        # 第四遍：按顺序打包所有字段
+        # 第五遍：按顺序打包所有字段
         result = b""
         for field in fields:
             name = field["name"]
@@ -322,6 +365,21 @@ class ProtocolFrameGenerator:
 
     # ------------------- 内部打包工具方法 -------------------
 
+    def _check_condition(self, field: Dict[str, Any], values: Dict[str, Any]) -> bool:
+        """检查字段条件是否满足（用于条件显示/打包的字段）"""
+        cond = field.get("condition")
+        if not cond:
+            return True
+        ref_name = cond.get("field")
+        ref_val = values.get(ref_name)
+        target_val = cond.get("value")
+        op = cond.get("eval", "eq")
+        if op == "eq":
+            return ref_val == target_val
+        elif op == "ne":
+            return ref_val != target_val
+        return True
+
     def _pack_field(self, field: Dict[str, Any], value: Any) -> bytes:
         """根据字段Schema将单个值打包为字节"""
         if value is None:
@@ -333,12 +391,12 @@ class ProtocolFrameGenerator:
             return struct.pack("B", int(value))
 
         elif ftype == "uint16":
-            endian = field.get("endian", "big")
+            endian = field.get("endian", "little")
             fmt = ">H" if endian == "big" else "<H"
             return struct.pack(fmt, int(value))
 
         elif ftype == "uint32":
-            endian = field.get("endian", "big")
+            endian = field.get("endian", "little")
             fmt = ">I" if endian == "big" else "<I"
             return struct.pack(fmt, int(value))
 

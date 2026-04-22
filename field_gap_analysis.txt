@@ -1,0 +1,533 @@
+=== Field Definition Gap Analysis ===
+
+DIs in schema: 88
+DIs found in docs: 121
+DIs in docs but not schema: 37
+DIs in schema but not docs: 4
+
+=== Per-DI Analysis ===
+
+E8 00 02 03 查询未完成任务数
+  Status: OK - No data in both
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 0
+
+E8 00 02 06 查询剩余可分配任务数
+  Status: OK - No data in both
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 0
+
+E8 00 03 01 查询厂商代码和版本信息
+  Status: OK - No data in both
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 0
+
+E8 00 03 02 查询本地通信模块运行模式信息
+  Status: OK - No data in both
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 0
+
+E8 00 03 03 查询主节点地址
+  Status: OK - No data in both
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 0
+
+E8 00 03 05 查询从节点数量
+  Status: OK - No data in both
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 0
+
+E8 00 03 07 查询从节点主动注册进度
+  Status: OK - No data in both
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 0
+
+E8 00 03 09 查询映射表从节点数量
+  Status: OK - No data in both
+  Doc has table: True, Doc says no data: True
+  Schema fields count: 0
+
+E8 00 03 0B 查询任务建议超时时间
+  Status: OK - No data in both
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 0
+
+E8 00 03 6A 查询最大网络规模
+  Status: OK - No data in both
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 0
+
+E8 00 03 6B 查询最大网络级数
+  Status: OK - No data in both
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 0
+
+E8 00 03 6C 查询允许/禁止拒绝从节点信息上报
+  Status: OK - No data in both
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 0
+
+E8 00 03 6D 查询无线参数
+  Status: OK - No data in both
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 0
+
+E8 00 03 6F 查询主节点运行信息
+  Status: OK - No data in both
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 0
+
+E8 00 03 72 查询踢出后不允许入网时间
+  Status: OK - No data in both
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 0
+
+E8 00 03 90 查询宽带载波频段
+  Status: OK - No data in both
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 0
+
+E8 00 03 91 查询多网络信息
+  Status: OK - No data in both
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 0
+
+E8 00 03 93 查询白名单生效信息
+  Status: EXTRA_FIELDS - Doc says no data but schema has fields
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 2
+    - 白名单开关 (enum, len=1)
+    - 白名单生效范围 (enum, len=1)
+
+E8 00 03 95 查询并发数
+  Status: OK - No data in both
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 0
+
+E8 00 03 97 查询台区组网成功率
+  Status: OK - No data in both
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 0
+
+E8 00 07 03 查询文件信息
+  Status: OK - No data in both
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 0
+
+E8 00 07 04 查询文件处理进度
+  Status: OK - No data in both
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 0
+
+E8 00 08 03 查询采集任务号
+  Status: NO_DOC - No documentation found
+  Schema fields count: 0
+
+E8 00 F0 DF 查询宽带应用省份
+  Status: NO_DOC - No documentation found
+  Schema fields count: 1
+    - 宽带应用省份 (enum, len=1)
+
+E8 01 00 01 确认
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 1
+    - 等待时间 (uint16, len=2)
+
+E8 01 00 02 否认
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 1
+    - 错误状态字 (uint8, len=1)
+
+E8 02 01 01 复位硬件
+  Status: OK - No data in both
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 0
+
+E8 02 01 02 初始化档案
+  Status: OK - No data in both
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 0
+
+E8 02 01 03 初始化任务
+  Status: OK - No data in both
+  Doc has table: True, Doc says no data: True
+  Schema fields count: 0
+
+E8 02 02 01 添加任务
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 5
+    - 任务ID (uint16, len=2)
+    - 任务模式字 (uint8, len=1)
+    - 超时时间 (uint16, len=2)
+    - 报文长度 (uint8, len=1)
+    - 报文内容 (bytes, len=?)
+
+E8 02 02 02 删除任务
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 1
+    - 任务ID (uint16, len=2)
+
+E8 02 02 07 添加多播任务
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 7
+    - 任务ID (uint16, len=2)
+    - 任务模式字 (uint8, len=1)
+    - 从节点数量 (uint16, len=2)
+    - 从节点地址列表 (list, len=?)
+    - 超时时间 (uint16, len=2)
+    - 报文长度 (uint8, len=1)
+    - 报文内容 (bytes, len=?)
+
+E8 02 02 08 启动任务
+  Status: EXTRA_FIELDS - Doc says no data but schema has fields
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 1
+    - 任务ID (uint16, len=2)
+
+E8 02 02 09 暂停任务
+  Status: EXTRA_FIELDS - Doc says no data but schema has fields
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 1
+    - 任务ID (uint16, len=2)
+
+E8 02 04 01 设置主节点地址
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 1
+    - 主节点地址 (bytes, len=6)
+
+E8 02 04 02 添加从节点
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 2
+    - 从节点数量 (uint8, len=1)
+    - 从节点地址列表 (list, len=?)
+
+E8 02 04 03 删除从节点
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 2
+    - 从节点数量 (uint8, len=1)
+    - 从节点地址列表 (list, len=?)
+
+E8 02 04 04 允许/禁止从节点上报
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 1
+    - 事件上报状态标志 (enum, len=1)
+
+E8 02 04 05 激活从节点主动注册
+  Status: OK - No data in both
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 0
+
+E8 02 04 06 终止从节点主动注册
+  Status: OK - No data in both
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 0
+
+E8 02 04 07 添加从节点通信地址映射表
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 2
+    - 本次添加从节点数量 (uint8, len=1)
+    - 映射表 (list, len=?)
+
+E8 02 04 6A 设置最大网络规模
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 1
+    - 最大网络规模 (uint16, len=2)
+
+E8 02 04 6B 设置最大网络级数
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 1
+    - 最大网络级数 (uint16, len=2)
+
+E8 02 04 6C 允许/禁止拒绝从节点信息上报
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 1
+    - 上报状态 (uint8, len=1)
+
+E8 02 04 6D 设置无线参数
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 1
+    - 数据内容 (bytes, len=?)
+
+E8 02 04 72 配置踢出后不允许入网时间
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 1
+    - 禁止入网时间 (uint16, len=2)
+
+E8 02 04 74 配置运行参数
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 1
+    - 数据内容 (bytes, len=?)
+
+E8 02 04 80 启动台区识别
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 1
+    - 台区识别模式 (uint16, len=2)
+
+E8 02 04 81 停止台区识别
+  Status: OK - No data in both
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 0
+
+E8 02 04 90 设置宽带载波频段
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 1
+    - 载波频段 (uint8, len=1)
+
+E8 02 04 93 允许/禁止白名单功能
+  Status: NO_DOC - No documentation found
+  Schema fields count: 2
+    - enable (uint8, len=1)
+    - 地址 (bytes, len=6)
+
+E8 02 04 F0 重启节点
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 1
+    - 地址 (bytes, len=6)
+
+E8 02 07 01 启动文件传输
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 7
+    - 文件类型 (uint8, len=1)
+    - 文件ID (uint8, len=1)
+    - 目的地址 (bytes, len=6)
+    - 总段数 (uint16, len=2)
+    - 文件大小 (uint32, len=4)
+    - 文件校验和 (uint16, len=2)
+    - 超时时间 (uint8, len=1)
+
+E8 02 07 02 传输文件内容
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 4
+    - 段序号 (uint16, len=2)
+    - 段长度 (uint16, len=2)
+    - 段数据 (bytes, len=?)
+    - 段校验和 (uint16, len=2)
+
+E8 02 10 14 触发指定节点网络维护
+  Status: MISSING_FIELDS - Doc has table but schema has no fields
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 0
+
+E8 02 10 16 恢复通信速率和信道
+  Status: OK - No data in both
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 0
+
+E8 03 02 04 查询未完成任务列表
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 2
+    - 起始序号 (uint16, len=2)
+    - 查询数量 (uint8, len=1)
+
+E8 03 02 05 查询未完成任务详细信息
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 1
+    - 任务ID (uint16, len=2)
+
+E8 03 03 04 查询通信延时时长
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 2
+    - 目的地址 (bytes, len=6)
+    - 报文长度 (uint16, len=2)
+
+E8 03 03 06 查询从节点信息
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 1
+    - 从节点序号 (uint16, len=2)
+
+E8 03 03 08 查询从节点的父节点
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 1
+    - 从节点序号 (uint16, len=2)
+
+E8 03 03 0A 查询从节点通信地址映射表
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 2
+    - 起始序号 (uint16, len=2)
+    - 查询数量 (uint8, len=1)
+
+E8 03 03 0C 查询从节点相位信息
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 1
+    - 数据内容 (bytes, len=?)
+
+E8 03 03 0D 批量查询从节点相位信息
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 2
+    - 起始序号 (uint16, len=2)
+    - 查询数量 (uint8, len=1)
+
+E8 03 03 0E 查询表档案的台区识别结果
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 2
+    - 起始序号 (uint16, len=2)
+    - 查询数量 (uint8, len=1)
+
+E8 03 03 0F 查询多余节点的台区识别结果
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 2
+    - 起始序号 (uint16, len=2)
+    - 查询数量 (uint8, len=1)
+
+E8 03 03 10 查询台区识别状态
+  Status: OK - No data in both
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 0
+
+E8 03 03 12 批量查询厂商代码和版本信息
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 2
+    - 起始序号 (uint16, len=2)
+    - 查询数量 (uint8, len=1)
+
+E8 03 03 13 查询模块资产信息
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 3
+    - 节点地址 (bytes, len=6)
+    - 信息元素数量 (uint8, len=1)
+    - 信息元素ID列表 (list, len=?)
+
+E8 03 03 14 批量查询模块资产信息
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 1
+    - 字段_0_2 (uint16, len=2)
+
+E8 03 03 20 查询当前工作频段
+  Status: NO_DOC - No documentation found
+  Schema fields count: 0
+
+E8 03 03 61 查询从节点实时信息
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 2
+    - 地址 (bytes, len=6)
+    - 从节点地址 (bytes, len=6)
+
+E8 03 03 64 查询设备在线状态
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 2
+    - req_type (uint8, len=1)
+    - 地址 (bytes, len=6)
+
+E8 03 03 65 查询网络拓扑信息
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 1
+    - 地址 (bytes, len=6)
+
+E8 03 03 66 查询节点运行时长
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 1
+    - 从节点地址 (bytes, len=6)
+
+E8 03 03 6E 查询指定从节点信息
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 2
+    - 地址 (bytes, len=6)
+    - 从节点地址 (bytes, len=6)
+
+E8 03 03 70 查询节点自检结果
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 1
+    - 地址 (bytes, len=6)
+
+E8 03 03 74 查询运行参数信息
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 2
+    - 数量 (uint8, len=1)
+    - 地址 (bytes, len=6)
+
+E8 03 03 96 查询设备类型
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 1
+    - 节点地址 (bytes, len=6)
+
+E8 03 03 98 查询节点信道信息
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 1
+    - 节点地址 (bytes, len=6)
+
+E8 03 06 02 请求交采数据
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 1
+    - data_type (uint8, len=1)
+
+E8 03 07 05 查询文件传输失败节点
+  Status: HAS_FIELDS - Need verification
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 2
+    - 起始序号 (uint16, len=2)
+    - 查询数量 (uint8, len=1)
+
+E8 03 10 10 查询从节点邻居表
+  Status: MISSING_FIELDS - Doc has table but schema has no fields
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 0
+
+E8 03 10 11 查询主节点状态
+  Status: OK - No data in both
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 0
+
+E8 03 10 12 读取入网节点信息
+  Status: MISSING_FIELDS - Doc has table but schema has no fields
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 0
+
+E8 03 10 13 读取未入网节点信息
+  Status: MISSING_FIELDS - Doc has table but schema has no fields
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 0
+
+E8 03 10 15 请求切换通信速率和信道
+  Status: MISSING_FIELDS - Doc has table but schema has no fields
+  Doc has table: True, Doc says no data: False
+  Schema fields count: 0
+
+E8 06 06 01 请求集中器时间
+  Status: OK - No data in both
+  Doc has table: False, Doc says no data: True
+  Schema fields count: 0
+
