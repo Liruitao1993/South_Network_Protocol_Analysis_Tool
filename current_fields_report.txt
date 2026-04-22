@@ -1,0 +1,176 @@
+E8 00 02 03 查询未完成任务数: NO FIELDS (no data unit)
+E8 00 02 06 查询剩余可分配任务数: NO FIELDS (no data unit)
+E8 00 03 01 查询厂商代码和版本信息: NO FIELDS (no data unit)
+E8 00 03 02 查询本地通信模块运行模式信息: NO FIELDS (no data unit)
+E8 00 03 03 查询主节点地址: NO FIELDS (no data unit)
+E8 00 03 05 查询从节点数量: NO FIELDS (no data unit)
+E8 00 03 07 查询从节点主动注册进度: NO FIELDS (no data unit)
+E8 00 03 09 查询映射表从节点数量: NO FIELDS (no data unit)
+E8 00 03 0B 查询任务建议超时时间: NO FIELDS (no data unit)
+E8 00 03 6A 查询最大网络规模: NO FIELDS (no data unit)
+E8 00 03 6B 查询最大网络级数: NO FIELDS (no data unit)
+E8 00 03 6C 查询允许/禁止拒绝从节点信息上报: NO FIELDS (no data unit)
+E8 00 03 6D 查询无线参数: NO FIELDS (no data unit)
+E8 00 03 6F 查询主节点运行信息: NO FIELDS (no data unit)
+E8 00 03 72 查询踢出后不允许入网时间: NO FIELDS (no data unit)
+E8 00 03 90 查询宽带载波频段: NO FIELDS (no data unit)
+E8 00 03 91 查询多网络信息: NO FIELDS (no data unit)
+E8 00 03 93 查询白名单生效信息: 2 fields
+    {'name': '白名单开关', 'type': 'enum', 'length': 1, 'required': True, 'enum_map': {0: '关闭', 1: '打开'}, 'default': 1, 'description': '0=关闭，1=打开'}
+    {'name': '白名单生效范围', 'type': 'enum', 'length': 1, 'required': True, 'enum_map': {0: '表档案', 1: '厂家自定义', 2: '表档案和厂家自定义的合集'}, 'default': 0, 'description': '0=表档案，1=厂家自定义，2=合集'}
+E8 00 03 95 查询并发数: NO FIELDS (no data unit)
+E8 00 03 97 查询台区组网成功率: NO FIELDS (no data unit)
+E8 00 07 03 查询文件信息: NO FIELDS (no data unit)
+E8 00 07 04 查询文件处理进度: NO FIELDS (no data unit)
+E8 00 08 03 查询采集任务号: NO FIELDS (no data unit)
+E8 00 F0 DF 查询宽带应用省份: 1 fields
+    {'name': '宽带应用省份', 'type': 'enum', 'length': 1, 'required': True, 'enum_map': {1: '北京', 2: '天津', 3: '河北', 4: '山西', 5: '内蒙古', 6: '辽宁', 7: '吉林', 8: '黑龙江', 9: '上海', 10: '江苏', 11: '浙江', 12: '安徽', 13: '福建', 14: '江西', 15: '山东', 16: '河南', 17: '湖北', 18: '湖南', 19: '广东', 20: '广西', 21: '海南', 22: '重庆', 23: '四川', 24: '贵州', 25: '云南', 26: '西藏', 27: '陕西', 28: '甘肃', 29: '青海', 30: '宁夏', 31: '新疆', 32: '台湾', 33: '香港', 34: '澳门'}, 'default': 19, 'description': '省份代码（如0x13=广东）'}
+E8 01 00 01 确认: 1 fields
+    {'name': '等待时间', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'big', 'default': 0, 'description': '等待确认时间（秒）'}
+E8 01 00 02 否认: 1 fields
+    {'name': '错误状态字', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': '错误状态代码'}
+E8 02 01 01 复位硬件: NO FIELDS (no data unit)
+E8 02 01 02 初始化档案: NO FIELDS (no data unit)
+E8 02 01 03 初始化任务: NO FIELDS (no data unit)
+E8 02 02 01 添加任务: 5 fields
+    {'name': '任务ID', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '任务标识号'}
+    {'name': '任务模式字', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': 'D7=响应标识,D6=转发标识,D2~0=优先级'}
+    {'name': '超时时间', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 30, 'description': '任务超时时间（秒）'}
+    {'name': '报文长度', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': '报文内容长度（字节）'}
+    {'name': '报文内容', 'type': 'bytes', 'required': False, 'default': '', 'description': '报文内容（hex字符串）'}
+E8 02 02 02 删除任务: 1 fields
+    {'name': '任务ID', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '要删除的任务标识号'}
+E8 02 02 07 添加多播任务: 7 fields
+    {'name': '任务ID', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '任务标识号'}
+    {'name': '任务模式字', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': 'D7=响应标识,D6=转发标识,D2~0=优先级'}
+    {'name': '从节点数量', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '0xFFFF=全部从节点'}
+    {'name': '从节点地址列表', 'type': 'list', 'count_field': '从节点数量', 'required': False, 'item_fields': [{'name': '从节点地址', 'type': 'bytes', 'length': 6, 'reverse': True, 'description': '6字节地址'}], 'description': '从节点地址列表（数量由上一字段决定）'}
+    {'name': '超时时间', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 30, 'description': '任务超时时间（秒）'}
+    {'name': '报文长度', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': '报文内容长度'}
+    {'name': '报文内容', 'type': 'bytes', 'required': False, 'default': '', 'description': '报文内容（hex字符串）'}
+E8 02 02 08 启动任务: 1 fields
+    {'name': '任务ID', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '要启动的任务标识号'}
+E8 02 02 09 暂停任务: 1 fields
+    {'name': '任务ID', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '要暂停的任务标识号'}
+E8 02 04 01 设置主节点地址: 1 fields
+    {'name': '主节点地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True, 'default': '000000000000', 'description': '6字节地址，低字节在前存储'}
+E8 02 04 02 添加从节点: 2 fields
+    {'name': '从节点数量', 'type': 'uint8', 'length': 1, 'required': True, 'default': 1, 'description': '要添加的从节点数量（自动计算，无需手动填写）'}
+    {'name': '从节点地址列表', 'type': 'list', 'count_field': '从节点数量', 'required': True, 'item_fields': [{'name': '从节点地址', 'type': 'bytes', 'length': 6, 'reverse': True, 'description': '6字节地址，低字节在前存储'}], 'description': '从节点地址列表，数量由上一字段决定'}
+E8 02 04 03 删除从节点: 2 fields
+    {'name': '从节点数量', 'type': 'uint8', 'length': 1, 'required': True, 'default': 1, 'description': '要删除的从节点数量（自动计算，无需手动填写）'}
+    {'name': '从节点地址列表', 'type': 'list', 'count_field': '从节点数量', 'required': True, 'item_fields': [{'name': '从节点地址', 'type': 'bytes', 'length': 6, 'reverse': True, 'description': '6字节地址，低字节在前存储'}], 'description': '从节点地址列表，数量由上一字段决定'}
+E8 02 04 04 允许/禁止从节点上报: 1 fields
+    {'name': '事件上报状态标志', 'type': 'enum', 'length': 1, 'required': True, 'enum_map': {0: '禁止上报', 1: '允许上报'}, 'default': 1, 'description': '0x00=禁止上报，0x01=允许上报'}
+E8 02 04 05 激活从节点主动注册: NO FIELDS (no data unit)
+E8 02 04 06 终止从节点主动注册: NO FIELDS (no data unit)
+E8 02 04 07 添加从节点通信地址映射表: 2 fields
+    {'name': '本次添加从节点数量', 'type': 'uint8', 'length': 1, 'required': True, 'default': 1, 'description': '本次添加的映射记录数量（自动计算，无需手动填写）'}
+    {'name': '映射表', 'type': 'list', 'count_field': '本次添加从节点数量', 'required': True, 'item_fields': [{'name': '从节点通信地址', 'type': 'bytes', 'length': 6, 'reverse': True, 'description': '6字节通信地址，低字节在前存储'}, {'name': '从节点表计地址', 'type': 'bytes', 'length': 12, 'reverse': True, 'description': '12字节表计地址，低字节在前存储'}], 'description': '映射表记录列表'}
+E8 02 04 6A 设置最大网络规模: 1 fields
+    {'name': '最大网络规模', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 1000, 'description': '网络最大节点数量'}
+E8 02 04 6B 设置最大网络级数: 1 fields
+    {'name': '最大网络级数', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 10, 'description': '网络最大层级数'}
+E8 02 04 6C 允许/禁止拒绝从节点信息上报: 1 fields
+    {'name': '上报状态', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': '0=禁止,1=允许拒绝上报'}
+E8 02 04 6D 设置无线参数: 1 fields
+    {'name': '数据内容', 'type': 'bytes', 'required': False, 'default': '', 'description': '无线参数数据（hex字符串）'}
+E8 02 04 72 配置踢出后不允许入网时间: 1 fields
+    {'name': '禁止入网时间', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '踢出后禁止入网时间（分钟）'}
+E8 02 04 74 配置运行参数: 1 fields
+    {'name': '数据内容', 'type': 'bytes', 'required': False, 'default': '', 'description': '运行参数数据（hex字符串）'}
+E8 02 04 80 启动台区识别: 1 fields
+    {'name': '台区识别模式', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '台区识别工作模式'}
+E8 02 04 81 停止台区识别: NO FIELDS (no data unit)
+E8 02 04 90 设置宽带载波频段: 1 fields
+    {'name': '载波频段', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': '宽带载波频段代码'}
+E8 02 04 93 允许/禁止白名单功能: 2 fields
+    {'name': 'enable', 'type': 'uint8', 'length': 1, 'required': True}
+    {'name': '地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True}
+E8 02 04 F0 重启节点: 1 fields
+    {'name': '地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True}
+E8 02 07 01 启动文件传输: 7 fields
+    {'name': '文件类型', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': '文件类型代码（如0x00=固件升级）'}
+    {'name': '文件ID', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': '文件标识号'}
+    {'name': '目的地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True, 'default': '999999999999', 'description': '6字节目的地址，低字节在前存储'}
+    {'name': '总段数', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'big', 'default': 0, 'description': '文件总分段数量'}
+    {'name': '文件大小', 'type': 'uint32', 'length': 4, 'required': True, 'endian': 'big', 'default': 0, 'description': '文件总大小（字节）'}
+    {'name': '文件校验和', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'big', 'default': 0, 'description': '文件总校验和（如CRC-16）'}
+    {'name': '超时时间', 'type': 'uint8', 'length': 1, 'required': True, 'default': 30, 'description': '单段传输超时时间（秒）'}
+E8 02 07 02 传输文件内容: 4 fields
+    {'name': '段序号', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'big', 'default': 0, 'description': '当前传输段序号（从0开始）'}
+    {'name': '段长度', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'big', 'default': 0, 'description': '本段数据长度（字节）'}
+    {'name': '段数据', 'type': 'bytes', 'length_field': '段长度', 'required': True, 'default': '', 'description': '段原始数据（hex字符串输入）'}
+    {'name': '段校验和', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'big', 'default': 0, 'description': '本段数据校验和'}
+E8 02 10 14 触发指定节点网络维护: NO FIELDS (no data unit)
+E8 02 10 16 恢复通信速率和信道: NO FIELDS (no data unit)
+E8 03 02 04 查询未完成任务列表: 2 fields
+    {'name': '起始序号', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'big', 'default': 0, 'description': '查询起始序号'}
+    {'name': '查询数量', 'type': 'uint8', 'length': 1, 'required': True, 'default': 1, 'description': '查询任务数量'}
+E8 03 02 05 查询未完成任务详细信息: 1 fields
+    {'name': '任务ID', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '要查询的任务标识号'}
+E8 03 03 04 查询通信延时时长: 2 fields
+    {'name': '目的地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True, 'default': '000000000000', 'description': '6字节目的地址，低字节在前存储'}
+    {'name': '报文长度', 'type': 'uint16', 'length': 2, 'endian': 'little', 'optional': True, 'default': 0, 'description': 'PLUZ扩展字段，可选，报文长度（小端序）'}
+E8 03 03 06 查询从节点信息: 1 fields
+    {'name': '从节点序号', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'big', 'default': 0, 'description': '从节点序号'}
+E8 03 03 08 查询从节点的父节点: 1 fields
+    {'name': '从节点序号', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'big', 'default': 0, 'description': '从节点序号'}
+E8 03 03 0A 查询从节点通信地址映射表: 2 fields
+    {'name': '起始序号', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'big', 'default': 0, 'description': '查询起始序号'}
+    {'name': '查询数量', 'type': 'uint8', 'length': 1, 'required': True, 'default': 1, 'description': '查询记录数量'}
+E8 03 03 0C 查询从节点相位信息: 1 fields
+    {'name': '数据内容', 'type': 'bytes', 'required': False, 'default': '', 'description': '查询从节点相位信息的自定义数据内容（hex字符串）'}
+E8 03 03 0D 批量查询从节点相位信息: 2 fields
+    {'name': '起始序号', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'big', 'default': 0, 'description': '查询起始序号'}
+    {'name': '查询数量', 'type': 'uint8', 'length': 1, 'required': True, 'default': 1, 'description': '查询节点数量'}
+E8 03 03 0E 查询表档案的台区识别结果: 2 fields
+    {'name': '起始序号', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'big', 'default': 0, 'description': '查询起始序号'}
+    {'name': '查询数量', 'type': 'uint8', 'length': 1, 'required': True, 'default': 1, 'description': '查询数量'}
+E8 03 03 0F 查询多余节点的台区识别结果: 2 fields
+    {'name': '起始序号', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'big', 'default': 0, 'description': '查询起始序号'}
+    {'name': '查询数量', 'type': 'uint8', 'length': 1, 'required': True, 'default': 1, 'description': '查询数量'}
+E8 03 03 10 查询台区识别状态: NO FIELDS (no data unit)
+E8 03 03 12 批量查询厂商代码和版本信息: 2 fields
+    {'name': '起始序号', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'big', 'default': 0, 'description': '查询起始序号'}
+    {'name': '查询数量', 'type': 'uint8', 'length': 1, 'required': True, 'default': 1, 'description': '查询数量'}
+E8 03 03 13 查询模块资产信息: 3 fields
+    {'name': '节点地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True, 'default': '000000000000', 'description': '6字节节点地址'}
+    {'name': '信息元素数量', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': '请求的信息元素数量'}
+    {'name': '信息元素ID列表', 'type': 'list', 'count_field': '信息元素数量', 'required': True, 'item_fields': [{'name': '信息元素ID', 'type': 'uint8', 'length': 1, 'description': '信息元素标识号'}], 'description': '信息元素ID列表'}
+E8 03 03 14 批量查询模块资产信息: 1 fields
+    {'name': '字段_0_2', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'big'}
+E8 03 03 20 查询当前工作频段: NO FIELDS (no data unit)
+E8 03 03 61 查询从节点实时信息: 2 fields
+    {'name': '地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True}
+    {'name': '从节点地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True}
+E8 03 03 64 查询设备在线状态: 2 fields
+    {'name': 'req_type', 'type': 'uint8', 'length': 1, 'required': True}
+    {'name': '地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True}
+E8 03 03 65 查询网络拓扑信息: 1 fields
+    {'name': '地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True}
+E8 03 03 66 查询节点运行时长: 1 fields
+    {'name': '从节点地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True}
+E8 03 03 6E 查询指定从节点信息: 2 fields
+    {'name': '地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True}
+    {'name': '从节点地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True}
+E8 03 03 70 查询节点自检结果: 1 fields
+    {'name': '地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True}
+E8 03 03 74 查询运行参数信息: 2 fields
+    {'name': '数量', 'type': 'uint8', 'length': 1, 'required': True}
+    {'name': '地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True}
+E8 03 03 96 查询设备类型: 1 fields
+    {'name': '节点地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True, 'default': '000000000000', 'description': '6字节节点地址'}
+E8 03 03 98 查询节点信道信息: 1 fields
+    {'name': '节点地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True, 'default': '000000000000', 'description': '6字节节点地址'}
+E8 03 06 02 请求交采数据: 1 fields
+    {'name': 'data_type', 'type': 'uint8', 'length': 1, 'required': True}
+E8 03 07 05 查询文件传输失败节点: 2 fields
+    {'name': '起始序号', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'big', 'default': 0, 'description': '查询起始序号'}
+    {'name': '查询数量', 'type': 'uint8', 'length': 1, 'required': True, 'default': 1, 'description': '查询节点数量'}
+E8 03 10 10 查询从节点邻居表: NO FIELDS (no data unit)
+E8 03 10 11 查询主节点状态: NO FIELDS (no data unit)
+E8 03 10 12 读取入网节点信息: NO FIELDS (no data unit)
+E8 03 10 13 读取未入网节点信息: NO FIELDS (no data unit)
+E8 03 10 15 请求切换通信速率和信道: NO FIELDS (no data unit)
+E8 06 06 01 请求集中器时间: NO FIELDS (no data unit)

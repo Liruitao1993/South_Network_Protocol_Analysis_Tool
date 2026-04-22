@@ -244,7 +244,9 @@ class ProtocolFrameParser:
                                             extra_parts.append(f"{ik}: {iv}")
                                     if extra_parts:
                                         idesc = (idesc + "；" + "，".join(extra_parts)).strip("；")
-                                    self._add_field(table_data, f"    项", iraw, ival, idesc, rng[0], rng[1], is_child=True)
+                                    # 使用条目名称作为字段名，如果没有则显示“项”
+                                    item_name = item.get("条目名称", "项")
+                                    self._add_field(table_data, f"    {item_name}", iraw, ival, idesc, rng[0], rng[1], is_child=True)
                                     # 显示dict值的子字段（如地址）
                                     for ik, iv in item.items():
                                         if ik in _skip_keys:
@@ -540,6 +542,7 @@ class ProtocolFrameParser:
         (0xE8, 0x04, 0x03, 0x14): "批量返回查询模块资产信息",
 
         # 厂商扩展 - 宽带应用省份
+        (0xE8, 0x00, 0xF0, 0x32): "厂商详细版本信息",
         (0xE8, 0x00, 0xF0, 0xDF): "查询宽带应用省份",
 
         # 深化应用 - 台区识别（1-1.md）
@@ -1044,6 +1047,7 @@ class ProtocolFrameParser:
             (0xE8, 0x04, 0x03, 0x14): self._parse_batch_return_asset_info_data,     # 批量返回查询模块资产信息
 
             # 厂商扩展 - 宽带应用省份
+            (0xE8, 0x00, 0xF0, 0x32): self._parse_afn_f0_32_data,                   # 厂商详细版本信息(E8 00 F0 32)
             (0xE8, 0x00, 0xF0, 0xDF): self._parse_query_broadband_province_data,   # 查询宽带应用省份
 
             # 深化应用 - 台区识别（1-1.md）
@@ -1113,7 +1117,7 @@ class ProtocolFrameParser:
         """解析确认帧数据内容"""
         if len(data) < 2:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
-        wait_time = int.from_bytes(data[0:2], 'big')
+        wait_time = int.from_bytes(data[0:2], 'little')
         return {
             "等待时间": {
                 "值": wait_time,
@@ -1252,7 +1256,7 @@ class ProtocolFrameParser:
         if len(data) < 3:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
         return {
-            "起始序号": {"原始值": data[0:2].hex().upper(), "十进制": int.from_bytes(data[0:2], 'big')},
+            "起始序号": {"原始值": data[0:2].hex().upper(), "十进制": int.from_bytes(data[0:2], 'little')},
             "查询数量": {"原始值": f"0x{data[2]:02X}", "十进制": data[2]}
         }
 
@@ -1260,7 +1264,7 @@ class ProtocolFrameParser:
         """解析返回查询未完成任务列表数据内容"""
         if len(data) < 4:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
-        total_count = int.from_bytes(data[0:2], 'big')
+        total_count = int.from_bytes(data[0:2], 'little')
         return_count = data[2]
         result = {
             "总任务数": {"原始值": data[0:2].hex().upper(), "十进制": total_count},
@@ -1271,7 +1275,7 @@ class ProtocolFrameParser:
         for i in range(return_count):
             if pos + 2 > len(data):
                 break
-            task_id = int.from_bytes(data[pos:pos+2], 'big')
+            task_id = int.from_bytes(data[pos:pos+2], 'little')
             result["任务列表"].append({
                 "序号": i + 1,
                 "任务ID": {"原始值": data[pos:pos+2].hex().upper(), "十进制": task_id}
@@ -1453,10 +1457,15 @@ class ProtocolFrameParser:
             return {"说明": "查询命令，无数据内容"}
         result = {"原始值": data.hex().upper()}
         try:
-            result["厂商代码"] = data[0:2].decode('ascii')
-            result["芯片代码"] = data[2:4].decode('ascii')
-            result["版本时间"] = f"20{data[4]:02d}-{data[5]:02d}-{data[6]:02d}"
-            result["版本号"] = data[7:9].hex().upper()
+            # 多字节字段按小端序解析：低字节在前，解析时反转
+            result["厂商代码"] = data[0:2][::-1].decode('ascii')
+            result["芯片代码"] = data[2:4][::-1].decode('ascii')
+            # 版本时间 3B BCD, 小端序: [YY, MM, DD] 传输为低字节在前
+            vdate = data[4:7][::-1]
+            result["版本时间"] = f"{self._bcd_to_str(vdate[0])}-{self._bcd_to_str(vdate[1])}-{self._bcd_to_str(vdate[2])}"
+            # 版本号 2B BCD, 小端序
+            ver = data[7:9][::-1]
+            result["版本号"] = self._bcd_to_str(ver[0]) + self._bcd_to_str(ver[1])
         except Exception:
             pass
         return result
@@ -1555,14 +1564,11 @@ class ProtocolFrameParser:
         }
         pos += 2
         
-        # 通信模块接口协议发布日期
-        date_bytes = data[pos:pos+3]
-        year = date_bytes[0]
-        month = date_bytes[1]
-        day = date_bytes[2]
+        # 通信模块接口协议发布日期 (3B BCD, 小端序)
+        date_bytes = data[pos:pos+3][::-1]
         result["通信模块接口协议发布日期"] = {
-            "原始值": date_bytes.hex().upper(),
-            "日期": f"20{year:02d}-{month:02d}-{day:02d}"
+            "原始值": data[pos:pos+3].hex().upper(),
+            "日期": f"{self._bcd_to_str(date_bytes[0])}-{self._bcd_to_str(date_bytes[1])}-{self._bcd_to_str(date_bytes[2])}"
         }
         pos += 3
         
@@ -1571,12 +1577,15 @@ class ProtocolFrameParser:
         vendor_result = {"原始值": vendor_info.hex().upper()}
         if len(vendor_info) >= 9:
             try:
-                vendor_code = vendor_info[0:2].decode('ascii')
-                chip_code = vendor_info[2:4].decode('ascii')
+                # 多字节字段按小端序解析：低字节在前，解析时反转
+                vendor_code = vendor_info[0:2][::-1].decode('ascii')
+                chip_code = vendor_info[2:4][::-1].decode('ascii')
                 vendor_result["厂商代码"] = vendor_code
                 vendor_result["芯片代码"] = chip_code
-                vendor_result["版本日期"] = f"{vendor_info[4]:02d}{vendor_info[5]:02d}{vendor_info[6]:02d}"
-                vendor_result["版本"] = f"{vendor_info[7]:02d}.{vendor_info[8]:02d}"
+                vdate = vendor_info[4:7][::-1]
+                vendor_result["版本日期"] = f"{self._bcd_to_str(vdate[0])}-{self._bcd_to_str(vdate[1])}-{self._bcd_to_str(vdate[2])}"
+                ver = vendor_info[7:9][::-1]
+                vendor_result["版本"] = self._bcd_to_str(ver[0]) + self._bcd_to_str(ver[1])
             except:
                 pass
         result["厂商代码和版本信息"] = vendor_result
@@ -1622,7 +1631,7 @@ class ProtocolFrameParser:
             "目的地址": data[0:6].hex().upper(),
             "通信延时时长": {
                 "原始值": data[6:8].hex().upper(),
-                "十进制": int.from_bytes(data[6:8], 'big'),
+                "十进制": int.from_bytes(data[6:8], 'little'),
                 "单位": "毫秒"
             }
         }
@@ -1650,7 +1659,7 @@ class ProtocolFrameParser:
         if len(data) < 2:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
         return {
-            "从节点序号": {"原始值": data[0:2].hex().upper(), "十进制": int.from_bytes(data[0:2], 'big')}
+            "从节点序号": {"原始值": data[0:2].hex().upper(), "十进制": int.from_bytes(data[0:2], 'little')}
         }
 
     def _parse_return_slave_node_info_data(self, data: bytes) -> Dict[str, Any]:
@@ -1658,7 +1667,7 @@ class ProtocolFrameParser:
         if len(data) < 14:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
         result = {
-            "从节点序号": {"原始值": data[0:2].hex().upper(), "十进制": int.from_bytes(data[0:2], 'big')},
+            "从节点序号": {"原始值": data[0:2].hex().upper(), "十进制": int.from_bytes(data[0:2], 'little')},
             "从节点地址": data[2:8].hex().upper(),
             "从节点类型": {"原始值": f"0x{data[8]:02X}", "说明": self._get_slave_node_type_desc(data[8])},
             "从节点状态": {"原始值": f"0x{data[9]:02X}", "说明": self._get_slave_node_status_desc(data[9])},
@@ -1685,7 +1694,7 @@ class ProtocolFrameParser:
         if len(data) < 2:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
         return {
-            "从节点序号": {"原始值": data[0:2].hex().upper(), "十进制": int.from_bytes(data[0:2], 'big')}
+            "从节点序号": {"原始值": data[0:2].hex().upper(), "十进制": int.from_bytes(data[0:2], 'little')}
         }
 
     def _parse_return_slave_parent_data(self, data: bytes) -> Dict[str, Any]:
@@ -1693,7 +1702,7 @@ class ProtocolFrameParser:
         if len(data) < 14:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
         result = {
-            "从节点序号": {"原始值": data[0:2].hex().upper(), "十进制": int.from_bytes(data[0:2], 'big')},
+            "从节点序号": {"原始值": data[0:2].hex().upper(), "十进制": int.from_bytes(data[0:2], 'little')},
             "从节点地址": data[2:8].hex().upper(),
             "父节点地址": data[8:14].hex().upper()
         }
@@ -1715,7 +1724,7 @@ class ProtocolFrameParser:
         if len(data) < 3:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
         return {
-            "起始序号": {"原始值": data[0:2].hex().upper(), "十进制": int.from_bytes(data[0:2], 'big')},
+            "起始序号": {"原始值": data[0:2].hex().upper(), "十进制": int.from_bytes(data[0:2], 'little')},
             "查询数量": {"原始值": f"0x{data[2]:02X}", "十进制": data[2]}
         }
 
@@ -1723,7 +1732,7 @@ class ProtocolFrameParser:
         """解析返回查询从节点通信地址映射表数据内容"""
         if len(data) < 4:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
-        total_count = int.from_bytes(data[0:2], 'big')
+        total_count = int.from_bytes(data[0:2], 'little')
         return_count = data[2]
         result = {
             "总记录数": {"原始值": data[0:2].hex().upper(), "十进制": total_count},
@@ -1788,7 +1797,7 @@ class ProtocolFrameParser:
         if len(data) < 3:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
         return {
-            "起始序号": {"原始值": data[0:2].hex().upper(), "十进制": int.from_bytes(data[0:2], 'big')},
+            "起始序号": {"原始值": data[0:2].hex().upper(), "十进制": int.from_bytes(data[0:2], 'little')},
             "查询数量": {"原始值": f"0x{data[2]:02X}", "十进制": data[2]}
         }
 
@@ -1797,7 +1806,7 @@ class ProtocolFrameParser:
         if len(data) < 3:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
         return {
-            "起始序号": {"原始值": data[0:2].hex().upper(), "十进制": int.from_bytes(data[0:2], 'big')},
+            "起始序号": {"原始值": data[0:2].hex().upper(), "十进制": int.from_bytes(data[0:2], 'little')},
             "查询数量": {"原始值": f"0x{data[2]:02X}", "十进制": data[2]}
         }
 
@@ -1806,7 +1815,7 @@ class ProtocolFrameParser:
         if len(data) < 3:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
         return {
-            "起始序号": {"原始值": data[0:2].hex().upper(), "十进制": int.from_bytes(data[0:2], 'big')},
+            "起始序号": {"原始值": data[0:2].hex().upper(), "十进制": int.from_bytes(data[0:2], 'little')},
             "查询数量": {"原始值": f"0x{data[2]:02X}", "十进制": data[2]}
         }
 
@@ -2083,8 +2092,8 @@ class ProtocolFrameParser:
 
     @staticmethod
     def _bcd_to_str(b: int) -> str:
-        """将1字节BCD编码转为字符串，如0x26 -> '26'"""
-        return f"{(b >> 4) & 0x0F}{b & 0x0F}"
+        """将1字节按十六进制原值转为2位字符串，如0x26 -> '26', 0xC0 -> 'C0'"""
+        return f"{b:02X}"
 
     def _parse_request_time_data(self, data: bytes) -> Dict[str, Any]:
         """解析请求/返回集中器时间数据内容（E8 06 06 01）
@@ -2121,8 +2130,8 @@ class ProtocolFrameParser:
             "文件类型": {"原始值": f"0x{data[0]:02X}", "说明": self._get_file_type_desc(data[0])},
             "文件ID": {"原始值": f"0x{data[1]:02X}", "十进制": data[1]},
             "目的地址": data[2:8].hex().upper(),
-            "总段数": {"原始值": data[8:10].hex().upper(), "十进制": int.from_bytes(data[8:10], 'big')},
-            "文件大小": {"原始值": data[10:14].hex().upper(), "十进制": int.from_bytes(data[10:14], 'big'), "单位": "字节"},
+            "总段数": {"原始值": data[8:10].hex().upper(), "十进制": int.from_bytes(data[8:10], 'little')},
+            "文件大小": {"原始值": data[10:14].hex().upper(), "十进制": int.from_bytes(data[10:14], 'little'), "单位": "字节"},
             "文件校验和": data[14:16].hex().upper(),
             "超时时间": {"原始值": f"0x{data[16]:02X}", "十进制": data[16], "单位": "秒"} if len(data) > 16 else None
         }
@@ -2131,8 +2140,8 @@ class ProtocolFrameParser:
         """解析传输文件内容数据内容"""
         if len(data) < 6:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
-        segment_no = int.from_bytes(data[0:2], 'big')
-        segment_len = int.from_bytes(data[2:4], 'big')
+        segment_no = int.from_bytes(data[0:2], 'little')
+        segment_len = int.from_bytes(data[2:4], 'little')
         result = {
             "段序号": {"原始值": data[0:2].hex().upper(), "十进制": segment_no},
             "段长度": {"原始值": data[2:4].hex().upper(), "十进制": segment_len},
@@ -2152,10 +2161,10 @@ class ProtocolFrameParser:
             "文件性质": {"原始值": f"0x{data[0]:02X}", "说明": self._get_file_nature_desc(data[0])},
             "文件ID": {"原始值": f"0x{data[1]:02X}", "十进制": data[1]},
             "目的地址": {"原始值": data[2:8].hex().upper()},
-            "文件总段数": {"原始值": data[8:10].hex().upper(), "十进制": int.from_bytes(data[8:10], 'big')},
-            "文件大小": {"原始值": data[10:14].hex().upper(), "十进制": int.from_bytes(data[10:14], 'big'), "单位": "字节"},
+            "文件总段数": {"原始值": data[8:10].hex().upper(), "十进制": int.from_bytes(data[8:10], 'little')},
+            "文件大小": {"原始值": data[10:14].hex().upper(), "十进制": int.from_bytes(data[10:14], 'little'), "单位": "字节"},
             "文件总校验": {"原始值": data[14:16].hex().upper()},
-            "已成功接收文件段数": {"原始值": data[16:18].hex().upper(), "十进制": int.from_bytes(data[16:18], 'big')}
+            "已成功接收文件段数": {"原始值": data[16:18].hex().upper(), "十进制": int.from_bytes(data[16:18], 'little')}
         }
         return result
 
@@ -2179,7 +2188,7 @@ class ProtocolFrameParser:
         if len(data) >= 2:
             result["处理未完成的文件ID"] = {"原始值": f"0x{data[1]:02X}", "十进制": data[1]}
         if len(data) >= 4:
-            result["失败的节点数量"] = {"原始值": data[2:4].hex().upper(), "十进制": int.from_bytes(data[2:4], 'big')}
+            result["失败的节点数量"] = {"原始值": data[2:4].hex().upper(), "十进制": int.from_bytes(data[2:4], 'little')}
         return result
 
     def _parse_query_file_failed_nodes_data(self, data: bytes) -> Dict[str, Any]:
@@ -2187,7 +2196,7 @@ class ProtocolFrameParser:
         if len(data) < 3:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
         return {
-            "起始序号": {"原始值": data[0:2].hex().upper(), "十进制": int.from_bytes(data[0:2], 'big')},
+            "起始序号": {"原始值": data[0:2].hex().upper(), "十进制": int.from_bytes(data[0:2], 'little')},
             "查询数量": {"原始值": f"0x{data[2]:02X}", "十进制": data[2]}
         }
 
@@ -2195,7 +2204,7 @@ class ProtocolFrameParser:
         """解析返回查询文件传输失败节点数据内容"""
         if len(data) < 4:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
-        total_count = int.from_bytes(data[0:2], 'big')
+        total_count = int.from_bytes(data[0:2], 'little')
         return_count = data[2]
         result = {
             "总失败节点数": {"原始值": data[0:2].hex().upper(), "十进制": total_count},
@@ -2310,6 +2319,230 @@ class ProtocolFrameParser:
             "白名单生效范围": {"原始值": f"0x{data[1]:02X}", "十进制": data[1], "说明": range_map.get(data[1], "保留")},
         }
 
+    def _parse_afn_f0_32_data(self, data: bytes, chip_type: str = '3960B') -> Dict[str, Any]:
+        """解析厂商详细版本信息数据内容 (E8 00 F0 32) - 上行响应
+        
+        Args:
+            data: 数据标识内容字节流
+            chip_type: 芯片类型，'3960A' 或 '3960B'（默认'3960B'），用于区分不同字段的解析方式
+        
+        数据格式参考 Lib.py 的 TLV 条目结构：
+        - 信息条目信息(1B) + 信息条目数(1B) + 多个TLV条目
+        - 每个TLV条目 = EntryHeader(2B) + Data(N B)
+        - EntryHeader位域: Data_ID(6bits) + Classified_ID(3bits) + Coding(2bits) + Data_Length(5bits)
+        - Coding: 1=ASCII, 2=BIN, 3=BCD
+        """
+        if len(data) < 2:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足，无法解析TLV条目"}
+        
+        result = {"原始值": data.hex().upper()}
+        info_flag = data[0]
+        entry_count = data[1]
+        result["信息条目信息"] = info_flag
+        result["信息条目数"] = entry_count
+        result["条目列表"] = []
+        
+        pos = 2
+        for i in range(entry_count):
+            if pos + 2 > len(data):
+                break
+            
+            # 解析 EntryHeader (2 bytes, little-endian packed bitfield)
+            raw = int.from_bytes(data[pos:pos+2], 'little')
+            data_id = raw & 0x3F              # 6 bits
+            classified_id = (raw >> 6) & 0x07  # 3 bits
+            coding = (raw >> 9) & 0x03        # 2 bits
+            data_length = (raw >> 11) & 0x1F  # 5 bits
+            
+            header_hex = data[pos:pos+2].hex().upper()
+            pos += 2
+            
+            if pos + data_length > len(data):
+                break
+            
+            content = data[pos:pos+data_length]
+            pos += data_length
+            
+            # 根据 Coding 解析数据内容
+            coding_map = {1: "ASCII", 2: "BIN", 3: "BCD"}
+            coding_str = coding_map.get(coding, f"未知({coding})")
+            
+            # 根据 (Classified_ID, Data_ID, Coding) 做详细解析
+            entry_name = self._get_f0_32_entry_name(classified_id, data_id)
+            
+            entry_result = {
+                "原始值": content.hex().upper(),
+                "说明": f"条目{i+1}: {entry_name} (类{classified_id}, ID{data_id}, {coding_str})",
+                "条目序号": i + 1,
+                "条目头原始值": header_hex,
+                "类ID(Classified_ID)": classified_id,
+                "数据ID(Data_ID)": data_id,
+                "编码(Coding)": coding_str,
+                "数据长度": data_length,
+                "条目名称": entry_name,
+            }
+            
+            if coding == 1 and data_length > 0:  # ASCII
+                try:
+                    entry_result["解析值"] = content[::-1].decode('ascii')
+                except Exception:
+                    entry_result["解析值"] = content.hex().upper()
+            elif coding == 3 and data_length > 0:  # BCD
+                entry_result["解析值"] = content[::-1].hex().upper()
+            elif coding == 2 and data_length > 0:  # BIN
+                # 根据字段做特殊解析
+                if classified_id == 0 and data_id == 9 and data_length >= 1:
+                    # 模块功能开关
+                    switch_byte = content[0]
+                    entry_result["解析值"] = f"0x{switch_byte:02X}"
+                    entry_result["即装即采功能开关"] = "打开" if (switch_byte & 0x01) else "关闭"
+                    entry_result["万年历启动开关"] = "打开" if (switch_byte & 0x02) else "关闭"
+                    entry_result["低功耗使能开关"] = "打开" if (switch_byte & 0x04) else "关闭"
+                    entry_result["白名单启动开关"] = "打开" if (switch_byte & 0x08) else "关闭"
+                elif classified_id == 0 and data_id == 15:
+                    # 本地接口默认信息：3960B 不支持详细解析
+                    if chip_type == '3960A' and data_length >= 2:
+                        entry_result["解析值"] = f"波特率{content[0]}, 校验位{content[1]}"
+                    else:
+                        entry_result["解析值"] = ""
+                        entry_result["说明"] += " [3960B不支持]"
+                elif classified_id == 0 and data_id == 18 and data_length >= 2:
+                    # 默认HRF信道信息
+                    entry_result["解析值"] = f"信道index:{content[0]}, 带宽option:{content[1] & 0x0F}, 信道切换使能:{(content[1] & 0x80) >> 7}"
+                elif classified_id == 0 and data_id == 19 and data_length >= 2:
+                    # 默认HRF参数信息
+                    entry_result["解析值"] = f"发送功率:{content[0]}, 调整因子:{content[1]}"
+                elif classified_id == 0 and data_id == 7 and data_length >= 1:
+                    # 应用省份
+                    entry_result["解析值"] = content[0]
+                elif classified_id == 0 and data_id == 8 and data_length >= 1:
+                    # 应用方案：3960B 不支持此字段
+                    if chip_type == '3960A':
+                        entry_result["解析值"] = content[0]
+                    else:
+                        entry_result["解析值"] = ""
+                        entry_result["说明"] += " [3960B不支持]"
+                elif classified_id == 0 and data_id == 10 and data_length >= 1:
+                    entry_result["解析值"] = content[0]
+                elif classified_id == 0 and data_id == 11 and data_length >= 1:
+                    entry_result["解析值"] = content[0]
+                elif classified_id == 0 and data_id == 22 and data_length >= 1:
+                    # 波特率协商使能：3960B 不支持
+                    if chip_type == '3960A':
+                        entry_result["解析值"] = content[0]
+                    else:
+                        entry_result["解析值"] = ""
+                        entry_result["说明"] += " [3960B不支持]"
+                elif classified_id == 0 and data_id == 23 and data_length >= 1:
+                    # 初始串口波特率：3960B 不支持
+                    if chip_type == '3960A':
+                        entry_result["解析值"] = content[0]
+                    else:
+                        entry_result["解析值"] = ""
+                        entry_result["说明"] += " [3960B不支持]"
+                elif classified_id == 0 and data_id == 24 and data_length >= 1:
+                    # 波特率协商结果：3960B 不支持
+                    if chip_type == '3960A':
+                        entry_result["解析值"] = content[0]
+                    else:
+                        entry_result["解析值"] = ""
+                        entry_result["说明"] += " [3960B不支持]"
+                elif classified_id == 0 and data_id == 25 and data_length >= 1:
+                    # 当前串口波特率：3960B 不支持
+                    if chip_type == '3960A':
+                        entry_result["解析值"] = content[0]
+                    else:
+                        entry_result["解析值"] = ""
+                        entry_result["说明"] += " [3960B不支持]"
+                elif classified_id == 2 and data_id == 4 and data_length >= 1:
+                    entry_result["解析值"] = content[0]
+                elif classified_id == 2 and data_id == 5:
+                    entry_result["解析值"] = content.hex().upper()
+                elif classified_id == 2 and data_id == 6 and data_length >= 1:
+                    entry_result["解析值"] = content[0]
+                elif classified_id == 2 and data_id == 7 and data_length >= 1:
+                    entry_result["解析值"] = content[0]
+                elif classified_id == 2 and data_id == 8 and data_length >= 1:
+                    entry_result["解析值"] = content[0]
+                elif classified_id == 2 and data_id == 9 and data_length >= 1:
+                    entry_result["解析值"] = content[0]
+                elif classified_id == 2 and data_id == 10 and data_length >= 1:
+                    entry_result["解析值"] = content[0]
+                elif classified_id == 2 and data_id == 20 and data_length >= 1:
+                    entry_result["解析值"] = content.hex().upper()
+                elif classified_id == 2 and data_id == 21:
+                    entry_result["解析值"] = content.hex().upper()
+                elif classified_id == 2 and data_id == 23 and data_length >= 2:
+                    entry_result["解析值"] = f"信号强度RSSI:{content[0]}, 信噪比SNR:{content[1]}"
+                else:
+                    entry_result["解析值"] = content.hex().upper()
+            
+            result["条目列表"].append(entry_result)
+        
+        return result
+    
+    @staticmethod
+    def _get_f0_32_entry_name(classified_id: int, data_id: int) -> str:
+        """获取 F0 32 条目的名称"""
+        names = {
+            (0, 1): "外部厂商代码",
+            (0, 2): "外部芯片代码",
+            (0, 3): "外部版本日期",
+            (0, 4): "外部版本号",
+            (0, 5): "内部厂商代码",
+            (0, 6): "内部芯片代码",
+            (0, 7): "应用省份",
+            (0, 8): "应用方案",
+            (0, 9): "模块功能开关",
+            (0, 10): "预留",
+            (0, 11): "模块类型",
+            (0, 12): "模块生产时间",
+            (0, 15): "本地接口默认信息",
+            (0, 16): "默认HPLC频段信息",
+            (0, 18): "默认HRF信道信息",
+            (0, 19): "默认HRF参数信息",
+            (0, 20): "以太网默认信息",
+            (0, 21): "以太网默认信息2",
+            (0, 22): "波特率协商使能",
+            (0, 23): "初始串口波特率",
+            (0, 24): "波特率协商结果",
+            (0, 25): "当前串口波特率",
+            (1, 1): "编译时间",
+            (1, 2): "程序总版本",
+            (1, 3): "总工程版本",
+            (1, 4): "boot程序版本",
+            (1, 5): "芯片程序版本",
+            (1, 6): "驱动层版本",
+            (1, 7): "载波接口层版本",
+            (1, 8): "无线PHY层版本",
+            (1, 9): "载波MAC层版本",
+            (1, 10): "无线MAC层版本",
+            (1, 11): "网络层版本",
+            (1, 12): "应用APS层版本",
+            (1, 13): "应用APP层版本",
+            (1, 14): "应用接口层版本",
+            (1, 20): "加密程序库版本",
+            (1, 21): "时钟管理库版本",
+            (1, 22): "虚拟扇区库版本",
+            (1, 23): "台区识别库版本",
+            (1, 24): "数据采集库版本",
+            (1, 30): "深化应用库版本",
+            (2, 3): "硬件型号",
+            (2, 4): "芯片型号",
+            (2, 5): "Flash型号及容量",
+            (2, 6): "电容容量",
+            (2, 7): "过零电路类型",
+            (2, 8): "天线类型",
+            (2, 9): "载波功放型号",
+            (2, 10): "特征电流拓朴类型",
+            (2, 15): "模块时钟信息",
+            (2, 20): "过零检测信息",
+            (2, 21): "NTB采样信息",
+            (2, 23): "无线接收信息",
+            (7, 1): "硬件信息组",
+        }
+        return names.get((classified_id, data_id), f"未知条目(类{classified_id}, ID{data_id})")
+
     def _parse_query_broadband_province_data(self, data: bytes) -> Dict[str, Any]:
         """解析返回查询宽带应用省份数据内容（E8 00 F0 DF）- 上行响应"""
         if len(data) < 1:
@@ -2347,14 +2580,15 @@ class ProtocolFrameParser:
         fmt = info["格式"]
         if fmt == "ASCII":
             try:
-                return raw.decode('ascii')
+                return raw[::-1].decode('ascii')
             except Exception:
                 return raw.hex().upper()
         elif fmt == "BCD":
-            return raw.hex().upper()
+            return raw[::-1].hex().upper()
         elif fmt == "YYMMDD":
             if len(raw) >= 3:
-                return f"20{raw[0]:02d}-{raw[1]:02d}-{raw[2]:02d}"
+                r = raw[0:3][::-1]
+                return f"{self._bcd_to_str(r[0])}-{self._bcd_to_str(r[1])}-{self._bcd_to_str(r[2])}"
             return raw.hex().upper()
         elif fmt == "BIN":
             if element_id == 0x08 and all(b == 0xFF for b in raw):
@@ -2432,7 +2666,7 @@ class ProtocolFrameParser:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
         eid = data[3]
         return {
-            "节点起始序号": {"原始值": data[0:2].hex().upper(), "十进制": int.from_bytes(data[0:2], 'big')},
+            "节点起始序号": {"原始值": data[0:2].hex().upper(), "十进制": int.from_bytes(data[0:2], 'little')},
             "节点数量": {"原始值": f"0x{data[2]:02X}", "十进制": data[2]},
             "信息元素ID": {"原始值": f"0x{eid:02X}", "名称": self._get_asset_element_name(eid)}
         }
@@ -2736,10 +2970,13 @@ class ProtocolFrameParser:
             info = data[pos+6:pos+15]
             vendor_info = {"原始值": info.hex().upper()}
             try:
-                vendor_info["厂商代码"] = info[0:2].decode('ascii')
-                vendor_info["芯片代码"] = info[2:4].decode('ascii')
-                vendor_info["版本时间"] = f"20{info[4]:02d}-{info[5]:02d}-{info[6]:02d}"
-                vendor_info["版本号"] = info[7:9].hex().upper()
+                # 多字节字段按小端序解析：低字节在前，解析时反转
+                vendor_info["厂商代码"] = info[0:2][::-1].decode('ascii')
+                vendor_info["芯片代码"] = info[2:4][::-1].decode('ascii')
+                vdate = info[4:7][::-1]
+                vendor_info["版本时间"] = f"{self._bcd_to_str(vdate[0])}-{self._bcd_to_str(vdate[1])}-{self._bcd_to_str(vdate[2])}"
+                ver = info[7:9][::-1]
+                vendor_info["版本号"] = self._bcd_to_str(ver[0]) + self._bcd_to_str(ver[1])
             except Exception:
                 pass
             result["节点列表"].append({

@@ -159,7 +159,7 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '查询白名单生效信息',
         "direction": "down",
         "doc": '<b>DI编码</b>：E8 00 03 93<br>\n<b>命令名称</b>：查询白名单生效信息<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n上行数据内容如下表。\n\n<div style="text-align: center;"><div style="text-align: center;">表 74 返回查询白名单生效信息</div> </div>\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>白名单开关</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>白名单生效范围</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr></table>\n\na） 白名单开关：0：关闭；1：打开；\n\nb) 白名单生效范围：0：表档案；1：厂家自定义；2：表档案和厂家自定义的合集；3～255：保留。\n\n数据标识内容格式见下表。\n',
-        "fields": [{'name': '白名单开关', 'type': 'enum', 'length': 1, 'required': True, 'enum_map': {0: '关闭', 1: '打开'}, 'default': 1, 'description': '0=关闭，1=打开'}, {'name': '白名单生效范围', 'type': 'enum', 'length': 1, 'required': True, 'enum_map': {0: '表档案', 1: '厂家自定义', 2: '表档案和厂家自定义的合集'}, 'default': 0, 'description': '0=表档案，1=厂家自定义，2=合集'}]
+        "fields": []
     },
 
     # 查询并发数 (E8 00 03 95)
@@ -202,6 +202,14 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "fields": []
     },
 
+    # 查询CCO详细版本信息 (E8 00 F0 32)
+    (0xE8, 0x00, 0xF0, 0x32): {
+        "name": '查询CCO详细版本信息',
+        "direction": "down",
+        "doc": '<b>DI编码</b>：E8 00 F0 32<br>\n<b>命令名称</b>：查询CCO详细版本信息<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n该命令用于查询模块的详细版本信息，包括外部/内部厂商代码、芯片代码、版本日期、版本号、各层程序版本、硬件型号等。上行响应采用TLV条目格式解析。<br><br>\n<b>下行数据内容</b>：无数据内容。',
+        "fields": []
+    },
+
     # 查询宽带应用省份 (E8 00 F0 DF)
     (0xE8, 0x00, 0xF0, 0xDF): {
         "name": '查询宽带应用省份',
@@ -215,7 +223,7 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '确认',
         "direction": "down",
         "doc": '<b>DI编码</b>：E8 01 00 01<br>\n<b>命令名称</b>：确认<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n数据标识内容格式见下表。\n\n等待时间：该确认帧对应的命令的执行时间，单位为秒。\n\n<div style="text-align: center;"><div style="text-align: center;">表 7 确认数据标识内容格式</div> </div>\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据标识内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>等待时间</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td></tr></table>\n',
-        "fields": [{'name': '等待时间', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'big', 'default': 0, 'description': '等待确认时间（秒）'}]
+        "fields": [{'name': '等待时间', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '等待确认时间（秒）'}]
     },
 
     # 否认 (E8 01 00 02)
@@ -255,7 +263,23 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '添加任务',
         "direction": "down",
         "doc": '<b>DI编码</b>：E8 02 02 01<br>\n<b>命令名称</b>：添加任务<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n数据标识内容格式见下表。\n\n<div style="text-align: center;"><div style="text-align: center;">表 11 添加任务数据标识内容格式</div> </div>\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td colspan="8">数据标识内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td colspan="8">任务 ID</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td></tr><tr><td colspan="8">任务模式字</td><td rowspan="2"></td><td rowspan="2"></td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>D7</td><td style=\'text-align: center; word-wrap: break-word;\'>D6</td><td style=\'text-align: center; word-wrap: break-word;\'>D5</td><td style=\'text-align: center; word-wrap: break-word;\'>D4</td><td style=\'text-align: center; word-wrap: break-word;\'>D3</td><td style=\'text-align: center; word-wrap: break-word;\'>D2</td><td style=\'text-align: center; word-wrap: break-word;\'>D1</td><td style=\'text-align: center; word-wrap: break-word;\'>D0</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>任务响应标识</td><td style=\'text-align: center; word-wrap: break-word;\'>转发标识</td><td style=\'text-align: center; word-wrap: break-word;\'>保留</td><td style=\'text-align: center; word-wrap: break-word;\'>保留</td><td colspan="4">任务优先级</td><td style=\'text-align: center; word-wrap: break-word;\'></td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr><tr><td colspan="8">超时时间</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td></tr><tr><td colspan="8">报文长度</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td></tr><tr><td colspan="8">报文内容</td><td style=\'text-align: center; word-wrap: break-word;\'></td><td style=\'text-align: center; word-wrap: break-word;\'>L</td></tr></table>\n\na）任务 ID：区分不同任务的任务标识。本标准的任务 ID 取值范围为 0x0000-0xEFFF，其他取值保留。任务 ID 号必须在取值范围内循环使用，同一个任务 ID 号不能连续用在不同的任务中。\n\nb) 任务优先级：0~3，0 表示最高优先级，3 表示最低优先级。由集中器指定任务的优先级，模块保证高优先级的任务得到优先执行。\n\nc) 任务响应标识：该任务是否需要返回数据，0－不需要数据返回，1－需要数据返回。由集中器指定，广播校时等任务为 0，抄表任务为 1。若任务响应标识为 0，则模块只向集中器上报任务状态，不上报任务数据。\n\nd) 转发标识：默认为 0，若该任务需要下达给通信模块，将该位置为 1。\n\ne）超时时间：集中器指定任务执行的超时时间，单位为秒。超时时间从模块正确接收完集中器下发任务时开始计时，超时时间结束，集中器删除自己保存的任务，再按需决定是否重新下发；模块在超时时间结束时，若未完成任务，应上报任务状态不成功。\n\nf) 报文长度：原始报文数据总长度。\n\ng）报文内容：当转发标识为1时，报文第一位为“业务代码”，如下表所示。\n\n<div style="text-align: center;"><div style="text-align: center;">表 12 报文内容格式</div> </div>\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td colspan="2">数据标识内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td rowspan="2">报文内容</td><td style=\'text-align: center; word-wrap: break-word;\'>业务代码</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>报文有效内容</td><td style=\'text-align: center; word-wrap: break-word;\'></td><td style=\'text-align: center; word-wrap: break-word;\'>L-1</td></tr></table>\n\nh）业务代码：00H-透传报文；01H-精准对时；02-DLMS报文；其他一保留。\n\n当业务代码为01H时，报文内容为校时报文，具体格式见A.7；\n',
-        "fields": [{'name': '任务ID', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '任务标识号'}, {'name': '任务模式字', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': 'D7=响应标识,D6=转发标识,D2~0=优先级'}, {'name': '超时时间', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 30, 'description': '任务超时时间（秒）'}, {'name': '报文长度', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': '报文内容长度（字节）'}, {'name': '报文内容', 'type': 'bytes', 'required': False, 'default': '', 'description': '报文内容（hex字符串）'}]
+        "fields": [
+            {'name': '任务ID', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '任务标识号，范围0x0000-0xEFFF'},
+            {'name': '任务模式字', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': 'D7=响应标识,D6=转发标识,D3-D0=优先级',
+             'sub_fields': [
+                 {'name': '任务响应标识', 'bit_offset': 7, 'bit_width': 1, 'type': 'enum', 'enum_map': {0: '不需要数据返回', 1: '需要数据返回'}, 'default': 0},
+                 {'name': '转发标识', 'bit_offset': 6, 'bit_width': 1, 'type': 'enum', 'enum_map': {0: '不下达给通信模块', 1: '下达给通信模块'}, 'default': 0},
+                 {'name': '保留', 'bit_offset': 4, 'bit_width': 2, 'type': 'uint8', 'default': 0},
+                 {'name': '任务优先级', 'bit_offset': 0, 'bit_width': 4, 'type': 'enum', 'enum_map': {0: '最高优先级', 1: '高优先级', 2: '中优先级', 3: '低优先级'}, 'default': 0}
+             ]},
+            {'name': '超时时间', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 30, 'description': '任务超时时间（秒）'},
+            {'name': '报文长度', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '报文内容长度（自动计算）'},
+            {'name': '报文内容', 'type': 'bytes', 'length_field': '报文长度', 'required': True, 'default': '',
+             'sub_fields': [
+                 {'name': '业务代码', 'type': 'enum', 'length': 1, 'default': 0x00, 'enum_map': {0x00: '透传报文', 0x01: '精准对时', 0x02: 'DLMS报文'}, 'description': '当转发标识=1时有效', 'condition': {'field': '转发标识', 'value': 1}},
+                 {'name': '报文有效内容', 'type': 'bytes', 'required': True, 'default': '', 'description': '原始报文内容（hex字符串）'}
+             ]}
+        ]
     },
 
     # 删除任务 (E8 02 02 02)
@@ -271,7 +295,20 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '添加多播任务',
         "direction": "down",
         "doc": '<b>DI编码</b>：E8 02 02 07<br>\n<b>命令名称</b>：添加多播任务<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n数据标识内容格式见下表。\n\n<div style="text-align: center;"><div style="text-align: center;">表 16 添加多播任务数据标识内容格式</div> </div>\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td colspan="8">数据标识内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td colspan="8">任务 ID</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td></tr><tr><td colspan="8">任务模式字</td><td rowspan="2">BS</td><td rowspan="2">1</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>D7</td><td style=\'text-align: center; word-wrap: break-word;\'>D6</td><td style=\'text-align: center; word-wrap: break-word;\'>D5</td><td style=\'text-align: center; word-wrap: break-word;\'>D4</td><td style=\'text-align: center; word-wrap: break-word;\'>D3</td><td style=\'text-align: center; word-wrap: break-word;\'>D2</td><td style=\'text-align: center; word-wrap: break-word;\'>D1</td><td style=\'text-align: center; word-wrap: break-word;\'>DO</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>任务响应标识</td><td style=\'text-align: center; word-wrap: break-word;\'>保留</td><td style=\'text-align: center; word-wrap: break-word;\'>保留</td><td style=\'text-align: center; word-wrap: break-word;\'>保留</td><td colspan="4">任务优先级</td><td style=\'text-align: center; word-wrap: break-word;\'></td><td style=\'text-align: center; word-wrap: break-word;\'></td></tr><tr><td colspan="8">从节点数量</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td></tr><tr><td colspan="8">从节点地址 1</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>6</td></tr><tr><td colspan="8">……</td><td style=\'text-align: center; word-wrap: break-word;\'>……</td><td style=\'text-align: center; word-wrap: break-word;\'>……</td></tr><tr><td colspan="8">从节点地址 n</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>6</td></tr><tr><td colspan="8">超时时间</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td></tr><tr><td colspan="8">报文长度 L</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td></tr><tr><td colspan="8">报文内容</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>L</td></tr></table>\n\na）任务ID：区分不同任务的任务标识。\n\nb) 任务优先级：0~3,0 表示最高优先级，3 表示最低优先级。由集中器来指定任务的优先级，模块保证高优先级的任务得到优先执行。\n\nc）任务响应标识：该任务是否需要返回数据，0－不需要数据返回，1－数据返回。由集中器指定，广播校时等任务为0，抄表任务为1。若任务响应标识为0，则模块只向集中器上报任务状态，不上报任务数据。\n\nd) 超时时间：集中器指定任务执行的超时时间，单位为秒。超时时间从模块正确接收完集中器下发任务时开始计时，超时时间结束，集中器删除自己保存的任务，再按需决定是否重新下发；模块在超时时间结束时，若未完成任务，应上报任务状态不成功。\n\ne) 从节点数量：多播抄表的数量。数量 0xFFFF 表示向所有从模块传输任务报文。\n\nf) 从节点地址：多播抄表的地址。从节点数量为 n 时，表示多播同时抄读 n 个地址的某个数据项。若节点数量为 0xFFFF，则无从节点地址域。\n\ng）报文长度：原始报文数据总长度。\n\nh）报文内容：原始报文数据。\n\ni）多播任务需要数据返回，则按照单播任务上报任务数据的格式上报集中器。\n',
-        "fields": [{'name': '任务ID', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '任务标识号'}, {'name': '任务模式字', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': 'D7=响应标识,D6=转发标识,D2~0=优先级'}, {'name': '从节点数量', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '0xFFFF=全部从节点'}, {'name': '从节点地址列表', 'type': 'list', 'count_field': '从节点数量', 'required': False, 'item_fields': [{'name': '从节点地址', 'type': 'bytes', 'length': 6, 'reverse': True, 'description': '6字节地址'}], 'description': '从节点地址列表（数量由上一字段决定）'}, {'name': '超时时间', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 30, 'description': '任务超时时间（秒）'}, {'name': '报文长度', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': '报文内容长度'}, {'name': '报文内容', 'type': 'bytes', 'required': False, 'default': '', 'description': '报文内容（hex字符串）'}]
+        "fields": [
+            {'name': '任务ID', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '任务标识号'},
+            {'name': '任务模式字', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': 'D7=响应标识,D6-D4=保留,D3-D0=优先级',
+             'sub_fields': [
+                 {'name': '任务响应标识', 'bit_offset': 7, 'bit_width': 1, 'type': 'enum', 'enum_map': {0: '不需要数据返回', 1: '需要数据返回'}, 'default': 0},
+                 {'name': '保留', 'bit_offset': 4, 'bit_width': 3, 'type': 'uint8', 'default': 0},
+                 {'name': '任务优先级', 'bit_offset': 0, 'bit_width': 4, 'type': 'enum', 'enum_map': {0: '最高优先级', 1: '高优先级', 2: '中优先级', 3: '低优先级'}, 'default': 0}
+             ]},
+            {'name': '从节点数量', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '0xFFFF=全部从节点'},
+            {'name': '从节点地址列表', 'type': 'list', 'count_field': '从节点数量', 'required': False, 'item_fields': [{'name': '从节点地址', 'type': 'bytes', 'length': 6, 'reverse': True, 'description': '6字节地址'}], 'description': '从节点地址列表（数量由上一字段决定）'},
+            {'name': '超时时间', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 30, 'description': '任务超时时间（秒）'},
+            {'name': '报文长度', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '报文内容长度'},
+            {'name': '报文内容', 'type': 'bytes', 'length_field': '报文长度', 'required': True, 'default': '', 'description': '报文内容（hex字符串）'}
+        ]
     },
 
     # 启动任务 (E8 02 02 08)
@@ -279,7 +316,15 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '启动任务',
         "direction": "down",
         "doc": '<b>DI编码</b>：E8 02 02 08<br>\n<b>命令名称</b>：启动任务<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n无数据标识内容。\n\n模块上电后，默认处于任务暂停状态，需要集中器下发启动任务。\n',
-        "fields": [{'name': '任务ID', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '要启动的任务标识号'}]
+        "fields": []
+    },
+
+    # 暂停任务 (E8 02 02 09)
+    (0xE8, 0x02, 0x02, 0x09): {
+        "name": '暂停任务',
+        "direction": "down",
+        "doc": '<b>DI编码</b>：E8 02 02 09<br>\n<b>命令名称</b>：暂停任务<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n无数据标识内容。\n\n需要插入立即执行的任务时，可以先 "暂停任务"，然后通过 "添加任务" 增加高优先级的任务，再 "启动任务"。\n\n### 上行报文\n\n### 数据标识内容定义\n',
+        "fields": []
     },
 
     # 暂停任务 (E8 02 02 09)
@@ -367,7 +412,7 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '允许/禁止拒绝从节点信息上报',
         "direction": "down",
         "doc": "<b>DI编码</b>：E8 02 04 6C<br>\n<b>命令名称</b>：允许/禁止拒绝从节点信息上报<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n数据标识内容格式见下表\n\n设置格式[狼3]：缩进: 左 2.01 字符, 首行缩进: 0 字符, 编号 + 级别: 1 + 编号样式: a, b, c, ... + 起始编号: 1 + 对齐方式: 左侧 + 对齐位置: 7.4 毫米 + 缩进位置: 14.8 毫米\n\n<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>数据内容</td><td style='text-align: center; word-wrap: break-word;'>数据格式</td><td style='text-align: center; word-wrap: break-word;'>字节数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>拒绝从节点信息上报使能</td><td style='text-align: center; word-wrap: break-word;'>BIN</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr></table>\n\n设置格式[狼 3]: 项目符号和编号\n\na） 拒绝从节点信息上报：0：禁止；1：允许；缺省配置：1；\n\n 规模\n",
-        "fields": [{'name': '上报状态', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': '0=禁止,1=允许拒绝上报'}]
+        "fields": [{'name': '拒绝从节点信息上报使能', 'type': 'enum', 'length': 1, 'required': True, 'enum_map': {0: '禁止', 1: '允许'}, 'default': 1, 'description': '0=禁止，1=允许；缺省配置：1'}]
     },
 
     # 设置无线参数 (E8 02 04 6D)
@@ -375,7 +420,7 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '设置无线参数',
         "direction": "down",
         "doc": "<b>DI编码</b>：E8 02 04 6D<br>\n<b>命令名称</b>：设置无线参数<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n数据标识内容格式见下表\n\n<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>数据内容</td><td style='text-align: center; word-wrap: break-word;'>数据格式</td><td style='text-align: center; word-wrap: break-word;'>字节数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>OPTION</td><td style='text-align: center; word-wrap: break-word;'>BIN</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>CHANNEL</td><td style='text-align: center; word-wrap: break-word;'>BIN</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr></table>\n\na) OPTION: 0: OPTION1; 1: OPTION2; 2: OPTION3;\n",
-        "fields": [{'name': '数据内容', 'type': 'bytes', 'required': False, 'default': '', 'description': '无线参数数据（hex字符串）'}]
+        "fields": [{'name': 'OPTION', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': '0: OPTION1; 1: OPTION2; 2: OPTION3'}, {'name': 'CHANNEL', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': '信道号'}]
     },
 
     # 配置踢出后不允许入网时间 (E8 02 04 72)
@@ -383,7 +428,7 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '配置踢出后不允许入网时间',
         "direction": "down",
         "doc": "<b>DI编码</b>：E8 02 04 72<br>\n<b>命令名称</b>：配置踢出后不允许入网时间<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n数据标识内容格式见下表\n\n<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>数据内容</td><td style='text-align: center; word-wrap: break-word;'>数据格式</td><td style='text-align: center; word-wrap: break-word;'>字节数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>踢出不允许入网时间</td><td style='text-align: center; word-wrap: break-word;'>BIN</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr></table>\n\na) 单位：秒；缺省配置：CCO 自动动态控制；\n",
-        "fields": [{'name': '禁止入网时间', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '踢出后禁止入网时间（分钟）'}]
+        "fields": [{'name': '踢出不允许入网时间', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '踢出后禁止入网时间（秒）；缺省配置：CCO自动动态控制'}]
     },
 
     # 配置运行参数 (E8 02 04 74)
@@ -399,7 +444,7 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '启动台区识别',
         "direction": "down",
         "doc": '<b>DI编码</b>：E8 02 04 80<br>\n<b>命令名称</b>：启动台区识别<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n数据标识内容格式如表18所示。\n\n<div style="text-align: center;"><div style="text-align: center;">表 85 启动台区识别数据标识内容格式</div> </div>\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>台区特征发送时长</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>保留</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr></table>\n\na）台区特征发送时长，表示 CCO 发送台区特征允许的最大时长，单位为分钟（最大不超过 1440 分钟）。0 代表 1440 分钟；超时时间到期后，台区识别自动结束。\n\n注：若集中器未给 CCO 设置主节点地址，启动台区识别时，CCO 应答否认帧，否认原因码扩展为 EOH，主节点地址不存在。\n',
-        "fields": [{'name': '台区识别模式', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '台区识别工作模式'}]
+        "fields": [{'name': '台区特征发送时长', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': 'CCO发送台区特征允许的最大时长（分钟），0代表1440分钟'}, {'name': '保留', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': '保留字节'}]
     },
 
     # 停止台区识别 (E8 02 04 81)
@@ -423,7 +468,7 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '允许/禁止白名单功能',
         "direction": "down",
         "doc": "<b>DI编码</b>：E8 02 04 93<br>\n<b>命令名称</b>：允许/禁止白名单功能<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>数据内容</td><td style='text-align: center; word-wrap: break-word;'>数据格式</td><td style='text-align: center; word-wrap: break-word;'>字节数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>白名单开关</td><td style='text-align: center; word-wrap: break-word;'>BIN</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>白名单生效范围</td><td style='text-align: center; word-wrap: break-word;'>BIN</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr></table>\n\na) 白名单开关：0：关闭；1：打开；缺省配置：1；\n\nb) 白名单生效范围：0：表档案；1：厂家自定义；2：表档案和厂家自定义的合集；3～255：保留。\n",
-        "fields": [{'name': 'enable', 'type': 'uint8', 'length': 1, 'required': True}, {'name': '地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True}]
+        "fields": [{'name': '白名单开关', 'type': 'enum', 'length': 1, 'required': True, 'enum_map': {0: '关闭', 1: '打开'}, 'default': 1, 'description': '0=关闭，1=打开；缺省配置：1'}, {'name': '白名单生效范围', 'type': 'enum', 'length': 1, 'required': True, 'enum_map': {0: '表档案', 1: '厂家自定义', 2: '表档案和厂家自定义的合集'}, 'default': 0, 'description': '0=表档案，1=厂家自定义，2=合集；3~255保留'}]
     },
 
     # 重启节点 (E8 02 04 F0)
@@ -431,7 +476,7 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '重启节点',
         "direction": "down",
         "doc": '<b>DI编码</b>：E8 02 04 F0<br>\n<b>命令名称</b>：重启节点<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n数据标识内容格式下表。\n\n<div style="text-align: center;"><div style="text-align: center;">表 87 重启节点数据标识内容格式</div> </div>\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据标识内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>节点地址</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>6</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>等待时长</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td></tr></table>\n\na) 节点地址：CCO 可填全 0。\n\nb）等待时长：节点重启前的等待时长，设置范围为 5~300，单位为秒。上行报文\n\n写参数上行报文为确认/否认报文，详见“确认/否认”报文格式。\n',
-        "fields": [{'name': '地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True}]
+        "fields": [{'name': '节点地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True, 'default': '000000000000', 'description': '节点地址，CCO可填全0'}, {'name': '等待时长', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 5, 'description': '节点重启前的等待时长（秒），范围5~300'}]
     },
 
     # 启动文件传输 (E8 02 07 01)
@@ -439,7 +484,7 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '启动文件传输',
         "direction": "down",
         "doc": '<b>DI编码</b>：E8 02 07 01<br>\n<b>命令名称</b>：启动文件传输<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n数据标识内容格式见下表。\n\n<div style="text-align: center;"><div style="text-align: center;">表 99 启动文件传输数据标识内容格式</div> </div>\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据标识内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>文件性质</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>文件 ID</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>目的地址</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>6</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>文件总段数 n</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>文件大小</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>4</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>文件总校验</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>文件传输超时时间</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr></table>\n\na) 文件性质；\n\n1）00H：清除下装文件；文件 ID 为 FFH 时，表示清除模块所有已接收且可以被清除的文件。文件 ID 不为 FFH 时，表示清除指定文件 ID 的文件，且该文件可以被清除。\n\n2）01H：集中器本地通信模块文件；\n\n3）02H：从节点模块文件；\n\nb) 文件 ID：用来区分不同的文件。\n\nc)\n\nd) 文件总段数 n：文件传输内容的总段数。\n\ne) 文件大小：文件的总长度，单位字节。\n\nf）文件总校验：文件所有内容的 CRC16 校验和。CRC16 校验生成多项式采用 CRC16-CCITT（0x1021）， $ x_{16} + x_{12} + x_{5} + 1 $。\n\ng) 文件传输超时时间：模块如果无法在超时时间内完成文件传输，则不再向从模块传输文件。集中器查询文件处理进度时，模块返回未全部成功，存在失败节点。单位为分钟。\n\nh) 文件传输采用串行方式，不允许并行传输文件。模块可根据自身存储容量存储多个文件。模块在未接收完文件时，若该文件不存在或者可以清除，则回复确认；若无法删除则回复否认。\n',
-        "fields": [{'name': '文件类型', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': '文件类型代码（如0x00=固件升级）'}, {'name': '文件ID', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': '文件标识号'}, {'name': '目的地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True, 'default': '999999999999', 'description': '6字节目的地址，低字节在前存储'}, {'name': '总段数', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'big', 'default': 0, 'description': '文件总分段数量'}, {'name': '文件大小', 'type': 'uint32', 'length': 4, 'required': True, 'endian': 'big', 'default': 0, 'description': '文件总大小（字节）'}, {'name': '文件校验和', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'big', 'default': 0, 'description': '文件总校验和（如CRC-16）'}, {'name': '超时时间', 'type': 'uint8', 'length': 1, 'required': True, 'default': 30, 'description': '单段传输超时时间（秒）'}]
+        "fields": [{'name': '文件类型', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': '文件类型代码（如0x00=固件升级）'}, {'name': '文件ID', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': '文件标识号'}, {'name': '目的地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True, 'default': '999999999999', 'description': '6字节目的地址，低字节在前存储'}, {'name': '总段数', 'type': 'uint16', 'length': 2, 'required': True, 'default': 0, 'description': '文件总分段数量'}, {'name': '文件大小', 'type': 'uint32', 'length': 4, 'required': True, 'default': 0, 'description': '文件总大小（字节）'}, {'name': '文件校验和', 'type': 'uint16', 'length': 2, 'required': True, 'default': 0, 'description': '文件总校验和（如CRC-16）'}, {'name': '超时时间', 'type': 'uint8', 'length': 1, 'required': True, 'default': 30, 'description': '单段传输超时时间（秒）'}]
     },
 
     # 传输文件内容 (E8 02 07 02)
@@ -455,7 +500,7 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '触发指定节点网络维护',
         "direction": "down",
         "doc": '<b>DI编码</b>：E8 02 10 14<br>\n<b>命令名称</b>：触发指定节点网络维护<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n本命令用于触发指定节点探测与邻居节点的链路信号质量。主节点接收到此命令之后，对指定的从节点逐一发起网络维护。\n\n数据标识编码定义见下表\n\n<div style="text-align: center;"><div style="text-align: center;">表6-99 触发指定节点网络维护数据标识内容格式</div> </div>\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据标识内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>探测方案</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>通信信道</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>超时时间</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>从节点数量n</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>从节点1地址</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>6</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>...</td><td style=\'text-align: center; word-wrap: break-word;\'>...</td><td style=\'text-align: center; word-wrap: break-word;\'>...</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>从节点n地址</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>6</td></tr></table>\n\na） 探测方案：0 表示在当前主路径上探测与父节点的通信链路质量；\n\n1 表示中心节点寻找可与从节点通信的邻居节点，再探测该从节点与各邻居节点的通信链路质量，最后更新从节点的邻居表；\n\nb）通信信道：0 表示默认；1 表示在公共信道低频点上探测；2 表示在公共信道高频点上探测；3 表示在私有信道低频点上探测；4 表示在私有信道高频点上探测。\n\n2 表示暂停指定节点网络维护。\n\nc） 超时时间：探测所有从节点的持续时间，单位：秒；默认时间为  $ \\Sigma t1 \\times $ 从节点 n 邻居节点从节点数量：取值范围 1~16，其它值无效。\n',
-        "fields": []
+        "fields": [{'name': '探测方案', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': '探测方案'}, {'name': '通信信道', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': '通信信道'}, {'name': '超时时间', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 30, 'description': '超时时间（秒）'}, {'name': '从节点数量', 'type': 'uint8', 'length': 1, 'required': True, 'default': 1, 'description': '从节点数量'}, {'name': '从节点地址列表', 'type': 'list', 'count_field': '从节点数量', 'required': True, 'item_fields': [{'name': '从节点地址', 'type': 'bytes', 'length': 6, 'reverse': True, 'description': '6字节从节点地址'}], 'description': '从节点地址列表'}]
     },
 
     # 恢复通信速率和信道 (E8 02 10 16)
@@ -495,7 +540,7 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '查询从节点信息',
         "direction": "down",
         "doc": "<b>DI编码</b>：E8 03 03 06<br>\n<b>命令名称</b>：查询从节点信息<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n数据标识内容格式见下表。\n\n### 表 23 查询从节点信息数据标识内容格式\n\n<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>数据内容</td><td style='text-align: center; word-wrap: break-word;'>数据格式</td><td style='text-align: center; word-wrap: break-word;'>字节数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>从节点起始序号</td><td style='text-align: center; word-wrap: break-word;'>BIN</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>从节点数量</td><td style='text-align: center; word-wrap: break-word;'>BIN</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr></table>\n\na）从节点起始序号 m：表示在从节点列表中的第 m 个从节点，序号从 0 开始。\n\nb) 从节点数量 n：从节点起始序号为 m，从节点数量为 n，表示查询从节点列表中的第 m, m+1, ..., m+n-1 个从节点，n≥1。\n",
-        "fields": [{'name': '从节点序号', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'big', 'default': 0, 'description': '从节点序号'}]
+        "fields": [{'name': '从节点起始序号', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '从节点起始序号，从0开始'}, {'name': '从节点数量', 'type': 'uint8', 'length': 1, 'required': True, 'default': 1, 'description': '查询从节点数量，n≥1'}]
     },
 
     # 查询从节点的父节点 (E8 03 03 08)
@@ -519,7 +564,7 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '查询从节点相位信息',
         "direction": "down",
         "doc": '<b>DI编码</b>：E8 03 03 0C<br>\n<b>命令名称</b>：查询从节点相位信息<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n数据标识内容格式见下表。\n\n<div style="text-align: center;"><div style="text-align: center;">表 26 查询从节点相位信息数据标识内容格式</div> </div>\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>本次查询从节点数量 n</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>从节点 1 地址</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>6</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>……</td><td style=\'text-align: center; word-wrap: break-word;\'>……</td><td style=\'text-align: center; word-wrap: break-word;\'>……</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>从节点 n 地址</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>6</td></tr></table>\n\na) 从节点数量 n 需满足： $ 0 < n \\leq 16 $。\n',
-        "fields": [{'name': '数据内容', 'type': 'bytes', 'required': False, 'default': '', 'description': '查询从节点相位信息的自定义数据内容（hex字符串）'}]
+        "fields": [{'name': '本次查询从节点数量', 'type': 'uint8', 'length': 1, 'required': True, 'default': 1, 'description': '本次查询从节点数量，0<n≤16'}, {'name': '从节点地址列表', 'type': 'list', 'count_field': '本次查询从节点数量', 'required': True, 'item_fields': [{'name': '从节点地址', 'type': 'bytes', 'length': 6, 'reverse': True, 'description': '6字节从节点地址'}], 'description': '从节点地址列表'}]
     },
 
     # 批量查询从节点相位信息 (E8 03 03 0D)
@@ -575,7 +620,7 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '批量查询模块资产信息',
         "direction": "down",
         "doc": '<b>DI编码</b>：E8 03 03 14<br>\n<b>命令名称</b>：批量查询模块资产信息<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n数据标识内容格式如表72所示。\n\n<div style="text-align: center;"><div style="text-align: center;">表 33 查询模块资产信息数据标识内容格式</div> </div>\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>节点起始序号 m</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>节点数量 n</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>信息元素 ID</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr></table>\n\na）从节点起始序号 m：表示在从节点列表中的第 m 个从节点，序号从 0 开始，0 表示 CCO，1 表示第 1 个从节点，2 表示第 2 个从节点，以此类推。\n\nb) 从节点数量 n：从节点起始序号为 m，从节点数量为 n，表示查询从节点列表中的第 m, m+1，……，m+n-1 个从节点，n≥1。\n\nc) 信息元素 ID：一次查询一个信息元素。\n',
-        "fields": [{'name': '字段_0_2', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'big'}]
+        "fields": [{'name': '节点起始序号', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '节点起始序号，从0开始，0表示CCO'}, {'name': '节点数量', 'type': 'uint8', 'length': 1, 'required': True, 'default': 1, 'description': '查询节点数量，n≥1'}, {'name': '信息元素ID', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': '一次查询一个信息元素ID'}]
     },
 
     # 查询当前工作频段 (E8 03 03 20)
@@ -591,7 +636,7 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '查询从节点实时信息',
         "direction": "down",
         "doc": '<b>DI编码</b>：E8 03 03 61<br>\n<b>命令名称</b>：查询从节点实时信息<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n数据标识内容格式见下表。\n\n<div style="text-align: center;"><div style="text-align: center;">表 34 查询从节点实时信息数据标识内容格式</div> </div>\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>从节点地址</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>6</td></tr></table>\n',
-        "fields": [{'name': '地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True}, {'name': '从节点地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True}]
+        "fields": [{'name': '从节点地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True, 'default': '000000000000', 'description': '6字节从节点地址'}]
     },
 
     # 查询设备在线状态 (E8 03 03 64)
@@ -599,7 +644,7 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '查询设备在线状态',
         "direction": "down",
         "doc": '<b>DI编码</b>：E8 03 03 64<br>\n<b>命令名称</b>：查询设备在线状态<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n数据标识内容格式见下表。\n\n<div style="text-align: center;"><div style="text-align: center;">表 35 查询设备在线状态数据标识内容格式</div> </div>\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>节点起始序号</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>节点数量 n</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr></table>\n',
-        "fields": [{'name': 'req_type', 'type': 'uint8', 'length': 1, 'required': True}, {'name': '地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True}]
+        "fields": [{'name': '节点起始序号', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '节点起始序号，从0开始'}, {'name': '节点数量', 'type': 'uint8', 'length': 1, 'required': True, 'default': 1, 'description': '查询节点数量'}]
     },
 
     # 查询网络拓扑信息 (E8 03 03 65)
@@ -607,7 +652,7 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '查询网络拓扑信息',
         "direction": "down",
         "doc": '<b>DI编码</b>：E8 03 03 65<br>\n<b>命令名称</b>：查询网络拓扑信息<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n数据标识内容格式见下表。\n\n<div style="text-align: center;"><div style="text-align: center;">表 36 查询网络拓扑信息数据标识内容格式</div> </div>\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>节点起始序号</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>节点数量 n</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr></table>\n\na） 节点序号从 0 开始，数量 n 取值少于支持单次读写从节点信息的最大数量。\n',
-        "fields": [{'name': '地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True}]
+        "fields": [{'name': '节点起始序号', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '节点起始序号，从0开始'}, {'name': '节点数量', 'type': 'uint8', 'length': 1, 'required': True, 'default': 1, 'description': '查询节点数量'}]
     },
 
     # 查询节点运行时长 (E8 03 03 66)
@@ -615,7 +660,7 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '查询节点运行时长',
         "direction": "down",
         "doc": '<b>DI编码</b>：E8 03 03 66<br>\n<b>命令名称</b>：查询节点运行时长<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n数据标识内容格式见下表。\n\n<div style="text-align: center;"><div style="text-align: center;">表 37 查询节点运行时长数据标识内容格式</div> </div>\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>节点地址</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>6</td></tr></table>\n',
-        "fields": [{'name': '从节点地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True}]
+        "fields": [{'name': '节点地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True, 'default': '000000000000', 'description': '6字节节点地址'}]
     },
 
     # 查询指定从节点信息 (E8 03 03 6E)
@@ -623,7 +668,7 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '查询指定从节点信息',
         "direction": "down",
         "doc": "<b>DI编码</b>：E8 03 03 6E<br>\n<b>命令名称</b>：查询指定从节点信息<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n数据标识内容格式见下表。\n\n<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>数据内容</td><td style='text-align: center; word-wrap: break-word;'>数据格式</td><td style='text-align: center; word-wrap: break-word;'>字节数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>从节点地址</td><td style='text-align: center; word-wrap: break-word;'>BIN</td><td style='text-align: center; word-wrap: break-word;'>6</td></tr></table>\n",
-        "fields": [{'name': '地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True}, {'name': '从节点地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True}]
+        "fields": [{'name': '从节点地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True, 'default': '000000000000', 'description': '6字节从节点地址'}]
     },
 
     # 查询节点自检结果 (E8 03 03 70)
@@ -631,7 +676,7 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '查询节点自检结果',
         "direction": "down",
         "doc": '<b>DI编码</b>：E8 03 03 70<br>\n<b>命令名称</b>：查询节点自检结果<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n数据标识内容格式见下表。\n\n<div style="text-align: center;"><div style="text-align: center;">表 38 查询节点自检结果数据标识内容格式</div> </div>\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>节点地址</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>6</td></tr></table>\n\n节点地址：节点的MAC地址\n',
-        "fields": [{'name': '地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True}]
+        "fields": [{'name': '节点地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True, 'default': '000000000000', 'description': '6字节节点地址（MAC地址）'}]
     },
 
     # 查询运行参数信息 (E8 03 03 74)
@@ -639,7 +684,7 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '查询运行参数信息',
         "direction": "down",
         "doc": '<b>DI编码</b>：E8 03 03 74<br>\n<b>命令名称</b>：查询运行参数信息<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n<div style="text-align: center;"><div style="text-align: center;">表 39 查询运行参数信息数据标识内容格式</div> </div>\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>节点地址</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>6</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>运行参数总数</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>运行参数ID1</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>运行参数ID2</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>...。</td><td style=\'text-align: center; word-wrap: break-word;\'></td><td style=\'text-align: center; word-wrap: break-word;\'></td></tr></table>\n\n运行参数ID取值如下：\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>运行参数ID</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td><td style=\'text-align: center; word-wrap: break-word;\'>说明</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>0x01</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td><td style=\'text-align: center; word-wrap: break-word;\'>从节点RF发送功率，范围：0：自动；1-4：数字越大，功率越大；</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>0x02</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td><td style=\'text-align: center; word-wrap: break-word;\'>从节点PLC发送功率，范围：0：自动；1-4：数字越大，功率越大；</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>0x03</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td><td style=\'text-align: center; word-wrap: break-word;\'>异常离网锁定时间，单位：分钟，默认30分钟</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>0x04</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td><td style=\'text-align: center; word-wrap: break-word;\'>RF通道控制开关：0：关闭；1：开启；默认开启</td></tr></table>\n',
-        "fields": [{'name': '数量', 'type': 'uint8', 'length': 1, 'required': True}, {'name': '地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True}]
+        "fields": [{'name': '节点地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True, 'default': '000000000000', 'description': '6字节节点地址'}, {'name': '运行参数总数', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': '运行参数总数'}, {'name': '运行参数ID列表', 'type': 'list', 'count_field': '运行参数总数', 'required': True, 'item_fields': [{'name': '运行参数ID', 'type': 'uint8', 'length': 1, 'description': '运行参数标识号'}], 'description': '运行参数ID列表'}]
     },
 
     # 查询设备类型 (E8 03 03 96)
@@ -647,7 +692,7 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '查询设备类型',
         "direction": "down",
         "doc": "<b>DI编码</b>：E8 03 03 96<br>\n<b>命令名称</b>：查询设备类型<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>数据内容</td><td style='text-align: center; word-wrap: break-word;'>数据格式</td><td style='text-align: center; word-wrap: break-word;'>字节数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>节点起始序号</td><td style='text-align: center; word-wrap: break-word;'>BIN</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>节点数量n</td><td style='text-align: center; word-wrap: break-word;'>BIN</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr></table>\n",
-        "fields": [{'name': '节点地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True, 'default': '000000000000', 'description': '6字节节点地址'}]
+        "fields": [{'name': '节点起始序号', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '节点起始序号，从0开始'}, {'name': '节点数量', 'type': 'uint8', 'length': 1, 'required': True, 'default': 1, 'description': '查询节点数量，n≥1'}]
     },
 
     # 查询节点信道信息 (E8 03 03 98)
@@ -655,7 +700,7 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '查询节点信道信息',
         "direction": "down",
         "doc": "<b>DI编码</b>：E8 03 03 98<br>\n<b>命令名称</b>：查询节点信道信息<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>数据内容</td><td style='text-align: center; word-wrap: break-word;'>数据格式</td><td style='text-align: center; word-wrap: break-word;'>字节数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>节点地址</td><td style='text-align: center; word-wrap: break-word;'>BIN</td><td style='text-align: center; word-wrap: break-word;'>6</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>周边节点起始序号</td><td style='text-align: center; word-wrap: break-word;'>BIN</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>周边节点数量</td><td style='text-align: center; word-wrap: break-word;'>BIN</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr></table>\n\na）节点地址：表地址。STA 是入网 MAC 地址\n\nb) 周边节点起始序号 m：表示在周边节点列表中的第 m 个从节点，序号从 0 开始。\n\nc) 周边节点数量 n ： 周边节点起始序号为 m ， 节点数量为 n ， 表示查询周边节点列表中的第 m, m+1 ， 。 。 ， m+n-1 个从节点， 每一次查询 6 个（6≥n≥1）。\n\n上行报文\n\n#### 数据标识内容定义\n",
-        "fields": [{'name': '节点地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True, 'default': '000000000000', 'description': '6字节节点地址'}]
+        "fields": [{'name': '节点地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True, 'default': '000000000000', 'description': '6字节节点地址（表地址，STA是入网MAC地址）'}, {'name': '周边节点起始序号', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '周边节点起始序号，从0开始'}, {'name': '周边节点数量', 'type': 'uint8', 'length': 1, 'required': True, 'default': 1, 'description': '周边节点数量，6≥n≥1'}]
     },
 
     # 请求交采数据 (E8 03 06 02)
@@ -663,7 +708,7 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '请求交采数据',
         "direction": "down",
         "doc": '<b>DI编码</b>：E8 03 06 02<br>\n<b>命令名称</b>：请求交采数据<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n数据标识内容格式如表 21 所示。\n\n<div style="text-align: center;"><div style="text-align: center;">表 21 请求交采数据数据标识内容格式</div> </div>\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>据内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据项类型</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>交采数据项标识</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>4</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>采集周期</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>采集数量</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr></table>\n\na） 数据项类型：1 代表 DL/T645-2007 数据项标识定义；其它取值保留。\n\nb） 数据项标识：若数据项类型为 1 则遵循 DL/T645-2007 中的定义；数据项类型其它取值时，数据项标识定义保留。\n\nc）采集周期：交采数据时间间隔，单位为秒，只每隔该时间采集一次数据。\n\nd）采集数量：连续采集交采数据的数量。\n',
-        "fields": [{'name': 'data_type', 'type': 'uint8', 'length': 1, 'required': True}]
+        "fields": [{'name': '数据项类型', 'type': 'uint8', 'length': 1, 'required': True, 'default': 1, 'description': '1代表DL/T645-2007数据项标识定义；其它取值保留'}, {'name': '交采数据项标识', 'type': 'uint32', 'length': 4, 'required': True, 'endian': 'little', 'default': 0, 'description': '交采数据项标识'}, {'name': '采集周期', 'type': 'uint8', 'length': 1, 'required': True, 'default': 1, 'description': '交采数据时间间隔（秒）'}, {'name': '采集数量', 'type': 'uint8', 'length': 1, 'required': True, 'default': 1, 'description': '连续采集交采数据的数量'}]
     },
 
     # 查询文件传输失败节点 (E8 03 07 05)
@@ -679,7 +724,7 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '查询从节点邻居表',
         "direction": "down",
         "doc": '<b>DI编码</b>：E8 03 10 10<br>\n<b>命令名称</b>：查询从节点邻居表<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n数据标识内容格式见下表。\n\n<div style="text-align: center;"><div style="text-align: center;">表6-96 查询从节点邻居表数据标识内容格式</div> </div>\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据标识内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>从节点地址</td><td style=\'text-align: center; word-wrap: break-word;\'>BCD</td><td style=\'text-align: center; word-wrap: break-word;\'>6</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>开始邻居节点指针</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>读取邻居节点数量（≤16）</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr></table>\n\n开始邻居节点指针：指从节点邻居表中的指针位置，0 为第一个指针。\n',
-        "fields": []
+        "fields": [{'name': '从节点地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True, 'default': '000000000000', 'description': '6字节从节点地址（BCD）'}, {'name': '开始邻居节点指针', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': '邻居表指针位置，0为第一个指针'}, {'name': '读取邻居节点数量', 'type': 'uint8', 'length': 1, 'required': True, 'default': 1, 'description': '读取邻居节点数量，≤16'}]
     },
 
     # 查询主节点状态 (E8 03 10 11)
@@ -695,7 +740,7 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '读取入网节点信息',
         "direction": "down",
         "doc": '<b>DI编码</b>：E8 03 10 12<br>\n<b>命令名称</b>：读取入网节点信息<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n数据标识内容格式见下表。\n\n<div style="text-align: center;"><div style="text-align: center;">表6-97 读取入网节点信息数据标识内容格式</div> </div>\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据标识内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>查询起始序号</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>查询数量</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr></table>\n',
-        "fields": []
+        "fields": [{'name': '查询起始序号', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '查询起始序号，从0开始'}, {'name': '查询数量', 'type': 'uint8', 'length': 1, 'required': True, 'default': 1, 'description': '查询数量'}]
     },
 
     # 读取未入网节点信息 (E8 03 10 13)
@@ -703,7 +748,7 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '读取未入网节点信息',
         "direction": "down",
         "doc": '<b>DI编码</b>：E8 03 10 13<br>\n<b>命令名称</b>：读取未入网节点信息<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n数据标识内容格式见下表。\n\n<div style="text-align: center;"><div style="text-align: center;">表6-98 读取未入网节点信息数据标识内容格式</div> </div>\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据标识内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>读取节点起始序号</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>查询数量</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr></table>\n',
-        "fields": []
+        "fields": [{'name': '读取节点起始序号', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '读取节点起始序号，从0开始'}, {'name': '查询数量', 'type': 'uint8', 'length': 1, 'required': True, 'default': 1, 'description': '查询数量'}]
     },
 
     # 请求切换通信速率和信道 (E8 03 10 15)
@@ -711,7 +756,7 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '请求切换通信速率和信道',
         "direction": "down",
         "doc": '<b>DI编码</b>：E8 03 10 15<br>\n<b>命令名称</b>：请求切换通信速率和信道<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n本命令用于掌机向主节点请求切换通信速率和通信信道。掌机在公共信道上发送此命令。\n\n<div style="text-align: center;"><div style="text-align: center;">表6-100 请求切换通信速率和信道数据标识内容格式</div> </div>\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据标识内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>通信速率</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>通信信道</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>维护信道空闲恢复时间</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>保留</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td></tr></table>\n\na）通信速率：0:10kbps；1:50kbps；2：100kbps。\n\nb）通信信道：0：主节点模块当前使用的私有信道组；33为维护信道组组；其他值保留。\n\nc）维护信道空闲恢复时间：恢复时间超时之后，自行恢复到原有的工作信道与通信速率。单位为分，默认值为10。范围为1~10。如果通信信道为0，则恢复时间填充0。\n',
-        "fields": []
+        "fields": [{'name': '通信速率', 'type': 'enum', 'length': 1, 'required': True, 'enum_map': {0: '10kbps', 1: '50kbps', 2: '100kbps'}, 'default': 0, 'description': '0:10kbps；1:50kbps；2:100kbps'}, {'name': '通信信道', 'type': 'uint8', 'length': 1, 'required': True, 'default': 0, 'description': '0：私有信道组；33：维护信道组；其他保留'}, {'name': '维护信道空闲恢复时间', 'type': 'uint8', 'length': 1, 'required': True, 'default': 10, 'description': '恢复时间（分钟），默认10，范围1~10'}, {'name': '保留', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '保留字节'}]
     },
 
     # 请求集中器时间 (E8 06 06 01)
