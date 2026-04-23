@@ -2045,6 +2045,7 @@ class ProtocolFrameParser:
             0x00: "成功",
             0x01: "从节点无响应",
             0x02: "数据不合法",
+            0X82: "从节点未入网",
             0xFF: "其他错误"
         }
             
@@ -2059,6 +2060,7 @@ class ProtocolFrameParser:
             },
             "任务状态": {
                 "原始值": f"0x{task_status:02X}",
+                "十进制": f"0x{task_status:02X}",
                 "说明": status_desc.get(task_status, f"未知状态 ({task_status:02X})")
             }
         }

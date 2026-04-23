@@ -206,8 +206,8 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
     (0xE8, 0x00, 0xF0, 0x32): {
         "name": '查询CCO详细版本信息',
         "direction": "down",
-        "doc": '<b>DI编码</b>：E8 00 F0 32<br>\n<b>命令名称</b>：查询CCO详细版本信息<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n该命令用于查询模块的详细版本信息，包括外部/内部厂商代码、芯片代码、版本日期、版本号、各层程序版本、硬件型号等。上行响应采用TLV条目格式解析。<br><br>\n<b>下行数据内容</b>：无数据内容。',
-        "fields": []
+        "doc": '<b>DI编码</b>：E8 00 F0 32<br>\n<b>命令名称</b>：查询CCO详细版本信息<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n该命令用于查询模块的详细版本信息，包括外部/内部厂商代码、芯片代码、版本日期、版本号、各层程序版本、硬件型号等。上行响应采用TLV条目格式解析。<br><br>\n<b>下行数据内容</b>：2字节保留字段，固定为0x0000。',
+        "fields": [{'name': '保留', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '保留字段，固定为0x0000'}]
     },
 
     # 查询宽带应用省份 (E8 00 F0 DF)
