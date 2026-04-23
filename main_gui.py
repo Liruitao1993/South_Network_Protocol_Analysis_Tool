@@ -262,6 +262,7 @@ class MainWindow(QMainWindow):
         self.serial_worker.connection_changed.connect(self._on_serial_connection_changed)
         self.serial_worker.error_occurred.connect(self._on_serial_error)
         self._refresh_serial_ports()
+        self._load_serial_config()
 
         # 选项卡
         self.tab_widget = QTabWidget()
@@ -1088,10 +1089,14 @@ class MainWindow(QMainWindow):
         # 更新查询页面
         self._update_protocol_lookup_tab()
 
-        # 协议组帧页面仅在南网协议下显示
+        # 协议组帧页面在南网和国网协议下显示
         if hasattr(self, '_frame_gen_tab_index'):
-            self.tab_widget.setTabVisible(self._frame_gen_tab_index, index == 0)
-            if index != 0:
+            show_frame_gen = index in (0, 6)
+            self.tab_widget.setTabVisible(self._frame_gen_tab_index, show_frame_gen)
+            if show_frame_gen:
+                mode = "south" if index == 0 else "gdw"
+                self.frame_gen_tab.set_protocol_mode(mode)
+            else:
                 self.frame_gen_tab.reset()
 
         # 清空当前结果
@@ -2639,6 +2644,126 @@ class MainWindow(QMainWindow):
         layout.addWidget(table)
         dialog.setLayout(layout)
         dialog.exec()
+
+    # ==================== 串口配置与持久化 ====================
+
+    def _load_serial_config(self):
+        """从 config.json 加载串口配置"""
+        config_path = Path(__file__).parent / "config.json"
+        if not config_path.exists():
+            return
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+            serial_config = config.get("serial", {})
+            port = serial_config.get("port", "")
+            baud = serial_config.get("baudrate", "9600")
+            parity = serial_config.get("parity", "无")
+
+            # 应用配置（仅当值有效时）
+            if port:
+                idx = self.serial_port_combo.findText(port)
+                if idx >= 0:
+                    self.serial_port_combo.setCurrentIndex(idx)
+            if baud:
+                self.serial_baud_combo.setCurrentText(str(baud))
+            if parity:
+                self.serial_parity_combo.setCurrentText(parity)
+        except Exception:
+            pass
+
+    def _save_serial_config(self):
+        """保存串口配置到 config.json"""
+        config_path = Path(__file__).parent / "config.json"
+        config: Dict[str, Any] = {}
+        # 保留现有配置
+        if config_path.exists():
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+            except Exception:
+                config = {}
+
+        config["serial"] = {
+            "port": self.serial_port_combo.currentText(),
+            "baudrate": self.serial_baud_combo.currentText(),
+            "parity": self.serial_parity_combo.currentText(),
+        }
+        try:
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _refresh_serial_ports(self):
+        """刷新可用串口列表"""
+        from serial_worker import SerialWorker
+        current = self.serial_port_combo.currentText()
+        self.serial_port_combo.clear()
+        ports = SerialWorker.list_ports()
+        for p in ports:
+            self.serial_port_combo.addItem(p)
+        # 恢复之前选中的端口（如果仍在列表中）
+        if current:
+            idx = self.serial_port_combo.findText(current)
+            if idx >= 0:
+                self.serial_port_combo.setCurrentIndex(idx)
+
+    def _on_serial_open_clicked(self):
+        """打开/关闭串口按钮点击"""
+        if self.serial_worker.is_open():
+            self.serial_worker.close_port()
+            self.serial_open_btn.setText("打开串口")
+            self.serial_open_btn.setStyleSheet(
+                "QPushButton { background-color: #4CAF50; color: white; border-radius: 3px; padding: 4px 12px; font-weight: bold; }"
+                "QPushButton:disabled { background-color: #cccccc; }"
+            )
+            self.serial_port_combo.setEnabled(True)
+            self.serial_baud_combo.setEnabled(True)
+            self.serial_parity_combo.setEnabled(True)
+            self.serial_status_label.setText("未连接")
+            self.serial_status_label.setStyleSheet("color: #999; font-size: 12px;")
+            self._save_serial_config()
+        else:
+            port = self.serial_port_combo.currentText()
+            if not port:
+                QMessageBox.warning(self, "警告", "请先选择串口端口")
+                return
+            baud = int(self.serial_baud_combo.currentText())
+            parity = self.serial_parity_combo.currentText()
+            self.serial_worker.configure(port, baudrate=baud, parity=parity)
+            if self.serial_worker.open_port():
+                self.serial_open_btn.setText("关闭串口")
+                self.serial_open_btn.setStyleSheet(
+                    "QPushButton { background-color: #f44336; color: white; border-radius: 3px; padding: 4px 12px; font-weight: bold; }"
+                    "QPushButton:disabled { background-color: #cccccc; }"
+                )
+                self.serial_port_combo.setEnabled(False)
+                self.serial_baud_combo.setEnabled(False)
+                self.serial_parity_combo.setEnabled(False)
+                self.serial_status_label.setText("已连接")
+                self.serial_status_label.setStyleSheet("color: #4CAF50; font-size: 12px;")
+                self._save_serial_config()
+
+    def _on_serial_connection_changed(self, connected: bool):
+        """串口连接状态变化回调"""
+        if not connected and self.serial_open_btn.text() == "关闭串口":
+            # 被动断开（如设备拔出）
+            self.serial_open_btn.setText("打开串口")
+            self.serial_open_btn.setStyleSheet(
+                "QPushButton { background-color: #4CAF50; color: white; border-radius: 3px; padding: 4px 12px; font-weight: bold; }"
+                "QPushButton:disabled { background-color: #cccccc; }"
+            )
+            self.serial_port_combo.setEnabled(True)
+            self.serial_baud_combo.setEnabled(True)
+            self.serial_parity_combo.setEnabled(True)
+            self.serial_status_label.setText("未连接")
+            self.serial_status_label.setStyleSheet("color: #999; font-size: 12px;")
+
+    def _on_serial_error(self, msg: str):
+        """串口错误回调"""
+        self.serial_status_label.setText(f"错误: {msg}")
+        self.serial_status_label.setStyleSheet("color: #f44336; font-size: 12px;")
 
 
 def main():

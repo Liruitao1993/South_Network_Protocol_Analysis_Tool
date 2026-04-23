@@ -18,6 +18,9 @@ from PySide6.QtGui import QFont, QKeyEvent
 from send_frame_lib import ProtocolFrameGenerator
 from frame_generator_schema import DI_FIELD_SCHEMA
 from protocol_parser import ProtocolFrameParser
+from gdw_send_frame_lib import GDWFrameGenerator
+from gdw_frame_generator_schema import GDW_AFNFN_SCHEMA
+from gdw10376_parser import GDW10376Parser
 
 
 # =============================================================================
@@ -41,10 +44,15 @@ class FrameGenWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        # 协议模式: "south"=南网, "gdw"=国网
+        self.protocol_mode = "south"
         self.generator = ProtocolFrameGenerator()
         self.parser = ProtocolFrameParser()
+        self.gdw_generator = GDWFrameGenerator()
+        self.gdw_parser = GDW10376Parser()
         self._field_widgets: Dict[str, Dict[str, Any]] = {}
         self._current_di_key: Tuple[int, int, int, int] = None
+        self._current_afn_fn: Tuple[int, int] = None
         self._form_container: QWidget = None
         self._custom_templates: List[CustomFieldTemplate] = []
         self._custom_mode = False
@@ -66,25 +74,41 @@ class FrameGenWidget(QWidget):
         left_layout = QVBoxLayout(left_widget)
         left_layout.setSpacing(6)
 
-        # ---- DI 选择 ----
-        di_group = QGroupBox("DI 选择")
-        di_layout = QHBoxLayout(di_group)
-        di_layout.setContentsMargins(6, 4, 6, 4)
-        di_layout.setSpacing(6)
-        di_layout.addWidget(QLabel("选择命令："))
+        # ---- 命令选择区（南网DI / 国网AFN+Fn） ----
+        self.cmd_select_group = QGroupBox("DI 选择")
+        cmd_layout = QHBoxLayout(self.cmd_select_group)
+        cmd_layout.setContentsMargins(6, 4, 6, 4)
+        cmd_layout.setSpacing(6)
+        cmd_layout.addWidget(QLabel("选择命令："))
+
+        # 南网DI选择
         self.di_combo = QComboBox()
         self.di_combo.setMinimumWidth(360)
         self.di_combo.setEditable(True)
         self.di_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.di_combo.completer().setCompletionMode(self.di_combo.completer().CompletionMode.PopupCompletion)
         self.di_combo.completer().setFilterMode(Qt.MatchFlag.MatchContains)
-        # 修复 completer 弹出列表黑色背景问题
         self.di_combo.completer().popup().setStyleSheet(
             "background-color: #ffffff; color: #000000; selection-background-color: #2196F3; selection-color: #ffffff;"
         )
         self._populate_di_combo()
         self.di_combo.currentIndexChanged.connect(self._on_di_changed)
-        di_layout.addWidget(self.di_combo)
+        cmd_layout.addWidget(self.di_combo)
+
+        # 国网AFN+Fn选择（默认隐藏）
+        self.afn_fn_combo = QComboBox()
+        self.afn_fn_combo.setMinimumWidth(360)
+        self.afn_fn_combo.setEditable(True)
+        self.afn_fn_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.afn_fn_combo.completer().setCompletionMode(self.afn_fn_combo.completer().CompletionMode.PopupCompletion)
+        self.afn_fn_combo.completer().setFilterMode(Qt.MatchFlag.MatchContains)
+        self.afn_fn_combo.completer().popup().setStyleSheet(
+            "background-color: #ffffff; color: #000000; selection-background-color: #2196F3; selection-color: #ffffff;"
+        )
+        self._populate_afn_fn_combo()
+        self.afn_fn_combo.currentIndexChanged.connect(self._on_afn_fn_changed)
+        self.afn_fn_combo.setVisible(False)
+        cmd_layout.addWidget(self.afn_fn_combo)
 
         self.cmd_help_btn = QPushButton("命令说明")
         self.cmd_help_btn.setStyleSheet(
@@ -94,46 +118,150 @@ class FrameGenWidget(QWidget):
         )
         self.cmd_help_btn.setEnabled(False)
         self.cmd_help_btn.clicked.connect(self._on_cmd_help_clicked)
-        di_layout.addWidget(self.cmd_help_btn)
-        di_layout.addStretch()
-        left_layout.addWidget(di_group)
+        cmd_layout.addWidget(self.cmd_help_btn)
+        cmd_layout.addStretch()
+        left_layout.addWidget(self.cmd_select_group)
 
-        # ---- 帧配置（地址、控制域） ----
-        config_group = QGroupBox("帧配置")
-        config_layout = QHBoxLayout(config_group)
-        config_layout.setContentsMargins(6, 4, 6, 4)
-        config_layout.setSpacing(6)
+        # ---- 帧配置（南网模式） ----
+        self.south_config_group = QGroupBox("帧配置")
+        south_config_layout = QHBoxLayout(self.south_config_group)
+        south_config_layout.setContentsMargins(6, 4, 6, 4)
+        south_config_layout.setSpacing(6)
 
-        config_layout.addWidget(QLabel("源地址:"))
+        south_config_layout.addWidget(QLabel("源地址:"))
         self.src_addr_input = QLineEdit("000000000000")
         self.src_addr_input.setMaxLength(12)
-        config_layout.addWidget(self.src_addr_input)
+        south_config_layout.addWidget(self.src_addr_input)
 
-        config_layout.addWidget(QLabel("目的地址:"))
+        south_config_layout.addWidget(QLabel("目的地址:"))
         self.dst_addr_input = QLineEdit("000000000000")
         self.dst_addr_input.setMaxLength(12)
-        config_layout.addWidget(self.dst_addr_input)
+        south_config_layout.addWidget(self.dst_addr_input)
 
-        config_layout.addWidget(QLabel("DIR:"))
+        south_config_layout.addWidget(QLabel("DIR:"))
         self.dir_combo = QComboBox()
         self.dir_combo.addItem("0-下行(集中器→模块)", 0)
         self.dir_combo.addItem("1-上行(模块→集中器)", 1)
-        config_layout.addWidget(self.dir_combo)
+        south_config_layout.addWidget(self.dir_combo)
 
-        config_layout.addWidget(QLabel("PRM:"))
+        south_config_layout.addWidget(QLabel("PRM:"))
         self.prm_combo = QComboBox()
         self.prm_combo.addItem("0-从动站", 0)
         self.prm_combo.addItem("1-启动站", 1)
-        config_layout.addWidget(self.prm_combo)
+        south_config_layout.addWidget(self.prm_combo)
 
-        config_layout.addWidget(QLabel("ADD:"))
+        south_config_layout.addWidget(QLabel("ADD:"))
         self.add_combo = QComboBox()
         self.add_combo.addItem("0-不带地址域", 0)
         self.add_combo.addItem("1-带地址域", 1)
-        config_layout.addWidget(self.add_combo)
+        south_config_layout.addWidget(self.add_combo)
 
-        config_layout.addStretch()
-        left_layout.addWidget(config_group)
+        south_config_layout.addStretch()
+        left_layout.addWidget(self.south_config_group)
+
+        # ---- 国网帧配置（信息域R + 地址域A，默认隐藏） ----
+        self.gdw_config_group = QGroupBox("国网帧配置")
+        gdw_config_layout = QVBoxLayout(self.gdw_config_group)
+        gdw_config_layout.setContentsMargins(6, 4, 6, 4)
+        gdw_config_layout.setSpacing(4)
+
+        # 信息域R配置
+        info_layout = QHBoxLayout()
+        info_layout.setSpacing(6)
+        info_layout.addWidget(QLabel("通信方式:"))
+        self.gdw_comm_type = QComboBox()
+        self.gdw_comm_type.addItem("0-保留", 0)
+        self.gdw_comm_type.addItem("1-集中式路由载波", 1)
+        self.gdw_comm_type.addItem("2-分布式路由载波", 2)
+        self.gdw_comm_type.addItem("3-HPLC载波", 3)
+        self.gdw_comm_type.addItem("4-双模HDC", 4)
+        self.gdw_comm_type.addItem("10-微功率无线", 10)
+        self.gdw_comm_type.addItem("20-以太网", 20)
+        info_layout.addWidget(self.gdw_comm_type)
+
+        info_layout.addWidget(QLabel("DIR:"))
+        self.gdw_dir = QComboBox()
+        self.gdw_dir.addItem("0-下行", 0)
+        self.gdw_dir.addItem("1-上行", 1)
+        info_layout.addWidget(self.gdw_dir)
+
+        info_layout.addWidget(QLabel("PRM:"))
+        self.gdw_prm = QComboBox()
+        self.gdw_prm.addItem("1-启动站", 1)
+        self.gdw_prm.addItem("0-从动站", 0)
+        info_layout.addWidget(self.gdw_prm)
+
+        info_layout.addWidget(QLabel("序列号:"))
+        self.gdw_seq = QLineEdit("0")
+        self.gdw_seq.setFixedWidth(40)
+        info_layout.addWidget(self.gdw_seq)
+        info_layout.addStretch()
+        gdw_config_layout.addLayout(info_layout)
+
+        # 信息域R详细配置
+        info_detail_layout = QHBoxLayout()
+        info_detail_layout.setSpacing(6)
+
+        info_detail_layout.addWidget(QLabel("路由标识:"))
+        self.gdw_route_flag = QComboBox()
+        self.gdw_route_flag.addItem("0-带路由", 0)
+        self.gdw_route_flag.addItem("1-不带路由", 1)
+        info_detail_layout.addWidget(self.gdw_route_flag)
+
+        info_detail_layout.addWidget(QLabel("通信模块标识:"))
+        self.gdw_comm_module = QComboBox()
+        self.gdw_comm_module.addItem("0-对主节点", 0)
+        self.gdw_comm_module.addItem("1-对从节点", 1)
+        self.gdw_comm_module.currentIndexChanged.connect(self._on_gdw_comm_module_changed)
+        info_detail_layout.addWidget(self.gdw_comm_module)
+
+        info_detail_layout.addWidget(QLabel("中继级别:"))
+        self.gdw_relay_level = QComboBox()
+        for i in range(16):
+            self.gdw_relay_level.addItem(f"{i}", i)
+        self.gdw_relay_level.currentIndexChanged.connect(self._on_gdw_relay_level_changed)
+        info_detail_layout.addWidget(self.gdw_relay_level)
+
+        info_detail_layout.addWidget(QLabel("信道标识:"))
+        self.gdw_channel = QLineEdit("0")
+        self.gdw_channel.setFixedWidth(30)
+        info_detail_layout.addWidget(self.gdw_channel)
+
+        info_detail_layout.addWidget(QLabel("应答字节数:"))
+        self.gdw_resp_bytes = QLineEdit("0")
+        self.gdw_resp_bytes.setFixedWidth(40)
+        info_detail_layout.addWidget(self.gdw_resp_bytes)
+
+        info_detail_layout.addStretch()
+        gdw_config_layout.addLayout(info_detail_layout)
+
+        # 地址域配置
+        addr_layout = QHBoxLayout()
+        addr_layout.setSpacing(6)
+        addr_layout.addWidget(QLabel("源地址(A1):"))
+        self.gdw_src_addr = QLineEdit("000000000000")
+        self.gdw_src_addr.setMaxLength(12)
+        addr_layout.addWidget(self.gdw_src_addr)
+
+        addr_layout.addWidget(QLabel("目的地址(A3):"))
+        self.gdw_dst_addr = QLineEdit("000000000000")
+        self.gdw_dst_addr.setMaxLength(12)
+        addr_layout.addWidget(self.gdw_dst_addr)
+        addr_layout.addStretch()
+        gdw_config_layout.addLayout(addr_layout)
+
+        # 中继地址（动态）
+        self.gdw_relay_container = QWidget()
+        self.gdw_relay_layout = QHBoxLayout(self.gdw_relay_container)
+        self.gdw_relay_layout.setContentsMargins(0, 0, 0, 0)
+        self.gdw_relay_layout.setSpacing(6)
+        self.gdw_relay_layout.addWidget(QLabel("中继地址:"))
+        self.gdw_relay_inputs: List[QLineEdit] = []
+        gdw_config_layout.addWidget(self.gdw_relay_container)
+        self.gdw_relay_container.setVisible(False)
+
+        self.gdw_config_group.setVisible(False)
+        left_layout.addWidget(self.gdw_config_group)
 
         # ---- 模式切换 ----
         self.mode_group = QGroupBox("字段模式")
@@ -289,6 +417,19 @@ class FrameGenWidget(QWidget):
         self.prm_combo.currentIndexChanged.connect(self._schedule_realtime_update)
         self.add_combo.currentIndexChanged.connect(self._schedule_realtime_update)
 
+        # ---- 连接国网控件的实时更新信号 ----
+        self.gdw_comm_type.currentIndexChanged.connect(self._schedule_realtime_update)
+        self.gdw_dir.currentIndexChanged.connect(self._schedule_realtime_update)
+        self.gdw_prm.currentIndexChanged.connect(self._schedule_realtime_update)
+        self.gdw_seq.textChanged.connect(self._schedule_realtime_update)
+        self.gdw_route_flag.currentIndexChanged.connect(self._schedule_realtime_update)
+        self.gdw_comm_module.currentIndexChanged.connect(self._schedule_realtime_update)
+        self.gdw_relay_level.currentIndexChanged.connect(self._schedule_realtime_update)
+        self.gdw_channel.textChanged.connect(self._schedule_realtime_update)
+        self.gdw_resp_bytes.textChanged.connect(self._schedule_realtime_update)
+        self.gdw_src_addr.textChanged.connect(self._schedule_realtime_update)
+        self.gdw_dst_addr.textChanged.connect(self._schedule_realtime_update)
+
     # ------------------------------------------------------------------
     # 模式切换
     # ------------------------------------------------------------------
@@ -306,7 +447,10 @@ class FrameGenWidget(QWidget):
                 self.mode_predefined_rb.setChecked(True)
                 self._custom_mode = False
         # 仅重新构建字段表单区（不清空模式切换控件本身）
-        self._rebuild_field_form(self._current_di_key)
+        if self.protocol_mode == "south":
+            self._rebuild_field_form(self._current_di_key)
+        else:
+            self._rebuild_gdw_field_form(self._current_afn_fn)
 
     # ------------------------------------------------------------------
     # DI 下拉框
@@ -323,21 +467,44 @@ class FrameGenWidget(QWidget):
             label = f"【下行】 {name}  ({di_key[0]:02X} {di_key[1]:02X} {di_key[2]:02X} {di_key[3]:02X})"
             self.di_combo.addItem(label, di_key)
 
+    def _populate_afn_fn_combo(self):
+        """填充国网AFN+Fn下拉框"""
+        self.afn_fn_combo.clear()
+        self.afn_fn_combo.addItem("-- 请选择AFN+Fn --", None)
+        for afn, fn, name in self.gdw_generator.get_supported_afn_fn():
+            label = f"【下行】 {name}  (AFN={afn:02X}H Fn=F{fn})"
+            self.afn_fn_combo.addItem(label, (afn, fn))
+
     def _on_di_changed(self, index: int):
         di_key = self.di_combo.currentData()
         self._current_di_key = di_key
         self.cmd_help_btn.setEnabled(di_key is not None)
         self._rebuild_form(di_key)
 
+    def _on_afn_fn_changed(self, index: int):
+        afn_fn = self.afn_fn_combo.currentData()
+        self._current_afn_fn = afn_fn
+        self.cmd_help_btn.setEnabled(afn_fn is not None)
+        self._rebuild_gdw_form(afn_fn)
+
     def _on_cmd_help_clicked(self):
         """显示命令说明弹窗"""
-        if not self._current_di_key:
-            return
-        schema = DI_FIELD_SCHEMA.get(self._current_di_key)
-        if not schema:
-            return
-        doc = schema.get("doc", "暂无说明")
-        name = schema.get("name", "未知命令")
+        if self.protocol_mode == "south":
+            if not self._current_di_key:
+                return
+            schema = DI_FIELD_SCHEMA.get(self._current_di_key)
+            if not schema:
+                return
+            doc = schema.get("doc", "暂无说明")
+            name = schema.get("name", "未知命令")
+        else:
+            if not self._current_afn_fn:
+                return
+            schema = GDW_AFNFN_SCHEMA.get(self._current_afn_fn)
+            if not schema:
+                return
+            doc = schema.get("doc", "暂无说明")
+            name = schema.get("name", "未知命令")
 
         dialog = QDialog(self)
         dialog.setWindowTitle(f"命令说明 - {name}")
@@ -411,6 +578,108 @@ class FrameGenWidget(QWidget):
             self.mode_custom_rb.setChecked(False)
 
         self._rebuild_field_form(di_key)
+
+    def _rebuild_gdw_form(self, afn_fn: Tuple[int, int]):
+        """重建国网模式表单"""
+        while self._form_layout.count():
+            item = self._form_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+        self._field_widgets.clear()
+
+        if not afn_fn:
+            self.mode_group.setVisible(True)
+            return
+
+        schema = GDW_AFNFN_SCHEMA.get(afn_fn)
+        if not schema:
+            self.mode_group.setVisible(True)
+            return
+
+        fields = schema.get("fields")
+        if fields is not None and len(fields) == 0:
+            self.mode_group.setVisible(False)
+            self._custom_mode = False
+            hint = QLabel("<b>该命令无数据单元，无需添加用户数据</b>")
+            hint.setStyleSheet("color: #2196F3; font-size: 13px; padding: 20px;")
+            hint.setAlignment(Qt.AlignCenter)
+            self._form_layout.addWidget(hint)
+            self._schedule_realtime_update()
+            return
+
+        self.mode_group.setVisible(True)
+        has_predefined = bool(fields)
+        if not has_predefined:
+            self.mode_custom_rb.setChecked(True)
+            self.mode_predefined_rb.setChecked(False)
+            self._custom_mode = True
+        elif not self._custom_mode:
+            self.mode_predefined_rb.setChecked(True)
+            self.mode_custom_rb.setChecked(False)
+
+        self._rebuild_gdw_field_form(afn_fn)
+
+    def _rebuild_gdw_field_form(self, afn_fn: Tuple[int, int]):
+        """仅重建国网字段表单区"""
+        while self._form_layout.count():
+            item = self._form_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+        self._field_widgets.clear()
+
+        if not afn_fn:
+            return
+        schema = GDW_AFNFN_SCHEMA.get(afn_fn)
+        if not schema:
+            return
+
+        fields = schema.get("fields")
+        if fields is not None and len(fields) == 0:
+            return
+
+        if self._custom_mode:
+            self._build_custom_template_ui()
+            self._connect_template_signals()
+        else:
+            for field in schema.get("fields", []):
+                widget = self._create_field_widget(field)
+                if widget:
+                    self._form_layout.addWidget(widget)
+            self._connect_field_signals()
+        self._schedule_realtime_update()
+
+    def _on_gdw_comm_module_changed(self, index: int):
+        """国网通信模块标识改变：决定是否显示地址域"""
+        # 地址域始终显示，但通信模块标识影响组帧时是否包含地址
+        pass
+
+    def _on_gdw_relay_level_changed(self, index: int):
+        """国网中继级别改变：动态显示中继地址输入框"""
+        level = self.gdw_relay_level.currentData()
+        # 清除旧的中继输入框
+        while self.gdw_relay_layout.count() > 1:
+            item = self.gdw_relay_layout.takeAt(1)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+        self.gdw_relay_inputs.clear()
+
+        if level > 0:
+            self.gdw_relay_container.setVisible(True)
+            for i in range(level):
+                lbl = QLabel(f"A2-{i+1}:")
+                edit = QLineEdit("000000000000")
+                edit.setMaxLength(12)
+                edit.setFixedWidth(100)
+                edit.textChanged.connect(self._schedule_realtime_update)
+                self.gdw_relay_layout.addWidget(lbl)
+                self.gdw_relay_layout.addWidget(edit)
+                self.gdw_relay_inputs.append(edit)
+            self.gdw_relay_layout.addStretch()
+        else:
+            self.gdw_relay_container.setVisible(False)
 
     def _rebuild_field_form(self, di_key: Tuple[int, int, int, int]):
         """仅重建字段表单区（模式切换时调用，不清空模式控件）"""
@@ -806,8 +1075,12 @@ class FrameGenWidget(QWidget):
     # ------------------------------------------------------------------
     def _collect_values(self) -> Dict[str, Any]:
         values: Dict[str, Any] = {}
-        if not self._current_di_key:
-            return values
+        if self.protocol_mode == "south":
+            if not self._current_di_key:
+                return values
+        else:
+            if not self._current_afn_fn:
+                return values
 
         if self._custom_mode:
             self._sync_templates_from_table()
@@ -826,7 +1099,10 @@ class FrameGenWidget(QWidget):
                 else:
                     values[tpl.name] = text
         else:
-            schema = DI_FIELD_SCHEMA.get(self._current_di_key, {})
+            if self.protocol_mode == "south":
+                schema = DI_FIELD_SCHEMA.get(self._current_di_key, {})
+            else:
+                schema = GDW_AFNFN_SCHEMA.get(self._current_afn_fn, {})
             for field in schema.get("fields", []):
                 name = field["name"]
                 widget_info = self._field_widgets.get(name)
@@ -986,6 +1262,16 @@ class FrameGenWidget(QWidget):
 
     def _do_realtime_update(self):
         """执行实时组帧与解析"""
+        try:
+            if self.protocol_mode == "south":
+                self._do_realtime_update_south()
+            else:
+                self._do_realtime_update_gdw()
+        except Exception:
+            pass
+
+    def _do_realtime_update_south(self):
+        """南网实时组帧与解析"""
         if not self._current_di_key:
             self.preview_table.setRowCount(0)
             return
@@ -1002,39 +1288,83 @@ class FrameGenWidget(QWidget):
             self.preview_table.setRowCount(0)
             return
 
+        di_key = self._current_di_key
+        dir_flag = self.dir_combo.currentData()
+        prm = self.prm_combo.currentData()
+        add_flag = self.add_combo.currentData()
+
+        if self._custom_mode:
+            data = self._generate_custom_data()
+            di3, di2, di1, di0 = di_key
+            frame = self.generator._build_frame(
+                di3, di2, di1, di0,
+                src_addr=src_addr, dst_addr=dst_addr, data=data,
+                dir_flag=dir_flag, prm=prm, add_flag=add_flag
+            )
+        else:
+            field_values = self._collect_values()
+            frame = self.generator.generate_frame(
+                di_key, field_values,
+                src_addr=src_addr, dst_addr=dst_addr,
+                dir_flag=dir_flag, prm=prm, add_flag=add_flag
+            )
+
+        table_data = self.parser.parse_to_table(frame)
+        self._populate_preview_table(table_data)
+
+        hex_str = frame.hex().upper()
+        formatted = " ".join(hex_str[i:i+2] for i in range(0, len(hex_str), 2))
+        self.result_hex.setText(formatted)
+
+    def _do_realtime_update_gdw(self):
+        """国网实时组帧与解析"""
+        if not self._current_afn_fn:
+            self.preview_table.setRowCount(0)
+            return
+
+        afn, fn = self._current_afn_fn
         try:
-            di_key = self._current_di_key
-            dir_flag = self.dir_combo.currentData()
-            prm = self.prm_combo.currentData()
-            add_flag = self.add_combo.currentData()
+            seq = int(self.gdw_seq.text().strip()) & 0xFF
+            channel = int(self.gdw_channel.text().strip()) & 0x0F
+            resp_bytes = int(self.gdw_resp_bytes.text().strip()) & 0xFF
+        except ValueError:
+            self.preview_table.setRowCount(0)
+            return
 
-            if self._custom_mode:
-                data = self._generate_custom_data()
-                di3, di2, di1, di0 = di_key
-                frame = self.generator._build_frame(
-                    di3, di2, di1, di0,
-                    src_addr=src_addr, dst_addr=dst_addr, data=data,
-                    dir_flag=dir_flag, prm=prm, add_flag=add_flag
-                )
-            else:
-                field_values = self._collect_values()
-                frame = self.generator.generate_frame(
-                    di_key, field_values,
-                    src_addr=src_addr, dst_addr=dst_addr,
-                    dir_flag=dir_flag, prm=prm, add_flag=add_flag
-                )
+        info_config = {
+            "dir": self.gdw_dir.currentData(),
+            "prm": self.gdw_prm.currentData(),
+            "通信方式": self.gdw_comm_type.currentData(),
+            "路由标识": self.gdw_route_flag.currentData(),
+            "附属节点标识": 0,
+            "通信模块标识": self.gdw_comm_module.currentData(),
+            "冲突检测": 0,
+            "中继级别": self.gdw_relay_level.currentData(),
+            "纠错编码标识": 0,
+            "信道标识": channel,
+            "预计应答字节数": resp_bytes,
+            "通信速率": 0,
+            "速率单位标识": 0,
+            "报文序列号": seq,
+        }
 
-            # 解析帧
-            table_data = self.parser.parse_to_table(frame)
-            self._populate_preview_table(table_data)
+        src_addr = self.gdw_src_addr.text().strip()
+        dst_addr = self.gdw_dst_addr.text().strip()
+        relay_addrs = [edit.text().strip() for edit in self.gdw_relay_inputs]
 
-            # 同时更新底部结果hex显示
-            hex_str = frame.hex().upper()
-            formatted = " ".join(hex_str[i:i+2] for i in range(0, len(hex_str), 2))
-            self.result_hex.setText(formatted)
-        except Exception:
-            # 实时更新失败静默处理，不清空表格以免闪烁
-            pass
+        field_values = self._collect_values()
+
+        frame = self.gdw_generator.generate_frame(
+            afn, fn, field_values, info_config,
+            src_addr=src_addr, dst_addr=dst_addr, relay_addrs=relay_addrs
+        )
+
+        table_data = self.gdw_parser.parse_to_table(frame)
+        self._populate_preview_table(table_data)
+
+        hex_str = frame.hex().upper()
+        formatted = " ".join(hex_str[i:i+2] for i in range(0, len(hex_str), 2))
+        self.result_hex.setText(formatted)
 
     def _populate_preview_table(self, table_data: list):
         """填充实时预览表格"""
@@ -1082,6 +1412,16 @@ class FrameGenWidget(QWidget):
                 cw6.textChanged.connect(self._schedule_realtime_update)
 
     def _on_generate(self):
+        try:
+            if self.protocol_mode == "south":
+                self._generate_south_frame()
+            else:
+                self._generate_gdw_frame()
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"组帧失败：{str(e)}")
+
+    def _generate_south_frame(self):
+        """生成南网协议帧"""
         if not self._current_di_key:
             QMessageBox.warning(self, "警告", "请先选择一个DI命令")
             return
@@ -1098,33 +1438,79 @@ class FrameGenWidget(QWidget):
             QMessageBox.warning(self, "警告", "地址格式错误，请输入有效的十六进制字符串")
             return
 
+        di_key = self._current_di_key
+        dir_flag = self.dir_combo.currentData()
+        prm = self.prm_combo.currentData()
+        add_flag = self.add_combo.currentData()
+
+        if self._custom_mode:
+            data = self._generate_custom_data()
+            di3, di2, di1, di0 = di_key
+            frame = self.generator._build_frame(
+                di3, di2, di1, di0,
+                src_addr=src_addr, dst_addr=dst_addr, data=data,
+                dir_flag=dir_flag, prm=prm, add_flag=add_flag
+            )
+        else:
+            field_values = self._collect_values()
+            frame = self.generator.generate_frame(
+                di_key, field_values,
+                src_addr=src_addr, dst_addr=dst_addr,
+                dir_flag=dir_flag, prm=prm, add_flag=add_flag
+            )
+
+        hex_str = frame.hex().upper()
+        formatted = " ".join(hex_str[i:i+2] for i in range(0, len(hex_str), 2))
+        self.result_hex.setText(formatted)
+
+    def _generate_gdw_frame(self):
+        """生成国网协议帧"""
+        if not self._current_afn_fn:
+            QMessageBox.warning(self, "警告", "请先选择一个AFN+Fn命令")
+            return
+
+        afn, fn = self._current_afn_fn
+
+        # 收集信息域配置
         try:
-            di_key = self._current_di_key
-            dir_flag = self.dir_combo.currentData()
-            prm = self.prm_combo.currentData()
-            add_flag = self.add_combo.currentData()
+            seq = int(self.gdw_seq.text().strip()) & 0xFF
+            channel = int(self.gdw_channel.text().strip()) & 0x0F
+            resp_bytes = int(self.gdw_resp_bytes.text().strip()) & 0xFF
+        except ValueError:
+            QMessageBox.warning(self, "警告", "信息域配置值格式错误")
+            return
 
-            if self._custom_mode:
-                data = self._generate_custom_data()
-                di3, di2, di1, di0 = di_key
-                frame = self.generator._build_frame(
-                    di3, di2, di1, di0,
-                    src_addr=src_addr, dst_addr=dst_addr, data=data,
-                    dir_flag=dir_flag, prm=prm, add_flag=add_flag
-                )
-            else:
-                field_values = self._collect_values()
-                frame = self.generator.generate_frame(
-                    di_key, field_values,
-                    src_addr=src_addr, dst_addr=dst_addr,
-                    dir_flag=dir_flag, prm=prm, add_flag=add_flag
-                )
+        info_config = {
+            "dir": self.gdw_dir.currentData(),
+            "prm": self.gdw_prm.currentData(),
+            "通信方式": self.gdw_comm_type.currentData(),
+            "路由标识": self.gdw_route_flag.currentData(),
+            "附属节点标识": 0,
+            "通信模块标识": self.gdw_comm_module.currentData(),
+            "冲突检测": 0,
+            "中继级别": self.gdw_relay_level.currentData(),
+            "纠错编码标识": 0,
+            "信道标识": channel,
+            "预计应答字节数": resp_bytes,
+            "通信速率": 0,
+            "速率单位标识": 0,
+            "报文序列号": seq,
+        }
 
-            hex_str = frame.hex().upper()
-            formatted = " ".join(hex_str[i:i+2] for i in range(0, len(hex_str), 2))
-            self.result_hex.setText(formatted)
-        except Exception as e:
-            QMessageBox.critical(self, "错误", f"组帧失败：{str(e)}")
+        src_addr = self.gdw_src_addr.text().strip()
+        dst_addr = self.gdw_dst_addr.text().strip()
+        relay_addrs = [edit.text().strip() for edit in self.gdw_relay_inputs]
+
+        field_values = self._collect_values()
+
+        frame = self.gdw_generator.generate_frame(
+            afn, fn, field_values, info_config,
+            src_addr=src_addr, dst_addr=dst_addr, relay_addrs=relay_addrs
+        )
+
+        hex_str = frame.hex().upper()
+        formatted = " ".join(hex_str[i:i+2] for i in range(0, len(hex_str), 2))
+        self.result_hex.setText(formatted)
 
     # ------------------------------------------------------------------
     # 串口功能
@@ -1166,14 +1552,17 @@ class FrameGenWidget(QWidget):
     def _on_serial_frame_received(self, frame: bytes):
         """收到串口帧后的解析与显示"""
         try:
-            table_data = self.parser.parse_to_table(frame)
-            # 填充响应帧解析表格
+            if self.protocol_mode == "south":
+                table_data = self.parser.parse_to_table(frame)
+                key_fields = ("应用功能码 (AFN)", "数据标识 (DI)", "传输方向")
+            else:
+                table_data = self.gdw_parser.parse_to_table(frame)
+                key_fields = ("应用功能码(AFN)", "数据单元标识(DT)", "传输方向")
             self._populate_response_table(table_data)
-            # 在日志中追加解析摘要
             summary_parts = []
             for item in table_data:
                 field_name = item[0].strip()
-                if field_name in ("应用功能码 (AFN)", "数据标识 (DI)", "传输方向"):
+                if field_name in key_fields:
                     parsed = str(item[2]) if item[2] else str(item[3])
                     summary_parts.append(f"{field_name}: {parsed}")
             if summary_parts:
@@ -1198,15 +1587,59 @@ class FrameGenWidget(QWidget):
             self.response_table.setItem(row, 3, QTableWidgetItem(str(comment)))
 
     # ------------------------------------------------------------------
+    # 协议模式切换
+    # ------------------------------------------------------------------
+    def set_protocol_mode(self, mode: str):
+        """切换协议模式: 'south' 或 'gdw'"""
+        if mode not in ("south", "gdw"):
+            return
+        self.protocol_mode = mode
+
+        # 切换命令选择区
+        if mode == "south":
+            self.cmd_select_group.setTitle("DI 选择")
+            self.di_combo.setVisible(True)
+            self.afn_fn_combo.setVisible(False)
+            self.south_config_group.setVisible(True)
+            self.gdw_config_group.setVisible(False)
+        else:
+            self.cmd_select_group.setTitle("AFN+Fn 选择")
+            self.di_combo.setVisible(False)
+            self.afn_fn_combo.setVisible(True)
+            self.south_config_group.setVisible(False)
+            self.gdw_config_group.setVisible(True)
+
+        # 清空当前选择
+        self.di_combo.setCurrentIndex(0)
+        self.afn_fn_combo.setCurrentIndex(0)
+        self._current_di_key = None
+        self._current_afn_fn = None
+        self._rebuild_form(None)
+        self.result_hex.clear()
+        self.preview_table.setRowCount(0)
+
+    # ------------------------------------------------------------------
     # 公共接口
     # ------------------------------------------------------------------
     def reset(self):
         self.di_combo.setCurrentIndex(0)
+        self.afn_fn_combo.setCurrentIndex(0)
         self.src_addr_input.setText("000000000000")
         self.dst_addr_input.setText("000000000000")
+        self.gdw_src_addr.setText("000000000000")
+        self.gdw_dst_addr.setText("000000000000")
         self.dir_combo.setCurrentIndex(0)
         self.prm_combo.setCurrentIndex(0)
         self.add_combo.setCurrentIndex(0)
+        self.gdw_dir.setCurrentIndex(0)
+        self.gdw_prm.setCurrentIndex(0)
+        self.gdw_comm_type.setCurrentIndex(0)
+        self.gdw_route_flag.setCurrentIndex(0)
+        self.gdw_comm_module.setCurrentIndex(0)
+        self.gdw_relay_level.setCurrentIndex(0)
+        self.gdw_seq.setText("0")
+        self.gdw_channel.setText("0")
+        self.gdw_resp_bytes.setText("0")
         self.result_hex.clear()
         if hasattr(self, 'preview_table'):
             self.preview_table.setRowCount(0)
