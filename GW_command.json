@@ -1,0 +1,135 @@
+{
+  "commands": [
+    {
+      "protocol": "gdw",
+      "button_name": "硬件初始化",
+      "group_name": "常用查询",
+      "frame_hex": "68 0F 00 40 00 00 00 00 00 00 01 01 00 42 16",
+      "description": "",
+      "config": {
+        "protocol_mode": "gdw",
+        "current_di_key": null,
+        "current_afn_fn": [
+          1,
+          1
+        ],
+        "custom_mode": false,
+        "south": {
+          "src_addr": "000000000000",
+          "dst_addr": "000000000000",
+          "dir": 0,
+          "prm": 0,
+          "add": 0
+        },
+        "gdw": {
+          "comm_type": 0,
+          "dir": 0,
+          "prm": 1,
+          "seq": "0",
+          "route_flag": 0,
+          "comm_module": 0,
+          "relay_level": 0,
+          "channel": "0",
+          "resp_bytes": "0",
+          "src_addr": "000000000000",
+          "dst_addr": "000000000000",
+          "relay_addrs": []
+        },
+        "field_values": {},
+        "custom_templates": []
+      },
+      "id": "6c528544"
+    },
+    {
+      "protocol": "gdw",
+      "button_name": "查询网络拓扑-64节点",
+      "group_name": "常用查询",
+      "frame_hex": "68 12 00 43 00 00 00 00 00 00 10 08 02 01 00 40 9E 16",
+      "description": "",
+      "config": {
+        "protocol_mode": "gdw",
+        "current_di_key": null,
+        "current_afn_fn": [
+          16,
+          20
+        ],
+        "custom_mode": false,
+        "south": {
+          "src_addr": "000000000000",
+          "dst_addr": "000000000000",
+          "dir": 0,
+          "prm": 0,
+          "add": 0
+        },
+        "gdw": {
+          "comm_type": 3,
+          "dir": 0,
+          "prm": 1,
+          "seq": "0",
+          "route_flag": 0,
+          "comm_module": 0,
+          "relay_level": 0,
+          "channel": "0",
+          "resp_bytes": "0",
+          "src_addr": "000000000000",
+          "dst_addr": "000000000022",
+          "relay_addrs": []
+        },
+        "field_values": {
+          "节点起始序号": 1,
+          "节点数量": 64
+        },
+        "custom_templates": []
+      },
+      "id": "eaff557d"
+    },
+    {
+      "protocol": "gdw",
+      "button_name": "添加从节点",
+      "group_name": "常用设置",
+      "frame_hex": "68 17 00 43 00 00 00 00 00 00 11 01 00 01 22 00 00 00 00 00 03 7B 16",
+      "description": "000000000022",
+      "config": {
+        "protocol_mode": "gdw",
+        "current_di_key": null,
+        "current_afn_fn": [
+          17,
+          1
+        ],
+        "custom_mode": false,
+        "south": {
+          "src_addr": "000000000000",
+          "dst_addr": "000000000000",
+          "dir": 0,
+          "prm": 0,
+          "add": 0
+        },
+        "gdw": {
+          "comm_type": 3,
+          "dir": 0,
+          "prm": 1,
+          "seq": "0",
+          "route_flag": 0,
+          "comm_module": 0,
+          "relay_level": 0,
+          "channel": "0",
+          "resp_bytes": "0",
+          "src_addr": "000000000000",
+          "dst_addr": "000000000022",
+          "relay_addrs": []
+        },
+        "field_values": {
+          "从节点数量": 1,
+          "从节点列表": [
+            {
+              "从节点地址": "220000000000",
+              "通信协议类型": 3
+            }
+          ]
+        },
+        "custom_templates": []
+      },
+      "id": "4b54e019"
+    }
+  ]
+}

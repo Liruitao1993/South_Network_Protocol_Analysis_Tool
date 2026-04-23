@@ -29,6 +29,7 @@ from command_lookup import CommandLookup, get_command_lookup
 from dlt645_di_lookup import DLT645DILookup, get_dlt645_di_lookup
 from gdw_afn_lookup import GDWAFNLookup, get_gdw_afn_lookup
 from frame_gen_widget import FrameGenWidget
+from preset_buttons import PresetButtonWidget
 from serial_worker import SerialWorker
 
 
@@ -272,10 +273,16 @@ class MainWindow(QMainWindow):
         self.protocol_lookup_tab_layout = QVBoxLayout(self.protocol_lookup_tab)
         self.tab_widget.addTab(self.protocol_lookup_tab, "查询")
         self.tab_widget.addTab(self.create_batch_parse_tab(), "批量解析")
-        # 协议组帧页面（仅南网协议支持）
+        # 协议组帧页面（南网和国网协议支持）
         self.frame_gen_tab = FrameGenWidget()
         self.frame_gen_tab.set_serial_worker(self.serial_worker)
         self._frame_gen_tab_index = self.tab_widget.addTab(self.frame_gen_tab, "协议组帧")
+        # 预设命令页面
+        self.preset_tab = PresetButtonWidget()
+        self._preset_tab_index = self.tab_widget.addTab(self.preset_tab, "预设命令")
+        # 信号连接
+        self.preset_tab.button_clicked.connect(self._on_preset_button_clicked)
+        self.frame_gen_tab.preset_added.connect(self.preset_tab.refresh)
         main_layout.addWidget(self.tab_widget, 1)
 
         # 初始化查询页面内容
@@ -1065,6 +1072,30 @@ class MainWindow(QMainWindow):
         """串口错误回调"""
         QMessageBox.warning(self, "串口错误", msg)
 
+    # ==================== 预设按钮功能 ====================
+
+    def _on_preset_button_clicked(self, protocol: str, frame_hex: str, config: dict):
+        """预设按钮点击：通过串口直接发送报文"""
+        # 先切到对应协议（保持界面一致性）
+        if protocol == "south" and self.current_protocol != 0:
+            self.protocol_combo.setCurrentIndex(0)
+        elif protocol == "gdw" and self.current_protocol != 6:
+            self.protocol_combo.setCurrentIndex(6)
+
+        # 检查串口是否打开
+        if not self.serial_worker or not self.serial_worker.is_open():
+            QMessageBox.warning(self, "串口未打开", "请先打开串口后再发送预设命令。")
+            return
+
+        # 把报文同步到组帧页面（方便查看）
+        self.frame_gen_tab.result_hex.setText(frame_hex)
+
+        # 直接通过串口发送
+        self.serial_worker.send_hex_string(frame_hex)
+
+        # 在串口日志显示
+        self.frame_gen_tab._on_serial_log(f"[预设发送] {frame_hex}")
+
     # ==================== 单帧解析功能 ====================
 
     def _on_protocol_changed(self, index: int):
@@ -1089,7 +1120,7 @@ class MainWindow(QMainWindow):
         # 更新查询页面
         self._update_protocol_lookup_tab()
 
-        # 协议组帧页面在南网和国网协议下显示
+        # 协议组帧页面和预设命令页面在南网和国网协议下显示
         if hasattr(self, '_frame_gen_tab_index'):
             show_frame_gen = index in (0, 6)
             self.tab_widget.setTabVisible(self._frame_gen_tab_index, show_frame_gen)
@@ -1098,6 +1129,11 @@ class MainWindow(QMainWindow):
                 self.frame_gen_tab.set_protocol_mode(mode)
             else:
                 self.frame_gen_tab.reset()
+        if hasattr(self, '_preset_tab_index'):
+            self.tab_widget.setTabVisible(self._preset_tab_index, index in (0, 6))
+            if index in (0, 6):
+                mode = "south" if index == 0 else "gdw"
+                self.preset_tab.set_protocol(mode)
 
         # 清空当前结果
         self.clear_single()

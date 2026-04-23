@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QComboBox, QGroupBox, QScrollArea, QCheckBox, QMessageBox, QTextEdit,
     QTableWidget, QTableWidgetItem, QHeaderView, QSplitter, QDialog
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QKeyEvent
 
 from send_frame_lib import ProtocolFrameGenerator
@@ -21,6 +21,7 @@ from protocol_parser import ProtocolFrameParser
 from gdw_send_frame_lib import GDWFrameGenerator
 from gdw_frame_generator_schema import GDW_AFNFN_SCHEMA
 from gdw10376_parser import GDW10376Parser
+from preset_buttons import PresetButtonManager, AddPresetDialog
 
 
 # =============================================================================
@@ -41,6 +42,9 @@ class CustomFieldTemplate:
 
 class FrameGenWidget(QWidget):
     """协议组帧页面Widget"""
+
+    # 当帧被添加到预设时发出（protocol, frame_hex, config_snapshot）
+    preset_added = Signal(str, str, dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -313,7 +317,7 @@ class FrameGenWidget(QWidget):
         result_layout.addWidget(self.result_hex)
         left_layout.addWidget(result_group)
 
-        # ---- 串口发送按钮 ----
+        # ---- 串口发送按钮 + 添加到预设 ----
         serial_btn_layout = QHBoxLayout()
         serial_btn_layout.setSpacing(6)
         self.send_serial_btn = QPushButton("发送到串口")
@@ -324,6 +328,15 @@ class FrameGenWidget(QWidget):
         )
         self.send_serial_btn.clicked.connect(self._on_send_to_serial)
         serial_btn_layout.addWidget(self.send_serial_btn)
+
+        self.add_preset_btn = QPushButton("添加到预设")
+        self.add_preset_btn.setStyleSheet(
+            "QPushButton { background-color: #FF9800; color: white; "
+            "border-radius: 4px; padding: 2px 12px; font-weight: bold; }"
+            "QPushButton:disabled { background-color: #cccccc; }"
+        )
+        self.add_preset_btn.clicked.connect(self._on_add_to_preset_clicked)
+        serial_btn_layout.addWidget(self.add_preset_btn)
 
         self.clear_log_btn = QPushButton("清空日志")
         self.clear_log_btn.setStyleSheet(
@@ -1537,6 +1550,246 @@ class FrameGenWidget(QWidget):
             QMessageBox.warning(self, "警告", "当前没有可发送的帧，请先生成帧")
             return
         self.serial_worker.send_hex_string(hex_text)
+
+    def _on_add_to_preset_clicked(self):
+        """将当前生成的帧添加到预设按钮"""
+        frame_hex = self.result_hex.toPlainText().strip()
+        if not frame_hex:
+            QMessageBox.warning(self, "警告", "当前没有可添加的帧，请先生成帧")
+            return
+
+        dialog = AddPresetDialog(frame_hex, self.protocol_mode, parent=self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        result = dialog.get_result()
+        if not result:
+            return
+
+        # 附加当前完整配置快照，方便恢复
+        result["config"] = self.get_config_snapshot()
+
+        if PresetButtonManager.add_command(self.protocol_mode, result):
+            QMessageBox.information(
+                self, "成功",
+                f"已添加预设按钮：{result['button_name']}\n分组：{result['group_name']}"
+            )
+            self.preset_added.emit(self.protocol_mode, frame_hex, result["config"])
+        else:
+            QMessageBox.critical(self, "错误", "保存预设按钮失败")
+
+    def get_config_snapshot(self) -> Dict[str, Any]:
+        """获取当前组帧页面的完整配置快照"""
+        snapshot = {
+            "protocol_mode": self.protocol_mode,
+            "current_di_key": self._current_di_key,
+            "current_afn_fn": self._current_afn_fn,
+            "custom_mode": self._custom_mode,
+            "south": {
+                "src_addr": self.src_addr_input.text(),
+                "dst_addr": self.dst_addr_input.text(),
+                "dir": self.dir_combo.currentData(),
+                "prm": self.prm_combo.currentData(),
+                "add": self.add_combo.currentData(),
+            },
+            "gdw": {
+                "comm_type": self.gdw_comm_type.currentData(),
+                "dir": self.gdw_dir.currentData(),
+                "prm": self.gdw_prm.currentData(),
+                "seq": self.gdw_seq.text(),
+                "route_flag": self.gdw_route_flag.currentData(),
+                "comm_module": self.gdw_comm_module.currentData(),
+                "relay_level": self.gdw_relay_level.currentData(),
+                "channel": self.gdw_channel.text(),
+                "resp_bytes": self.gdw_resp_bytes.text(),
+                "src_addr": self.gdw_src_addr.text(),
+                "dst_addr": self.gdw_dst_addr.text(),
+                "relay_addrs": [e.text() for e in self.gdw_relay_inputs],
+            },
+        }
+
+        # 收集字段值
+        try:
+            snapshot["field_values"] = self._collect_values()
+        except Exception:
+            snapshot["field_values"] = {}
+
+        # 自定义模板
+        if self._custom_mode:
+            self._sync_templates_from_table()
+            snapshot["custom_templates"] = [
+                {
+                    "name": t.name,
+                    "length": t.length,
+                    "ftype": t.ftype,
+                    "endian": t.endian,
+                    "display": t.display,
+                    "reverse": t.reverse,
+                }
+                for t in self._custom_templates
+            ]
+        else:
+            snapshot["custom_templates"] = []
+
+        return snapshot
+
+    def apply_config_snapshot(self, config: Dict[str, Any]):
+        """从配置快照恢复组帧页面状态"""
+        if not config:
+            return
+
+        # 恢复协议模式（由外部先调用 set_protocol_mode，这里只校验）
+        mode = config.get("protocol_mode", self.protocol_mode)
+
+        # 恢复南网配置
+        south = config.get("south", {})
+        if "src_addr" in south:
+            self.src_addr_input.setText(south["src_addr"])
+        if "dst_addr" in south:
+            self.dst_addr_input.setText(south["dst_addr"])
+        if "dir" in south:
+            idx = self.dir_combo.findData(south["dir"])
+            if idx >= 0:
+                self.dir_combo.setCurrentIndex(idx)
+        if "prm" in south:
+            idx = self.prm_combo.findData(south["prm"])
+            if idx >= 0:
+                self.prm_combo.setCurrentIndex(idx)
+        if "add" in south:
+            idx = self.add_combo.findData(south["add"])
+            if idx >= 0:
+                self.add_combo.setCurrentIndex(idx)
+
+        # 恢复国网配置
+        gdw = config.get("gdw", {})
+        if "comm_type" in gdw:
+            idx = self.gdw_comm_type.findData(gdw["comm_type"])
+            if idx >= 0:
+                self.gdw_comm_type.setCurrentIndex(idx)
+        if "dir" in gdw:
+            idx = self.gdw_dir.findData(gdw["dir"])
+            if idx >= 0:
+                self.gdw_dir.setCurrentIndex(idx)
+        if "prm" in gdw:
+            idx = self.gdw_prm.findData(gdw["prm"])
+            if idx >= 0:
+                self.gdw_prm.setCurrentIndex(idx)
+        if "seq" in gdw:
+            self.gdw_seq.setText(str(gdw["seq"]))
+        if "route_flag" in gdw:
+            idx = self.gdw_route_flag.findData(gdw["route_flag"])
+            if idx >= 0:
+                self.gdw_route_flag.setCurrentIndex(idx)
+        if "comm_module" in gdw:
+            idx = self.gdw_comm_module.findData(gdw["comm_module"])
+            if idx >= 0:
+                self.gdw_comm_module.setCurrentIndex(idx)
+        if "relay_level" in gdw:
+            idx = self.gdw_relay_level.findData(gdw["relay_level"])
+            if idx >= 0:
+                self.gdw_relay_level.setCurrentIndex(idx)
+        if "channel" in gdw:
+            self.gdw_channel.setText(str(gdw["channel"]))
+        if "resp_bytes" in gdw:
+            self.gdw_resp_bytes.setText(str(gdw["resp_bytes"]))
+        if "src_addr" in gdw:
+            self.gdw_src_addr.setText(gdw["src_addr"])
+        if "dst_addr" in gdw:
+            self.gdw_dst_addr.setText(gdw["dst_addr"])
+
+        # 恢复中继地址（需等 relay_level 信号触发后再设置）
+        relay_addrs = gdw.get("relay_addrs", [])
+        if relay_addrs:
+            # 用 QTimer 延迟一帧，让 _on_gdw_relay_level_changed 先完成
+            def _fill_relay():
+                for i, edit in enumerate(self.gdw_relay_inputs):
+                    if i < len(relay_addrs):
+                        edit.setText(relay_addrs[i])
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(50, _fill_relay)
+
+        # 恢复命令选择
+        di_key = config.get("current_di_key")
+        afn_fn = config.get("current_afn_fn")
+        if mode == "south" and di_key:
+            # di_key 被 JSON 序列化后变成了 list，需要转回 tuple
+            if isinstance(di_key, list):
+                di_key = tuple(di_key)
+            for i in range(self.di_combo.count()):
+                data = self.di_combo.itemData(i)
+                if data == di_key:
+                    self.di_combo.setCurrentIndex(i)
+                    break
+        elif mode == "gdw" and afn_fn:
+            if isinstance(afn_fn, list):
+                afn_fn = tuple(afn_fn)
+            for i in range(self.afn_fn_combo.count()):
+                data = self.afn_fn_combo.itemData(i)
+                if data == afn_fn:
+                    self.afn_fn_combo.setCurrentIndex(i)
+                    break
+
+        # 恢复自定义模板
+        custom_templates_data = config.get("custom_templates", [])
+        if custom_templates_data:
+            self._custom_templates = [
+                CustomFieldTemplate(
+                    t["name"], t["length"], t["ftype"],
+                    t["endian"], t["display"], t["reverse"]
+                )
+                for t in custom_templates_data
+            ]
+
+        # 恢复模式
+        custom_mode = config.get("custom_mode", False)
+        if custom_mode:
+            self.mode_custom_rb.setChecked(True)
+            self.mode_predefined_rb.setChecked(False)
+            self._custom_mode = True
+        else:
+            self.mode_predefined_rb.setChecked(True)
+            self.mode_custom_rb.setChecked(False)
+            self._custom_mode = False
+
+        # 恢复字段值（在表单重建后）
+        field_values = config.get("field_values", {})
+        if field_values:
+            # 延迟一帧，让表单控件已创建
+            def _apply_fields():
+                for name, widget_info in self._field_widgets.items():
+                    if name not in field_values:
+                        continue
+                    val = field_values[name]
+                    widget = widget_info.get("widget")
+                    if "sub_widgets" in widget_info:
+                        for sub_name, sub_widget in widget_info["sub_widgets"].items():
+                            if sub_name in field_values:
+                                sv = field_values[sub_name]
+                                if isinstance(sub_widget, QComboBox):
+                                    idx = sub_widget.findData(sv)
+                                    if idx >= 0:
+                                        sub_widget.setCurrentIndex(idx)
+                                else:
+                                    sub_widget.setText(str(sv))
+                    elif isinstance(widget, QComboBox):
+                        idx = widget.findData(val)
+                        if idx >= 0:
+                            widget.setCurrentIndex(idx)
+                    elif isinstance(widget, QLineEdit):
+                        widget.setText(str(val))
+                    elif widget is not None and hasattr(widget, '_items'):
+                        # list 类型：先清空再添加
+                        items = val if isinstance(val, list) else []
+                        # 删除现有项
+                        while widget._items:
+                            row_widget, _ = widget._items.pop()
+                            row_widget.deleteLater()
+                        for item_values in items:
+                            # 触发 add_item（通过点击按钮太复杂，直接重建）
+                            pass  # list 类型暂不支持精确恢复
+                self._schedule_realtime_update()
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(100, _apply_fields)
 
     def _on_clear_serial_log(self):
         """清空串口日志"""
