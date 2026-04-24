@@ -1974,34 +1974,81 @@ class ProtocolFrameParser:
         return result
 
     def _parse_report_event_data(self, data: bytes) -> Dict[str, Any]:
-        """解析上报从节点事件数据内容"""
-        if len(data) < 9:
+        """解析上报从节点事件数据内容 (DI=E8050502)
+
+        格式: [报文长度L 2字节BIN] [报文内容 L字节]
+        报文内容: [事件类型 1B] [类型 1B] [A0~A5 6B] ...
+        """
+        if len(data) < 2:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+
+        # 报文长度 L (2字节, 小端序)
+        msg_len = int.from_bytes(data[0:2], 'little')
         result = {
-            "从节点地址": data[0:6].hex().upper(),
-            "事件类型": {"原始值": f"0x{data[6]:02X}", "说明": self._get_event_type_desc(data[6])},
-            "事件数据长度": {"原始值": f"0x{data[7]:02X}", "十进制": data[7]}
+            "报文长度(L)": {"原始值": data[0:2].hex().upper(), "十进制": msg_len}
         }
-        event_len = data[7]
-        if len(data) >= 8 + event_len:
-            result["事件数据"] = data[8:8+event_len].hex().upper()
-        else:
-            result["事件数据"] = data[8:].hex().upper()
+
+        # 报文内容
+        content_start = 2
+        if len(data) < content_start + msg_len:
+            result["报文内容"] = data[content_start:].hex().upper()
+            result["说明"] = "数据长度不足，报文内容被截断"
+            return result
+
+        content = data[content_start:content_start + msg_len]
+        result["报文内容"] = content.hex().upper()
+
+        if len(content) < 2:
+            result["说明"] = "报文内容长度不足"
+            return result
+
+        event_type = content[0]
+        type_val = content[1]
+
+        result["事件类型"] = {
+            "原始值": f"0x{event_type:02X}",
+            "说明": self._get_event_type_desc(event_type)
+        }
+        result["类型"] = {
+            "原始值": f"0x{type_val:02X}",
+            "说明": self._get_event_node_type_desc(type_val, event_type)
+        }
+
+        # 解析 A0~A5 (电表地址)，支持多个从节点
+        pos = 2
+        node_list = []
+        while pos + 6 <= len(content):
+            addr = content[pos:pos + 6]
+            node_list.append({"电表地址(A0~A5)": addr.hex().upper()})
+            pos += 6
+
+        if node_list:
+            result["从节点列表"] = node_list
+
+        if pos < len(content):
+            result["剩余数据"] = content[pos:].hex().upper()
+
         return result
 
     def _get_event_type_desc(self, event_type: int) -> str:
         """获取事件类型说明"""
         events = {
-            0x01: "上电事件",
-            0x02: "掉电事件",
-            0x03: "通信异常事件",
-            0x04: "通信恢复事件",
-            0x05: "数据异常事件",
-            0x06: "参数变更事件",
-            0x07: "告警事件",
-            0x08: "故障事件"
+            0x81: "停电事件",
+            0x82: "上电事件",
+            0xA1: "拒绝从节点信息上报事件",
         }
         return events.get(event_type, f"未知事件 ({event_type:02X})")
+
+    def _get_event_node_type_desc(self, type_val: int, event_type: int) -> str:
+        """获取事件中的类型说明"""
+        if event_type in (0x81, 0x82):
+            # 停电/上电事件
+            return "电表" if type_val == 0x00 else f"其他保留 ({type_val:02X})"
+        elif event_type == 0xA1:
+            # 拒绝从节点信息上报
+            types = {0x00: "单相模块", 0x01: "三相模块"}
+            return types.get(type_val, f"其他保留 ({type_val:02X})")
+        return f"未知 ({type_val:02X})"
     
     # ==================== AFN=05H 上报信息 (续) ====================
     
