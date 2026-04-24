@@ -95,7 +95,7 @@ class AddPresetDialog(QDialog):
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setSpacing(10)
+        layout.setSpacing(6)
 
         # 协议显示
         proto_label = QLabel(
@@ -205,8 +205,8 @@ class PresetButtonWidget(QWidget):
 
     def setup_ui(self):
         main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(10)
-        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(6)
+        main_layout.setContentsMargins(6, 6, 6, 6)
 
         # 顶部说明
         hint = QLabel(
@@ -236,7 +236,7 @@ class PresetButtonWidget(QWidget):
         self.scroll_content = QWidget()
         self.scroll_layout = QVBoxLayout(self.scroll_content)
         self.scroll_layout.setAlignment(Qt.AlignTop)
-        self.scroll_layout.setSpacing(12)
+        self.scroll_layout.setSpacing(6)
         scroll.setWidget(self.scroll_content)
         main_layout.addWidget(scroll, 1)
 
@@ -250,6 +250,8 @@ class PresetButtonWidget(QWidget):
         self.log_text.setMaximumHeight(120)
         self.log_text.setFont(QFont("Consolas", 9))
         self.log_text.setPlaceholderText("点击预设按钮后，串口收发记录将显示在这里...")
+        self.log_text.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.log_text.customContextMenuRequested.connect(self._on_log_context_menu)
         log_layout.addWidget(self.log_text)
         main_layout.addWidget(log_group)
 
@@ -284,8 +286,8 @@ class PresetButtonWidget(QWidget):
                 "QGroupBox { font-weight: bold; color: #333; }"
             )
             row_layout = QHBoxLayout(group_box)
-            row_layout.setSpacing(8)
-            row_layout.setContentsMargins(8, 12, 8, 8)
+            row_layout.setSpacing(6)
+            row_layout.setContentsMargins(6, 6, 6, 4)
             row_layout.setAlignment(Qt.AlignLeft | Qt.AlignTop)
 
             for cmd in cmds:
@@ -294,11 +296,11 @@ class PresetButtonWidget(QWidget):
                 if cmd.get("frame_hex"):
                     tooltip_lines.append(f"\n报文: {cmd['frame_hex']}")
                 btn.setToolTip("\n".join(tooltip_lines))
-                btn.setMinimumHeight(32)
+                btn.setMinimumHeight(28)
                 # 不设置固定宽度，让按钮根据文字自适应
                 btn.setStyleSheet(
                     "QPushButton { background-color: #2196F3; color: white; "
-                    "border-radius: 4px; padding: 4px 12px; font-weight: bold; }"
+                    "border-radius: 4px; padding: 3px 10px; font-weight: bold; }"
                     "QPushButton:hover { background-color: #1976D2; }"
                     "QPushButton:pressed { background-color: #0D47A1; }"
                 )
@@ -337,6 +339,7 @@ class PresetButtonWidget(QWidget):
             f"{btn_name}  ->  {frame_hex}"
         )
         self.log_text.append(log_line)
+        self._trim_log(self.log_text)
         scrollbar = self.log_text.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 
@@ -350,6 +353,7 @@ class PresetButtonWidget(QWidget):
     def _on_serial_log(self, msg: str):
         """串口日志（发送/接收原始字节）"""
         self.log_text.append(msg)
+        self._trim_log(self.log_text)
         scrollbar = self.log_text.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 
@@ -385,6 +389,30 @@ class PresetButtonWidget(QWidget):
     def _current_time() -> str:
         from datetime import datetime
         return datetime.now().strftime("%H:%M:%S")
+
+    def _on_log_context_menu(self, pos):
+        """日志区域右键菜单"""
+        menu = QMenu(self)
+        clear_action = menu.addAction("清空日志")
+        copy_action = menu.addAction("复制选中内容")
+        select_all_action = menu.addAction("全选")
+        action = menu.exec(self.log_text.mapToGlobal(pos))
+        if action == clear_action:
+            self.log_text.clear()
+        elif action == copy_action:
+            self.log_text.copy()
+        elif action == select_all_action:
+            self.log_text.selectAll()
+
+    @staticmethod
+    def _trim_log(log_widget: QTextEdit, max_lines: int = 500):
+        """当日志超过max_lines行时，自动删除最早的行"""
+        doc = log_widget.document()
+        if doc.blockCount() > max_lines:
+            cursor = log_widget.textCursor()
+            cursor.movePosition(cursor.MoveOperation.Start)
+            cursor.movePosition(cursor.MoveOperation.Down, cursor.MoveMode.KeepAnchor, doc.blockCount() - max_lines)
+            cursor.removeSelectedText()
 
     def _show_context_menu(self, cmd: Dict[str, Any], btn: QPushButton):
         """右键菜单：删除预设"""
