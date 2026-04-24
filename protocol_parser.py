@@ -2433,96 +2433,212 @@ class ProtocolFrameParser:
             
             if coding == 1 and data_length > 0:  # ASCII
                 try:
-                    entry_result["解析值"] = content[::-1].decode('ascii')
+                    if classified_id == 0:
+                        entry_result["解析值"] = content[::-1].decode('ascii')
+                    else:
+                        entry_result["解析值"] = content.decode('utf-8', errors='replace')
                 except Exception:
                     entry_result["解析值"] = content.hex().upper()
             elif coding == 3 and data_length > 0:  # BCD
-                entry_result["解析值"] = content[::-1].hex().upper()
+                if classified_id == 0 and data_id == 3 and data_length >= 3:
+                    bcd_rev = content[::-1]
+                    entry_result["解析值"] = f"20{bcd_rev[0]:02X}-{bcd_rev[1]:02X}-{bcd_rev[2]:02X}"
+                elif classified_id == 0 and data_id == 4:
+                    entry_result["解析值"] = content[::-1].hex().upper()
+                elif classified_id == 0 and data_id == 12 and data_length >= 3:
+                    bcd_rev = content[::-1]
+                    entry_result["解析值"] = f"20{bcd_rev[0]:02X}-{bcd_rev[1]:02X}-{bcd_rev[2]:02X}"
+                elif classified_id == 1 and data_id in (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14):
+                    entry_result["解析值"] = content[::-1].hex().upper()
+                elif classified_id == 1 and data_id in (20, 21, 22, 23, 24):
+                    entry_result["解析值"] = content[::-1].hex().upper()
+                elif classified_id == 1 and data_id == 30:
+                    entry_result["解析值"] = content[::-1].hex().upper()
+                elif classified_id == 2 and data_id == 15 and data_length >= 26:
+                    bcd_data = content
+                    clock_source = bcd_data[0]
+                    clock_map = {0: "未同步", 1: "设备时间", 2: "网络万年历"}
+                    def _bcd_time(b):
+                        if all(x == 0xFF for x in b):
+                            return "无效时间(全F)"
+                        return f"20{b[0]:02X}-{b[1]:02X}-{b[2]:02X} {b[3]:02X}:{b[4]:02X}:{b[5]:02X}"
+                    entry_result["解析值"] = f"时钟源:{clock_map.get(clock_source, f'未知({clock_source})')}"
+                    entry_result["保留"] = f"0x{bcd_data[1]:02X}"
+                    entry_result["模块当前RTC时间"] = _bcd_time(bcd_data[2:8])
+                    entry_result["上次获取设备时间"] = _bcd_time(bcd_data[8:14])
+                    entry_result["上次校时RTC时间"] = _bcd_time(bcd_data[14:20])
+                    entry_result["模拟设备运行时间"] = _bcd_time(bcd_data[20:26])
+                elif classified_id == 7 and data_id == 15 and data_length >= 26:
+                    bcd_data = content
+                    clock_source = bcd_data[0]
+                    clock_map = {0: "未同步", 1: "设备时间", 2: "网络万年历"}
+                    def _bcd_time7(b):
+                        if all(x == 0xFF for x in b):
+                            return "无效时间(全F)"
+                        return f"20{b[0]:02X}-{b[1]:02X}-{b[2]:02X} {b[3]:02X}:{b[4]:02X}:{b[5]:02X}"
+                    entry_result["解析值"] = f"时钟源:{clock_map.get(clock_source, f'未知({clock_source})')}"
+                    entry_result["保留"] = f"0x{bcd_data[1]:02X}"
+                    entry_result["模块当前RTC时间"] = _bcd_time7(bcd_data[2:8])
+                    entry_result["上次获取设备时间"] = _bcd_time7(bcd_data[8:14])
+                    entry_result["上次校时RTC时间"] = _bcd_time7(bcd_data[14:20])
+                    entry_result["模拟设备运行时间"] = _bcd_time7(bcd_data[20:26])
+                else:
+                    entry_result["解析值"] = content[::-1].hex().upper()
             elif coding == 2 and data_length > 0:  # BIN
-                # 根据字段做特殊解析
-                if classified_id == 0 and data_id == 9 and data_length >= 1:
-                    # 模块功能开关
-                    switch_byte = content[0]
-                    entry_result["解析值"] = f"0x{switch_byte:02X}"
-                    entry_result["即装即采功能开关"] = "打开" if (switch_byte & 0x01) else "关闭"
-                    entry_result["万年历启动开关"] = "打开" if (switch_byte & 0x02) else "关闭"
-                    entry_result["低功耗使能开关"] = "打开" if (switch_byte & 0x04) else "关闭"
-                    entry_result["白名单启动开关"] = "打开" if (switch_byte & 0x08) else "关闭"
-                elif classified_id == 0 and data_id == 15:
-                    # 本地接口默认信息：3960B 不支持详细解析
-                    if chip_type == '3960A' and data_length >= 2:
-                        entry_result["解析值"] = f"波特率{content[0]}, 校验位{content[1]}"
-                    else:
-                        entry_result["解析值"] = ""
-                        entry_result["说明"] += " [3960B不支持]"
-                elif classified_id == 0 and data_id == 18 and data_length >= 2:
-                    # 默认HRF信道信息
-                    entry_result["解析值"] = f"信道index:{content[0]}, 带宽option:{content[1] & 0x0F}, 信道切换使能:{(content[1] & 0x80) >> 7}"
-                elif classified_id == 0 and data_id == 19 and data_length >= 2:
-                    # 默认HRF参数信息
-                    entry_result["解析值"] = f"发送功率:{content[0]}, 调整因子:{content[1]}"
-                elif classified_id == 0 and data_id == 7 and data_length >= 1:
-                    # 应用省份
-                    entry_result["解析值"] = content[0]
-                elif classified_id == 0 and data_id == 8 and data_length >= 1:
-                    # 应用方案：3960B 不支持此字段
-                    if chip_type == '3960A':
+                if classified_id == 0:
+                    if data_id == 7 and data_length >= 1:
                         entry_result["解析值"] = content[0]
-                    else:
-                        entry_result["解析值"] = ""
-                        entry_result["说明"] += " [3960B不支持]"
-                elif classified_id == 0 and data_id == 10 and data_length >= 1:
-                    entry_result["解析值"] = content[0]
-                elif classified_id == 0 and data_id == 11 and data_length >= 1:
-                    entry_result["解析值"] = content[0]
-                elif classified_id == 0 and data_id == 22 and data_length >= 1:
-                    # 波特率协商使能：3960B 不支持
-                    if chip_type == '3960A':
+                    elif data_id == 8 and data_length >= 1:
+                        if chip_type == '3960A':
+                            entry_result["解析值"] = content[0]
+                        else:
+                            entry_result["解析值"] = ""
+                            entry_result["说明"] += " [3960B不支持]"
+                    elif data_id == 9 and data_length >= 1:
+                        switch_byte = content[0]
+                        entry_result["解析值"] = f"0x{switch_byte:02X} (0b{switch_byte:08b})"
+                        entry_result["B0-即装即采功能开关"] = "打开" if (switch_byte & 0x01) else "关闭"
+                        entry_result["B1-万年历启动开关"] = "打开" if (switch_byte & 0x02) else "关闭"
+                        entry_result["B2-低功耗使能开关"] = "打开" if (switch_byte & 0x04) else "关闭"
+                        entry_result["B3-白名单启动开关"] = "打开" if (switch_byte & 0x08) else "关闭"
+                        entry_result["B4~B7保留"] = f"0b{(switch_byte >> 4):04b}"
+                    elif data_id == 10 and data_length >= 1:
                         entry_result["解析值"] = content[0]
-                    else:
-                        entry_result["解析值"] = ""
-                        entry_result["说明"] += " [3960B不支持]"
-                elif classified_id == 0 and data_id == 23 and data_length >= 1:
-                    # 初始串口波特率：3960B 不支持
-                    if chip_type == '3960A':
+                    elif data_id == 11 and data_length >= 1:
                         entry_result["解析值"] = content[0]
-                    else:
-                        entry_result["解析值"] = ""
-                        entry_result["说明"] += " [3960B不支持]"
-                elif classified_id == 0 and data_id == 24 and data_length >= 1:
-                    # 波特率协商结果：3960B 不支持
-                    if chip_type == '3960A':
+                    elif data_id == 15:
+                        if chip_type == '3960A' and data_length >= 2:
+                            entry_result["解析值"] = f"波特率{content[0]}, 校验位{content[1]}"
+                        else:
+                            entry_result["解析值"] = ""
+                            entry_result["说明"] += " [3960B不支持]"
+                    elif data_id == 16 and data_length >= 1:
                         entry_result["解析值"] = content[0]
-                    else:
+                    elif data_id == 18 and data_length >= 2:
+                        entry_result["解析值"] = f"信道index:{content[0]}, 带宽option:{content[1] & 0x0F}, 信道切换使能:{(content[1] & 0x80) >> 7}"
+                    elif data_id == 19 and data_length >= 2:
+                        entry_result["解析值"] = f"发送功率:{content[0]}, 调整因子:{content[1]}"
+                    elif data_id == 20:
                         entry_result["解析值"] = ""
-                        entry_result["说明"] += " [3960B不支持]"
-                elif classified_id == 0 and data_id == 25 and data_length >= 1:
-                    # 当前串口波特率：3960B 不支持
-                    if chip_type == '3960A':
+                    elif data_id == 21:
+                        entry_result["解析值"] = ""
+                    elif data_id == 22 and data_length >= 1:
+                        if chip_type == '3960A':
+                            entry_result["解析值"] = content[0]
+                        else:
+                            entry_result["解析值"] = ""
+                            entry_result["说明"] += " [3960B不支持]"
+                    elif data_id == 23 and data_length >= 1:
+                        if chip_type == '3960A':
+                            entry_result["解析值"] = content[0]
+                        else:
+                            entry_result["解析值"] = ""
+                            entry_result["说明"] += " [3960B不支持]"
+                    elif data_id == 24 and data_length >= 1:
+                        if chip_type == '3960A':
+                            entry_result["解析值"] = content[0]
+                        else:
+                            entry_result["解析值"] = ""
+                            entry_result["说明"] += " [3960B不支持]"
+                    elif data_id == 25 and data_length >= 1:
+                        if chip_type == '3960A':
+                            entry_result["解析值"] = content[0]
+                        else:
+                            entry_result["解析值"] = ""
+                            entry_result["说明"] += " [3960B不支持]"
+                    else:
+                        entry_result["解析值"] = content.hex().upper()
+                elif classified_id == 2:
+                    if data_id == 4 and data_length >= 1:
                         entry_result["解析值"] = content[0]
+                    elif data_id == 5:
+                        entry_result["解析值"] = content.hex().upper()
+                    elif data_id == 6 and data_length >= 1:
+                        entry_result["解析值"] = content[0]
+                    elif data_id == 7 and data_length >= 1:
+                        entry_result["解析值"] = content[0]
+                    elif data_id == 8 and data_length >= 1:
+                        entry_result["解析值"] = content[0]
+                    elif data_id == 9 and data_length >= 1:
+                        entry_result["解析值"] = content[0]
+                    elif data_id == 10 and data_length >= 1:
+                        entry_result["解析值"] = content[0]
+                    elif data_id == 20 and data_length >= 25:
+                        entry_result["解析值"] = f"过零标志:{content[0]}"
+                        entry_result["A相(下降沿)频率"] = f"{int.from_bytes(content[1:3], 'little') * 0.01}Hz"
+                        entry_result["A相(下降沿)占空比"] = f"{int.from_bytes(content[3:5], 'little') * 0.1:.2f}%"
+                        entry_result["B相(下降沿)频率"] = f"{int.from_bytes(content[5:7], 'little') * 0.01}Hz"
+                        entry_result["B相(下降沿)占空比"] = f"{int.from_bytes(content[7:9], 'little') * 0.1:.2f}%"
+                        entry_result["C相(下降沿)频率"] = f"{int.from_bytes(content[9:11], 'little') * 0.01}Hz"
+                        entry_result["C相(下降沿)占空比"] = f"{int.from_bytes(content[11:13], 'little') * 0.1:.2f}%"
+                        entry_result["A相(上升沿)频率"] = f"{int.from_bytes(content[13:15], 'little') * 0.01}Hz"
+                        entry_result["A相(上升沿)占空比"] = f"{int.from_bytes(content[15:17], 'little') * 0.1:.2f}%"
+                        entry_result["B相(上升沿)频率"] = f"{int.from_bytes(content[17:19], 'little') * 0.01}Hz"
+                        entry_result["B相(上升沿)占空比"] = f"{int.from_bytes(content[19:21], 'little') * 0.1:.2f}%"
+                        entry_result["C相(上升沿)频率"] = f"{int.from_bytes(content[21:23], 'little') * 0.01}Hz"
+                        entry_result["C相(上升沿)占空比"] = f"{int.from_bytes(content[23:25], 'little') * 0.1:.2f}%"
+                    elif data_id == 20 and data_length >= 1:
+                        entry_result["解析值"] = content.hex().upper()
+                    elif data_id == 21:
+                        entry_result["解析值"] = content.hex().upper()
+                    elif data_id == 23 and data_length >= 2:
+                        entry_result["解析值"] = f"信号强度RSSI:{content[0]}, 信噪比SNR:{content[1]}"
                     else:
-                        entry_result["解析值"] = ""
-                        entry_result["说明"] += " [3960B不支持]"
-                elif classified_id == 2 and data_id == 4 and data_length >= 1:
+                        entry_result["解析值"] = content.hex().upper()
+                elif classified_id == 3 and data_id == 1 and data_length >= 1:
+                    entry_result["解析值"] = f"确认(ACK)={content[0] & 0x01}, 否认(NAK)={(content[0] >> 1) & 0x01}"
+                elif classified_id == 5 and data_id == 1 and data_length >= 1:
                     entry_result["解析值"] = content[0]
-                elif classified_id == 2 and data_id == 5:
-                    entry_result["解析值"] = content.hex().upper()
-                elif classified_id == 2 and data_id == 6 and data_length >= 1:
-                    entry_result["解析值"] = content[0]
-                elif classified_id == 2 and data_id == 7 and data_length >= 1:
-                    entry_result["解析值"] = content[0]
-                elif classified_id == 2 and data_id == 8 and data_length >= 1:
-                    entry_result["解析值"] = content[0]
-                elif classified_id == 2 and data_id == 9 and data_length >= 1:
-                    entry_result["解析值"] = content[0]
-                elif classified_id == 2 and data_id == 10 and data_length >= 1:
-                    entry_result["解析值"] = content[0]
-                elif classified_id == 2 and data_id == 20 and data_length >= 1:
-                    entry_result["解析值"] = content.hex().upper()
-                elif classified_id == 2 and data_id == 21:
-                    entry_result["解析值"] = content.hex().upper()
-                elif classified_id == 2 and data_id == 23 and data_length >= 2:
-                    entry_result["解析值"] = f"信号强度RSSI:{content[0]}, 信噪比SNR:{content[1]}"
+                elif classified_id == 7:
+                    if data_id == 1 and data_length >= 11:
+                        entry_result["解析值"] = f"芯片型号:{content[0]}"
+                        entry_result["Flash型号及容量"] = content[1:5].hex().upper()
+                        entry_result["电容容量"] = content[5]
+                        entry_result["过零电路类型"] = content[6]
+                        entry_result["天线类型"] = content[7]
+                        entry_result["载波功放型号"] = content[8]
+                        entry_result["特征电流拓朴类型"] = content[9]
+                        if data_length >= 11:
+                            entry_result["无线射频开关类型"] = content[10]
+                        if data_length >= 31:
+                            try:
+                                entry_result["硬件编码"] = content[11:31].decode('utf-8', errors='replace').rstrip('\x00')
+                            except Exception:
+                                entry_result["硬件编码"] = content[11:31].hex().upper()
+                    elif data_id == 2 and data_length >= 3:
+                        entry_result["解析值"] = f"应用省份:{content[0]}, 应用方案:{content[1]}, 模块类型:{content[2]}"
+                    elif data_id == 5 and data_length >= 1:
+                        entry_result["解析值"] = str(content[0])
+                    elif data_id == 6 and data_length >= 1:
+                        entry_result["解析值"] = str(content[0])
+                    elif data_id == 7 and data_length >= 1:
+                        entry_result["解析值"] = str(content[0])
+                    elif data_id == 8 and data_length >= 1:
+                        entry_result["解析值"] = str(content[0])
+                    elif data_id == 9 and data_length >= 1:
+                        entry_result["解析值"] = str(content[0])
+                    elif data_id == 10 and data_length >= 1:
+                        entry_result["解析值"] = str(content[0])
+                    elif data_id == 20 and data_length >= 25:
+                        entry_result["解析值"] = f"过零标志:{content[0]}"
+                        entry_result["A相(下降沿)频率"] = f"{int.from_bytes(content[1:3], 'little') * 0.01}Hz"
+                        entry_result["A相(下降沿)占空比"] = f"{int.from_bytes(content[3:5], 'little') * 0.1:.2f}%"
+                        entry_result["B相(下降沿)频率"] = f"{int.from_bytes(content[5:7], 'little') * 0.01}Hz"
+                        entry_result["B相(下降沿)占空比"] = f"{int.from_bytes(content[7:9], 'little') * 0.1:.2f}%"
+                        entry_result["C相(下降沿)频率"] = f"{int.from_bytes(content[9:11], 'little') * 0.01}Hz"
+                        entry_result["C相(下降沿)占空比"] = f"{int.from_bytes(content[11:13], 'little') * 0.1:.2f}%"
+                        entry_result["A相(上升沿)频率"] = f"{int.from_bytes(content[13:15], 'little') * 0.01}Hz"
+                        entry_result["A相(上升沿)占空比"] = f"{int.from_bytes(content[15:17], 'little') * 0.1:.2f}%"
+                        entry_result["B相(上升沿)频率"] = f"{int.from_bytes(content[17:19], 'little') * 0.01}Hz"
+                        entry_result["B相(上升沿)占空比"] = f"{int.from_bytes(content[19:21], 'little') * 0.1:.2f}%"
+                        entry_result["C相(上升沿)频率"] = f"{int.from_bytes(content[21:23], 'little') * 0.01}Hz"
+                        entry_result["C相(上升沿)占空比"] = f"{int.from_bytes(content[23:25], 'little') * 0.1:.2f}%"
+                    elif data_id == 20 and data_length >= 1:
+                        entry_result["解析值"] = content.hex().upper()
+                    elif data_id == 21:
+                        entry_result["解析值"] = content.hex().upper()
+                    else:
+                        entry_result["解析值"] = content.hex().upper()
                 else:
                     entry_result["解析值"] = content.hex().upper()
             
@@ -2534,6 +2650,7 @@ class ProtocolFrameParser:
     def _get_f0_32_entry_name(classified_id: int, data_id: int) -> str:
         """获取 F0 32 条目的名称"""
         names = {
+            # === Class 0: 基础信息 ===
             (0, 1): "外部厂商代码",
             (0, 2): "外部芯片代码",
             (0, 3): "外部版本日期",
@@ -2543,11 +2660,14 @@ class ProtocolFrameParser:
             (0, 7): "应用省份",
             (0, 8): "应用方案",
             (0, 9): "模块功能开关",
-            (0, 10): "预留",
+            (0, 10): "预留字段",
             (0, 11): "模块类型",
             (0, 12): "模块生产时间",
+            (0, 13): "本地通信模块运行模式",
+            (0, 14): "从节点监控最大超时时间",
             (0, 15): "本地接口默认信息",
             (0, 16): "默认HPLC频段信息",
+            (0, 17): "默认无线频段信息",
             (0, 18): "默认HRF信道信息",
             (0, 19): "默认HRF参数信息",
             (0, 20): "以太网默认信息",
@@ -2556,6 +2676,7 @@ class ProtocolFrameParser:
             (0, 23): "初始串口波特率",
             (0, 24): "波特率协商结果",
             (0, 25): "当前串口波特率",
+            # === Class 1: 程序版本 ===
             (1, 1): "编译时间",
             (1, 2): "程序总版本",
             (1, 3): "总工程版本",
@@ -2576,6 +2697,7 @@ class ProtocolFrameParser:
             (1, 23): "台区识别库版本",
             (1, 24): "数据采集库版本",
             (1, 30): "深化应用库版本",
+            # === Class 2: 硬件信息 ===
             (2, 3): "硬件型号",
             (2, 4): "芯片型号",
             (2, 5): "Flash型号及容量",
@@ -2588,7 +2710,25 @@ class ProtocolFrameParser:
             (2, 20): "过零检测信息",
             (2, 21): "NTB采样信息",
             (2, 23): "无线接收信息",
+            # === Class 3: 确认控制 ===
+            (3, 1): "确认/否认控制",
+            # === Class 5: 异常事件 ===
+            (5, 1): "异常事件码",
+            # === Class 7: 信息组 ===
             (7, 1): "硬件信息组",
+            (7, 2): "软件信息组",
+            (7, 3): "模块功能开关(组)",
+            (7, 4): "模块生产时间(组)",
+            (7, 5): "Flash型号及容量",
+            (7, 6): "电容容量",
+            (7, 7): "过零电路类型",
+            (7, 8): "天线类型",
+            (7, 9): "载波功放型号",
+            (7, 10): "特征电流拓朴类型",
+            (7, 15): "模块时钟信息",
+            (7, 20): "过零检测信息",
+            (7, 21): "NTB采样信息",
+            (7, 23): "无线接收信息",
         }
         return names.get((classified_id, data_id), f"未知条目(类{classified_id}, ID{data_id})")
 

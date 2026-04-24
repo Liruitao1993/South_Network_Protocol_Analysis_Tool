@@ -180,18 +180,18 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
 
         main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(15, 15, 15, 15)
-        main_layout.setSpacing(15)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(8)
 
         # ========== 顶部栏：协议选择 + 串口配置 ==========
         top_bar = QHBoxLayout()
-        top_bar.setSpacing(10)
+        top_bar.setSpacing(6)
 
         # ---- 协议选择分组 ----
         proto_group = QGroupBox("协议选择")
         proto_layout = QHBoxLayout(proto_group)
-        proto_layout.setContentsMargins(10, 8, 10, 10)
-        proto_layout.setSpacing(10)
+        proto_layout.setContentsMargins(8, 4, 8, 4)
+        proto_layout.setSpacing(6)
 
         proto_label = QLabel("当前协议：")
         proto_label.setFont(QFont("", 10, QFont.Bold))
@@ -219,8 +219,8 @@ class MainWindow(QMainWindow):
         # ---- 串口配置分组 ----
         serial_group = QGroupBox("串口配置")
         serial_layout = QHBoxLayout(serial_group)
-        serial_layout.setContentsMargins(10, 8, 10, 10)
-        serial_layout.setSpacing(8)
+        serial_layout.setContentsMargins(8, 4, 8, 4)
+        serial_layout.setSpacing(6)
 
         serial_layout.addWidget(QLabel("端口:"))
         self.serial_port_combo = QComboBox()
@@ -805,16 +805,16 @@ class MainWindow(QMainWindow):
             QGroupBox {
                 font-weight: bold;
                 border: 1px solid #cccccc;
-                border-radius: 5px;
-                margin-top: 10px;
-                padding-top: 10px;
+                border-radius: 4px;
+                margin-top: 6px;
+                padding-top: 6px;
                 background-color: #ffffff;
                 color: #000000;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
+                left: 8px;
+                padding: 0 4px;
                 color: #000000;
             }
 
@@ -901,7 +901,7 @@ class MainWindow(QMainWindow):
                 background-color: #ffffff;
             }
             QTabBar::tab {
-                padding: 10px 20px;
+                padding: 6px 14px;
                 margin-right: 2px;
                 border: 1px solid #cccccc;
                 border-bottom: none;

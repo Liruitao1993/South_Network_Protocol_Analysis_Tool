@@ -126,7 +126,9 @@ class GDW10376Parser:
         0x15: {
             1: "文件传输方式1",
         },
-        0xF0: {},
+        0xF0: {
+            62: "查询CCO详细版本信息 (LME扩展)",
+        },
         0xF1: {
             1: "集中器主动并发抄表",
             2: "集中器确认主动上报",
@@ -1660,6 +1662,48 @@ class GDW10376Parser:
                     neighbor_nid = int.from_bytes(data_bytes[offset:offset+3], 'big')
                     table_data.append((f"  邻居节点{i+1}网络标识号", f"0x{data_bytes[offset]:02X}{data_bytes[offset+1]:02X}{data_bytes[offset+2]:02X}", str(neighbor_nid), "", base_offset + offset, base_offset + offset + 2))
                     offset += 3
+
+        # AFN=F0H 内部调试 / LME扩展
+        elif afn == 0xF0:
+            if fn == 62 and data_len >= 2:  # F62: 查询CCO详细版本信息 (LME扩展)
+                from protocol_parser import ProtocolFrameParser
+                parser = ProtocolFrameParser()
+                result = parser._parse_afn_f0_32_data(data_bytes)
+
+                info_flag = result.get("信息条目信息", 0)
+                entry_count = result.get("信息条目数", 0)
+                table_data.append(("  信息条目信息", f"0x{info_flag:02X}", str(info_flag), "", base_offset, base_offset))
+                table_data.append(("  信息条目数", str(entry_count), str(entry_count), "", base_offset + 1, base_offset + 1))
+
+                pos = 2
+                for entry in result.get("条目列表", []):
+                    entry_name = entry.get("条目名称", "未知")
+                    raw_val = entry.get("原始值", "")
+                    parsed_val = entry.get("解析值", "")
+                    desc = entry.get("说明", "")
+                    classified_id = entry.get("类ID(Classified_ID)", 0)
+                    data_id = entry.get("数据ID(Data_ID)", 0)
+                    coding = entry.get("编码(Coding)", "未知")
+                    entry_len = entry.get("数据长度", 0)
+
+                    if pos + 2 > data_len:
+                        table_data.append(("  条目头", "-", "数据不足", f"需要2字节,剩余{data_len - pos}", base_offset + pos, base_offset + data_len - 1))
+                        break
+                    pos += 2
+                    if entry_len > 0:
+                        if pos + entry_len > data_len:
+                            table_data.append((f"  {entry_name}", "-", "数据不足", f"需要{entry_len}字节,剩余{data_len - pos}", base_offset + pos, base_offset + data_len - 1))
+                            break
+                        extra = f"类{classified_id}, ID{data_id}, {coding}, {entry_len}B"
+                        table_data.append((f"  {entry_name}", raw_val, str(parsed_val), extra, base_offset + pos, base_offset + pos + entry_len - 1))
+
+                        _skip_keys = {"原始值", "十进制", "说明", "描述", "值", "整数值", "业务说明", "单位", "原始字节", "原始数据", "校验结果", "解析状态", "错误信息", "解析值", "条目序号", "条目头原始值", "类ID(Classified_ID)", "数据ID(Data_ID)", "编码(Coding)", "数据长度", "条目名称"}
+                        for sub_key, sub_val in entry.items():
+                            if sub_key in _skip_keys:
+                                continue
+                            table_data.append((f"    {sub_key}", "-", str(sub_val), "", base_offset + pos, base_offset + pos + entry_len - 1))
+
+                        pos += entry_len
 
         # AFN=F1H 并发抄表
         elif afn == 0xF1:

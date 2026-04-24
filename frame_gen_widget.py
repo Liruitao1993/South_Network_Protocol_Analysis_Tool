@@ -69,14 +69,14 @@ class FrameGenWidget(QWidget):
     # ------------------------------------------------------------------
     def setup_ui(self):
         main_layout = QHBoxLayout(self)
-        main_layout.setSpacing(10)
+        main_layout.setSpacing(6)
 
         splitter = QSplitter(Qt.Horizontal)
 
         # ================== 左侧面板 ==================
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
-        left_layout.setSpacing(6)
+        left_layout.setSpacing(4)
 
         # ---- 命令选择区（南网DI / 国网AFN+Fn） ----
         self.cmd_select_group = QGroupBox("DI 选择")
@@ -356,6 +356,8 @@ class FrameGenWidget(QWidget):
         self.serial_log.setReadOnly(True)
         self.serial_log.setMaximumHeight(120)
         self.serial_log.setFont(QFont("Consolas", 9))
+        self.serial_log.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.serial_log.customContextMenuRequested.connect(self._on_serial_log_context_menu)
         log_layout.addWidget(self.serial_log)
         left_layout.addWidget(log_group)
 
@@ -364,7 +366,7 @@ class FrameGenWidget(QWidget):
         # ================== 右侧面板（实时解析预览） ==================
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
-        right_layout.setSpacing(6)
+        right_layout.setSpacing(4)
 
         preview_group = QGroupBox("实时解析预览")
         preview_layout = QVBoxLayout(preview_group)
@@ -1795,9 +1797,35 @@ class FrameGenWidget(QWidget):
         """清空串口日志"""
         self.serial_log.clear()
 
+    def _on_serial_log_context_menu(self, pos):
+        """串口日志区域右键菜单"""
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        clear_action = menu.addAction("清空日志")
+        copy_action = menu.addAction("复制选中内容")
+        select_all_action = menu.addAction("全选")
+        action = menu.exec(self.serial_log.mapToGlobal(pos))
+        if action == clear_action:
+            self.serial_log.clear()
+        elif action == copy_action:
+            self.serial_log.copy()
+        elif action == select_all_action:
+            self.serial_log.selectAll()
+
+    @staticmethod
+    def _trim_log(log_widget, max_lines: int = 500):
+        """当日志超过max_lines行时，自动删除最早的行"""
+        doc = log_widget.document()
+        if doc.blockCount() > max_lines:
+            cursor = log_widget.textCursor()
+            cursor.movePosition(cursor.MoveOperation.Start)
+            cursor.movePosition(cursor.MoveOperation.Down, cursor.MoveMode.KeepAnchor, doc.blockCount() - max_lines)
+            cursor.removeSelectedText()
+
     def _on_serial_log(self, msg: str):
         """串口日志消息回调"""
         self.serial_log.append(msg)
+        self._trim_log(self.serial_log)
         # 自动滚动到底部
         scrollbar = self.serial_log.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
