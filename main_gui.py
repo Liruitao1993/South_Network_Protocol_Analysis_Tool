@@ -279,8 +279,8 @@ class MainWindow(QMainWindow):
         self._frame_gen_tab_index = self.tab_widget.addTab(self.frame_gen_tab, "协议组帧")
         # 预设命令页面
         self.preset_tab = PresetButtonWidget()
+        self.preset_tab.set_serial_worker(self.serial_worker)
         self._preset_tab_index = self.tab_widget.addTab(self.preset_tab, "预设命令")
-        # 信号连接
         self.preset_tab.button_clicked.connect(self._on_preset_button_clicked)
         self.frame_gen_tab.preset_added.connect(self.preset_tab.refresh)
         main_layout.addWidget(self.tab_widget, 1)

@@ -241,7 +241,7 @@ class PresetButtonWidget(QWidget):
         main_layout.addWidget(scroll, 1)
 
         # ---- 底部日志区域 ----
-        log_group = QGroupBox("发送日志")
+        log_group = QGroupBox("串口日志")
         log_layout = QVBoxLayout(log_group)
         log_layout.setContentsMargins(6, 4, 6, 4)
         log_layout.setSpacing(4)
@@ -249,7 +249,7 @@ class PresetButtonWidget(QWidget):
         self.log_text.setReadOnly(True)
         self.log_text.setMaximumHeight(120)
         self.log_text.setFont(QFont("Consolas", 9))
-        self.log_text.setPlaceholderText("点击预设按钮后，发送记录将显示在这里...")
+        self.log_text.setPlaceholderText("点击预设按钮后，串口收发记录将显示在这里...")
         log_layout.addWidget(self.log_text)
         main_layout.addWidget(log_group)
 
@@ -337,6 +337,47 @@ class PresetButtonWidget(QWidget):
             f"{btn_name}  ->  {frame_hex}"
         )
         self.log_text.append(log_line)
+        scrollbar = self.log_text.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
+    def set_serial_worker(self, worker):
+        """绑定串口工作线程，接收收发日志和帧数据"""
+        self._serial_worker = worker
+        if worker:
+            worker.log_message.connect(self._on_serial_log)
+            worker.frame_received.connect(self._on_serial_frame_received)
+
+    def _on_serial_log(self, msg: str):
+        """串口日志（发送/接收原始字节）"""
+        self.log_text.append(msg)
+        scrollbar = self.log_text.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
+    def _on_serial_frame_received(self, frame: bytes):
+        """收到完整帧后，在日志中追加简要解析"""
+        from protocol_parser import ProtocolFrameParser
+        from gdw10376_parser import GDW10376Parser
+        try:
+            if self._protocol == "south":
+                parser = ProtocolFrameParser()
+                table_data = parser.parse_to_table(frame)
+                key_fields = ("应用功能码 (AFN)", "数据标识 (DI)", "传输方向")
+            else:
+                parser = GDW10376Parser()
+                table_data = parser.parse_to_table(frame)
+                key_fields = ("应用功能码(AFN)", "数据单元标识(DT)", "传输方向")
+            summary_parts = []
+            for item in table_data:
+                field_name = item[0].strip()
+                if field_name in key_fields:
+                    parsed = str(item[2]) if item[2] else str(item[3])
+                    summary_parts.append(f"{field_name}: {parsed}")
+            if summary_parts:
+                self.log_text.append(f"[解析] {' | '.join(summary_parts)}")
+            else:
+                self.log_text.append("[解析] 帧结构识别成功")
+        except Exception as e:
+            self.log_text.append(f"[解析失败] {e}")
         scrollbar = self.log_text.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 
