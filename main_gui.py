@@ -30,7 +30,9 @@ from dlt645_di_lookup import DLT645DILookup, get_dlt645_di_lookup
 from gdw_afn_lookup import GDWAFNLookup, get_gdw_afn_lookup
 from frame_gen_widget import FrameGenWidget
 from preset_buttons import PresetButtonWidget
+from test_plan_widget import TestPlanWidget
 from serial_worker import SerialWorker
+from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu
 
 
 APP_VERSION = "1.6.5"
@@ -283,10 +285,18 @@ class MainWindow(QMainWindow):
         self._preset_tab_index = self.tab_widget.addTab(self.preset_tab, "预设命令")
         self.preset_tab.button_clicked.connect(self._on_preset_button_clicked)
         self.frame_gen_tab.preset_added.connect(self.preset_tab.refresh)
+        # 测试方案页面
+        self.test_plan_tab = TestPlanWidget()
+        self.test_plan_tab.set_serial_worker(self.serial_worker)
+        self._test_plan_tab_index = self.tab_widget.addTab(self.test_plan_tab, "测试方案")
+        self.frame_gen_tab.test_plan_added.connect(self.test_plan_tab.add_item)
         main_layout.addWidget(self.tab_widget, 1)
 
         # 初始化查询页面内容
         self._update_protocol_lookup_tab()
+
+        # 统一设置中文右键菜单（在标签页创建完成后应用）
+        self._apply_chinese_menus_to_all_tabs()
 
     def create_single_parse_tab(self) -> QWidget:
         """创建单帧解析标签页 - 上下布局"""
@@ -536,6 +546,8 @@ class MainWindow(QMainWindow):
 
         ok_btn.clicked.connect(dialog.accept)
         cancel_btn.clicked.connect(dialog.reject)
+
+        apply_chinese_context_menus(dialog)
 
         if dialog.exec() != QDialog.Accepted:
             return
@@ -1914,6 +1926,21 @@ class MainWindow(QMainWindow):
                 child.widget().deleteLater()
             elif child.layout():
                 MainWindow._clear_layout(child.layout())
+
+    def _apply_chinese_menus_to_all_tabs(self):
+        """为所有标签页中的文本输入控件设置中文右键菜单"""
+        # 应用到主窗口及其所有子控件
+        apply_chinese_context_menus(self)
+        
+        # 确保各个标签页中的控件也被处理
+        if hasattr(self, 'single_input'):
+            setup_chinese_context_menu(self.single_input)
+        if hasattr(self, 'batch_input'):
+            setup_chinese_context_menu(self.batch_input)
+        if hasattr(self, 'frame_gen_tab'):
+            apply_chinese_context_menus(self.frame_gen_tab)
+        if hasattr(self, 'preset_tab'):
+            apply_chinese_context_menus(self.preset_tab)
 
     def _setup_menu_bar(self):
         """创建菜单栏"""

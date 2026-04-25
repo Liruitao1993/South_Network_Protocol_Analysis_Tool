@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
+from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu
 
 
 # 南网和国网各自独立的预设文件
@@ -153,6 +154,8 @@ class AddPresetDialog(QDialog):
         btn_layout.addWidget(cancel_btn)
         layout.addLayout(btn_layout)
 
+        apply_chinese_context_menus(self)
+
     def _load_existing_groups(self) -> List[str]:
         commands = PresetButtonManager.load_commands(self._protocol)
         groups = set()
@@ -254,6 +257,8 @@ class PresetButtonWidget(QWidget):
         self.log_text.customContextMenuRequested.connect(self._on_log_context_menu)
         log_layout.addWidget(self.log_text)
         main_layout.addWidget(log_group)
+
+        apply_chinese_context_menus(self)
 
     def load_buttons(self):
         """从对应协议 JSON 加载并重新生成全部按钮"""

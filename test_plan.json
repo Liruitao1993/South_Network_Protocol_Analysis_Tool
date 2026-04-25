@@ -1,0 +1,74 @@
+[
+  {
+    "name": "查询最大网络规模",
+    "frame_hex": "680C000003006A0300E85816",
+    "match_rule": "68 0E 00 88 03 00 6A 03 00 E8 F7 03 DA 16",
+    "match_mode": "HEX",
+    "timeout_ms": 2000,
+    "match_enabled": true
+  },
+  {
+    "name": "查询多网络信息",
+    "frame_hex": "680C00000300910300E87F16",
+    "match_rule": "68 14 00 88 03 00 91 03 00 E8 00 01 12 90 78 56 34 12 BE 16",
+    "match_mode": "HEX",
+    "timeout_ms": 2000,
+    "match_enabled": true
+  },
+  {
+    "name": "查询并发数",
+    "frame_hex": "680C00000300950300E88316",
+    "match_rule": "68 0D 00 88 03 00 95 03 00 E8 14 1F 16",
+    "match_mode": "HEX",
+    "timeout_ms": 2000,
+    "match_enabled": true
+  },
+  {
+    "name": "查询宽带载波频段",
+    "frame_hex": "680C00000300900300E87E16",
+    "match_rule": "68 0D 00 88 03 00 90 03 00 E8 XX XX 16",
+    "match_mode": "HEX",
+    "timeout_ms": 2000,
+    "match_enabled": true
+  },
+  {
+    "name": "查询主节点运行信息",
+    "frame_hex": "680C000003006F0300E85D16",
+    "match_rule": "68 25 00 88 03 00 6F 03 00 E8 XX XX XX XX FF FF FF FF FF FF FF FF FF FF FF XX XX XX XX XX XX 00 00 00 00 XX 16",
+    "match_mode": "HEX",
+    "timeout_ms": 2000,
+    "match_enabled": true
+  },
+  {
+    "name": "初始化任务",
+    "frame_hex": "680C00000100030102E8EF16",
+    "match_rule": "680E00880000010001E800007216",
+    "match_mode": "HEX",
+    "timeout_ms": 2000,
+    "match_enabled": true
+  },
+  {
+    "name": "启动任务",
+    "frame_hex": "681800200000000000002200000000000200080202E83816",
+    "match_rule": "680E00880000010001E800007216",
+    "match_mode": "HEX",
+    "timeout_ms": 2000,
+    "match_enabled": true
+  },
+  {
+    "name": "添加任务",
+    "frame_hex": "682600200000000000002200000000000200010202E80000801E00070001020304050607F216",
+    "match_rule": "680E00880000010001E800007216",
+    "match_mode": "HEX",
+    "timeout_ms": 15000,
+    "match_enabled": true
+  },
+  {
+    "name": "查询台区组网成功率",
+    "frame_hex": "680C00000300970300E88516",
+    "match_rule": "680E00880300970300E800000D16",
+    "match_mode": "HEX",
+    "timeout_ms": 2000,
+    "match_enabled": true
+  }
+]

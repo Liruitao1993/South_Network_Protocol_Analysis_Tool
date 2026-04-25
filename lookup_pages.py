@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QColor
+from gui_utils import setup_chinese_context_menu
 
 
 def create_search_bar(parent, placeholder="输入关键词搜索...", on_text_changed=None):
@@ -21,6 +22,7 @@ def create_search_bar(parent, placeholder="输入关键词搜索...", on_text_ch
     search_input.setPlaceholderText(placeholder)
     if on_text_changed:
         search_input.textChanged.connect(on_text_changed)
+    setup_chinese_context_menu(search_input)
     layout.addWidget(label)
     layout.addWidget(search_input)
     return layout, search_input

@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QColor
+from gui_utils import setup_chinese_context_menu
 
 
 def create_base_table(headers, column_widths):
@@ -52,6 +53,7 @@ def create_command_lookup_page(parent):
     search_label.setFixedWidth(45)
     search_input = QLineEdit()
     search_input.setPlaceholderText("输入命令字编码(如1001)或关键词搜索...")
+    setup_chinese_context_menu(search_input)
     search_layout.addWidget(search_label)
     search_layout.addWidget(search_input)
     layout.addLayout(search_layout)
@@ -131,6 +133,7 @@ def create_obis_lookup_page(parent):
     search_label.setFixedWidth(45)
     search_input = QLineEdit()
     search_input.setPlaceholderText("输入OBIS码(如0.0.96.1.0.255)或关键词搜索...")
+    setup_chinese_context_menu(search_input)
     search_layout.addWidget(search_label)
     search_layout.addWidget(search_input)
     layout.addLayout(search_layout)
