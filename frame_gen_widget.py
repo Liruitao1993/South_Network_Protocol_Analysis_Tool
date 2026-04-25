@@ -22,6 +22,7 @@ from gdw_send_frame_lib import GDWFrameGenerator
 from gdw_frame_generator_schema import GDW_AFNFN_SCHEMA
 from gdw10376_parser import GDW10376Parser
 from preset_buttons import PresetButtonManager, AddPresetDialog
+from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu
 
 
 # =============================================================================
@@ -45,6 +46,8 @@ class FrameGenWidget(QWidget):
 
     # 当帧被添加到预设时发出（protocol, frame_hex, config_snapshot）
     preset_added = Signal(str, str, dict)
+    # 当帧被添加到测试方案时发出（name, frame_hex）
+    test_plan_added = Signal(str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -338,6 +341,15 @@ class FrameGenWidget(QWidget):
         self.add_preset_btn.clicked.connect(self._on_add_to_preset_clicked)
         serial_btn_layout.addWidget(self.add_preset_btn)
 
+        self.add_test_plan_btn = QPushButton("添加到测试方案")
+        self.add_test_plan_btn.setStyleSheet(
+            "QPushButton { background-color: #9C27B0; color: white; "
+            "border-radius: 4px; padding: 2px 12px; font-weight: bold; }"
+            "QPushButton:disabled { background-color: #cccccc; }"
+        )
+        self.add_test_plan_btn.clicked.connect(self._on_add_to_test_plan_clicked)
+        serial_btn_layout.addWidget(self.add_test_plan_btn)
+
         self.clear_log_btn = QPushButton("清空日志")
         self.clear_log_btn.setStyleSheet(
             "QPushButton { padding: 2px 12px; }"
@@ -445,6 +457,8 @@ class FrameGenWidget(QWidget):
         self.gdw_src_addr.textChanged.connect(self._schedule_realtime_update)
         self.gdw_dst_addr.textChanged.connect(self._schedule_realtime_update)
 
+        apply_chinese_context_menus(self)
+
     # ------------------------------------------------------------------
     # 模式切换
     # ------------------------------------------------------------------
@@ -532,6 +546,7 @@ class FrameGenWidget(QWidget):
         text_edit.setReadOnly(True)
         text_edit.setHtml(doc)
         text_edit.setFont(QFont("Microsoft YaHei", 10))
+        setup_chinese_context_menu(text_edit)
         layout.addWidget(text_edit, 1)
 
         btn_layout = QHBoxLayout()
@@ -664,6 +679,7 @@ class FrameGenWidget(QWidget):
                     self._form_layout.addWidget(widget)
             self._connect_field_signals()
         self._schedule_realtime_update()
+        apply_chinese_context_menus(self._form_container)
 
     def _on_gdw_comm_module_changed(self, index: int):
         """国网通信模块标识改变：决定是否显示地址域"""
@@ -693,6 +709,7 @@ class FrameGenWidget(QWidget):
                 self.gdw_relay_layout.addWidget(edit)
                 self.gdw_relay_inputs.append(edit)
             self.gdw_relay_layout.addStretch()
+            apply_chinese_context_menus(self.gdw_relay_container)
         else:
             self.gdw_relay_container.setVisible(False)
 
@@ -727,6 +744,7 @@ class FrameGenWidget(QWidget):
                     self._form_layout.addWidget(widget)
             self._connect_field_signals()
         self._schedule_realtime_update()
+        apply_chinese_context_menus(self._form_container)
 
     # ------------------------------------------------------------------
     # 自定义字段模板 UI（参考图2）
@@ -844,6 +862,7 @@ class FrameGenWidget(QWidget):
                 self.template_table.setCellWidget(row, 6, val_edit)
         self._connect_template_signals()
         self._schedule_realtime_update()
+        apply_chinese_context_menus(self.template_table)
 
     def _add_template_row(self):
         """添加一行模板字段"""
@@ -1579,6 +1598,45 @@ class FrameGenWidget(QWidget):
             self.preset_added.emit(self.protocol_mode, frame_hex, result["config"])
         else:
             QMessageBox.critical(self, "错误", "保存预设按钮失败")
+
+    def _on_add_to_test_plan_clicked(self):
+        """将当前生成的帧添加到测试方案"""
+        frame_hex = self.result_hex.toPlainText().strip()
+        if not frame_hex:
+            QMessageBox.warning(self, "警告", "当前没有可添加的帧，请先生成帧")
+            return
+        # 尝试从当前DI/AFN+Fn获取中文名称
+        name = ""
+        if self.protocol_mode == "south" and self._current_di_key:
+            schema = DI_FIELD_SCHEMA.get(self._current_di_key)
+            if schema:
+                name = schema.get("name", "")
+            if not name:
+                # 从combo文本解析：【下行】 中文名称  (DI3 DI2 DI1 DI0)
+                text = self.di_combo.currentText()
+                name = self._extract_name_from_label(text)
+        elif self.protocol_mode == "gdw" and self._current_afn_fn:
+            text = self.afn_fn_combo.currentText()
+            name = self._extract_name_from_label(text)
+        if not name:
+            name = "测试项"
+        self.test_plan_added.emit(name, frame_hex.replace(" ", ""))
+        QMessageBox.information(self, "成功", f"已添加到测试方案：{name}")
+
+    @staticmethod
+    def _extract_name_from_label(label: str) -> str:
+        """从combo标签中提取中文名称
+        格式: 【下行】 中文名称  (DI3 DI2 DI1 DI0) 或 【下行】 中文名称  (AFN=XXH Fn=FY)
+        """
+        if not label or label.startswith("--"):
+            return ""
+        # 去掉 【下行】 前缀
+        if label.startswith("【下行】"):
+            label = label[4:]
+        # 去掉 (DI码) 或 (AFN=... ) 后缀
+        if "(" in label:
+            label = label[:label.index("(")]
+        return label.strip()
 
     def get_config_snapshot(self) -> Dict[str, Any]:
         """获取当前组帧页面的完整配置快照"""

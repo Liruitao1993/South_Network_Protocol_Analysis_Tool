@@ -378,6 +378,212 @@
         "custom_templates": []
       },
       "id": "fcccc50c"
+    },
+    {
+      "protocol": "south",
+      "button_name": "查询任务详细信息",
+      "group_name": "常用查询",
+      "frame_hex": "68 0E 00 00 02 00 05 02 03 E8 01 00 F5 16",
+      "description": "查询任务ID=1的详细信息",
+      "config": {
+        "protocol_mode": "south",
+        "current_di_key": [
+          232,
+          3,
+          2,
+          5
+        ],
+        "current_afn_fn": null,
+        "custom_mode": false,
+        "south": {
+          "src_addr": "000000000000",
+          "dst_addr": "000000000000",
+          "dir": 0,
+          "prm": 0,
+          "add": 0
+        },
+        "gdw": {
+          "comm_type": 0,
+          "dir": 0,
+          "prm": 1,
+          "seq": "0",
+          "route_flag": 0,
+          "comm_module": 0,
+          "relay_level": 0,
+          "channel": "0",
+          "resp_bytes": "0",
+          "src_addr": "000000000000",
+          "dst_addr": "000000000000",
+          "relay_addrs": []
+        },
+        "field_values": {
+          "任务ID": 1
+        },
+        "custom_templates": []
+      },
+      "id": "e9128ec1"
+    },
+    {
+      "protocol": "south",
+      "button_name": "添加任务ID=1的透传15字节99的任务",
+      "group_name": "常用查询",
+      "frame_hex": "68 22 00 00 02 00 01 02 02 E8 01 00 80 1E 00 0F 00 99 99 99 99 99 99 99 99 99 99 99 99 99 99 99 94 16",
+      "description": "",
+      "config": {
+        "protocol_mode": "south",
+        "current_di_key": [
+          232,
+          2,
+          2,
+          1
+        ],
+        "current_afn_fn": null,
+        "custom_mode": false,
+        "south": {
+          "src_addr": "000000000000",
+          "dst_addr": "000000000000",
+          "dir": 0,
+          "prm": 0,
+          "add": 0
+        },
+        "gdw": {
+          "comm_type": 0,
+          "dir": 0,
+          "prm": 1,
+          "seq": "0",
+          "route_flag": 0,
+          "comm_module": 0,
+          "relay_level": 0,
+          "channel": "0",
+          "resp_bytes": "0",
+          "src_addr": "000000000000",
+          "dst_addr": "000000000000",
+          "relay_addrs": []
+        },
+        "field_values": {
+          "任务ID": 1,
+          "任务响应标识": 1,
+          "转发标识": 0,
+          "保留": 0,
+          "任务优先级": 0,
+          "任务模式字": 128,
+          "超时时间": 30,
+          "报文长度": 0,
+          "业务代码": 0,
+          "报文有效内容": "999999999999999999999999999999",
+          "报文内容": "999999999999999999999999999999"
+        },
+        "custom_templates": []
+      },
+      "id": "9271883d"
+    },
+    {
+      "protocol": "south",
+      "button_name": "添加全99透传任务任务ID=1",
+      "group_name": "常用查询",
+      "frame_hex": "68 2E 00 20 00 00 00 00 00 00 99 99 99 99 99 99 02 00 01 02 02 E8 01 00 80 1E 00 0F 00 99 99 99 99 99 99 99 99 99 99 99 99 99 99 99 4A 16",
+      "description": "",
+      "config": {
+        "protocol_mode": "south",
+        "current_di_key": [
+          232,
+          2,
+          2,
+          1
+        ],
+        "current_afn_fn": null,
+        "custom_mode": false,
+        "south": {
+          "src_addr": "000000000000",
+          "dst_addr": "999999999999",
+          "dir": 0,
+          "prm": 0,
+          "add": 1
+        },
+        "gdw": {
+          "comm_type": 0,
+          "dir": 0,
+          "prm": 1,
+          "seq": "0",
+          "route_flag": 0,
+          "comm_module": 0,
+          "relay_level": 0,
+          "channel": "0",
+          "resp_bytes": "0",
+          "src_addr": "000000000000",
+          "dst_addr": "000000000000",
+          "relay_addrs": []
+        },
+        "field_values": {
+          "任务ID": 1,
+          "任务响应标识": 1,
+          "转发标识": 0,
+          "保留": 0,
+          "任务优先级": 0,
+          "任务模式字": 128,
+          "超时时间": 30,
+          "报文长度": 0,
+          "业务代码": 0,
+          "报文有效内容": "999999999999999999999999999999",
+          "报文内容": "999999999999999999999999999999"
+        },
+        "custom_templates": []
+      },
+      "id": "65515c6f"
+    },
+    {
+      "protocol": "south",
+      "button_name": "测试任务详细信息",
+      "group_name": "常用查询",
+      "frame_hex": "68 2E 00 20 00 00 00 00 00 00 00 00 00 00 00 22 02 00 01 02 02 E8 01 00 80 1E 00 0F 00 99 99 99 99 99 99 99 99 99 99 99 99 99 99 99 D6 16",
+      "description": "",
+      "config": {
+        "protocol_mode": "south",
+        "current_di_key": [
+          232,
+          2,
+          2,
+          1
+        ],
+        "current_afn_fn": null,
+        "custom_mode": false,
+        "south": {
+          "src_addr": "000000000000",
+          "dst_addr": "220000000000",
+          "dir": 0,
+          "prm": 0,
+          "add": 1
+        },
+        "gdw": {
+          "comm_type": 0,
+          "dir": 0,
+          "prm": 1,
+          "seq": "0",
+          "route_flag": 0,
+          "comm_module": 0,
+          "relay_level": 0,
+          "channel": "0",
+          "resp_bytes": "0",
+          "src_addr": "000000000000",
+          "dst_addr": "000000000000",
+          "relay_addrs": []
+        },
+        "field_values": {
+          "任务ID": 1,
+          "任务响应标识": 1,
+          "转发标识": 0,
+          "保留": 0,
+          "任务优先级": 0,
+          "任务模式字": 128,
+          "超时时间": 30,
+          "报文长度": 0,
+          "业务代码": 0,
+          "报文有效内容": "999999999999999999999999999999",
+          "报文内容": "999999999999999999999999999999"
+        },
+        "custom_templates": []
+      },
+      "id": "6de7c923"
     }
   ]
 }
