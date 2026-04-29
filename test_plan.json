@@ -1,11 +1,36 @@
 [
   {
+    "name": "复位硬件",
+    "frame_hex": "680C00000100010102E8ED16",
+    "match_rule": "682A00C80300020300E8029808000202129078563412FC0301000F00010817484C3039XXXXXXXXXXXX16",
+    "match_mode": "HEX",
+    "timeout_ms": 5000,
+    "send_enabled": true,
+    "match_enabled": true,
+    "response_frame": "680E00880000010001E800007216",
+    "persistent": false
+  },
+  {
+    "name": "回复集中器时间",
+    "frame_hex": "",
+    "match_rule": "680C00C806XX010606E8XX16",
+    "match_mode": "HEX",
+    "timeout_ms": 600000,
+    "send_enabled": false,
+    "match_enabled": true,
+    "response_frame": "681200000606010606E8【\"time\",6,Y-M-D-h-m-s,\"little\"】【\"CS\",1,3:-2,\"little\"】16",
+    "persistent": true
+  },
+  {
     "name": "查询最大网络规模",
     "frame_hex": "680C000003006A0300E85816",
     "match_rule": "68 0E 00 88 03 00 6A 03 00 E8 F7 03 DA 16",
     "match_mode": "HEX",
     "timeout_ms": 2000,
-    "match_enabled": true
+    "send_enabled": true,
+    "match_enabled": true,
+    "response_frame": "",
+    "persistent": false
   },
   {
     "name": "查询多网络信息",
@@ -13,7 +38,10 @@
     "match_rule": "68 14 00 88 03 00 91 03 00 E8 00 01 12 90 78 56 34 12 BE 16",
     "match_mode": "HEX",
     "timeout_ms": 2000,
-    "match_enabled": true
+    "send_enabled": true,
+    "match_enabled": true,
+    "response_frame": "",
+    "persistent": false
   },
   {
     "name": "查询并发数",
@@ -21,7 +49,10 @@
     "match_rule": "68 0D 00 88 03 00 95 03 00 E8 14 1F 16",
     "match_mode": "HEX",
     "timeout_ms": 2000,
-    "match_enabled": true
+    "send_enabled": true,
+    "match_enabled": true,
+    "response_frame": "",
+    "persistent": false
   },
   {
     "name": "查询宽带载波频段",
@@ -29,15 +60,87 @@
     "match_rule": "68 0D 00 88 03 00 90 03 00 E8 XX XX 16",
     "match_mode": "HEX",
     "timeout_ms": 2000,
-    "match_enabled": true
+    "send_enabled": true,
+    "match_enabled": true,
+    "response_frame": "",
+    "persistent": false
   },
   {
     "name": "查询主节点运行信息",
     "frame_hex": "680C000003006F0300E85D16",
-    "match_rule": "68 25 00 88 03 00 6F 03 00 E8 XX XX XX XX FF FF FF FF FF FF FF FF FF FF FF XX XX XX XX XX XX 00 00 00 00 XX 16",
+    "match_rule": "6825008803006F0300E8XXXXXXXXFFFFFFFFFFFFFFFFFFFFFFXXXXXXXXXXXXXX000000XX16",
     "match_mode": "HEX",
     "timeout_ms": 2000,
-    "match_enabled": true
+    "send_enabled": true,
+    "match_enabled": true,
+    "response_frame": "",
+    "persistent": false
+  },
+  {
+    "name": "查询台区组网成功率",
+    "frame_hex": "680C00000300970300E88516",
+    "match_rule": "680E00880300970300E8XXXXXX16",
+    "match_mode": "HEX",
+    "timeout_ms": 2000,
+    "send_enabled": true,
+    "match_enabled": true,
+    "response_frame": "",
+    "persistent": false
+  },
+  {
+    "name": "初始化档案",
+    "frame_hex": "680C00000100020102E8EE16",
+    "match_rule": "680E00880000010001E8XXXXXX16",
+    "match_mode": "HEX",
+    "timeout_ms": 2000,
+    "send_enabled": true,
+    "match_enabled": true,
+    "response_frame": "",
+    "persistent": false
+  },
+  {
+    "name": "添加从节点",
+    "frame_hex": "681300000400020402E8012200000000001716",
+    "match_rule": "680E00880000010001E800007216",
+    "match_mode": "HEX",
+    "timeout_ms": 2000,
+    "send_enabled": true,
+    "match_enabled": true,
+    "response_frame": "",
+    "persistent": false
+  },
+  {
+    "name": "查询从节点数量",
+    "frame_hex": "680C00000300050300E8F316",
+    "match_rule": "680E00880300050300E801007C16",
+    "match_mode": "HEX",
+    "timeout_ms": 2000,
+    "send_enabled": true,
+    "match_enabled": true,
+    "response_frame": "",
+    "persistent": false
+  },
+  {
+    "name": "等待组网",
+    "frame_hex": "",
+    "match_rule": "",
+    "match_mode": "HEX",
+    "timeout_ms": 60000,
+    "send_enabled": false,
+    "match_enabled": false,
+    "response_frame": "",
+    "persistent": false
+  },
+  {
+    "name": "查询网络拓扑信息",
+    "frame_hex": "680F00000300650303E80000025816",
+    "match_rule": "683700880300650304E8020000000212907856341201000000XXXXXXXXXXXX00004022000000000002100100XXXXXXXXXXXX0000XXXX16",
+    "match_mode": "HEX",
+    "timeout_ms": 2000,
+    "send_enabled": true,
+    "match_enabled": true,
+    "response_frame": "",
+    "persistent": false
   },
   {
     "name": "初始化任务",
@@ -45,7 +148,10 @@
     "match_rule": "680E00880000010001E800007216",
     "match_mode": "HEX",
     "timeout_ms": 2000,
-    "match_enabled": true
+    "send_enabled": true,
+    "match_enabled": true,
+    "response_frame": "",
+    "persistent": false
   },
   {
     "name": "启动任务",
@@ -53,22 +159,31 @@
     "match_rule": "680E00880000010001E800007216",
     "match_mode": "HEX",
     "timeout_ms": 2000,
-    "match_enabled": true
+    "send_enabled": true,
+    "match_enabled": true,
+    "response_frame": "",
+    "persistent": false
   },
   {
     "name": "添加任务",
     "frame_hex": "682600200000000000002200000000000200010202E80000801E00070001020304050607F216",
     "match_rule": "680E00880000010001E800007216",
     "match_mode": "HEX",
-    "timeout_ms": 15000,
-    "match_enabled": true
+    "timeout_ms": 2000,
+    "send_enabled": true,
+    "match_enabled": true,
+    "response_frame": "",
+    "persistent": false
   },
   {
-    "name": "查询台区组网成功率",
-    "frame_hex": "680C00000300970300E88516",
-    "match_rule": "680E00880300970300E800000D16",
+    "name": "延时等待任务数据上报",
+    "frame_hex": "",
+    "match_rule": "681500C80500050505E8000022000000000001E716",
     "match_mode": "HEX",
-    "timeout_ms": 2000,
-    "match_enabled": true
+    "timeout_ms": 25000,
+    "send_enabled": false,
+    "match_enabled": true,
+    "response_frame": "680E00880000010001E800007216",
+    "persistent": false
   }
 ]

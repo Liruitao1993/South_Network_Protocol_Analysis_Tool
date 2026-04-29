@@ -35,7 +35,7 @@ from serial_worker import SerialWorker
 from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu
 
 
-APP_VERSION = "1.6.5"
+APP_VERSION = "1.6.6"
 
 CHANGELOG = [
     ("1.6.5", "2026-04-22", [
@@ -320,6 +320,22 @@ class MainWindow(QMainWindow):
         self.parse_btn.clicked.connect(self.parse_single)
         btn_layout.addWidget(self.parse_btn)
 
+        self.verify_btn = QPushButton("校验报文")
+        self.verify_btn.setMinimumHeight(32)
+        self.verify_btn.setStyleSheet(
+            "QPushButton { background-color: #2196F3; color: white; border-radius: 3px; padding: 4px 12px; }"
+        )
+        self.verify_btn.clicked.connect(self.verify_single)
+        btn_layout.addWidget(self.verify_btn)
+
+        self.add_to_test_btn = QPushButton("添加到测试方案")
+        self.add_to_test_btn.setMinimumHeight(32)
+        self.add_to_test_btn.setStyleSheet(
+            "QPushButton { background-color: #4CAF50; color: white; border-radius: 3px; padding: 4px 12px; }"
+        )
+        self.add_to_test_btn.clicked.connect(self._add_parsed_to_test_plan)
+        btn_layout.addWidget(self.add_to_test_btn)
+
         clear_btn = QPushButton("清空")
         clear_btn.setMinimumHeight(32)
         clear_btn.clicked.connect(self.clear_single)
@@ -365,6 +381,15 @@ class MainWindow(QMainWindow):
         self._byte_ranges: list = []
 
         result_layout.addWidget(self.result_table_widget)
+
+        # === 校验结果区域 ===
+        self.verify_group = QGroupBox("校验结果")
+        verify_layout = QVBoxLayout(self.verify_group)
+        self.verify_label = QLabel("点击「校验报文」按钮进行协议一致性校验")
+        self.verify_label.setWordWrap(True)
+        self.verify_label.setFont(QFont("Consolas", 9))
+        verify_layout.addWidget(self.verify_label)
+        result_layout.addWidget(self.verify_group)
 
         layout.addWidget(result_group, 1)
 
@@ -1887,12 +1912,121 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "解析错误", f"解析失败：{str(e)}")
 
+    def verify_single(self):
+        """校验单帧报文的协议一致性"""
+        input_text = self.single_input.toPlainText().strip()
+        if not input_text:
+            QMessageBox.warning(self, "警告", "请输入报文内容！")
+            return
+
+        # 清理输入
+        clean_input = input_text.replace(" ", "").replace("\n", "").replace("\t", "").strip()
+
+        # 验证输入
+        if not all(c in '0123456789abcdefABCDEF' for c in clean_input):
+            QMessageBox.critical(self, "错误", "输入包含非法字符，请只输入十六进制字符（0-9, A-F）！")
+            return
+
+        if len(clean_input) % 2 != 0:
+            QMessageBox.critical(self, "错误", "输入长度为奇数，十六进制字符串必须是偶数长度！")
+            return
+
+        try:
+            frame_bytes = bytes.fromhex(clean_input)
+
+            # 根据当前协议选择验证器
+            from validator import NWValidator, GDWValidator, HDLCValidator, PLCRFValidator, DLT645Validator
+
+            validators = {
+                0: NWValidator(),      # 南网
+                1: PLCRFValidator(),   # PLC RF
+                2: HDLCValidator(),    # HDLC
+                3: HDLCValidator(),    # Wrapper
+                4: HDLCValidator(),    # APDU
+                5: DLT645Validator(),  # DLT645
+                6: GDWValidator(),     # 国网
+            }
+
+            validator = validators.get(self.current_protocol)
+            if validator:
+                result = validator.verify(frame_bytes)
+                self._display_verify_result(result)
+            else:
+                self.verify_label.setText("当前协议不支持校验")
+
+        except Exception as e:
+            QMessageBox.critical(self, "校验错误", f"校验失败：{str(e)}")
+
+    def _display_verify_result(self, result):
+        """显示校验结果"""
+        from validator.base import CheckLevel
+
+        lines = []
+        lines.append(f"协议: {result.protocol}")
+        lines.append(f"整体结果: {'✅ 通过' if result.valid else '❌ 失败'}")
+        lines.append("")
+
+        for check in result.checks:
+            icon = "✅" if check.level == CheckLevel.PASS else "❌" if check.level == CheckLevel.FAIL else "⚠️"
+            lines.append(f"{icon} {check.name}: {check.message}")
+
+        if result.warnings:
+            lines.append("")
+            lines.append("⚠️ 警告:")
+            for w in result.warnings:
+                lines.append(f"  - {w}")
+
+        if result.errors:
+            lines.append("")
+            lines.append("❌ 错误:")
+            for e in result.errors:
+                lines.append(f"  - {e}")
+
+        self.verify_label.setText("\n".join(lines))
+
+        # 设置颜色
+        if result.valid:
+            self.verify_group.setStyleSheet("QGroupBox { border: 2px solid #4CAF50; }")
+        else:
+            self.verify_group.setStyleSheet("QGroupBox { border: 2px solid #f44336; }")
+
+    def _add_parsed_to_test_plan(self):
+        """将当前解析的帧添加到测试方案"""
+        input_text = self.single_input.toPlainText().strip()
+        if not input_text:
+            QMessageBox.warning(self, "警告", "请先解析报文！")
+            return
+
+        # 清理 HEX
+        clean_hex = input_text.replace(" ", "").replace("\n", "").replace("\t", "").strip()
+
+        if not clean_hex:
+            QMessageBox.warning(self, "警告", "请输入报文内容！")
+            return
+
+        # 根据协议生成名称
+        protocol_names = {
+            0: "南网", 1: "PLC RF", 2: "HDLC", 3: "Wrapper",
+            4: "APDU", 5: "DLT645", 6: "国网"
+        }
+        protocol_name = protocol_names.get(self.current_protocol, "未知")
+        name = f"{protocol_name}帧-{len(self.test_plan_tab._items) + 1}"
+
+        # 添加到测试方案
+        self.test_plan_tab.add_item(name, clean_hex)
+        QMessageBox.information(self, "成功", f"已添加到测试方案: {name}")
+
     def clear_single(self):
         """清空单帧解析输入和结果"""
         self.single_input.clear()
         self.result_table_widget.setRowCount(0)
         self.current_result = None
         self._byte_ranges = []
+        # 清空校验结果
+        if hasattr(self, 'verify_label'):
+            self.verify_label.setText("点击「校验报文」按钮进行协议一致性校验")
+        if hasattr(self, 'verify_group'):
+            self.verify_group.setStyleSheet("")
 
     def export_single(self):
         """导出单帧解析结果"""
