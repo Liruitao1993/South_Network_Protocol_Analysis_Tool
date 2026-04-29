@@ -2026,3 +2026,13 @@ if __name__ == "__main__":
                 print(f"  {k}: {v}")
         else:
             print(f"{key}: {value}")
+
+
+# 为 HDLCParser 类添加 verify 方法
+def _hdlc_verify(self, frame_bytes: bytes):
+    """验证帧的协议一致性，返回 ValidationResult"""
+    from validator.hdlc_validator import HDLCValidator
+    validator = HDLCValidator()
+    return validator.verify(frame_bytes)
+
+HDLCParser.verify = _hdlc_verify

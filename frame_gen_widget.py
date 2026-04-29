@@ -6,6 +6,7 @@
 """
 
 from typing import Dict, Any, List, Tuple
+from datetime import datetime
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
@@ -1882,7 +1883,8 @@ class FrameGenWidget(QWidget):
 
     def _on_serial_log(self, msg: str):
         """串口日志消息回调"""
-        self.serial_log.append(msg)
+        ts = datetime.now().strftime("%H:%M:%S")
+        self.serial_log.append(f"[{ts}] {msg}")
         self._trim_log(self.serial_log)
         # 自动滚动到底部
         scrollbar = self.serial_log.verticalScrollBar()
@@ -1904,12 +1906,14 @@ class FrameGenWidget(QWidget):
                 if field_name in key_fields:
                     parsed = str(item[2]) if item[2] else str(item[3])
                     summary_parts.append(f"{field_name}: {parsed}")
+            ts = datetime.now().strftime("%H:%M:%S")
             if summary_parts:
-                self.serial_log.append(f"[解析] {' | '.join(summary_parts)}")
+                self.serial_log.append(f"[{ts}] [解析] {' | '.join(summary_parts)}")
             else:
-                self.serial_log.append("[解析] 帧结构识别成功")
+                self.serial_log.append(f"[{ts}] [解析] 帧结构识别成功")
         except Exception as e:
-            self.serial_log.append(f"[解析失败] {e}")
+            ts = datetime.now().strftime("%H:%M:%S")
+            self.serial_log.append(f"[{ts}] [解析失败] {e}")
 
     def _populate_response_table(self, table_data: list):
         """填充响应帧解析表格"""

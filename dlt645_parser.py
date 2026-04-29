@@ -170,3 +170,9 @@ class DLT645Parser:
         ])
 
         return result
+
+    def verify(self, frame_bytes: bytes):
+        """验证帧的协议一致性，返回 ValidationResult"""
+        from validator.dlt645_validator import DLT645Validator
+        validator = DLT645Validator()
+        return validator.verify(frame_bytes)

@@ -170,6 +170,50 @@ def generate_di_map():
     di_map["04000506"] = {"name": "电表运行状态字6", "unit": "", "data_type": "BS32", "length": 4}
     di_map["04000507"] = {"name": "电表运行状态字7", "unit": "", "data_type": "BS32", "length": 4}
 
+    # 参变量其他 (DI1>=06) - 国网补遗第4号扩展
+    di_map["04001104"] = {"name": "主动上报模式字", "unit": "", "data_type": "BS64", "length": 8}
+    di_map["04001402"] = {"name": "继电器拉闸控制电流门限值", "unit": "A", "data_type": "XXX.XXX", "length": 3}
+    di_map["04001501"] = {"name": "主动上报状态字", "unit": "", "data_type": "BS96", "length": 12}
+    di_map["04001503"] = {"name": "复位主动上报状态字", "unit": "", "data_type": "BS96", "length": 12}
+
+    # 负荷曲线抄读扩展 (0610xx) - 国网补遗第4号
+    curve_items = {
+        "01": [("电压", "XXX.X", 2, "01=A相,02=B相,03=C相"), ("A相电压", "B相电压", "C相电压")],
+        "02": [("电流", "XXX.XXX", 3, ""), ("A相电流", "B相电流", "C相电流")],
+        "03": [("有功功率", "XX.XXXX", 3, "00=总,01=A相,02=B相,03=C相"), ("总有功功率", "A相有功功率", "B相有功功率", "C相有功功率")],
+        "04": [("无功功率", "XX.XXXX", 3, ""), ("总无功功率", "A相无功功率", "B相无功功率", "C相无功功率")],
+        "05": [("功率因数", "X.XXX", 2, ""), ("总功率因数", "A功率因数", "B功率因数", "C功率因数")],
+    }
+    for code, (meta, names) in curve_items.items():
+        name, dtype, length, _ = meta
+        for i, n in enumerate(names):
+            di = f"0610{code}{i:02X}" if i > 0 else f"0610{code}00"
+            di_map[di] = {"name": f"负荷曲线-{n}", "unit": "V" if code == "01" else ("A" if code == "02" else ("kW" if code == "03" else ("kvar" if code == "04" else ""))), "data_type": dtype, "length": length}
+        di_map[f"0610{code}FF"] = {"name": f"{name if code!='03' else '有功功率' if code!='04' else '无功功率'}曲线数据块", "unit": "", "data_type": "", "length": 0}
+
+    # 电能/四象限/需量曲线 (061006-061008)
+    energy_names = ["正向有功总电能", "反向有功总电能", "组合无功1总电能", "组合无功2总电能"]
+    for i, n in enumerate(energy_names):
+        di_map[f"061006{i+1:02X}"] = {"name": f"负荷曲线-{n}", "unit": "kWh" if i < 2 else "kvarh", "data_type": "XXXXXX.XX", "length": 4}
+    di_map["061006FF"] = {"name": "有功无功曲线总电能总数据块", "unit": "", "data_type": "", "length": 0}
+
+    for i in range(1, 5):
+        di_map[f"0610070{i}"] = {"name": f"负荷曲线-第{i}象限无功总电能", "unit": "kvarh", "data_type": "XXXXXX.XX", "length": 4}
+    di_map["061007FF"] = {"name": "四象限无功曲线数据块", "unit": "", "data_type": "", "length": 0}
+
+    di_map["06100801"] = {"name": "负荷曲线-当前有功需量", "unit": "kW", "data_type": "XX.XXXX", "length": 3}
+    di_map["06100802"] = {"name": "负荷曲线-当前无功需量", "unit": "kvar", "data_type": "XX.XXXX", "length": 3}
+    di_map["061008FF"] = {"name": "当前需量曲线数据块", "unit": "", "data_type": "", "length": 0}
+
+    # 精确电能扩展 (0060xx, 0061xx) - 国网补遗第4号
+    di_map["00600000"] = {"name": "(当前)正向有功总精确电能", "unit": "kWh", "data_type": "XXXXXX.XXXX", "length": 5}
+    di_map["006000FF"] = {"name": "(当前)正向有功精确电能数据块", "unit": "kWh", "data_type": "XXXXXX.XXXX", "length": 5}
+    di_map["00610000"] = {"name": "(当前)反向有功总精确电能", "unit": "kWh", "data_type": "XXXXXX.XXXX", "length": 5}
+    di_map["006100FF"] = {"name": "(当前)反向有功精确电能数据块", "unit": "kWh", "data_type": "XXXXXX.XXXX", "length": 5}
+    for i in range(1, 64):
+        di_map[f"0060{i:02X}00"] = {"name": f"(当前)正向有功费率{i}精确电能", "unit": "kWh", "data_type": "XXXXXX.XXXX", "length": 5}
+        di_map[f"0061{i:02X}00"] = {"name": f"(当前)反向有功费率{i}精确电能", "unit": "kWh", "data_type": "XXXXXX.XXXX", "length": 5}
+
     # 事件记录类 (06)
     di_map["06000001"] = {"name": "事件清零总次数", "unit": "次", "data_type": "XXXXXX", "length": 3}
     di_map["06000002"] = {"name": "编程总次数", "unit": "次", "data_type": "XXXXXX", "length": 3}

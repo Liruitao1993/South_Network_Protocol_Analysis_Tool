@@ -1,6 +1,6 @@
 {
-  "description": "DLT645-2007 电表协议数据标识(DI)映射表",
-  "version": "1.1.0",
+  "description": "DLT645-2007 电表协议数据标识(DI)映射表 (含国网补遗扩展)",
+  "version": "1.2.0",
   "di_map": {
     "00010000": {
       "name": "当前正向有功总电能",
@@ -2191,6 +2191,12 @@
       "unit": "",
       "data_type": "BS32",
       "length": 4
+    },
+    "04001501": {
+      "name": "主动上报状态字",
+      "unit": "",
+      "data_type": "BS96",
+      "length": 12
     },
     "06000001": {
       "name": "事件清零总次数",
@@ -5563,6 +5569,1020 @@
       "unit": "kWh",
       "data_type": "XXXXXX.XX",
       "length": 4
+    },
+    "04001104": {
+      "name": "主动上报模式字",
+      "unit": "",
+      "data_type": "BS64",
+      "length": 8
+    },
+    "04001503": {
+      "name": "复位主动上报状态字",
+      "unit": "",
+      "data_type": "BS96",
+      "length": 12
+    },
+    "04001402": {
+      "name": "继电器拉闸控制电流门限值",
+      "unit": "A",
+      "data_type": "XXX.XXX",
+      "length": 3
+    },
+    "06100101": {
+      "name": "负荷曲线-A相电压",
+      "unit": "V",
+      "data_type": "XXX.X",
+      "length": 2
+    },
+    "06100102": {
+      "name": "负荷曲线-B相电压",
+      "unit": "V",
+      "data_type": "XXX.X",
+      "length": 2
+    },
+    "06100103": {
+      "name": "负荷曲线-C相电压",
+      "unit": "V",
+      "data_type": "XXX.X",
+      "length": 2
+    },
+    "061001FF": {
+      "name": "电压曲线数据块",
+      "unit": "",
+      "data_type": "",
+      "length": 0
+    },
+    "06100201": {
+      "name": "负荷曲线-A相电流",
+      "unit": "A",
+      "data_type": "XXX.XXX",
+      "length": 3
+    },
+    "06100202": {
+      "name": "负荷曲线-B相电流",
+      "unit": "A",
+      "data_type": "XXX.XXX",
+      "length": 3
+    },
+    "06100203": {
+      "name": "负荷曲线-C相电流",
+      "unit": "A",
+      "data_type": "XXX.XXX",
+      "length": 3
+    },
+    "061002FF": {
+      "name": "电流曲线数据块",
+      "unit": "",
+      "data_type": "",
+      "length": 0
+    },
+    "06100300": {
+      "name": "负荷曲线-总有功功率",
+      "unit": "kW",
+      "data_type": "XX.XXXX",
+      "length": 3
+    },
+    "06100301": {
+      "name": "负荷曲线-A相有功功率",
+      "unit": "kW",
+      "data_type": "XX.XXXX",
+      "length": 3
+    },
+    "06100302": {
+      "name": "负荷曲线-B相有功功率",
+      "unit": "kW",
+      "data_type": "XX.XXXX",
+      "length": 3
+    },
+    "06100303": {
+      "name": "负荷曲线-C相有功功率",
+      "unit": "kW",
+      "data_type": "XX.XXXX",
+      "length": 3
+    },
+    "061003FF": {
+      "name": "有功功率曲线数据块",
+      "unit": "",
+      "data_type": "",
+      "length": 0
+    },
+    "06100400": {
+      "name": "负荷曲线-总无功功率",
+      "unit": "kvar",
+      "data_type": "XX.XXXX",
+      "length": 3
+    },
+    "06100401": {
+      "name": "负荷曲线-A相无功功率",
+      "unit": "kvar",
+      "data_type": "XX.XXXX",
+      "length": 3
+    },
+    "06100402": {
+      "name": "负荷曲线-B相无功功率",
+      "unit": "kvar",
+      "data_type": "XX.XXXX",
+      "length": 3
+    },
+    "06100403": {
+      "name": "负荷曲线-C相无功功率",
+      "unit": "kvar",
+      "data_type": "XX.XXXX",
+      "length": 3
+    },
+    "061004FF": {
+      "name": "无功功率曲线数据块",
+      "unit": "",
+      "data_type": "",
+      "length": 0
+    },
+    "06100500": {
+      "name": "负荷曲线-总功率因数",
+      "unit": "",
+      "data_type": "X.XXX",
+      "length": 2
+    },
+    "06100501": {
+      "name": "负荷曲线-A功率因数",
+      "unit": "",
+      "data_type": "X.XXX",
+      "length": 2
+    },
+    "06100502": {
+      "name": "负荷曲线-B功率因数",
+      "unit": "",
+      "data_type": "X.XXX",
+      "length": 2
+    },
+    "06100503": {
+      "name": "负荷曲线-C功率因数",
+      "unit": "",
+      "data_type": "X.XXX",
+      "length": 2
+    },
+    "061005FF": {
+      "name": "功率因数数据块",
+      "unit": "",
+      "data_type": "",
+      "length": 0
+    },
+    "06100601": {
+      "name": "负荷曲线-正向有功总电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XX",
+      "length": 4
+    },
+    "06100602": {
+      "name": "负荷曲线-反向有功总电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XX",
+      "length": 4
+    },
+    "06100603": {
+      "name": "负荷曲线-组合无功1总电能",
+      "unit": "kvarh",
+      "data_type": "XXXXXX.XX",
+      "length": 4
+    },
+    "06100604": {
+      "name": "负荷曲线-组合无功2总电能",
+      "unit": "kvarh",
+      "data_type": "XXXXXX.XX",
+      "length": 4
+    },
+    "061006FF": {
+      "name": "有功无功曲线总电能总数据块",
+      "unit": "",
+      "data_type": "",
+      "length": 0
+    },
+    "06100701": {
+      "name": "负荷曲线-第一象限无功总电能",
+      "unit": "kvarh",
+      "data_type": "XXXXXX.XX",
+      "length": 4
+    },
+    "06100702": {
+      "name": "负荷曲线-第二象限无功总电能",
+      "unit": "kvarh",
+      "data_type": "XXXXXX.XX",
+      "length": 4
+    },
+    "06100703": {
+      "name": "负荷曲线-第三象限无功总电能",
+      "unit": "kvarh",
+      "data_type": "XXXXXX.XX",
+      "length": 4
+    },
+    "06100704": {
+      "name": "负荷曲线-第四象限无功总电能",
+      "unit": "kvarh",
+      "data_type": "XXXXXX.XX",
+      "length": 4
+    },
+    "061007FF": {
+      "name": "四象限无功曲线数据块",
+      "unit": "",
+      "data_type": "",
+      "length": 0
+    },
+    "06100801": {
+      "name": "负荷曲线-当前有功需量",
+      "unit": "kW",
+      "data_type": "XX.XXXX",
+      "length": 3
+    },
+    "06100802": {
+      "name": "负荷曲线-当前无功需量",
+      "unit": "kvar",
+      "data_type": "XX.XXXX",
+      "length": 3
+    },
+    "061008FF": {
+      "name": "当前需量曲线数据块",
+      "unit": "",
+      "data_type": "",
+      "length": 0
+    },
+    "00600000": {
+      "name": "(当前)正向有功总精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "006000FF": {
+      "name": "(当前)正向有功精确电能数据块",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00610000": {
+      "name": "(当前)反向有功总精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "006100FF": {
+      "name": "(当前)反向有功精确电能数据块",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00600100": {
+      "name": "(当前)正向有功费率1精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00610100": {
+      "name": "(当前)反向有功费率1精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00600200": {
+      "name": "(当前)正向有功费率2精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00610200": {
+      "name": "(当前)反向有功费率2精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00600300": {
+      "name": "(当前)正向有功费率3精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00610300": {
+      "name": "(当前)反向有功费率3精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00600400": {
+      "name": "(当前)正向有功费率4精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00610400": {
+      "name": "(当前)反向有功费率4精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00600500": {
+      "name": "(当前)正向有功费率5精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00610500": {
+      "name": "(当前)反向有功费率5精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00600600": {
+      "name": "(当前)正向有功费率6精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00610600": {
+      "name": "(当前)反向有功费率6精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00600700": {
+      "name": "(当前)正向有功费率7精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00610700": {
+      "name": "(当前)反向有功费率7精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00600800": {
+      "name": "(当前)正向有功费率8精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00610800": {
+      "name": "(当前)反向有功费率8精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00600900": {
+      "name": "(当前)正向有功费率9精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00610900": {
+      "name": "(当前)反向有功费率9精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00600A00": {
+      "name": "(当前)正向有功费率10精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00610A00": {
+      "name": "(当前)反向有功费率10精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00600B00": {
+      "name": "(当前)正向有功费率11精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00610B00": {
+      "name": "(当前)反向有功费率11精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00600C00": {
+      "name": "(当前)正向有功费率12精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00610C00": {
+      "name": "(当前)反向有功费率12精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00600D00": {
+      "name": "(当前)正向有功费率13精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00610D00": {
+      "name": "(当前)反向有功费率13精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00600E00": {
+      "name": "(当前)正向有功费率14精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00610E00": {
+      "name": "(当前)反向有功费率14精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00600F00": {
+      "name": "(当前)正向有功费率15精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00610F00": {
+      "name": "(当前)反向有功费率15精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00601000": {
+      "name": "(当前)正向有功费率16精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00611000": {
+      "name": "(当前)反向有功费率16精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00601100": {
+      "name": "(当前)正向有功费率17精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00611100": {
+      "name": "(当前)反向有功费率17精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00601200": {
+      "name": "(当前)正向有功费率18精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00611200": {
+      "name": "(当前)反向有功费率18精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00601300": {
+      "name": "(当前)正向有功费率19精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00611300": {
+      "name": "(当前)反向有功费率19精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00601400": {
+      "name": "(当前)正向有功费率20精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00611400": {
+      "name": "(当前)反向有功费率20精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00601500": {
+      "name": "(当前)正向有功费率21精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00611500": {
+      "name": "(当前)反向有功费率21精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00601600": {
+      "name": "(当前)正向有功费率22精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00611600": {
+      "name": "(当前)反向有功费率22精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00601700": {
+      "name": "(当前)正向有功费率23精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00611700": {
+      "name": "(当前)反向有功费率23精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00601800": {
+      "name": "(当前)正向有功费率24精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00611800": {
+      "name": "(当前)反向有功费率24精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00601900": {
+      "name": "(当前)正向有功费率25精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00611900": {
+      "name": "(当前)反向有功费率25精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00601A00": {
+      "name": "(当前)正向有功费率26精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00611A00": {
+      "name": "(当前)反向有功费率26精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00601B00": {
+      "name": "(当前)正向有功费率27精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00611B00": {
+      "name": "(当前)反向有功费率27精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00601C00": {
+      "name": "(当前)正向有功费率28精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00611C00": {
+      "name": "(当前)反向有功费率28精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00601D00": {
+      "name": "(当前)正向有功费率29精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00611D00": {
+      "name": "(当前)反向有功费率29精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00601E00": {
+      "name": "(当前)正向有功费率30精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00611E00": {
+      "name": "(当前)反向有功费率30精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00601F00": {
+      "name": "(当前)正向有功费率31精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00611F00": {
+      "name": "(当前)反向有功费率31精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00602000": {
+      "name": "(当前)正向有功费率32精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00612000": {
+      "name": "(当前)反向有功费率32精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00602100": {
+      "name": "(当前)正向有功费率33精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00612100": {
+      "name": "(当前)反向有功费率33精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00602200": {
+      "name": "(当前)正向有功费率34精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00612200": {
+      "name": "(当前)反向有功费率34精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00602300": {
+      "name": "(当前)正向有功费率35精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00612300": {
+      "name": "(当前)反向有功费率35精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00602400": {
+      "name": "(当前)正向有功费率36精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00612400": {
+      "name": "(当前)反向有功费率36精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00602500": {
+      "name": "(当前)正向有功费率37精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00612500": {
+      "name": "(当前)反向有功费率37精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00602600": {
+      "name": "(当前)正向有功费率38精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00612600": {
+      "name": "(当前)反向有功费率38精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00602700": {
+      "name": "(当前)正向有功费率39精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00612700": {
+      "name": "(当前)反向有功费率39精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00602800": {
+      "name": "(当前)正向有功费率40精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00612800": {
+      "name": "(当前)反向有功费率40精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00602900": {
+      "name": "(当前)正向有功费率41精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00612900": {
+      "name": "(当前)反向有功费率41精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00602A00": {
+      "name": "(当前)正向有功费率42精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00612A00": {
+      "name": "(当前)反向有功费率42精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00602B00": {
+      "name": "(当前)正向有功费率43精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00612B00": {
+      "name": "(当前)反向有功费率43精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00602C00": {
+      "name": "(当前)正向有功费率44精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00612C00": {
+      "name": "(当前)反向有功费率44精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00602D00": {
+      "name": "(当前)正向有功费率45精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00612D00": {
+      "name": "(当前)反向有功费率45精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00602E00": {
+      "name": "(当前)正向有功费率46精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00612E00": {
+      "name": "(当前)反向有功费率46精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00602F00": {
+      "name": "(当前)正向有功费率47精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00612F00": {
+      "name": "(当前)反向有功费率47精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00603000": {
+      "name": "(当前)正向有功费率48精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00613000": {
+      "name": "(当前)反向有功费率48精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00603100": {
+      "name": "(当前)正向有功费率49精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00613100": {
+      "name": "(当前)反向有功费率49精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00603200": {
+      "name": "(当前)正向有功费率50精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00613200": {
+      "name": "(当前)反向有功费率50精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00603300": {
+      "name": "(当前)正向有功费率51精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00613300": {
+      "name": "(当前)反向有功费率51精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00603400": {
+      "name": "(当前)正向有功费率52精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00613400": {
+      "name": "(当前)反向有功费率52精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00603500": {
+      "name": "(当前)正向有功费率53精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00613500": {
+      "name": "(当前)反向有功费率53精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00603600": {
+      "name": "(当前)正向有功费率54精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00613600": {
+      "name": "(当前)反向有功费率54精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00603700": {
+      "name": "(当前)正向有功费率55精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00613700": {
+      "name": "(当前)反向有功费率55精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00603800": {
+      "name": "(当前)正向有功费率56精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00613800": {
+      "name": "(当前)反向有功费率56精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00603900": {
+      "name": "(当前)正向有功费率57精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00613900": {
+      "name": "(当前)反向有功费率57精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00603A00": {
+      "name": "(当前)正向有功费率58精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00613A00": {
+      "name": "(当前)反向有功费率58精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00603B00": {
+      "name": "(当前)正向有功费率59精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00613B00": {
+      "name": "(当前)反向有功费率59精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00603C00": {
+      "name": "(当前)正向有功费率60精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00613C00": {
+      "name": "(当前)反向有功费率60精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00603D00": {
+      "name": "(当前)正向有功费率61精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00613D00": {
+      "name": "(当前)反向有功费率61精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00603E00": {
+      "name": "(当前)正向有功费率62精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00613E00": {
+      "name": "(当前)反向有功费率62精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00603F00": {
+      "name": "(当前)正向有功费率63精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
+    },
+    "00613F00": {
+      "name": "(当前)反向有功费率63精确电能",
+      "unit": "kWh",
+      "data_type": "XXXXXX.XXXX",
+      "length": 5
     }
   }
 }

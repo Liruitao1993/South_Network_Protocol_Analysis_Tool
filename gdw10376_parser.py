@@ -1824,3 +1824,9 @@ class GDW10376Parser:
                 results.append((afn, afn_name, fn, fn_name))
 
         return results
+
+    def verify(self, frame_bytes: bytes):
+        """验证帧的协议一致性，返回 ValidationResult"""
+        from validator.gdw_validator import GDWValidator
+        validator = GDWValidator()
+        return validator.verify(frame_bytes)

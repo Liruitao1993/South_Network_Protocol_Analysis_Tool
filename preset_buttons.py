@@ -9,6 +9,7 @@
 
 import json
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
@@ -357,7 +358,8 @@ class PresetButtonWidget(QWidget):
 
     def _on_serial_log(self, msg: str):
         """串口日志（发送/接收原始字节）"""
-        self.log_text.append(msg)
+        ts = datetime.now().strftime("%H:%M:%S")
+        self.log_text.append(f"[{ts}] {msg}")
         self._trim_log(self.log_text)
         scrollbar = self.log_text.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
@@ -382,17 +384,19 @@ class PresetButtonWidget(QWidget):
                     parsed = str(item[2]) if item[2] else str(item[3])
                     summary_parts.append(f"{field_name}: {parsed}")
             if summary_parts:
-                self.log_text.append(f"[解析] {' | '.join(summary_parts)}")
+                ts = datetime.now().strftime("%H:%M:%S")
+                self.log_text.append(f"[{ts}] [解析] {' | '.join(summary_parts)}")
             else:
-                self.log_text.append("[解析] 帧结构识别成功")
+                ts = datetime.now().strftime("%H:%M:%S")
+                self.log_text.append(f"[{ts}] [解析] 帧结构识别成功")
         except Exception as e:
-            self.log_text.append(f"[解析失败] {e}")
+            ts = datetime.now().strftime("%H:%M:%S")
+            self.log_text.append(f"[{ts}] [解析失败] {e}")
         scrollbar = self.log_text.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 
     @staticmethod
     def _current_time() -> str:
-        from datetime import datetime
         return datetime.now().strftime("%H:%M:%S")
 
     def _on_log_context_menu(self, pos):

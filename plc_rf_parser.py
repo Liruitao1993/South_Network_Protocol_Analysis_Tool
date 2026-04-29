@@ -742,3 +742,9 @@ class PLCRFProtocolParser:
             content["原始数据"] = data.hex(' ').upper()
 
         return content
+
+    def verify(self, frame_bytes: bytes):
+        """验证帧的协议一致性，返回 ValidationResult"""
+        from validator.plc_rf_validator import PLCRFValidator
+        validator = PLCRFValidator()
+        return validator.verify(frame_bytes)
