@@ -9,6 +9,7 @@
 """
 
 from typing import Optional
+import time
 import serial
 import serial.tools.list_ports
 
@@ -119,10 +120,12 @@ class SerialWorker(QThread):
                     raw = self._ser.read(self._ser.in_waiting)
                     self._buffer.extend(raw)
                     self._process_buffer()
+                else:
+                    time.sleep(0.01)
             except serial.SerialException:
                 break
-            except Exception:
-                pass
+            except Exception as e:
+                self.log_message.emit(f"[串口错误] 接收循环异常: {e}")
         self._running = False
         if self._ser and self._ser.is_open:
             try:
@@ -133,7 +136,7 @@ class SerialWorker(QThread):
         self.connection_changed.emit(False)
 
     def _process_buffer(self):
-        """从缓冲区提取完整 FT1.2 帧"""
+        """从缓冲区提取完整 FT1.2 帧（支持长度域容错）"""
         buf = self._buffer
         i = 0
         while i < len(buf) - 7:
@@ -152,18 +155,30 @@ class SerialWorker(QThread):
             if end_pos > len(buf):
                 break
             # 验证结束符
-            if buf[end_pos - 1] != 0x16:
-                i = pos + 1
+            if buf[end_pos - 1] == 0x16:
+                # 标准 FT1.2 帧
+                frame = bytes(buf[pos:end_pos])
+                self.frame_received.emit(frame)
+                hex_str = frame.hex().upper()
+                formatted = " ".join(hex_str[j:j+2] for j in range(0, len(hex_str), 2))
+                self.log_message.emit(f"[接收] {formatted}")
+                # 删除已处理数据
+                del buf[:end_pos]
+                i = 0
                 continue
-            # 提取帧
-            frame = bytes(buf[pos:end_pos])
-            self.frame_received.emit(frame)
-            hex_str = frame.hex().upper()
-            formatted = " ".join(hex_str[j:j+2] for j in range(0, len(hex_str), 2))
-            self.log_message.emit(f"[接收] {formatted}")
-            # 删除已处理数据
-            del buf[:end_pos]
-            i = 0
+            # 长度域对应的结束符不是 0x16，尝试查找下一个 0x16 作为备选边界
+            alt_end = buf.find(b'\x16', pos + 3)
+            if alt_end != -1 and 7 <= alt_end - pos <= 2048:
+                # 找到一个可能的帧边界（从 0x68 到 0x16）
+                frame = bytes(buf[pos:alt_end + 1])
+                self.frame_received.emit(frame)
+                hex_str = frame.hex().upper()
+                formatted = " ".join(hex_str[j:j+2] for j in range(0, len(hex_str), 2))
+                self.log_message.emit(f"[接收(容错)] {formatted}")
+                del buf[:alt_end + 1]
+                i = 0
+                continue
+            i = pos + 1
         # 如果缓冲区太大且没有有效帧头，清理旧数据
         if len(buf) > 4096:
             # 保留最后 1024 字节

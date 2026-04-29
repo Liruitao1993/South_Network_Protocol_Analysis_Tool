@@ -3944,4 +3944,10 @@ class ProtocolFrameParser:
         """计算校验和"""
         return sum(data) & 0xFF
 
+    def verify(self, frame_bytes: bytes):
+        """验证帧的协议一致性，返回 ValidationResult"""
+        from validator.nw_validator import NWValidator
+        validator = NWValidator()
+        return validator.verify(frame_bytes)
+
 
