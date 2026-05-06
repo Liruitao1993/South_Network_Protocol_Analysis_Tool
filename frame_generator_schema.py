@@ -548,7 +548,7 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '查询从节点的父节点',
         "direction": "down",
         "doc": '<b>DI编码</b>：E8 03 03 08<br>\n<b>命令名称</b>：查询从节点的父节点<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n数据标识内容格式见下表。\n\n<div style="text-align: center;"><div style="text-align: center;">表 24 查询从节点的父节点数据标识内容格式</div> </div>\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据标识内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>从节点地址</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>6</td></tr></table>\n',
-        "fields": [{'name': '从节点序号', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'big', 'default': 0, 'description': '从节点序号'}]
+        "fields": [{'name': '从节点地址', 'type': 'bytes', 'length': 6, 'required': True, 'reverse': True, 'default': '000000000000', 'description': '6字节从节点地址，低字节在前存储'}]
     },
 
     # 查询从节点通信地址映射表 (E8 03 03 0A)

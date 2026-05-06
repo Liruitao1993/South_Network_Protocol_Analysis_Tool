@@ -1,0 +1,403 @@
+id,name,filePath,startLine,endLine,content,description
+"Property:test_plan_widget.py:parts","parts","test_plan_widget.py",88,88,"def _split_bracket_params(content: str) -> List[str]:
+    """"""按逗号分割标记参数，支持引号包裹""""""
+    parts: List[str] = []
+    current = """"
+    in_quote = False
+",""
+"Property:send_frame_lib.py:ProtocolFrameGenerator.values","values","send_frame_lib.py",257,257,"
+        fields = schema[""fields""]
+        values: Dict[str, Any] = {}
+
+        # 第一遍：收集所有字段值（含默认值）",""
+"Property:protocol_tool.py:Frame.start_char","start_char","protocol_tool.py",27,27,"@dataclass
+class Frame:
+    start_char: int = 0x68
+    length: int = 0
+    control: ControlField = ControlField()
+",""
+"Property:protocol_tool.py:Frame.length","length","protocol_tool.py",28,28,"class Frame:
+    start_char: int = 0x68
+    length: int = 0
+    control: ControlField = ControlField()
+    address: bytes = b''
+",""
+"Property:protocol_tool.py:Frame.control","control","protocol_tool.py",29,29,"    start_char: int = 0x68
+    length: int = 0
+    control: ControlField = ControlField()
+    address: bytes = b''
+    afn: int = 0
+",""
+"Property:protocol_tool.py:Frame.address","address","protocol_tool.py",30,30,"    length: int = 0
+    control: ControlField = ControlField()
+    address: bytes = b''
+    afn: int = 0
+    seq: int = 0
+",""
+"Property:protocol_tool.py:Frame.afn","afn","protocol_tool.py",31,31,"    control: ControlField = ControlField()
+    address: bytes = b''
+    afn: int = 0
+    seq: int = 0
+    di: int = 0
+",""
+"Property:protocol_tool.py:Frame.seq","seq","protocol_tool.py",32,32,"    address: bytes = b''
+    afn: int = 0
+    seq: int = 0
+    di: int = 0
+    data: bytes = b''
+",""
+"Property:protocol_tool.py:Frame.di","di","protocol_tool.py",33,33,"    afn: int = 0
+    seq: int = 0
+    di: int = 0
+    data: bytes = b''
+    cs: int = 0
+",""
+"Property:protocol_tool.py:Frame.data","data","protocol_tool.py",34,34,"    seq: int = 0
+    di: int = 0
+    data: bytes = b''
+    cs: int = 0
+    end_char: int = 0x16
+",""
+"Property:protocol_tool.py:Frame.cs","cs","protocol_tool.py",35,35,"    di: int = 0
+    data: bytes = b''
+    cs: int = 0
+    end_char: int = 0x16
+    def __init__(self, control: ControlField = ControlField(), src_addr: bytes = b'', dst_addr: bytes = b'', afn: int = 0, seq: int = 0, di: int = 0, data: bytes = b''):
+",""
+"Property:protocol_tool.py:Frame.end_char","end_char","protocol_tool.py",36,36,"    data: bytes = b''
+    cs: int = 0
+    end_char: int = 0x16
+    def __init__(self, control: ControlField = ControlField(), src_addr: bytes = b'', dst_addr: bytes = b'', afn: int = 0, seq: int = 0, di: int = 0, data: bytes = b''):
+        self.control = control
+",""
+"Property:preset_buttons.py:PresetButtonWidget.groups","groups","preset_buttons.py",297,297,"    def _build_buttons(self, commands: List[Dict[str, Any]]):
+        """"""按 group_name 分组构建按钮，水平排列、自适应宽度""""""
+        groups: Dict[str, List[Dict[str, Any]]] = {}
+        for cmd in commands:
+            group = cmd.get(""group_name"", ""默认分组"")
+",""
+"Property:main_gui.py:MainWindow.config","config","main_gui.py",3036,3036,"    def _save_app_config(self):
+        """"""保存应用配置到 config.json""""""
+        config: Dict[str, Any] = {}
+        if self._config_path.exists():
+            try:
+",""
+"Property:main_gui.py:MainWindow.file_paths","file_paths","main_gui.py",3052,3052,"
+        # 更新文件路径配置
+        file_paths: Dict[str, str] = {}
+        for key, path in self._file_paths.items():
+            if path:
+",""
+"Property:main_gui.py:MainWindow.current_paths","current_paths","main_gui.py",3071,3071,"        """"""显示配置路径管理对话框""""""
+        # 构建当前路径字典（字符串形式传给对话框）
+        current_paths: Dict[str, str] = {}
+        for key, path in self._file_paths.items():
+            if path:
+",""
+"Property:gdw_frame_generator_schema.py:GDW_AFNFN_SCHEMA","GDW_AFNFN_SCHEMA","gdw_frame_generator_schema.py",7,634,"from typing import Dict, Any, Tuple
+
+GDW_AFNFN_SCHEMA: Dict[Tuple[int, int], Dict[str, Any]] = {
+
+    # =========================================================================
+    # AFN=00H 确认/否认 (上行响应，无下行数据单元)
+    # =========================================================================
+    (0x00, 1): {""name"": ""确认"", ""direction"": ""up"", ""fields"": [],
+                ""doc"": ""<b>AFN=00H F1 确认</b><br>上行响应帧，无下行数据单元。""},
+    (0x00, 2): {""name"": ""否认"", ""direction"": ""up"", ""fields"": [],
+                ""doc"": ""<b>AFN=00H F2 否认</b><br>上行响应帧，无下行数据单元。""},
+
+    # =========================================================================
+    # AFN=01H 初始化
+    # =========================================================================
+    (0x01, 1): {""name"": ""硬件初始化"", ""direction"": ""down"", ""fields"": [],
+                ""doc"": ""<b>AFN=01H F1 硬件初始化</b><br>无数据单元。""},
+    (0x01, 2): {""name"": ""参数区初始化"", ""direction"": ""down"", ""fields"": [],
+                ""doc"": ""<b>AFN=01H F2 参数区初始化</b><br>无数据单元。""},
+    (0x01, 3): {""name"": ""数据区初始化"", ""direction"": ""down"", ""fields"": [],
+                ""doc"": ""<b>AFN=01H F3 数据区初始化</b><br>无数据单元。""},
+
+    # =========================================================================
+    # AFN=02H 数据转发
+    # =========================================================================
+    (0x02, 1): {
+        ""name"": ""转发通信协议数据帧"",
+        ""direction"": ""down"",
+        ""fields"": [
+            {""name"": ""通信协议类型"", ""type"": ""enum"", ""default"": 0,
+             ""enum_map"": {0: ""透明传输"", 1: ""DL/T 645-1997"", 2: ""DL/T 645-2007"", 3: ""DL/T 698.45""}},
+            {""name"": ""报文长度"", ""type"": ""uint8"", ""default"": 0},
+            {""name"": ""报文内容"", ""type"": ""bytes"", ""default"": """"},
+        ],
+        ""doc"": ""<b>AFN=02H F1 转发通信协议数据帧</b><br>数据单元：通信协议类型(1B)+报文长度(1B)+报文内容(NB)""
+    },
+
+    # =========================================================================
+    # AFN=03H 查询数据
+    # =========================================================================
+    (0x03, 1):  {""name"": ""厂商代码和版本信息"", ""direction"": ""down"", ""fields"": [],
+                 ""doc"": ""<b>AFN=03H F1</b><br>无下行数据单元。""},
+    (0x03, 2):  {""name"": ""噪声值"", ""direction"": ""down"", ""fields"": [],
+                 ""doc"": ""<b>AFN=03H F2</b><br>无下行数据单元。""},
+    (0x03, 3):  {
+        ""name"": ""从节点侦听信息"",
+        ""direction"": ""down"",
+        ""fields"": [
+            {""name"": ""开始节点指针"", ""type"": ""uint8"", ""default"": 0,
+             ""description"": ""节点侦听列表中的指针位置，0为第一个指针""},
+            {""name"": ""读取节点数量"", ""type"": ""uint8"", ""default"": 1,
+             ""description"": ""N<=16""},
+        ],
+        ""doc"": ""<b>AFN=03H F3 从节点侦听信息</b><br>数据单元：开始节点指针(1B)+读取节点数量(1B)""
+    },
+    (0x03, 4):  {""name"": ""主节点地址"", ""direction"": ""down"", ""fields"": [],
+                 ""doc"": ""<b>AFN=03H F4</b><br>无下行数据单元。""},
+    (0x03, 5):  {""name"": ""主节点状态字和通信速率"", ""direction"": ""down"", ""fields"": [],
+                 ""doc"": ""<b>AFN=03H F5</b><br>无下行数据单元。""},
+    (0x03, 6):  {
+        ""name"": ""主节点干扰状态"",
+        ""direction"": ""down"",
+        ""fields"": [
+            {""name"": ""持续时间"", ""type"": ""uint8"", ""default"": 0,
+             ""description"": ""等待查询执行的时间，单位min，0表示立即停止""},
+        ],
+        ""doc"": ""<b>AFN=03H F6 主节点干扰状态</b><br>数据单元：持续时间(1B)""
+    },
+    (0x03, 7):  {""name"": ""从节点监控最大超时时间"", ""direction"": ""down"", ""fields"": [],
+                 ""doc"": ""<b>AFN=03H F7</b><br>无下行数据单元。""},
+    (0x03, 8):  {""name"": ""无线通信参数"", ""direction"": ""down"", ""fields"": [],
+                 ""doc"": ""<b>AFN=03H F8</b><br>无下行数据单元。""},
+    (0x03, 9):  {
+        ""name"": ""通信延时相关广播通信时长"",
+        ""direction"": ""down"",
+        ""fields"": [
+            {""name"": ""通信协议类型"", ""type"": ""enum"", ""default"": 0,
+             ""enum_map"": {0: ""透明传输"", 1: ""DL/T 645-1997"", 2: ""DL/T 645-2007"", 3: ""DL/T 698.45""}},
+            {""name"": ""报文长度"", ""type"": ""uint8"", ""default"": 0},
+            {""name"": ""报文内容"", ""type"": ""bytes"", ""default"": """"},
+        ],
+        ""doc"": ""<b>AFN=03H F9</b><br>数据单元：通信协议类型(1B)+报文长度(1B)+报文内容(NB)""
+    },
+    (0x03, 10): {""name"": ""本地通信模块运行模式信息"", ""direction"": ""down"", ""fields"": [],
+                 ""doc"": ""<b>AFN=03H F10</b><br>无下行数据单元。""},
+    (0x03, 11): {
+        ""name"": ""本地通信模块AFN索引"",
+        ""direction"": ""down"",
+        ""fields"": [
+            {""name"": ""AFN功能码"", ""type"": ""uint8"", ""default"": 0},
+        ],
+        ""doc"": ""<b>AFN=03H F11</b><br>数据单元：AFN功能码(1B)""
+    },
+    (0x03, 12): {""name"": ""查询CCO模块ID"", ""direction"": ""down"", ""fields"": [],
+                 ""doc"": ""<b>AFN=03H F12</b><br>无下行数据单元。""},
+    (0x03, 16): {""name"": ""查询宽带载波通信参数"", ""direction"": ""down"", ""fields"": [],
+                 ""doc"": ""<b>AFN=03H F16</b><br>无下行数据单元。""},
+    (0x03, 17): {""name"": ""查询无线频段"", ""direction"": ""down"", ""fields"": [],
+                 ""doc"": ""<b>AFN=03H F17</b><br>无下行数据单元。""},
+    (0x03, 18): {""name"": ""查询本地通信信道加密参数"", ""direction"": ""down"", ""fields"": [],
+                 ""doc"": ""<b>AFN=03H F18</b><br>无下行数据单元。""},
+    (0x03, 100): {""name"": ""查询场强门限"", ""direction"": ""down"", ""fields"": [],
+                  ""doc"": ""<b>AFN=03H 
+... [truncated]",""
+"Property:gdw10376_tool.py:GDWFrame.start_char","start_char","gdw10376_tool.py",78,78,"class GDWFrame:
+    """"""国网协议帧结构 (Q/GDW 10376.2—2024)""""""
+    start_char: int = 0x68
+    length: int = 0
+    control: GDWControlField = None",""
+"Property:gdw10376_tool.py:GDWFrame.length","length","gdw10376_tool.py",79,79,"    """"""国网协议帧结构 (Q/GDW 10376.2—2024)""""""
+    start_char: int = 0x68
+    length: int = 0
+    control: GDWControlField = None
+    info_domain: bytes = b''",""
+"Property:gdw10376_tool.py:GDWFrame.control","control","gdw10376_tool.py",80,80,"    start_char: int = 0x68
+    length: int = 0
+    control: GDWControlField = None
+    info_domain: bytes = b''
+    address: bytes = b''",""
+"Property:gdw10376_tool.py:GDWFrame.info_domain","info_domain","gdw10376_tool.py",81,81,"    length: int = 0
+    control: GDWControlField = None
+    info_domain: bytes = b''
+    address: bytes = b''
+    afn: int = 0",""
+"Property:gdw10376_tool.py:GDWFrame.address","address","gdw10376_tool.py",82,82,"    control: GDWControlField = None
+    info_domain: bytes = b''
+    address: bytes = b''
+    afn: int = 0
+    dt: bytes = b''",""
+"Property:gdw10376_tool.py:GDWFrame.afn","afn","gdw10376_tool.py",83,83,"    info_domain: bytes = b''
+    address: bytes = b''
+    afn: int = 0
+    dt: bytes = b''
+    data: bytes = b''",""
+"Property:gdw10376_tool.py:GDWFrame.dt","dt","gdw10376_tool.py",84,84,"    address: bytes = b''
+    afn: int = 0
+    dt: bytes = b''
+    data: bytes = b''
+    cs: int = 0",""
+"Property:gdw10376_tool.py:GDWFrame.data","data","gdw10376_tool.py",85,85,"    afn: int = 0
+    dt: bytes = b''
+    data: bytes = b''
+    cs: int = 0
+    end_char: int = 0x16",""
+"Property:gdw10376_tool.py:GDWFrame.cs","cs","gdw10376_tool.py",86,86,"    dt: bytes = b''
+    data: bytes = b''
+    cs: int = 0
+    end_char: int = 0x16
+",""
+"Property:gdw10376_tool.py:GDWFrame.end_char","end_char","gdw10376_tool.py",87,87,"    data: bytes = b''
+    cs: int = 0
+    end_char: int = 0x16
+
+    def __post_init__(self):",""
+"Property:gdw10376_parser.py:GDW10376Parser.merged_fn","merged_fn","gdw10376_parser.py",1800,1800,"        merged_afn = dict(self.AFN_MAP)
+        merged_afn.update(self._custom_afn_map)
+        merged_fn: Dict[int, Dict[int, str]] = {}
+        for afn, fn_dict in self.FN_MAP.items():
+            merged_fn[afn] = dict(fn_dict)
+",""
+"Property:frame_gen_widget.py:FrameGenWidget.sub_widgets","sub_widgets","frame_gen_widget.py",938,938,"            sub_layout.setContentsMargins(0, 0, 0, 0)
+            sub_layout.setSpacing(4)
+            sub_widgets: Dict[str, Any] = {}
+            for sub in field[""sub_fields""]:
+                sub_name = sub[""name""]
+",""
+"Property:frame_gen_widget.py:FrameGenWidget.item_widgets","item_widgets","frame_gen_widget.py",1052,1052,"            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(2, 2, 2, 2)
+            item_widgets: Dict[str, Any] = {}
+            for item_field in item_fields:
+                item_name = item_field[""name""]
+",""
+"Property:frame_gen_widget.py:FrameGenWidget.values","values","frame_gen_widget.py",1111,1111,"    # ------------------------------------------------------------------
+    def _collect_values(self) -> Dict[str, Any]:
+        values: Dict[str, Any] = {}
+        if self.protocol_mode == ""south"":
+            if not self._current_di_key:
+",""
+"Property:frame_gen_widget.py:FrameGenWidget.item_values","item_values","frame_gen_widget.py",1203,1203,"                    items = []
+                    for _, item_widgets in widget._items:
+                        item_values: Dict[str, Any] = {}
+                        for item_name, item_widget in item_widgets.items():
+                            if isinstance(item_widget, QComboBox):
+",""
+"Property:frame_generator_schema.py:DI_FIELD_SCHEMA","DI_FIELD_SCHEMA","frame_generator_schema.py",19,769,"# ==================== DI 字段 Schema ====================
+
+DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
+    # 查询未完成任务数 (E8 00 02 03)
+    (0xE8, 0x00, 0x02, 0x03): {
+        ""name"": '查询未完成任务数',
+        ""direction"": ""down"",
+        ""doc"": '<b>DI编码</b>：E8 00 02 03<br>\n<b>命令名称</b>：查询未完成任务数<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n无数据标识内容。用于查询模块中尚未执行完毕的任务数。\n',
+        ""fields"": []
+    },
+
+    # 查询剩余可分配任务数 (E8 00 02 06)
+    (0xE8, 0x00, 0x02, 0x06): {
+        ""name"": '查询剩余可分配任务数',
+        ""direction"": ""down"",
+        ""doc"": '<b>DI编码</b>：E8 00 02 06<br>\n<b>命令名称</b>：查询剩余可分配任务数<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n数据标识内容格式见下表。\n\n<div style=""text-align: center;""><div style=""text-align: center;"">表 20 查询剩余可分配任务数数据标识内容格式</div> </div>\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据标识内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>剩余可分配任务数</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td></tr></table>\n\n模块上电进行模块识别时，集中器可读取模块剩余可分配任务数作为参考，进行任务管理初始化，在分配任务时也可作为参考。\n\n一个典型任务的大小为 24 字节，模块结合自身可用存储空间的大小，计算剩余可分配的任务数。模块至少能缓存 100 个典型任务。\n\n剩余可分配任务数仅为集中器管理任务提供参考，当集中器添加任务的长度超过模块剩余存储空间时，模块回复否认。\n',
+        ""fields"": []
+    },
+
+    # 查询厂商代码和版本信息 (E8 00 03 01)
+    (0xE8, 0x00, 0x03, 0x01): {
+        ""name"": '查询厂商代码和版本信息',
+        ""direction"": ""down"",
+        ""doc"": '<b>DI编码</b>：E8 00 03 01<br>\n<b>命令名称</b>：查询厂商代码和版本信息<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n数据标识内容格式见下表。\n\n<div style=""text-align: center;""><div style=""text-align: center;"">表 40 厂商代码和版本信息数据标识内容格式</div> </div>\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据标识内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>厂商代码</td><td style=\'text-align: center; word-wrap: break-word;\'>ASCII</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>芯片代码</td><td style=\'text-align: center; word-wrap: break-word;\'>ASCII</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>版本时间</td><td style=\'text-align: center; word-wrap: break-word;\'>YYMMDD</td><td style=\'text-align: center; word-wrap: break-word;\'>3</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>版本</td><td style=\'text-align: center; word-wrap: break-word;\'>BCD</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td></tr></table>\n',
+        ""fields"": []
+    },
+
+    # 查询本地通信模块运行模式信息 (E8 00 03 02)
+    (0xE8, 0x00, 0x03, 0x02): {
+        ""name"": '查询本地通信模块运行模式信息',
+        ""direction"": ""down"",
+        ""doc"": '<b>DI编码</b>：E8 00 03 02<br>\n<b>命令名称</b>：查询本地通信模块运行模式信息<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n数据标识内容格式见下表。\n\n<div style=""text-align: center;""><div style=""text-align: center;"">表 41 本地通信模块运行模式信息数据标识内容格式</div> </div>\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td colspan=""7"">数据标识内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td colspan=""7"">本地通信模式字</td><td style=\'text-align: center; word-wrap: break-word;\'>BS</td><td rowspan=""3"">1</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>D7</td><td style=\'text-align: center; word-wrap: break-word;\'>D6</td><td style=\'text-align: center; word-wrap: break-word;\'>D5</td><td style=\'text-align: center; word-wrap: break-word;\'>D4</td><td style=\'text-align: center; word-wrap: break-word;\'>D3</td><td style=\'text-align: center; word-wrap: break-word;\'>D2</td><td style=\'text-align: center; word-wrap: break-word;\'>D1</td><td style=\'text-align: center; word-wrap: break-word;\'>D0</td></tr><tr><td colspan=""4"">保留</td><td colspan=""4"">通信方式</td></tr></table>\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>最大支持的协议报文长度</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>文件传输支持的最大单包长度</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>升级操作等待时间</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr><tr><td style=\'text-a
+... [truncated]",""
+"Property:validator/base.py:CheckItem.name","name","validator/base.py",21,21,"class CheckItem:
+    """"""单个校验项结果""""""
+    name: str           # 校验项名称（如""起始字符""、""校验和""）
+    level: CheckLevel   # 校验结果级别
+    expected: str       # 期望值（如""0x68""）
+",""
+"Property:validator/base.py:CheckItem.level","level","validator/base.py",22,22,"    """"""单个校验项结果""""""
+    name: str           # 校验项名称（如""起始字符""、""校验和""）
+    level: CheckLevel   # 校验结果级别
+    expected: str       # 期望值（如""0x68""）
+    actual: str         # 实际值
+",""
+"Property:validator/base.py:CheckItem.expected","expected","validator/base.py",23,23,"    name: str           # 校验项名称（如""起始字符""、""校验和""）
+    level: CheckLevel   # 校验结果级别
+    expected: str       # 期望值（如""0x68""）
+    actual: str         # 实际值
+    message: str        # 描述信息
+",""
+"Property:validator/base.py:CheckItem.actual","actual","validator/base.py",24,24,"    level: CheckLevel   # 校验结果级别
+    expected: str       # 期望值（如""0x68""）
+    actual: str         # 实际值
+    message: str        # 描述信息
+
+",""
+"Property:validator/base.py:CheckItem.message","message","validator/base.py",25,25,"    expected: str       # 期望值（如""0x68""）
+    actual: str         # 实际值
+    message: str        # 描述信息
+
+    @property
+",""
+"Property:validator/base.py:ValidationResult.protocol","protocol","validator/base.py",41,41,"class ValidationResult:
+    """"""验证结果""""""
+    protocol: str                    # 协议名称
+    valid: bool                      # 整体是否通过
+    checks: List[CheckItem] = field(default_factory=list)
+",""
+"Property:validator/base.py:ValidationResult.valid","valid","validator/base.py",42,42,"    """"""验证结果""""""
+    protocol: str                    # 协议名称
+    valid: bool                      # 整体是否通过
+    checks: List[CheckItem] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+",""
+"Property:validator/base.py:ValidationResult.checks","checks","validator/base.py",43,43,"    protocol: str                    # 协议名称
+    valid: bool                      # 整体是否通过
+    checks: List[CheckItem] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    errors: List[str] = field(default_factory=list)
+",""
+"Property:validator/base.py:ValidationResult.warnings","warnings","validator/base.py",44,44,"    valid: bool                      # 整体是否通过
+    checks: List[CheckItem] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    errors: List[str] = field(default_factory=list)
+
+",""
+"Property:validator/base.py:ValidationResult.errors","errors","validator/base.py",45,45,"    checks: List[CheckItem] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    errors: List[str] = field(default_factory=list)
+
+    @property
+",""
+"Property:templates/test_templates.py:TestTemplate.name","name","templates/test_templates.py",14,14,"class TestTemplate:
+    """"""测试用例模板""""""
+    name: str                    # 模板名称
+    description: str             # 描述
+    protocol: str                # 协议类型（south/gdw/hdlc/plc_rf/dlt645）
+",""
+"Property:templates/test_templates.py:TestTemplate.description","description","templates/test_templates.py",15,15,"    """"""测试用例模板""""""
+    name: str                    # 模板名称
+    description: str             # 描述
+    protocol: str                # 协议类型（south/gdw/hdlc/plc_rf/dlt645）
+    category: str                # 分类（组网/档案/任务/时间/查询等）
+",""
+"Property:templates/test_templates.py:TestTemplate.protocol","protocol","templates/test_templates.py",16,16,"    name: str                    # 模板名称
+    description: str             # 描述
+    protocol: str                # 协议类型（south/gdw/hdlc/plc_rf/dlt645）
+    category: str                # 分类（组网/档案/任务/时间/查询等）
+    items: List[Dict[str, Any]]  # 测试项列表
+",""
+"Property:templates/test_templates.py:TestTemplate.category","category","templates/test_templates.py",17,17,"    description: str             # 描述
+    protocol: str                # 协议类型（south/gdw/hdlc/plc_rf/dlt645）
+    category: str                # 分类（组网/档案/任务/时间/查询等）
+    items: List[Dict[str, Any]]  # 测试项列表
+
+",""
+"Property:templates/test_templates.py:TestTemplate.items","items","templates/test_templates.py",18,18,"    protocol: str                # 协议类型（south/gdw/hdlc/plc_rf/dlt645）
+    category: str                # 分类（组网/档案/任务/时间/查询等）
+    items: List[Dict[str, Any]]  # 测试项列表
+
+
+",""

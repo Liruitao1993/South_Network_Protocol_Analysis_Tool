@@ -36,8 +36,9 @@ class PresetButtonManager:
     """预设按钮数据管理器——封装 NW_command.json / GW_command.json 的读写"""
 
     @staticmethod
-    def load_commands(protocol: str) -> List[Dict[str, Any]]:
-        path = _get_path(protocol)
+    def load_commands(protocol: str, path: Optional[Path] = None) -> List[Dict[str, Any]]:
+        if path is None:
+            path = _get_path(protocol)
         if not path.exists():
             return []
         try:
@@ -49,8 +50,9 @@ class PresetButtonManager:
             return []
 
     @staticmethod
-    def save_commands(protocol: str, commands: List[Dict[str, Any]]) -> bool:
-        path = _get_path(protocol)
+    def save_commands(protocol: str, commands: List[Dict[str, Any]], path: Optional[Path] = None) -> bool:
+        if path is None:
+            path = _get_path(protocol)
         try:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump({"commands": commands}, f, ensure_ascii=False, indent=2)
@@ -60,27 +62,27 @@ class PresetButtonManager:
             return False
 
     @staticmethod
-    def add_command(protocol: str, cmd: Dict[str, Any]) -> bool:
-        commands = PresetButtonManager.load_commands(protocol)
+    def add_command(protocol: str, cmd: Dict[str, Any], path: Optional[Path] = None) -> bool:
+        commands = PresetButtonManager.load_commands(protocol, path)
         if "id" not in cmd:
             cmd["id"] = str(uuid.uuid4())[:8]
         commands.append(cmd)
-        return PresetButtonManager.save_commands(protocol, commands)
+        return PresetButtonManager.save_commands(protocol, commands, path)
 
     @staticmethod
-    def remove_command(protocol: str, cmd_id: str) -> bool:
-        commands = PresetButtonManager.load_commands(protocol)
+    def remove_command(protocol: str, cmd_id: str, path: Optional[Path] = None) -> bool:
+        commands = PresetButtonManager.load_commands(protocol, path)
         commands = [c for c in commands if c.get("id") != cmd_id]
-        return PresetButtonManager.save_commands(protocol, commands)
+        return PresetButtonManager.save_commands(protocol, commands, path)
 
     @staticmethod
-    def update_command(protocol: str, cmd_id: str, new_data: Dict[str, Any]) -> bool:
-        commands = PresetButtonManager.load_commands(protocol)
+    def update_command(protocol: str, cmd_id: str, new_data: Dict[str, Any], path: Optional[Path] = None) -> bool:
+        commands = PresetButtonManager.load_commands(protocol, path)
         for c in commands:
             if c.get("id") == cmd_id:
                 c.update(new_data)
                 break
-        return PresetButtonManager.save_commands(protocol, commands)
+        return PresetButtonManager.save_commands(protocol, commands, path)
 
 
 class AddPresetDialog(QDialog):
@@ -192,9 +194,12 @@ class PresetButtonWidget(QWidget):
     button_clicked = Signal(str, str, dict)
     button_deleted = Signal(str)
 
-    def __init__(self, protocol: str = "south", parent=None):
+    def __init__(self, protocol: str = "south", parent=None,
+                 nw_path: Optional[Path] = None, gw_path: Optional[Path] = None):
         super().__init__(parent)
         self._protocol = protocol  # "south" 或 "gdw"
+        self._nw_path = nw_path
+        self._gw_path = gw_path
         self._group_boxes: Dict[str, QGroupBox] = {}
         self._buttons: Dict[str, QPushButton] = {}
         self.setup_ui()
@@ -261,10 +266,20 @@ class PresetButtonWidget(QWidget):
 
         apply_chinese_context_menus(self)
 
+    def _get_path(self) -> Optional[Path]:
+        """获取当前协议对应的配置路径"""
+        return self._nw_path if self._protocol == "south" else self._gw_path
+
+    def set_file_paths(self, nw_path: Optional[Path] = None, gw_path: Optional[Path] = None):
+        """动态更新配置文件路径并刷新"""
+        self._nw_path = nw_path
+        self._gw_path = gw_path
+        self.load_buttons()
+
     def load_buttons(self):
         """从对应协议 JSON 加载并重新生成全部按钮"""
         self._clear_all()
-        commands = PresetButtonManager.load_commands(self._protocol)
+        commands = PresetButtonManager.load_commands(self._protocol, self._get_path())
         self._build_buttons(commands)
         self.stats_label.setText(f"共 {len(commands)} 个预设命令")
 
@@ -436,7 +451,7 @@ class PresetButtonWidget(QWidget):
                 QMessageBox.Yes | QMessageBox.No,
             )
             if reply == QMessageBox.Yes:
-                PresetButtonManager.remove_command(self._protocol, cmd.get("id"))
+                PresetButtonManager.remove_command(self._protocol, cmd.get("id"), self._get_path())
                 self.load_buttons()
                 self.button_deleted.emit(cmd.get("id", ""))
 

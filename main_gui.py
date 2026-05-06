@@ -35,9 +35,19 @@ from serial_worker import SerialWorker
 from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu
 
 
-APP_VERSION = "1.6.6"
+APP_VERSION = "1.6.7"
 
 CHANGELOG = [
+    ("1.6.7", "2026-04-30", [
+        "修复南网协议DI字节序解析（恢复小端序，修复DI查找匹配）",
+        "修复查询运行参数信息(E8 03 03 74)数据内容解析器IndexError",
+        "修复国网验证器长度域校验逻辑（长度域值即帧总长度）",
+        "南网/国网控制域位域显示二进制位值（D7~D0）",
+        "国网信息域位域显示二进制位值（D0~D7）",
+    ]),
+    ("1.6.6", "2026-04-30", [
+        "修复DI解析字节序问题，恢复小端序正确匹配DI_COMBINATION_MAP",
+    ]),
     ("1.6.5", "2026-04-22", [
         "系统性修复字节序解析：所有多字节字段按小端序（低字节在前）解析",
         "修复ASCII字段反转：厂商代码/芯片代码等2字节ASCII正确反转显示",
@@ -145,6 +155,118 @@ def _get_git_changelog() -> list:
         return []
 
 
+# 配置文件路径标签映射
+FILE_PATH_LABELS = {
+    "nw_command": "南网预设命令",
+    "gw_command": "国网预设命令",
+    "test_plan": "测试方案",
+    "custom_di": "南网自定义DI",
+    "dlt645_di": "DLT645 DI映射",
+    "gdw_custom_afn": "国网自定义AFN",
+    "command": "PLC RF命令字",
+}
+
+
+class ConfigDialog(QDialog):
+    """配置文件路径管理对话框"""
+
+    def __init__(self, file_paths: Dict[str, str], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("配置管理")
+        self.setMinimumWidth(650)
+        self._file_paths = dict(file_paths)
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        desc = QLabel("管理各配置文件的存储路径。支持相对路径（相对于程序目录）或绝对路径。")
+        desc.setWordWrap(True)
+        desc.setStyleSheet("color: #666;")
+        layout.addWidget(desc)
+
+        # 表格布局：每行 = 标签 + 路径输入 + 浏览按钮
+        self._inputs: Dict[str, QLineEdit] = {}
+        for key, label in FILE_PATH_LABELS.items():
+            row = QHBoxLayout()
+            row.setSpacing(8)
+
+            lbl = QLabel(f"{label}:")
+            lbl.setFixedWidth(110)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            row.addWidget(lbl)
+
+            edit = QLineEdit()
+            edit.setText(self._file_paths.get(key, ""))
+            edit.setPlaceholderText(f"默认: {key}.json")
+            self._inputs[key] = edit
+            row.addWidget(edit, 1)
+
+            btn = QPushButton("浏览...")
+            btn.setFixedWidth(70)
+            btn.clicked.connect(lambda checked=False, k=key, e=edit: self._browse_file(k, e))
+            row.addWidget(btn)
+
+            layout.addLayout(row)
+
+        layout.addStretch()
+
+        # 底部按钮
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+
+        save_btn = QPushButton("保存")
+        save_btn.setStyleSheet(
+            "QPushButton { background-color: #4CAF50; color: white; "
+            "border-radius: 4px; padding: 5px 18px; font-weight: bold; }"
+        )
+        save_btn.clicked.connect(self._on_save)
+        btn_layout.addWidget(save_btn)
+
+        cancel_btn = QPushButton("取消")
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+
+        layout.addLayout(btn_layout)
+
+    def _browse_file(self, key: str, edit: QLineEdit):
+        """弹出文件选择对话框"""
+        current = edit.text().strip()
+        start_dir = str(Path(__file__).parent)
+        if current:
+            p = Path(current)
+            if not p.is_absolute():
+                p = Path(__file__).parent / p
+            if p.parent.exists():
+                start_dir = str(p.parent)
+
+        path, _ = QFileDialog.getOpenFileName(
+            self, f"选择 {FILE_PATH_LABELS.get(key, key)}", start_dir, "JSON 文件 (*.json);;所有文件 (*.*)"
+        )
+        if path:
+            # 尽量保存为相对路径
+            try:
+                rel = Path(path).relative_to(Path(__file__).parent)
+                edit.setText(str(rel))
+            except ValueError:
+                edit.setText(path)
+
+    def _on_save(self):
+        """保存按钮点击"""
+        for key, edit in self._inputs.items():
+            val = edit.text().strip()
+            if val:
+                self._file_paths[key] = val
+            elif key in self._file_paths:
+                del self._file_paths[key]
+        self.accept()
+
+    def get_file_paths(self) -> Dict[str, str]:
+        return self._file_paths
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -171,6 +293,12 @@ class MainWindow(QMainWindow):
 
         # 字节高亮映射
         self._byte_ranges: list = []
+
+        # 应用配置（先加载，setup_ui 会用到）
+        self._config_path = Path(__file__).parent / "config.json"
+        self._app_config: Dict[str, Any] = {}
+        self._file_paths: Dict[str, Path] = {}
+        self._load_app_config()
 
         self.setup_ui()
         self._setup_menu_bar()
@@ -279,14 +407,19 @@ class MainWindow(QMainWindow):
         self.frame_gen_tab = FrameGenWidget()
         self.frame_gen_tab.set_serial_worker(self.serial_worker)
         self._frame_gen_tab_index = self.tab_widget.addTab(self.frame_gen_tab, "协议组帧")
-        # 预设命令页面
-        self.preset_tab = PresetButtonWidget()
+        # 预设命令页面（传入配置文件路径）
+        self.preset_tab = PresetButtonWidget(
+            nw_path=self._file_paths.get("nw_command"),
+            gw_path=self._file_paths.get("gw_command"),
+        )
         self.preset_tab.set_serial_worker(self.serial_worker)
         self._preset_tab_index = self.tab_widget.addTab(self.preset_tab, "预设命令")
         self.preset_tab.button_clicked.connect(self._on_preset_button_clicked)
         self.frame_gen_tab.preset_added.connect(self.preset_tab.refresh)
-        # 测试方案页面
-        self.test_plan_tab = TestPlanWidget()
+        # 测试方案页面（传入配置文件路径）
+        self.test_plan_tab = TestPlanWidget(
+            file_path=self._file_paths.get("test_plan"),
+        )
         self.test_plan_tab.set_serial_worker(self.serial_worker)
         self._test_plan_tab_index = self.tab_widget.addTab(self.test_plan_tab, "测试方案")
         self.frame_gen_tab.test_plan_added.connect(self.test_plan_tab.add_item)
@@ -2080,6 +2213,11 @@ class MainWindow(QMainWindow):
         """创建菜单栏"""
         menubar = self.menuBar()
 
+        # 配置菜单
+        config_menu = menubar.addMenu("配置(&C)")
+        config_action = config_menu.addAction("配置文件路径(&P)...")
+        config_action.triggered.connect(self._show_config_dialog)
+
         help_menu = menubar.addMenu("帮助(&H)")
 
         about_action = help_menu.addAction("关于(&A)")
@@ -2869,28 +3007,102 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-    def _save_serial_config(self):
-        """保存串口配置到 config.json"""
-        config_path = Path(__file__).parent / "config.json"
+    def _resolve_config_path(self, raw: str) -> Path:
+        """将配置文件路径字符串解析为绝对 Path"""
+        p = Path(raw)
+        if p.is_absolute():
+            return p
+        return Path(__file__).parent / p
+
+    def _load_app_config(self):
+        """加载应用配置（串口 + 文件路径）"""
+        if not self._config_path.exists():
+            self._app_config = {}
+            self._file_paths = {}
+            return
+        try:
+            with open(self._config_path, "r", encoding="utf-8") as f:
+                self._app_config = json.load(f)
+        except Exception:
+            self._app_config = {}
+
+        paths = self._app_config.get("file_paths", {})
+        self._file_paths = {}
+        for key, val in paths.items():
+            if val:
+                self._file_paths[key] = self._resolve_config_path(val)
+
+    def _save_app_config(self):
+        """保存应用配置到 config.json"""
         config: Dict[str, Any] = {}
-        # 保留现有配置
-        if config_path.exists():
+        if self._config_path.exists():
             try:
-                with open(config_path, "r", encoding="utf-8") as f:
+                with open(self._config_path, "r", encoding="utf-8") as f:
                     config = json.load(f)
             except Exception:
                 config = {}
 
+        # 更新串口配置
         config["serial"] = {
             "port": self.serial_port_combo.currentText(),
             "baudrate": self.serial_baud_combo.currentText(),
             "parity": self.serial_parity_combo.currentText(),
         }
+
+        # 更新文件路径配置
+        file_paths: Dict[str, str] = {}
+        for key, path in self._file_paths.items():
+            if path:
+                try:
+                    rel = path.relative_to(Path(__file__).parent)
+                    file_paths[key] = str(rel)
+                except ValueError:
+                    file_paths[key] = str(path)
+        config["file_paths"] = file_paths
+
         try:
-            with open(config_path, "w", encoding="utf-8") as f:
+            with open(self._config_path, "w", encoding="utf-8") as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[配置保存失败] {e}")
+
+    def _show_config_dialog(self):
+        """显示配置路径管理对话框"""
+        # 构建当前路径字典（字符串形式传给对话框）
+        current_paths: Dict[str, str] = {}
+        for key, path in self._file_paths.items():
+            if path:
+                try:
+                    rel = path.relative_to(Path(__file__).parent)
+                    current_paths[key] = str(rel)
+                except ValueError:
+                    current_paths[key] = str(path)
+
+        dialog = ConfigDialog(current_paths, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        new_paths = dialog.get_file_paths()
+        self._file_paths = {}
+        for key, val in new_paths.items():
+            if val:
+                self._file_paths[key] = self._resolve_config_path(val)
+
+        # 保存到 config.json
+        self._save_app_config()
+
+        # 动态刷新各页面
+        self.preset_tab.set_file_paths(
+            nw_path=self._file_paths.get("nw_command"),
+            gw_path=self._file_paths.get("gw_command"),
+        )
+        self.test_plan_tab.set_file_path(self._file_paths.get("test_plan"))
+
+        QMessageBox.information(self, "配置", "配置文件路径已更新并保存。")
+
+    def _save_serial_config(self):
+        """保存串口配置到 config.json（保留现有 file_paths）"""
+        self._save_app_config()
 
     def _refresh_serial_ports(self):
         """刷新可用串口列表"""

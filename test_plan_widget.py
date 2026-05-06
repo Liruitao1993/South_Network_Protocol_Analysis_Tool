@@ -408,8 +408,9 @@ class TestPlanWidget(QWidget):
     # 当帧被添加到测试方案时发出（供外部日志或联动）
     item_added = Signal(str, str)  # name, frame_hex
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, file_path: Optional[Path] = None):
         super().__init__(parent)
+        self._file_path = file_path or TEST_PLAN_PATH
         self._items: List[Dict[str, Any]] = []
         self._serial_worker = None
         self._current_test_index: int = -1
@@ -1389,8 +1390,15 @@ class TestPlanWidget(QWidget):
     # ------------------------------------------------------------------
     # 自动持久化
     # ------------------------------------------------------------------
+    def set_file_path(self, file_path: Optional[Path] = None):
+        """动态更新配置文件路径并重新加载"""
+        self._file_path = file_path or TEST_PLAN_PATH
+        self._items.clear()
+        self._refresh_table()
+        self._auto_load()
+
     def _auto_save(self):
-        """自动保存当前方案到 test_plan.json"""
+        """自动保存当前方案到配置指定的文件"""
         try:
             export_data = [
                 {
@@ -1406,17 +1414,17 @@ class TestPlanWidget(QWidget):
                 }
                 for item in self._items
             ]
-            with open(TEST_PLAN_PATH, "w", encoding="utf-8") as f:
+            with open(self._file_path, "w", encoding="utf-8") as f:
                 json.dump(export_data, f, ensure_ascii=False, indent=2)
         except Exception as e:
             print(f"[测试方案自动保存失败] {e}")
 
     def _auto_load(self):
-        """自动加载上次保存的方案"""
-        if not TEST_PLAN_PATH.exists():
+        """自动加载配置指定路径的方案"""
+        if not self._file_path.exists():
             return
         try:
-            with open(TEST_PLAN_PATH, "r", encoding="utf-8") as f:
+            with open(self._file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if not isinstance(data, list):
                 return
@@ -1440,7 +1448,7 @@ class TestPlanWidget(QWidget):
                 }
                 self._items.append(item)
             self._refresh_table()
-            self._log(f"[自动加载] 已从 {TEST_PLAN_PATH.name} 加载 {len(self._items)} 项")
+            self._log(f"[自动加载] 已从 {self._file_path.name} 加载 {len(self._items)} 项")
             self._update_bg_status()
         except Exception as e:
             print(f"[测试方案自动加载失败] {e}")

@@ -1,0 +1,4264 @@
+id,name,filePath,startLine,endLine,isExported,content,description
+"Class:test_plan_widget.py:AddTestItemDialog","AddTestItemDialog","test_plan_widget.py",236,401,true,"
+
+class AddTestItemDialog(QDialog):
+    """"""添加/编辑测试项对话框""""""
+
+    def __init__(self, item: Dict[str, Any] = None, parent=None):
+        super().__init__(parent)
+        self._edit_mode = item is not None
+        self.setWindowTitle(""编辑测试项"" if self._edit_mode else ""添加测试项"")
+        self.setMinimumWidth(480)
+        self._result: Optional[Dict[str, Any]] = None
+        self._init_ui(item or {})
+        self._apply_nature()
+
+    @staticmethod
+    def _derive_nature(item: Dict[str, Any]) -> str:
+        """"""从 item 字段推导性质""""""
+        if item.get(""persistent"", False):
+            return ""后台监听""
+        if not item.get(""send_enabled"", True) and not item.get(""match_enabled"", True):
+            return ""纯等待""
+        return ""发送帧""
+
+    def _apply_nature(self):
+        """"""根据性质下拉同步各控件状态""""""
+        nature = self.nature_combo.currentText()
+        if nature == ""发送帧"":
+            self._set_nature_state(send=True, match=True, persistent=False)
+        elif nature == ""后台监听"":
+            self._set_nature_state(send=False, match=True, persistent=True)
+        elif nature == ""纯等待"":
+            self._set_nature_state(send=False, match=False, persistent=False)
+
+    def _set_nature_state(self, send: bool, match: bool, persistent: bool):
+        """"""同步控件状态，屏蔽信号避免循环触发""""""
+        self.send_enabled.blockSignals(True)
+        self.send_enabled.setChecked(send)
+        self.send_enabled.setEnabled(True)
+        self.send_enabled.blockSignals(False)
+        self.match_enabled.blockSignals(True)
+        self.match_enabled.setChecked(match)
+        self.match_enabled.setEnabled(True)
+        self.match_enabled.blockSignals(False)
+        self.timeout_spin.setEnabled(True)
+        if not send:
+            self.timeout_spin.setValue(600000)
+
+    def _init_ui(self, data: Dict[str, Any]):
+        nature = self._derive_nature(data)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(8)
+
+        # ---- 性质 ----
+        row = QHBoxLayout()
+        row.addWidget(QLabel(""性质:""))
+        self.nature_combo = QComboBox()
+        self.nature_combo.addItems([""发送帧"", ""后台监听"", ""纯等待""])
+        self.nature_combo.setCurrentText(nature)
+        self.nature_combo.currentTextChanged.connect(self._apply_nature)
+        nature_help = QLabel(""发送帧→发后匹配置  后台→全时监听匹配回复  纯等待→忽略帧仅等超时"")
+        nature_help.setStyleSheet(""color: #888; font-size: 11px;"")
+        row.addWidget(self.nature_combo)
+        row.addWidget(nature_help)
+        row.addStretch()
+        layout.addLayout(row)
+
+        layout.addWidget(QLabel(""名称:""))
+        self.name_input = QLineEdit(data.get(""name"", """"))
+        self.name_input.setPlaceholderText(""如：查询厂商代码"")
+        layout.addWidget(self.name_input)
+
+        layout.addWidget(QLabel(""帧内容 (十六进制，支持空格):""))
+        self.frame_input = QLineEdit(data.get(""frame_hex"", """"))
+        self.frame_input.setPlaceholderText(""68 0E 00 00 00 00 ..."")
+        layout.addWidget(self.frame_input)
+
+        layout.addWidget(QLabel(""匹配规则 (HEX/ASCII，XX 为通配符):""))
+        self.match_input = QLineEdit(data.get(""match_rule"", data.get(""frame_hex"", """")))
+        self.match_input.setPlaceholderText(""默认与帧内容相同，可修改为 XX 通配..."")
+        layout.addWidget(self.match_input)
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel(""匹配模式:""))
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems([""HEX"", ""ASCII""])
+        self.mode_combo.setCurrentText(data.get(""match_mode"", ""HEX""))
+        row.addWidget(self.mode_combo)
+        row.addWidget(QLabel(""超时 (ms):""))
+        self.timeout_spin = QSpinBox()
+        self.timeout_spin.setRange(100, 600000)
+        self.timeout_spin.setValue(data.get(""timeout_ms"", 2000))
+        self.timeout_spin.setSingleStep(1000)
+        row.addWidget(self.timeout_spin)
+        row.addStretch()
+        layout.addLayout(row)
+
+        self.send_enabled = QCheckBox(""发送帧"")
+        self.send_enabled.setChecked(data.get(""send_enabled"", True))
+        self.send_enabled.toggled.connect(self._on_manual_toggle)
+        layout.addWidget(self.send_enabled)
+
+        self.match_enabled = QCheckBox(""启用匹配"")
+        self.match_enabled.setChecked(data.get(""match_enabled"", True))
+        self.match_enabled.toggled.connect(self._on_manual_toggle)
+        layout.addWidget(self.match_enabled)
+
+        layout.addWidget(QLabel(""响应帧 (匹配成功后自动发送，留空则不响应):""))
+        self.response_input = QLineEdit(data.get(""response_frame"", """"))
+        self.response_input.setPlaceholderText(""68 0E 00 00 00 00 ..."")
+        layout.addWidget(self.response_input)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        ok_btn = QPushButton(""确定"")
+        ok_btn.setStyleSheet(
+            ""QPushButton { background-color: #4CAF50; color: white; border-radius: 4px; padding: 4px 16px; font-weight: bold; }""
+        )
+        ok_btn.clicked.connect(self._on_ok)
+        btn_layout.addWidget(ok_btn)
+        cancel_btn = QPushButton(""取消"")
+        cancel_btn.clicked.conne
+... [truncated]",""
+"Class:test_plan_widget.py:TestPlanWidget","TestPlanWidget","test_plan_widget.py",404,1453,true,"
+
+class TestPlanWidget(QWidget):
+    """"""测试方案页面Widget""""""
+
+    # 当帧被添加到测试方案时发出（供外部日志或联动）
+    item_added = Signal(str, str)  # name, frame_hex
+
+    def __init__(self, parent=None, file_path: Optional[Path] = None):
+        super().__init__(parent)
+        self._file_path = file_path or TEST_PLAN_PATH
+        self._items: List[Dict[str, Any]] = []
+        self._serial_worker = None
+        self._current_test_index: int = -1
+        self._testing: bool = False
+        self._stop_requested: bool = False
+        self._wait_timer: QTimer = None
+        self._waiting_for_response: bool = False
+        self._any_frame_received: bool = False
+        self._test_start_time: Optional[datetime] = None  # 测试开始时间
+        self._test_end_time: Optional[datetime] = None    # 测试结束时间
+        self.setup_ui()
+
+    # ------------------------------------------------------------------
+    # UI 构建
+    # ------------------------------------------------------------------
+    def setup_ui(self):
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(6)
+        main_layout.setContentsMargins(6, 6, 6, 6)
+
+        # ---- 顶部按钮工具栏 ----
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(6)
+
+        self.btn_add = QPushButton(""添加"")
+        self.btn_add.setToolTip(""手动添加测试项"")
+        self.btn_add.clicked.connect(self._on_add_item)
+        toolbar.addWidget(self.btn_add)
+
+        self.btn_del = QPushButton(""删除"")
+        self.btn_del.setToolTip(""删除选中的测试项"")
+        self.btn_del.clicked.connect(self._on_delete_item)
+        toolbar.addWidget(self.btn_del)
+
+        self.btn_up = QPushButton(""上移"")
+        self.btn_up.setToolTip(""将选中项上移"")
+        self.btn_up.clicked.connect(self._on_move_up)
+        toolbar.addWidget(self.btn_up)
+
+        self.btn_down = QPushButton(""下移"")
+        self.btn_down.setToolTip(""将选中项下移"")
+        self.btn_down.clicked.connect(self._on_move_down)
+        toolbar.addWidget(self.btn_down)
+
+        toolbar.addSpacing(8)
+
+        self.btn_clear_bg = QPushButton(""清空后台"")
+        self.btn_clear_bg.setToolTip(""清除所有后台监听项的匹配计数和状态"")
+        self.btn_clear_bg.clicked.connect(self._on_clear_background)
+        self.btn_clear_bg.setStyleSheet(
+            ""QPushButton { background-color: #FF9800; color: white; border-radius: 3px; padding: 3px 10px; }""
+        )
+        toolbar.addWidget(self.btn_clear_bg)
+
+        toolbar.addSpacing(8)
+
+        self.lbl_bg_status = QLabel(""后台: 0 项 | 匹配: 0 次"")
+        self.lbl_bg_status.setStyleSheet(
+            ""QLabel { background-color: #E8F5E9; border: 1px solid #A5D6A7; border-radius: 3px; ""
+            ""padding: 4px 10px; font-weight: bold; color: #2E7D32; font-size: 12px; }""
+        )
+        toolbar.addWidget(self.lbl_bg_status)
+
+        self.btn_edit_item = QPushButton(""编辑选中"")
+        self.btn_edit_item.setToolTip(""编辑当前选中行的测试项"")
+        self.btn_edit_item.clicked.connect(self._on_edit_item)
+        toolbar.addWidget(self.btn_edit_item)
+
+        toolbar.addSpacing(12)
+
+        self.btn_start = QPushButton(""开始测试"")
+        self.btn_start.setStyleSheet(
+            ""QPushButton { background-color: #4CAF50; color: white; border-radius: 3px; padding: 4px 14px; font-weight: bold; }""
+        )
+        self.btn_start.clicked.connect(self._on_start_test)
+        toolbar.addWidget(self.btn_start)
+
+        self.btn_stop = QPushButton(""停止测试"")
+        self.btn_stop.setStyleSheet(
+            ""QPushButton { background-color: #f44336; color: white; border-radius: 3px; padding: 4px 14px; font-weight: bold; }""
+        )
+        self.btn_stop.setEnabled(False)
+        self.btn_stop.clicked.connect(self._on_stop_test)
+        toolbar.addWidget(self.btn_stop)
+
+        self.chk_stop_on_fail = QCheckBox(""失败时停止"")
+        self.chk_stop_on_fail.setChecked(True)
+        self.chk_stop_on_fail.setStyleSheet(
+            ""QCheckBox { spacing: 6px; padding: 4px 10px; background-color: #E3F2FD; ""
+            ""border: 1px solid #90CAF9; border-radius: 4px; font-weight: bold; color: #1565C0; }""
+            ""QCheckBox::indicator { width: 16px; height: 16px; }""
+            ""QCheckBox::indicator:checked { background-color: #1565C0; border: 2px solid #1565C0; }""
+            ""QCheckBox::indicator:unchecked { background-color: #FFFFFF; border: 2px solid #90CAF9; }""
+        )
+        toolbar.addWidget(self.chk_stop_on_fail)
+
+        toolbar.addStretch()
+
+        self.btn_export = QPushButton(""导出"")
+        self.btn_export.setToolTip(""导出帧列表到 JSON"")
+        self.btn_export.clicked.connect(self._on_export)
+        toolbar.addWidget(self.btn_export)
+
+        self.btn_import = QPushButton(""导入"")
+        self.btn_import.setToolTip(""从 JSON 导入帧列表"")
+        self.btn_import.clicked.connect(self._on_import)
+        toolbar.addWidget(self.btn_import)
+
+        self.btn_clear_results = QPushButton(""清空结果"")
+        self.btn_clear_results.setToolTip(""清空所有测试结果和状态"")
+        self.btn_clear_results.clicked.connect(self._
+... [truncated]",""
+"Class:serial_worker.py:SerialWorker","SerialWorker","serial_worker.py",18,189,true,"
+
+class SerialWorker(QThread):
+    """"""串口后台工作线程""""""
+
+    # 信号定义
+    frame_received = Signal(bytes)       # 收到一帧完整数据
+    log_message = Signal(str)            # 日志消息（供文本框显示）
+    connection_changed = Signal(bool)    # 连接状态变化
+    error_occurred = Signal(str)         # 错误信息
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._ser: Optional[serial.Serial] = None
+        self._port: str = """"
+        self._baudrate: int = 9600
+        self._bytesize: int = 8
+        self._parity: str = ""N""
+        self._stopbits: float = 1.0
+        self._running: bool = False
+        self._buffer: bytearray = bytearray()
+
+    def configure(self, port: str, baudrate: int = 9600,
+                  bytesize: int = 8, parity: str = ""N"", stopbits: float = 1.0):
+        """"""配置串口参数（打开前调用）""""""
+        self._port = port
+        self._baudrate = baudrate
+        self._bytesize = bytesize
+        self._parity = parity
+        self._stopbits = stopbits
+
+    def open_port(self) -> bool:
+        """"""打开串口，成功返回 True""""""
+        if self._ser and self._ser.is_open:
+            return True
+        try:
+            parity_map = {""无"": ""N"", ""偶"": ""E"", ""奇"": ""O""}
+            parity_val = parity_map.get(self._parity, self._parity)
+            self._ser = serial.Serial(
+                port=self._port,
+                baudrate=self._baudrate,
+                bytesize=self._bytesize,
+                parity=parity_val,
+                stopbits=self._stopbits,
+                timeout=0.1,
+            )
+            self._running = True
+            if not self.isRunning():
+                self.start()
+            self.connection_changed.emit(True)
+            self.log_message.emit(f""[串口] 已打开 {self._port} @ {self._baudrate}"")
+            return True
+        except serial.SerialException as e:
+            self.error_occurred.emit(f""打开串口失败: {e}"")
+            return False
+
+    def close_port(self):
+        """"""关闭串口""""""
+        self._running = False
+        if self._ser and self._ser.is_open:
+            try:
+                self._ser.close()
+            except Exception:
+                pass
+        self._ser = None
+        self.connection_changed.emit(False)
+        self.log_message.emit(""[串口] 已关闭"")
+
+    def is_open(self) -> bool:
+        return self._ser is not None and self._ser.is_open
+
+    def send_frame(self, frame_bytes: bytes) -> bool:
+        """"""发送一帧字节数据""""""
+        if not self._ser or not self._ser.is_open:
+            self.error_occurred.emit(""串口未打开"")
+            return False
+        try:
+            self._ser.write(frame_bytes)
+            hex_str = frame_bytes.hex().upper()
+            formatted = "" "".join(hex_str[i:i+2] for i in range(0, len(hex_str), 2))
+            self.log_message.emit(f""[发送] {formatted}"")
+            return True
+        except serial.SerialException as e:
+            self.error_occurred.emit(f""发送失败: {e}"")
+            return False
+
+    def send_hex_string(self, hex_str: str) -> bool:
+        """"""发送十六进制字符串（自动去除空格）""""""
+        clean = hex_str.replace("" "", """").strip()
+        if not clean:
+            return False
+        try:
+            data = bytes.fromhex(clean)
+            return self.send_frame(data)
+        except ValueError as e:
+            self.error_occurred.emit(f""发送数据格式错误: {e}"")
+            return False
+
+    def run(self):
+        """"""后台读取循环""""""
+        while self._running and self._ser and self._ser.is_open:
+            try:
+                if self._ser.in_waiting:
+                    raw = self._ser.read(self._ser.in_waiting)
+                    self._buffer.extend(raw)
+                    self._process_buffer()
+                else:
+                    time.sleep(0.01)
+            except serial.SerialException:
+                break
+            except Exception as e:
+                self.log_message.emit(f""[串口错误] 接收循环异常: {e}"")
+        self._running = False
+        if self._ser and self._ser.is_open:
+            try:
+                self._ser.close()
+            except Exception:
+                pass
+        self._ser = None
+        self.connection_changed.emit(False)
+
+    def _process_buffer(self):
+        """"""从缓冲区提取完整 FT1.2 帧（支持长度域容错）""""""
+        buf = self._buffer
+        i = 0
+        while i < len(buf) - 7:
+            # 寻找 68 起始
+            pos = buf.find(b'\x68', i)
+            if pos == -1:
+                break
+            if pos + 6 > len(buf):
+                break
+            # 解析长度域（小端）
+            length = buf[pos + 1] | (buf[pos + 2] << 8)
+            if length < 8 or length > 2048:
+                i = pos + 1
+                continue
+            end_pos = pos + length
+            if end_pos > len(buf):
+                break
+            # 验证结束符
+            if buf[end_pos - 1] == 0x16:
+                # 标准 FT1.2 帧
+                frame = bytes(buf[pos:end_pos])
+                self.frame_received.emit(frame)
+                hex_str = frame.hex().up
+... [truncated]",""
+"Class:send_frame_lib.py:ProtocolFrameGenerator","ProtocolFrameGenerator","send_frame_lib.py",5,485,true,"from frame_generator_schema import DI_FIELD_SCHEMA
+
+class ProtocolFrameGenerator:
+    def __init__(self):
+        self.afn_handlers = {
+            (""00"", ""00""): self.create_afn00_di00,
+            (""01"", ""01""): self.create_afn01_di01,
+            (""02"", ""02""): self.create_afn02_di02,
+            (""03"", ""03""): self.create_afn03_di03,
+            (""04"", ""04""): self.create_afn04_di04,
+            (""05"", ""05""): self.create_afn05_di05,
+            (""06"", ""06""): self.create_afn06_di06,
+            (""07"", ""07""): self.create_afn07_di07,
+        }
+
+    def _build_frame(self, di3: int, di2: int, di1: int, di0: int, 
+                     src_addr: bytes = b'\x00\x00\x00\x00\x00\x00',
+                     dst_addr: bytes = b'\x00\x00\x00\x00\x00\x00',
+                     data: bytes = b'',
+                     dir_flag: int = 0, prm: int = 1, add_flag: int = 0) -> bytes:
+        di = (di3 << 24) | (di2 << 16) | (di1 << 8) | di0
+        control = ControlField(dir=dir_flag, prm=prm, add=add_flag, ver=0, reserved=0)
+        frame = Frame(control=control, src_addr=src_addr, dst_addr=dst_addr,
+                     afn=di1, seq=0, di=di, data=data)
+        return frame.frame_pack()
+
+    def create_afn00_di00(self, sub_code: int, **kwargs) -> bytes:
+        if sub_code == 0x01:
+            wait_time = kwargs.get('wait_time', 0)
+            data = struct.pack('>H', wait_time)
+            return self._build_frame(0xE8, 0x01, 0x00, 0x01, data=data, dir_flag=0, prm=0)
+        elif sub_code == 0x02:
+            error_code = kwargs.get('error_code', 0)
+            data = struct.pack('B', error_code)
+            return self._build_frame(0xE8, 0x01, 0x00, 0x02, data=data, dir_flag=0, prm=0)
+        raise ValueError(f""不支持的子功能码: {sub_code}"")
+
+    def create_afn01_di01(self, sub_code: int, **kwargs) -> bytes:
+        if sub_code == 0x01:
+            return self._build_frame(0xE8, 0x02, 0x01, 0x01)
+        elif sub_code == 0x02:
+            return self._build_frame(0xE8, 0x02, 0x01, 0x02)
+        elif sub_code == 0x03:
+            return self._build_frame(0xE8, 0x02, 0x01, 0x03)
+        raise ValueError(f""不支持的子功能码: {sub_code}"")
+
+    def create_afn02_di02(self, sub_code: int, **kwargs) -> bytes:
+        if sub_code == 0x01:
+            task_info = kwargs.get('task_info', b'')
+            return self._build_frame(0xE8, 0x02, 0x02, 0x01, data=task_info, add_flag=1,
+                                    src_addr=kwargs.get('src_addr', b'\x00'*6),
+                                    dst_addr=kwargs.get('dst_addr', b'\x00'*6))
+        elif sub_code == 0x02:
+            task_id = kwargs.get('task_id', 0)
+            data = struct.pack('>H', task_id)
+            return self._build_frame(0xE8, 0x02, 0x02, 0x02, data=data)
+        elif sub_code == 0x03:
+            return self._build_frame(0xE8, 0x00, 0x02, 0x03)
+        elif sub_code == 0x04:
+            task_count = kwargs.get('task_count', 0)
+            data = struct.pack('>H', task_count)
+            return self._build_frame(0xE8, 0x03, 0x02, 0x04, data=data)
+        elif sub_code == 0x05:
+            task_id = kwargs.get('task_id', 0)
+            data = struct.pack('>H', task_id)
+            return self._build_frame(0xE8, 0x03, 0x02, 0x05, data=data)
+        elif sub_code == 0x06:
+            return self._build_frame(0xE8, 0x00, 0x02, 0x06)
+        elif sub_code == 0x07:
+            task_info = kwargs.get('task_info', b'')
+            return self._build_frame(0xE8, 0x02, 0x02, 0x07, data=task_info)
+        elif sub_code == 0x08:
+            return self._build_frame(0xE8, 0x02, 0x02, 0x08)
+        elif sub_code == 0x09:
+            return self._build_frame(0xE8, 0x02, 0x02, 0x09)
+        raise ValueError(f""不支持的子功能码: {sub_code}"")
+
+    def create_afn03_di03(self, sub_code: int, **kwargs) -> bytes:
+        if sub_code == 0x01:
+            return self._build_frame(0xE8, 0x00, 0x03, 0x01)
+        elif sub_code == 0x02:
+            return self._build_frame(0xE8, 0x00, 0x03, 0x02)
+        elif sub_code == 0x03:
+            return self._build_frame(0xE8, 0x00, 0x03, 0x03)
+        elif sub_code == 0x04:
+            dst_addr = kwargs.get('dst_addr', b'\x00'*6)
+            data = dst_addr
+            return self._build_frame(0xE8, 0x03, 0x03, 0x04, data=data)
+        elif sub_code == 0x05:
+            return self._build_frame(0xE8, 0x00, 0x03, 0x05)
+        elif sub_code == 0x06:
+            node_id = kwargs.get('node_id', 0)
+            data = struct.pack('>H', node_id)
+            return self._build_frame(0xE8, 0x03, 0x03, 0x06, data=data)
+        elif sub_code == 0x07:
+            return self._build_frame(0xE8, 0x00, 0x03, 0x07)
+        elif sub_code == 0x08:
+            node_id = kwargs.get('node_id', 0)
+            data = struct.pack('>H', node_id)
+            return self._build_frame(0xE8, 0x03, 0x03, 0x08, data=data)
+        elif sub_code == 0x09:
+            return self._build_frame(0xE8, 0x00, 0x03, 0x09)
+        elif sub_code == 0x0A:
+            start_index = kwargs.get('start_index', 0)
+    
+... [truncated]",""
+"Class:protocol_tool.py:ControlField","ControlField","protocol_tool.py",3,23,true,"from dataclasses import dataclass
+
+class ControlField(ctypes.BigEndianStructure):
+    _fields_ = [
+        (""dir"", ctypes.c_uint8, 1),   # 传输方向(D7)
+        (""prm"", ctypes.c_uint8, 1),   # 启动标志(D6)
+        (""add"", ctypes.c_uint8, 1),   # 地址域标识(D5)
+        (""ver"", ctypes.c_uint8, 2),   # 协议版本(D4~D3)
+        (""reserved"", ctypes.c_uint8, 3) # 保留(D2~D0)
+    ]
+    def __init__(self, dir=0, prm=0, add=0, ver=0, reserved=0) -> None:
+        '''
+        :param dir: 传输方向(D7)
+        :param prm: 启动标志(D6)
+        :param add: 地址域标识(D5)
+        :param ver: 协议版本(D4~D3)
+        :param reserved: 保留(D2~D0)
+        '''
+        self.dir = dir
+        self.prm = prm
+        self.add = add
+        self.ver = ver
+        self.reserved = reserved
+
+@dataclass
+",""
+"Class:protocol_tool.py:Frame","Frame","protocol_tool.py",26,75,true,"
+@dataclass
+class Frame:
+    start_char: int = 0x68
+    length: int = 0
+    control: ControlField = ControlField()
+    address: bytes = b''
+    afn: int = 0
+    seq: int = 0
+    di: int = 0
+    data: bytes = b''
+    cs: int = 0
+    end_char: int = 0x16
+    def __init__(self, control: ControlField = ControlField(), src_addr: bytes = b'', dst_addr: bytes = b'', afn: int = 0, seq: int = 0, di: int = 0, data: bytes = b''):
+        self.control = control
+        self.address = src_addr[::-1] + dst_addr[::-1]  # 地址域=源地址反转+目的地址反转
+        self.afn = afn
+        self.seq = seq
+        self.di = di.to_bytes(4, 'little')  # DI为4字节，小端序
+        self.data = data
+
+    def calculate_checksum(self, data: bytes) -> int:
+        """"""计算校验和 - 八位位组算术和""""""
+        return sum(data) & 0xFF
+    def frame_pack(self) -> bytes:
+        """"""组帧功能实现""""""
+        # 构建用户数据区
+        user_data = bytearray()
+        if self.control.add:
+            user_data.extend(self.address)
+        user_data.append(self.afn)
+        user_data.append(self.seq)
+        user_data.extend(self.di) # DI为4字节，大端序
+        user_data.extend(self.data)
+
+        # 计算长度
+        self.length = len(user_data) + 6  # +6字节固定长度
+
+        # 构建完整帧
+        packed_frame = bytearray()
+        packed_frame.append(self.start_char)
+        packed_frame.extend(self.length.to_bytes(2, 'little'))  # 长度L为2字节，小端序
+        # 提取ControlField结构的字节值
+        control_byte = ctypes.cast(ctypes.addressof(self.control), ctypes.POINTER(ctypes.c_uint8)).contents.value
+        packed_frame.append(control_byte)
+        packed_frame.extend(user_data)
+
+        # 计算校验和
+        self.cs = self.calculate_checksum(packed_frame[3:])  # 从长度字段开始计算
+        packed_frame.append(self.cs)
+        packed_frame.append(self.end_char)
+        return bytes(packed_frame)",""
+"Class:protocol_parser.py:ProtocolFrameParser","ProtocolFrameParser","protocol_parser.py",6,3976,true,"
+
+class ProtocolFrameParser:
+    """"""南网协议帧解析器""""""
+
+    # AFN 定义（集中器 + 采集器 + 无线维护）
+    AFN_MAP = {
+        0x00: ""确认/否认"",
+        0x01: ""初始化模块"",
+        0x02: ""管理任务"",
+        0x03: ""读参数"",
+        0x04: ""写参数"",
+        0x05: ""上报信息"",
+        0x06: ""请求信息"",
+        0x07: ""传输文件"",
+        0x10: ""维护命令（无线维护）"",
+        0x21: ""管理电表（采集器）"",
+        0x22: ""转发数据（采集器）"",
+        0x23: ""读参数（采集器）"",
+        0x24: ""传输文件（采集器）"",
+        0x25: ""请求信息（采集器）"",
+        0x31: ""管理映射表表计（采集器）"",
+        0xF0: ""维护模块（厂家自定义）"",
+    }
+
+    # DI3 映射
+    DI3_MAP = {
+        0xE8: ""集中器与本地模块通信"",
+        0xEA: ""采集器与本地模块通信""
+    }
+
+    # DI2 映射
+    DI2_MAP = {
+        0x00: ""上下行均用，下行无数据内容"",
+        0x01: ""上下行均用，数据内容格式一致"",
+        0x02: ""仅下行用，上行为确认/否认报文"",
+        0x03: ""仅下行用，带数据内容"",
+        0x04: ""仅上行用，带数据内容"",
+        0x05: ""仅上行用，下行为确认/否认报文"",
+        0x06: ""上下行均用，上行无数据内容""
+    }
+
+    def parse_to_table(self, frame_bytes: bytes) -> list:
+        """"""解析为表格数据格式（最多 2 级：父字段和子字段）
+
+        返回：[(字段名，原始值，解析值，说明, byte_start, byte_end), ...]
+        """"""
+        table_data = []
+
+        # 解析帧
+        result = self.parse(frame_bytes)
+        frame_len = len(frame_bytes)
+
+        # 检查解析是否失败，如果失败则返回错误信息
+        if result.get(""解析状态"") == ""失败"":
+            error_msg = result.get(""错误信息"", ""未知错误"")
+            self._add_field(table_data, ""❌ 解析失败"", ""-"", ""-"", error_msg, None, None)
+            # 同时显示原始数据
+            self._add_field(table_data, ""原始数据"", result.get(""原始数据"", ""-""), ""-"", f""共{frame_len}字节"", None, None)
+            return table_data
+
+        # 安全计算帧结构偏移量
+        if frame_len < 3:
+            self._add_field(table_data, ""❌ 帧数据过短"", ""-"", ""-"", f""仅{frame_len}字节，无法解析长度域"", None, None)
+            return table_data
+
+        length_val = int.from_bytes(frame_bytes[1:3], 'little')
+        user_data_len = length_val - 6
+        cs_pos = 4 + user_data_len  # 校验和位置
+
+        # 获取地址域标识
+        add_flag = 0
+        if ""控制域"" in result:
+            ctrl = result[""控制域""]
+            if ""D5 地址域标识(ADD)"" in ctrl:
+                add_flag = ctrl[""D5 地址域标识(ADD)""][""值""]
+
+        # 第 1 级：帧的各个组成部分
+        for key, value in result.items():
+            # 跳过辅助字段
+            if key in [""原始数据"", ""解析状态"", ""错误信息""]:
+                continue
+
+            if isinstance(value, dict):
+                if key == ""帧头"":
+                    self._add_field(table_data, ""起始字符"", value.get(""起始字符""), """", ""帧起始标志"", 0, 0)
+
+                elif key == ""长度域"":
+                    raw = value.get(""原始字节"", f""0x{value.get('长度值', 0):04X}"" if value.get(""长度值"", 0) > 255 else f""0x{value.get('长度值', 0):02X}"")
+                    parsed = str(value.get(""长度值"", ""-""))
+                    comment = f""{value.get('说明', '')}, {value.get('字节序', '')}，{value.get('字节长度', '')}字节""
+                    self._add_field(table_data, ""长度域"", raw, parsed, comment, 1, 2)
+
+                elif key == ""控制域"":
+                    raw = value.get(""原始字节"", ""-"")
+                    self._add_field(table_data, ""控制域"", raw, """", """", 3, 3)
+                    for subkey, subvalue in value.items():
+                        if subkey == ""原始字节"":
+                            continue
+                        if isinstance(subvalue, dict):
+                            bit_val = subvalue.get(""位"", ""-"")
+                            val = subvalue.get(""值"", ""-"")
+                            desc = subvalue.get(""说明"", """")
+                            # 子字段原始值显示对应二进制位值
+                            self._add_field(table_data, f""  {subkey}"", str(bit_val), str(val), desc, 3, 3, is_child=True)
+
+                elif key == ""用户数据区"":
+                    self._parse_user_data_to_table(value, table_data, add_flag, cs_pos, frame_len)
+
+                elif key == ""校验和"":
+                    raw = value.get(""校验值"", ""-"")
+                    parsed = value.get(""计算值"", ""-"")
+                    result_val = value.get(""校验结果"", ""-"")
+                    self._add_field(table_data, ""校验和"", raw, parsed, result_val, cs_pos, cs_pos)
+
+                elif key == ""结束符"":
+                    raw = value.get(""结束字符"", ""-"")
+                    result_val = value.get(""校验结果"", ""-"")
+                    self._add_field(table_data, ""结束符"", raw, ""-"", result_val, frame_len - 1, frame_len - 1)
+
+        return table_data
+    
+    def _add_field(self, table_data: list, field_name: str, raw_value: str, parsed_value: str, comment: str, byte_start: Optional[int] = None, byte_end: Optional[int] = None, is_child: bool = False):
+        """"""添加字段到表格
+
+        byte_start/byte_end: 该字段在原始帧中的字节范围（包含两端），None 表示无对应字节
+        """"""
+        prefix = ""  "" if is_child else """"
+        full_name = f""{prefix}{field_name}""
+        table_data.append((full_name, raw_value, parsed_value, comment, byte_start, byte_end))
+    
+    @staticmethod
+    def _estimate_byte_size(value: dict) -> int:
+        """"""从解析字典的原始值推算字节长度，用于精准高亮""""""
+        raw = value.get(""原始值"", value.get(""原始字节"", """"))
+        if not isinstance(raw, str):
+            return 0
+  
+... [truncated]",""
+"Class:preset_buttons.py:PresetButtonManager","PresetButtonManager","preset_buttons.py",34,84,true,"
+
+class PresetButtonManager:
+    """"""预设按钮数据管理器——封装 NW_command.json / GW_command.json 的读写""""""
+
+    @staticmethod
+    def load_commands(protocol: str, path: Optional[Path] = None) -> List[Dict[str, Any]]:
+        if path is None:
+            path = _get_path(protocol)
+        if not path.exists():
+            return []
+        try:
+            with open(path, ""r"", encoding=""utf-8"") as f:
+                data = json.load(f)
+                return data.get(""commands"", [])
+        except (json.JSONDecodeError, OSError) as e:
+            print(f""加载 {path.name} 失败: {e}"")
+            return []
+
+    @staticmethod
+    def save_commands(protocol: str, commands: List[Dict[str, Any]], path: Optional[Path] = None) -> bool:
+        if path is None:
+            path = _get_path(protocol)
+        try:
+            with open(path, ""w"", encoding=""utf-8"") as f:
+                json.dump({""commands"": commands}, f, ensure_ascii=False, indent=2)
+            return True
+        except OSError as e:
+            print(f""保存 {path.name} 失败: {e}"")
+            return False
+
+    @staticmethod
+    def add_command(protocol: str, cmd: Dict[str, Any], path: Optional[Path] = None) -> bool:
+        commands = PresetButtonManager.load_commands(protocol, path)
+        if ""id"" not in cmd:
+            cmd[""id""] = str(uuid.uuid4())[:8]
+        commands.append(cmd)
+        return PresetButtonManager.save_commands(protocol, commands, path)
+
+    @staticmethod
+    def remove_command(protocol: str, cmd_id: str, path: Optional[Path] = None) -> bool:
+        commands = PresetButtonManager.load_commands(protocol, path)
+        commands = [c for c in commands if c.get(""id"") != cmd_id]
+        return PresetButtonManager.save_commands(protocol, commands, path)
+
+    @staticmethod
+    def update_command(protocol: str, cmd_id: str, new_data: Dict[str, Any], path: Optional[Path] = None) -> bool:
+        commands = PresetButtonManager.load_commands(protocol, path)
+        for c in commands:
+            if c.get(""id"") == cmd_id:
+                c.update(new_data)
+                break
+        return PresetButtonManager.save_commands(protocol, commands, path)
+
+
+",""
+"Class:preset_buttons.py:AddPresetDialog","AddPresetDialog","preset_buttons.py",87,186,true,"
+
+class AddPresetDialog(QDialog):
+    """"""添加预设按钮对话框""""""
+
+    def __init__(self, frame_hex: str, protocol: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(""添加命令到预设按钮"")
+        self.setMinimumWidth(400)
+        self._frame_hex = frame_hex
+        self._protocol = protocol
+        self._result: Optional[Dict[str, Any]] = None
+        self.setup_ui()
+
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(6)
+
+        # 协议显示
+        proto_label = QLabel(
+            f""协议: {'南网协议' if self._protocol == 'south' else '国网协议'}""
+        )
+        proto_label.setStyleSheet(""font-weight: bold; color: #2196F3;"")
+        layout.addWidget(proto_label)
+
+        # 按钮名称
+        layout.addWidget(QLabel(""按钮名称:""))
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText(""如：查询厂商代码"")
+        layout.addWidget(self.name_input)
+
+        # 分组名称（支持下拉选择已有分组 + 手动输入新分组）
+        layout.addWidget(QLabel(""分组名称:""))
+        self.group_combo = QComboBox()
+        self.group_combo.setEditable(True)
+        existing_groups = self._load_existing_groups()
+        self.group_combo.addItem(""常用查询"")
+        self.group_combo.addItem(""常用设置"")
+        self.group_combo.addItem(""测试命令"")
+        for g in existing_groups:
+            if g not in (""常用查询"", ""常用设置"", ""测试命令""):
+                self.group_combo.addItem(g)
+        layout.addWidget(self.group_combo)
+
+        # 功能描述
+        layout.addWidget(QLabel(""功能描述:""))
+        self.desc_input = QTextEdit()
+        self.desc_input.setPlaceholderText(""简要描述该命令的用途..."")
+        self.desc_input.setMaximumHeight(80)
+        layout.addWidget(self.desc_input)
+
+        # 报文预览（只读）
+        layout.addWidget(QLabel(""报文内容:""))
+        self.frame_preview = QTextEdit()
+        self.frame_preview.setPlainText(self._frame_hex)
+        self.frame_preview.setReadOnly(True)
+        self.frame_preview.setMaximumHeight(60)
+        layout.addWidget(self.frame_preview)
+
+        # 按钮
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        ok_btn = QPushButton(""确定"")
+        ok_btn.setStyleSheet(
+            ""QPushButton { background-color: #4CAF50; color: white; ""
+            ""border-radius: 4px; padding: 4px 16px; font-weight: bold; }""
+        )
+        ok_btn.clicked.connect(self._on_ok)
+        cancel_btn = QPushButton(""取消"")
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(ok_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+
+        apply_chinese_context_menus(self)
+
+    def _load_existing_groups(self) -> List[str]:
+        commands = PresetButtonManager.load_commands(self._protocol)
+        groups = set()
+        for c in commands:
+            groups.add(c.get(""group_name"", ""默认分组""))
+        return sorted(groups)
+
+    def _on_ok(self):
+        name = self.name_input.text().strip()
+        if not name:
+            QMessageBox.warning(self, ""提示"", ""请输入按钮名称！"")
+            return
+        group = self.group_combo.currentText().strip() or ""默认分组""
+        desc = self.desc_input.toPlainText().strip()
+
+        self._result = {
+            ""protocol"": self._protocol,
+            ""button_name"": name,
+            ""group_name"": group,
+            ""frame_hex"": self._frame_hex,
+            ""description"": desc,
+        }
+        self.accept()
+
+    def get_result(self) -> Optional[Dict[str, Any]]:
+        return self._result
+
+
+",""
+"Class:preset_buttons.py:PresetButtonWidget","PresetButtonWidget","preset_buttons.py",189,491,true,"
+
+class PresetButtonWidget(QWidget):
+    """"""预设按钮页面——动态加载对应协议 JSON 生成按钮""""""
+
+    # (protocol, frame_hex, config_snapshot)
+    button_clicked = Signal(str, str, dict)
+    button_deleted = Signal(str)
+
+    def __init__(self, protocol: str = ""south"", parent=None,
+                 nw_path: Optional[Path] = None, gw_path: Optional[Path] = None):
+        super().__init__(parent)
+        self._protocol = protocol  # ""south"" 或 ""gdw""
+        self._nw_path = nw_path
+        self._gw_path = gw_path
+        self._group_boxes: Dict[str, QGroupBox] = {}
+        self._buttons: Dict[str, QPushButton] = {}
+        self.setup_ui()
+        self.load_buttons()
+
+    def set_protocol(self, protocol: str):
+        """"""切换当前显示的协议预设""""""
+        if protocol in (""south"", ""gdw"") and protocol != self._protocol:
+            self._protocol = protocol
+            self.load_buttons()
+            self.log_text.append(f""[系统] 已切换至 {'南网' if protocol == 'south' else '国网'}预设命令"")
+
+    def setup_ui(self):
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(6)
+        main_layout.setContentsMargins(6, 6, 6, 6)
+
+        # 顶部说明
+        hint = QLabel(
+            ""预设命令：点击按钮可快速发送报文。右键点击按钮可删除。""
+        )
+        hint.setStyleSheet(""color: #666; font-size: 12px;"")
+        hint.setWordWrap(True)
+        main_layout.addWidget(hint)
+
+        # 搜索过滤
+        search_layout = QHBoxLayout()
+        search_layout.addWidget(QLabel(""搜索:""))
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText(""输入按钮名称或分组名称过滤..."")
+        self.search_input.textChanged.connect(self._filter_buttons)
+        search_layout.addWidget(self.search_input)
+        main_layout.addLayout(search_layout)
+
+        # 统计
+        self.stats_label = QLabel(""共 0 个预设命令"")
+        self.stats_label.setStyleSheet(""color: #999; font-size: 11px;"")
+        main_layout.addWidget(self.stats_label)
+
+        # 滚动区域（按钮分组）
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        self.scroll_content = QWidget()
+        self.scroll_layout = QVBoxLayout(self.scroll_content)
+        self.scroll_layout.setAlignment(Qt.AlignTop)
+        self.scroll_layout.setSpacing(6)
+        scroll.setWidget(self.scroll_content)
+        main_layout.addWidget(scroll, 1)
+
+        # ---- 底部日志区域 ----
+        log_group = QGroupBox(""串口日志"")
+        log_layout = QVBoxLayout(log_group)
+        log_layout.setContentsMargins(6, 4, 6, 4)
+        log_layout.setSpacing(4)
+        self.log_text = QTextEdit()
+        self.log_text.setReadOnly(True)
+        self.log_text.setMaximumHeight(120)
+        self.log_text.setFont(QFont(""Consolas"", 9))
+        self.log_text.setPlaceholderText(""点击预设按钮后，串口收发记录将显示在这里..."")
+        self.log_text.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.log_text.customContextMenuRequested.connect(self._on_log_context_menu)
+        log_layout.addWidget(self.log_text)
+        main_layout.addWidget(log_group)
+
+        apply_chinese_context_menus(self)
+
+    def _get_path(self) -> Optional[Path]:
+        """"""获取当前协议对应的配置路径""""""
+        return self._nw_path if self._protocol == ""south"" else self._gw_path
+
+    def set_file_paths(self, nw_path: Optional[Path] = None, gw_path: Optional[Path] = None):
+        """"""动态更新配置文件路径并刷新""""""
+        self._nw_path = nw_path
+        self._gw_path = gw_path
+        self.load_buttons()
+
+    def load_buttons(self):
+        """"""从对应协议 JSON 加载并重新生成全部按钮""""""
+        self._clear_all()
+        commands = PresetButtonManager.load_commands(self._protocol, self._get_path())
+        self._build_buttons(commands)
+        self.stats_label.setText(f""共 {len(commands)} 个预设命令"")
+
+    def _clear_all(self):
+        """"""清空所有分组控件（保留 scroll_layout 的 stretch）""""""
+        self._group_boxes.clear()
+        self._buttons.clear()
+        while self.scroll_layout.count():
+            item = self.scroll_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+
+    def _build_buttons(self, commands: List[Dict[str, Any]]):
+        """"""按 group_name 分组构建按钮，水平排列、自适应宽度""""""
+        groups: Dict[str, List[Dict[str, Any]]] = {}
+        for cmd in commands:
+            group = cmd.get(""group_name"", ""默认分组"")
+            groups.setdefault(group, []).append(cmd)
+
+        for group_name in sorted(groups.keys()):
+            cmds = groups[group_name]
+            group_box = QGroupBox(group_name)
+            group_box.setStyleSheet(
+                ""QGroupBox { font-weight: bold; color: #333; }""
+            )
+            row_layout = QHBoxLayout(group_box)
+            row_layout.setSpacing(6)
+            row_layout.setContentsMargins(6, 6, 6, 4)
+            row_layout.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+
+            for cmd in cmds:
+                btn = QPushButton(cmd.get(""button_name"", ""未命名""))
+                tooltip_lines = [cmd.get(""description"", """")]
+                if cmd.get(""frame_hex""):
+                   
+... [truncated]",""
+"Class:plc_rf_parser.py:PLCRFProtocolParser","PLCRFProtocolParser","plc_rf_parser.py",11,749,true,"
+
+class PLCRFProtocolParser:
+    """"""PLC RF协议帧解析器""""""
+
+    # 帧起始符
+    FRAME_START = 0x02
+
+    # 控制域定义
+    CONTROL_MAP = {
+        0xC0: ""模块→电表（下行）"",
+        0xC4: ""电表→模块（上行）"",
+    }
+
+    # 命令字映射 (Command Code -> 中文含义)
+    COMMAND_MAP = {
+        0x1001: ""模块通用信息"",
+        0x1101: ""启动升级命令（初始化）"",
+        0x1102: ""发送升级包数据"",
+        0x1103: ""激活模块固件"",
+        0x1201: ""数据推送（DataNotification）"",
+        0x1202: ""事件推送（EventNotification）"",
+        0x1301: ""DLMS数据帧封装"",
+        0x2001: ""模块获取电表表号"",
+        0x2002: ""心跳机制"",
+        0x2003: ""模块将自身信息传输至电表"",
+        0x2004: ""获取电表信息"",
+        0x2101: ""从电表获取G3-PLC信息"",
+        0x2102: ""模块将G3-PLC信息传输至电表"",
+    }
+
+    # 模块厂家代码
+    MANUFACTURER_MAP = {
+        0x00: ""无"",
+        0x01: ""东软"",
+        0x02: ""矩泉"",
+        0x03: ""有方"",
+        0x04: ""华为"",
+        0x05: ""中兴"",
+        0x06: ""瑞瀛"",
+        0x07: ""智微宽载"",
+    }
+
+    # 模块类型
+    MODULE_TYPE_MAP = {
+        0x00: ""无"",
+        0x01: ""2G(GPRS)"",
+        0x02: ""3G(EDGE)"",
+        0x03: ""3G(UMTS)"",
+        0x04: ""3G(HSDPA)"",
+        0x05: ""3G(CDMA)"",
+        0x06: ""4G(LTE)"",
+        0x07: ""4G(LTE-M)"",
+        0x08: ""4G(LTE-NB1)"",
+        0x09: ""4G(LTE-NB2)"",
+        0x0A: ""WIFI 4"",
+        0x0B: ""WIFI 6"",
+        0x0C: ""以太网"",
+        0x0D: ""HPLC"",
+        0x0E: ""G3-PLC"",
+        0x0F: ""RF"",
+    }
+
+    # HPLC频段定义
+    HPLC_BAND_MAP = {
+        0: {""范围"": ""1.953~11.96 MHz"", ""载波编号"": ""80~490""},
+        1: {""范围"": ""2.441~5.615 MHz"", ""载波编号"": ""100~230""},
+        2: {""范围"": ""0.781~2.930 MHz"", ""载波编号"": ""32~120""},
+        3: {""范围"": ""1.758~2.930 MHz"", ""载波编号"": ""72~120""},
+    }
+
+    # 状态字定义
+    STATUS_MAP = {
+        0x00: ""失败/离线"",
+        0x01: ""成功/在线"",
+    }
+
+    def __init__(self):
+        self.dlms_parser = DLMSParser()
+
+    # CRC16查找表（与4.md文档中的C代码一致）
+    CRC16_TABLE = [
+        0x0000, 0x1189, 0x2312, 0x329b, 0x4624, 0x57ad, 0x6536, 0x74bf,
+        0x8c48, 0x9dc1, 0xaf5a, 0xbed3, 0xca6c, 0xdbe5, 0xe97e, 0xf8f7,
+        0x1081, 0x0108, 0x3393, 0x221a, 0x56a5, 0x472c, 0x75b7, 0x643e,
+        0x9cc9, 0x8d40, 0xbfdb, 0xae52, 0xdaed, 0xcb64, 0xf9ff, 0xe876,
+        0x2102, 0x308b, 0x0210, 0x1399, 0x6726, 0x76af, 0x4434, 0x55bd,
+        0xad4a, 0xbcc3, 0x8e58, 0x9fd1, 0xeb6e, 0xfae7, 0xc87c, 0xd9f5,
+        0x3183, 0x200a, 0x1291, 0x0318, 0x77a7, 0x662e, 0x54b5, 0x453c,
+        0xbdcb, 0xac42, 0x9ed9, 0x8f50, 0xfbef, 0xea66, 0xd8fd, 0xc974,
+        0x4204, 0x538d, 0x6116, 0x709f, 0x0420, 0x15a9, 0x2732, 0x36bb,
+        0xce4c, 0xdfc5, 0xed5e, 0xfcd7, 0x8868, 0x99e1, 0xab7a, 0xbaf3,
+        0x5285, 0x430c, 0x7197, 0x601e, 0x14a1, 0x0528, 0x37b3, 0x263a,
+        0xdecd, 0xcf44, 0xfddf, 0xec56, 0x98e9, 0x8960, 0xbbfb, 0xaa72,
+        0x6306, 0x728f, 0x4014, 0x519d, 0x2522, 0x34ab, 0x0630, 0x17b9,
+        0xef4e, 0xfec7, 0xcc5c, 0xddd5, 0xa96a, 0xb8e3, 0x8a78, 0x9bf1,
+        0x7387, 0x620e, 0x5095, 0x411c, 0x35a3, 0x242a, 0x16b1, 0x0738,
+        0xffcf, 0xee46, 0xdcdd, 0xcd54, 0xb9eb, 0xa862, 0x9af9, 0x8b70,
+        0x8408, 0x9581, 0xa71a, 0xb693, 0xc22c, 0xd3a5, 0xe13e, 0xf0b7,
+        0x0840, 0x19c9, 0x2b52, 0x3adb, 0x4e64, 0x5fed, 0x6d76, 0x7cff,
+        0x9489, 0x8500, 0xb79b, 0xa612, 0xd2ad, 0xc324, 0xf1bf, 0xe036,
+        0x18c1, 0x0948, 0x3bd3, 0x2a5a, 0x5ee5, 0x4f6c, 0x7df7, 0x6c7e,
+        0xa50a, 0xb483, 0x8618, 0x9791, 0xe32e, 0xf2a7, 0xc03c, 0xd1b5,
+        0x2942, 0x38cb, 0x0a50, 0x1bd9, 0x6f66, 0x7eef, 0x4c74, 0x5dfd,
+        0xb58b, 0xa402, 0x9699, 0x8710, 0xf3af, 0xe226, 0xd0bd, 0xc134,
+        0x39c3, 0x284a, 0x1ad1, 0x0b58, 0x7fe7, 0x6e6e, 0x5cf5, 0x4d7c,
+        0xc60c, 0xd785, 0xe51e, 0xf497, 0x8028, 0x91a1, 0xa33a, 0xb2b3,
+        0x4a44, 0x5bcd, 0x6956, 0x78df, 0x0c60, 0x1de9, 0x2f72, 0x3efb,
+        0xd68d, 0xc704, 0xf59f, 0xe416, 0x90a9, 0x8120, 0xb3bb, 0xa232,
+        0x5ac5, 0x4b4c, 0x79d7, 0x685e, 0x1ce1, 0x0d68, 0x3ff3, 0x2e7a,
+        0xe70e, 0xf687, 0xc41c, 0xd595, 0xa12a, 0xb0a3, 0x8238, 0x93b1,
+        0x6b46, 0x7acf, 0x4854, 0x59dd, 0x2d62, 0x3ceb, 0x0e70, 0x1ff9,
+        0xf78f, 0xe606, 0xd49d, 0xc514, 0xb1ab, 0xa022, 0x92b9, 0x8330,
+        0x7bc7, 0x6a4e, 0x58d5, 0x495c, 0x3de3, 0x2c6a, 0x1ef1, 0x0f78
+    ]
+
+    def calculate_crc16(self, data: bytes) -> int:
+        """"""计算CRC16校验值（使用查表法，与4.md文档C代码一致）
+        
+        根据4.md文档附录A定义：
+        - 计算范围：从Length（包含）到UserData（包含）之间的数据
+        - 存储格式：CRC16采用小端格式（Little-Endian）
+        - 初始值：0xFFFF
+        - 最终异或值：0xFFFF
+        - 多项式：CRC-CCITT (0x1021) 查表实现
+        """"""
+        fcs = 0xFFFF
+        for byte in data:
+            fcs = ((fcs >> 8) ^ self.CRC16_TABLE[(fcs ^ byte) & 0xFF]) & 0xFFFF
+        return fcs ^ 0xFFFF
+    
+    def verify_crc(self, frame_bytes: bytes) -> tuple:
+        """"""验证CRC16校验，返回(接收值, 计算值, 是否匹配)
+        
+        根据4.md文档定义：
+        - CRC16计算范围：从Length（包含）到UserData（包含）
+        - CRC16存储格式：小端格式（Little-Endian）
+        - 备注：整个数据帧除CRC16采用小端传输外，其余数据均采用大端传输
+        """"""
+        if len(frame_bytes) < 8:
+            return None, Non
+... [truncated]",""
+"Class:obis_lookup.py:OBISLookup","OBISLookup","obis_lookup.py",10,219,true,"
+
+class OBISLookup:
+    """"""OBIS 查询管理器""""""
+
+    # 标准 OBIS 码定义 (A.B.C.D.E.F -> 名称, 说明)
+    STANDARD_OBIS = {
+        # 通用对象 (0.x.x.x.x.255)
+        (0, 0, 96, 1, 0, 255): (""设备逻辑名称"", ""设备的逻辑名称标识""),
+        (0, 0, 96, 1, 1, 255): (""制造商"", ""设备制造商名称""),
+        (0, 0, 96, 1, 2, 255): (""产品名称"", ""产品型号或名称""),
+        (0, 0, 96, 1, 3, 255): (""固件版本"", ""当前固件版本号""),
+        (0, 0, 96, 1, 4, 255): (""硬件版本"", ""当前硬件版本号""),
+
+        # 电能相关对象 (1.x.x.x.x.255)
+        (1, 0, 1, 8, 0, 255): (""正向有功总电能"", ""累计正向有功总电能""),
+        (1, 0, 2, 8, 0, 255): (""反向有功总电能"", ""累计反向有功总电能""),
+        (1, 0, 3, 8, 0, 255): (""正向无功总电能"", ""累计正向无功总电能""),
+        (1, 0, 4, 8, 0, 255): (""反向无功总电能"", ""累计反向无功总电能""),
+        (1, 0, 15, 8, 0, 255): (""绝对值有功总电能"", ""累计绝对值有功总电能""),
+
+        # 需量相关对象 (1.x.x.x.x.255)
+        (1, 0, 1, 6, 0, 255): (""正向有功最大需量"", ""正向有功最大需量及发生时间""),
+        (1, 0, 2, 6, 0, 255): (""反向有功最大需量"", ""反向有功最大需量及发生时间""),
+
+        # 时钟相关 (0.x.x.x.x.255)
+        (0, 0, 1, 0, 0, 255): (""时钟"", ""当前日期和时间""),
+        (0, 0, 1, 1, 0, 255): (""时区"", ""本地时区偏移""),
+        (0, 0, 1, 2, 0, 255): (""夏令时"", ""夏令时状态""),
+
+        # 关联对象 (0.x.x.x.x.255)
+        (0, 0, 41, 0, 0, 255): (""当前关联"", ""当前活动关联""),
+        (0, 0, 41, 0, 1, 255): (""关联状态"", ""当前关联状态""),
+
+        # 安全对象 (0.x.x.x.x.255)
+        (0, 0, 43, 1, 0, 255): (""当前用户"", ""当前活动用户""),
+        (0, 0, 43, 1, 1, 255): (""用户列表"", ""已配置用户列表""),
+        (0, 0, 43, 2, 0, 255): (""当前角色"", ""当前活动角色""),
+
+        # 活动日历 (0.x.x.x.x.255)
+        (0, 0, 13, 0, 0, 255): (""活动日历"", ""当前活动日历""),
+        (0, 0, 13, 1, 0, 255): (""日表"", ""活动日表""),
+        (0, 0, 13, 2, 0, 255): (""周表"", ""活动周表""),
+        (0, 0, 13, 3, 0, 255): (""年表"", ""活动年表""),
+
+        # 寄存器对象 (1.x.x.x.x.255)
+        (1, 0, 1, 0, 0, 255): (""正向有功瞬时功率"", ""当前正向有功瞬时功率""),
+        (1, 0, 2, 0, 0, 255): (""反向有功瞬时功率"", ""当前反向有功瞬时功率""),
+        (1, 0, 3, 0, 0, 255): (""正向无功瞬时功率"", ""当前正向无功瞬时功率""),
+        (1, 0, 4, 0, 0, 255): (""反向无功瞬时功率"", ""当前反向无功瞬时功率""),
+        (1, 0, 15, 0, 0, 255): (""总功率因数"", ""当前总功率因数""),
+
+        # 电压电流 (1.x.x.x.x.255)
+        (1, 0, 32, 7, 0, 255): (""L1电压"", ""A相电压""),
+        (1, 0, 52, 7, 0, 255): (""L2电压"", ""B相电压""),
+        (1, 0, 72, 7, 0, 255): (""L3电压"", ""C相电压""),
+        (1, 0, 31, 7, 0, 255): (""L1电流"", ""A相电流""),
+        (1, 0, 51, 7, 0, 255): (""L2电流"", ""B相电流""),
+        (1, 0, 71, 7, 0, 255): (""L3电流"", ""C相电流""),
+
+        # 谐波 (1.x.x.x.x.255)
+        (1, 0, 32, 127, 0, 255): (""L1电压THD"", ""A相电压总谐波失真""),
+        (1, 0, 31, 127, 0, 255): (""L1电流THD"", ""A相电流总谐波失真""),
+
+        # 需量寄存器 (1.x.x.x.x.255)
+        (1, 0, 1, 4, 0, 255): (""正向有功需量"", ""当前正向有功需量""),
+        (1, 0, 2, 4, 0, 255): (""反向有功需量"", ""当前反向有功需量""),
+
+        # 质量指标 (1.x.x.x.x.255)
+        (1, 0, 32, 24, 0, 255): (""L1电压中断次数"", ""A相电压中断次数""),
+        (1, 0, 32, 26, 0, 255): (""L1电压中断累计时间"", ""A相电压中断累计时间""),
+
+        # 错误寄存器对象 (0.x.x.x.x.255)
+        (0, 0, 97, 97, 0, 255): (""错误寄存器"", ""通用错误寄存器""),
+        (0, 0, 97, 97, 1, 255): (""报警寄存器1"", ""报警寄存器1""),
+        (0, 0, 97, 97, 2, 255): (""报警寄存器2"", ""报警寄存器2""),
+        (0, 0, 97, 97, 3, 255): (""报警寄存器3"", ""报警寄存器3""),
+
+        # 断开控制对象 (0.x.x.x.x.255)
+        (0, 0, 96, 3, 10, 255): (""断开控制状态"", ""断开控制状态""),
+        (0, 0, 96, 3, 11, 255): (""断开控制模式"", ""断开控制模式""),
+
+        # 限电阈值对象 (1.x.x.x.x.255)
+        (1, 0, 94, 96, 19, 255): (""限电阈值"", ""限电阈值""),
+    }
+
+    def __init__(self, custom_obis_file: Optional[str] = None):
+        """"""
+        初始化 OBIS 查询器
+
+        Args:
+            custom_obis_file: 自定义 OBIS 定义文件路径（JSON格式）
+        """"""
+        self.custom_obis: Dict[Tuple, Tuple[str, str]] = {}
+        self._data: List[Tuple] = []  # 用于表格显示的数据
+
+        # 加载自定义 OBIS
+        if custom_obis_file:
+            self._load_custom_obis(custom_obis_file)
+        else:
+            # 默认保存位置
+            default_path = Path(__file__).parent / ""custom_obis.json""
+            if default_path.exists():
+                self._load_custom_obis(str(default_path))
+
+        # 构建数据列表
+        self._build_data_list()
+
+    def _load_custom_obis(self, filepath: str):
+        """"""从 JSON 文件加载自定义 OBIS""""""
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            for item in data:
+                obis = tuple(item['obis'])
+                self.custom_obis[obis] = (item['name'], item['desc'])
+        except Exception as e:
+            print(f""加载自定义 OBIS 失败: {e}"")
+
+    def save_custom_obis(self, filepath: Optional[str] = None):
+        """"""保存自定义 OBIS 到 JSON 文件""""""
+        if filepath is None:
+            filepath = str(Path(__file__).parent / ""custom_obis.json"")
+
+        data = []
+        for obis, (name, desc) in self.custom_obis.items():
+            data.append({
+                'obis': list(obis),
+                'name': name,
+                'desc': desc
+            })
+
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            return True
+        except Exception as e:
+            print(f""保存自定义 OBIS 失败: {e}"")
+            return False
+
+    def _build_data_list(self):
+        """"""构建用于显示的数据列表""""""
+        self._data = []
+
+        # 标准 OBIS
+       
+... [truncated]",""
+"Class:main_gui.py:ConfigDialog","ConfigDialog","main_gui.py",169,266,true,"
+
+class ConfigDialog(QDialog):
+    """"""配置文件路径管理对话框""""""
+
+    def __init__(self, file_paths: Dict[str, str], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(""配置管理"")
+        self.setMinimumWidth(650)
+        self._file_paths = dict(file_paths)
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        desc = QLabel(""管理各配置文件的存储路径。支持相对路径（相对于程序目录）或绝对路径。"")
+        desc.setWordWrap(True)
+        desc.setStyleSheet(""color: #666;"")
+        layout.addWidget(desc)
+
+        # 表格布局：每行 = 标签 + 路径输入 + 浏览按钮
+        self._inputs: Dict[str, QLineEdit] = {}
+        for key, label in FILE_PATH_LABELS.items():
+            row = QHBoxLayout()
+            row.setSpacing(8)
+
+            lbl = QLabel(f""{label}:"")
+            lbl.setFixedWidth(110)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            row.addWidget(lbl)
+
+            edit = QLineEdit()
+            edit.setText(self._file_paths.get(key, """"))
+            edit.setPlaceholderText(f""默认: {key}.json"")
+            self._inputs[key] = edit
+            row.addWidget(edit, 1)
+
+            btn = QPushButton(""浏览..."")
+            btn.setFixedWidth(70)
+            btn.clicked.connect(lambda checked=False, k=key, e=edit: self._browse_file(k, e))
+            row.addWidget(btn)
+
+            layout.addLayout(row)
+
+        layout.addStretch()
+
+        # 底部按钮
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+
+        save_btn = QPushButton(""保存"")
+        save_btn.setStyleSheet(
+            ""QPushButton { background-color: #4CAF50; color: white; ""
+            ""border-radius: 4px; padding: 5px 18px; font-weight: bold; }""
+        )
+        save_btn.clicked.connect(self._on_save)
+        btn_layout.addWidget(save_btn)
+
+        cancel_btn = QPushButton(""取消"")
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+
+        layout.addLayout(btn_layout)
+
+    def _browse_file(self, key: str, edit: QLineEdit):
+        """"""弹出文件选择对话框""""""
+        current = edit.text().strip()
+        start_dir = str(Path(__file__).parent)
+        if current:
+            p = Path(current)
+            if not p.is_absolute():
+                p = Path(__file__).parent / p
+            if p.parent.exists():
+                start_dir = str(p.parent)
+
+        path, _ = QFileDialog.getOpenFileName(
+            self, f""选择 {FILE_PATH_LABELS.get(key, key)}"", start_dir, ""JSON 文件 (*.json);;所有文件 (*.*)""
+        )
+        if path:
+            # 尽量保存为相对路径
+            try:
+                rel = Path(path).relative_to(Path(__file__).parent)
+                edit.setText(str(rel))
+            except ValueError:
+                edit.setText(path)
+
+    def _on_save(self):
+        """"""保存按钮点击""""""
+        for key, edit in self._inputs.items():
+            val = edit.text().strip()
+            if val:
+                self._file_paths[key] = val
+            elif key in self._file_paths:
+                del self._file_paths[key]
+        self.accept()
+
+    def get_file_paths(self) -> Dict[str, str]:
+        return self._file_paths
+
+
+",""
+"Class:main_gui.py:MainWindow","MainWindow","main_gui.py",269,3174,true,"
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle(f""协议解析工具 v{APP_VERSION}"")
+        self.setMinimumSize(1000, 700)
+
+        # 协议选择：0=南网协议，1=PLC RF协议，2=HDLC/DLMS协议，3=Wrapper，4=APDU，5=DLT645，6=国网协议
+        self.current_protocol = 0
+
+        # 初始化解析器
+        self.parser = ProtocolFrameParser()
+        self.plc_rf_parser = PLCRFProtocolParser()
+        self.hdlc_parser = HDLCParser()
+        self.dlt645_parser = DLT645Parser()
+        self.gdw_parser = GDW10376Parser()
+
+        # 初始化查询器
+        self.obis_lookup = get_obis_lookup()
+        self.command_lookup = get_command_lookup()
+        self.gdw_afn_lookup = get_gdw_afn_lookup()
+
+        # 批量解析结果缓存
+        self.batch_results: List[Dict[str, Any]] = []
+
+        # 字节高亮映射
+        self._byte_ranges: list = []
+
+        # 应用配置（先加载，setup_ui 会用到）
+        self._config_path = Path(__file__).parent / ""config.json""
+        self._app_config: Dict[str, Any] = {}
+        self._file_paths: Dict[str, Path] = {}
+        self._load_app_config()
+
+        self.setup_ui()
+        self._setup_menu_bar()
+        self.apply_styles()
+
+    def setup_ui(self):
+        """"""设置UI布局""""""
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(8)
+
+        # ========== 顶部栏：协议选择 + 串口配置 ==========
+        top_bar = QHBoxLayout()
+        top_bar.setSpacing(6)
+
+        # ---- 协议选择分组 ----
+        proto_group = QGroupBox(""协议选择"")
+        proto_layout = QHBoxLayout(proto_group)
+        proto_layout.setContentsMargins(8, 4, 8, 4)
+        proto_layout.setSpacing(6)
+
+        proto_label = QLabel(""当前协议："")
+        proto_label.setFont(QFont("""", 10, QFont.Bold))
+        proto_label.setFixedWidth(65)
+        proto_layout.addWidget(proto_label)
+
+        self.protocol_combo = QComboBox()
+        self.protocol_combo.addItem(""南网协议 (Q/CSG1209021-2019)"")
+        self.protocol_combo.addItem(""PLC RF协议 (万胜海外 V1_04)"")
+        self.protocol_combo.addItem(""HDLC/DLMS协议 (IEC 62056-46)"")
+        self.protocol_combo.addItem(""DLMS Wrapper裸报文"")
+        self.protocol_combo.addItem(""DLMS-APDU裸报文"")
+        self.protocol_combo.addItem(""DLT645-2007 电表协议"")
+        self.protocol_combo.addItem(""国网协议 (Q/GDW 10376.2-2024)"")
+        self.protocol_combo.setMinimumWidth(280)
+        self.protocol_combo.setFont(QFont(""Microsoft YaHei"", 10))
+        # 让弹出菜单宽度自动适应最宽的文字
+        self.protocol_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.protocol_combo.currentIndexChanged.connect(self._on_protocol_changed)
+        proto_layout.addWidget(self.protocol_combo)
+        proto_layout.addStretch()
+
+        top_bar.addWidget(proto_group, 1)
+
+        # ---- 串口配置分组 ----
+        serial_group = QGroupBox(""串口配置"")
+        serial_layout = QHBoxLayout(serial_group)
+        serial_layout.setContentsMargins(8, 4, 8, 4)
+        serial_layout.setSpacing(6)
+
+        serial_layout.addWidget(QLabel(""端口:""))
+        self.serial_port_combo = QComboBox()
+        self.serial_port_combo.setMinimumWidth(80)
+        serial_layout.addWidget(self.serial_port_combo)
+
+        serial_layout.addWidget(QLabel(""波特率:""))
+        self.serial_baud_combo = QComboBox()
+        self.serial_baud_combo.addItems([""1200"", ""2400"", ""4800"", ""9600"", ""19200"", ""38400"", ""57600"", ""115200""])
+        self.serial_baud_combo.setCurrentText(""9600"")
+        self.serial_baud_combo.setMinimumWidth(80)
+        serial_layout.addWidget(self.serial_baud_combo)
+
+        serial_layout.addWidget(QLabel(""校验:""))
+        self.serial_parity_combo = QComboBox()
+        self.serial_parity_combo.addItems([""无"", ""偶"", ""奇""])
+        self.serial_parity_combo.setMinimumWidth(60)
+        serial_layout.addWidget(self.serial_parity_combo)
+
+        self.serial_open_btn = QPushButton(""打开串口"")
+        self.serial_open_btn.setMinimumHeight(28)
+        self.serial_open_btn.setStyleSheet(
+            ""QPushButton { background-color: #4CAF50; color: white; border-radius: 3px; padding: 4px 12px; font-weight: bold; }""
+            ""QPushButton:disabled { background-color: #cccccc; }""
+        )
+        self.serial_open_btn.clicked.connect(self._on_serial_open_clicked)
+        serial_layout.addWidget(self.serial_open_btn)
+
+        self.serial_status_label = QLabel(""未连接"")
+        self.serial_status_label.setStyleSheet(""color: #999; font-size: 12px;"")
+        serial_layout.addWidget(self.serial_status_label)
+
+        serial_layout.addStretch()
+        top_bar.addWidget(serial_group)
+
+        main_layout.addLayout(top_bar)
+
+        # ========== 串口工作线程 ==========
+        self.serial_worker = SerialWorker()
+        self.serial_worker.connection_changed.connect(self._on_serial_connection_changed)
+        self.serial_worker.error_occurred.connect(self._on_serial_error)
+  
+... [truncated]",""
+"Class:main_gui.py:WrapperParser","WrapperParser","main_gui.py",1943,1947,true,"        elif self.current_protocol == 3:  # DLMS Wrapper裸报文 (直接解析Wrapper+APDU)
+            # 返回一个匿名对象，调用parse_wrapper_to_table
+            class WrapperParser:
+                def __init__(self, hdlc_parser):
+                    self.hdlc_parser = hdlc_parser
+                def parse_to_table(self, data):
+                    return self.hdlc_parser.parse_wrapper_to_table(data)
+            return WrapperParser(self.hdlc_parser)
+        elif self.current_protocol == 4:  # DLMS-APDU裸报文 (直接解析APDU)
+",""
+"Class:main_gui.py:APDUParser","APDUParser","main_gui.py",1951,1955,true,"        elif self.current_protocol == 4:  # DLMS-APDU裸报文 (直接解析APDU)
+            # 返回一个匿名对象，调用parse_apdu_to_table
+            class APDUParser:
+                def __init__(self, hdlc_parser):
+                    self.hdlc_parser = hdlc_parser
+                def parse_to_table(self, data):
+                    return self.hdlc_parser.parse_apdu_to_table(data)
+            return APDUParser(self.hdlc_parser)
+        elif self.current_protocol == 5:  # DLT645-2007
+",""
+"Class:main_gui.py:DLT645GuiParser","DLT645GuiParser","main_gui.py",1958,2000,true,"            return APDUParser(self.hdlc_parser)
+        elif self.current_protocol == 5:  # DLT645-2007
+            class DLT645GuiParser:
+                def __init__(self, parser):
+                    self.parser = parser
+                def parse_to_table(self, data):
+                    result = self.parser.parse(data)
+                    table = []
+                    # DLT645 帧结构计算字节范围
+                    data_len = result.get('data_length', 0)
+                    total_len = 10 + data_len + 2
+
+                    for field, raw, desc in result['fields']:
+                        byte_start = 0
+                        byte_end = 0
+                        parsed_value = ''
+
+                        if '帧起始符 1' in field:
+                            byte_start, byte_end = 0, 0
+                        elif '从站地址' in field:
+                            byte_start, byte_end = 1, 6
+                        elif '帧起始符 2' in field:
+                            byte_start, byte_end = 7, 7
+                        elif '控制码' in field:
+                            byte_start, byte_end = 8, 8
+                            parsed_value = result.get('control_parsed', '')
+                        elif '数据长度' in field:
+                            byte_start, byte_end = 9, 9
+                        elif '数据标识 DI' in field:
+                            byte_start, byte_end = 10, 13
+                            di_code = result.get('di_code', '')
+                            di_desc = result.get('di_desc', '')
+                            parsed_value = f""{di_code} ({di_desc})"" if di_code and di_desc else di_code
+                        elif '数据内容' in field:
+                            byte_start, byte_end = 14, 10 + data_len - 1
+                        elif '数据域' in field:
+                            byte_start, byte_end = 10, 10 + data_len - 1
+                        elif '校验和' in field:
+                            byte_start, byte_end = total_len - 2, total_len - 2
+                        elif '帧结束符' in field:
+                            byte_start, byte_end = total_len - 1, total_len - 1
+
+                        table.append((field, raw, parsed_value, desc, byte_start, byte_end))
+
+                    return table
+            return DLT645GuiParser(self.dlt645_parser)
+        elif self.current_protocol == 6:  # 国网协议
+",""
+"Class:Lib.py:EntryHeader","EntryHeader","Lib.py",31,38,true,"
+# 条目头的定义
+class EntryHeader(Structure):
+    _pack_ = 1
+    _fields_ = [
+        (""Data_ID"", u16, 6),
+        (""Classified_ID"", u16, 3),
+        (""Coding"", u16, 2),
+        (""Data_Length"", u16, 5),
+        ]
+# 确认帧条目头的定义
+class SackEntryHeader(Structure):
+",""
+"Class:Lib.py:SackEntryHeader","SackEntryHeader","Lib.py",40,46,true,"        ]
+# 确认帧条目头的定义
+class SackEntryHeader(Structure):
+    _pack_ = 1
+    _fields_ = [
+        (""Data_ID"", u16, 6),
+        (""Classified_ID"", u16, 3),
+        (""result"", u16, 7),
+        ]
+    
+coding = {1:""[ASCII]"", 2:""[BIN  ]"", 3:""[BCD  ]""}
+",""
+"Class:hdlc_parser.py:HDLCParser","HDLCParser","hdlc_parser.py",9,1992,true,"
+
+class HDLCParser:
+    """"""HDLC协议解析器 - 基于IEC 62056-46标准""""""
+
+    # HDLC帧起始符和结束符
+    HDLC_FLAG = 0x7E  # 01111110
+
+    # 控制域类型映射
+    CONTROL_FIELD_TYPES = {
+        # I帧：bit0=0
+        'I': ""信息帧 (Information - 信息帧，带有序号用于差错控制和流量控制)"",
+        # RR帧：bit0=1, bit1=0, bit3=0
+        'RR': ""接收准备就绪 (Receive Ready - 接收准备好，用于流量控制和应答)"",
+        # RNR帧：bit0=1, bit1=0, bit3=1
+        'RNR': ""接收未准备就绪 (Receive Not Ready - 接收未准备好，要求对方停止发送)"",
+        # SNRM帧：bit0=1, bit1=1, bit2=0, bit3=0
+        'SNRM': ""设置正常响应模式 (Set Normal Response Mode - 建立链路层连接)"",
+        # DISC帧：bit0=1, bit1=1, bit2=1, bit3=0
+        'DISC': ""断开连接 (Disconnect - 断开链路请求)"",
+        # UA帧：bit0=1, bit1=1, bit2=1, bit3=0 (bit6=1)
+        'UA': ""无编号确认 (Unnumbered Acknowledge - 无编号确认应答)"",
+        # DM帧：bit0=1, bit1=1, bit2=1, bit3=1
+        'DM': ""断开模式 (Disconnected Mode - 站点已断开模式)"",
+        # FRMR帧：bit0=1, bit1=1, bit2=1, bit3=0 (bit5=1)
+        'FRMR': ""帧拒绝 (Frame Reject - 帧拒绝应答)"",
+        # UI帧：bit0=1, bit1=1, bit2=0, bit3=0 (bit3=0表示UI)
+        'UI': ""无编号信息 (Unnumbered Information - 未确认信息帧)"",
+    }
+
+    # 地址域特殊地址
+    SPECIAL_ADDRESSES = {
+        # 客户端特殊地址
+        0x00: ""NO_STATION (无站地址)"",
+        0x01: ""客户端管理进程"",
+        0x10: ""公共客户端 (最低安全级)"",
+        0x7F: ""ALL_STATION (广播地址)"",
+        # 服务器端特殊地址
+    }
+
+    # HDLC链路层协商参数标识符（SNRM/UA信息域TLV标签，见ISO/IEC 13239 5.5.3.2）
+    SNRM_UA_PARAM_TAGS = {
+        0x05: ""Max Info Field Length - Transmit (发送最大信息域长度)"",
+        0x06: ""Max Info Field Length - Receive (接收最大信息域长度)"",
+        0x07: ""Window Size - Transmit (发送窗口大小)"",
+        0x08: ""Window Size - Receive (接收窗口大小)"",
+    }
+
+    # DLMS APDU类型映射（按IEC 62056标准/Green Book定义）
+    APDU_TYPES = {
+        0x01: ""AARQ (关联请求)"",
+        0x02: ""AARE (关联响应)"",
+        0x03: ""RLRQ (释放请求)"",
+        0x04: ""RLRE (释放响应)"",
+        0x0C: ""Confirmed-Service-Error"",
+        0x0E: ""General-Block-Transfer"",
+        0x60: ""AARQ (关联请求-BER)"",
+        0x61: ""AARE (关联响应-BER)"",
+        0xC0: ""Get-Request (读请求)"",
+        0xC1: ""Set-Request (写请求)"",
+        0xC3: ""Action-Request (方法请求)"",
+        0xC4: ""Get-Response (读应答)"",
+        0xC5: ""Set-Response (写应答)"",
+        0xC7: ""Action-Response (方法应答)"",
+        0xC8: ""Glo-Get-Request (加密读请求)"",
+        0xC9: ""Glo-Set-Request (加密写请求)"",
+        0xCB: ""Glo-Action-Request (加密方法请求)"",
+        0xCC: ""Glo-Get-Response (加密读应答)"",
+        0xCD: ""Glo-Set-Response (加密写应答)"",
+        0xCF: ""Glo-Action-Response (加密方法应答)"",
+        0xD0: ""Ded-Get-Request (专属加密读请求)"",
+        0xD1: ""Ded-Set-Request (专属加密写请求)"",
+        0xD3: ""Ded-Action-Request (专属加密方法请求)"",
+        0xD4: ""Ded-Get-Response (专属加密读应答)"",
+        0xD5: ""Ded-Set-Response (专属加密写应答)"",
+        0xD7: ""Ded-Action-Response (专属加密方法应答)"",
+        0xE6: ""Event-Notification (事件通知)"",
+        0xE7: ""Data-Notification (数据推送)"",
+    }
+
+    # Get-Request/Response 子类型
+    GET_REQUEST_TYPES = {
+        0x01: ""Normal (正常读)"",
+        0x02: ""Next-Data-block (下一数据块)"",
+        0x03: ""With-list (批量读)"",
+        0x04: ""With-block (分块读)"",
+    }
+    GET_RESPONSE_TYPES = {
+        0x01: ""Normal (正常响应)"",
+        0x02: ""With-data-block (数据块响应)"",
+        0x03: ""With-list (批量响应)"",
+    }
+
+    # Set-Request/Response 子类型
+    SET_REQUEST_TYPES = {
+        0x01: ""Normal (正常写)"",
+        0x02: ""With-first-data-block (首块写)"",
+        0x03: ""With-data-block (数据块写)"",
+        0x04: ""With-list (批量写)"",
+        0x05: ""With-list-and-first-data-block (批量首块写)"",
+    }
+    SET_RESPONSE_TYPES = {
+        0x01: ""Normal (正常响应)"",
+        0x02: ""With-data-block (数据块响应)"",
+        0x03: ""With-last-data-block (最后块响应)"",
+        0x04: ""With-list (批量响应)"",
+        0x05: ""With-list-and-last-data-block (批量最后块响应)"",
+    }
+
+    # Action-Request/Response 子类型
+    ACTION_REQUEST_TYPES = {
+        0x01: ""Normal (普通)"",
+        0x02: ""With-first-pblock (首参数块)"",
+        0x03: ""With-list (批量)"",
+        0x04: ""With-first-pblock-and-list (批量首参数块)"",
+        0x05: ""With-pblock (参数块)"",
+    }
+    ACTION_RESPONSE_TYPES = {
+        0x01: ""Normal (普通)"",
+        0x02: ""With-pblock (参数块)"",
+        0x03: ""With-list (批量)"",
+        0x04: ""Next-pblock (下一参数块)"",
+        0x05: ""With-list-and-first-pblock (批量首参数块)"",
+    }
+
+    # Data-Access-Result 错误码
+    DATA_ACCESS_RESULTS = {
+        0x00: ""成功"",
+        0x01: ""硬件故障"",
+        0x02: ""临时失败"",
+        0x03: ""读写对象未定义"",
+        0x04: ""对象不可访问"",
+        0x05: ""数据类型不匹配"",
+        0x06: ""对象未定义"",
+        0x07: ""对象地址不匹配"",
+        0x08: ""对象地址非法"",
+        0x09: ""对象未定义"",
+        0x0A: ""对象不在"",
+        0x0B: ""对象访问被拒绝"",
+        0x0C: ""类型不匹配"",
+        0x0D: ""对象未激活"",
+        0x0E: ""方法未定义"",
+        0x0F: ""方法不支持"",
+        0x10: ""参数数量错误"",
+        0x11: ""参数类型错误"",
+        0x12: ""参数值非法"",
+        0x13: ""参数非法"",
+        0x14: ""操作不支持"",
+        0x15: ""其他原因"",
+    }
+
+    # Action-Result 错误码
+    ACTION_RESULTS = {
+        0x00: ""成功"",
+        0x01: ""硬件故障"",
+        0x02: ""临时失败"",
+        0x03: ""读写对象未定义"",
+        0x04: ""对象不可访问"",
+        0x05: 
+... [truncated]",""
+"Class:gdw_send_frame_lib.py:GDWFrameGenerator","GDWFrameGenerator","gdw_send_frame_lib.py",15,326,true,"
+
+class GDWFrameGenerator:
+    """"""国网协议帧生成器""""""
+
+    def __init__(self):
+        pass
+
+    def generate_frame(self,
+                       afn: int,
+                       fn: int,
+                       field_values: Dict[str, Any],
+                       info_config: Dict[str, Any],
+                       src_addr: str = ""000000000000"",
+                       dst_addr: str = ""000000000000"",
+                       relay_addrs: List[str] = None) -> bytes:
+        """"""通用组帧入口
+
+        Args:
+            afn: 应用功能码 (0x00~0xFF)
+            fn: 信息类标识码 (1~248)
+            field_values: 数据单元字段值字典
+            info_config: 信息域配置字典
+                - 路由标识 (0/1)
+                - 附属节点标识 (0/1)
+                - 通信模块标识 (0/1)  -- 决定是否有地址域
+                - 冲突检测 (0/1)
+                - 中继级别 (0~15)
+                - 纠错编码标识 (0~15)
+                - 信道标识 (0~15)
+                - 预计应答字节数 (0~255)
+                - 通信速率 (0~32767)
+                - 速率单位标识 (0/1)
+                - 报文序列号 (0~255)
+            src_addr: 源地址A1，12位十进制字符串（BCD编码）
+            dst_addr: 目的地址A3，12位十进制字符串（BCD编码）
+            relay_addrs: 中继地址A2列表，每项12位十进制字符串
+
+        Returns:
+            完整协议帧字节流
+        """"""
+        # 1. 构建信息域R
+        info_domain = self._build_info_domain(info_config)
+
+        # 2. 构建地址域A
+        comm_module_flag = info_config.get(""通信模块标识"", 0)
+        relay_level = info_config.get(""中继级别"", 0)
+        address = self._build_address_domain(
+            comm_module_flag, relay_level,
+            src_addr, dst_addr, relay_addrs or []
+        )
+
+        # 3. 构建应用数据域
+        app_data = self._build_application_data(afn, fn, field_values)
+
+        # 4. 构建控制域
+        dir_flag = info_config.get(""dir"", 0)
+        prm = info_config.get(""prm"", 1)
+        comm_type = info_config.get(""通信方式"", 0)
+        control = GDWControlField(comm_type=comm_type, prm=prm, dir=dir_flag)
+
+        # 5. 组装帧
+        frame = GDWFrame(
+            control=control,
+            info_domain=info_domain,
+            address=address,
+            afn=afn,
+            dt=self._fn_to_dt(fn),
+            data=app_data,
+        )
+        return frame.frame_pack()
+
+    def _build_info_domain(self, config: Dict[str, Any]) -> bytes:
+        """"""组装6字节信息域R（下行报文）""""""
+        # 字节1: 路由标识(D0) + 附属节点标识(D1) + 通信模块标识(D2) + 冲突检测(D3) + 中继级别(D4-D7)
+        byte1 = 0
+        byte1 |= (config.get(""路由标识"", 0) & 0x01) << 0
+        byte1 |= (config.get(""附属节点标识"", 0) & 0x01) << 1
+        byte1 |= (config.get(""通信模块标识"", 0) & 0x01) << 2
+        byte1 |= (config.get(""冲突检测"", 0) & 0x01) << 3
+        byte1 |= (config.get(""中继级别"", 0) & 0x0F) << 4
+
+        # 字节2: 纠错编码标识(D0-D3) + 信道标识(D4-D7)
+        byte2 = 0
+        byte2 |= (config.get(""纠错编码标识"", 0) & 0x0F) << 0
+        byte2 |= (config.get(""信道标识"", 0) & 0x0F) << 4
+
+        # 字节3: 预计应答字节数
+        byte3 = config.get(""预计应答字节数"", 0) & 0xFF
+
+        # 字节4-5: 速率单位标识(D15) + 通信速率(D0-D14)
+        rate = config.get(""通信速率"", 0) & 0x7FFF
+        rate_unit = config.get(""速率单位标识"", 0) & 0x01
+        rate_bytes = (rate | (rate_unit << 15)).to_bytes(2, 'little')
+
+        # 字节6: 报文序列号
+        byte6 = config.get(""报文序列号"", 0) & 0xFF
+
+        return bytes([byte1, byte2, byte3, rate_bytes[0], rate_bytes[1], byte6])
+
+    def _build_address_domain(self,
+                              comm_module_flag: int,
+                              relay_level: int,
+                              src_addr: str,
+                              dst_addr: str,
+                              relay_addrs: List[str]) -> bytes:
+        """"""组装地址域A（BCD编码）
+
+        通信模块标识=0时: 无地址域
+        通信模块标识=1时: 源地址A1(6B) + 中继地址A2(6B×中继级别) + 目的地址A3(6B)
+        """"""
+        if comm_module_flag == 0:
+            return b''
+
+        addr = b''
+        addr += self._bcd_encode(src_addr, 6)
+
+        # 中继地址: 根据中继级别，取前relay_level个
+        for i in range(relay_level):
+            if i < len(relay_addrs):
+                addr += self._bcd_encode(relay_addrs[i], 6)
+            else:
+                addr += b'\x00' * 6  # 不足补零
+
+        addr += self._bcd_encode(dst_addr, 6)
+        return addr
+
+    @staticmethod
+    def _bcd_encode(addr_str: str, length: int) -> bytes:
+        """"""将十进制地址字符串编码为BCD字节
+
+        Args:
+            addr_str: 如 ""123456789012""
+            length: 目标字节数
+        """"""
+        addr_str = addr_str.strip()
+        if not addr_str:
+            return b'\x00' * length
+
+        # 只保留数字
+        digits = ''.join(c for c in addr_str if c.isdigit())
+        # 补齐到偶数位
+        if len(digits) % 2 == 1:
+            digits = '0' + digits
+
+        result = bytearray()
+        for i in range(0, len(digits), 2):
+            high = int(digits[i])
+            low = int(digits[i + 1])
+            result.append((high << 4) | low)
+
+        # 截断或补齐
+        if len(result) < length:
+            result.extend(b'\x00' * (length - len(result)))
+        elif len(result) > length:
+            result = result[:length]
+
+        return bytes(result)
+
+    def _build_application_data(self, afn: int, fn: int,
+                                field_values: Dict[str, Any]) -> byte
+... [truncated]",""
+"Class:gdw_afn_lookup.py:GDWAFNLookup","GDWAFNLookup","gdw_afn_lookup.py",9,30,true,"
+
+class GDWAFNLookup:
+    """"""国网协议 AFN+Fn 组合查询管理器""""""
+
+    def __init__(self):
+        self.parser = GDW10376Parser()
+        self._data: List[Tuple] = []
+        self._build_data_list()
+
+    def _build_data_list(self):
+        """"""构建用于显示的数据列表""""""
+        self._data = []
+        for afn, afn_name, fn, fn_name in self.parser.get_afn_fn_list():
+            self._data.append((afn, afn_name, fn, fn_name))
+
+    def search(self, keyword: str) -> List[Tuple]:
+        """"""根据关键词搜索 AFN+Fn 组合""""""
+        return self.parser.search_afn_fn(keyword)
+
+    @property
+    def data(self) -> List[Tuple]:
+        """"""获取所有 AFN+Fn 数据""""""
+        return self._data
+
+",""
+"Class:gdw10376_tool.py:GDWControlField","GDWControlField","gdw10376_tool.py",4,34,true,"
+
+class GDWControlField(ctypes.LittleEndianStructure):
+    """"""国网协议控制域 C (1字节)
+
+    位定义（从低位到高位，小端序）：
+    - comm_type: D5~D0 通信方式 (6 bits)
+    - prm: D6 启动标志位 (1 bit)
+    - dir: D7 传输方向位 (1 bit)
+    """"""
+    _fields_ = [
+        (""comm_type"", ctypes.c_uint8, 6),  # D5~D0: 通信方式
+        (""prm"", ctypes.c_uint8, 1),        # D6: 启动标志位
+        (""dir"", ctypes.c_uint8, 1),        # D7: 传输方向位
+    ]
+
+    def __init__(self, comm_type=0, prm=0, dir=0) -> None:
+        self.comm_type = comm_type
+        self.prm = prm
+        self.dir = dir
+
+    def to_byte(self) -> int:
+        """"""将控制域转换为单字节整数值""""""
+        return (self.dir << 7) | (self.prm << 6) | (self.comm_type & 0x3F)
+
+    @classmethod
+    def from_byte(cls, byte_val: int) -> ""GDWControlField"":
+        """"""从单字节整数值解析控制域""""""
+        return cls(
+            comm_type=byte_val & 0x3F,
+            prm=(byte_val >> 6) & 0x01,
+            dir=(byte_val >> 7) & 0x01,
+        )
+
+",""
+"Class:gdw10376_tool.py:GDWFrame","GDWFrame","gdw10376_tool.py",76,121,true,"
+@dataclass
+class GDWFrame:
+    """"""国网协议帧结构 (Q/GDW 10376.2—2024)""""""
+    start_char: int = 0x68
+    length: int = 0
+    control: GDWControlField = None
+    info_domain: bytes = b''
+    address: bytes = b''
+    afn: int = 0
+    dt: bytes = b''
+    data: bytes = b''
+    cs: int = 0
+    end_char: int = 0x16
+
+    def __post_init__(self):
+        if self.control is None:
+            self.control = GDWControlField()
+
+    def calculate_checksum(self, data: bytes) -> int:
+        """"""计算校验和 - 控制域和用户数据区所有字节的八位位组算术和""""""
+        return sum(data) & 0xFF
+
+    def frame_pack(self) -> bytes:
+        """"""组帧功能实现""""""
+        # 构建用户数据区 = 信息域 + 地址域 + 应用数据域
+        user_data = bytearray()
+        user_data.extend(self.info_domain)
+        user_data.extend(self.address)
+        user_data.append(self.afn)
+        user_data.extend(self.dt)
+        user_data.extend(self.data)
+
+        # 计算长度 L = 用户数据长度 + 6 (起始字符1 + 长度2 + 控制域1 + 校验和1 + 结束字符1)
+        self.length = len(user_data) + 6
+
+        # 构建完整帧
+        packed_frame = bytearray()
+        packed_frame.append(self.start_char)
+        packed_frame.extend(self.length.to_bytes(2, 'little'))  # 长度L为2字节，小端序
+        packed_frame.append(self.control.to_byte())
+        packed_frame.extend(user_data)
+
+        # 计算校验和: 控制域 + 用户数据区
+        self.cs = self.calculate_checksum(packed_frame[3:])
+        packed_frame.append(self.cs)
+        packed_frame.append(self.end_char)
+        return bytes(packed_frame)
+",""
+"Class:gdw10376_parser.py:GDW10376Parser","GDW10376Parser","gdw10376_parser.py",7,1843,true,"
+
+class GDW10376Parser:
+    """"""国网集中器本地通信模块接口协议解析器 (Q/GDW 10376.2—2024)""""""
+
+    # AFN 定义
+    AFN_MAP = {
+        0x00: ""确认/否认"",
+        0x01: ""初始化"",
+        0x02: ""数据转发"",
+        0x03: ""查询数据"",
+        0x04: ""链路接口检测"",
+        0x05: ""控制命令"",
+        0x06: ""主动上报"",
+        0x10: ""路由查询"",
+        0x11: ""路由设置"",
+        0x12: ""重启/暂停/恢复控制"",
+        0x13: ""路由数据转发"",
+        0x14: ""路由数据抄读"",
+        0x15: ""文件传输"",
+        0xF0: ""内部调试"",
+        0xF1: ""并发抄表"",
+    }
+
+    # FN 定义 (AFN -> {Fn: 名称})
+    FN_MAP = {
+        0x00: {1: ""确认"", 2: ""否认""},
+        0x01: {1: ""硬件初始化"", 2: ""参数区初始化"", 3: ""数据区初始化""},
+        0x02: {1: ""转发通信协议数据帧""},
+        0x03: {
+            1: ""厂商代码和版本信息"",
+            2: ""噪声值"",
+            3: ""从节点侦听信息"",
+            4: ""主节点地址"",
+            5: ""主节点状态字和通信速率"",
+            6: ""主节点干扰状态"",
+            7: ""读取从节点监控最大超时时间"",
+            8: ""查询无线通信参数"",
+            9: ""查询从节点通信延时"",
+            10: ""本地通信模块运行模式信息"",
+            11: ""本地通信模块AFN索引"",
+            12: ""查询CCO模块ID"",
+            16: ""查询宽带载波通信参数"",
+            17: ""查询无线频段"",
+            18: ""查询本地通信信道加密参数"",
+            100: ""查询场强门限"",
+        },
+        0x04: {
+            1: ""发送测试"",
+            2: ""从节点点名"",
+            3: ""本地通信模块报文通信测试"",
+        },
+        0x05: {
+            1: ""设置主节点地址"",
+            2: ""允许从节点上报"",
+            3: ""启动广播"",
+            4: ""设置从节点监控最大超时时间"",
+            5: ""设置无线通信参数"",
+            6: ""允许/禁止台区识别"",
+            10: ""串口速率配置"",
+            16: ""设置宽带载波通信参数"",
+            17: ""设置无线频段"",
+            18: ""允许/禁止本地通信信道加密"",
+            20: ""广播透传命令"",
+            100: ""设置场强门限"",
+            101: ""设置中心节点时间"",
+            200: ""控制拒绝节点上报"",
+        },
+        0x06: {
+            1: ""上报从节点信息"",
+            2: ""上报抄读数据"",
+            3: ""上报路由工况变动信息"",
+            4: ""上报从节点信息及设备类型"",
+            5: ""上报从节点事件"",
+        },
+        0x10: {
+            1: ""从节点数量"",
+            2: ""从节点信息"",
+            3: ""指定从节点的上一级中继路由信息"",
+            4: ""路由运行状态"",
+            5: ""未抄读成功的从节点信息"",
+            6: ""主动注册的从节点信息"",
+            7: ""查询从节点模块ID信息"",
+            9: ""查询网络规模"",
+            20: ""查询双模网络拓扑信息"",
+            21: ""查询网络拓扑信息"",
+            31: ""查询相线信息"",
+            40: ""流水线查询ID信息"",
+            100: ""查询微功率无线网络规模"",
+            101: ""查询微功率无线从节点信息"",
+            104: ""查询升级后模块版本信息"",
+            111: ""查询网络信息"",
+            112: ""查询宽带载波芯片信息"",
+        },
+        0x11: {
+            1: ""添加从节点"",
+            2: ""删除从节点"",
+            3: ""设置从节点固定中继路径"",
+            4: ""设置路由工作模式"",
+            5: ""激活从节点主动注册"",
+            6: ""终止从节点主动注册"",
+            100: ""设置网络规模"",
+            101: ""启动网络维护进程"",
+            102: ""启动组网"",
+        },
+        0x12: {
+            1: ""重启"",
+            2: ""暂停"",
+            3: ""恢复"",
+        },
+        0x13: {
+            1: ""监控从节点"",
+            2: ""扩展监控从节点"",
+        },
+        0x14: {
+            1: ""路由请求抄读内容"",
+            2: ""路由请求集中器时钟"",
+            3: ""请求依通信延时修正通信数据"",
+            4: ""路由请求交采信息"",
+        },
+        0x15: {
+            1: ""文件传输方式1"",
+        },
+        0xF0: {
+            62: ""查询CCO详细版本信息 (LME扩展)"",
+        },
+        0xF1: {
+            1: ""集中器主动并发抄表"",
+            2: ""集中器确认主动上报"",
+        },
+    }
+
+    def __init__(self, custom_config_path: str = ""gdw_custom_afn.json""):
+        """"""初始化解析器，加载自定义AFN+Fn定义
+
+        Args:
+            custom_config_path: 自定义AFN+Fn配置文件路径
+        """"""
+        self._custom_afn_map: Dict[int, str] = {}
+        self._custom_fn_map: Dict[int, Dict[int, str]] = {}
+        self._custom_config_path = custom_config_path
+        self._load_custom_config()
+
+    def _load_custom_config(self):
+        """"""从JSON文件加载自定义AFN+Fn定义""""""
+        if not os.path.exists(self._custom_config_path):
+            return
+        try:
+            with open(self._custom_config_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            # Load custom AFN names
+            for afn_hex, name in data.get(""afn_map"", {}).items():
+                try:
+                    afn = int(afn_hex, 16) if isinstance(afn_hex, str) and not afn_hex.isdigit() else int(afn_hex)
+                    self._custom_afn_map[afn] = name
+                except (ValueError, TypeError):
+                    continue
+            # Load custom Fn names
+            for afn_hex, fn_dict in data.get(""fn_map"", {}).items():
+                try:
+                    afn = int(afn_hex, 16) if isinstance(afn_hex, str) and not afn_hex.isdigit() else int(afn_hex)
+                    self._custom_fn_map[afn] = {}
+                    for fn_str, name in fn_dict.items():
+                        try:
+                            fn = int(fn_str)
+                            self._custom_fn_map[afn][fn] = name
+                        except (ValueError, TypeError):
+                            continue
+                except (ValueError, TypeError):
+                    continue
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    de
+... [truncated]",""
+"Class:frame_gen_widget.py:CustomFieldTemplate","CustomFieldTemplate","frame_gen_widget.py",32,41,true,"# =============================================================================
+
+class CustomFieldTemplate:
+    """"""通用字段模板项（参考图2模式）""""""
+    def __init__(self, name: str = """", length: int = 1, ftype: str = ""uint8"",
+                 endian: str = ""big"", display: str = ""hex"", reverse: bool = False):
+        self.name = name
+        self.length = length
+        self.ftype = ftype      # uint8/uint16/uint32/bytes/checksum
+        self.endian = endian    # big/little
+        self.display = display  # hex/dec
+        self.reverse = reverse  # 字节反转（地址类）
+
+
+",""
+"Class:frame_gen_widget.py:FrameGenWidget","FrameGenWidget","frame_gen_widget.py",44,1994,true,"
+
+class FrameGenWidget(QWidget):
+    """"""协议组帧页面Widget""""""
+
+    # 当帧被添加到预设时发出（protocol, frame_hex, config_snapshot）
+    preset_added = Signal(str, str, dict)
+    # 当帧被添加到测试方案时发出（name, frame_hex）
+    test_plan_added = Signal(str, str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # 协议模式: ""south""=南网, ""gdw""=国网
+        self.protocol_mode = ""south""
+        self.generator = ProtocolFrameGenerator()
+        self.parser = ProtocolFrameParser()
+        self.gdw_generator = GDWFrameGenerator()
+        self.gdw_parser = GDW10376Parser()
+        self._field_widgets: Dict[str, Dict[str, Any]] = {}
+        self._current_di_key: Tuple[int, int, int, int] = None
+        self._current_afn_fn: Tuple[int, int] = None
+        self._form_container: QWidget = None
+        self._custom_templates: List[CustomFieldTemplate] = []
+        self._custom_mode = False
+        self._update_timer: QTimer = None
+        self.serial_worker = None
+        self.setup_ui()
+
+    # ------------------------------------------------------------------
+    # UI 构建
+    # ------------------------------------------------------------------
+    def setup_ui(self):
+        main_layout = QHBoxLayout(self)
+        main_layout.setSpacing(6)
+
+        splitter = QSplitter(Qt.Horizontal)
+
+        # ================== 左侧面板 ==================
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setSpacing(4)
+
+        # ---- 命令选择区（南网DI / 国网AFN+Fn） ----
+        self.cmd_select_group = QGroupBox(""DI 选择"")
+        cmd_layout = QHBoxLayout(self.cmd_select_group)
+        cmd_layout.setContentsMargins(6, 4, 6, 4)
+        cmd_layout.setSpacing(6)
+        cmd_layout.addWidget(QLabel(""选择命令：""))
+
+        # 南网DI选择
+        self.di_combo = QComboBox()
+        self.di_combo.setMinimumWidth(360)
+        self.di_combo.setEditable(True)
+        self.di_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.di_combo.completer().setCompletionMode(self.di_combo.completer().CompletionMode.PopupCompletion)
+        self.di_combo.completer().setFilterMode(Qt.MatchFlag.MatchContains)
+        self.di_combo.completer().popup().setStyleSheet(
+            ""background-color: #ffffff; color: #000000; selection-background-color: #2196F3; selection-color: #ffffff;""
+        )
+        self._populate_di_combo()
+        self.di_combo.currentIndexChanged.connect(self._on_di_changed)
+        cmd_layout.addWidget(self.di_combo)
+
+        # 国网AFN+Fn选择（默认隐藏）
+        self.afn_fn_combo = QComboBox()
+        self.afn_fn_combo.setMinimumWidth(360)
+        self.afn_fn_combo.setEditable(True)
+        self.afn_fn_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.afn_fn_combo.completer().setCompletionMode(self.afn_fn_combo.completer().CompletionMode.PopupCompletion)
+        self.afn_fn_combo.completer().setFilterMode(Qt.MatchFlag.MatchContains)
+        self.afn_fn_combo.completer().popup().setStyleSheet(
+            ""background-color: #ffffff; color: #000000; selection-background-color: #2196F3; selection-color: #ffffff;""
+        )
+        self._populate_afn_fn_combo()
+        self.afn_fn_combo.currentIndexChanged.connect(self._on_afn_fn_changed)
+        self.afn_fn_combo.setVisible(False)
+        cmd_layout.addWidget(self.afn_fn_combo)
+
+        self.cmd_help_btn = QPushButton(""命令说明"")
+        self.cmd_help_btn.setStyleSheet(
+            ""QPushButton { background-color: #FF9800; color: white; ""
+            ""border-radius: 3px; padding: 2px 10px; font-weight: bold; }""
+            ""QPushButton:disabled { background-color: #cccccc; }""
+        )
+        self.cmd_help_btn.setEnabled(False)
+        self.cmd_help_btn.clicked.connect(self._on_cmd_help_clicked)
+        cmd_layout.addWidget(self.cmd_help_btn)
+        cmd_layout.addStretch()
+        left_layout.addWidget(self.cmd_select_group)
+
+        # ---- 帧配置（南网模式） ----
+        self.south_config_group = QGroupBox(""帧配置"")
+        south_config_layout = QHBoxLayout(self.south_config_group)
+        south_config_layout.setContentsMargins(6, 4, 6, 4)
+        south_config_layout.setSpacing(6)
+
+        south_config_layout.addWidget(QLabel(""源地址:""))
+        self.src_addr_input = QLineEdit(""000000000000"")
+        self.src_addr_input.setMaxLength(12)
+        south_config_layout.addWidget(self.src_addr_input)
+
+        south_config_layout.addWidget(QLabel(""目的地址:""))
+        self.dst_addr_input = QLineEdit(""000000000000"")
+        self.dst_addr_input.setMaxLength(12)
+        south_config_layout.addWidget(self.dst_addr_input)
+
+        south_config_layout.addWidget(QLabel(""DIR:""))
+        self.dir_combo = QComboBox()
+        self.dir_combo.addItem(""0-下行(集中器→模块)"", 0)
+        self.dir_combo.addItem(""1-上行(模块→集中器)"", 1)
+        south_config_layout.addWidget(self.dir_combo)
+
+        south_config_layout.addWidget(QLabel(""PRM:""))
+        self.prm_combo = QComboBox()
+        self.prm_com
+... [truncated]",""
+"Class:dlt645_parser.py:DLT645Parser","DLT645Parser","dlt645_parser.py",3,177,true,"import os
+
+class DLT645Parser:
+    """"""DLT645-2007 电表协议解析器""""""
+
+    @staticmethod
+    def _load_di_map():
+        """"""从 JSON 文件加载完整的 DI 映射表""""""
+        json_path = os.path.join(os.path.dirname(__file__), 'dlt645_di.json')
+
+        try:
+            with open(json_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return data.get('di_map', {})
+        except Exception as e:
+            print(f""加载 DLT645 DI 映射表失败: {e}"")
+            # 返回基本 DI 映射作为后备
+            return {
+                ""00010000"": {""name"": ""当前正向有功总电能"", ""unit"": ""kWh"", ""data_type"": ""XXXXXX.XX"", ""length"": 4},
+                ""00020000"": {""name"": ""当前反向有功总电能"", ""unit"": ""kWh"", ""data_type"": ""XXXXXX.XX"", ""length"": 4},
+            }
+
+    @staticmethod
+    def check_frame(data: bytes) -> bool:
+        if len(data) < 12:
+            return False
+        if data[0] != 0x68 or data[7] != 0x68 or data[-1] != 0x16:
+            return False
+        cs = sum(data[0:-2]) & 0xFF
+        return cs == data[-2]
+
+    @staticmethod
+    def parse(data: bytes) -> dict:
+        result = {
+            'valid': False,
+            'protocol': 'DLT645-2007',
+            'raw_hex': data.hex().upper(),
+            'address': '',
+            'control': 0,
+            'control_desc': '',
+            'data_length': 0,
+            'data': b'',
+            'di_code': '',
+            'di_desc': '',
+            'checksum': 0,
+            'checksum_valid': False,
+            'fields': []
+        }
+
+        # 加载 DI 映射表
+        DI_MAP = DLT645Parser._load_di_map()
+
+        if not DLT645Parser.check_frame(data):
+            result['error'] = '无效的DLT645帧格式'
+            return result
+
+        result['valid'] = True
+        result['address'] = data[1:7][::-1].hex().upper()
+        result['control'] = data[8]
+        result['data_length'] = data[9]
+        # 数据域解码：每个字节减 0x33，使用 & 0xFF 确保结果在有效字节范围内
+        result['data'] = bytes([(b - 0x33) & 0xFF for b in data[10:10+result['data_length']]])
+        result['checksum'] = data[-2]
+        result['checksum_valid'] = (sum(data[0:-2]) & 0xFF) == data[-2]
+
+        # 解析数据标识DI(前4字节)
+        if len(result['data']) >=4:
+            di_val = int.from_bytes(result['data'][0:4], byteorder='little')
+            di_code_str = f""{di_val:08X}""
+            result['di_code'] = di_code_str
+            # 从 JSON 加载的 DI_MAP 使用字符串键
+            di_info = DI_MAP.get(di_code_str)
+            if di_info:
+                result['di_desc'] = di_info['name']
+                result['di_unit'] = di_info.get('unit', '')
+                result['di_data_type'] = di_info.get('data_type', '')
+            else:
+                result['di_desc'] = ""未知数据标识""
+                result['di_unit'] = """"
+                result['di_data_type'] = """"
+
+        ctrl = result['control']
+        ctrl_desc = []
+        ctrl_parsed_value = []
+
+        # 解析 D7 方向位
+        if ctrl & 0x80:
+            ctrl_parsed_value.append(""DIR=1(从站应答)"")
+            ctrl_desc.append('从站应答')
+            func = ctrl & 0x1F
+            if func == 0x11:
+                ctrl_desc.append('读数据应答')
+                ctrl_parsed_value.append(""FUNC=11H(读数据应答)"")
+            elif func == 0x12:
+                ctrl_desc.append('读后续数据应答')
+                ctrl_parsed_value.append(""FUNC=12H(读后续数据应答)"")
+            elif func == 0x14:
+                ctrl_desc.append('写数据应答')
+                ctrl_parsed_value.append(""FUNC=14H(写数据应答)"")
+            elif func == 0x13:
+                ctrl_desc.append('读地址应答')
+                ctrl_parsed_value.append(""FUNC=13H(读地址应答)"")
+            elif func == 0x15:
+                ctrl_desc.append('写地址应答')
+                ctrl_parsed_value.append(""FUNC=15H(写地址应答)"")
+            elif func == 0x16:
+                ctrl_desc.append('冻结命令应答')
+                ctrl_parsed_value.append(""FUNC=16H(冻结命令应答)"")
+            elif func == 0x17:
+                ctrl_desc.append('更改速率应答')
+                ctrl_parsed_value.append(""FUNC=17H(更改速率应答)"")
+
+            # D5 后续帧标志
+            if ctrl & 0x20:
+                ctrl_desc.append('有后续帧')
+                ctrl_parsed_value.append(""D5=1(有后续帧)"")
+            else:
+                ctrl_parsed_value.append(""D5=0(无后续帧)"")
+        else:
+            ctrl_parsed_value.append(""DIR=0(主站请求)"")
+            ctrl_desc.append('主站请求')
+            func = ctrl & 0x1F
+            if func == 0x11:
+                ctrl_desc.append('读数据')
+                ctrl_parsed_value.append(""FUNC=11H(读数据)"")
+            elif func == 0x12:
+                ctrl_desc.append('读后续数据')
+                ctrl_parsed_value.append(""FUNC=12H(读后续数据)"")
+            elif func == 0x14:
+                ctrl_desc.append('写数据')
+                ctrl_parsed_value.append(""FUNC=14H(写数据)"")
+            elif func == 0x13:
+                ctrl_desc.append('读通信地址')
+                ctrl_parsed_value.append(""FUNC=13H(读通信地址)"")
+            elif func == 0x15:
+                ctrl_des
+... [truncated]",""
+"Class:dlt645_di_lookup.py:DLT645DILookup","DLT645DILookup","dlt645_di_lookup.py",9,197,true,"
+
+class DLT645DILookup:
+    """"""DLT645-2007 DI标识查询器""""""
+
+    def __init__(self):
+        self._di_map: dict = {}  # DI标识 -> DI信息
+        self._data: List[Tuple[str, str, str, str, str, bool]] = []  # (di_code, di_name, unit, data_type, desc, is_custom)
+        self._custom_file = os.path.join(os.path.dirname(__file__), 'dlt645_di_custom.json')
+        self._load_di_map()
+
+    def _load_di_map(self):
+        """"""从JSON文件加载DI映射表""""""
+        json_path = os.path.join(os.path.dirname(__file__), 'dlt645_di.json')
+
+        # 加载标准DI定义
+        standard_dis = {}
+        if os.path.exists(json_path):
+            try:
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    standard_dis = data.get('di_map', {})
+            except Exception as e:
+                print(f""加载DLT645 DI文件失败: {e}"")
+
+        # 加载自定义DI
+        custom_dis = self._load_custom_di()
+
+        # 合并标准DI和自定义DI
+        self._di_map = {**standard_dis, **custom_dis}
+
+        # 准备查询数据
+        self._rebuild_data_list()
+
+    def _load_custom_di(self) -> dict:
+        """"""加载自定义DI列表""""""
+        if not os.path.exists(self._custom_file):
+            return {}
+        try:
+            with open(self._custom_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                # 将列表转换为字典
+                result = {}
+                for item in data:
+                    di_code = item.get('di_code', '').upper()
+                    if di_code:
+                        result[di_code] = {
+                            'name': item.get('name', ''),
+                            'unit': item.get('unit', ''),
+                            'data_type': item.get('data_type', ''),
+                            'length': item.get('length', 4)
+                        }
+                return result
+        except Exception as e:
+            print(f""加载自定义DI失败: {e}"")
+            return {}
+
+    def _rebuild_data_list(self):
+        """"""重建数据列表""""""
+        self._data = []
+        custom_codes = set()
+
+        # 首先收集自定义DI代码
+        if os.path.exists(self._custom_file):
+            try:
+                with open(self._custom_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    for item in data:
+                        custom_codes.add(item.get('di_code', '').upper())
+            except:
+                pass
+
+        # 构建数据列表
+        for di_code, info in self._di_map.items():
+            di_code = di_code.upper()
+            is_custom = di_code in custom_codes
+
+            di_name = info.get('name', '')
+            unit = info.get('unit', '')
+            data_type = info.get('data_type', '')
+            length = info.get('length', 4)
+
+            desc = f""数据类型: {data_type}, 长度: {length}字节""
+            if unit:
+                desc += f"", 单位: {unit}""
+
+            self._data.append((di_code, di_name, unit, data_type, desc, is_custom))
+
+    def search(self, keyword: str) -> List[Tuple[str, str, str, str, str, bool]]:
+        """"""搜索DI标识""""""
+        keyword = keyword.strip().upper()
+        results = []
+
+        for item in self._data:
+            di_code, di_name, unit, data_type, desc, is_custom = item
+            # 搜索DI代码、名称、数据类型
+            search_text = f""{di_code} {di_name} {data_type}"".upper()
+            if keyword in search_text:
+                results.append(item)
+
+        return results
+
+    def get_di_info(self, di_code: str) -> Optional[dict]:
+        """"""获取指定DI的详细信息""""""
+        return self._di_map.get(di_code.upper())
+
+    @property
+    def data(self) -> List[Tuple[str, str, str, str, str, bool]]:
+        """"""获取所有DI数据""""""
+        return self._data.copy()
+
+    def add_custom_di(self, di_code: str, name: str, unit: str = """", data_type: str = """", length: int = 4) -> bool:
+        """"""添加自定义DI""""""
+        di_code = di_code.upper().strip()
+        if not di_code or len(di_code) != 8:
+            return False
+
+        # 验证DI代码格式（必须是8位十六进制）
+        try:
+            int(di_code, 16)
+        except ValueError:
+            return False
+
+        # 添加到自定义列表
+        custom_list = []
+        if os.path.exists(self._custom_file):
+            try:
+                with open(self._custom_file, 'r', encoding='utf-8') as f:
+                    custom_list = json.load(f)
+            except:
+                pass
+
+        # 检查是否已存在
+        for item in custom_list:
+            if item.get('di_code', '').upper() == di_code:
+                # 更新
+                item['name'] = name
+                item['unit'] = unit
+                item['data_type'] = data_type
+                item['length'] = length
+                break
+        else:
+            # 新增
+            custom_list.append({
+                'di_code': di_code,
+                'name': name,
+                'unit': unit,
+                'data_type': data_type,
+                'length': length
+            })
+
+        # 保存
+        try:
+            with open(self._custom_file, 'w', encoding='utf-8') as f:
+                json.dump(custom_list, f
+... [truncated]",""
+"Class:dlms_parser.py:DLMSParser","DLMSParser","dlms_parser.py",8,378,true,"
+
+class DLMSParser:
+    """"""DLMS协议解析器""""""
+
+    # APDU类型映射（按IEC 62056标准/Green Book定义）
+    APDU_TYPES = {
+        0x01: ""AARQ (关联请求)"",
+        0x02: ""AARE (关联响应)"",
+        0x03: ""RLRQ (释放请求)"",
+        0x04: ""RLRE (释放响应)"",
+        0x0C: ""Confirmed-Service-Error"",
+        0x0E: ""General-Block-Transfer"",
+        0x60: ""AARQ (关联请求-BER)"",
+        0x61: ""AARE (关联响应-BER)"",
+        0xC0: ""Get-Request"",
+        0xC1: ""Set-Request"",
+        0xC3: ""Action-Request"",
+        0xC4: ""Get-Response"",
+        0xC5: ""Set-Response"",
+        0xC7: ""Action-Response"",
+        0xC8: ""Glo-Get-Request"",
+        0xC9: ""Glo-Set-Request"",
+        0xCB: ""Glo-Action-Request"",
+        0xCC: ""Glo-Get-Response"",
+        0xCD: ""Glo-Set-Response"",
+        0xCF: ""Glo-Action-Response"",
+        0xD0: ""Ded-Get-Request"",
+        0xD1: ""Ded-Set-Request"",
+        0xD3: ""Ded-Action-Request"",
+        0xD4: ""Ded-Get-Response"",
+        0xD5: ""Ded-Set-Response"",
+        0xD7: ""Ded-Action-Response"",
+        0xE6: ""Event-Notification"",
+        0xE7: ""Data-Notification"",
+    }
+
+    # 数据类型映射
+    DATA_TYPES = {
+        0x00: ""Null"",
+        0x01: ""Data (Array/Structure)"",
+        0x02: ""Boolean"",
+        0x03: ""Bit-String"",
+        0x04: ""Double-Long-Unsigned"",
+        0x05: ""Double-Long"",
+        0x06: ""Octet-String"",
+        0x09: ""Visible-String"",
+        0x0A: ""UTF8-String"",
+        0x0B: ""BCD"",
+        0x0C: ""Integer"",
+        0x0D: ""Long"",
+        0x0F: ""Long-Unsigned"",
+        0x10: ""Compact-Array"",
+        0x11: ""Long64-Unsigned"",
+        0x12: ""Long64"",
+        0x13: ""Enum"",
+        0x16: ""Float32"",
+        0x17: ""Float64"",
+        0x18: ""DateTime"",
+        0x19: ""Date"",
+        0x1A: ""Time"",
+        0x1B: ""Dont-Care"",
+    }
+
+    def parse_to_table(self, dlms_data: bytes) -> list:
+        """"""解析DLMS数据到表格格式""""""
+        table_data = []
+        
+        if len(dlms_data) < 2:
+            table_data.append((""错误"", ""-"", ""-"", ""数据过短"", None, None))
+            return table_data
+
+        offset = 0
+
+        # 尝试解析HDLC帧（如果以0x7E开头）
+        if dlms_data[0] == 0x7E:
+            self._parse_hdlc_frame(dlms_data, table_data, offset)
+            return table_data
+
+        # 直接解析APDU
+        self._parse_apdu(dlms_data, table_data, offset)
+        return table_data
+
+    def _parse_hdlc_frame(self, data: bytes, table_data: list, offset: int):
+        """"""解析HDLC封装的DLMS帧""""""
+        table_data.append((""HDLC起始符"", f""0x{data[offset]:02X}"", ""0x7E"", ""HDLC帧起始标志"", offset, offset))
+        offset += 1
+
+        # HDLC地址字段（简化）
+        if len(data) > offset:
+            addr_field = data[offset]
+            table_data.append((""HDLC地址域"", f""0x{addr_field:02X}"", """", """", offset, offset))
+            offset += 1
+
+        # HDLC控制字段
+        if len(data) > offset:
+            ctrl_field = data[offset]
+            table_data.append((""HDLC控制域"", f""0x{ctrl_field:02X}"", """", """", offset, offset))
+            offset += 1
+
+        # HCS（HDLC校验和）
+        if len(data) > offset + 1:
+            hcs = struct.unpack('<H', data[offset:offset+2])[0]
+            table_data.append((""HCS校验"", f""0x{hcs:04X}"", """", """", offset, offset+1))
+            offset += 2
+
+        # 解析内部APDU
+        self._parse_apdu(data[offset:], table_data, offset)
+
+    def _parse_apdu(self, data: bytes, table_data: list, offset: int):
+        """"""解析DLMS APDU""""""
+        start_offset = offset
+
+        if len(data) < 2:
+            return
+
+        # 控制字段
+        ctrl_field = data[0]
+        ctrl_desc = """"
+        
+        # 分析控制字段
+        if ctrl_field == 0x00:
+            ctrl_desc = ""长格式""
+        elif ctrl_field == 0x01:
+            ctrl_desc = ""短格式""
+        
+        table_data.append((""DLMS控制字段"", f""0x{ctrl_field:02X}"", ctrl_desc, """", offset, offset))
+        offset += 1
+
+        # 根据控制字段判断格式
+        if ctrl_field == 0x00:
+            # 长格式：目标地址(4字节) + 源地址(1字节) + APDU
+            if len(data) > offset + 4:
+                dst_addr = data[offset:offset + 4]
+                table_data.append((""  目标地址"", dst_addr.hex(' ').upper(), f""4字节"", ""长格式目标地址"", offset, offset + 3))
+                offset += 4
+            
+            if len(data) > offset:
+                src_addr = data[offset]
+                table_data.append((""  源地址"", f""0x{src_addr:02X}"", f""1字节"", """", offset, offset))
+                offset += 1
+        
+        # APDU类型（可能是下一个字节）
+        if len(data) > offset:
+            apdu_byte = data[offset]
+            
+            # 检查是否是已知的APDU类型
+            if apdu_byte in self.APDU_TYPES:
+                apdu_name = self.APDU_TYPES[apdu_byte]
+                table_data.append((""APDU类型"", f""0x{apdu_byte:02X}"", apdu_name, """", offset, offset))
+                offset += 1
+                
+                # 继续解析具体APDU内容
+                self._parse_apdu_content(data[offset:], table_data, offset, apdu_byte)
+            else:
+                # 可能APDU类型在更后面的位置
+                # 尝试寻找常见的APDU类型
+            
+... [truncated]",""
+"Class:dlms_deep_parser.py:DLMSDeepParser","DLMSDeepParser","dlms_deep_parser.py",9,446,true,"
+
+class DLMSDeepParser:
+    """"""DLMS/COSEM 深度解析器""""""
+
+    # DLMS 数据类型映射
+    DLMS_DATA_TYPES = {
+        0x00: (""Null"", 0, None),
+        0x01: (""Data (Array/Structure)"", 0, None),  # 长度在后续字节
+        0x02: (""Boolean"", 1, ""bool""),
+        0x03: (""Bit-String"", 0, None),  # 长度+数据
+        0x04: (""Double-Long-Unsigned"", 4, ""uint32""),
+        0x05: (""Double-Long"", 4, ""int32""),
+        0x06: (""Octet-String"", 0, None),  # 长度+数据
+        0x09: (""Visible-String"", 0, None),  # 长度+ASCII
+        0x0A: (""UTF8-String"", 0, None),  # 长度+UTF8
+        0x0B: (""BCD"", 0, None),  # 长度+数据
+        0x0C: (""Integer"", 2, ""int16""),
+        0x0D: (""Long"", 4, ""int32""),
+        0x0F: (""Long-Unsigned"", 2, ""uint16""),
+        0x10: (""Compact-Array"", 0, None),
+        0x11: (""Long64-Unsigned"", 8, ""uint64""),
+        0x12: (""Long64"", 8, ""int64""),
+        0x13: (""Enum"", 1, ""uint8""),
+        0x16: (""Float32"", 4, ""float""),
+        0x17: (""Float64"", 8, ""double""),
+        0x18: (""DateTime"", 12, ""datetime""),
+        0x19: (""Date"", 5, ""date""),
+        0x1A: (""Time"", 4, ""time""),
+        0x1B: (""Dont-Care"", 0, None),
+    }
+
+    # OBIS 码描述（常见对象）
+    OBIS_DESCRIPTIONS = {
+        (0, 0, 96, 1, 0, 255): ""逻辑设备名称"",
+        (0, 0, 96, 1, 1, 255): ""设备标识"",
+        (0, 0, 96, 1, 2, 255): ""固件版本"",
+        (1, 0, 1, 8, 0, 255): ""有功电能正向累计值（总）"",
+        (1, 0, 1, 8, 1, 255): ""有功电能正向费率1"",
+        (1, 0, 1, 8, 2, 255): ""有功电能正向费率2"",
+        (1, 0, 2, 8, 0, 255): ""有功电能反向累计值（总）"",
+        (1, 0, 3, 8, 0, 255): ""无功电能正向累计值（总）"",
+        (1, 0, 4, 8, 0, 255): ""无功电能反向累计值（总）"",
+        (1, 0, 21, 7, 0, 255): ""瞬时电压 L1"",
+        (1, 0, 22, 7, 0, 255): ""瞬时电压 L2"",
+        (1, 0, 23, 7, 0, 255): ""瞬时电压 L3"",
+        (1, 0, 31, 7, 0, 255): ""瞬时电流 L1"",
+        (1, 0, 32, 7, 0, 255): ""瞬时电流 L2"",
+        (1, 0, 33, 7, 0, 255): ""瞬时电流 L3"",
+        (1, 0, 51, 7, 0, 255): ""瞬时功率 L1"",
+        (1, 0, 52, 7, 0, 255): ""瞬时功率 L2"",
+        (1, 0, 53, 7, 0, 255): ""瞬时功率 L3"",
+        (1, 0, 96, 1, 0, 255): ""电表时间"",
+        (1, 0, 96, 1, 1, 255): ""电表日期"",
+    }
+
+    # COSEM 类 ID
+    COSEM_CLASS_IDS = {
+        1: ""数据 (Data)"",
+        3: ""寄存器 (Register)"",
+        4: ""扩展寄存器 (Extended-Register)"",
+        5: ""需求寄存器 (Demand-Register)"",
+        6: ""活动日历 (Activity-Calendar)"",
+        7: ""配置文件 (Profile-Generic)"",
+        8: ""时钟 (Clock)"",
+        9: ""脚本表 (Script-Table)"",
+        10: ""调度器 (Schedule)"",
+        15: ""特殊天数表 (Special-Days-Table)"",
+        17: ""关联逻辑设备 (Association-Logical-Device)"",
+        20: ""关联快照 (Association-Snapshot)"",
+        42: ""MBus 客户端端口 (M-Bus-Client-Port)"",
+        43: ""MBus 主端口 (M-Bus-Master-Port)"",
+        44: ""MBus 诊断 (M-Bus-Diagnostic)"",
+        70: ""脉冲计数器 (Pulse-Counter)"",
+        71: ""水计量 (Water-Meter)"",
+        72: ""气体计量 (Gas-Meter)"",
+        73: ""热计量 (Heat-Meter)"",
+        74: ""热成本分配器 (Heat-Cost-Allocator)"",
+        81: ""通信口 HDLC (Comms-Port-HDLC)"",
+        82: ""通信口 调制解调器 (Comms-Port-Modem)"",
+        88: ""自动应答 (Auto-Ans-wer)"",
+        89: ""自动连接 (Auto-Connect)"",
+        90: ""GPRS 调制解调器配置 (GPRS-Modem-Configuration)"",
+        91: ""LTE 调制解调器配置 (LTE-Modem-Configuration)"",
+        100: ""应用关联 (Application-Association)"",
+        101: ""安全设置 (Security-Setup)"",
+        111: ""断开控制 (Disconnect-Control)"",
+        113: ""极限值 (Limit-Value)"",
+        114: ""参数监控 (Parameter-Monitor)"",
+        115: ""参数控制 (Parameter-Control)"",
+        118: ""MBus 端口配置 (M-Bus-Port-Configuration)"",
+        129: ""报警对象 (Alarm-Object)"",
+        200: ""动作计划 (Action-Schedule)"",
+    }
+
+    def parse_action_request(self, data: bytes, base_offset: int) -> List[Tuple]:
+        """"""
+        解析 Action-Request (0xC2)
+        参考 dlmslib 的解析逻辑
+        """"""
+        table_data = []
+        offset = 0
+        local_base = base_offset
+
+        # Action-Request 结构:
+        # - Invoke-Id-And-Priority (1 byte): 高4位=Invoke-ID, 低2位=Priority
+        if len(data) > offset:
+            invoke_byte = data[offset]
+            invoke_id = (invoke_byte >> 4) & 0x0F
+            priority = invoke_byte & 0x03
+            
+            table_data.append((
+                ""    调用ID (Invoke-ID)"",
+                f""0x{invoke_byte:02X}"",
+                f""Invoke-ID={invoke_id}, Priority={priority}"",
+                ""请求标识符和优先级"",
+                local_base + offset,
+                local_base + offset
+            ))
+            offset += 1
+
+        # 检查是否有 SEQUENCE 标签 (0x30 或 0xA0 等)
+        # 但在某些编码中，SEQUENCE 可能是隐式的
+        if len(data) > offset:
+            # 尝试解析 Cosem-Attribute-Descriptor
+            # 这通常是: OBIS(6 bytes) + Class-ID(2 bytes) + Attribute-ID(2 bytes)
+            
+            # 检查是否是 OCTET STRING 标签 (0x09) 后跟 OBIS
+            if data[offset] == 0x09 and len(data) >= offset + 8:
+                # OCTET STRING (OBIS)
+                obis_len = data[offset + 1]
+                if obis_len == 6:
+                    obis_bytes = data[offset + 2:offset + 8]
+                    obis_str = ""."".join(str(b) for b in obis_bytes)
+          
+... [truncated]",""
+"Class:command_lookup.py:CommandLookup","CommandLookup","command_lookup.py",10,155,true,"
+
+class CommandLookup:
+    """"""命令字查询管理器""""""
+
+    # 标准命令字定义 (Command Code -> 中文含义, 详细描述)
+    STANDARD_COMMANDS = {
+        0x1001: (""模块通用信息"", ""模块通用信息查询/设置""),
+        0x1101: (""启动升级命令（初始化）"", ""开始固件升级流程，初始化升级环境""),
+        0x1102: (""发送升级包数据"", ""传输固件升级包的分片数据""),
+        0x1103: (""激活模块固件"", ""激活新固件，完成升级流程""),
+        0x1201: (""数据推送（DataNotification）"", ""模块向电表推送数据通知""),
+        0x1202: (""事件推送（EventNotification）"", ""模块向电表推送事件通知""),
+        0x1301: (""DLMS数据帧封装"", ""通过DLMS协议封装的数据帧传输""),
+        0x2001: (""模块获取电表表号"", ""查询电表的表号信息""),
+        0x2002: (""心跳机制"", ""模块与电表之间的心跳保活""),
+        0x2003: (""模块将自身信息传输至电表"", ""上报模块自身的配置和状态信息""),
+        0x2004: (""获取电表信息"", ""查询电表的详细信息""),
+        0x2101: (""从电表获取G3-PLC信息"", ""查询G3-PLC网络相关信息""),
+        0x2102: (""模块将G3-PLC信息传输至电表"", ""上报G3-PLC网络状态信息""),
+    }
+
+    def __init__(self, custom_commands_file: Optional[str] = None):
+        """"""
+        初始化命令字查询器
+
+        Args:
+            custom_commands_file: 自定义命令字定义文件路径（JSON格式）
+        """"""
+        self.custom_commands: Dict[int, Tuple[str, str]] = {}
+        self._data: List[Tuple] = []  # 用于表格显示的数据
+
+        # 加载自定义命令字
+        if custom_commands_file:
+            self._load_custom_commands(custom_commands_file)
+        else:
+            # 默认保存位置
+            default_path = Path(__file__).parent / ""custom_commands.json""
+            if default_path.exists():
+                self._load_custom_commands(str(default_path))
+
+        # 构建数据列表
+        self._build_data_list()
+
+    def _load_custom_commands(self, filepath: str):
+        """"""从 JSON 文件加载自定义命令字""""""
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            for item in data:
+                code = int(item['code'], 16) if isinstance(item['code'], str) else item['code']
+                self.custom_commands[code] = (item['name'], item['desc'])
+        except Exception as e:
+            print(f""加载自定义命令字失败: {e}"")
+
+    def save_custom_commands(self, filepath: Optional[str] = None) -> bool:
+        """"""保存自定义命令字到 JSON 文件""""""
+        if filepath is None:
+            filepath = str(Path(__file__).parent / ""custom_commands.json"")
+
+        data = []
+        for code, (name, desc) in self.custom_commands.items():
+            data.append({
+                'code': f""0x{code:04X}"",
+                'name': name,
+                'desc': desc
+            })
+
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            return True
+        except Exception as e:
+            print(f""保存自定义命令字失败: {e}"")
+            return False
+
+    def _build_data_list(self):
+        """"""构建用于显示的数据列表""""""
+        self._data = []
+
+        # 标准命令字
+        for code, (name, desc) in self.STANDARD_COMMANDS.items():
+            self._data.append((code, name, desc, False))  # False = 非自定义
+
+        # 自定义命令字（覆盖或追加）
+        for code, (name, desc) in self.custom_commands.items():
+            # 检查是否已存在
+            found = False
+            for i, (c, n, d, is_custom) in enumerate(self._data):
+                if c == code:
+                    self._data[i] = (code, name, desc, True)
+                    found = True
+                    break
+            if not found:
+                self._data.append((code, name, desc, True))
+
+        # 按命令字排序
+        self._data.sort(key=lambda x: x[0])
+
+    def search(self, keyword: str) -> List[Tuple]:
+        """"""
+        搜索命令字
+
+        Args:
+            keyword: 搜索关键词（命令字编码或名称）
+
+        Returns:
+            匹配的命令字列表
+        """"""
+        if not keyword:
+            return self._data
+
+        keyword = keyword.strip().upper()
+        results = []
+
+        for code, name, desc, is_custom in self._data:
+            # 匹配命令字编码（支持 0x1101 或 1101 或 4353）
+            code_hex = f""0x{code:04X}""
+            code_dec = str(code)
+
+            if keyword in code_hex or keyword in code_dec or keyword == name.upper() or keyword in desc.upper():
+                results.append((code, name, desc, is_custom))
+
+        return results
+
+    def get_by_code(self, code: int) -> Optional[Tuple[str, str]]:
+        """"""根据命令字编码获取名称和描述""""""
+        # 先查自定义
+        if code in self.custom_commands:
+            return self.custom_commands[code]
+        # 再查标准
+        if code in self.STANDARD_COMMANDS:
+            return self.STANDARD_COMMANDS[code]
+        return None
+
+    def add_custom(self, code: int, name: str, desc: str) -> bool:
+        """"""添加自定义命令字""""""
+        self.custom_commands[code] = (name, desc)
+        self._build_data_list()
+        return self.save_custom_commands()
+
+    def delete_custom(self, code: int) -> bool:
+        """"""删除自定义命令字""""""
+        if code in self.custom_commands:
+            del self.custom_commands[code]
+            self._build_data_list()
+            return self.save_custom_commands()
+        return False
+
+",""
+"Class:visual_editor/test_item_editor.py:VisualTestItemEditor","VisualTestItemEditor","visual_editor/test_item_editor.py",20,554,true,"
+
+class VisualTestItemEditor(QDialog):
+    """"""可视化测试项编辑器对话框""""""
+
+    def __init__(self, parent=None, edit_data: Optional[Dict] = None,
+                 protocol: str = ""south""):
+        """"""
+        参数:
+            parent: 父窗口
+            edit_data: 编辑模式下的测试项数据
+            protocol: 当前协议类型
+        """"""
+        super().__init__(parent)
+        self._edit_mode = edit_data is not None
+        self._edit_data = edit_data or {}
+        self._protocol = protocol
+        self._result = None
+
+        self.setWindowTitle(""编辑测试项"" if self._edit_mode else ""添加测试项"")
+        self.setMinimumSize(700, 600)
+        self._setup_ui()
+
+        if self._edit_mode:
+            self._load_edit_data()
+
+    def _setup_ui(self):
+        """"""设置 UI""""""
+        layout = QVBoxLayout(self)
+        layout.setSpacing(8)
+
+        # 标签页
+        tab_widget = QTabWidget()
+
+        # 基本模式标签页
+        basic_tab = self._create_basic_tab()
+        tab_widget.addTab(basic_tab, ""基本模式"")
+
+        # 高级模式标签页（从解析结果导入）
+        advanced_tab = self._create_advanced_tab()
+        tab_widget.addTab(advanced_tab, ""从解析导入"")
+
+        # 模板标签页
+        template_tab = self._create_template_tab()
+        tab_widget.addTab(template_tab, ""从模板导入"")
+
+        layout.addWidget(tab_widget, 1)
+
+        # 底部按钮
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+
+        ok_btn = QPushButton(""确定"")
+        ok_btn.setDefault(True)
+        ok_btn.clicked.connect(self._on_ok)
+        btn_layout.addWidget(ok_btn)
+
+        cancel_btn = QPushButton(""取消"")
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+
+        layout.addLayout(btn_layout)
+
+    def _create_basic_tab(self) -> QWidget:
+        """"""创建基本模式标签页""""""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(8)
+
+        # 性质选择
+        nature_group = QGroupBox(""测试项性质"")
+        nature_layout = QHBoxLayout(nature_group)
+        nature_layout.addWidget(QLabel(""性质:""))
+        self._nature_combo = QComboBox()
+        self._nature_combo.addItem(""发送帧 - 发送帧并等待匹配响应"", ""send"")
+        self._nature_combo.addItem(""后台监听 - 持续监听匹配收到的帧"", ""listen"")
+        self._nature_combo.addItem(""纯等待 - 仅等待指定时间"", ""wait"")
+        self._nature_combo.currentIndexChanged.connect(self._on_nature_changed)
+        nature_layout.addWidget(self._nature_combo, 1)
+        layout.addWidget(nature_group)
+
+        # 基本信息
+        basic_group = QGroupBox(""基本信息"")
+        basic_form = QFormLayout(basic_group)
+
+        self._name_edit = QLineEdit()
+        self._name_edit.setPlaceholderText(""输入测试项名称，如：查询厂商代码"")
+        basic_form.addRow(""名称:"", self._name_edit)
+
+        self._timeout_spin = QSpinBox()
+        self._timeout_spin.setRange(100, 600000)
+        self._timeout_spin.setValue(2000)
+        self._timeout_spin.setSuffix("" ms"")
+        basic_form.addRow(""超时:"", self._timeout_spin)
+
+        layout.addWidget(basic_group)
+
+        # 帧内容
+        frame_group = QGroupBox(""帧内容"")
+        frame_layout = QVBoxLayout(frame_group)
+
+        frame_layout.addWidget(QLabel(""发送帧 (HEX):""))
+        self._frame_edit = QLineEdit()
+        self._frame_edit.setPlaceholderText(""输入十六进制报文，如：68 0C 00 00 03 00 01 03 00 E8 EF 16"")
+        frame_layout.addWidget(self._frame_edit)
+
+        # 匹配规则
+        match_layout = QHBoxLayout()
+        match_layout.addWidget(QLabel(""匹配规则:""))
+        self._match_edit = QLineEdit()
+        self._match_edit.setPlaceholderText(""XX 为通配符，如：68 XX 00 88 03 00 01 03 00 E8 XX XX 16"")
+        match_layout.addWidget(self._match_edit, 1)
+
+        self._match_mode_combo = QComboBox()
+        self._match_mode_combo.addItems([""HEX"", ""ASCII""])
+        match_layout.addWidget(self._match_mode_combo)
+
+        frame_layout.addLayout(match_layout)
+
+        # 启用匹配
+        self._match_enabled_check = QCheckBox(""启用匹配"")
+        self._match_enabled_check.setChecked(True)
+        frame_layout.addWidget(self._match_enabled_check)
+
+        layout.addWidget(frame_group)
+
+        # 响应帧
+        response_group = QGroupBox(""响应帧 (可选)"")
+        response_layout = QVBoxLayout(response_group)
+
+        response_layout.addWidget(QLabel(""匹配成功后自动发送的响应帧:""))
+        self._response_edit = QLineEdit()
+        self._response_edit.setPlaceholderText(""支持动态标记：【\""time\"",6,Y-M-D-h-m-s,\""little\""】【\""CS\"",1,3:-2】"")
+        response_layout.addWidget(self._response_edit)
+
+        layout.addWidget(response_group)
+
+        return tab
+
+    def _create_advanced_tab(self) -> QWidget:
+        """"""创建高级模式标签页（从解析导入）""""""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(8)
+
+        # 说明
+        info_label = QLabel(""在此粘贴一个完整的 HEX 报文，系统会自动解析并生成测试项。\n""
+                           ""您可以选择需要匹配的字段，其他字段自动设为通配符。"")
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet(""color: #666; padding: 8px;"")
+        layout.addWidget(info_label)
+
+        # 输入区
+        input_group = QGroupBo
+... [truncated]",""
+"Class:validator/plc_rf_validator.py:PLCRFValidator","PLCRFValidator","validator/plc_rf_validator.py",5,100,true,"
+
+class PLCRFValidator(BaseValidator):
+    """"""PLC RF 协议帧合法性验证器""""""
+
+    FRAME_START = 0x02
+
+    def verify(self, frame_bytes: bytes) -> ValidationResult:
+        """"""验证 PLC RF 帧的合法性""""""
+        result = ValidationResult(protocol=""PLC RF"", valid=True)
+
+        # 1. 最小帧长度校验
+        check = self._check_min_length(frame_bytes, 8, ""PLC RF"")
+        result.checks.append(check)
+        if check.level == CheckLevel.FAIL:
+            result.valid = False
+            return result
+
+        # 2. 起始符校验 (0x02)
+        check = self._check_start_char(frame_bytes, self.FRAME_START, 0)
+        result.checks.append(check)
+        if check.level == CheckLevel.FAIL:
+            result.valid = False
+
+        # 3. 长度域校验（小端序）
+        if len(frame_bytes) >= 3:
+            length_val = int.from_bytes(frame_bytes[1:3], 'little')
+            actual_len = len(frame_bytes)
+            if actual_len < length_val:
+                check = CheckItem(
+                    name=""长度域"",
+                    level=CheckLevel.FAIL,
+                    expected=f"">={length_val}字节"",
+                    actual=f""{actual_len}字节"",
+                    message=f""帧数据不足，长度域指示{length_val}字节""
+                )
+                result.valid = False
+            else:
+                check = CheckItem(
+                    name=""长度域"",
+                    level=CheckLevel.PASS,
+                    expected=f""{length_val}字节"",
+                    actual=f""{actual_len}字节"",
+                    message=""长度域校验通过""
+                )
+            result.checks.append(check)
+
+        # 4. CRC-16 校验
+        if len(frame_bytes) >= 8:
+            # CRC 位于帧尾部（最后2字节之前）
+            crc_pos = len(frame_bytes) - 2
+            if crc_pos >= 3:
+                crc_received = int.from_bytes(frame_bytes[crc_pos:crc_pos + 2], 'little')
+                crc_data = frame_bytes[1:crc_pos]  # 从 Length 到 CRC 之前
+                crc_calc = self._calc_crc16_ccitt(crc_data)
+                if crc_received == crc_calc:
+                    check = CheckItem(
+                        name=""CRC校验"",
+                        level=CheckLevel.PASS,
+                        expected=f""0x{crc_calc:04X}"",
+                        actual=f""0x{crc_received:04X}"",
+                        message=""CRC校验正确""
+                    )
+                else:
+                    check = CheckItem(
+                        name=""CRC校验"",
+                        level=CheckLevel.FAIL,
+                        expected=f""0x{crc_calc:04X}"",
+                        actual=f""0x{crc_received:04X}"",
+                        message=f""CRC校验错误，期望0x{crc_calc:04X}""
+                    )
+                    result.valid = False
+                result.checks.append(check)
+
+        # 5. 控制域值检查
+        if len(frame_bytes) >= 4:
+            ctrl = frame_bytes[3]
+            known_ctrl = {0xC0, 0xC4}
+            if ctrl in known_ctrl:
+                check = CheckItem(
+                    name=""控制域"",
+                    level=CheckLevel.PASS,
+                    expected=""0xC0或0xC4"",
+                    actual=f""0x{ctrl:02X}"",
+                    message=f""控制域值0x{ctrl:02X}有效""
+                )
+            else:
+                check = CheckItem(
+                    name=""控制域"",
+                    level=CheckLevel.WARN,
+                    expected=""0xC0或0xC4"",
+                    actual=f""0x{ctrl:02X}"",
+                    message=f""未知控制域值0x{ctrl:02X}""
+                )
+                result.warnings.append(f""未知控制域值0x{ctrl:02X}"")
+            result.checks.append(check)
+
+        return result
+",""
+"Class:validator/nw_validator.py:NWValidator","NWValidator","validator/nw_validator.py",5,116,true,"
+
+class NWValidator(BaseValidator):
+    """"""南网协议帧合法性验证器""""""
+
+    AFN_VALID_RANGE = range(0x00, 0xF1)  # AFN 合法范围
+
+    def verify(self, frame_bytes: bytes) -> ValidationResult:
+        """"""验证南网协议帧的合法性""""""
+        result = ValidationResult(protocol=""南网协议"", valid=True)
+
+        # 1. 最小帧长度校验
+        check = self._check_min_length(frame_bytes, 8, ""南网协议"")
+        result.checks.append(check)
+        if check.level == CheckLevel.FAIL:
+            result.valid = False
+            return result
+
+        # 2. 起始字符校验
+        check = self._check_start_char(frame_bytes, 0x68, 0)
+        result.checks.append(check)
+        if check.level == CheckLevel.FAIL:
+            result.valid = False
+
+        # 3. 长度域校验（小端序）
+        if len(frame_bytes) >= 3:
+            length_val = int.from_bytes(frame_bytes[1:3], 'little')
+            # 南网协议：L = 用户数据区长度 + 6
+            # 帧总长度 = 1(68) + 2(L) + 1(C) + (L-6)(用户数据) + 1(CS) + 1(16) = L
+            expected_len = length_val  # 长度域值即帧总长度
+            actual_len = len(frame_bytes)
+            if actual_len < expected_len:
+                check = CheckItem(
+                    name=""长度域"",
+                    level=CheckLevel.FAIL,
+                    expected=f""{expected_len}字节(长度域值{length_val}+6)"",
+                    actual=f""{actual_len}字节"",
+                    message=f""帧数据不足，长度域指示帧总长{length_val}字节，实际仅{actual_len}字节""
+                )
+                result.valid = False
+            elif actual_len > expected_len:
+                check = CheckItem(
+                    name=""长度域"",
+                    level=CheckLevel.WARN,
+                    expected=f""{expected_len}字节"",
+                    actual=f""{actual_len}字节"",
+                    message=f""帧数据超出长度域指示，可能包含额外数据""
+                )
+                result.warnings.append(""帧数据超出长度域指示"")
+            else:
+                check = CheckItem(
+                    name=""长度域"",
+                    level=CheckLevel.PASS,
+                    expected=f""{expected_len}字节"",
+                    actual=f""{actual_len}字节"",
+                    message=""长度域与实际帧长一致""
+                )
+            result.checks.append(check)
+
+        # 4. 结束字符校验
+        check = self._check_end_char(frame_bytes, 0x16)
+        result.checks.append(check)
+        if check.level == CheckLevel.FAIL:
+            result.valid = False
+
+        # 5. 校验和校验（控制域 + 用户数据区的算术和）
+        if len(frame_bytes) >= 8:
+            cs_pos = len(frame_bytes) - 2  # 校验和位置：倒数第2字节
+            cs_actual = frame_bytes[cs_pos]
+            cs_data = frame_bytes[3:cs_pos]  # 控制域 + 用户数据区
+            cs_calc = self._calc_checksum_sum(cs_data)
+            if cs_actual == cs_calc:
+                check = CheckItem(
+                    name=""校验和"",
+                    level=CheckLevel.PASS,
+                    expected=f""0x{cs_calc:02X}"",
+                    actual=f""0x{cs_actual:02X}"",
+                    message=""校验和正确""
+                )
+            else:
+                check = CheckItem(
+                    name=""校验和"",
+                    level=CheckLevel.FAIL,
+                    expected=f""0x{cs_calc:02X}"",
+                    actual=f""0x{cs_actual:02X}"",
+                    message=f""校验和错误，期望0x{cs_calc:02X}，实际0x{cs_actual:02X}""
+                )
+                result.valid = False
+            result.checks.append(check)
+
+        # 6. AFN 值域检查
+        if len(frame_bytes) >= 8:
+            # AFN 在用户数据区第1字节（偏移6）
+            afn = frame_bytes[6]
+            if afn in self.AFN_VALID_RANGE:
+                check = CheckItem(
+                    name=""AFN值域"",
+                    level=CheckLevel.PASS,
+                    expected=""0x00~0xF0"",
+                    actual=f""0x{afn:02X}"",
+                    message=f""AFN值0x{afn:02X}在合法范围内""
+                )
+            else:
+                check = CheckItem(
+                    name=""AFN值域"",
+                    level=CheckLevel.WARN,
+                    expected=""0x00~0xF0"",
+                    actual=f""0x{afn:02X}"",
+                    message=f""AFN值0x{afn:02X}超出常规范围""
+                )
+                result.warnings.append(f""AFN值0x{afn:02X}超出常规范围"")
+            result.checks.append(check)
+
+        return result
+",""
+"Class:validator/hdlc_validator.py:HDLCValidator","HDLCValidator","validator/hdlc_validator.py",5,122,true,"
+
+class HDLCValidator(BaseValidator):
+    """"""HDLC/DLMS 协议帧合法性验证器""""""
+
+    HDLC_FLAG = 0x7E
+
+    def verify(self, frame_bytes: bytes) -> ValidationResult:
+        """"""验证 HDLC 帧的合法性""""""
+        result = ValidationResult(protocol=""HDLC/DLMS"", valid=True)
+
+        # 1. 最小帧长度校验
+        check = self._check_min_length(frame_bytes, 7, ""HDLC"")
+        result.checks.append(check)
+        if check.level == CheckLevel.FAIL:
+            result.valid = False
+            return result
+
+        # 2. 起始标志校验 (0x7E)
+        check = self._check_start_char(frame_bytes, self.HDLC_FLAG, 0)
+        result.checks.append(check)
+        if check.level == CheckLevel.FAIL:
+            result.valid = False
+
+        # 3. 结束标志校验 (0x7E)
+        check = self._check_end_char(frame_bytes, self.HDLC_FLAG)
+        result.checks.append(check)
+        if check.level == CheckLevel.FAIL:
+            result.valid = False
+
+        # 4. 格式域校验
+        if len(frame_bytes) >= 3:
+            fmt_byte = frame_bytes[1]
+            format_type = (fmt_byte >> 4) & 0x0F
+            if format_type == 0x0A:  # Type 3
+                check = CheckItem(
+                    name=""格式域类型"",
+                    level=CheckLevel.PASS,
+                    expected=""Type 3 (0xA)"",
+                    actual=f""Type {format_type}"",
+                    message=""格式域类型正确(Type 3)""
+                )
+            else:
+                check = CheckItem(
+                    name=""格式域类型"",
+                    level=CheckLevel.WARN,
+                    expected=""Type 3 (0xA)"",
+                    actual=f""Type {format_type}"",
+                    message=f""非标准格式域类型(Type {format_type})""
+                )
+                result.warnings.append(f""非标准格式域类型(Type {format_type})"")
+            result.checks.append(check)
+
+        # 5. HCS 校验（头部校验序列）
+        if len(frame_bytes) >= 7:
+            # HCS 位于地址域+控制域之后，信息域之前
+            # 需要先解析地址域确定 HCS 位置
+            addr_end = self._find_address_end(frame_bytes)
+            if addr_end > 0 and addr_end + 2 < len(frame_bytes):
+                hcs_pos = addr_end
+                hcs_received = frame_bytes[hcs_pos] | (frame_bytes[hcs_pos + 1] << 8)
+                hcs_data = frame_bytes[1:hcs_pos]  # 格式域 + 地址域 + 控制域
+                hcs_calc = self._calc_crc16_ccitt(hcs_data)
+                if hcs_received == hcs_calc:
+                    check = CheckItem(
+                        name=""HCS校验"",
+                        level=CheckLevel.PASS,
+                        expected=f""0x{hcs_calc:04X}"",
+                        actual=f""0x{hcs_received:04X}"",
+                        message=""HCS校验正确""
+                    )
+                else:
+                    check = CheckItem(
+                        name=""HCS校验"",
+                        level=CheckLevel.FAIL,
+                        expected=f""0x{hcs_calc:04X}"",
+                        actual=f""0x{hcs_received:04X}"",
+                        message=f""HCS校验错误，期望0x{hcs_calc:04X}""
+                    )
+                    result.valid = False
+                result.checks.append(check)
+
+        # 6. FCS 校验（帧校验序列）
+        if len(frame_bytes) >= 7:
+            # FCS 位于结束标志之前
+            fcs_pos = len(frame_bytes) - 3  # 倒数第2-3字节是FCS，最后1字节是结束标志
+            if fcs_pos >= 2:
+                fcs_received = frame_bytes[fcs_pos] | (frame_bytes[fcs_pos + 1] << 8)
+                fcs_data = frame_bytes[1:fcs_pos]  # 格式域到信息域
+                fcs_calc = self._calc_crc16_ccitt(fcs_data)
+                if fcs_received == fcs_calc:
+                    check = CheckItem(
+                        name=""FCS校验"",
+                        level=CheckLevel.PASS,
+                        expected=f""0x{fcs_calc:04X}"",
+                        actual=f""0x{fcs_received:04X}"",
+                        message=""FCS校验正确""
+                    )
+                else:
+                    check = CheckItem(
+                        name=""FCS校验"",
+                        level=CheckLevel.FAIL,
+                        expected=f""0x{fcs_calc:04X}"",
+                        actual=f""0x{fcs_received:04X}"",
+                        message=f""FCS校验错误，期望0x{fcs_calc:04X}""
+                    )
+                    result.valid = False
+                result.checks.append(check)
+
+        return result
+
+    def _find_address_end(self, data: bytes) -> int:
+        """"""查找地址域结束位置（地址域最高位为1表示结束）""""""
+        if len(data) < 3:
+            return -1
+        pos = 2  # 从第3字节开始（跳过起始标志和格式域）
+        for i in range(pos, min(pos + 8, len(data))):
+            if data[i] & 0x01:  # 最高位为1表示地址域结束
+                return i + 1
+        return -1
+",""
+"Class:validator/gdw_validator.py:GDWValidator","GDWValidator","validator/gdw_validator.py",5,105,true,"
+
+class GDWValidator(BaseValidator):
+    """"""国网协议帧合法性验证器""""""
+
+    AFN_VALID_RANGE = range(0x00, 0xF2)  # AFN 合法范围
+
+    def verify(self, frame_bytes: bytes) -> ValidationResult:
+        """"""验证国网协议帧的合法性""""""
+        result = ValidationResult(protocol=""国网协议"", valid=True)
+
+        # 1. 最小帧长度校验
+        check = self._check_min_length(frame_bytes, 8, ""国网协议"")
+        result.checks.append(check)
+        if check.level == CheckLevel.FAIL:
+            result.valid = False
+            return result
+
+        # 2. 起始字符校验
+        check = self._check_start_char(frame_bytes, 0x68, 0)
+        result.checks.append(check)
+        if check.level == CheckLevel.FAIL:
+            result.valid = False
+
+        # 3. 格式域校验（第2-3字节）
+        if len(frame_bytes) >= 4:
+            fmt_byte = frame_bytes[1]
+            # 格式域包含帧长度信息
+            frame_len_from_fmt = ((frame_bytes[2] & 0x03) << 8) | fmt_byte
+            actual_len = len(frame_bytes)
+            if actual_len < frame_len_from_fmt:
+                check = CheckItem(
+                    name=""格式域-帧长度"",
+                    level=CheckLevel.FAIL,
+                    expected=f"">={frame_len_from_fmt}字节"",
+                    actual=f""{actual_len}字节"",
+                    message=f""帧数据不足，格式域指示帧长{frame_len_from_fmt}字节""
+                )
+                result.valid = False
+            else:
+                check = CheckItem(
+                    name=""格式域-帧长度"",
+                    level=CheckLevel.PASS,
+                    expected=f""{frame_len_from_fmt}字节"",
+                    actual=f""{actual_len}字节"",
+                    message=""格式域帧长度校验通过""
+                )
+            result.checks.append(check)
+
+        # 4. 结束字符校验
+        check = self._check_end_char(frame_bytes, 0x16)
+        result.checks.append(check)
+        if check.level == CheckLevel.FAIL:
+            result.valid = False
+
+        # 5. 校验和校验
+        if len(frame_bytes) >= 8:
+            cs_pos = len(frame_bytes) - 2
+            cs_actual = frame_bytes[cs_pos]
+            cs_data = frame_bytes[3:cs_pos]
+            cs_calc = self._calc_checksum_sum(cs_data)
+            if cs_actual == cs_calc:
+                check = CheckItem(
+                    name=""校验和"",
+                    level=CheckLevel.PASS,
+                    expected=f""0x{cs_calc:02X}"",
+                    actual=f""0x{cs_actual:02X}"",
+                    message=""校验和正确""
+                )
+            else:
+                check = CheckItem(
+                    name=""校验和"",
+                    level=CheckLevel.FAIL,
+                    expected=f""0x{cs_calc:02X}"",
+                    actual=f""0x{cs_actual:02X}"",
+                    message=f""校验和错误，期望0x{cs_calc:02X}，实际0x{cs_actual:02X}""
+                )
+                result.valid = False
+            result.checks.append(check)
+
+        # 6. AFN 值域检查
+        if len(frame_bytes) >= 8:
+            afn = frame_bytes[6]
+            if afn in self.AFN_VALID_RANGE:
+                check = CheckItem(
+                    name=""AFN值域"",
+                    level=CheckLevel.PASS,
+                    expected=""0x00~0xF1"",
+                    actual=f""0x{afn:02X}"",
+                    message=f""AFN值0x{afn:02X}在合法范围内""
+                )
+            else:
+                check = CheckItem(
+                    name=""AFN值域"",
+                    level=CheckLevel.WARN,
+                    expected=""0x00~0xF1"",
+                    actual=f""0x{afn:02X}"",
+                    message=f""AFN值0x{afn:02X}超出常规范围""
+                )
+                result.warnings.append(f""AFN值0x{afn:02X}超出常规范围"")
+            result.checks.append(check)
+
+        return result
+",""
+"Class:validator/dlt645_validator.py:DLT645Validator","DLT645Validator","validator/dlt645_validator.py",5,88,true,"
+
+class DLT645Validator(BaseValidator):
+    """"""DLT645-2007 协议帧合法性验证器""""""
+
+    START_CHAR = 0x68
+    END_CHAR = 0x16
+
+    def verify(self, frame_bytes: bytes) -> ValidationResult:
+        """"""验证 DLT645 帧的合法性""""""
+        result = ValidationResult(protocol=""DLT645-2007"", valid=True)
+
+        # 1. 最小帧长度校验
+        check = self._check_min_length(frame_bytes, 12, ""DLT645"")
+        result.checks.append(check)
+        if check.level == CheckLevel.FAIL:
+            result.valid = False
+            return result
+
+        # 2. 起始符1校验 (0x68)
+        check = self._check_start_char(frame_bytes, self.START_CHAR, 0)
+        result.checks.append(check)
+        if check.level == CheckLevel.FAIL:
+            result.valid = False
+
+        # 3. 起始符2校验 (0x68)
+        check = self._check_start_char(frame_bytes, self.START_CHAR, 7)
+        check.name = ""起始符2""
+        result.checks.append(check)
+        if check.level == CheckLevel.FAIL:
+            result.valid = False
+
+        # 4. 结束符校验 (0x16)
+        check = self._check_end_char(frame_bytes, self.END_CHAR)
+        result.checks.append(check)
+        if check.level == CheckLevel.FAIL:
+            result.valid = False
+
+        # 5. 校验和校验（所有字节累加和 & 0xFF）
+        if len(frame_bytes) >= 12:
+            cs_pos = len(frame_bytes) - 2  # 倒数第2字节
+            cs_actual = frame_bytes[cs_pos]
+            cs_data = frame_bytes[0:cs_pos]  # 从第一个0x68到校验和之前
+            cs_calc = self._calc_checksum_sum(cs_data)
+            if cs_actual == cs_calc:
+                check = CheckItem(
+                    name=""校验和"",
+                    level=CheckLevel.PASS,
+                    expected=f""0x{cs_calc:02X}"",
+                    actual=f""0x{cs_actual:02X}"",
+                    message=""校验和正确""
+                )
+            else:
+                check = CheckItem(
+                    name=""校验和"",
+                    level=CheckLevel.FAIL,
+                    expected=f""0x{cs_calc:02X}"",
+                    actual=f""0x{cs_actual:02X}"",
+                    message=f""校验和错误，期望0x{cs_calc:02X}""
+                )
+                result.valid = False
+            result.checks.append(check)
+
+        # 6. 数据长度字段检查
+        if len(frame_bytes) >= 11:
+            data_len = frame_bytes[9]  # 第10字节是数据长度
+            if data_len > 200:  # 合理性检查
+                check = CheckItem(
+                    name=""数据长度"",
+                    level=CheckLevel.WARN,
+                    expected=""<=200字节"",
+                    actual=f""{data_len}字节"",
+                    message=f""数据长度{data_len}字节异常偏大""
+                )
+                result.warnings.append(f""数据长度{data_len}字节异常偏大"")
+            else:
+                check = CheckItem(
+                    name=""数据长度"",
+                    level=CheckLevel.PASS,
+                    expected=""合理范围"",
+                    actual=f""{data_len}字节"",
+                    message=f""数据长度{data_len}字节""
+                )
+            result.checks.append(check)
+
+        return result
+",""
+"Class:validator/base.py:CheckLevel","CheckLevel","validator/base.py",11,15,true,"
+
+class CheckLevel(Enum):
+    """"""校验结果级别""""""
+    PASS = ""pass""      # 通过
+    FAIL = ""fail""      # 失败
+    WARN = ""warn""      # 警告
+
+
+",""
+"Class:validator/base.py:CheckItem","CheckItem","validator/base.py",19,35,true,"
+@dataclass
+class CheckItem:
+    """"""单个校验项结果""""""
+    name: str           # 校验项名称（如""起始字符""、""校验和""）
+    level: CheckLevel   # 校验结果级别
+    expected: str       # 期望值（如""0x68""）
+    actual: str         # 实际值
+    message: str        # 描述信息
+
+    @property
+    def icon(self) -> str:
+        """"""返回状态图标""""""
+        if self.level == CheckLevel.PASS:
+            return ""✅""
+        elif self.level == CheckLevel.FAIL:
+            return ""❌""
+        else:
+            return ""⚠️""
+
+
+",""
+"Class:validator/base.py:ValidationResult","ValidationResult","validator/base.py",39,90,true,"
+@dataclass
+class ValidationResult:
+    """"""验证结果""""""
+    protocol: str                    # 协议名称
+    valid: bool                      # 整体是否通过
+    checks: List[CheckItem] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    errors: List[str] = field(default_factory=list)
+
+    @property
+    def pass_count(self) -> int:
+        return sum(1 for c in self.checks if c.level == CheckLevel.PASS)
+
+    @property
+    def fail_count(self) -> int:
+        return sum(1 for c in self.checks if c.level == CheckLevel.FAIL)
+
+    @property
+    def warn_count(self) -> int:
+        return sum(1 for c in self.checks if c.level == CheckLevel.WARN)
+
+    def summary(self) -> str:
+        """"""返回摘要字符串""""""
+        status = ""通过"" if self.valid else ""失败""
+        parts = [f""[{status}]""]
+        parts.append(f""通过{self.pass_count}项"")
+        if self.fail_count > 0:
+            parts.append(f""失败{self.fail_count}项"")
+        if self.warn_count > 0:
+            parts.append(f""警告{self.warn_count}项"")
+        return "", "".join(parts)
+
+    def to_dict(self) -> dict:
+        """"""转换为字典""""""
+        return {
+            ""协议"": self.protocol,
+            ""整体结果"": ""通过"" if self.valid else ""失败"",
+            ""通过项数"": self.pass_count,
+            ""失败项数"": self.fail_count,
+            ""警告项数"": self.warn_count,
+            ""校验项"": [
+                {
+                    ""名称"": c.name,
+                    ""状态"": c.level.value,
+                    ""期望"": c.expected,
+                    ""实际"": c.actual,
+                    ""说明"": c.message
+                }
+                for c in self.checks
+            ],
+            ""警告"": self.warnings,
+            ""错误"": self.errors
+        }
+
+
+",""
+"Class:validator/base.py:BaseValidator","BaseValidator","validator/base.py",93,216,true,"
+
+class BaseValidator(ABC):
+    """"""协议验证器基类""""""
+
+    @abstractmethod
+    def verify(self, frame_bytes: bytes) -> ValidationResult:
+        """"""验证帧的合法性，返回 ValidationResult""""""
+        pass
+
+    def _check_min_length(self, data: bytes, min_len: int, protocol: str) -> CheckItem:
+        """"""通用最小长度校验""""""
+        if len(data) < min_len:
+            return CheckItem(
+                name=""帧长度"",
+                level=CheckLevel.FAIL,
+                expected=f"">={min_len}字节"",
+                actual=f""{len(data)}字节"",
+                message=f""帧长度不足，最小需要{min_len}字节""
+            )
+        return CheckItem(
+            name=""帧长度"",
+            level=CheckLevel.PASS,
+            expected=f"">={min_len}字节"",
+            actual=f""{len(data)}字节"",
+            message=""帧长度满足最小要求""
+        )
+
+    def _check_start_char(self, data: bytes, expected: int, pos: int = 0) -> CheckItem:
+        """"""通用起始字符校验""""""
+        if len(data) <= pos:
+            return CheckItem(
+                name=""起始字符"",
+                level=CheckLevel.FAIL,
+                expected=f""0x{expected:02X}"",
+                actual=""数据不足"",
+                message=""帧数据不足以读取起始字符""
+            )
+        actual = data[pos]
+        if actual != expected:
+            return CheckItem(
+                name=""起始字符"",
+                level=CheckLevel.FAIL,
+                expected=f""0x{expected:02X}"",
+                actual=f""0x{actual:02X}"",
+                message=f""起始字符错误，期望0x{expected:02X}，实际0x{actual:02X}""
+            )
+        return CheckItem(
+            name=""起始字符"",
+            level=CheckLevel.PASS,
+            expected=f""0x{expected:02X}"",
+            actual=f""0x{actual:02X}"",
+            message=""起始字符正确""
+        )
+
+    def _check_end_char(self, data: bytes, expected: int) -> CheckItem:
+        """"""通用结束字符校验""""""
+        if len(data) == 0:
+            return CheckItem(
+                name=""结束字符"",
+                level=CheckLevel.FAIL,
+                expected=f""0x{expected:02X}"",
+                actual=""空帧"",
+                message=""帧数据为空，无法校验结束字符""
+            )
+        actual = data[-1]
+        if actual != expected:
+            return CheckItem(
+                name=""结束字符"",
+                level=CheckLevel.FAIL,
+                expected=f""0x{expected:02X}"",
+                actual=f""0x{actual:02X}"",
+                message=f""结束字符错误，期望0x{expected:02X}，实际0x{actual:02X}""
+            )
+        return CheckItem(
+            name=""结束字符"",
+            level=CheckLevel.PASS,
+            expected=f""0x{expected:02X}"",
+            actual=f""0x{actual:02X}"",
+            message=""结束字符正确""
+        )
+
+    def _calc_checksum_sum(self, data: bytes) -> int:
+        """"""计算累加和校验（& 0xFF）""""""
+        return sum(data) & 0xFF
+
+    def _calc_crc16_ccitt(self, data: bytes) -> int:
+        """"""计算 CRC16-CCITT 校验（初始值0xFFFF，最终异或0xFFFF）""""""
+        crc_table = [
+            0x0000, 0x1189, 0x2312, 0x329b, 0x4624, 0x57ad, 0x6536, 0x74bf,
+            0x8c48, 0x9dc1, 0xaf5a, 0xbed3, 0xca6c, 0xdbe5, 0xe97e, 0xf8f7,
+            0x1081, 0x0108, 0x3393, 0x221a, 0x56a5, 0x472c, 0x75b7, 0x643e,
+            0x9cc9, 0x8d40, 0xbfdb, 0xae52, 0xdaed, 0xcb64, 0xf9ff, 0xe876,
+            0x2102, 0x308b, 0x0210, 0x1399, 0x6726, 0x76af, 0x4434, 0x55bd,
+            0xad4a, 0xbcc3, 0x8e58, 0x9fd1, 0xeb6e, 0xfae7, 0xc87c, 0xd9f5,
+            0x3183, 0x200a, 0x1291, 0x0318, 0x77a7, 0x662e, 0x54b5, 0x453c,
+            0xbdcb, 0xac42, 0x9ed9, 0x8f50, 0xfbef, 0xea66, 0xd8fd, 0xc974,
+            0x4204, 0x538d, 0x6116, 0x709f, 0x0420, 0x15a9, 0x2732, 0x36bb,
+            0xce4c, 0xdfc5, 0xed5e, 0xfcd7, 0x8868, 0x99e1, 0xab7a, 0xbaf3,
+            0x5285, 0x430c, 0x7197, 0x601e, 0x14a1, 0x0528, 0x37b3, 0x263a,
+            0xdecd, 0xcf44, 0xfddf, 0xec56, 0x98e9, 0x8960, 0xbbfb, 0xaa72,
+            0x6306, 0x728f, 0x4014, 0x519d, 0x2522, 0x34ab, 0x0630, 0x17b9,
+            0xef4e, 0xfec7, 0xcc5c, 0xddd5, 0xa96a, 0xb8e3, 0x8a78, 0x9bf1,
+            0x7387, 0x620e, 0x5095, 0x411c, 0x35a3, 0x242a, 0x16b1, 0x0738,
+            0xffcf, 0xee46, 0xdcdd, 0xcd54, 0xb9eb, 0xa862, 0x9af9, 0x8b70,
+            0x8408, 0x9581, 0xa71a, 0xb693, 0xc22c, 0xd3a5, 0xe13e, 0xf0b7,
+            0x0840, 0x19c9, 0x2b52, 0x3adb, 0x4e64, 0x5fed, 0x6d76, 0x7cff,
+            0x9489, 0x8500, 0xb79b, 0xa612, 0xd2ad, 0xc324, 0xf1bf, 0xe036,
+            0x18c1, 0x0948, 0x3bd3, 0x2a5a, 0x5ee5, 0x4f6c, 0x7df7, 0x6c7e,
+            0xa50a, 0xb483, 0x8618, 0x9791, 0xe32e, 0xf2a7, 0xc03c, 0xd1b5,
+            0x2942, 0x38cb, 0x0a50, 0x1bd9, 0x6f66, 0x7eef, 0x4c74, 0x5dfd,
+            0xb58b, 0xa402, 0x9699, 0x8710, 0xf3af, 0xe226, 0xd0bd, 0xc134,
+            0x39c3, 0x284a, 0x1ad1, 0x0b58, 0x7fe7, 0x6e6e, 0x5cf5, 0x4d7c,
+            0xc60c, 0xd785, 0xe51e, 0xf497, 0x8028, 0x91a1, 0xa33a, 0xb2b3,
+            0x4a44, 0x5bcd, 0x6956, 0x78df, 0x0c60, 0x1de9, 0x2f72, 0x3efb,
+            0xd68d, 0xc704, 0xf59f, 0xe416, 0x90a9, 0x8120, 0xb3bb, 0xa232,
+            0x5ac5, 0x4b4
+... [truncated]",""
+"Class:templates/test_templates.py:TestTemplate","TestTemplate","templates/test_templates.py",12,18,true,"
+@dataclass
+class TestTemplate:
+    """"""测试用例模板""""""
+    name: str                    # 模板名称
+    description: str             # 描述
+    protocol: str                # 协议类型（south/gdw/hdlc/plc_rf/dlt645）
+    category: str                # 分类（组网/档案/任务/时间/查询等）
+    items: List[Dict[str, Any]]  # 测试项列表
+
+
+",""
+"Class:report/excel_reporter.py:ExcelReporter","ExcelReporter","report/excel_reporter.py",17,214,true,"
+
+class ExcelReporter:
+    """"""Excel 测试报告生成器""""""
+
+    # 样式定义
+    HEADER_FONT = Font(name='微软雅黑', bold=True, size=11, color='FFFFFF')
+    HEADER_FILL = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
+    HEADER_ALIGNMENT = Alignment(horizontal='center', vertical='center', wrap_text=True)
+
+    PASS_FILL = PatternFill(start_color='C6EFCE', end_color='C6EFCE', fill_type='solid')
+    PASS_FONT = Font(color='006100')
+
+    FAIL_FILL = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')
+    FAIL_FONT = Font(color='9C0006')
+
+    WARN_FILL = PatternFill(start_color='FFEB9C', end_color='FFEB9C', fill_type='solid')
+    WARN_FONT = Font(color='9C6500')
+
+    NORMAL_FONT = Font(name='微软雅黑', size=10)
+    TITLE_FONT = Font(name='微软雅黑', bold=True, size=14)
+    SUBTITLE_FONT = Font(name='微软雅黑', bold=True, size=11)
+
+    THIN_BORDER = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+
+    def export(self, file_path: str, test_items: List[Dict[str, Any]],
+               test_log: str = """", test_start_time: Optional[datetime] = None,
+               test_end_time: Optional[datetime] = None) -> str:
+        """"""
+        导出测试报告到 Excel 文件
+
+        参数:
+            file_path: 保存路径
+            test_items: 测试项列表
+            test_log: 测试日志
+            test_start_time: 测试开始时间
+            test_end_time: 测试结束时间
+
+        返回:
+            保存的文件路径
+        """"""
+        wb = Workbook()
+
+        # Sheet 1: 测试概要
+        self._create_summary_sheet(wb, test_items, test_start_time, test_end_time)
+
+        # Sheet 2: 详细结果
+        self._create_detail_sheet(wb, test_items)
+
+        # Sheet 3: 测试日志
+        self._create_log_sheet(wb, test_log)
+
+        # 保存文件
+        wb.save(file_path)
+        return file_path
+
+    def _create_summary_sheet(self, wb: Workbook, items: List[Dict],
+                              start_time: Optional[datetime],
+                              end_time: Optional[datetime]):
+        """"""创建测试概要 Sheet""""""
+        ws = wb.active
+        ws.title = ""测试概要""
+
+        # 标题
+        ws.merge_cells('A1:F1')
+        ws['A1'] = ""协议一致性测试报告""
+        ws['A1'].font = self.TITLE_FONT
+        ws['A1'].alignment = Alignment(horizontal='center')
+
+        # 统计数据
+        total = len(items)
+        passed = sum(1 for item in items if item.get('test_result') == '通过')
+        failed = sum(1 for item in items if item.get('test_result') == '失败')
+        timeout = sum(1 for item in items if item.get('test_result') == '超时')
+        skipped = sum(1 for item in items if item.get('test_result') == '未测')
+
+        pass_rate = (passed / total * 100) if total > 0 else 0
+
+        # 概要信息
+        summary_data = [
+            (""测试信息"", """", """", """", """", """"),
+            (""测试开始时间"", start_time.strftime(""%Y-%m-%d %H:%M:%S"") if start_time else ""未记录"", """", """", """", """"),
+            (""测试结束时间"", end_time.strftime(""%Y-%m-%d %H:%M:%S"") if end_time else ""未记录"", """", """", """", """"),
+            ("""", """", """", """", """", """"),
+            (""测试统计"", """", """", """", """", """"),
+            (""总步骤数"", total, """", ""通过数"", passed, """"),
+            (""失败数"", failed, """", ""超时数"", timeout, """"),
+            (""未测数"", skipped, """", ""通过率"", f""{pass_rate:.1f}%"", """"),
+        ]
+
+        for row_idx, row_data in enumerate(summary_data, start=3):
+            for col_idx, value in enumerate(row_data, start=1):
+                cell = ws.cell(row=row_idx, column=col_idx, value=value)
+                cell.font = self.NORMAL_FONT
+                cell.border = self.THIN_BORDER
+                if col_idx == 1 or col_idx == 4:
+                    cell.font = self.SUBTITLE_FONT
+                    cell.fill = PatternFill(start_color='D9E2F3', end_color='D9E2F3', fill_type='solid')
+
+        # 设置列宽
+        ws.column_dimensions['A'].width = 18
+        ws.column_dimensions['B'].width = 25
+        ws.column_dimensions['C'].width = 5
+        ws.column_dimensions['D'].width = 12
+        ws.column_dimensions['E'].width = 15
+
+    def _create_detail_sheet(self, wb: Workbook, items: List[Dict]):
+        """"""创建详细结果 Sheet""""""
+        ws = wb.create_sheet(""详细结果"")
+
+        # 表头
+        headers = [""序号"", ""测试项名称"", ""发送帧"", ""匹配规则"", ""响应帧"", ""匹配结果"", ""状态""]
+        for col_idx, header in enumerate(headers, start=1):
+            cell = ws.cell(row=1, column=col_idx, value=header)
+            cell.font = self.HEADER_FONT
+            cell.fill = self.HEADER_FILL
+            cell.alignment = self.HEADER_ALIGNMENT
+            cell.border = self.THIN_BORDER
+
+        # 数据行
+        for row_idx, item in enumerate(items, start=2):
+            # 序号
+            ws.cell(row=row_idx, column=1, value=row_idx - 1).font = self.NORMAL_FONT
+
+            # 名称
+            ws.cell(row=row_idx, column=2, value=item.get('name', '')).font = self.NORMAL_FONT
+
+            # 发送帧
+            frame_hex = item.get('frame_hex', '')
+     
+... [truncated]",""
+"Class:monitor/frame_monitor.py:FrameMonitorWidget","FrameMonitorWidget","monitor/frame_monitor.py",18,514,true,"
+
+class FrameMonitorWidget(QWidget):
+    """"""实时帧监听 Widget""""""
+
+    # 信号
+    frame_selected = Signal(bytes)  # 用户选中帧时发出
+    add_to_test_plan = Signal(str, str)  # 添加到测试方案 (name, frame_hex)
+
+    # 最大历史记录数
+    MAX_HISTORY = 1000
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._serial_worker = None
+        self._frame_history: deque = deque(maxlen=self.MAX_HISTORY)
+        self._parsers = {}  # 协议解析器映射
+        self._auto_parse = True
+        self._setup_ui()
+        self._init_parsers()
+
+    def _init_parsers(self):
+        """"""初始化协议解析器""""""
+        try:
+            from protocol_parser import ProtocolFrameParser
+            from gdw10376_parser import GDW10376Parser
+            from hdlc_parser import HDLCParser
+            from plc_rf_parser import PLCRFProtocolParser
+            from dlt645_parser import DLT645Parser
+
+            self._parsers = {
+                '南网': ProtocolFrameParser(),
+                '国网': GDW10376Parser(),
+                'HDLC': HDLCParser(),
+                'PLC RF': PLCRFProtocolParser(),
+                'DLT645': DLT645Parser(),
+            }
+        except Exception as e:
+            print(f""初始化解析器失败: {e}"")
+
+    def _setup_ui(self):
+        """"""设置 UI 布局""""""
+        layout = QVBoxLayout(self)
+        layout.setSpacing(6)
+        layout.setContentsMargins(6, 6, 6, 6)
+
+        # ---- 工具栏 ----
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(6)
+
+        self._auto_parse_check = QCheckBox(""自动解析"")
+        self._auto_parse_check.setChecked(True)
+        self._auto_parse_check.toggled.connect(self._on_auto_parse_toggled)
+        toolbar.addWidget(self._auto_parse_check)
+
+        toolbar.addWidget(QLabel(""协议过滤:""))
+        self._filter_combo = QComboBox()
+        self._filter_combo.addItems([""全部"", ""南网"", ""国网"", ""HDLC"", ""PLC RF"", ""DLT645""])
+        self._filter_combo.currentTextChanged.connect(self._on_filter_changed)
+        toolbar.addWidget(self._filter_combo)
+
+        self._clear_btn = QPushButton(""清空历史"")
+        self._clear_btn.clicked.connect(self._on_clear_history)
+        toolbar.addWidget(self._clear_btn)
+
+        self._export_btn = QPushButton(""导出历史"")
+        self._export_btn.clicked.connect(self._on_export_history)
+        toolbar.addWidget(self._export_btn)
+
+        toolbar.addStretch()
+
+        self._count_label = QLabel(""共 0 帧"")
+        self._count_label.setStyleSheet(""color: #666; font-size: 12px;"")
+        toolbar.addWidget(self._count_label)
+
+        self._pause_check = QCheckBox(""暂停接收"")
+        self._pause_check.toggled.connect(self._on_pause_toggled)
+        toolbar.addWidget(self._pause_check)
+
+        layout.addLayout(toolbar)
+
+        # ---- 主内容区（左右分割）----
+        splitter = QSplitter(Qt.Horizontal)
+
+        # 左侧：帧历史列表
+        left_group = QGroupBox(""帧历史"")
+        left_layout = QVBoxLayout(left_group)
+        left_layout.setContentsMargins(4, 4, 4, 4)
+
+        self._history_table = QTableWidget()
+        self._history_table.setColumnCount(6)
+        self._history_table.setHorizontalHeaderLabels([""序号"", ""时间"", ""协议"", ""方向"", ""长度"", ""摘要""])
+        header = self._history_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
+        self._history_table.setColumnWidth(0, 50)
+        self._history_table.setColumnWidth(1, 80)
+        self._history_table.setColumnWidth(2, 70)
+        self._history_table.setColumnWidth(3, 50)
+        self._history_table.setColumnWidth(4, 50)
+        self._history_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self._history_table.setAlternatingRowColors(True)
+        self._history_table.verticalHeader().hide()
+        self._history_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self._history_table.currentCellChanged.connect(self._on_history_row_changed)
+        table_font = QFont()
+        table_font.setPointSize(8)
+        self._history_table.setFont(table_font)
+        left_layout.addWidget(self._history_table)
+
+        splitter.addWidget(left_group)
+
+        # 右侧：选中帧的解析结果 + 校验结果
+        right_group = QGroupBox(""解析结果"")
+        right_layout = QVBoxLayout(right_group)
+        right_layout.setContentsMargins(4, 4, 4, 4)
+
+        self._parse_result_table = QTableWidget()
+        self._parse_result_table.setColumnCount(4)
+        self._parse_result_table.setHorizontalHeaderLabels([""字段"", ""原始值"", ""解析值"", ""说明""])
+        header = self._parse_result_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
+        self._parse_result_table.setColumnWidth(0, 120)
+        self._parse_result_table.setColumnWidth(1, 100)
+        self._parse_result_table.setColumnWidth(2, 100)
+        self._parse_result_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self._parse_result_table.setAlternatingRowColors(True)
+... [truncated]",""
