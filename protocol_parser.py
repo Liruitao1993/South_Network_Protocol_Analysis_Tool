@@ -55,7 +55,19 @@ class ProtocolFrameParser:
         result = self.parse(frame_bytes)
         frame_len = len(frame_bytes)
 
-        # 计算帧结构偏移量
+        # 检查解析是否失败，如果失败则返回错误信息
+        if result.get("解析状态") == "失败":
+            error_msg = result.get("错误信息", "未知错误")
+            self._add_field(table_data, "❌ 解析失败", "-", "-", error_msg, None, None)
+            # 同时显示原始数据
+            self._add_field(table_data, "原始数据", result.get("原始数据", "-"), "-", f"共{frame_len}字节", None, None)
+            return table_data
+
+        # 安全计算帧结构偏移量
+        if frame_len < 3:
+            self._add_field(table_data, "❌ 帧数据过短", "-", "-", f"仅{frame_len}字节，无法解析长度域", None, None)
+            return table_data
+
         length_val = int.from_bytes(frame_bytes[1:3], 'little')
         user_data_len = length_val - 6
         cs_pos = 4 + user_data_len  # 校验和位置
@@ -64,8 +76,8 @@ class ProtocolFrameParser:
         add_flag = 0
         if "控制域" in result:
             ctrl = result["控制域"]
-            if "地址域标识(ADD)" in ctrl:
-                add_flag = ctrl["地址域标识(ADD)"]["值"]
+            if "D5 地址域标识(ADD)" in ctrl:
+                add_flag = ctrl["D5 地址域标识(ADD)"]["值"]
 
         # 第 1 级：帧的各个组成部分
         for key, value in result.items():
@@ -90,9 +102,11 @@ class ProtocolFrameParser:
                         if subkey == "原始字节":
                             continue
                         if isinstance(subvalue, dict):
+                            bit_val = subvalue.get("位", "-")
                             val = subvalue.get("值", "-")
                             desc = subvalue.get("说明", "")
-                            self._add_field(table_data, f"  {subkey.split('(')[0]}", "-", str(val), desc, 3, 3, is_child=True)
+                            # 子字段原始值显示对应二进制位值
+                            self._add_field(table_data, f"  {subkey}", str(bit_val), str(val), desc, 3, 3, is_child=True)
 
                 elif key == "用户数据区":
                     self._parse_user_data_to_table(value, table_data, add_flag, cs_pos, frame_len)
@@ -139,8 +153,10 @@ class ProtocolFrameParser:
         if "地址域" in user_data:
             addr = user_data["地址域"]
             self._add_field(table_data, "地址域", "", "", "", offset, offset + 11)
-            self._add_field(table_data, "  源地址", addr.get("源地址", "-"), "", "", offset, offset + 5, is_child=True)
-            self._add_field(table_data, "  目的地址", addr.get("目的地址", "-"), "", "", offset + 6, offset + 11, is_child=True)
+            src_addr = addr.get("源地址", {})
+            dst_addr = addr.get("目的地址", {})
+            self._add_field(table_data, "  源地址", src_addr.get("原始值", "-"), src_addr.get("解析值", ""), "", offset, offset + 5, is_child=True)
+            self._add_field(table_data, "  目的地址", dst_addr.get("原始值", "-"), dst_addr.get("解析值", ""), "", offset + 6, offset + 11, is_child=True)
             offset += 12
 
         # 应用功能码 AFN
@@ -828,32 +844,45 @@ class ProtocolFrameParser:
         return result
 
     def _parse_control_field(self, control_byte: int) -> Dict[str, Any]:
-        """解析控制域"""
+        """解析控制域
+        位布局: D7=DIR, D6=PRM, D5=ADD, D4~D3=VER, D2~D0=保留
+        """
         dir_flag = (control_byte >> 7) & 0x01
         prm = (control_byte >> 6) & 0x01
         add = (control_byte >> 5) & 0x01
-        ver = (control_byte >> 3) & 0x03
-        reserved = control_byte & 0x07
+        ver = (control_byte >> 3) & 0x03  # D4~D3, 2 bits
+        reserved = control_byte & 0x07    # D2~D0, 3 bits
+
+        # 二进制字符串
+        full_bits = f"{control_byte:08b}"
 
         return {
             "原始字节": f"0x{control_byte:02X}",
-            "传输方向(DIR)": {
+            "D7 传输方向(DIR)": {
                 "值": dir_flag,
+                "位": full_bits[0],
                 "说明": "下行帧(集中器->模块)" if dir_flag == 0 else "上行帧(模块->集中器)"
             },
-            "启动标志(PRM)": {
+            "D6 启动标志(PRM)": {
                 "值": prm,
+                "位": full_bits[1],
                 "说明": "从动站" if prm == 0 else "启动站"
             },
-            "地址域标识(ADD)": {
+            "D5 地址域标识(ADD)": {
                 "值": add,
+                "位": full_bits[2],
                 "说明": "不带地址域" if add == 0 else "带地址域"
             },
-            "协议版本(VER)": {
+            "D4~D3 协议版本(VER)": {
                 "值": ver,
+                "位": f"{full_bits[3:5]}({ver})",
                 "说明": f"版本{ver}"
             },
-            "保留位": reserved
+            "D2~D0 保留位": {
+                "值": reserved,
+                "位": f"{full_bits[5:8]}({reserved})",
+                "说明": f"保留(reserved={reserved})"
+            }
         }
 
     def _parse_user_data(self, user_data: bytes, control: Dict[str, Any]) -> Dict[str, Any]:
@@ -870,13 +899,15 @@ class ProtocolFrameParser:
         pos = 0
 
         # 解析地址域
-        add = control["地址域标识(ADD)"]["值"]
+        add = control["D5 地址域标识(ADD)"]["值"]
         if add == 1 and len(user_data) >= 12:
-            src_addr = user_data[pos:pos+6][::-1]
-            dst_addr = user_data[pos+6:pos+12][::-1]
+            src_raw = user_data[pos:pos+6].hex().upper()
+            src_parsed = user_data[pos:pos+6][::-1].hex().upper()
+            dst_raw = user_data[pos+6:pos+12].hex().upper()
+            dst_parsed = user_data[pos+6:pos+12][::-1].hex().upper()
             result["地址域"] = {
-                "源地址": src_addr.hex().upper(),
-                "目的地址": dst_addr.hex().upper()
+                "源地址": {"原始值": src_raw, "解析值": src_parsed},
+                "目的地址": {"原始值": dst_raw, "解析值": dst_parsed}
             }
             pos += 12
 
@@ -901,9 +932,11 @@ class ProtocolFrameParser:
             pos += 1
 
         # 解析DI
+        di_combination = None
         if len(user_data) >= pos + 4:
             di_bytes = user_data[pos:pos+4]
             di_value = int.from_bytes(di_bytes, 'little')
+            # DI字段按小端序存储：di_bytes[0]是最低字节(DI0)，di_bytes[3]是最高字节(DI3)
             di3, di2, di1, di0 = di_bytes[3], di_bytes[2], di_bytes[1], di_bytes[0]
 
             # 查找DI组合说明
@@ -928,7 +961,7 @@ class ProtocolFrameParser:
             pos += 4
 
         # 剩余数据作为数据标识内容
-        if len(user_data) > pos:
+        if len(user_data) > pos and di_combination is not None:
             data_content = user_data[pos:]
             # 根据DI组合解析数据内容
             parsed_content = self._parse_di_data_content(di_combination, data_content)
@@ -1080,7 +1113,7 @@ class ProtocolFrameParser:
             (0xE8, 0x03, 0x03, 0x65): self._parse_query_network_topology_data,        # 查询网络拓扑信息（下行）
             (0xE8, 0x00, 0x03, 0x6A): self._parse_simple_bin2_data,                   # 查询最大网络规模
             (0xE8, 0x00, 0x03, 0x6B): self._parse_simple_bin1_data,                   # 查询最大网络级数
-            (0xE8, 0x00, 0x03, 0x6C): self._parse_simple_bin1_data,                   # 查询允许/禁止拒绝从节点信息上报
+            (0xE8, 0x00, 0x03, 0x6C): self._parse_refuse_report_enable_data,          # 查询允许/禁止拒绝从节点信息上报
             (0xE8, 0x00, 0x03, 0x6D): self._parse_query_rf_params_data,               # 查询无线参数
             (0xE8, 0x04, 0x03, 0x6E): self._parse_return_slave_detail_info_data,       # 返回查询指定从节点信息
             (0xE8, 0x03, 0x03, 0x6E): self._parse_query_slave_detail_info_data,        # 查询指定从节点信息（下行）
@@ -1093,7 +1126,7 @@ class ProtocolFrameParser:
             (0xE8, 0x00, 0x03, 0x90): self._parse_simple_bin1_data,                   # 查询宽带载波频段
             (0xE8, 0x04, 0x03, 0x96): self._parse_return_device_type_data,             # 返回查询设备类型
             (0xE8, 0x03, 0x03, 0x96): self._parse_query_device_type_data,              # 查询设备类型（下行）
-            (0xE8, 0x00, 0x03, 0x97): self._parse_simple_bin2_data,                   # 查询台区组网成功率
+            (0xE8, 0x00, 0x03, 0x97): self._parse_network_success_rate_data,         # 查询台区组网成功率
             (0xE8, 0x04, 0x03, 0x98): self._parse_return_node_channel_info_data,       # 返回查询节点信道信息
             (0xE8, 0x03, 0x03, 0x98): self._parse_query_node_channel_info_data,        # 查询节点信道信息（下行）
             (0xE8, 0x00, 0x03, 0x95): self._parse_simple_bin1_data,                   # 查询并发数
@@ -1101,7 +1134,7 @@ class ProtocolFrameParser:
             # ==================== PLUZ扩展 - 写参数（AFN=04H）新增 ====================
             (0xE8, 0x02, 0x04, 0x6A): self._parse_simple_bin2_data,                   # 设置最大网络规模
             (0xE8, 0x02, 0x04, 0x6B): self._parse_simple_bin2_data,                   # 设置最大网络级数
-            (0xE8, 0x02, 0x04, 0x6C): self._parse_simple_bin1_data,                   # 允许/禁止拒绝从节点信息上报
+            (0xE8, 0x02, 0x04, 0x6C): self._parse_refuse_report_enable_data,          # 允许/禁止拒绝从节点信息上报
             (0xE8, 0x02, 0x04, 0x6D): self._parse_set_rf_params_data,                  # 设置无线参数
             (0xE8, 0x02, 0x04, 0x72): self._parse_simple_bin2_data,                   # 配置踢出后不允许入网时间
             (0xE8, 0x02, 0x04, 0x74): self._parse_set_run_params_data,                 # 配置运行参数
@@ -1323,7 +1356,7 @@ class ProtocolFrameParser:
         for i in range(addr_count):
             if pos + 6 > len(data):
                 break
-            addrs.append({"序号": i + 1, "任务目的地址": data[pos:pos+6].hex().upper()})
+            addrs.append({"序号": i + 1, "任务目的地址": {"原始值": data[pos:pos+6].hex().upper(), "解析值": data[pos:pos+6][::-1].hex().upper()}})
             pos += 6
         result["任务目的地址列表"] = addrs
 
@@ -1385,7 +1418,7 @@ class ProtocolFrameParser:
             for i in range(node_count):
                 if pos + 6 > len(data):
                     break
-                nodes.append({"序号": i + 1, "从节点地址": data[pos:pos+6].hex().upper()})
+                nodes.append({"序号": i + 1, "从节点地址": {"原始值": data[pos:pos+6].hex().upper(), "解析值": data[pos:pos+6][::-1].hex().upper()}})
                 pos += 6
             result["从节点列表"] = nodes
 
@@ -1458,14 +1491,26 @@ class ProtocolFrameParser:
         result = {"原始值": data.hex().upper()}
         try:
             # 多字节字段按小端序解析：低字节在前，解析时反转
-            result["厂商代码"] = data[0:2][::-1].decode('ascii')
-            result["芯片代码"] = data[2:4][::-1].decode('ascii')
-            # 版本时间 3B BCD, 小端序: [YY, MM, DD] 传输为低字节在前
+            result["厂商代码"] = {
+                "原始值": data[0:2].hex().upper(),
+                "解析值": data[0:2][::-1].decode('ascii')
+            }
+            result["芯片代码"] = {
+                "原始值": data[2:4].hex().upper(),
+                "解析值": data[2:4][::-1].decode('ascii')
+            }
+            # 版本时间 3B BCD, 小端序(低字节在前), 格式为 YYMMDD
             vdate = data[4:7][::-1]
-            result["版本时间"] = f"{self._bcd_to_str(vdate[0])}-{self._bcd_to_str(vdate[1])}-{self._bcd_to_str(vdate[2])}"
+            result["版本时间"] = {
+                "原始值": data[4:7].hex().upper(),
+                "解析值": f"20{self._bcd_to_str(vdate[0])}-{self._bcd_to_str(vdate[1])}-{self._bcd_to_str(vdate[2])}"
+            }
             # 版本号 2B BCD, 小端序
             ver = data[7:9][::-1]
-            result["版本号"] = self._bcd_to_str(ver[0]) + self._bcd_to_str(ver[1])
+            result["版本号"] = {
+                "原始值": data[7:9].hex().upper(),
+                "解析值": self._bcd_to_str(ver[0]) + self._bcd_to_str(ver[1])
+            }
         except Exception:
             pass
         return result
@@ -1536,7 +1581,8 @@ class ProtocolFrameParser:
         # 主节点地址
         master_addr = data[pos:pos+6]
         result["主节点地址"] = {
-            "原始值": master_addr.hex().upper()
+            "原始值": master_addr.hex().upper(),
+            "解析值": master_addr[::-1].hex().upper()
         }
         pos += 6
         
@@ -1564,11 +1610,11 @@ class ProtocolFrameParser:
         }
         pos += 2
         
-        # 通信模块接口协议发布日期 (3B BCD, 小端序)
+        # 通信模块接口协议发布日期 (3B BCD, 小端序, YYMMDD)
         date_bytes = data[pos:pos+3][::-1]
         result["通信模块接口协议发布日期"] = {
             "原始值": data[pos:pos+3].hex().upper(),
-            "日期": f"{self._bcd_to_str(date_bytes[0])}-{self._bcd_to_str(date_bytes[1])}-{self._bcd_to_str(date_bytes[2])}"
+            "解析值": f"20{self._bcd_to_str(date_bytes[0])}-{self._bcd_to_str(date_bytes[1])}-{self._bcd_to_str(date_bytes[2])}"
         }
         pos += 3
         
@@ -1577,15 +1623,27 @@ class ProtocolFrameParser:
         vendor_result = {"原始值": vendor_info.hex().upper()}
         if len(vendor_info) >= 9:
             try:
-                # 多字节字段按小端序解析：低字节在前，解析时反转
+                # ASCII字段按小端序解析：低字节在前，解析时反转；BCD日期字段按自然序YYMMDD解析
                 vendor_code = vendor_info[0:2][::-1].decode('ascii')
                 chip_code = vendor_info[2:4][::-1].decode('ascii')
-                vendor_result["厂商代码"] = vendor_code
-                vendor_result["芯片代码"] = chip_code
+                vendor_result["厂商代码"] = {
+                    "原始值": vendor_info[0:2].hex().upper(),
+                    "解析值": vendor_code
+                }
+                vendor_result["芯片代码"] = {
+                    "原始值": vendor_info[2:4].hex().upper(),
+                    "解析值": chip_code
+                }
                 vdate = vendor_info[4:7][::-1]
-                vendor_result["版本日期"] = f"{self._bcd_to_str(vdate[0])}-{self._bcd_to_str(vdate[1])}-{self._bcd_to_str(vdate[2])}"
+                vendor_result["版本日期"] = {
+                    "原始值": vendor_info[4:7].hex().upper(),
+                    "解析值": f"20{self._bcd_to_str(vdate[0])}-{self._bcd_to_str(vdate[1])}-{self._bcd_to_str(vdate[2])}"
+                }
                 ver = vendor_info[7:9][::-1]
-                vendor_result["版本"] = self._bcd_to_str(ver[0]) + self._bcd_to_str(ver[1])
+                vendor_result["版本号"] = {
+                    "原始值": vendor_info[7:9].hex().upper(),
+                    "解析值": self._bcd_to_str(ver[0]) + self._bcd_to_str(ver[1])
+                }
             except:
                 pass
         result["厂商代码和版本信息"] = vendor_result
@@ -1598,8 +1656,9 @@ class ProtocolFrameParser:
         """
         if len(data) < 6:
             return {"说明": "查询命令，无数据内容"}
+        addr = data[0:6]
         return {
-            "主节点地址": {"原始值": data[0:6].hex().upper()}
+            "主节点地址": {"原始值": addr.hex().upper(), "解析值": addr[::-1].hex().upper()}
         }
 
     def _parse_query_comm_delay_data(self, data: bytes) -> Dict[str, Any]:
@@ -1611,7 +1670,7 @@ class ProtocolFrameParser:
         if len(data) < 6:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
         result = {
-            "目的地址": data[0:6].hex().upper()
+            "目的地址": {"原始值": data[0:6].hex().upper(), "解析值": data[0:6][::-1].hex().upper()}
         }
         # PLUZ扩展：包含报文长度字段（2字节）
         if len(data) >= 8:
@@ -1628,7 +1687,7 @@ class ProtocolFrameParser:
         if len(data) < 8:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
         result = {
-            "目的地址": data[0:6].hex().upper(),
+            "目的地址": {"原始值": data[0:6].hex().upper(), "解析值": data[0:6][::-1].hex().upper()},
             "通信延时时长": {
                 "原始值": data[6:8].hex().upper(),
                 "十进制": int.from_bytes(data[6:8], 'little'),
@@ -1655,26 +1714,41 @@ class ProtocolFrameParser:
         }
 
     def _parse_query_slave_node_info_data(self, data: bytes) -> Dict[str, Any]:
-        """解析查询从节点信息数据内容"""
-        if len(data) < 2:
+        """解析查询从节点信息数据内容（E8 03 03 06）- 下行
+        格式：从节点起始序号(2B BIN 小端) + 从节点数量(1B BIN)
+        """
+        if len(data) < 3:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
         return {
-            "从节点序号": {"原始值": data[0:2].hex().upper(), "十进制": int.from_bytes(data[0:2], 'little')}
+            "从节点起始序号": {"原始值": data[0:2].hex().upper(), "十进制": int.from_bytes(data[0:2], 'little')},
+            "从节点数量": {"原始值": f"0x{data[2]:02X}", "十进制": data[2]}
         }
 
     def _parse_return_slave_node_info_data(self, data: bytes) -> Dict[str, Any]:
-        """解析返回查询从节点信息数据内容"""
-        if len(data) < 14:
+        """解析返回查询从节点信息数据内容（E8 04 03 06）
+        格式：从节点总数量(2B BIN) + 本次应答数量n(1B BIN) + [从节点地址(6B)]×n
+        """
+        if len(data) < 3:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        total = int.from_bytes(data[0:2], 'little')
+        count = data[2]
         result = {
-            "从节点序号": {"原始值": data[0:2].hex().upper(), "十进制": int.from_bytes(data[0:2], 'little')},
-            "从节点地址": data[2:8].hex().upper(),
-            "从节点类型": {"原始值": f"0x{data[8]:02X}", "说明": self._get_slave_node_type_desc(data[8])},
-            "从节点状态": {"原始值": f"0x{data[9]:02X}", "说明": self._get_slave_node_status_desc(data[9])},
-            "信号强度": {"原始值": f"0x{data[10]:02X}", "十进制": data[10], "单位": "dBm"},
-            "通信成功率": {"原始值": f"0x{data[11]:02X}", "十进制": data[11], "单位": "%"},
-            "最后通信时间": data[12:14].hex().upper()
+            "从节点总数量": {"原始值": data[0:2].hex().upper(), "十进制": total},
+            "本次应答的从节点数量": {"原始值": f"0x{count:02X}", "十进制": count},
+            "从节点列表": []
         }
+        pos = 3
+        for i in range(count):
+            if pos + 6 > len(data):
+                result["从节点列表"].append({"序号": i + 1, "说明": "数据长度不足"})
+                break
+            addr_raw = data[pos:pos+6].hex().upper()
+            addr_parsed = data[pos:pos+6][::-1].hex().upper()
+            result["从节点列表"].append({
+                "序号": i + 1,
+                "从节点地址": {"原始值": addr_raw, "解析值": addr_parsed}
+            })
+            pos += 6
         return result
 
     def _parse_query_reg_progress_data(self, data: bytes) -> Dict[str, Any]:
@@ -1690,21 +1764,25 @@ class ProtocolFrameParser:
         }
 
     def _parse_query_slave_parent_data(self, data: bytes) -> Dict[str, Any]:
-        """解析查询从节点的父节点数据内容"""
-        if len(data) < 2:
+        """解析查询从节点的父节点数据内容（E8 03 03 08）- 下行
+        格式：从节点地址(6B BIN)
+        """
+        if len(data) < 6:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
         return {
-            "从节点序号": {"原始值": data[0:2].hex().upper(), "十进制": int.from_bytes(data[0:2], 'little')}
+            "从节点地址": {"原始值": data[0:6].hex().upper(), "解析值": data[0:6][::-1].hex().upper()}
         }
 
     def _parse_return_slave_parent_data(self, data: bytes) -> Dict[str, Any]:
-        """解析返回查询从节点的父节点数据内容"""
-        if len(data) < 14:
+        """解析返回查询从节点的父节点数据内容（E8 04 03 08）- 上行
+        格式：从节点地址(6B) + 父节点地址(6B) + 链路质量(1B)
+        """
+        if len(data) < 13:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
         result = {
-            "从节点序号": {"原始值": data[0:2].hex().upper(), "十进制": int.from_bytes(data[0:2], 'little')},
-            "从节点地址": data[2:8].hex().upper(),
-            "父节点地址": data[8:14].hex().upper()
+            "从节点地址": {"原始值": data[0:6].hex().upper(), "解析值": data[0:6][::-1].hex().upper()},
+            "父节点地址": {"原始值": data[6:12].hex().upper(), "解析值": data[6:12][::-1].hex().upper()},
+            "链路质量": {"原始值": f"0x{data[12]:02X}", "十进制": data[12], "说明": "范围0~31，31最佳，0最差"}
         }
         return result
 
@@ -1745,8 +1823,8 @@ class ProtocolFrameParser:
                 break
             result["映射表"].append({
                 "序号": i + 1,
-                "从节点地址": data[pos:pos+6].hex().upper(),
-                "通信地址": data[pos+6:pos+12].hex().upper()
+                "从节点地址": {"原始值": data[pos:pos+6].hex().upper(), "解析值": data[pos:pos+6][::-1].hex().upper()},
+                "通信地址": {"原始值": data[pos+6:pos+12].hex().upper(), "解析值": data[pos+6:pos+12][::-1].hex().upper()}
             })
             pos += 12
         return result
@@ -1786,7 +1864,7 @@ class ProtocolFrameParser:
                 break
             nodes.append({
                 "序号": i + 1,
-                "从节点地址": data[pos:pos+6].hex().upper()
+                "从节点地址": {"原始值": data[pos:pos+6].hex().upper(), "解析值": data[pos:pos+6][::-1].hex().upper()}
             })
             pos += 6
         result["从节点列表"] = nodes
@@ -1846,8 +1924,9 @@ class ProtocolFrameParser:
         """解析设置主节点地址数据内容（E8 02 04 01）"""
         if len(data) < 6:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        addr = data[0:6]
         return {
-            "主节点地址": {"原始值": data[0:6].hex().upper()}
+            "主节点地址": {"原始值": addr.hex().upper(), "解析值": addr[::-1].hex().upper()}
         }
 
     def _parse_add_slave_node_data(self, data: bytes) -> Dict[str, Any]:
@@ -1865,7 +1944,7 @@ class ProtocolFrameParser:
                 break
             nodes.append({
                 "序号": i + 1,
-                "从节点地址": data[pos:pos+6].hex().upper()
+                "从节点地址": {"原始值": data[pos:pos+6].hex().upper(), "解析值": data[pos:pos+6][::-1].hex().upper()}
             })
             pos += 6
         result["从节点列表"] = nodes
@@ -1886,7 +1965,7 @@ class ProtocolFrameParser:
                 break
             nodes.append({
                 "序号": i + 1,
-                "从节点地址": data[pos:pos+6].hex().upper()
+                "从节点地址": {"原始值": data[pos:pos+6].hex().upper(), "解析值": data[pos:pos+6][::-1].hex().upper()}
             })
             pos += 6
         result["从节点列表"] = nodes
@@ -1923,8 +2002,8 @@ class ProtocolFrameParser:
                 break
             records.append({
                 "序号": i + 1,
-                "从节点通信地址": data[pos:pos+6].hex().upper(),
-                "从节点表计地址": data[pos+6:pos+18].hex().upper()
+                "从节点通信地址": {"原始值": data[pos:pos+6].hex().upper(), "解析值": data[pos:pos+6][::-1].hex().upper()},
+                "从节点表计地址": {"原始值": data[pos+6:pos+18].hex().upper(), "解析值": data[pos+6:pos+18][::-1].hex().upper()}
             })
             pos += 18
         result["映射表"] = records
@@ -2019,7 +2098,7 @@ class ProtocolFrameParser:
         node_list = []
         while pos + 6 <= len(content):
             addr = content[pos:pos + 6]
-            node_list.append({"电表地址(A0~A5)": addr.hex().upper()})
+            node_list.append({"电表地址(A0~A5)": {"原始值": addr.hex().upper(), "解析值": addr[::-1].hex().upper()}})
             pos += 6
 
         if node_list:
@@ -2067,7 +2146,7 @@ class ProtocolFrameParser:
                 break
             result["从节点列表"].append({
                 "序号": i + 1,
-                "从节点地址": data[pos:pos+6].hex().upper()
+                "从节点地址": {"原始值": data[pos:pos+6].hex().upper(), "解析值": data[pos:pos+6][::-1].hex().upper()}
             })
             pos += 6
         if len(data) > pos:
@@ -2103,6 +2182,7 @@ class ProtocolFrameParser:
             },
             "从节点地址": {
                 "原始值": node_addr.hex().upper(),
+                "解析值": node_addr[::-1].hex().upper(),
                 "说明": "从节点地址"
             },
             "任务状态": {
@@ -2178,7 +2258,7 @@ class ProtocolFrameParser:
         return {
             "文件类型": {"原始值": f"0x{data[0]:02X}", "说明": self._get_file_type_desc(data[0])},
             "文件ID": {"原始值": f"0x{data[1]:02X}", "十进制": data[1]},
-            "目的地址": data[2:8].hex().upper(),
+            "目的地址": {"原始值": data[2:8].hex().upper(), "解析值": data[2:8][::-1].hex().upper()},
             "总段数": {"原始值": data[8:10].hex().upper(), "十进制": int.from_bytes(data[8:10], 'little')},
             "文件大小": {"原始值": data[10:14].hex().upper(), "十进制": int.from_bytes(data[10:14], 'little'), "单位": "字节"},
             "文件校验和": data[14:16].hex().upper(),
@@ -2209,7 +2289,7 @@ class ProtocolFrameParser:
         result = {
             "文件性质": {"原始值": f"0x{data[0]:02X}", "说明": self._get_file_nature_desc(data[0])},
             "文件ID": {"原始值": f"0x{data[1]:02X}", "十进制": data[1]},
-            "目的地址": {"原始值": data[2:8].hex().upper()},
+            "目的地址": {"原始值": data[2:8].hex().upper(), "解析值": data[2:8][::-1].hex().upper()},
             "文件总段数": {"原始值": data[8:10].hex().upper(), "十进制": int.from_bytes(data[8:10], 'little')},
             "文件大小": {"原始值": data[10:14].hex().upper(), "十进制": int.from_bytes(data[10:14], 'little'), "单位": "字节"},
             "文件总校验": {"原始值": data[14:16].hex().upper()},
@@ -2266,7 +2346,7 @@ class ProtocolFrameParser:
                 break
             result["失败节点列表"].append({
                 "序号": i + 1,
-                "从节点地址": data[pos:pos+6].hex().upper(),
+                "从节点地址": {"原始值": data[pos:pos+6].hex().upper(), "解析值": data[pos:pos+6][::-1].hex().upper()},
                 "失败原因": {"原始值": f"0x{data[pos+6]:02X}", "说明": self._get_file_fail_reason_desc(data[pos+6])}
             })
             pos += 7
@@ -2301,16 +2381,18 @@ class ProtocolFrameParser:
         """解析查询节点运行时长数据内容（E8 03 03 66）- 下行查询"""
         if len(data) < 6:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        addr = data[0:6]
         return {
-            "从节点地址": {"原始值": data[0:6].hex().upper()}
+            "从节点地址": {"原始值": addr.hex().upper(), "解析值": addr[::-1].hex().upper()}
         }
 
     def _parse_return_node_runtime_data(self, data: bytes) -> Dict[str, Any]:
         """解析返回查询节点运行时长数据内容（E8 04 03 66）- 上行应答"""
         if len(data) < 6:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        addr = data[0:6]
         result = {
-            "从节点地址": {"原始值": data[0:6].hex().upper()}
+            "从节点地址": {"原始值": addr.hex().upper(), "解析值": addr[::-1].hex().upper()}
         }
         if len(data) > 6:
             runtime = int.from_bytes(data[6:10], 'little') if len(data) >= 10 else int.from_bytes(data[6:], 'little')
@@ -2333,7 +2415,7 @@ class ProtocolFrameParser:
         result = {
             "多网络节点总数量": {"原始值": f"0x{n:02X}", "十进制": n, "说明": "包含本节点和邻居网络节点总数"},
             "本节点网络标识号": {"原始值": f"0x{local_nid:02X}", "十进制": local_nid, "说明": ""},
-            "本节点主节点地址": {"原始值": local_master.hex().upper(), "说明": "6字节BIN格式"},
+            "本节点主节点地址": {"原始值": local_master.hex().upper(), "解析值": local_master[::-1].hex().upper(), "说明": "6字节BIN格式"},
         }
 
         offset = 8
@@ -2347,7 +2429,7 @@ class ProtocolFrameParser:
             # SNR is signed: range -20~80 dB
             snr_val = snr if snr <= 127 else snr - 256
             result[f"邻居网络{i+1}标识号"] = {"原始值": f"0x{nid:02X}", "十进制": nid, "说明": ""}
-            result[f"邻居网络{i+1}主节点地址"] = {"原始值": master.hex().upper(), "说明": "6字节BIN格式"}
+            result[f"邻居网络{i+1}主节点地址"] = {"原始值": master.hex().upper(), "解析值": master[::-1].hex().upper(), "说明": "6字节BIN格式"}
             result[f"邻居网络{i+1}网间SNR"] = {"原始值": f"0x{snr:02X}", "十进制": snr_val, "说明": "单位dB，取值范围-20~80"}
             offset += 8
 
@@ -2461,7 +2543,8 @@ class ProtocolFrameParser:
                     def _bcd_time(b):
                         if all(x == 0xFF for x in b):
                             return "无效时间(全F)"
-                        return f"20{b[0]:02X}-{b[1]:02X}-{b[2]:02X} {b[3]:02X}:{b[4]:02X}:{b[5]:02X}"
+                        # 6字节BCD时间格式: 秒(0)分(1)时(2)日(3)月(4)年(5)
+                        return f"20{b[5]:02X}-{b[4]:02X}-{b[3]:02X} {b[2]:02X}:{b[1]:02X}:{b[0]:02X}"
                     entry_result["解析值"] = f"时钟源:{clock_map.get(clock_source, f'未知({clock_source})')}"
                     entry_result["保留"] = f"0x{bcd_data[1]:02X}"
                     entry_result["模块当前RTC时间"] = _bcd_time(bcd_data[2:8])
@@ -2475,7 +2558,8 @@ class ProtocolFrameParser:
                     def _bcd_time7(b):
                         if all(x == 0xFF for x in b):
                             return "无效时间(全F)"
-                        return f"20{b[0]:02X}-{b[1]:02X}-{b[2]:02X} {b[3]:02X}:{b[4]:02X}:{b[5]:02X}"
+                        # 6字节BCD时间格式: 秒(0)分(1)时(2)日(3)月(4)年(5)
+                        return f"20{b[5]:02X}-{b[4]:02X}-{b[3]:02X} {b[2]:02X}:{b[1]:02X}:{b[0]:02X}"
                     entry_result["解析值"] = f"时钟源:{clock_map.get(clock_source, f'未知({clock_source})')}"
                     entry_result["保留"] = f"0x{bcd_data[1]:02X}"
                     entry_result["模块当前RTC时间"] = _bcd_time7(bcd_data[2:8])
@@ -2856,7 +2940,7 @@ class ProtocolFrameParser:
         elif fmt == "YYMMDD":
             if len(raw) >= 3:
                 r = raw[0:3][::-1]
-                return f"{self._bcd_to_str(r[0])}-{self._bcd_to_str(r[1])}-{self._bcd_to_str(r[2])}"
+                return f"20{self._bcd_to_str(r[0])}-{self._bcd_to_str(r[1])}-{self._bcd_to_str(r[2])}"
             return raw.hex().upper()
         elif fmt == "BIN":
             if element_id == 0x08 and all(b == 0xFF for b in raw):
@@ -2871,8 +2955,9 @@ class ProtocolFrameParser:
         """
         if len(data) < 7:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        addr = data[0:6]
         result = {
-            "节点地址": {"原始值": data[0:6].hex().upper()}
+            "节点地址": {"原始值": addr.hex().upper(), "解析值": addr[::-1].hex().upper()}
         }
         elem_count = data[6]
         ids = []
@@ -2897,8 +2982,9 @@ class ProtocolFrameParser:
         """
         if len(data) < 6:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        addr = data[0:6]
         result = {
-            "节点地址": {"原始值": data[0:6].hex().upper()}
+            "节点地址": {"原始值": addr.hex().upper(), "解析值": addr[::-1].hex().upper()}
         }
         elements = []
         pos = 6
@@ -2971,7 +3057,7 @@ class ProtocolFrameParser:
                 pos = len(data)
             nodes.append({
                 "序号": i + 1,
-                "从节点地址": addr.hex().upper(),
+                "从节点地址": {"原始值": addr.hex().upper(), "解析值": addr[::-1].hex().upper()},
                 "数据值": self._format_asset_value(eid, raw),
                 "原始值": raw.hex().upper()
             })
@@ -3039,10 +3125,10 @@ class ProtocolFrameParser:
         device_type_desc = "采集器" if device_type == 0x00 else "电表" if device_type == 0x01 else f"未知(0x{device_type:02X})"
 
         result = {
-            "从节点地址": {"原始值": node_addr.hex().upper()},
+            "从节点地址": {"原始值": node_addr.hex().upper(), "解析值": node_addr[::-1].hex().upper()},
             "从节点设备类型": {"原始值": f"0x{device_type:02X}", "说明": device_type_desc},
             "采集器下接电表数量": {"原始值": f"0x{meter_count:02X}", "十进制": meter_count},
-            "应属台区主节点地址": {"原始值": region_addr.hex().upper()}
+            "应属台区主节点地址": {"原始值": region_addr.hex().upper(), "解析值": region_addr[::-1].hex().upper()}
         }
         if len(data) >= 16:
             result["保留"] = data[14:16].hex().upper()
@@ -3054,9 +3140,10 @@ class ProtocolFrameParser:
             for i in range(meter_count):
                 if pos + 6 > len(data):
                     break
+                addr = data[pos:pos+6]
                 meters.append({
                     "序号": i + 1,
-                    "电表地址": data[pos:pos+6].hex().upper()
+                    "电表地址": {"原始值": addr.hex().upper(), "解析值": addr[::-1].hex().upper()}
                 })
                 pos += 6
             result["电表地址列表"] = meters
@@ -3162,11 +3249,12 @@ class ProtocolFrameParser:
         for i in range(node_count):
             if pos + 8 > len(data):
                 break
-            addr = data[pos:pos+6].hex().upper()
+            addr_raw = data[pos:pos+6].hex().upper()
+            addr_parsed = data[pos:pos+6][::-1].hex().upper()
             phase = self._parse_phase_info(data[pos+6:pos+8])
             result["从节点列表"].append({
                 "序号": i + 1,
-                "从节点地址": {"原始值": addr},
+                "从节点地址": {"原始值": addr_raw, "解析值": addr_parsed},
                 "相位信息": phase
             })
             pos += 8
@@ -3191,11 +3279,12 @@ class ProtocolFrameParser:
         for i in range(node_count):
             if pos + 8 > len(data):
                 break
-            addr = data[pos:pos+6].hex().upper()
+            addr_raw = data[pos:pos+6].hex().upper()
+            addr_parsed = data[pos:pos+6][::-1].hex().upper()
             phase = self._parse_phase_info(data[pos+6:pos+8])
             result["从节点列表"].append({
                 "序号": i + 1,
-                "从节点地址": {"原始值": addr},
+                "从节点地址": {"原始值": addr_raw, "解析值": addr_parsed},
                 "相位信息": phase
             })
             pos += 8
@@ -3234,28 +3323,57 @@ class ProtocolFrameParser:
         for i in range(node_count):
             if pos + 15 > len(data):
                 break
-            addr = data[pos:pos+6].hex().upper()
+            addr_raw = data[pos:pos+6].hex().upper()
+            addr_parsed = data[pos:pos+6][::-1].hex().upper()
             info = data[pos+6:pos+15]
             vendor_info = {"原始值": info.hex().upper()}
             try:
-                # 多字节字段按小端序解析：低字节在前，解析时反转
-                vendor_info["厂商代码"] = info[0:2][::-1].decode('ascii')
-                vendor_info["芯片代码"] = info[2:4][::-1].decode('ascii')
+                # ASCII字段按小端序解析：低字节在前，解析时反转；BCD日期字段按自然序YYMMDD解析
+                vendor_info["厂商代码"] = {
+                    "原始值": info[0:2].hex().upper(),
+                    "解析值": info[0:2][::-1].decode('ascii')
+                }
+                vendor_info["芯片代码"] = {
+                    "原始值": info[2:4].hex().upper(),
+                    "解析值": info[2:4][::-1].decode('ascii')
+                }
                 vdate = info[4:7][::-1]
-                vendor_info["版本时间"] = f"{self._bcd_to_str(vdate[0])}-{self._bcd_to_str(vdate[1])}-{self._bcd_to_str(vdate[2])}"
+                vendor_info["版本时间"] = {
+                    "原始值": info[4:7].hex().upper(),
+                    "解析值": f"20{self._bcd_to_str(vdate[0])}-{self._bcd_to_str(vdate[1])}-{self._bcd_to_str(vdate[2])}"
+                }
                 ver = info[7:9][::-1]
-                vendor_info["版本号"] = self._bcd_to_str(ver[0]) + self._bcd_to_str(ver[1])
+                vendor_info["版本号"] = {
+                    "原始值": info[7:9].hex().upper(),
+                    "解析值": self._bcd_to_str(ver[0]) + self._bcd_to_str(ver[1])
+                }
             except Exception:
                 pass
             result["节点列表"].append({
                 "序号": i + 1,
-                "节点地址": {"原始值": addr},
+                "节点地址": {"原始值": addr_raw, "解析值": addr_parsed},
                 "节点信息": vendor_info
             })
             pos += 15
         return result
 
     # ==================== PLUZ扩展解析方法 ====================
+
+    def _parse_refuse_report_enable_data(self, data: bytes) -> Dict[str, Any]:
+        """解析允许/禁止拒绝从节点信息上报使能（E8 00 03 6C / E8 02 04 6C）
+        0：禁止；1：允许
+        """
+        if len(data) < 1:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        enable = data[0]
+        desc = {0: "禁止拒绝从节点信息上报", 1: "允许拒绝从节点信息上报"}.get(enable, f"保留({enable})")
+        return {
+            "拒绝从节点信息上报使能": {
+                "原始值": f"0x{enable:02X}",
+                "十进制": enable,
+                "说明": desc
+            }
+        }
 
     def _parse_simple_bin1_data(self, data: bytes) -> Dict[str, Any]:
         """解析1字节BIN数据的通用方法（用于最大网络级数、并发数等）"""
@@ -3268,8 +3386,24 @@ class ProtocolFrameParser:
             }
         }
 
+    def _parse_network_success_rate_data(self, data: bytes) -> Dict[str, Any]:
+        """解析查询台区组网成功率（E8 00 03 97）
+        模块上报扩大100倍，如组网成功率为100%，上报信息为10000
+        """
+        if len(data) < 2:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        value = int.from_bytes(data[0:2], 'little')
+        actual_rate = value / 100.0
+        return {
+            "组网成功率": {
+                "原始值": data[0:2].hex().upper(),
+                "十进制": value,
+                "说明": f"{actual_rate:.2f}%（模块上报扩大100倍）"
+            }
+        }
+
     def _parse_simple_bin2_data(self, data: bytes) -> Dict[str, Any]:
-        """解析2字节BIN数据的通用方法（用于最大网络规模、台区组网成功率等）"""
+        """解析2字节BIN数据的通用方法（用于最大网络规模、并发数等）"""
         if len(data) < 2:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
         value = int.from_bytes(data[0:2], 'little')
@@ -3419,7 +3553,8 @@ class ProtocolFrameParser:
             result["系统启动原因"] = {"原始值": f"0x{reboot_reason:02X}", "说明": reason_map.get(reboot_reason, f"未知({reboot_reason})")}
             pos += 1
         if pos + 6 <= len(data):
-            result["节点模块ID"] = {"原始值": data[pos:pos+6].hex().upper()}
+            mid = data[pos:pos+6]
+            result["节点模块ID"] = {"原始值": mid.hex().upper(), "解析值": mid[::-1].hex().upper()}
             pos += 6
         if pos < len(data):
             result["入网次数"] = {"原始值": f"0x{data[pos]:02X}", "十进制": data[pos]}
@@ -3770,7 +3905,7 @@ class ProtocolFrameParser:
 
     def _parse_query_run_params_data(self, data: bytes) -> Dict[str, Any]:
         """解析查询运行参数信息下行数据（E8 03 03 74）
-        格式：节点地址(6B BIN) + 运行参数总数(1B) + 运行参数ID列表
+        格式：节点地址(6B BIN) + 运行参数总数(1B) + 运行参数ID列表(每个1B)
         """
         if len(data) < 7:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
@@ -3787,24 +3922,21 @@ class ProtocolFrameParser:
             0x03: "异常离网锁定时间",
             0x04: "RF通道控制开关",
         }
-        pos = 6
+        # 参数ID列表从 byte 7 开始
         for i in range(param_count):
+            pos = 7 + i
             if pos >= len(data):
                 break
-            pos += 1
             pid = data[pos]
             param_name = RUN_PARAM_MAP.get(pid, f"未知参数(0x{pid:02X})")
-            param_ids.append({"参数ID": f"0x{pid:02X}", "原始值": f"0x{pid:02X}", "说明": param_name})
-            pos += 1
-            plen = data[pos]
-            param_ids.append({"参数长度": f"0x{plen:02X}", "原始值": f"0x{plen:02X}", "说明": f"{plen}字节"})
-            pos += 1
-            pvalue = data[pos:(pos+plen)]
-            pvalue_int = int().from_bytes(pvalue,'little')
-            param_ids.append({"参数值": f"0x{pvalue:02X}", "原始值": f"0x{pvalue_int}", "说明": f"{pvalue_int}分钟"})
+            param_ids.append({
+                "条目名称": "参数ID",
+                "原始值": f"0x{pid:02X}",
+                "解析值": f"{pid:02X}",
+                "说明": param_name
+            })
         if param_ids:
             result["运行参数ID列表"] = param_ids
-            print(result["运行参数ID列表"])
         return result
 
     def _parse_query_device_type_data(self, data: bytes) -> Dict[str, Any]:

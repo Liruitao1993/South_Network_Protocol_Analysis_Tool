@@ -1,7 +1,16 @@
 {
   "serial": {
-    "port": "COM9",
+    "port": "COM46",
     "baudrate": "115200",
     "parity": "偶"
+  },
+  "file_paths": {
+    "nw_command": "NW_command.json",
+    "gw_command": "GW_command.json",
+    "test_plan": "test_plan.json",
+    "custom_di": "custom_di.json",
+    "dlt645_di": "dlt645_di.json",
+    "gdw_custom_afn": "gdw_custom_afn.json",
+    "command": "command.json"
   }
 }

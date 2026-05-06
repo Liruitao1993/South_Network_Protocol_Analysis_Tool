@@ -28,7 +28,9 @@ class NWValidator(BaseValidator):
         # 3. 长度域校验（小端序）
         if len(frame_bytes) >= 3:
             length_val = int.from_bytes(frame_bytes[1:3], 'little')
-            expected_len = length_val + 6  # 长度域值 + 6字节固定长度
+            # 南网协议：L = 用户数据区长度 + 6
+            # 帧总长度 = 1(68) + 2(L) + 1(C) + (L-6)(用户数据) + 1(CS) + 1(16) = L
+            expected_len = length_val  # 长度域值即帧总长度
             actual_len = len(frame_bytes)
             if actual_len < expected_len:
                 check = CheckItem(
@@ -36,7 +38,7 @@ class NWValidator(BaseValidator):
                     level=CheckLevel.FAIL,
                     expected=f"{expected_len}字节(长度域值{length_val}+6)",
                     actual=f"{actual_len}字节",
-                    message=f"帧数据不足，长度域指示帧总长{expected_len}字节，实际仅{actual_len}字节"
+                    message=f"帧数据不足，长度域指示帧总长{length_val}字节，实际仅{actual_len}字节"
                 )
                 result.valid = False
             elif actual_len > expected_len:

@@ -279,6 +279,7 @@ class GDW10376Parser:
         if offset < frame_len:
             ctrl_byte = frame_bytes[offset]
             ctrl = GDWControlField.from_byte(ctrl_byte)
+            ctrl_bits = f"{ctrl_byte:08b}"
             table_data.append((
                 "控制域",
                 f"0x{ctrl_byte:02X}",
@@ -287,23 +288,23 @@ class GDW10376Parser:
                 offset, offset
             ))
             table_data.append((
-                "  传输方向(DIR)",
-                "-",
+                "  D7 传输方向(DIR)",
+                ctrl_bits[0],
                 str(ctrl.dir),
                 DIR_MAP.get(ctrl.dir, "未知"),
                 offset, offset
             ))
             table_data.append((
-                "  启动标志(PRM)",
-                "-",
+                "  D6 启动标志(PRM)",
+                ctrl_bits[1],
                 str(ctrl.prm),
                 PRM_MAP.get(ctrl.prm, "未知"),
                 offset, offset
             ))
             comm_type_name = COMM_TYPE_MAP.get(ctrl.comm_type, f"未知({ctrl.comm_type})")
             table_data.append((
-                "  通信方式",
-                "-",
+                "  D5~D0 通信方式",
+                f"{ctrl_bits[2:8]}({ctrl.comm_type})",
                 str(ctrl.comm_type),
                 comm_type_name,
                 offset, offset
@@ -346,71 +347,82 @@ class GDW10376Parser:
             if dir_val == 0 and actual_info_len >= 5:
                 # 下行信息域
                 b0 = info_bytes[0]
+                b0_bits = f"{b0:08b}"
                 route_flag = b0 & 0x01
                 sub_node_flag = (b0 >> 1) & 0x01
                 comm_module_flag = (b0 >> 2) & 0x01
                 conflict_detect = (b0 >> 3) & 0x01
                 relay_level = (b0 >> 4) & 0x0F
 
-                table_data.append(("  路由标识", "-", str(route_flag), "0=带路由/路由模式, 1=不带路由/旁路模式", offset, offset))
-                table_data.append(("  附属节点标识", "-", str(sub_node_flag), "0=无附加节点, 1=有附加节点", offset, offset))
-                table_data.append(("  通信模块标识", "-", str(comm_module_flag), "0=对主节点操作, 1=对从节点操作", offset, offset))
-                table_data.append(("  冲突检测", "-", str(conflict_detect), "0=不进行, 1=要进行", offset, offset))
-                table_data.append(("  中继级别", "-", str(relay_level), "0~15，0表示无中继", offset, offset))
+                table_data.append(("  D0 路由标识", b0_bits[7], str(route_flag), "0=带路由/路由模式, 1=不带路由/旁路模式", offset, offset))
+                table_data.append(("  D1 附属节点标识", b0_bits[6], str(sub_node_flag), "0=无附加节点, 1=有附加节点", offset, offset))
+                table_data.append(("  D2 通信模块标识", b0_bits[5], str(comm_module_flag), "0=对主节点操作, 1=对从节点操作", offset, offset))
+                table_data.append(("  D3 冲突检测", b0_bits[4], str(conflict_detect), "0=不进行, 1=要进行", offset, offset))
+                table_data.append(("  D4~D7 中继级别", f"{b0_bits[0:4]}({relay_level})", str(relay_level), "0~15，0表示无中继", offset, offset))
 
                 if actual_info_len >= 2:
                     b1 = info_bytes[1]
+                    b1_bits = f"{b1:08b}"
                     channel_id = b1 & 0x1F
                     fec_flag = (b1 >> 5) & 0x07
-                    table_data.append(("  信道标识", "-", str(channel_id), "0~15，0表示不分信道", offset + 1, offset + 1))
-                    table_data.append(("  纠错编码标识", "-", str(fec_flag), "0=未编码, 1=RS编码", offset + 1, offset + 1))
+                    table_data.append(("  D0~D4 信道标识", f"{b1_bits[3:8]}({channel_id})", str(channel_id), "0~15，0表示不分信道", offset + 1, offset + 1))
+                    table_data.append(("  D5~D7 纠错编码标识", f"{b1_bits[0:3]}({fec_flag})", str(fec_flag), "0=未编码, 1=RS编码", offset + 1, offset + 1))
 
                 if actual_info_len >= 3:
                     resp_bytes = info_bytes[2]
-                    table_data.append(("  预计应答字节数", "-", str(resp_bytes), "0=默认延时", offset + 2, offset + 2))
+                    table_data.append(("  预计应答字节数", f"0x{resp_bytes:02X}", str(resp_bytes), "0=默认延时", offset + 2, offset + 2))
 
                 if actual_info_len >= 5:
                     rate_val = int.from_bytes(info_bytes[3:5], 'little')
                     rate_unit = (rate_val >> 15) & 0x01
                     rate = rate_val & 0x7FFF
-                    table_data.append(("  通信速率", "-", str(rate), f"{'kbit/s' if rate_unit else 'bit/s'}，0=默认速率", offset + 3, offset + 4))
+                    table_data.append(("  通信速率", f"0x{rate:04X}", str(rate), f"{'kbit/s' if rate_unit else 'bit/s'}，0=默认速率", offset + 3, offset + 4))
 
                 if actual_info_len >= 6:
                     seq = info_bytes[5]
-                    table_data.append(("  报文序列号", "-", str(seq), "0~255循环", offset + 5, offset + 5))
+                    table_data.append(("  报文序列号", f"0x{seq:02X}", str(seq), "0~255循环", offset + 5, offset + 5))
 
             elif dir_val == 1 and actual_info_len >= 6:
                 # 上行信息域
                 b0 = info_bytes[0]
+                b0_bits = f"{b0:08b}"
                 route_flag = b0 & 0x01
                 comm_module_flag = (b0 >> 2) & 0x01
                 relay_level = (b0 >> 4) & 0x0F
 
-                table_data.append(("  路由标识", "-", str(route_flag), "0=带路由/路由模式, 1=不带路由/旁路模式", offset, offset))
-                table_data.append(("  通信模块标识", "-", str(comm_module_flag), "0=对主节点操作, 1=对从节点操作", offset, offset))
-                table_data.append(("  中继级别", "-", str(relay_level), "0~15，0表示无中继", offset, offset))
+                table_data.append(("  D0 路由标识", b0_bits[7], str(route_flag), "0=带路由/路由模式, 1=不带路由/旁路模式", offset, offset))
+                table_data.append(("  D2 通信模块标识", b0_bits[5], str(comm_module_flag), "0=对主节点操作, 1=对从节点操作", offset, offset))
+                table_data.append(("  D4~D7 中继级别", f"{b0_bits[0:4]}({relay_level})", str(relay_level), "0~15，0表示无中继", offset, offset))
 
                 if actual_info_len >= 2:
-                    channel_id = info_bytes[1] & 0x0F
-                    table_data.append(("  信道标识", "-", str(channel_id), "0~15，0表示不分信道", offset + 1, offset + 1))
+                    b1 = info_bytes[1]
+                    b1_bits = f"{b1:08b}"
+                    channel_id = b1 & 0x0F
+                    table_data.append(("  D0~D3 信道标识", f"{b1_bits[4:8]}({channel_id})", str(channel_id), "0~15，0表示不分信道", offset + 1, offset + 1))
 
                 if actual_info_len >= 3:
-                    phase_id = info_bytes[2] & 0x03
-                    channel_feature = (info_bytes[2] >> 4) & 0x0F
-                    table_data.append(("  实测相线标识", "-", str(phase_id), "0=不确定, 1~3=第1~3相", offset + 2, offset + 2))
-                    table_data.append(("  电能表通道特征", "-", str(channel_feature), "1=单相单信道, 4=三相三信道", offset + 2, offset + 2))
+                    b2 = info_bytes[2]
+                    b2_bits = f"{b2:08b}"
+                    phase_id = b2 & 0x03
+                    channel_feature = (b2 >> 4) & 0x0F
+                    table_data.append(("  D0~D1 实测相线标识", f"{b2_bits[6:8]}({phase_id})", str(phase_id), "0=不确定, 1~3=第1~3相", offset + 2, offset + 2))
+                    table_data.append(("  D4~D7 电能表通道特征", f"{b2_bits[0:4]}({channel_feature})", str(channel_feature), "1=单相单信道, 4=三相三信道", offset + 2, offset + 2))
 
                 if actual_info_len >= 4:
-                    signal_quality = info_bytes[3] & 0x0F
-                    table_data.append(("  信号品质", "-", str(signal_quality), "0~15，0=无品质, 1=最低", offset + 3, offset + 3))
+                    b3 = info_bytes[3]
+                    b3_bits = f"{b3:08b}"
+                    signal_quality = b3 & 0x0F
+                    table_data.append(("  D0~D3 信号品质", f"{b3_bits[4:8]}({signal_quality})", str(signal_quality), "0~15，0=无品质, 1=最低", offset + 3, offset + 3))
 
                 if actual_info_len >= 5:
-                    event_flag = info_bytes[4] & 0x01
-                    table_data.append(("  事件标志", "-", str(event_flag), "0=无上报事件, 1=有上报事件", offset + 4, offset + 4))
+                    b4 = info_bytes[4]
+                    b4_bits = f"{b4:08b}"
+                    event_flag = b4 & 0x01
+                    table_data.append(("  D0 事件标志", b4_bits[7], str(event_flag), "0=无上报事件, 1=有上报事件", offset + 4, offset + 4))
 
                 if actual_info_len >= 6:
                     seq = info_bytes[5]
-                    table_data.append(("  报文序列号", "-", str(seq), "0~255循环", offset + 5, offset + 5))
+                    table_data.append(("  报文序列号", f"0x{seq:02X}", str(seq), "0~255循环", offset + 5, offset + 5))
 
             offset = info_end
 
@@ -738,13 +750,13 @@ class GDW10376Parser:
             if fn == 1 and data_len >= 9:  # F1: 厂商代码和版本信息
                 vendor = bytes(data_bytes[0:2]).decode('ascii', errors='replace')
                 chip = bytes(data_bytes[2:4]).decode('ascii', errors='replace')
-                day = data_bytes[4]
+                year = data_bytes[4]
                 month = data_bytes[5]
-                year = data_bytes[6]
+                day = data_bytes[6]
                 ver = int.from_bytes(data_bytes[7:9], 'big')
                 table_data.append(("  厂商代码", f"0x{data_bytes[0]:02X}{data_bytes[1]:02X}", vendor, "ASCII", base_offset, base_offset + 1))
                 table_data.append(("  芯片代码", f"0x{data_bytes[2]:02X}{data_bytes[3]:02X}", chip, "ASCII", base_offset + 2, base_offset + 3))
-                table_data.append(("  版本日期", f"{day:02X}-{month:02X}-{year:02X}", f"20{year:02X}-{month:02X}-{day:02X}", "BCD编码", base_offset + 4, base_offset + 6))
+                table_data.append(("  版本日期", f"{year:02X}-{month:02X}-{day:02X}", f"20{year:02X}-{month:02X}-{day:02X}", "BCD编码,YYMMDD", base_offset + 4, base_offset + 6))
                 table_data.append(("  版本", f"0x{data_bytes[7]:02X}{data_bytes[8]:02X}", f"{ver}", "BCD编码", base_offset + 7, base_offset + 8))
 
             elif fn == 2 and data_len >= 1:  # F2: 噪声值
@@ -904,13 +916,13 @@ class GDW10376Parser:
                 
                 vendor = bytes(data_bytes[28:30]).decode('ascii', errors='replace')
                 chip = bytes(data_bytes[30:32]).decode('ascii', errors='replace')
-                day = data_bytes[32]
+                year = data_bytes[32]
                 month = data_bytes[33]
-                year = data_bytes[34]
+                day = data_bytes[34]
                 ver = int.from_bytes(data_bytes[35:37], 'big')
                 table_data.append(("  厂商代码", f"0x{data_bytes[28]:02X}{data_bytes[29]:02X}", vendor, "ASCII", base_offset + 28, base_offset + 29))
                 table_data.append(("  芯片代码", f"0x{data_bytes[30]:02X}{data_bytes[31]:02X}", chip, "ASCII", base_offset + 30, base_offset + 31))
-                table_data.append(("  版本日期", f"{day:02X}-{month:02X}-{year:02X}", f"20{year:02X}-{month:02X}-{day:02X}", "BCD编码", base_offset + 32, base_offset + 34))
+                table_data.append(("  版本日期", f"{year:02X}-{month:02X}-{day:02X}", f"20{year:02X}-{month:02X}-{day:02X}", "BCD编码,YYMMDD", base_offset + 32, base_offset + 34))
                 table_data.append(("  版本", f"0x{data_bytes[35]:02X}{data_bytes[36]:02X}", f"{ver}", "BCD编码", base_offset + 35, base_offset + 36))
                 
                 offset = 37

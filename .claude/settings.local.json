@@ -14,7 +14,23 @@
       "mcp__exa__web_search_exa",
       "Bash(python -c \"import dlms_cosem; print\\(dlms_cosem.__file__\\); print\\(dir\\(dlms_cosem\\)\\)\")",
       "Bash(pip install:*)",
-      "Bash(pyinstaller --onefile --windowed --name \"协议解析工具\" --icon=NONE main_gui.py)"
+      "Bash(pyinstaller --onefile --windowed --name \"协议解析工具\" --icon=NONE main_gui.py)",
+      "WebSearch",
+      "Bash(npx skills *)",
+      "Bash(node index.js search \"super power\")",
+      "Bash(node index.js search \"superpower\")",
+      "Bash(node index.js search \"super\")",
+      "Bash(node index.js install \"superpower\" 4)",
+      "Bash(node index.js install \"superpower\" 5)",
+      "Bash(node *)",
+      "Bash(curl -L -o \"C:\\\\Users\\\\lirt3\\\\.claude\\\\skills\\\\using-superpowers\\\\SKILL.md\" \"https://raw.githubusercontent.com/davila7/claude-code-templates/main/cli-tool/components/skills/development/using-superpowers/SKILL.md\")",
+      "Bash(curl -L -k -o \"C:\\\\Users\\\\lirt3\\\\.claude\\\\skills\\\\using-superpowers\\\\SKILL.md\" \"https://raw.githubusercontent.com/davila7/claude-code-templates/main/cli-tool/components/skills/development/using-superpowers/SKILL.md\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\lirt3\\\\.claude\\\\skills\\\\skills-search\")",
+      "Bash(curl -L -k -o \"C:\\\\Users\\\\lirt3\\\\.claude\\\\skills\\\\skills-search\\\\SKILL.md\" \"https://raw.githubusercontent.com/daymade/claude-code-skills/main/skills-search/SKILL.md\")",
+      "Bash(curl -L -k -s \"https://api.github.com/repos/affaan-m/everything-claude-code/contents\")",
+      "Bash(curl -L -k -s \"https://api.github.com/repos/affaan-m/everything-claude-code/contents/.claude\")",
+      "Bash(curl -L -k -s \"https://api.github.com/repos/affaan-m/everything-claude-code/contents/.claude/homunculus\")",
+      "Bash(curl -L -k -s \"https://api.github.com/repos/affaan-m/everything-claude-code/contents/.claude/commands\")"
     ]
   }
 }
