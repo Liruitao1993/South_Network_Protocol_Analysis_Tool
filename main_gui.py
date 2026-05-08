@@ -29,6 +29,8 @@ from command_lookup import CommandLookup, get_command_lookup
 from dlt645_di_lookup import DLT645DILookup, get_dlt645_di_lookup
 from gdw_afn_lookup import GDWAFNLookup, get_gdw_afn_lookup
 from frame_gen_widget import FrameGenWidget
+from archive_widget import ArchiveWidget
+from topology_widget import TopologyWidget
 from preset_buttons import PresetButtonWidget
 from test_plan_widget import TestPlanWidget
 from serial_worker import SerialWorker
@@ -423,6 +425,16 @@ class MainWindow(QMainWindow):
         self.test_plan_tab.set_serial_worker(self.serial_worker)
         self._test_plan_tab_index = self.tab_widget.addTab(self.test_plan_tab, "测试方案")
         self.frame_gen_tab.test_plan_added.connect(self.test_plan_tab.add_item)
+        # 档案管理页面（南网和国网协议支持）
+        self.archive_tab = ArchiveWidget()
+        self.archive_tab.set_serial_worker(self.serial_worker)
+        self._archive_tab_index = self.tab_widget.addTab(self.archive_tab, "档案管理")
+
+        # 拓扑信息页面（南网和国网协议支持）
+        self.topology_tab = TopologyWidget()
+        self.topology_tab.set_serial_worker(self.serial_worker)
+        self._topology_tab_index = self.tab_widget.addTab(self.topology_tab, "拓扑信息")
+
         main_layout.addWidget(self.tab_widget, 1)
 
         # 初始化查询页面内容
@@ -1304,6 +1316,24 @@ class MainWindow(QMainWindow):
             if index in (0, 6):
                 mode = "south" if index == 0 else "gdw"
                 self.preset_tab.set_protocol(mode)
+        # 档案管理页面在南网和国网协议下显示
+        if hasattr(self, '_archive_tab_index'):
+            show_archive = index in (0, 6)
+            self.tab_widget.setTabVisible(self._archive_tab_index, show_archive)
+            if show_archive:
+                mode = "south" if index == 0 else "gdw"
+                self.archive_tab.set_protocol_mode(mode)
+            else:
+                self.archive_tab.reset()
+        # 拓扑信息页面在南网和国网协议下显示
+        if hasattr(self, '_topology_tab_index'):
+            show_topology = index in (0, 6)
+            self.tab_widget.setTabVisible(self._topology_tab_index, show_topology)
+            if show_topology:
+                mode = "south" if index == 0 else "gdw"
+                self.topology_tab.set_protocol_mode(mode)
+            else:
+                self.topology_tab.clear_nodes()
 
         # 清空当前结果
         self.clear_single()
@@ -2415,8 +2445,19 @@ class MainWindow(QMainWindow):
                 # 从表格数据生成摘要（取前3个字段作为摘要）
                 summary = self._get_summary_from_table_data(table_data)
 
-                status = "成功"
-                success_count += 1
+                # 检查解析是否失败（校验错误、长度不匹配等）
+                is_parse_failed = any(item[0] == "❌ 解析失败" for item in table_data)
+                if is_parse_failed:
+                    status = "失败"
+                    fail_count += 1
+                    # 提取失败原因作为摘要
+                    for item in table_data:
+                        if item[0] == "❌ 解析失败":
+                            summary = item[3] if item[3] else "解析失败"
+                            break
+                else:
+                    status = "成功"
+                    success_count += 1
 
                 # 保存结果（表格数据可以在详情查看时使用）
                 self.batch_results.append({

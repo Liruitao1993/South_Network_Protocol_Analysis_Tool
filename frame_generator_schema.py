@@ -327,14 +327,6 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "fields": []
     },
 
-    # 暂停任务 (E8 02 02 09)
-    (0xE8, 0x02, 0x02, 0x09): {
-        "name": '暂停任务',
-        "direction": "down",
-        "doc": '<b>DI编码</b>：E8 02 02 09<br>\n<b>命令名称</b>：暂停任务<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n无数据标识内容。\n\n需要插入立即执行的任务时，可以先 “暂停任务”，然后通过 “添加任务” 增加高优先级的任务，再 “启动任务”。\n\n### 上行报文\n\n### 数据标识内容定义\n',
-        "fields": [{'name': '任务ID', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '要暂停的任务标识号'}]
-    },
-
     # 设置主节点地址 (E8 02 04 01)
     (0xE8, 0x02, 0x04, 0x01): {
         "name": '设置主节点地址',
@@ -436,7 +428,13 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "name": '配置运行参数',
         "direction": "down",
         "doc": '<b>DI编码</b>：E8 02 04 74<br>\n<b>命令名称</b>：配置运行参数<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n数据标识内容格式见下表\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>站点 MAC 地址</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>6 字节</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>配置参数总数 m</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1 字节</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>参数 1ID</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1 字节</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>参数 1 配置数据长度</td><td style=\'text-align: center; word-wrap: break-word;\'></td><td style=\'text-align: center; word-wrap: break-word;\'>1 字节</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>参数 1 数据</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>见运行参数列表</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>参数 2ID</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1 字节</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>参数 2 配置数据长度</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1 字节</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>参数 2 数据</td><td style=\'text-align: center; word-wrap: break-word;\'></td><td style=\'text-align: center; word-wrap: break-word;\'>见运行参数列表</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>...</td><td style=\'text-align: center; word-wrap: break-word;\'></td><td style=\'text-align: center; word-wrap: break-word;\'></td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>参数 mID</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1 字节</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>参数 m 配置数据长度</td><td style=\'text-align: center; word-wrap: break-word;\'></td><td style=\'text-align: center; word-wrap: break-word;\'>1 字节</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>参数 m 数据</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>见运行参数列表</td></tr></table>\n\n<div style="text-align: center;"><div style="text-align: center;">运行参数列表</div> </div>\n\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>运行参数 ID</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td><td style=\'text-align: center; word-wrap: break-word;\'>说明</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>0x01</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td><td style=\'text-align: center; word-wrap: break-word;\'>从节点RF发送功率，范围：0：自动；1-4：数字越大，功率越大；</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>0x02</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td><td style=\'text-align: center; word-wrap: break-word;\'>从节点PLC发送功率，范围：0：自动；1-4：数字越大，功率越大；</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>0x03</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td><td style=\'text-align: center; word-wrap: break-word;\'>异常离网锁定时间，单位：分钟，默认30分钟</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>0x04</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td><td style=\'text-align: center; word-wrap: break-word;\'>RF通道控制开关：0：关闭；1：开启；默认开启</td></tr></table>\n',
-        "fields": [{'name': '数据内容', 'type': 'bytes', 'required': False, 'default': '', 'description': '运行参数数据（hex字符串）'}]
+        "fields": [
+            {'name': '站点MAC地址', 'type': 'bytes', 'length': 6, 'required': True, 'default': '000000000000', 'reverse': True, 'description': '站点MAC地址（6字节hex，输入正常顺序，自动反转存储）'},
+            {'name': '参数列表', 'type': 'list', 'count_type': 'uint8', 'required': True, 'item_fields': [
+                {'name': '参数ID', 'type': 'enum', 'required': True, 'default': 1, 'enum_map': {0x01: '从节点RF发送功率(0=自动,1-4=等级)', 0x02: '从节点PLC发送功率(0=自动,1-4=等级)', 0x03: '异常离网锁定时间(分钟,默认30)', 0x04: 'RF通道控制开关(0=关闭,1=开启)'}, 'description': '运行参数ID'},
+                {'name': '参数值', 'type': 'uint16', 'required': True, 'default': 0, 'description': '参数数值（RF/PLC功率填0-4；锁定时间填分钟数；开关填0/1）'}
+            ], 'description': '运行参数列表（根据参数ID自动确定长度）'}
+        ]
     },
 
     # 启动台区识别 (E8 02 04 80)
