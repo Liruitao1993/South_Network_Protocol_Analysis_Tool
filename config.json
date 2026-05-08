@@ -1,7 +1,7 @@
 {
   "serial": {
     "port": "COM46",
-    "baudrate": "115200",
+    "baudrate": "9600",
     "parity": "偶"
   },
   "file_paths": {

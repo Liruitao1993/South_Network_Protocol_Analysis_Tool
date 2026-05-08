@@ -92,8 +92,9 @@ class ProtocolFrameGenerator:
         elif sub_code == 0x05:
             return self._build_frame(0xE8, 0x00, 0x03, 0x05)
         elif sub_code == 0x06:
-            node_id = kwargs.get('node_id', 0)
-            data = struct.pack('>H', node_id)
+            start_index = kwargs.get('start_index', 0)
+            query_count = kwargs.get('query_count', 1)
+            data = struct.pack('<H', start_index) + struct.pack('B', query_count)
             return self._build_frame(0xE8, 0x03, 0x03, 0x06, data=data)
         elif sub_code == 0x07:
             return self._build_frame(0xE8, 0x00, 0x03, 0x07)
@@ -150,8 +151,11 @@ class ProtocolFrameGenerator:
                 data += addr
             return self._build_frame(0xE8, 0x02, 0x04, 0x02, data=data)
         elif sub_code == 0x03:
-            node_id = kwargs.get('node_id', 0)
-            data = struct.pack('>H', node_id)
+            node_count = kwargs.get('node_count', 1)
+            node_addrs = kwargs.get('node_addrs', [])
+            data = struct.pack('B', node_count)
+            for addr in node_addrs:
+                data += addr
             return self._build_frame(0xE8, 0x02, 0x04, 0x03, data=data)
         elif sub_code == 0x04:
             control_data = kwargs.get('control_data', b'')
@@ -240,6 +244,44 @@ class ProtocolFrameGenerator:
         """获取指定DI的字段Schema"""
         return DI_FIELD_SCHEMA.get(di_key)
 
+    def _generate_e8020474_data(self, field_values: Dict[str, Any]) -> bytes:
+        """配置运行参数 E8 02 04 74 的自定义数据生成"""
+        mac = field_values.get('站点MAC地址', '000000000000')
+        if isinstance(mac, str):
+            mac = bytes.fromhex(mac.replace(" ", ""))
+        if len(mac) < 6:
+            mac = mac + b'\x00' * (6 - len(mac))
+        elif len(mac) > 6:
+            mac = mac[:6]
+        mac = mac[::-1]
+
+        params = field_values.get('参数列表', [])
+        if not isinstance(params, list):
+            params = []
+
+        data = mac
+        data += struct.pack('B', len(params))
+
+        param_lengths = {0x01: 1, 0x02: 1, 0x03: 2, 0x04: 1}
+
+        for param in params:
+            param_id = int(param.get('参数ID', 0))
+            param_val_str = param.get('参数值', '0')
+            try:
+                param_val = int(param_val_str, 0) if isinstance(param_val_str, str) else int(param_val_str)
+            except ValueError:
+                param_val = 0
+
+            length = param_lengths.get(param_id, 1)
+            data += struct.pack('B', param_id)
+            data += struct.pack('B', length)
+            if length == 2:
+                data += struct.pack('<H', param_val & 0xFFFF)
+            else:
+                data += struct.pack('B', param_val & 0xFF)
+
+        return data
+
     def generate_data(self, di_key: Tuple[int, int, int, int], field_values: Dict[str, Any]) -> bytes:
         """根据DI字段Schema和字段值生成用户数据区字节流
 
@@ -250,6 +292,12 @@ class ProtocolFrameGenerator:
         Returns:
             打包后的用户数据区字节
         """
+        custom_handlers = {
+            (0xE8, 0x02, 0x04, 0x74): self._generate_e8020474_data,
+        }
+        if di_key in custom_handlers:
+            return custom_handlers[di_key](field_values)
+
         schema = DI_FIELD_SCHEMA.get(di_key)
         if not schema:
             raise ValueError(f"不支持的DI组合: {di_key}")

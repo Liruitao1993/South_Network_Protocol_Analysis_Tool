@@ -16,10 +16,15 @@
       "Bash(npm install *)",
       "mcp__gitnexus__list_repos",
       "mcp__open-websearch__search",
+      "mcp__exa__web_search_exa",
+      "mcp__fetch__fetch",
+      "mcp__exa__get_code_context_exa",
       "Bash(python test_verify_fixes.py)",
       "Bash(python test_e8030308.py)",
       "Bash(python test_6c.py)",
-      "Bash(python test_97.py)"
+      "Bash(python test_97.py)",
+      "Bash(python -c ' *)",
+      "Bash(python3 -c ' *)"
     ]
   }
 }

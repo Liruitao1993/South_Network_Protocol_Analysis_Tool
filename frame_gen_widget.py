@@ -432,6 +432,18 @@ class FrameGenWidget(QWidget):
         self.response_table.verticalHeader().setDefaultSectionSize(10)
 
         resp_layout.addWidget(self.response_table)
+
+        # 清空响应解析按钮
+        resp_btn_layout = QHBoxLayout()
+        self.clear_resp_btn = QPushButton("清空响应解析")
+        self.clear_resp_btn.setStyleSheet(
+            "QPushButton { padding: 2px 12px; }"
+        )
+        self.clear_resp_btn.clicked.connect(self._on_clear_response_table)
+        resp_btn_layout.addWidget(self.clear_resp_btn)
+        resp_btn_layout.addStretch()
+        resp_layout.addLayout(resp_btn_layout)
+
         right_layout.addWidget(resp_group, 1)
 
         splitter.addWidget(right_widget)
@@ -1855,6 +1867,10 @@ class FrameGenWidget(QWidget):
     def _on_clear_serial_log(self):
         """清空串口日志"""
         self.serial_log.clear()
+
+    def _on_clear_response_table(self):
+        """清空响应帧解析表格"""
+        self.response_table.setRowCount(0)
 
     def _on_serial_log_context_menu(self, pos):
         """串口日志区域右键菜单"""
