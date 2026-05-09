@@ -535,7 +535,7 @@ class TopologyWidget(QWidget):
             self._log("[组网] CCO 上报从节点总数为 0，跳过完成判定")
             return
         # 拓扑节点总数减去 1 个 CCO 即为从节点数
-        sta_count = len(self.nodes) - 1
+        sta_count = max(0, len(self.nodes) - 1)
         ratio = sta_count / self._formation_node_count
         if ratio >= self.FORMATION_COMPLETE_THRESHOLD:
             start_time = self._formation_start_time
@@ -552,7 +552,7 @@ class TopologyWidget(QWidget):
         """更新组网状态标签"""
         if self._formation_done and self._formation_elapsed_seconds is not None:
             text = f"组网状态: 完成 | 耗时: {self._formation_elapsed_seconds:.1f} 秒"
-        elif self._formation_start_time:
+        elif self._formation_start_time is not None:
             elapsed = time.time() - self._formation_start_time
             text = f"组网状态: 进行中 | 已耗时: {elapsed:.1f} 秒"
         else:
