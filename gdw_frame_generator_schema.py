@@ -425,7 +425,8 @@ GDW_AFNFN_SCHEMA: Dict[Tuple[int, int], Dict[str, Any]] = {
             {"name": "从节点列表", "type": "list",
              "count_field": "从节点数量",
              "item_fields": [
-                 {"name": "从节点地址", "type": "bcd", "length": 6, "default": "000000000000"},
+                 {"name": "从节点地址", "type": "bytes", "length": 6,
+                        "reverse": True, "default": "000000000000"},
                  {"name": "通信协议类型", "type": "enum", "default": 0,
                   "enum_map": {0: "透明传输", 1: "DL/T 645-1997", 2: "DL/T 645-2007", 3: "DL/T 698.45"}},
              ]},
@@ -440,7 +441,8 @@ GDW_AFNFN_SCHEMA: Dict[Tuple[int, int], Dict[str, Any]] = {
             {"name": "从节点列表", "type": "list",
              "count_field": "从节点数量",
              "item_fields": [
-                 {"name": "从节点地址", "type": "bcd", "length": 6, "default": "000000000000"},
+                 {"name": "从节点地址", "type": "bytes", "length": 6,
+                        "reverse": True, "default": "000000000000"},
              ]},
         ],
         "doc": "<b>AFN=11H F2</b><br>数据单元：数量(1B)+[地址(6B)]*n"
