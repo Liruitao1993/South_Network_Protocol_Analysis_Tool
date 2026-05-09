@@ -4,6 +4,7 @@
 包含档案表格、操作按钮、串口交互和响应解析。
 """
 
+import json
 import struct
 from typing import Dict, Any, List, Tuple, Optional
 from datetime import datetime
@@ -11,7 +12,8 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QComboBox, QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView,
-    QDialog, QTextEdit, QMessageBox, QSplitter, QMenu, QCheckBox, QGridLayout
+    QDialog, QTextEdit, QMessageBox, QSplitter, QMenu, QCheckBox, QGridLayout,
+    QFileDialog
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
@@ -20,6 +22,8 @@ from send_frame_lib import ProtocolFrameGenerator
 from gdw_send_frame_lib import GDWFrameGenerator
 from protocol_parser import ProtocolFrameParser
 from gdw10376_parser import GDW10376Parser
+
+ARCHIVE_FILE = "archive_data.json"
 
 
 class AddNodesDialog(QDialog):
@@ -202,6 +206,7 @@ class ArchiveWidget(QWidget):
         self.gdw_parser = GDW10376Parser()
         self._node_data: List[Dict[str, Any]] = []
         self.setup_ui()
+        self._load_archive()  # 启动时自动加载上次档案
 
     # ------------------------------------------------------------------
     # UI 构建
@@ -382,9 +387,19 @@ class ArchiveWidget(QWidget):
         self.del_node_btn.clicked.connect(self._on_delete_nodes)
         archive_layout.addWidget(self.del_node_btn)
 
-        self.init_archive_btn = QPushButton("档案初始化")
+        self.init_archive_btn = QPushButton("参数初始化")
         self.init_archive_btn.clicked.connect(self._on_init_archive)
         archive_layout.addWidget(self.init_archive_btn)
+
+        archive_layout.addWidget(QLabel("|"))
+
+        self.export_archive_btn = QPushButton("导出档案")
+        self.export_archive_btn.clicked.connect(self._on_export_archive)
+        archive_layout.addWidget(self.export_archive_btn)
+
+        self.import_archive_btn = QPushButton("导入档案")
+        self.import_archive_btn.clicked.connect(self._on_import_archive)
+        archive_layout.addWidget(self.import_archive_btn)
 
         btn_layout.addWidget(archive_group)
 
@@ -457,7 +472,8 @@ class ArchiveWidget(QWidget):
         self.south_config_group.setVisible(mode == "south")
         self.gdw_config_group.setVisible(mode == "gdw")
         self.task_group.setVisible(mode == "south")
-        self.reset()
+        self.init_archive_btn.setText("档案初始化" if mode == "south" else "参数初始化")
+        # 切换协议时不清空档案数据，档案可在南网/国网间共享
 
     def reset(self):
         self.table.setRowCount(0)
@@ -465,6 +481,92 @@ class ArchiveWidget(QWidget):
         self.status_label.setText("就绪")
         if hasattr(self, 'serial_log'):
             self.serial_log.clear()
+        self._save_archive()
+
+    # ------------------------------------------------------------------
+    # JSON 持久化
+    # ------------------------------------------------------------------
+    def _save_archive(self):
+        """将当前档案数据保存到 JSON 文件"""
+        try:
+            with open(ARCHIVE_FILE, "w", encoding="utf-8") as f:
+                json.dump(self._node_data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass  # 静默失败，不影响主流程
+
+    def _load_archive(self):
+        """从 JSON 文件加载档案数据并填充表格"""
+        import os
+        if not os.path.exists(ARCHIVE_FILE):
+            return
+        try:
+            with open(ARCHIVE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, list):
+                return
+            self.table.setRowCount(0)
+            self._node_data.clear()
+            for info in data:
+                if not isinstance(info, dict):
+                    continue
+                # 向后兼容：确保必要字段存在
+                info.setdefault("meter_id", "")
+                info.setdefault("module_id", "")
+                info.setdefault("comm_type", "电力载波")
+                info.setdefault("protocol", "DL/T698.45")
+                info.setdefault("phase", "未知")
+                info.setdefault("meter_type", "电能表")
+                info.setdefault("remark", "")
+                self._add_meter_to_table(info)
+            self._log(f"[本地] 已加载 {len(self._node_data)} 条档案记录")
+        except Exception:
+            pass
+
+    def _on_export_archive(self):
+        """导出档案到指定 JSON 文件"""
+        path, _ = QFileDialog.getSaveFileName(self, "导出档案", "archive_export.json", "JSON (*.json)")
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(self._node_data, f, ensure_ascii=False, indent=2)
+            self._log(f"[本地] 档案已导出: {path}")
+        except Exception as e:
+            QMessageBox.critical(self, "导出失败", str(e))
+
+    def _on_import_archive(self):
+        """从 JSON 文件导入档案"""
+        path, _ = QFileDialog.getOpenFileName(self, "导入档案", "", "JSON (*.json)")
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, list):
+                raise ValueError("文件格式错误：应为 JSON 数组")
+            reply = QMessageBox.question(
+                self, "确认导入",
+                f"确定导入 {len(data)} 条档案记录？\n当前表格中的记录将被覆盖。",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            self.table.setRowCount(0)
+            self._node_data.clear()
+            for info in data:
+                if isinstance(info, dict):
+                    info.setdefault("meter_id", "")
+                    info.setdefault("module_id", "")
+                    info.setdefault("comm_type", "电力载波")
+                    info.setdefault("protocol", "DL/T698.45")
+                    info.setdefault("phase", "未知")
+                    info.setdefault("meter_type", "电能表")
+                    info.setdefault("remark", "")
+                    self._add_meter_to_table(info)
+            self._save_archive()
+            self._log(f"[本地] 已导入 {len(self._node_data)} 条档案记录")
+        except Exception as e:
+            QMessageBox.critical(self, "导入失败", str(e))
 
     # ------------------------------------------------------------------
     # Frame helpers
@@ -519,13 +621,14 @@ class ArchiveWidget(QWidget):
             return
 
         if self.protocol_mode == "south":
-            addrs = []
+            node_list = []
             for row in checked_rows:
                 addr_str = self.table.item(row, 2).text().strip().zfill(12)
-                addrs.append(bytes.fromhex(addr_str))
+                # Schema 已定义 reverse=True，直接传字符串即可自动小端序填充
+                node_list.append({"从节点地址": addr_str})
             frame = self._build_south_frame(
                 (0xE8, 0x02, 0x04, 0x02),
-                {"从节点地址列表": addrs}
+                {"从节点地址列表": node_list}
             )
         else:
             node_list = []
@@ -560,13 +663,13 @@ class ArchiveWidget(QWidget):
             return
 
         if self.protocol_mode == "south":
-            addrs = []
+            node_list = []
             for row in checked_rows:
                 addr_str = self.table.item(row, 2).text().strip()
-                addrs.append(bytes.fromhex(addr_str.zfill(12)))
+                node_list.append({"从节点地址": addr_str.zfill(12)})
             frame = self._build_south_frame(
                 (0xE8, 0x02, 0x04, 0x03),
-                {"从节点地址列表": addrs}
+                {"从节点地址列表": node_list}
             )
         else:
             node_list = []
@@ -582,7 +685,8 @@ class ArchiveWidget(QWidget):
             frame = self._build_south_frame((0xE8, 0x02, 0x01, 0x02), {})
             self._send_hex(frame.hex().upper(), "档案初始化")
         else:
-            QMessageBox.information(self, "提示", "国网协议暂不支持档案初始化命令")
+            frame = self._build_gdw_frame(0x01, 2, {})
+            self._send_hex(frame.hex().upper(), "参数区初始化")
 
     def _on_query_node_count(self):
         if self.protocol_mode == "south":
@@ -664,11 +768,13 @@ class ArchiveWidget(QWidget):
 
         self.table.setItem(row, 1, QTableWidgetItem(str(row + 1)))
         self.table.setItem(row, 2, QTableWidgetItem(info["meter_id"]))
-        self.table.setItem(row, 3, QTableWidgetItem(info["protocol"]))
-        self.table.setItem(row, 4, QTableWidgetItem(info["phase"]))
-        self.table.setItem(row, 5, QTableWidgetItem("本地添加"))
+        self.table.setItem(row, 3, QTableWidgetItem(info.get("protocol", "-")))
+        self.table.setItem(row, 4, QTableWidgetItem(info.get("phase", "-")))
+        status = info.get("status", "本地添加")
+        self.table.setItem(row, 5, QTableWidgetItem(status))
 
         self._node_data.append(info)
+        self._save_archive()
 
     def _on_delete_meters_from_table(self):
         checked = self._get_checked_rows()
@@ -690,6 +796,7 @@ class ArchiveWidget(QWidget):
         # renumber rows
         for row in range(self.table.rowCount()):
             self.table.item(row, 1).setText(str(row + 1))
+        self._save_archive()
         self._log(f"[本地] 从表格删除 {len(checked)} 个电能表")
 
     def _set_all_checkboxes(self, checked: bool):
@@ -725,6 +832,7 @@ class ArchiveWidget(QWidget):
     def _clear_table(self):
         self.table.setRowCount(0)
         self._node_data.clear()
+        self._save_archive()
 
     # ------------------------------------------------------------------
     # Response handling
@@ -778,7 +886,13 @@ class ArchiveWidget(QWidget):
                     break
                 addr_bytes = user_data[offset:offset+6]
                 addr_str = addr_bytes[::-1].hex().upper()  # reverse for display
-                self._add_table_row(i + 1, addr_str, "-", "-", "在线")
+                info = {
+                    "meter_id": addr_str, "module_id": "",
+                    "comm_type": "电力载波", "protocol": "-",
+                    "phase": "-", "meter_type": "电能表",
+                    "remark": "", "status": "在线"
+                }
+                self._add_meter_to_table(info)
                 offset += 6
             self.status_label.setText(f"从节点总数量: {total}, 本次应答: {count}")
             self._log(f"[应答] 返回查询从节点信息: 总数{total}, 本次{count}")
@@ -820,7 +934,13 @@ class ArchiveWidget(QWidget):
             for name, raw, parsed, comment, bs, be in table_data:
                 if "从节点" in name and "地址" in name:
                     if addr is not None:
-                        self._add_table_row(row_idx, addr, proto, phase, "在线")
+                        info = {
+                            "meter_id": addr, "module_id": "",
+                            "comm_type": "电力载波", "protocol": proto,
+                            "phase": phase, "meter_type": "电能表",
+                            "remark": "", "status": "在线"
+                        }
+                        self._add_meter_to_table(info)
                         row_idx += 1
                     addr = str(parsed)
                     phase = "-"
@@ -830,7 +950,13 @@ class ArchiveWidget(QWidget):
                 elif "通信协议" in name or "协议类型" in name:
                     proto = str(parsed)
             if addr is not None:
-                self._add_table_row(row_idx, addr, proto, phase, "在线")
+                info = {
+                    "meter_id": addr, "module_id": "",
+                    "comm_type": "电力载波", "protocol": proto,
+                    "phase": phase, "meter_type": "电能表",
+                    "remark": "", "status": "在线"
+                }
+                self._add_meter_to_table(info)
             self._log(f"[应答] 返回查询从节点信息, 共{row_idx-1}条")
             return
 
