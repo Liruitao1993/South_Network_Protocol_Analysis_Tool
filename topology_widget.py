@@ -518,10 +518,13 @@ class TopologyWidget(QWidget):
             self._log("[自动刷新] 已停止")
 
     def _check_formation_complete(self):
-        """检查是否组网完成（拓扑节点数 / CCO从节点总数 >= 98%）"""
+        """检查是否组网完成（拓扑从节点数 / CCO从节点总数 >= 98%）"""
         if self._formation_done or not self._formation_node_count:
             return
-        ratio = len(self.nodes) / self._formation_node_count
+        # CCO 上报的从节点总数不包含 CCO 本身，拓扑节点中需排除 CCO
+        cco_count = sum(1 for n in self.nodes.values() if n.role == "CCO")
+        sta_count = len(self.nodes) - cco_count
+        ratio = sta_count / self._formation_node_count
         if ratio >= 0.98:
             start_time = self._formation_start_time
             if start_time is not None:
@@ -529,7 +532,7 @@ class TopologyWidget(QWidget):
                 self._formation_elapsed_seconds = time.time() - start_time
                 self._update_formation_ui()
                 self._log(
-                    f"[组网完成] 拓扑节点{len(self.nodes)} / 总数{self._formation_node_count} = "
+                    f"[组网完成] 拓扑从节点{sta_count} / CCO总数{self._formation_node_count} = "
                     f"{ratio * 100:.1f}%, 耗时 {self._formation_elapsed_seconds:.1f} 秒"
                 )
 
