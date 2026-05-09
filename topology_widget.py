@@ -523,13 +523,15 @@ class TopologyWidget(QWidget):
             return
         ratio = len(self.nodes) / self._formation_node_count
         if ratio >= 0.98:
-            self._formation_done = True
-            self._formation_elapsed_seconds = time.time() - self._formation_start_time
-            self._update_formation_ui()
-            self._log(
-                f"[组网完成] 拓扑节点{len(self.nodes)} / 总数{self._formation_node_count} = "
-                f"{ratio * 100:.1f}%, 耗时 {self._formation_elapsed_seconds:.1f} 秒"
-            )
+            start_time = self._formation_start_time
+            if start_time is not None:
+                self._formation_done = True
+                self._formation_elapsed_seconds = time.time() - start_time
+                self._update_formation_ui()
+                self._log(
+                    f"[组网完成] 拓扑节点{len(self.nodes)} / 总数{self._formation_node_count} = "
+                    f"{ratio * 100:.1f}%, 耗时 {self._formation_elapsed_seconds:.1f} 秒"
+                )
 
     def _update_formation_ui(self):
         """更新组网状态标签"""
