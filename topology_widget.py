@@ -9,6 +9,7 @@ import struct
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime
+import time
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
@@ -189,15 +190,33 @@ class TopologyGraphicsView(QGraphicsView):
 
         # 构建父子关系
         children: Dict[int, List[int]] = {tei: [] for tei in nodes}
+        orphans: List[int] = []  # proxy_tei 不在 nodes 中的节点
         for n in nodes.values():
             if n.tei == n.proxy_tei:
                 continue
             if n.proxy_tei in children:
                 children[n.proxy_tei].append(n.tei)
+            else:
+                orphans.append(n.tei)
+
+        # 孤儿节点挂到根节点下，确保能被绘制
+        if orphans:
+            children[root.tei].extend(orphans)
 
         # 递归布局
         positions: Dict[int, Tuple[float, float]] = {}
         self._layout_subtree(root.tei, children, positions, 0)
+
+        # 处理仍不在 positions 中的节点（如多个独立根节点），
+        # 将它们作为根节点的额外子节点补充布局
+        missing = [tei for tei in nodes if tei not in positions]
+        if missing:
+            # 将缺失节点追加到根的子列表，重新布局
+            for tei in missing:
+                if tei not in children[root.tei]:
+                    children[root.tei].append(tei)
+            positions.clear()
+            self._layout_subtree(root.tei, children, positions, 0)
 
         # 归一化到左上角 + 边距
         self._normalize_positions(positions)
@@ -237,21 +256,23 @@ class TopologyGraphicsView(QGraphicsView):
         self._scene.setSceneRect(rect.adjusted(-80, -80, 80, 80))
 
     def _layout_subtree(self, tei: int, children: Dict[int, List[int]],
-                        positions: Dict[int, Tuple[float, float]], depth: int) -> float:
+                        positions: Dict[int, Tuple[float, float]], depth: int,
+                        x_offset: float = 0) -> float:
         """递归布局子树，返回该子树的宽度（以节点间距为单位）"""
         H_SPACING = 70
         V_SPACING = 100
 
         child_teis = [c for c in children.get(tei, []) if c != tei and c not in positions]
         if not child_teis:
-            # 叶子节点，先占位，x 在归一化时统一平移
-            positions[tei] = (0, depth * V_SPACING)
+            # 叶子节点
+            positions[tei] = (x_offset, depth * V_SPACING)
             return 1.0
 
-        # 先布局所有子节点
+        # 先布局所有子节点，依次向右排列
         total_width = 0.0
-        for i, child in enumerate(child_teis):
-            w = self._layout_subtree(child, children, positions, depth + 1)
+        for child in child_teis:
+            w = self._layout_subtree(child, children, positions, depth + 1,
+                                     x_offset + total_width * H_SPACING)
             total_width += w
 
         # 父节点 X 坐标 = 第一个子节点到最后一个子节点的中点
@@ -309,6 +330,12 @@ class TopologyWidget(QWidget):
         # 自动刷新
         self._refresh_timer = QTimer(self)
         self._refresh_timer.timeout.connect(self._on_refresh_timeout)
+
+        # 组网计时状态
+        self._formation_start_time: Optional[float] = None
+        self._formation_node_count: Optional[int] = None
+        self._formation_done = False
+        self._formation_elapsed_seconds: Optional[float] = None
 
         self.setup_ui()
 
@@ -393,6 +420,10 @@ class TopologyWidget(QWidget):
         self.stats_label.setStyleSheet("color: #666; font-size: 12px;")
         layout.addWidget(self.stats_label)
 
+        self.formation_label = QLabel("组网状态: 未开始")
+        self.formation_label.setStyleSheet("color: #2196F3; font-size: 12px; font-weight: bold;")
+        layout.addWidget(self.formation_label)
+
         # 日志
         self.log_edit = QTextEdit()
         self.log_edit.setReadOnly(True)
@@ -464,9 +495,22 @@ class TopologyWidget(QWidget):
             self._stop_auto_refresh()
 
     def _start_auto_refresh(self):
+        # 重置组网计时
+        self._formation_start_time = time.time()
+        self._formation_node_count = None
+        self._formation_done = False
+        self._formation_elapsed_seconds = None
+
         interval_ms = self.refresh_interval_sb.value() * 1000
         self._refresh_timer.start(interval_ms)
         self._log(f"[自动刷新] 已启动，间隔 {self.refresh_interval_sb.value()} 秒")
+
+        # 立即查询一次从节点数量（用于组网完成判定）
+        if self.protocol_mode == "south":
+            frame = self._build_south_frame((0xE8, 0x00, 0x03, 0x05), {})
+        else:
+            frame = self._build_gdw_frame(0x10, 1, {})
+        self._send_hex(frame.hex().upper(), "查询从节点数量(组网计时)")
 
     def _stop_auto_refresh(self):
         if self._refresh_timer.isActive():
