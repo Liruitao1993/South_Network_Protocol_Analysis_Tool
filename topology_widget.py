@@ -516,16 +516,28 @@ class TopologyWidget(QWidget):
         if self._refresh_timer.isActive():
             self._refresh_timer.stop()
             self._log("[自动刷新] 已停止")
+        # 停止后清理组网计时状态，防止手动查询误用
+        self._formation_start_time = None
+        self._formation_node_count = None
+        self._formation_done = False
+        self._formation_elapsed_seconds = None
+        self._update_formation_ui()
+
+    FORMATION_COMPLETE_THRESHOLD = 0.98
 
     def _check_formation_complete(self):
         """检查是否组网完成（拓扑从节点数 / CCO从节点总数 >= 98%）"""
-        if self._formation_done or not self._formation_node_count:
+        if self._formation_done:
             return
-        # CCO 上报的从节点总数不包含 CCO 本身，拓扑节点中需排除 CCO
-        cco_count = sum(1 for n in self.nodes.values() if n.role == "CCO")
-        sta_count = len(self.nodes) - cco_count
+        if self._formation_node_count is None:
+            return
+        if self._formation_node_count == 0:
+            self._log("[组网] CCO 上报从节点总数为 0，跳过完成判定")
+            return
+        # 拓扑节点总数减去 1 个 CCO 即为从节点数
+        sta_count = len(self.nodes) - 1
         ratio = sta_count / self._formation_node_count
-        if ratio >= 0.98:
+        if ratio >= self.FORMATION_COMPLETE_THRESHOLD:
             start_time = self._formation_start_time
             if start_time is not None:
                 self._formation_done = True
@@ -559,6 +571,13 @@ class TopologyWidget(QWidget):
     # Query & pagination
     # ------------------------------------------------------------------
     def _on_query(self):
+        # 如果不是自动刷新模式，重置组网状态防止手动查询污染计时
+        if not self._refresh_timer.isActive():
+            self._formation_start_time = None
+            self._formation_node_count = None
+            self._formation_done = False
+            self._formation_elapsed_seconds = None
+            self._update_formation_ui()
         self.nodes.clear()
         self._pending_query = True
         self._total_nodes = 0
@@ -668,7 +687,7 @@ class TopologyWidget(QWidget):
                         self._formation_node_count = int(parsed)
                         self._log(f"[组网] CCO 从节点总数: {parsed}")
                     except (ValueError, TypeError):
-                        pass
+                        self._log(f"[组网] 从节点数量解析失败: {parsed!r}")
                     break
             return
 
