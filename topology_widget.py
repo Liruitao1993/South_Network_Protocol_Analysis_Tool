@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QGraphicsView, QGraphicsScene, QGraphicsEllipseItem,
     QGraphicsLineItem, QGraphicsTextItem, QGraphicsItem,
-    QLabel, QComboBox, QTextEdit, QMessageBox, QCheckBox, QSpinBox, QLineEdit, QGroupBox
+    QLabel, QComboBox, QTextEdit, QMessageBox, QCheckBox, QSpinBox, QDoubleSpinBox, QLineEdit, QGroupBox
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QPen, QBrush, QColor, QFont, QPainter
@@ -386,6 +386,11 @@ class TopologyWidget(QWidget):
         self._formation_done = False
         self._formation_elapsed_seconds: Optional[float] = None
 
+        # 组网完成判定模式: "ratio"(成功率) 或 "count"(数量)
+        self._formation_mode: str = "ratio"
+        self._formation_ratio_threshold: float = 0.98
+        self._formation_count_threshold: Optional[int] = None
+
         # 节点搜索状态
         self._search_results: List[int] = []
         self._search_index = 0
@@ -444,6 +449,28 @@ class TopologyWidget(QWidget):
         self.refresh_interval_sb.setValue(10)
         self.refresh_interval_sb.setFixedWidth(60)
         toolbar.addWidget(self.refresh_interval_sb)
+
+        toolbar.addWidget(QLabel("组网模式:"))
+        self.formation_mode_combo = QComboBox()
+        self.formation_mode_combo.addItem("成功率", "ratio")
+        self.formation_mode_combo.addItem("数量", "count")
+        self.formation_mode_combo.currentIndexChanged.connect(self._on_formation_mode_changed)
+        toolbar.addWidget(self.formation_mode_combo)
+
+        self.formation_ratio_sb = QDoubleSpinBox()
+        self.formation_ratio_sb.setRange(1, 100)
+        self.formation_ratio_sb.setValue(98)
+        self.formation_ratio_sb.setSuffix("%")
+        self.formation_ratio_sb.setDecimals(0)
+        self.formation_ratio_sb.setFixedWidth(70)
+        toolbar.addWidget(self.formation_ratio_sb)
+
+        self.formation_count_sb = QSpinBox()
+        self.formation_count_sb.setRange(1, 10000)
+        self.formation_count_sb.setValue(100)
+        self.formation_count_sb.setFixedWidth(70)
+        self.formation_count_sb.setVisible(False)
+        toolbar.addWidget(self.formation_count_sb)
 
         layout.addLayout(toolbar)
 
@@ -591,6 +618,11 @@ class TopologyWidget(QWidget):
             self._stop_auto_refresh()
 
     def _start_auto_refresh(self):
+        # 同步 UI 上的组网判定设置
+        self._formation_mode = self.formation_mode_combo.currentData()
+        self._formation_ratio_threshold = self.formation_ratio_sb.value() / 100.0
+        self._formation_count_threshold = self.formation_count_sb.value()
+
         # 重置组网计时
         self._formation_start_time = time.time()
         self._formation_node_count = None
@@ -619,10 +651,15 @@ class TopologyWidget(QWidget):
         self._formation_elapsed_seconds = None
         self._update_formation_ui()
 
-    FORMATION_COMPLETE_THRESHOLD = 0.98
+    def _on_formation_mode_changed(self, index: int):
+        """切换组网判定模式时显示/隐藏对应的输入框"""
+        mode = self.formation_mode_combo.currentData()
+        is_ratio = mode == "ratio"
+        self.formation_ratio_sb.setVisible(is_ratio)
+        self.formation_count_sb.setVisible(not is_ratio)
 
     def _check_formation_complete(self):
-        """检查是否组网完成（拓扑从节点数 / CCO从节点总数 >= 98%）"""
+        """检查是否组网完成（按成功率或按数量）"""
         if self._formation_done:
             return
         if self._formation_node_count is None:
@@ -632,27 +669,44 @@ class TopologyWidget(QWidget):
             return
         # 拓扑节点总数减去 1 个 CCO 即为从节点数
         sta_count = max(0, len(self.nodes) - 1)
-        ratio = sta_count / self._formation_node_count
-        if ratio >= self.FORMATION_COMPLETE_THRESHOLD:
-            start_time = self._formation_start_time
-            if start_time is not None:
-                self._formation_done = True
-                self._formation_elapsed_seconds = time.time() - start_time
-                self._update_formation_ui()
-                self._log(
-                    f"[组网完成] 拓扑从节点{sta_count} / CCO总数{self._formation_node_count} = "
-                    f"{ratio * 100:.1f}%, 耗时 {self._formation_elapsed_seconds:.1f} 秒"
-                )
+
+        if self._formation_mode == "count":
+            target = self._formation_count_threshold
+            if target is None or target <= 0:
+                return
+            if sta_count >= target:
+                start_time = self._formation_start_time
+                if start_time is not None:
+                    self._formation_done = True
+                    self._formation_elapsed_seconds = time.time() - start_time
+                    self._update_formation_ui()
+                    self._log(
+                        f"[组网完成] 拓扑从节点{sta_count} >= 设定数量{target}, "
+                        f"耗时 {self._formation_elapsed_seconds:.1f} 秒"
+                    )
+        else:
+            ratio = sta_count / self._formation_node_count
+            if ratio >= self._formation_ratio_threshold:
+                start_time = self._formation_start_time
+                if start_time is not None:
+                    self._formation_done = True
+                    self._formation_elapsed_seconds = time.time() - start_time
+                    self._update_formation_ui()
+                    self._log(
+                        f"[组网完成] 拓扑从节点{sta_count} / CCO总数{self._formation_node_count} = "
+                        f"{ratio * 100:.1f}%, 耗时 {self._formation_elapsed_seconds:.1f} 秒"
+                    )
 
     def _update_formation_ui(self):
-        """更新组网状态标签"""
+        """更新组网状态标签，同时显示 CCO 从节点总数"""
+        total_str = f"CCO从节点总数: {self._formation_node_count}" if self._formation_node_count is not None else "CCO从节点总数: --"
         if self._formation_done and self._formation_elapsed_seconds is not None:
-            text = f"组网状态: 完成 | 耗时: {self._formation_elapsed_seconds:.1f} 秒"
+            text = f"组网状态: 完成 | 耗时: {self._formation_elapsed_seconds:.1f} 秒 | {total_str}"
         elif self._formation_start_time is not None:
             elapsed = time.time() - self._formation_start_time
-            text = f"组网状态: 进行中 | 已耗时: {elapsed:.1f} 秒"
+            text = f"组网状态: 进行中 | 已耗时: {elapsed:.1f} 秒 | {total_str}"
         else:
-            text = "组网状态: 未开始"
+            text = f"组网状态: 未开始 | {total_str}"
         self.formation_label.setText(text)
 
     def _on_search_node(self):
