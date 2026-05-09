@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QGraphicsView, QGraphicsScene, QGraphicsEllipseItem,
     QGraphicsLineItem, QGraphicsTextItem, QGraphicsItem,
-    QLabel, QComboBox, QTextEdit, QMessageBox, QCheckBox, QSpinBox, QLineEdit
+    QLabel, QComboBox, QTextEdit, QMessageBox, QCheckBox, QSpinBox, QLineEdit, QGroupBox
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QPen, QBrush, QColor, QFont, QPainter
@@ -335,24 +335,21 @@ class TopologyGraphicsView(QGraphicsView):
             self.centerOn(item)
             self.ensureVisible(item, 50, 50)
 
-    def search_nodes(self, keyword: str) -> List[int]:
-        """模糊搜索节点，返回匹配的 TEI 列表"""
-        if not keyword:
-            return []
-        kw = keyword.strip().lower()
+    def search_nodes(self, tei_kw: str, addr_kw: str, role_kw: str) -> List[int]:
+        """按字段搜索节点，返回匹配的 TEI 列表（各字段为 AND 关系）"""
+        tei_kw = tei_kw.strip().lower()
+        addr_kw = addr_kw.strip().lower()
+        role_kw = role_kw.strip().lower()
         matches = []
         for tei, item in self._node_items.items():
             node = item.node
-            fields = [
-                str(node.tei),
-                node.address,
-                node.role,
-                node.phase,
-                node.channel,
-                node.module_type,
-            ]
-            if any(kw in f.lower() for f in fields):
-                matches.append(tei)
+            if tei_kw and tei_kw not in str(node.tei).lower():
+                continue
+            if addr_kw and addr_kw not in node.address.lower():
+                continue
+            if role_kw and role_kw not in node.role.lower():
+                continue
+            matches.append(tei)
         return matches
 
 
@@ -392,6 +389,7 @@ class TopologyWidget(QWidget):
         # 节点搜索状态
         self._search_results: List[int] = []
         self._search_index = 0
+        self._search_key: Optional[Tuple[str, str, str]] = None
 
         self.setup_ui()
 
@@ -435,24 +433,6 @@ class TopologyWidget(QWidget):
 
         toolbar.addStretch()
 
-        # 节点搜索
-        toolbar.addWidget(QLabel("搜索节点:"))
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("TEI/地址/角色/相位...")
-        self.search_input.setFixedWidth(140)
-        self.search_input.returnPressed.connect(self._on_search_node)
-        toolbar.addWidget(self.search_input)
-
-        self.search_btn = QPushButton("定位")
-        self.search_btn.clicked.connect(self._on_search_node)
-        toolbar.addWidget(self.search_btn)
-
-        self.clear_search_btn = QPushButton("清除")
-        self.clear_search_btn.clicked.connect(self._on_clear_search)
-        toolbar.addWidget(self.clear_search_btn)
-
-        toolbar.addStretch()
-
         # 自动刷新
         self.auto_refresh_cb = QCheckBox("自动刷新")
         self.auto_refresh_cb.stateChanged.connect(self._on_auto_refresh_changed)
@@ -466,6 +446,48 @@ class TopologyWidget(QWidget):
         toolbar.addWidget(self.refresh_interval_sb)
 
         layout.addLayout(toolbar)
+
+        # 搜索栏（第二行）
+        search_bar = QHBoxLayout()
+        search_bar.setSpacing(6)
+
+        search_group = QGroupBox("节点搜索")
+        search_group_layout = QHBoxLayout(search_group)
+        search_group_layout.setSpacing(6)
+        search_group_layout.setContentsMargins(6, 4, 6, 4)
+
+        search_group_layout.addWidget(QLabel("TEI:"))
+        self.search_tei = QLineEdit()
+        self.search_tei.setPlaceholderText("TEI")
+        self.search_tei.setFixedWidth(70)
+        self.search_tei.returnPressed.connect(self._on_search_node)
+        search_group_layout.addWidget(self.search_tei)
+
+        search_group_layout.addWidget(QLabel("地址:"))
+        self.search_addr = QLineEdit()
+        self.search_addr.setPlaceholderText("节点地址")
+        self.search_addr.setFixedWidth(100)
+        self.search_addr.returnPressed.connect(self._on_search_node)
+        search_group_layout.addWidget(self.search_addr)
+
+        search_group_layout.addWidget(QLabel("角色:"))
+        self.search_role = QLineEdit()
+        self.search_role.setPlaceholderText("CCO/PCO/STA")
+        self.search_role.setFixedWidth(70)
+        self.search_role.returnPressed.connect(self._on_search_node)
+        search_group_layout.addWidget(self.search_role)
+
+        self.search_btn = QPushButton("定位")
+        self.search_btn.clicked.connect(self._on_search_node)
+        search_group_layout.addWidget(self.search_btn)
+
+        self.clear_search_btn = QPushButton("清除")
+        self.clear_search_btn.clicked.connect(self._on_clear_search)
+        search_group_layout.addWidget(self.clear_search_btn)
+
+        search_group_layout.addStretch()
+        search_bar.addWidget(search_group)
+        layout.addLayout(search_bar)
 
         # 图例说明
         legend = QHBoxLayout()
@@ -634,21 +656,37 @@ class TopologyWidget(QWidget):
         self.formation_label.setText(text)
 
     def _on_search_node(self):
-        """搜索节点并定位高亮"""
-        keyword = self.search_input.text().strip()
-        if not keyword:
+        """搜索节点并定位高亮（支持 TEI / 地址 / 角色 多字段联合过滤）"""
+        tei_kw = self.search_tei.text().strip()
+        addr_kw = self.search_addr.text().strip()
+        role_kw = self.search_role.text().strip()
+
+        if not tei_kw and not addr_kw and not role_kw:
             return
-        matches = self.view.search_nodes(keyword)
+
+        matches = self.view.search_nodes(tei_kw, addr_kw, role_kw)
         if not matches:
-            QMessageBox.information(self, "搜索", f"未找到匹配的节点: {keyword}")
-            self._log(f"[搜索] 未找到匹配: {keyword}")
+            filters = []
+            if tei_kw:
+                filters.append(f"TEI={tei_kw}")
+            if addr_kw:
+                filters.append(f"地址={addr_kw}")
+            if role_kw:
+                filters.append(f"角色={role_kw}")
+            QMessageBox.information(self, "搜索", f"未找到匹配的节点: {' | '.join(filters)}")
+            self._log(f"[搜索] 未找到匹配: {' | '.join(filters)}")
             return
-        # 如果关键词变化则重置索引
-        if self._search_results != matches:
+
+        # 如果搜索条件变化则重置索引
+        new_key = (tei_kw, addr_kw, role_kw)
+        old_key = getattr(self, '_search_key', None)
+        if new_key != old_key:
             self._search_results = matches
             self._search_index = 0
+            self._search_key = new_key
         else:
             self._search_index = (self._search_index + 1) % len(self._search_results)
+
         tei = self._search_results[self._search_index]
         self.view._apply_highlight(tei)
         self.view.focus_on_node(tei)
@@ -658,9 +696,12 @@ class TopologyWidget(QWidget):
 
     def _on_clear_search(self):
         """清除搜索状态和高亮"""
-        self.search_input.clear()
+        self.search_tei.clear()
+        self.search_addr.clear()
+        self.search_role.clear()
         self._search_results.clear()
         self._search_index = 0
+        self._search_key = None
         self.view.clear_highlight()
         self._log("[搜索] 已清除")
 
