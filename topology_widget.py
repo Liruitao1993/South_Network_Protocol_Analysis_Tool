@@ -586,6 +586,14 @@ class TopologyWidget(QWidget):
             di_info.get("DI0", 0)
         )
 
+        # 查询从节点数量响应（组网计时用）
+        if di_key == (0xE8, 0x00, 0x03, 0x05):
+            if len(user_data) >= 2:
+                count = int.from_bytes(user_data[0:2], 'little')
+                self._formation_node_count = count
+                self._log(f"[组网] CCO 从节点总数: {count}")
+            return
+
         if di_key != (0xE8, 0x04, 0x03, 0x65):
             return
 
@@ -619,6 +627,19 @@ class TopologyWidget(QWidget):
             return
 
         afn, fn = self._extract_gdw_afn_fn(frame)
+        # 查询从节点数量响应（组网计时用）
+        if afn == 0x10 and fn == 1:
+            table_data = self.gdw_parser.parse_to_table(frame)
+            for name, raw, parsed, comment, bs, be in table_data:
+                if "从节点总数量" in name or "从节点数量" in name:
+                    try:
+                        self._formation_node_count = int(parsed)
+                        self._log(f"[组网] CCO 从节点总数: {parsed}")
+                    except (ValueError, TypeError):
+                        pass
+                    break
+            return
+
         if afn != 0x10 or fn not in (20, 21):
             return
 
