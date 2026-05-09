@@ -517,12 +517,38 @@ class TopologyWidget(QWidget):
             self._refresh_timer.stop()
             self._log("[自动刷新] 已停止")
 
+    def _check_formation_complete(self):
+        """检查是否组网完成（拓扑节点数 / CCO从节点总数 >= 98%）"""
+        if self._formation_done or not self._formation_node_count:
+            return
+        ratio = len(self.nodes) / self._formation_node_count
+        if ratio >= 0.98:
+            self._formation_done = True
+            self._formation_elapsed_seconds = time.time() - self._formation_start_time
+            self._update_formation_ui()
+            self._log(
+                f"[组网完成] 拓扑节点{len(self.nodes)} / 总数{self._formation_node_count} = "
+                f"{ratio * 100:.1f}%, 耗时 {self._formation_elapsed_seconds:.1f} 秒"
+            )
+
+    def _update_formation_ui(self):
+        """更新组网状态标签"""
+        if self._formation_done and self._formation_elapsed_seconds is not None:
+            text = f"组网状态: 完成 | 耗时: {self._formation_elapsed_seconds:.1f} 秒"
+        elif self._formation_start_time:
+            elapsed = time.time() - self._formation_start_time
+            text = f"组网状态: 进行中 | 已耗时: {elapsed:.1f} 秒"
+        else:
+            text = "组网状态: 未开始"
+        self.formation_label.setText(text)
+
     def _on_refresh_timeout(self):
         if self._pending_query:
             return
         if not self.serial_worker or not self.serial_worker.is_open():
             return
         self._on_query()
+        self._update_formation_ui()
 
     # ------------------------------------------------------------------
     # Query & pagination
@@ -617,6 +643,7 @@ class TopologyWidget(QWidget):
                     self._query_south_page()
                 else:
                     self._pending_query = False
+                    self._check_formation_complete()
                     self._log(f"[完成] 南网拓扑查询完成，共{len(self.nodes)}个节点")
         else:
             self._pending_query = False
@@ -664,6 +691,7 @@ class TopologyWidget(QWidget):
                     self._query_gdw_page()
                 else:
                     self._pending_query = False
+                    self._check_formation_complete()
                     self._log(f"[完成] 国网拓扑查询完成，共{len(self.nodes)}个节点")
         else:
             self._pending_query = False
