@@ -37,9 +37,14 @@ from serial_worker import SerialWorker
 from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu
 
 
-APP_VERSION = "1.6.7"
+APP_VERSION = "1.6.8"
 
 CHANGELOG = [
+    ("1.6.8", "2026-05-09", [
+        "档案管理：修复缺失 json 导入导致导出失败的问题",
+        "档案管理：修复协议切换时错误清空档案数据的问题",
+        "拓扑信息：新增组网完成时间统计功能（自动刷新模式）",
+    ]),
     ("1.6.7", "2026-04-30", [
         "修复南网协议DI字节序解析（恢复小端序，修复DI查找匹配）",
         "修复查询运行参数信息(E8 03 03 74)数据内容解析器IndexError",
@@ -1323,8 +1328,6 @@ class MainWindow(QMainWindow):
             if show_archive:
                 mode = "south" if index == 0 else "gdw"
                 self.archive_tab.set_protocol_mode(mode)
-            else:
-                self.archive_tab.reset()
         # 拓扑信息页面在南网和国网协议下显示
         if hasattr(self, '_topology_tab_index'):
             show_topology = index in (0, 6)
@@ -3226,6 +3229,24 @@ def main():
     font = QFont()
     font.setPointSize(10)
     app.setFont(font)
+
+    # 全局复选框样式：白色背景 + 黑色边框，确保在浅色主题下清晰可见
+    app.setStyleSheet("""
+        QCheckBox::indicator {
+            width: 16px;
+            height: 16px;
+            border: 1px solid black;
+            background-color: white;
+        }
+        QCheckBox::indicator:checked {
+            background-color: #2196F3;
+            border: 1px solid black;
+        }
+        QCheckBox::indicator:indeterminate {
+            background-color: #90CAF9;
+            border: 1px solid black;
+        }
+    """)
 
     window = MainWindow()
     window.show()
