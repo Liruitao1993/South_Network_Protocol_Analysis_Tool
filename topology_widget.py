@@ -343,7 +343,7 @@ class TopologyGraphicsView(QGraphicsView):
         matches = []
         for tei, item in self._node_items.items():
             node = item.node
-            if tei_kw and tei_kw not in str(node.tei).lower():
+            if tei_kw and str(node.tei).lower() != tei_kw:
                 continue
             if addr_kw and addr_kw not in node.address.lower():
                 continue
