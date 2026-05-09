@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QGraphicsView, QGraphicsScene, QGraphicsEllipseItem,
     QGraphicsLineItem, QGraphicsTextItem, QGraphicsItem,
-    QLabel, QComboBox, QTextEdit, QMessageBox, QCheckBox, QSpinBox
+    QLabel, QComboBox, QTextEdit, QMessageBox, QCheckBox, QSpinBox, QLineEdit
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QPen, QBrush, QColor, QFont, QPainter
@@ -158,6 +158,8 @@ class TopologyGraphicsView(QGraphicsView):
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
         self.setMinimumSize(300, 300)
         self.setStyleSheet("background-color: #FAFAFA; border: 1px solid #cccccc;")
+        self._node_items: Dict[int, TopoNodeItem] = {}
+        self._highlighted_tei: Optional[int] = None
 
     def wheelEvent(self, event):
         factor = 1.15 if event.angleDelta().y() > 0 else 0.87
@@ -165,6 +167,8 @@ class TopologyGraphicsView(QGraphicsView):
 
     def clear(self):
         self._scene.clear()
+        self._node_items.clear()
+        self._highlighted_tei = None
 
     def build_tree(self, nodes: Dict[int, TopoNode]):
         """根据节点字典构建拓扑树"""
@@ -246,10 +250,16 @@ class TopologyGraphicsView(QGraphicsView):
                 self._scene.addItem(line)
 
         # 绘制节点
+        self._node_items.clear()
         for tei, pos in positions.items():
             node = nodes[tei]
             item = TopoNodeItem(node, pos[0], pos[1])
             self._scene.addItem(item)
+            self._node_items[tei] = item
+
+        # 恢复高亮状态（如果重建后仍有匹配的节点）
+        if self._highlighted_tei is not None and self._highlighted_tei in self._node_items:
+            self._apply_highlight(self._highlighted_tei)
 
         # 调整场景大小
         rect = self._scene.itemsBoundingRect()
@@ -303,6 +313,48 @@ class TopologyGraphicsView(QGraphicsView):
         self._scene.addItem(text)
         self._scene.setSceneRect(0, 0, 300, 300)
 
+    def _apply_highlight(self, tei: int):
+        """将指定节点设为高亮（红色边框）并取消其他节点高亮"""
+        for t, item in self._node_items.items():
+            if t == tei:
+                item.setPen(QPen(QColor("#FF0000"), 4))
+            else:
+                item.setPen(QPen(QColor("#333333"), 2))
+        self._highlighted_tei = tei
+
+    def clear_highlight(self):
+        """清除所有节点高亮"""
+        for item in self._node_items.values():
+            item.setPen(QPen(QColor("#333333"), 2))
+        self._highlighted_tei = None
+
+    def focus_on_node(self, tei: int):
+        """将视图中心移动到指定节点"""
+        item = self._node_items.get(tei)
+        if item:
+            self.centerOn(item)
+            self.ensureVisible(item, 50, 50)
+
+    def search_nodes(self, keyword: str) -> List[int]:
+        """模糊搜索节点，返回匹配的 TEI 列表"""
+        if not keyword:
+            return []
+        kw = keyword.strip().lower()
+        matches = []
+        for tei, item in self._node_items.items():
+            node = item.node
+            fields = [
+                str(node.tei),
+                node.address,
+                node.role,
+                node.phase,
+                node.channel,
+                node.module_type,
+            ]
+            if any(kw in f.lower() for f in fields):
+                matches.append(tei)
+        return matches
+
 
 class TopologyWidget(QWidget):
     """拓扑信息页面Widget（可独立作为Tab）"""
@@ -336,6 +388,10 @@ class TopologyWidget(QWidget):
         self._formation_node_count: Optional[int] = None
         self._formation_done = False
         self._formation_elapsed_seconds: Optional[float] = None
+
+        # 节点搜索状态
+        self._search_results: List[int] = []
+        self._search_index = 0
 
         self.setup_ui()
 
@@ -376,6 +432,24 @@ class TopologyWidget(QWidget):
         self.export_btn = QPushButton("导出拓扑(JSON)")
         self.export_btn.clicked.connect(self._on_export)
         toolbar.addWidget(self.export_btn)
+
+        toolbar.addStretch()
+
+        # 节点搜索
+        toolbar.addWidget(QLabel("搜索节点:"))
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("TEI/地址/角色/相位...")
+        self.search_input.setFixedWidth(140)
+        self.search_input.returnPressed.connect(self._on_search_node)
+        toolbar.addWidget(self.search_input)
+
+        self.search_btn = QPushButton("定位")
+        self.search_btn.clicked.connect(self._on_search_node)
+        toolbar.addWidget(self.search_btn)
+
+        self.clear_search_btn = QPushButton("清除")
+        self.clear_search_btn.clicked.connect(self._on_clear_search)
+        toolbar.addWidget(self.clear_search_btn)
 
         toolbar.addStretch()
 
@@ -558,6 +632,37 @@ class TopologyWidget(QWidget):
         else:
             text = "组网状态: 未开始"
         self.formation_label.setText(text)
+
+    def _on_search_node(self):
+        """搜索节点并定位高亮"""
+        keyword = self.search_input.text().strip()
+        if not keyword:
+            return
+        matches = self.view.search_nodes(keyword)
+        if not matches:
+            QMessageBox.information(self, "搜索", f"未找到匹配的节点: {keyword}")
+            self._log(f"[搜索] 未找到匹配: {keyword}")
+            return
+        # 如果关键词变化则重置索引
+        if self._search_results != matches:
+            self._search_results = matches
+            self._search_index = 0
+        else:
+            self._search_index = (self._search_index + 1) % len(self._search_results)
+        tei = self._search_results[self._search_index]
+        self.view._apply_highlight(tei)
+        self.view.focus_on_node(tei)
+        self._log(
+            f"[搜索] 定位到 TEI={tei} ({self._search_index + 1}/{len(self._search_results)})"
+        )
+
+    def _on_clear_search(self):
+        """清除搜索状态和高亮"""
+        self.search_input.clear()
+        self._search_results.clear()
+        self._search_index = 0
+        self.view.clear_highlight()
+        self._log("[搜索] 已清除")
 
     def _on_refresh_timeout(self):
         if self._pending_query:
