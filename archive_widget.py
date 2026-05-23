@@ -22,8 +22,23 @@ from send_frame_lib import ProtocolFrameGenerator
 from gdw_send_frame_lib import GDWFrameGenerator
 from protocol_parser import ProtocolFrameParser
 from gdw10376_parser import GDW10376Parser
+from dlt645_parser import DLT645Parser
+from lme_info_entry_parser import parse_lme_info_entries, format_lme_info_summary
 
 ARCHIVE_FILE = "archive_data.json"
+
+
+def _crc16_x25(data: bytes) -> int:
+    """X-25 CRC16 (多项式0x1021, 初始值0xFFFF, 输入/输出反转, 输出异或0xFFFF)"""
+    crc = 0xFFFF
+    for byte in data:
+        crc ^= byte
+        for _ in range(8):
+            if crc & 1:
+                crc = (crc >> 1) ^ 0x8408  # 0x1021 bit-reversed
+            else:
+                crc >>= 1
+    return crc ^ 0xFFFF
 
 
 class AddNodesDialog(QDialog):
@@ -208,6 +223,27 @@ class ArchiveWidget(QWidget):
         self.setup_ui()
         self._load_archive()  # 启动时自动加载上次档案
 
+        # 版本查询队列
+        self._version_query_queue: List[Tuple[int, str]] = []  # [(row, addr), ...]
+        self._version_query_mode: str = ""  # "simple" | "detail"
+        self._version_query_timer = None
+        self._version_query_timeout_ms: int = 5000  # 默认5秒超时
+        self._is_querying_version: bool = False
+        self._version_query_current_row: int = -1
+        self._version_query_current_addr: str = ""
+        self._gdw_seq_counter: int = 0  # 1376.2 报文序列号，每次发送+1
+
+        # 抄表测试
+        self._copy_test_queue: List[Tuple[int, str, str, int]] = []
+        self._copy_test_timer = None
+        self._copy_test_timeout_ms: int = 3000
+        self._is_copy_testing: bool = False
+        self._copy_test_mode: str = ""  # "sequential" | "concurrent"
+        self._copy_test_stats: Dict[str, Dict[str, int]] = {}
+        self._copy_test_count: int = 3
+        self._copy_test_concurrent_responses: Dict[str, int] = {}
+        self._copy_test_remaining_rounds: int = 0
+
     # ------------------------------------------------------------------
     # UI 构建
     # ------------------------------------------------------------------
@@ -231,17 +267,18 @@ class ArchiveWidget(QWidget):
         table_layout.setSpacing(4)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(6)
-        self.table.setHorizontalHeaderLabels(["选择", "序号", "电表号/从节点地址", "电表协议", "相位/相序", "状态"])
+        self.table.setColumnCount(10)
+        self.table.setHorizontalHeaderLabels(["选择", "序号", "电表号/从节点地址", "电表协议", "相位/相序", "状态", "版本信息", "详细版本", "抄读结果", "其他信息"])
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(True)
         self.table.setColumnWidth(0, 50)
         self.table.setColumnWidth(1, 50)
         self.table.setColumnWidth(2, 160)
-        self.table.setColumnWidth(3, 120)
-        self.table.setColumnWidth(4, 80)
+        self.table.setColumnWidth(3, 100)
+        self.table.setColumnWidth(4, 60)
         self.table.setColumnWidth(5, 80)
+        self.table.setColumnWidth(6, 200)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setAlternatingRowColors(True)
@@ -366,6 +403,20 @@ class ArchiveWidget(QWidget):
         addr_layout.addStretch()
         gdw_layout.addLayout(addr_layout)
 
+        # 抄读配置
+        copy_config_layout = QHBoxLayout()
+        copy_config_layout.setSpacing(6)
+        copy_config_layout.addWidget(QLabel("抄读次数:"))
+        self.copy_count_input = QLineEdit("3")
+        self.copy_count_input.setFixedWidth(40)
+        copy_config_layout.addWidget(self.copy_count_input)
+        copy_config_layout.addWidget(QLabel("超时(ms):"))
+        self.copy_timeout_input = QLineEdit("3000")
+        self.copy_timeout_input.setFixedWidth(50)
+        copy_config_layout.addWidget(self.copy_timeout_input)
+        copy_config_layout.addStretch()
+        gdw_layout.addLayout(copy_config_layout)
+
         self.gdw_config_group.setVisible(False)
         parent_layout.addWidget(self.gdw_config_group)
 
@@ -417,6 +468,24 @@ class ArchiveWidget(QWidget):
         self.query_info_btn.clicked.connect(self._on_query_node_info)
         query_layout.addWidget(self.query_info_btn)
 
+        self.query_version_btn = QPushButton("查询从节点版本")
+        self.query_version_btn.clicked.connect(self._on_query_node_version)
+        query_layout.addWidget(self.query_version_btn)
+
+        self.query_version_detail_btn = QPushButton("查询从节点详细版本")
+        self.query_version_detail_btn.clicked.connect(self._on_query_node_version_detail)
+        query_layout.addWidget(self.query_version_detail_btn)
+
+        query_layout.addWidget(QLabel("|"))
+
+        self.copy_test_btn = QPushButton("点抄测试")
+        self.copy_test_btn.clicked.connect(self._on_copy_test)
+        query_layout.addWidget(self.copy_test_btn)
+
+        self.concurrent_copy_btn = QPushButton("并发抄表")
+        self.concurrent_copy_btn.clicked.connect(self._on_concurrent_copy)
+        query_layout.addWidget(self.concurrent_copy_btn)
+
         btn_layout.addWidget(query_group)
 
         # 任务操作
@@ -458,6 +527,8 @@ class ArchiveWidget(QWidget):
         for btn in [
             self.add_node_btn, self.del_node_btn, self.init_archive_btn,
             self.query_count_btn, self.query_info_btn,
+            self.query_version_btn, self.query_version_detail_btn,
+            self.copy_test_btn, self.concurrent_copy_btn,
             self.init_task_btn, self.start_task_btn, self.pause_task_btn
         ]:
             btn.setEnabled(connected)
@@ -583,10 +654,14 @@ class ArchiveWidget(QWidget):
         )
 
     def _build_gdw_frame(self, afn: int, fn: int, field_values: Dict[str, Any]) -> bytes:
+        seq = self._gdw_seq_counter
+        self._gdw_seq_counter = (self._gdw_seq_counter + 1) & 0xFF
+        self.gdw_seq.setText(str(self._gdw_seq_counter))
         info_config = {
             "dir": self.gdw_dir.currentData(),
             "prm": self.gdw_prm.currentData(),
-            "报文序列号": int(self.gdw_seq.text() or 0),
+            "通信方式": 4,  # 双模
+            "报文序列号": seq,
             "通信模块标识": self.gdw_comm_module.currentData(),
             "中继级别": self.gdw_relay_level.currentData(),
             "路由标识": 0,
@@ -708,6 +783,453 @@ class ArchiveWidget(QWidget):
             )
         self._send_hex(frame.hex().upper(), "查询从节点信息")
 
+    def _on_query_node_version(self):
+        """查询从节点版本（AFN=03 F1 厂商代码和版本信息）"""
+        checked_rows = self._get_checked_rows()
+        if not checked_rows:
+            QMessageBox.warning(self, "警告", "请先在表格中勾选要查询的从节点！")
+            return
+        if self.protocol_mode != "gdw":
+            QMessageBox.warning(self, "警告", "版本查询仅在国网协议模式下支持！")
+            return
+        self._start_version_query(checked_rows, "simple")
+
+    def _on_query_node_version_detail(self):
+        """查询从节点详细版本信息（AFN=13 F1 + DLT645内层）"""
+        checked_rows = self._get_checked_rows()
+        if not checked_rows:
+            QMessageBox.warning(self, "警告", "请先在表格中勾选要查询的从节点！")
+            return
+        if self.protocol_mode != "gdw":
+            QMessageBox.warning(self, "警告", "版本查询仅在国网协议模式下支持！")
+            return
+        self._start_version_query(checked_rows, "detail")
+
+    # ------------------------------------------------------------------
+    # 抄表测试
+    # ------------------------------------------------------------------
+    def _on_copy_test(self):
+        """点抄测试（AFN=13 F1，依次抄读）"""
+        checked_rows = self._get_checked_rows()
+        if not checked_rows:
+            QMessageBox.warning(self, "警告", "请先在表格中勾选要抄读的电表！")
+            return
+        if self.protocol_mode != "gdw":
+            QMessageBox.warning(self, "警告", "抄表测试仅在国网协议模式下支持！")
+            return
+        self._start_copy_test(checked_rows, "sequential")
+
+    def _on_concurrent_copy(self):
+        """并发抄表测试（AFN=F1 F1）"""
+        checked_rows = self._get_checked_rows()
+        if not checked_rows:
+            QMessageBox.warning(self, "警告", "请先在表格中勾选要抄读的电表！")
+            return
+        if self.protocol_mode != "gdw":
+            QMessageBox.warning(self, "警告", "抄表测试仅在国网协议模式下支持！")
+            return
+        self._start_copy_test(checked_rows, "concurrent")
+
+    def _build_dlt645_read_energy_frame(self, addr: str) -> bytes:
+        """构建DLT645-2007读正向有功总电能帧"""
+        addr_bytes = bytes.fromhex(addr.zfill(12))[::-1]
+        di_bytes = (0x00010000).to_bytes(4, 'little')
+        data_field = bytes([(b + 0x33) & 0xFF for b in di_bytes])
+        frame = bytearray()
+        frame.append(0x68)
+        frame.extend(addr_bytes)
+        frame.append(0x68)
+        frame.append(0x11)
+        frame.append(len(data_field))
+        frame.extend(data_field)
+        cs = sum(frame) & 0xFF
+        frame.append(cs)
+        frame.append(0x16)
+        return bytes(frame)
+
+    def _build_dlt698_read_energy_frame(self, addr: str) -> bytes:
+        """构建DL/T 698.45读正向有功总电能帧（基于用户参考报文模板）
+
+        参考报文: 68 2C 00 43 05 25 01 00 00 03 02 00 7B E3
+                  10 00 08 05 01 7D 00 10 02 01 00 01 10 00 01 02 03 04
+                  05 06 07 08 09 0A 0B 0C 0D 0E 0F 84 66 16
+        HCS: X-25 CRC(frame[1:12]), 小端序存储
+        FCS: X-25 CRC(frame[1:-3]), 小端序存储
+        """
+        # 地址BCD编码（12位十进制→6字节，小端序）
+        addr_bytes = bytes.fromhex(addr.zfill(12))[::-1]
+
+        # 模板报文（地址和校验先填00）
+        frame = bytearray(bytes.fromhex(
+            '68'          # 起始符
+            '2C00'        # L = 44 (小端)
+            '43'          # C
+            '000000000000'  # 地址占位（6字节）
+            '0200'        # CA + SA
+            '0000'        # HCS占位
+            '1000'        # 数据长度 = 16
+            '0805017D00100201000110000102'  # APDU前14字节
+            '030405060708090A0B0C0D0E0F'    # APDU后2字节 + 其他数据
+            '0000'        # FCS占位
+            '16'          # 结束符
+        ))
+
+        # 替换地址（索引4-9）
+        frame[4:10] = addr_bytes
+
+        # 计算HCS：从L1到SA（索引1到11，含），X-25 CRC，小端序
+        hcs_raw = _crc16_x25(bytes(frame[1:12]))
+        frame[12] = hcs_raw & 0xFF
+        frame[13] = (hcs_raw >> 8) & 0xFF
+
+        # 计算FCS：从L1到DATA末尾（索引1到-3，不含FCS和16），X-25 CRC，小端序
+        fcs_raw = _crc16_x25(bytes(frame[1:-3]))
+        frame[-3] = fcs_raw & 0xFF
+        frame[-2] = (fcs_raw >> 8) & 0xFF
+
+        return bytes(frame)
+
+    def _start_copy_test(self, rows: List[int], mode: str):
+        """启动抄表测试"""
+        try:
+            self._copy_test_count = max(1, int(self.copy_count_input.text() or "3"))
+        except ValueError:
+            self._copy_test_count = 3
+        try:
+            self._copy_test_timeout_ms = max(500, int(self.copy_timeout_input.text() or "3000"))
+        except ValueError:
+            self._copy_test_timeout_ms = 3000
+        self._copy_test_queue = []
+        self._copy_test_stats = {}
+        self._copy_test_concurrent_responses = {}
+
+        for row in rows:
+            addr = self.table.item(row, 2).text().strip().zfill(12)
+            proto = self.table.item(row, 3).text().strip()
+            self._copy_test_stats[addr] = {"sent": 0, "success": 0, "total": self._copy_test_count}
+            self._copy_test_queue.append((row, addr, proto, self._copy_test_count))
+            self.table.setItem(row, 8, QTableWidgetItem("抄读中..."))
+
+        self._copy_test_mode = mode
+        self._is_copy_testing = True
+
+        if mode == "sequential":
+            self._log(f"[点抄测试] 开始依次抄读 {len(rows)} 个电表，每表{self._copy_test_count}次")
+            self._send_next_copy_test()
+        else:
+            self._copy_test_remaining_rounds = self._copy_test_count
+            self._log(f"[并发抄表] 开始并发抄读 {len(rows)} 个电表，共{self._copy_test_count}轮")
+            self._send_concurrent_copy()
+
+    def _send_next_copy_test(self):
+        """发送队列中的下一个点抄"""
+        if not self._copy_test_queue:
+            self._is_copy_testing = False
+            self._log("[点抄测试] 所有电表抄读完成")
+            return
+        row, addr, proto, remaining = self._copy_test_queue[0]
+
+        if "645" in proto:
+            inner_frame = self._build_dlt645_read_energy_frame(addr)
+            proto_type = 2
+        elif "698" in proto:
+            inner_frame = self._build_dlt698_read_energy_frame(addr)
+            proto_type = 3
+        else:
+            inner_frame = self._build_dlt645_read_energy_frame(addr)
+            proto_type = 2
+
+        field_values = {
+            "通信协议类型": proto_type,
+            "通信延时相关性标志": 0,
+            "从节点附属节点数量": 0,
+            "报文长度": len(inner_frame),
+            "报文内容": inner_frame.hex().upper(),
+        }
+        seq = self._gdw_seq_counter
+        self._gdw_seq_counter = (self._gdw_seq_counter + 1) & 0xFF
+        self.gdw_seq.setText(str(self._gdw_seq_counter))
+        info_config = {
+            "dir": 0, "prm": 1, "通信方式": 4,
+            "报文序列号": seq,
+            "通信模块标识": 1, "中继级别": 0,
+            "路由标识": 0, "附属节点标识": 0,
+            "冲突检测": 0, "纠错编码标识": 0,
+            "信道标识": 0, "预计应答字节数": 0,
+            "通信速率": 0, "速率单位标识": 0,
+        }
+        frame = self.gdw_generator.generate_frame(
+            0x13, 1, field_values, info_config,
+            src_addr=self.gdw_src_addr.text().strip(),
+            dst_addr=addr
+        )
+        self._copy_test_stats[addr]["sent"] += 1
+        current = self._copy_test_count - remaining + 1
+        self._send_hex(frame.hex().upper(), f"点抄 [{addr}] 第{current}/{self._copy_test_count}次")
+
+        if self._copy_test_timer is None:
+            from PySide6.QtCore import QTimer
+            self._copy_test_timer = QTimer(self)
+            self._copy_test_timer.setSingleShot(True)
+            self._copy_test_timer.timeout.connect(self._on_copy_test_timeout)
+        self._copy_test_timer.start(self._copy_test_timeout_ms)
+
+    def _send_concurrent_copy(self):
+        """发送并发抄表帧（AFN=F1 F1）"""
+        node_list = []
+        for row, addr, proto, _ in self._copy_test_queue:
+            if "645" in proto:
+                inner_frame = self._build_dlt645_read_energy_frame(addr)
+                proto_type = 2
+            elif "698" in proto:
+                inner_frame = self._build_dlt698_read_energy_frame(addr)
+                proto_type = 3
+            else:
+                inner_frame = self._build_dlt645_read_energy_frame(addr)
+                proto_type = 2
+            node_list.append({
+                "从节点地址": addr,
+                "通信协议类型": proto_type,
+                "报文长度": len(inner_frame),
+                "报文内容": inner_frame.hex().upper(),
+            })
+            self._copy_test_concurrent_responses[addr] = 0
+
+        field_values = {
+            "从节点数量": len(node_list),
+            "从节点列表": node_list,
+        }
+        self._copy_test_concurrent_responses = {}
+        seq = self._gdw_seq_counter
+        self._gdw_seq_counter = (self._gdw_seq_counter + 1) & 0xFF
+        self.gdw_seq.setText(str(self._gdw_seq_counter))
+        info_config = {
+            "dir": 0, "prm": 1, "通信方式": 4,
+            "报文序列号": seq,
+            "通信模块标识": 1, "中继级别": 0,
+            "路由标识": 0, "附属节点标识": 0,
+            "冲突检测": 0, "纠错编码标识": 0,
+            "信道标识": 0, "预计应答字节数": 0,
+            "通信速率": 0, "速率单位标识": 0,
+        }
+        frame = self.gdw_generator.generate_frame(
+            0xF1, 1, field_values, info_config,
+            src_addr=self.gdw_src_addr.text().strip(),
+            dst_addr="000000000000"
+        )
+        for addr in self._copy_test_stats:
+            self._copy_test_stats[addr]["sent"] = self._copy_test_stats[addr]["total"]
+        self._send_hex(frame.hex().upper(), f"并发抄表 {len(node_list)} 个电表")
+
+        if self._copy_test_timer is None:
+            from PySide6.QtCore import QTimer
+            self._copy_test_timer = QTimer(self)
+            self._copy_test_timer.setSingleShot(True)
+            self._copy_test_timer.timeout.connect(self._on_copy_test_timeout)
+        timeout = self._copy_test_timeout_ms * max(len(node_list), 1)
+        self._copy_test_timer.start(timeout)
+
+    def _on_copy_test_timeout(self):
+        """抄表测试超时处理"""
+        if not self._is_copy_testing:
+            return
+        if self._copy_test_mode == "sequential":
+            row, addr, proto, remaining = self._copy_test_queue.pop(0)
+            remaining -= 1
+            if remaining > 0:
+                self._copy_test_queue.append((row, addr, proto, remaining))
+            else:
+                self._update_copy_test_result(row, addr)
+            self._send_next_copy_test()
+        else:
+            self._copy_test_remaining_rounds -= 1
+            if self._copy_test_remaining_rounds > 0:
+                self._log(f"[并发抄表] 本轮超时，剩余{self._copy_test_remaining_rounds}轮")
+                self._send_concurrent_copy()
+            else:
+                for row, addr, proto, _ in self._copy_test_queue:
+                    self._update_copy_test_result(row, addr)
+                self._is_copy_testing = False
+                self._copy_test_queue = []
+                self._log("[并发抄表] 超时，抄读结束")
+
+    def _update_copy_test_result(self, row: int, addr: str):
+        """更新抄读结果到表格"""
+        stats = self._copy_test_stats.get(addr, {"sent": 0, "success": 0, "total": 0})
+        sent = stats["sent"]
+        success = stats["success"]
+        total = stats["total"]
+        rate = (success / total * 100) if total > 0 else 0
+        result_text = f"发送{sent} 成功{success}/{total} ({rate:.0f}%)"
+        self.table.setItem(row, 8, QTableWidgetItem(result_text))
+        self._log(f"[抄读结果] {addr}: {result_text}")
+
+    def _extract_src_addr_from_frame(self, frame: bytes) -> str:
+        """从1376.2上行帧中提取源地址A1"""
+        if len(frame) < 22 or frame[0] != 0x68:
+            return ""
+        comm_module = (frame[4] >> 2) & 0x01
+        relay_level = (frame[4] >> 4) & 0x0F
+        if comm_module == 0:
+            return ""
+        addr_start = 10
+        src_addr_bytes = frame[addr_start:addr_start + 6][::-1]
+        return src_addr_bytes.hex().upper()
+
+    def _extract_inner_meter_addr(self, frame: bytes) -> str:
+        """从AFN=13/F1上行帧的内层报文中提取电表地址"""
+        try:
+            table_data = self.gdw_parser.parse_to_table(frame)
+        except Exception:
+            return ""
+        inner_frame = None
+        for name, raw, parsed, comment, bs, be in table_data:
+            if "报文内容" in name and "原始报文数据" in comment:
+                try:
+                    inner_frame = bytes.fromhex(raw.replace(" ", ""))
+                except ValueError:
+                    pass
+                break
+        if not inner_frame or len(inner_frame) < 10:
+            return ""
+        if inner_frame[0] == 0x68 and len(inner_frame) >= 7:
+            addr_bytes = inner_frame[1:7][::-1]
+            return addr_bytes.hex().upper()
+        return ""
+
+    def _start_version_query(self, rows: List[int], mode: str):
+        """启动版本查询队列"""
+        self._version_query_queue = []
+        for row in rows:
+            addr = self.table.item(row, 2).text().strip().zfill(12)
+            self._version_query_queue.append((row, addr))
+            # 清空对应模式的列
+            col = 6 if mode == "simple" else 7
+            self.table.setItem(row, col, QTableWidgetItem("查询中..."))
+        self._version_query_mode = mode
+        self._is_querying_version = True
+        self._log(f"[版本查询] 开始查询 {len(rows)} 个从节点，模式={mode}")
+        self._send_next_version_query()
+
+    def _send_next_version_query(self):
+        """发送队列中的下一个版本查询"""
+        if not self._version_query_queue:
+            self._is_querying_version = False
+            self._log("[版本查询] 所有从节点查询完成")
+            return
+        row, addr = self._version_query_queue[0]
+        self._version_query_current_row = row
+        self._version_query_current_addr = addr
+
+        seq = self._gdw_seq_counter
+        self._gdw_seq_counter = (self._gdw_seq_counter + 1) & 0xFF
+        self.gdw_seq.setText(str(self._gdw_seq_counter))
+
+        if self._version_query_mode == "simple":
+            # AFN=03 F1 厂商代码和版本信息
+            info_config = {
+                "dir": self.gdw_dir.currentData(),
+                "prm": self.gdw_prm.currentData(),
+                "通信方式": 4,  # 双模
+                "报文序列号": seq,
+                "通信模块标识": 1,  # 对从节点
+                "中继级别": 0,
+                "路由标识": 0,
+                "附属节点标识": 0,
+                "冲突检测": 0,
+                "纠错编码标识": 0,
+                "信道标识": 0,
+                "预计应答字节数": 0,
+                "通信速率": 0,
+                "速率单位标识": 0,
+            }
+            frame = self.gdw_generator.generate_frame(
+                0x03, 1, {}, info_config,
+                src_addr=self.gdw_src_addr.text().strip(),
+                dst_addr=addr
+            )
+            frame_hex = frame.hex().upper()
+            self._send_hex(frame_hex, f"查询从节点版本 [{addr}] seq={seq}")
+        else:
+            # AFN=13 F1 扩展监控从节点 + DLT645内层
+            inner_frame = self._build_detail_version_inner_frame(addr)
+            field_values = {
+                "通信协议类型": 2,  # DL/T 645-2007
+                "通信延时相关性标志": 0,
+                "从节点附属节点数量": 0,
+                "报文长度": len(inner_frame),
+                "报文内容": inner_frame.hex().upper()
+            }
+            info_config = {
+                "dir": self.gdw_dir.currentData(),
+                "prm": self.gdw_prm.currentData(),
+                "通信方式": 4,  # 双模
+                "报文序列号": seq,
+                "通信模块标识": 1,  # 对从节点
+                "中继级别": 0,
+                "路由标识": 0,
+                "附属节点标识": 0,
+                "冲突检测": 0,
+                "纠错编码标识": 0,
+                "信道标识": 0,
+                "预计应答字节数": 0,
+                "通信速率": 0,
+                "速率单位标识": 0,
+            }
+            frame = self.gdw_generator.generate_frame(
+                0x13, 1, field_values, info_config,
+                src_addr=self.gdw_src_addr.text().strip(),
+                dst_addr=addr
+            )
+            frame_hex = frame.hex().upper()
+            self._send_hex(frame_hex, f"查询从节点详细版本 [{addr}]")
+
+        # 启动超时定时器
+        from PySide6.QtCore import QTimer
+        if self._version_query_timer is None:
+            self._version_query_timer = QTimer(self)
+            self._version_query_timer.setSingleShot(True)
+            self._version_query_timer.timeout.connect(self._on_version_timeout)
+        self._version_query_timer.start(self._version_query_timeout_ms)
+
+    def _build_detail_version_inner_frame(self, addr: str) -> bytes:
+        """构建查询详细版本信息的内层DLT645帧（基于用户参考报文模板）"""
+        # 参考报文内层: 68 99 99 99 99 99 99 68 11 3C [60字节数据] B2 16
+        addr_bytes = bytes.fromhex(addr)
+        # 60字节数据域（使用参考报文中的原始数据域）
+        data_field = bytes([
+            0x34, 0x10, 0x33, 0x32, 0x33, 0x4E, 0x34, 0x33, 0x35, 0x33,
+            0x36, 0x33, 0x37, 0x33, 0x38, 0x33, 0x39, 0x33, 0x3C, 0x33,
+            0x74, 0x33, 0x75, 0x33, 0x76, 0x33, 0x77, 0x33, 0x78, 0x33,
+            0x79, 0x33, 0x7A, 0x33, 0x7B, 0x33, 0x7C, 0x33, 0x7D, 0x33,
+            0x7E, 0x33, 0x7F, 0x33, 0x80, 0x33, 0x81, 0x33, 0x87, 0x33,
+            0x88, 0x33, 0x89, 0x33, 0x8A, 0x33, 0x8B, 0x33, 0x91, 0x33
+        ])
+        data_len = len(data_field)
+        # 构建DLT645帧
+        frame = bytearray()
+        frame.append(0x68)
+        frame.extend(addr_bytes[::-1])  # DLT645地址低字节在前
+        frame.append(0x68)
+        frame.append(0x11)  # 控制码: 读数据
+        frame.append(data_len)
+        frame.extend(data_field)
+        # 计算校验和
+        cs = sum(frame) & 0xFF
+        frame.append(cs)
+        frame.append(0x16)
+        return bytes(frame)
+
+    def _on_version_timeout(self):
+        """版本查询超时处理"""
+        if not self._is_querying_version or not self._version_query_queue:
+            return
+        row, addr = self._version_query_queue.pop(0)
+        col = 6 if self._version_query_mode == "simple" else 7
+        self.table.setItem(row, col, QTableWidgetItem("超时"))
+        self._log(f"[版本查询] 从节点 {addr} 查询超时")
+        self._send_next_version_query()
+
     def _on_init_task(self):
         frame = self._build_south_frame((0xE8, 0x02, 0x01, 0x03), {})
         self._send_hex(frame.hex().upper(), "初始化任务")
@@ -772,6 +1294,10 @@ class ArchiveWidget(QWidget):
         self.table.setItem(row, 4, QTableWidgetItem(info.get("phase", "-")))
         status = info.get("status", "本地添加")
         self.table.setItem(row, 5, QTableWidgetItem(status))
+        self.table.setItem(row, 6, QTableWidgetItem(""))
+        self.table.setItem(row, 7, QTableWidgetItem(""))
+        self.table.setItem(row, 8, QTableWidgetItem(""))
+        self.table.setItem(row, 9, QTableWidgetItem(""))
 
         self._node_data.append(info)
         self._save_archive()
@@ -828,6 +1354,10 @@ class ArchiveWidget(QWidget):
         self.table.setItem(row, 3, QTableWidgetItem(proto))
         self.table.setItem(row, 4, QTableWidgetItem(phase))
         self.table.setItem(row, 5, QTableWidgetItem(status))
+        self.table.setItem(row, 6, QTableWidgetItem(""))
+        self.table.setItem(row, 7, QTableWidgetItem(""))
+        self.table.setItem(row, 8, QTableWidgetItem(""))
+        self.table.setItem(row, 9, QTableWidgetItem(""))
 
     def _clear_table(self):
         self.table.setRowCount(0)
@@ -960,12 +1490,202 @@ class ArchiveWidget(QWidget):
             self._log(f"[应答] 返回查询从节点信息, 共{row_idx-1}条")
             return
 
+        # 抄表测试响应 AFN=13 F1 (点抄) / AFN=F1 F1 (并发)
+        if self._is_copy_testing:
+            if afn == 0x13 and fn == 1 and self._copy_test_mode == "sequential":
+                self._handle_copy_test_response(frame, table_data)
+                return
+            if afn == 0xF1 and fn == 1 and self._copy_test_mode == "concurrent":
+                self._handle_concurrent_copy_response(frame, table_data)
+                return
+
+        # 版本查询响应 AFN=03 F1
+        if afn == 0x03 and fn == 1 and self._is_querying_version and self._version_query_mode == "simple":
+            self._handle_version_response_simple(frame, table_data)
+            return
+
+        # 详细版本查询响应 AFN=13 F1/F2
+        if afn == 0x13 and fn in (1, 2) and self._is_querying_version and self._version_query_mode == "detail":
+            self._handle_version_response_detail(frame)
+            return
+
         # 添加/删除从节点响应 AFN=00
         if afn == 0x00:
             self._log("[应答] 确认/否认")
             return
 
         self._log(f"[应答] 收到上行帧 AFN={afn:02X} F{fn}")
+
+    def _handle_version_response_simple(self, frame: bytes, table_data: list):
+        """处理AFN=03 F1版本查询响应"""
+        if self._version_query_timer:
+            self._version_query_timer.stop()
+        vendor = ""
+        chip = ""
+        ver_date = ""
+        ver = ""
+        for name, raw, parsed, comment, bs, be in table_data:
+            if "厂商代码" in name:
+                vendor = str(parsed)
+            elif "芯片代码" in name:
+                chip = str(parsed)
+            elif "版本日期" in name:
+                ver_date = str(parsed)
+            elif "版本" == name.strip() or "  版本" in name:
+                ver = str(parsed)
+        parts = [f"厂商:{vendor}", f"芯片:{chip}"]
+        if ver_date:
+            parts.append(f"日期:{ver_date}")
+        parts.append(f"版本:{ver}")
+        result_text = " ".join(parts)
+        if not vendor and not ver:
+            result_text = "无版本数据"
+        self._set_version_query_result(result_text, col=6)
+
+    def _handle_version_response_detail(self, frame: bytes):
+        """处理AFN=13 F1/F2详细版本查询响应"""
+        if self._version_query_timer:
+            self._version_query_timer.stop()
+        try:
+            table_data = self.gdw_parser.parse_to_table(frame)
+        except Exception:
+            self._set_version_query_result("解析失败")
+            return
+        # 提取内层DLT645报文
+        inner_frame = None
+        for name, raw, parsed, comment, bs, be in table_data:
+            if "报文内容" in name and "原始报文数据" in comment:
+                try:
+                    inner_frame = bytes.fromhex(raw.replace(" ", ""))
+                except ValueError:
+                    pass
+                break
+        if not inner_frame:
+            self._set_version_query_result("无内层数据")
+            return
+        # 解析内层DLT645帧
+        try:
+            dlt_parser = DLT645Parser()
+            dlt_result = dlt_parser.parse(inner_frame)
+            if dlt_result.get('valid'):
+                di_desc = dlt_result.get('di_desc', '未知')
+                # 提取数据域的原始字节（已减0x33）
+                data = dlt_result.get('data', b'')
+                if data and di_desc == "未知数据标识":
+                    # 尝试按LME信息条目格式解析（DI=0xFF00DD01等自定义DI）
+                    try:
+                        entries = parse_lme_info_entries(data)
+                        if entries:
+                            result_text = format_lme_info_summary(entries)
+                        else:
+                            result_text = f"DI:{di_desc} 数据:{data.hex().upper()}"
+                    except Exception as e:
+                        result_text = f"DI:{di_desc} 数据:{data.hex().upper()} 解析异常:{e}"
+                elif data:
+                    result_text = f"DI:{di_desc} 数据:{data.hex().upper()}"
+                else:
+                    result_text = f"DI:{di_desc}"
+            else:
+                result_text = f"DLT645无效帧:{dlt_result.get('error', '未知错误')}"
+        except Exception as e:
+            result_text = f"DLT645解析异常:{e}"
+        self._set_version_query_result(result_text, col=7)
+
+    def _handle_copy_test_response(self, frame: bytes, table_data: list):
+        """处理点抄测试响应 (AFN=13 F1)"""
+        if self._copy_test_timer:
+            self._copy_test_timer.stop()
+        if not self._copy_test_queue:
+            return
+        row, addr, proto, remaining = self._copy_test_queue.pop(0)
+        # 尝试从内层报文判断是否成功
+        success = self._parse_copy_inner_success(frame, proto)
+        if success:
+            self._copy_test_stats[addr]["success"] += 1
+        remaining -= 1
+        if remaining > 0:
+            self._copy_test_queue.insert(0, (row, addr, proto, remaining))
+        else:
+            self._update_copy_test_result(row, addr)
+        self._send_next_copy_test()
+
+    def _handle_concurrent_copy_response(self, frame: bytes, table_data: list):
+        """处理并发抄表响应 (AFN=F1 F1)"""
+        # 从上行帧提取源地址A1
+        src_addr = self._extract_src_addr_from_frame(frame)
+        if not src_addr:
+            # 尝试从内层报文提取电表地址
+            src_addr = self._extract_inner_meter_addr(frame)
+        if not src_addr:
+            return
+        # 查找匹配的电表并统计
+        found = False
+        for row, addr, proto, _ in self._copy_test_queue:
+            if addr == src_addr:
+                self._copy_test_stats[addr]["success"] += 1
+                self._copy_test_concurrent_responses[addr] = self._copy_test_concurrent_responses.get(addr, 0) + 1
+                found = True
+                break
+        if not found:
+            return
+        # 检查本轮是否所有电表都已响应
+        all_responded = all(
+            self._copy_test_concurrent_responses.get(addr, 0) > 0
+            for _, addr, _, _ in self._copy_test_queue
+        )
+        if all_responded:
+            if self._copy_test_timer:
+                self._copy_test_timer.stop()
+            self._copy_test_remaining_rounds -= 1
+            if self._copy_test_remaining_rounds > 0:
+                self._log(f"[并发抄表] 本轮完成，剩余{self._copy_test_remaining_rounds}轮")
+                self._send_concurrent_copy()
+            else:
+                for row, addr, proto, _ in self._copy_test_queue:
+                    self._update_copy_test_result(row, addr)
+                self._is_copy_testing = False
+                self._copy_test_queue = []
+                self._log("[并发抄表] 所有轮次完成")
+
+    def _parse_copy_inner_success(self, frame: bytes, proto: str) -> bool:
+        """从AFN=13 F1上行帧中提取内层报文并判断是否抄读成功"""
+        try:
+            table_data = self.gdw_parser.parse_to_table(frame)
+        except Exception:
+            return False
+        inner_frame = None
+        for name, raw, parsed, comment, bs, be in table_data:
+            if "报文内容" in name and "原始报文数据" in comment:
+                try:
+                    inner_frame = bytes.fromhex(raw.replace(" ", ""))
+                except ValueError:
+                    pass
+                break
+        if not inner_frame or len(inner_frame) < 10:
+            return False
+        # DLT645: 控制码应答位bit3=1表示成功 (0x91等)
+        if "645" in proto:
+            if inner_frame[0] == 0x68 and len(inner_frame) >= 8:
+                ctrl = inner_frame[8]
+                return (ctrl & 0x80) != 0
+        # DLT698: 看APDU第一个字节是否为应答类型
+        if "698" in proto:
+            if inner_frame[0] == 0x68 and len(inner_frame) > 14:
+                apdu_offset = 14
+                if apdu_offset < len(inner_frame):
+                    apdu_tag = inner_frame[apdu_offset]
+                    return (apdu_tag & 0x80) != 0
+        return False
+
+    def _set_version_query_result(self, text: str, col: int = 6):
+        """设置当前查询行的回读信息并继续下一个"""
+        if not self._version_query_queue:
+            self._is_querying_version = False
+            return
+        row, addr = self._version_query_queue.pop(0)
+        self.table.setItem(row, col, QTableWidgetItem(text))
+        self._log(f"[版本查询] 从节点 {addr} 结果: {text}")
+        self._send_next_version_query()
 
     @staticmethod
     def _extract_gdw_afn_fn(frame: bytes) -> Tuple[Optional[int], Optional[int]]:

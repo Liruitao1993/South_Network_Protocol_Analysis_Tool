@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "lastScanned": 1778223654410,
+  "lastScanned": 1779519843752,
   "projectRoot": "e:\\python\\南网解析工具",
   "techStack": {
     "languages": [],
@@ -24,7 +24,9 @@
   "structure": {
     "isMonorepo": false,
     "workspaces": [],
-    "mainDirectories": [],
+    "mainDirectories": [
+      "docs"
+    ],
     "gitBranches": {
       "defaultBranch": "main",
       "branchingStrategy": null
@@ -36,33 +38,44 @@
       "path": "build",
       "purpose": "Build output",
       "fileCount": 0,
-      "lastAccessed": 1778223654359,
+      "lastAccessed": 1779519843696,
       "keyFiles": []
     },
     "dist": {
       "path": "dist",
       "purpose": "Distribution/build output",
-      "fileCount": 1,
-      "lastAccessed": 1778223654360,
+      "fileCount": 9,
+      "lastAccessed": 1779519843697,
       "keyFiles": [
-        "协议解析工具.exe"
+        "command.json",
+        "config.json",
+        "custom_di.json",
+        "dlt645_di.json",
+        "gdw_custom_afn.json"
       ]
     },
     "dist1": {
       "path": "dist1",
       "purpose": null,
       "fileCount": 2,
-      "lastAccessed": 1778223654361,
+      "lastAccessed": 1779519843698,
       "keyFiles": [
         "南网协议解析工具.exe",
         "南网协议解析工具260409.exe"
       ]
     },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 0,
+      "lastAccessed": 1779519843699,
+      "keyFiles": []
+    },
     "monitor": {
       "path": "monitor",
       "purpose": null,
       "fileCount": 1,
-      "lastAccessed": 1778223654362,
+      "lastAccessed": 1779519843699,
       "keyFiles": [
         "frame_monitor.py"
       ]
@@ -71,7 +84,7 @@
       "path": "report",
       "purpose": null,
       "fileCount": 1,
-      "lastAccessed": 1778223654362,
+      "lastAccessed": 1779519843699,
       "keyFiles": [
         "excel_reporter.py"
       ]
@@ -80,7 +93,7 @@
       "path": "templates",
       "purpose": null,
       "fileCount": 1,
-      "lastAccessed": 1778223654363,
+      "lastAccessed": 1779519843700,
       "keyFiles": [
         "test_templates.py"
       ]
@@ -88,21 +101,21 @@
     "validator": {
       "path": "validator",
       "purpose": null,
-      "fileCount": 7,
-      "lastAccessed": 1778223654363,
+      "fileCount": 8,
+      "lastAccessed": 1779519843700,
       "keyFiles": [
         "base.py",
         "dlt645_validator.py",
+        "dl_t698_45_validator.py",
         "gdw_validator.py",
-        "hdlc_validator.py",
-        "nw_validator.py"
+        "hdlc_validator.py"
       ]
     },
     "visual_editor": {
       "path": "visual_editor",
       "purpose": null,
       "fileCount": 1,
-      "lastAccessed": 1778223654364,
+      "lastAccessed": 1779519843701,
       "keyFiles": [
         "test_item_editor.py"
       ]
@@ -110,96 +123,302 @@
     "__pycache__": {
       "path": "__pycache__",
       "purpose": null,
-      "fileCount": 26,
-      "lastAccessed": 1778223654365,
+      "fileCount": 36,
+      "lastAccessed": 1779519843701,
       "keyFiles": [
         "archive_widget.cpython-313.pyc",
+        "archive_widget.cpython-314.pyc",
         "command_lookup.cpython-313.pyc",
         "dlms_parser.cpython-313.pyc",
-        "dlt645_di_lookup.cpython-313.pyc",
-        "dlt645_parser.cpython-313.pyc"
+        "dlt645_di_lookup.cpython-313.pyc"
       ]
     }
   },
   "hotPaths": [
     {
-      "path": "topology_widget.py",
-      "accessCount": 63,
-      "lastAccessed": 1778232605615,
+      "path": "frame_gen_widget.py",
+      "accessCount": 124,
+      "lastAccessed": 1779520737351,
+      "type": "directory"
+    },
+    {
+      "path": "archive_widget.py",
+      "accessCount": 99,
+      "lastAccessed": 1778582294644,
       "type": "file"
     },
     {
-      "path": "topology_networkx_demo.py",
-      "accessCount": 7,
-      "lastAccessed": 1778224661726,
+      "path": "main_gui.py",
+      "accessCount": 59,
+      "lastAccessed": 1779428832553,
+      "type": "directory"
+    },
+    {
+      "path": "dl_t698_45_apdu_parser.py",
+      "accessCount": 53,
+      "lastAccessed": 1779269250618,
       "type": "file"
     },
     {
-      "path": "gdw10376_parser.py",
-      "accessCount": 6,
-      "lastAccessed": 1778229560101,
+      "path": "面向对象的用电信息数据交换协议(20210910).md",
+      "accessCount": 40,
+      "lastAccessed": 1779264886750,
+      "type": "file"
+    },
+    {
+      "path": "test_dl_t698_45.py",
+      "accessCount": 27,
+      "lastAccessed": 1779265458069,
+      "type": "file"
+    },
+    {
+      "path": "dl_t698_45_parser.py",
+      "accessCount": 24,
+      "lastAccessed": 1779327498798,
       "type": "file"
     },
     {
       "path": "gdw_send_frame_lib.py",
-      "accessCount": 5,
-      "lastAccessed": 1778229625553,
-      "type": "file"
+      "accessCount": 19,
+      "lastAccessed": 1778558344159,
+      "type": "directory"
+    },
+    {
+      "path": "LME产品相关信息生产运维接口手册_V2.4_251115.md",
+      "accessCount": 17,
+      "lastAccessed": 1778518355143,
+      "type": "directory"
+    },
+    {
+      "path": "gdw10376_parser.py",
+      "accessCount": 14,
+      "lastAccessed": 1778687487448,
+      "type": "directory"
     },
     {
       "path": "",
+      "accessCount": 13,
+      "lastAccessed": 1779520155596,
+      "type": "directory"
+    },
+    {
+      "path": "dl_t698_45_oi_lookup.py",
+      "accessCount": 12,
+      "lastAccessed": 1779327475439,
+      "type": "file"
+    },
+    {
+      "path": "lme_info_entry_parser.py",
+      "accessCount": 10,
+      "lastAccessed": 1779327475479,
+      "type": "file"
+    },
+    {
+      "path": "dl_t698_45_axdr.py",
+      "accessCount": 9,
+      "lastAccessed": 1779434775540,
+      "type": "file"
+    },
+    {
+      "path": "dl_t698_45_frame_gen.py",
+      "accessCount": 9,
+      "lastAccessed": 1779501205661,
+      "type": "file"
+    },
+    {
+      "path": "PLUZ计量自动化系统技术规范.md",
+      "accessCount": 8,
+      "lastAccessed": 1778687683160,
+      "type": "directory"
+    },
+    {
+      "path": "protocol_parser.py",
+      "accessCount": 8,
+      "lastAccessed": 1778688098383,
+      "type": "file"
+    },
+    {
+      "path": "低压电力线宽带载波深化应用技术手册v1.1.md",
+      "accessCount": 6,
+      "lastAccessed": 1778687708355,
+      "type": "file"
+    },
+    {
+      "path": "DLT645-2007.md",
+      "accessCount": 5,
+      "lastAccessed": 1778516765419,
+      "type": "directory"
+    },
+    {
+      "path": "test_698_frame.py",
+      "accessCount": 5,
+      "lastAccessed": 1778582243539,
+      "type": "file"
+    },
+    {
+      "path": "gdw_frame_generator_schema.py",
+      "accessCount": 5,
+      "lastAccessed": 1779434664437,
+      "type": "directory"
+    },
+    {
+      "path": "dlt645_di.json",
       "accessCount": 4,
-      "lastAccessed": 1778232583568,
+      "lastAccessed": 1778566865053,
       "type": "directory"
     },
     {
       "path": "gdw10376_tool.py",
       "accessCount": 3,
-      "lastAccessed": 1778226570347,
+      "lastAccessed": 1778549363759,
       "type": "file"
     },
     {
-      "path": "archive_widget.py",
+      "path": "oi_name_map.py",
       "accessCount": 3,
-      "lastAccessed": 1778226611418,
+      "lastAccessed": 1778684578320,
       "type": "file"
     },
     {
-      "path": "protocol_tool.py",
-      "accessCount": 2,
-      "lastAccessed": 1778224114264,
-      "type": "directory"
-    },
-    {
-      "path": "protocol_parser.py",
-      "accessCount": 2,
-      "lastAccessed": 1778224114318,
-      "type": "directory"
-    },
-    {
-      "path": "topology_graph.py",
-      "accessCount": 2,
-      "lastAccessed": 1778229720705,
+      "path": "test_oad_enrichment.py",
+      "accessCount": 3,
+      "lastAccessed": 1779268659028,
       "type": "file"
     },
     {
-      "path": "send_frame_lib.py",
-      "accessCount": 1,
-      "lastAccessed": 1778223805724,
-      "type": "file"
-    },
-    {
-      "path": "gdw_frame_generator_schema.py",
-      "accessCount": 1,
-      "lastAccessed": 1778229769087,
+      "path": "validator\\__init__.py",
+      "accessCount": 3,
+      "lastAccessed": 1779327488326,
       "type": "file"
     },
     {
       "path": "serial_worker.py",
+      "accessCount": 2,
+      "lastAccessed": 1778495684368,
+      "type": "directory"
+    },
+    {
+      "path": "dlt645_di_lookup.py",
+      "accessCount": 2,
+      "lastAccessed": 1778496078566,
+      "type": "directory"
+    },
+    {
+      "path": "dlt645_parser.py",
+      "accessCount": 2,
+      "lastAccessed": 1778496233470,
+      "type": "file"
+    },
+    {
+      "path": "validator\\base.py",
+      "accessCount": 2,
+      "lastAccessed": 1778599223366,
+      "type": "file"
+    },
+    {
+      "path": "validator\\dl_t698_45_validator.py",
+      "accessCount": 2,
+      "lastAccessed": 1778599255595,
+      "type": "file"
+    },
+    {
+      "path": "gui_utils.py",
+      "accessCount": 2,
+      "lastAccessed": 1779419399154,
+      "type": "file"
+    },
+    {
+      "path": "dl_t698_45_frame_schema.py",
+      "accessCount": 2,
+      "lastAccessed": 1779451418473,
+      "type": "file"
+    },
+    {
+      "path": "gdw_afn_lookup.py",
       "accessCount": 1,
-      "lastAccessed": 1778232592147,
+      "lastAccessed": 1778480787294,
+      "type": "file"
+    },
+    {
+      "path": "docs\\superpowers\\specs\\2026-05-12-dl-t698-45-parser-design.md",
+      "accessCount": 1,
+      "lastAccessed": 1778587169604,
+      "type": "file"
+    },
+    {
+      "path": "docs\\superpowers\\plans\\2026-05-12-dl-t698-45-parser.md",
+      "accessCount": 1,
+      "lastAccessed": 1778589409563,
+      "type": "file"
+    },
+    {
+      "path": "validator\\nw_validator.py",
+      "accessCount": 1,
+      "lastAccessed": 1778599223349,
+      "type": "file"
+    },
+    {
+      "path": "extract_doc_fields.py",
+      "accessCount": 1,
+      "lastAccessed": 1779262734358,
+      "type": "file"
+    },
+    {
+      "path": "extract_69845_classes.py",
+      "accessCount": 1,
+      "lastAccessed": 1779262825000,
+      "type": "file"
+    },
+    {
+      "path": "extracted_classes.json",
+      "accessCount": 1,
+      "lastAccessed": 1779263977253,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\lirt3\\.claude\\projects\\e--python-------\\6c82416c-bfcf-4f4b-afef-65c357a0557c\\tool-results\\bcn3jjmh1.txt",
+      "accessCount": 1,
+      "lastAccessed": 1779264728407,
+      "type": "file"
+    },
+    {
+      "path": "extract_oi_to_class.py",
+      "accessCount": 1,
+      "lastAccessed": 1779264823914,
+      "type": "file"
+    },
+    {
+      "path": "generate_oi_lookup.py",
+      "accessCount": 1,
+      "lastAccessed": 1779265036229,
+      "type": "file"
+    },
+    {
+      "path": "南网协议解析工具.spec",
+      "accessCount": 1,
+      "lastAccessed": 1779327448420,
+      "type": "file"
+    },
+    {
+      "path": "协议解析工具.spec",
+      "accessCount": 1,
+      "lastAccessed": 1779327448478,
+      "type": "file"
+    },
+    {
+      "path": "C:\\Users\\lirt3\\AppData\\Local\\Temp\\claude\\e--python-------\\6a4c187c-1de3-4abd-91dc-b1e2543e2b87\\tasks\\bukm21xj1.output",
+      "accessCount": 1,
+      "lastAccessed": 1779520491048,
       "type": "file"
     }
   ],
-  "userDirectives": []
+  "userDirectives": [
+    {
+      "timestamp": 1779270793718,
+      "directive": "优先使用 CodeGraph 工具（codegraph_explore, codegraph_search, codegraph_callers, codegraph_impact 等）进行代码结构分析、调用关系追踪和影响范围评估，避免手动 grep + Read 的低效方式",
+      "context": "用户明确要求在编码任务中充分利用 CodeGraph 了解项目关系",
+      "source": "explicit",
+      "priority": "high"
+    }
+  ]
 }

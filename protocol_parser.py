@@ -3477,10 +3477,16 @@ class ProtocolFrameParser:
         line_flag_desc = ",".join(phases) if phases else "无"
 
         # 字节2解析
+        # 合并 PLUZ 技术规范 + 深化应用技术手册(1-1.md) 定义
         module_type = (b2 >> 6) & 0x03
-        module_type_map = {0: "未知", 1: "三相表", 2: "单相表"}
+        module_type_map = {
+            0: "采集器", 1: "单相表", 2: "三相表", 3: "采集器下接电能表"
+        }
         proto_type = b2 & 0x07
-        proto_type_map = {0: "未知规约", 1: "DLT/645-1997", 2: "DLT/645-2007", 3: "CJ/T188"}
+        proto_type_map = {
+            0: "未知规约", 1: "DLT/645-1997", 2: "DLT/645-2007",
+            3: "CJ/T188", 4: "DLMS规约"
+        }
 
         return {
             "原始值": phase_bytes.hex().upper(),

@@ -14,6 +14,7 @@ def setup_chinese_context_menu(widget):
 
     def _show_menu(pos):
         menu = widget.createStandardContextMenu()
+        menu.setStyleSheet("QMenu { background-color: white; color: black; } QMenu::item:selected { background-color: #e3f2fd; }")
         text_map = {
             "Undo": "撤销",
             "Redo": "恢复",

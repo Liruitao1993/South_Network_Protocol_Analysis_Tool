@@ -24,6 +24,7 @@ from plc_rf_parser import PLCRFProtocolParser
 from hdlc_parser import HDLCParser
 from dlt645_parser import DLT645Parser
 from gdw10376_parser import GDW10376Parser
+from dl_t698_45_parser import DLT69845Parser
 from obis_lookup import OBISLookup, get_obis_lookup
 from command_lookup import CommandLookup, get_command_lookup
 from dlt645_di_lookup import DLT645DILookup, get_dlt645_di_lookup
@@ -280,7 +281,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"协议解析工具 v{APP_VERSION}")
         self.setMinimumSize(1000, 700)
 
-        # 协议选择：0=南网协议，1=PLC RF协议，2=HDLC/DLMS协议，3=Wrapper，4=APDU，5=DLT645，6=国网协议
+        # 协议选择：0=南网协议，1=PLC RF协议，2=HDLC/DLMS协议，3=Wrapper，4=APDU，5=DLT645，6=国网协议，7=698.45
         self.current_protocol = 0
 
         # 初始化解析器
@@ -289,6 +290,7 @@ class MainWindow(QMainWindow):
         self.hdlc_parser = HDLCParser()
         self.dlt645_parser = DLT645Parser()
         self.gdw_parser = GDW10376Parser()
+        self.dl_t698_45_parser = DLT69845Parser()
 
         # 初始化查询器
         self.obis_lookup = get_obis_lookup()
@@ -343,6 +345,7 @@ class MainWindow(QMainWindow):
         self.protocol_combo.addItem("DLMS-APDU裸报文")
         self.protocol_combo.addItem("DLT645-2007 电表协议")
         self.protocol_combo.addItem("国网协议 (Q/GDW 10376.2-2024)")
+        self.protocol_combo.addItem("698.45协议 (DL/T 698.45-2017)")
         self.protocol_combo.setMinimumWidth(280)
         self.protocol_combo.setFont(QFont("Microsoft YaHei", 10))
         # 让弹出菜单宽度自动适应最宽的文字
@@ -1301,39 +1304,57 @@ class MainWindow(QMainWindow):
             self.single_input.setPlaceholderText("请输入APDU报文，例如：C0 01 C1 00 ...")
         elif index == 5:  # DLT645-2007
             self.single_input.setPlaceholderText("请输入DLT645报文，例如：68 AA AA AA AA AA AA 68 11 04 33 33 33 33 CS 16")
-        else:  # index == 6, 国网协议
+        elif index == 6:  # 国网协议
             self.single_input.setPlaceholderText("请输入国网报文，例如：68 0F 00 43 00 00 00 00 00 00 00 00 00 03 01 00 48 16")
+        else:  # index == 7, 698.45
+            self.single_input.setPlaceholderText("请输入698.45报文，例如：68 0E 00 41 01 07 08 09 AE C6 01 00 00 00 00 34 87 16")
 
         # 更新查询页面
         self._update_protocol_lookup_tab()
 
-        # 协议组帧页面和预设命令页面在南网和国网协议下显示
+        # 协议组帧页面和预设命令页面在南网、国网、698.45协议下显示
         if hasattr(self, '_frame_gen_tab_index'):
-            show_frame_gen = index in (0, 6)
+            show_frame_gen = index in (0, 6, 7)
             self.tab_widget.setTabVisible(self._frame_gen_tab_index, show_frame_gen)
             if show_frame_gen:
-                mode = "south" if index == 0 else "gdw"
+                if index == 0:
+                    mode = "south"
+                elif index == 6:
+                    mode = "gdw"
+                else:
+                    mode = "dlt698"
                 self.frame_gen_tab.set_protocol_mode(mode)
             else:
                 self.frame_gen_tab.reset()
         if hasattr(self, '_preset_tab_index'):
-            self.tab_widget.setTabVisible(self._preset_tab_index, index in (0, 6))
-            if index in (0, 6):
-                mode = "south" if index == 0 else "gdw"
+            self.tab_widget.setTabVisible(self._preset_tab_index, index in (0, 6, 7))
+            if index in (0, 6, 7):
+                if index == 0:
+                    mode = "south"
+                elif index == 6:
+                    mode = "gdw"
+                else:
+                    mode = "dlt698"
                 self.preset_tab.set_protocol(mode)
-        # 档案管理页面在南网和国网协议下显示
+        # 档案管理页面在南网、国网协议下显示
         if hasattr(self, '_archive_tab_index'):
             show_archive = index in (0, 6)
             self.tab_widget.setTabVisible(self._archive_tab_index, show_archive)
             if show_archive:
-                mode = "south" if index == 0 else "gdw"
+                if index == 0:
+                    mode = "south"
+                else:
+                    mode = "gdw"
                 self.archive_tab.set_protocol_mode(mode)
-        # 拓扑信息页面在南网和国网协议下显示
+        # 拓扑信息页面在南网、国网协议下显示
         if hasattr(self, '_topology_tab_index'):
             show_topology = index in (0, 6)
             self.tab_widget.setTabVisible(self._topology_tab_index, show_topology)
             if show_topology:
-                mode = "south" if index == 0 else "gdw"
+                if index == 0:
+                    mode = "south"
+                else:
+                    mode = "gdw"
                 self.topology_tab.set_protocol_mode(mode)
             else:
                 self.topology_tab.clear_nodes()
@@ -1373,6 +1394,86 @@ class MainWindow(QMainWindow):
             # 国网协议：AFN查询
             self.tab_widget.setTabText(lookup_tab_index, "AFN查询")
             self._create_gdw_lookup_content(self.protocol_lookup_tab_layout)
+
+        elif self.current_protocol == 7:
+            # 698.45协议：OAD查询
+            self.tab_widget.setTabText(lookup_tab_index, "OAD查询")
+            self._create_oad_lookup_content(self.protocol_lookup_tab_layout)
+
+    def _create_oad_lookup_content(self, layout):
+        """创建698.45协议OAD查询页面内容"""
+        from dl_t698_45_oi_lookup import OILookup
+
+        # 搜索栏
+        search_layout = QHBoxLayout()
+        search_label = QLabel("搜索：")
+        search_label.setFixedWidth(45)
+        self.oad_search_input = QLineEdit()
+        self.oad_search_input.setPlaceholderText("输入OI(如2000)或中文关键词(如通信地址)搜索...")
+        self.oad_search_input.setClearButtonEnabled(True)
+        self.oad_search_input.textChanged.connect(self._filter_oad_table)
+        search_layout.addWidget(search_label)
+        search_layout.addWidget(self.oad_search_input)
+        layout.addLayout(search_layout)
+
+        # 统计标签
+        self.oad_stats_label = QLabel()
+        self.oad_stats_label.setStyleSheet("color: #666; font-size: 12px;")
+        layout.addWidget(self.oad_stats_label)
+
+        # 表格
+        self.oad_table = QTableWidget()
+        self.oad_table.setColumnCount(5)
+        self.oad_table.setHorizontalHeaderLabels(["OI", "对象名称", "属性", "方法", "说明"])
+        header = self.oad_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
+        self.oad_table.setColumnWidth(0, 80)
+        self.oad_table.setColumnWidth(1, 120)
+        self.oad_table.setColumnWidth(2, 200)
+        self.oad_table.setColumnWidth(3, 120)
+        self.oad_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.oad_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.oad_table.setAlternatingRowColors(True)
+        self.oad_table.verticalHeader().hide()
+        self.oad_table.verticalHeader().setDefaultSectionSize(20)
+        table_font = QFont()
+        table_font.setPointSize(8)
+        self.oad_table.setFont(table_font)
+        layout.addWidget(self.oad_table)
+
+        # 加载数据
+        self._load_oad_map_data()
+
+    def _load_oad_map_data(self):
+        """加载698.45 OI映射数据"""
+        from dl_t698_45_oi_lookup import OILookup
+        lookup = OILookup()
+        self._oad_data = []
+        for oi, name in lookup.OI_NAME_MAP.items():
+            class_id = lookup.OI_TO_CLASS_ID.get(oi)
+            if class_id is not None:
+                info = lookup.CLASS_ID_MAP.get(class_id, {})
+                attrs = ", ".join([f"{k}:{v}" for k, v in info.get("attributes", {}).items()])
+                methods = ", ".join([f"{k}:{v}" for k, v in info.get("methods", {}).items()])
+            else:
+                attrs = ""
+                methods = ""
+            self._oad_data.append((f"0x{oi:04X}", name, attrs, methods or "-", f"OI=0x{oi:04X}"))
+        self._filter_oad_table()
+
+    def _filter_oad_table(self):
+        """过滤OAD查询表格"""
+        keyword = self.oad_search_input.text().strip().lower() if hasattr(self, 'oad_search_input') else ""
+        filtered = []
+        for row in self._oad_data:
+            if not keyword or any(keyword in str(cell).lower() for cell in row):
+                filtered.append(row)
+        self.oad_table.setRowCount(len(filtered))
+        for i, row in enumerate(filtered):
+            for j, val in enumerate(row):
+                self.oad_table.setItem(i, j, QTableWidgetItem(str(val)))
+        self.oad_stats_label.setText(f"共 {len(filtered)} 条记录")
 
     def _create_gdw_lookup_content(self, layout):
         """创建国网协议AFN查询页面内容"""
@@ -2035,6 +2136,8 @@ class MainWindow(QMainWindow):
             return DLT645GuiParser(self.dlt645_parser)
         elif self.current_protocol == 6:  # 国网协议
             return self.gdw_parser
+        elif self.current_protocol == 7:  # 698.45
+            return self.dl_t698_45_parser
 
     def load_example(self, data: str):
         """加载示例数据"""
@@ -2103,6 +2206,7 @@ class MainWindow(QMainWindow):
             # 根据当前协议选择验证器
             from validator import NWValidator, GDWValidator, HDLCValidator, PLCRFValidator, DLT645Validator
 
+            from validator.dl_t698_45_validator import DLT69845Validator
             validators = {
                 0: NWValidator(),      # 南网
                 1: PLCRFValidator(),   # PLC RF
@@ -2111,6 +2215,7 @@ class MainWindow(QMainWindow):
                 4: HDLCValidator(),    # APDU
                 5: DLT645Validator(),  # DLT645
                 6: GDWValidator(),     # 国网
+                7: DLT69845Validator(), # 698.45
             }
 
             validator = validators.get(self.current_protocol)
@@ -2173,7 +2278,7 @@ class MainWindow(QMainWindow):
         # 根据协议生成名称
         protocol_names = {
             0: "南网", 1: "PLC RF", 2: "HDLC", 3: "Wrapper",
-            4: "APDU", 5: "DLT645", 6: "国网"
+            4: "APDU", 5: "DLT645", 6: "国网", 7: "698.45"
         }
         protocol_name = protocol_names.get(self.current_protocol, "未知")
         name = f"{protocol_name}帧-{len(self.test_plan_tab._items) + 1}"
@@ -2441,8 +2546,8 @@ class MainWindow(QMainWindow):
                 # 调用parse_to_table生成表格数据
                 table_data = current_parser.parse_to_table(frame_bytes)
 
-                # 南网协议/国网协议提取方向
-                if self.current_protocol in (0, 6):
+                # 南网协议/国网协议/698.45提取方向
+                if self.current_protocol in (0, 6, 7):
                     direction = self._extract_direction_from_table(table_data)
 
                 # 从表格数据生成摘要（取前3个字段作为摘要）
@@ -2493,9 +2598,9 @@ class MainWindow(QMainWindow):
             self.result_table.setItem(row, 1, QTableWidgetItem(hex_display))
             self.result_table.setItem(row, 2, QTableWidgetItem(str(len(frame_hex) // 2)))
 
-            # 方向：南网协议/国网协议从控制域DIR位解析，其他协议暂无
+            # 方向：南网协议/国网协议/698.45从控制域DIR位解析，其他协议暂无
             direction = "-"
-            if self.current_protocol in (0, 6):
+            if self.current_protocol in (0, 6, 7):
                 direction = self._extract_direction_from_table(table_data)
             self.result_table.setItem(row, 3, QTableWidgetItem(direction))
 
@@ -2586,6 +2691,29 @@ class MainWindow(QMainWindow):
                 summary_parts.append(fn_desc)
             return " | ".join(summary_parts) if summary_parts else "-"
 
+        elif self.current_protocol == 7:
+            # 698.45：提取 APDU 类型、DIR+PRM、功能码
+            apdu_type = None
+            dir_prm = None
+            func_desc = None
+            for item in table_data:
+                field_name = item[0]
+                parsed_val = item[2]
+                comment = item[3]
+                if field_name == "  APDU类型":
+                    apdu_type = str(parsed_val) if parsed_val else comment
+                elif field_name == "  DIR+PRM":
+                    dir_prm = str(parsed_val) if parsed_val else comment
+                elif field_name == "  功能码":
+                    func_desc = str(parsed_val) if parsed_val else comment
+            if dir_prm:
+                summary_parts.append(dir_prm)
+            if func_desc:
+                summary_parts.append(func_desc)
+            if apdu_type:
+                summary_parts.append(apdu_type)
+            return " | ".join(summary_parts) if summary_parts else "-"
+
         else:
             # 其他协议：取前几个非冗余字段
             for i, item in enumerate(table_data):
@@ -2606,6 +2734,10 @@ class MainWindow(QMainWindow):
             # 南网协议 / 国网协议：68开头，16结束，FT1.2帧格式
             clean = re.sub(r'[^0-9A-Fa-f]', '', text).upper()
             return self._extract_68_frames(clean)
+        elif protocol_index == 7:
+            # 698.45：68开头，16结束，但长度域定义不同
+            clean = re.sub(r'[^0-9A-Fa-f]', '', text).upper()
+            return self._extract_69845_frames(clean)
         elif protocol_index == 1:
             # PLC RF协议：尝试通用提取
             clean = re.sub(r'[^0-9A-Fa-f]', '', text).upper()
@@ -2748,6 +2880,63 @@ class MainWindow(QMainWindow):
                 continue
 
             # 通过长度域和结束符验证，接受此帧（不校验CS，由解析器负责校验）
+            frames.append(candidate)
+            i = pos + frame_hex_len
+            continue
+
+        return frames
+
+    def _extract_69845_frames(self, clean: str) -> list:
+        """提取698.45格式帧（DL/T 698.45-2017）
+
+        帧格式: 68H | L(2B小端) | C(1B) | SA | CA | HCS(2B) | APDU | FCS(2B) | 16H
+        L = 控制域 + 地址域 + 链路用户数据的长度（不含68、LL、16）
+        帧总长度 = 1(68) + 2(LL) + L + 1(16) = L + 4
+        验证规则:
+          1. 起始字符 = 68H
+          2. L >= 8（最小有效长度）
+          3. 帧末尾 = 16H
+          4. 长度域一致性: 实际帧长 = L + 4
+        """
+        frames = []
+        i = 0
+        while i < len(clean) - 7:
+            pos = clean.find('68', i)
+            if pos == -1:
+                break
+
+            if pos + 6 > len(clean):
+                i = pos + 2
+                continue
+
+            try:
+                low_byte = int(clean[pos + 2:pos + 4], 16)
+                high_byte = int(clean[pos + 4:pos + 6], 16)
+                length = low_byte | (high_byte << 8)
+            except ValueError:
+                i = pos + 2
+                continue
+
+            # L 至少为 8（控制1 + SA至少1 + CA1 + HCS2 + FCS2 + APDU至少1）
+            if length < 8 or length > 2048:
+                i = pos + 2
+                continue
+
+            # 698.45: 帧总长度 = L + 4
+            total_len = length + 4
+            frame_hex_len = total_len * 2
+
+            if pos + frame_hex_len > len(clean):
+                i = pos + 2
+                continue
+
+            candidate = clean[pos:pos + frame_hex_len]
+
+            # 验证结束符 = 16H
+            if candidate[-2:] != '16':
+                i = pos + 2
+                continue
+
             frames.append(candidate)
             i = pos + frame_hex_len
             continue

@@ -22,6 +22,9 @@ from protocol_parser import ProtocolFrameParser
 from gdw_send_frame_lib import GDWFrameGenerator
 from gdw_frame_generator_schema import GDW_AFNFN_SCHEMA
 from gdw10376_parser import GDW10376Parser
+from dl_t698_45_frame_gen import DLT69845FrameGenerator
+from dl_t698_45_frame_schema import DLT69845_FIELD_SCHEMA, APDU_TYPE_LIST, OI_PRESET_LIST
+from dl_t698_45_parser import DLT69845Parser
 from preset_buttons import PresetButtonManager, AddPresetDialog
 from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu
 
@@ -52,18 +55,23 @@ class FrameGenWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        # 协议模式: "south"=南网, "gdw"=国网
+        # 协议模式: "south"=南网, "gdw"=国网, "dlt698"=698.45
         self.protocol_mode = "south"
         self.generator = ProtocolFrameGenerator()
         self.parser = ProtocolFrameParser()
         self.gdw_generator = GDWFrameGenerator()
         self.gdw_parser = GDW10376Parser()
+        self.dlt698_generator = DLT69845FrameGenerator()
+        self.dlt698_parser = DLT69845Parser()
         self._field_widgets: Dict[str, Dict[str, Any]] = {}
         self._current_di_key: Tuple[int, int, int, int] = None
         self._current_afn_fn: Tuple[int, int] = None
+        self._current_dlt698_key: Tuple[str, str] = None  # (apdu_type, sub_type)
         self._form_container: QWidget = None
         self._custom_templates: List[CustomFieldTemplate] = []
         self._custom_mode = False
+        self._axdr_mode = False
+        self._axdr_items: list = []  # A-XDR tree items
         self._update_timer: QTimer = None
         self.serial_worker = None
         self.setup_ui()
@@ -271,6 +279,111 @@ class FrameGenWidget(QWidget):
         self.gdw_config_group.setVisible(False)
         left_layout.addWidget(self.gdw_config_group)
 
+        # ---- 698.45 APDU选择（默认隐藏） ----
+        self.dlt698_combo = QComboBox()
+        self.dlt698_combo.setMinimumWidth(360)
+        self.dlt698_combo.setEditable(True)
+        self.dlt698_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.dlt698_combo.completer().setCompletionMode(self.dlt698_combo.completer().CompletionMode.PopupCompletion)
+        self.dlt698_combo.completer().setFilterMode(Qt.MatchFlag.MatchContains)
+        self.dlt698_combo.completer().popup().setStyleSheet(
+            "background-color: #ffffff; color: #000000; selection-background-color: #2196F3; selection-color: #ffffff;"
+        )
+        self._populate_dlt698_combo()
+        self.dlt698_combo.currentIndexChanged.connect(self._on_dlt698_changed)
+        self.dlt698_combo.setVisible(False)
+        cmd_layout.addWidget(self.dlt698_combo)
+
+        # ---- 698.45帧配置（默认隐藏） ----
+        self.dlt698_config_group = QGroupBox("698.45 帧配置")
+        dlt698_config_layout = QVBoxLayout(self.dlt698_config_group)
+        dlt698_config_layout.setContentsMargins(6, 4, 6, 4)
+        dlt698_config_layout.setSpacing(4)
+
+        # 地址特征配置行
+        addr_feat_layout = QHBoxLayout()
+        addr_feat_layout.setSpacing(6)
+        addr_feat_layout.addWidget(QLabel("地址类型:"))
+        self.dlt698_addr_type = QComboBox()
+        self.dlt698_addr_type.addItem("单地址", 0)
+        self.dlt698_addr_type.addItem("通配地址", 1)
+        self.dlt698_addr_type.addItem("组地址", 2)
+        self.dlt698_addr_type.addItem("广播地址", 3)
+        self.dlt698_addr_type.setToolTip("D7-D6: 地址类型")
+        addr_feat_layout.addWidget(self.dlt698_addr_type)
+
+        addr_feat_layout.addWidget(QLabel("逻辑地址:"))
+        self.dlt698_logic_addr = QComboBox()
+        self.dlt698_logic_addr.addItem("逻辑地址0", 0)
+        self.dlt698_logic_addr.addItem("逻辑地址1", 1)
+        self.dlt698_logic_addr.addItem("扩展逻辑地址(2~255)", 3)
+        self.dlt698_logic_addr.setToolTip("D5-D4: 逻辑地址")
+        addr_feat_layout.addWidget(self.dlt698_logic_addr)
+
+        addr_feat_layout.addWidget(QLabel("地址长度:"))
+        self.dlt698_addr_len = QComboBox()
+        self.dlt698_addr_len.addItem("自动(广播=1)", 0)
+        for i in range(1, 17):
+            self.dlt698_addr_len.addItem(f"{i}", i)
+        self.dlt698_addr_len.setCurrentText("6")
+        self.dlt698_addr_len.setToolTip("D3-D0: 地址字节长度(1~16, 广播固定1)")
+        addr_feat_layout.addWidget(self.dlt698_addr_len)
+
+        addr_feat_layout.addWidget(QLabel("SA地址:"))
+        self.dlt698_sa_raw = QLineEdit("000000000000")
+        self.dlt698_sa_raw.setMaxLength(12)
+        self.dlt698_sa_raw.setMinimumWidth(140)
+        self.dlt698_sa_raw.setToolTip("服务器地址(不含特征字节)，自动补齐/截断到地址长度")
+        addr_feat_layout.addWidget(self.dlt698_sa_raw)
+
+        addr_feat_layout.addStretch()
+        dlt698_config_layout.addLayout(addr_feat_layout)
+
+        # 控制域 + CA 配置行
+        dlt698_ctrl_layout = QHBoxLayout()
+        dlt698_ctrl_layout.setSpacing(6)
+
+        dlt698_ctrl_layout.addWidget(QLabel("CA:"))
+        self.dlt698_ca = QLineEdit("0")
+        self.dlt698_ca.setFixedWidth(30)
+        self.dlt698_ca.setToolTip("客户机地址(1字节)")
+        dlt698_ctrl_layout.addWidget(self.dlt698_ca)
+
+        dlt698_ctrl_layout.addWidget(QLabel("DIR:"))
+        self.dlt698_dir = QComboBox()
+        self.dlt698_dir.addItem("0-客户机→服务器", 0)
+        self.dlt698_dir.addItem("1-服务器→客户机", 1)
+        dlt698_ctrl_layout.addWidget(self.dlt698_dir)
+
+        dlt698_ctrl_layout.addWidget(QLabel("PRM:"))
+        self.dlt698_prm = QComboBox()
+        self.dlt698_prm.addItem("1-发起(请求)", 1)
+        self.dlt698_prm.addItem("0-响应", 0)
+        dlt698_ctrl_layout.addWidget(self.dlt698_prm)
+
+        dlt698_ctrl_layout.addWidget(QLabel("SC:"))
+        self.dlt698_sc = QComboBox()
+        self.dlt698_sc.addItem("0-不加扰", 0)
+        self.dlt698_sc.addItem("1-加扰码", 1)
+        dlt698_ctrl_layout.addWidget(self.dlt698_sc)
+
+        dlt698_ctrl_layout.addWidget(QLabel("分帧:"))
+        self.dlt698_seg = QComboBox()
+        self.dlt698_seg.addItem("0-完整", 0)
+        self.dlt698_seg.addItem("1-分帧", 1)
+        dlt698_ctrl_layout.addWidget(self.dlt698_seg)
+
+        dlt698_ctrl_layout.addWidget(QLabel("功能码:"))
+        self.dlt698_func = QComboBox()
+        self.dlt698_func.addItem("3-用户数据", 3)
+        self.dlt698_func.addItem("1-链路管理", 1)
+        dlt698_ctrl_layout.addWidget(self.dlt698_func)
+        dlt698_ctrl_layout.addStretch()
+        dlt698_config_layout.addLayout(dlt698_ctrl_layout)
+
+        self.dlt698_config_group.setVisible(False)
+        left_layout.addWidget(self.dlt698_config_group)
+
         # ---- 模式切换 ----
         self.mode_group = QGroupBox("字段模式")
         mode_layout = QHBoxLayout(self.mode_group)
@@ -284,6 +397,10 @@ class FrameGenWidget(QWidget):
         self.mode_custom_rb = QCheckBox("使用自定义字段模板")
         self.mode_custom_rb.stateChanged.connect(self._on_mode_changed)
         mode_layout.addWidget(self.mode_custom_rb)
+
+        self.mode_axdr_rb = QCheckBox("A-XDR自定义数据")
+        self.mode_axdr_rb.stateChanged.connect(self._on_mode_changed)
+        mode_layout.addWidget(self.mode_axdr_rb)
         mode_layout.addStretch()
         left_layout.addWidget(self.mode_group)
 
@@ -470,7 +587,43 @@ class FrameGenWidget(QWidget):
         self.gdw_src_addr.textChanged.connect(self._schedule_realtime_update)
         self.gdw_dst_addr.textChanged.connect(self._schedule_realtime_update)
 
+        # ---- 连接698.45控件的实时更新信号 ----
+        self.dlt698_addr_type.currentIndexChanged.connect(self._schedule_realtime_update)
+        self.dlt698_logic_addr.currentIndexChanged.connect(self._schedule_realtime_update)
+        self.dlt698_addr_len.currentIndexChanged.connect(self._on_dlt698_addr_len_changed)
+        self.dlt698_addr_len.currentIndexChanged.connect(self._schedule_realtime_update)
+        self.dlt698_sa_raw.textChanged.connect(self._schedule_realtime_update)
+        self.dlt698_ca.textChanged.connect(self._schedule_realtime_update)
+        self.dlt698_dir.currentIndexChanged.connect(self._schedule_realtime_update)
+        self.dlt698_prm.currentIndexChanged.connect(self._schedule_realtime_update)
+        self.dlt698_sc.currentIndexChanged.connect(self._schedule_realtime_update)
+        self.dlt698_seg.currentIndexChanged.connect(self._schedule_realtime_update)
+        self.dlt698_func.currentIndexChanged.connect(self._schedule_realtime_update)
+
+        # 初始化 SA 输入框长度限制
+        self._on_dlt698_addr_len_changed(0)
+
         apply_chinese_context_menus(self)
+
+    # ------------------------------------------------------------------
+    # OI 下拉框联动
+    # ------------------------------------------------------------------
+    def _on_oi_combo_changed(self, index: int):
+        """OI 预设下拉框选择改变时，同步值到旁边的文本输入框"""
+        combo = self.sender()
+        if combo is None:
+            return
+        val = combo.currentData()
+        if val is None:
+            return
+        # 找到对应的 edit 控件并写入十六进制值
+        for widget_info in self._field_widgets.values():
+            if widget_info.get("widget") is combo:
+                edit = widget_info.get("edit")
+                if edit:
+                    edit.setText(f"{val:04X}")
+                break
+        self._schedule_realtime_update()
 
     # ------------------------------------------------------------------
     # 模式切换
@@ -479,18 +632,36 @@ class FrameGenWidget(QWidget):
         sender = self.sender()
         if sender == self.mode_predefined_rb and self.mode_predefined_rb.isChecked():
             self.mode_custom_rb.setChecked(False)
+            self.mode_axdr_rb.setChecked(False)
             self._custom_mode = False
+            self._axdr_mode = False
         elif sender == self.mode_custom_rb and self.mode_custom_rb.isChecked():
-            self.mode_predefined_rb.setChecked(False)
-            self._custom_mode = True
-        else:
-            # 确保至少选中一个
-            if not self.mode_predefined_rb.isChecked() and not self.mode_custom_rb.isChecked():
+            if self.protocol_mode == "dlt698":
+                self.mode_custom_rb.setChecked(False)
                 self.mode_predefined_rb.setChecked(True)
                 self._custom_mode = False
+                self._axdr_mode = False
+            else:
+                self.mode_predefined_rb.setChecked(False)
+                self.mode_axdr_rb.setChecked(False)
+                self._custom_mode = True
+                self._axdr_mode = False
+        elif sender == self.mode_axdr_rb and self.mode_axdr_rb.isChecked():
+            self.mode_predefined_rb.setChecked(False)
+            self.mode_custom_rb.setChecked(False)
+            self._custom_mode = False
+            self._axdr_mode = True
+        else:
+            # 确保至少选中一个
+            if not self.mode_predefined_rb.isChecked() and not self.mode_custom_rb.isChecked() and not self.mode_axdr_rb.isChecked():
+                self.mode_predefined_rb.setChecked(True)
+                self._custom_mode = False
+                self._axdr_mode = False
         # 仅重新构建字段表单区（不清空模式切换控件本身）
         if self.protocol_mode == "south":
             self._rebuild_field_form(self._current_di_key)
+        elif self.protocol_mode == "dlt698":
+            self._rebuild_dlt698_field_form(self._current_dlt698_key)
         else:
             self._rebuild_gdw_field_form(self._current_afn_fn)
 
@@ -539,6 +710,14 @@ class FrameGenWidget(QWidget):
                 return
             doc = schema.get("doc", "暂无说明")
             name = schema.get("name", "未知命令")
+        elif self.protocol_mode == "dlt698":
+            if not self._current_dlt698_key:
+                return
+            schema = DLT69845_FIELD_SCHEMA.get(self._current_dlt698_key)
+            if not schema:
+                return
+            doc = schema.get("doc", "暂无说明")
+            name = schema.get("name", "未知命令")
         else:
             if not self._current_afn_fn:
                 return
@@ -579,11 +758,7 @@ class FrameGenWidget(QWidget):
     # ------------------------------------------------------------------
     def _rebuild_form(self, di_key: Tuple[int, int, int, int]):
         # 清空旧表单
-        while self._form_layout.count():
-            item = self._form_layout.takeAt(0)
-            w = item.widget()
-            if w:
-                w.deleteLater()
+        self._clear_layout(self._form_layout)
         self._field_widgets.clear()
 
         if not di_key:
@@ -624,11 +799,7 @@ class FrameGenWidget(QWidget):
 
     def _rebuild_gdw_form(self, afn_fn: Tuple[int, int]):
         """重建国网模式表单"""
-        while self._form_layout.count():
-            item = self._form_layout.takeAt(0)
-            w = item.widget()
-            if w:
-                w.deleteLater()
+        self._clear_layout(self._form_layout)
         self._field_widgets.clear()
 
         if not afn_fn:
@@ -665,11 +836,7 @@ class FrameGenWidget(QWidget):
 
     def _rebuild_gdw_field_form(self, afn_fn: Tuple[int, int]):
         """仅重建国网字段表单区"""
-        while self._form_layout.count():
-            item = self._form_layout.takeAt(0)
-            w = item.widget()
-            if w:
-                w.deleteLater()
+        self._clear_layout(self._form_layout)
         self._field_widgets.clear()
 
         if not afn_fn:
@@ -726,14 +893,291 @@ class FrameGenWidget(QWidget):
         else:
             self.gdw_relay_container.setVisible(False)
 
+
+    # ------------------------------------------------------------------
+    # 698.45 地址编码
+    # ------------------------------------------------------------------
+    def _on_dlt698_addr_len_changed(self, index: int):
+        """地址长度改变时更新SA输入框长度限制"""
+        addr_len = self.dlt698_addr_len.currentData()
+        if addr_len == 0:
+            addr_len = 6
+        self.dlt698_sa_raw.setMaxLength(addr_len * 2)
+        # 截断超长内容
+        text = self.dlt698_sa_raw.text()
+        if len(text) > addr_len * 2:
+            self.dlt698_sa_raw.setText(text[:addr_len * 2])
+
+    def _get_dlt698_sa(self) -> bytes:
+        """从 UI 控件组装服务器地址 SA（含地址特征字节 + 地址字节）
+
+        地址特征字节: bit7-6=地址类型, bit5-4=逻辑地址, bit3-0=地址长度-1
+        广播地址时返回 1 字节 0xAA
+        """
+        addr_type = self.dlt698_addr_type.currentData()
+        logic_addr = self.dlt698_logic_addr.currentData()
+        addr_len = self.dlt698_addr_len.currentData()
+
+        # 广播地址: 固定 1 字节 0xAA
+        if addr_type == 3:
+            return bytes([0xAA])
+
+        # 地址长度: D3-D0 编码为 (n-1)，0 = 自动
+        if addr_len == 0:
+            addr_len = 6  # 默认 6 字节
+
+        # 地址特征字节
+        feature = ((addr_type & 0x03) << 6) | ((logic_addr & 0x03) << 4) | ((addr_len - 1) & 0x0F)
+
+        # 收集 SA 地址字节
+        sa_text = self.dlt698_sa_raw.text().strip().replace(" ", "")
+        try:
+            sa_bytes = bytes.fromhex(sa_text) if sa_text else b""
+        except ValueError:
+            sa_bytes = b""
+
+        # 补齐或截断到 addr_len
+        if len(sa_bytes) < addr_len:
+            sa_bytes = sa_bytes + b'\x00' * (addr_len - len(sa_bytes))
+        elif len(sa_bytes) > addr_len:
+            sa_bytes = sa_bytes[:addr_len]
+
+        # GUI 大端正序输入，报文小端字节逆序
+        return bytes([feature]) + sa_bytes[::-1]
+
+    # ------------------------------------------------------------------
+    # 698.45 APDU 下拉框与表单
+    # ------------------------------------------------------------------
+    def _populate_dlt698_combo(self):
+        """填充698.45 APDU类型下拉框"""
+        self.dlt698_combo.clear()
+        self.dlt698_combo.addItem("-- 请选择APDU命令 --", None)
+        for apdu_type, sub_type, name in self.dlt698_generator.get_supported_commands():
+            label = f"【请求】 {name}  ({apdu_type}/{sub_type})"
+            self.dlt698_combo.addItem(label, (apdu_type, sub_type))
+        # 自定义 APDU
+        self.dlt698_combo.addItem("【自定义】 自定义APDU命令  (输入服务码/子类型)", ("_custom_", "_custom_"))
+
+    def _on_dlt698_changed(self, index: int):
+        key = self.dlt698_combo.currentData()
+        self._current_dlt698_key = key
+        self.cmd_help_btn.setEnabled(key is not None)
+        self._rebuild_dlt698_form(key)
+
+    def _rebuild_dlt698_form(self, key: Tuple[str, str]):
+        """重建698.45模式表单"""
+        self._clear_layout(self._form_layout)
+        self._field_widgets.clear()
+
+        if not key:
+            self.mode_group.setVisible(True)
+            return
+
+        # 自定义 APDU：自动切到 A-XDR 模式
+        if key == ("_custom_", "_custom_"):
+            self.mode_group.setVisible(True)
+            self.mode_axdr_rb.setChecked(True)
+            self.mode_predefined_rb.setChecked(False)
+            self.mode_custom_rb.setChecked(False)
+            self._custom_mode = False
+            self._axdr_mode = True
+            self._rebuild_dlt698_field_form(key)
+            return
+
+        schema = DLT69845_FIELD_SCHEMA.get(key)
+        if not schema:
+            self.mode_group.setVisible(True)
+            return
+
+        fields = schema.get("fields")
+        if fields is not None and len(fields) == 0:
+            self.mode_group.setVisible(False)
+            self._custom_mode = False
+            hint = QLabel("<b>该命令无数据单元，无需添加用户数据</b>")
+            hint.setStyleSheet("color: #2196F3; font-size: 13px; padding: 20px;")
+            hint.setAlignment(Qt.AlignCenter)
+            self._form_layout.addWidget(hint)
+            self._schedule_realtime_update()
+            return
+
+        self.mode_group.setVisible(True)
+        has_predefined = bool(fields)
+        if not has_predefined:
+            self.mode_axdr_rb.setChecked(True)
+            self.mode_predefined_rb.setChecked(False)
+            self._custom_mode = False
+            self._axdr_mode = True
+        elif not self._axdr_mode:
+            self.mode_predefined_rb.setChecked(True)
+            self.mode_axdr_rb.setChecked(False)
+            self._custom_mode = False
+
+        self._rebuild_dlt698_field_form(key)
+
+    def _clear_layout(self, layout):
+        """递归清空 layout 中所有 widget 和子 layout"""
+        while layout.count():
+            item = layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.setParent(None)
+                w.deleteLater()
+            elif item.layout():
+                self._clear_layout(item.layout())
+
+    def _rebuild_dlt698_field_form(self, key: Tuple[str, str]):
+        """仅重建698.45字段表单区"""
+        self._clear_layout(self._form_layout)
+        self._field_widgets.clear()
+
+        if not key:
+            return
+
+        # A-XDR 模式：固定字段 PIID(优先级+序号) + OI + 属性ID+索引/方法ID+模式 + A-XDR编辑器
+        if self._axdr_mode:
+            apdu_type = key[0] if key else ""
+
+            # PIID = 服务优先级(D7) + 服务序号(D6-D0)
+            piid_container = QWidget()
+            piid_layout = QHBoxLayout(piid_container)
+            piid_layout.setContentsMargins(4, 2, 4, 2)
+            piid_layout.addWidget(QLabel("PIID"))
+            piid_layout.addWidget(QLabel("服务优先级:"))
+            priority_combo = QComboBox()
+            priority_combo.addItem("0-普通", 0)
+            priority_combo.addItem("1-高优先级", 1)
+            priority_combo.currentIndexChanged.connect(self._schedule_realtime_update)
+            piid_layout.addWidget(priority_combo)
+            piid_layout.addWidget(QLabel("服务序号:"))
+            seq_edit = QLineEdit("1")
+            seq_edit.setFixedWidth(50)
+            seq_edit.textChanged.connect(self._schedule_realtime_update)
+            piid_layout.addWidget(seq_edit)
+            self._field_widgets["PIID_优先级"] = {"widget": priority_combo}
+            self._field_widgets["PIID_序号"] = {"widget": seq_edit}
+            piid_layout.addStretch()
+            self._form_layout.addWidget(piid_container)
+
+            # OI
+            oi_container = QWidget()
+            oi_layout = QHBoxLayout(oi_container)
+            oi_layout.setContentsMargins(4, 2, 4, 2)
+            oi_layout.addWidget(QLabel("OI  [对象标识 (2字节小端序)]"))
+            oi_edit = QLineEdit()
+            oi_edit.setPlaceholderText("输入十六进制 如 0400")
+            oi_edit.setMinimumWidth(140)
+            oi_edit.textChanged.connect(self._schedule_realtime_update)
+            oi_layout.addWidget(oi_edit)
+            self._field_widgets["OI"] = {"widget": oi_edit}
+            oi_layout.addStretch()
+            self._form_layout.addWidget(oi_container)
+
+            # 属性ID+索引 / 方法ID+操作模式
+            if apdu_type == "ACTION-Request":
+                attr_container = QWidget()
+                attr_layout = QHBoxLayout(attr_container)
+                attr_layout.setContentsMargins(4, 2, 4, 2)
+                attr_layout.addWidget(QLabel("方法标识"))
+                method_edit = QLineEdit("1")
+                method_edit.setFixedWidth(40)
+                method_edit.textChanged.connect(self._schedule_realtime_update)
+                attr_layout.addWidget(method_edit)
+                attr_layout.addWidget(QLabel("操作模式"))
+                mode_edit = QLineEdit("0")
+                mode_edit.setFixedWidth(40)
+                mode_edit.textChanged.connect(self._schedule_realtime_update)
+                attr_layout.addWidget(mode_edit)
+                self._field_widgets["方法标识"] = {"widget": method_edit}
+                self._field_widgets["操作模式"] = {"widget": mode_edit}
+                attr_layout.addStretch()
+                self._form_layout.addWidget(attr_container)
+            else:
+                attr_container = QWidget()
+                attr_layout = QHBoxLayout(attr_container)
+                attr_layout.setContentsMargins(4, 2, 4, 2)
+                attr_layout.addWidget(QLabel("属性标识"))
+                attr_edit = QLineEdit("2")
+                attr_edit.setFixedWidth(40)
+                attr_edit.textChanged.connect(self._schedule_realtime_update)
+                attr_layout.addWidget(attr_edit)
+                attr_layout.addWidget(QLabel("索引"))
+                idx_edit = QLineEdit("0")
+                idx_edit.setFixedWidth(40)
+                idx_edit.textChanged.connect(self._schedule_realtime_update)
+                attr_layout.addWidget(idx_edit)
+                self._field_widgets["属性标识"] = {"widget": attr_edit}
+                self._field_widgets["索引"] = {"widget": idx_edit}
+                attr_layout.addStretch()
+                self._form_layout.addWidget(attr_container)
+
+            self._connect_field_signals()
+            self._build_axdr_editor(key)
+            return
+
+        schema = DLT69845_FIELD_SCHEMA.get(key)
+        if not schema:
+            return
+
+        fields = schema.get("fields")
+        if fields is not None and len(fields) == 0:
+            return
+
+        if self._custom_mode and self.protocol_mode != "dlt698":
+            self._build_custom_template_ui()
+            self._connect_template_signals()
+        else:
+            for field in schema.get("fields", []):
+                ftype = field.get("type", "bytes")
+                if ftype == "oi":
+                    # OI 特殊处理：提供下拉框 + 手动输入
+                    container = QWidget()
+                    layout = QHBoxLayout(container)
+                    layout.setContentsMargins(4, 2, 4, 2)
+                    label_text = field.get("name", "OI")
+                    desc = field.get("desc", "")
+                    if desc:
+                        label_text += f"  [{desc}]"
+                    label = QLabel(label_text)
+                    label.setMinimumWidth(180)
+                    label.setToolTip(desc)
+                    layout.addWidget(label)
+                    oi_combo = QComboBox()
+                    oi_combo.addItem("-- 选择OI --", None)
+                    for oi_val, oi_name in OI_PRESET_LIST:
+                        oi_combo.addItem(f"{oi_name} (0x{oi_val:04X})", oi_val)
+                    oi_combo.currentIndexChanged.connect(self._schedule_realtime_update)
+                    layout.addWidget(oi_combo)
+                    self._field_widgets[field["name"]] = {"widget": oi_combo}
+                    layout.addStretch()
+                    self._form_layout.addWidget(container)
+                elif ftype == "oad_list":
+                    # OAD列表：一个大文本框
+                    container = QWidget()
+                    layout = QHBoxLayout(container)
+                    layout.setContentsMargins(4, 2, 4, 2)
+                    desc = field.get("desc", "格式：OI(4B)+属性标识(2B) 空格分隔")
+                    label = QLabel(f"{field['name']}  [{desc}]")
+                    label.setMinimumWidth(180)
+                    layout.addWidget(label)
+                    edit = QLineEdit(field.get("default", "00000000"))
+                    edit.setPlaceholderText("如：0000000002 0001000002")
+                    edit.textChanged.connect(self._schedule_realtime_update)
+                    layout.addWidget(edit)
+                    self._field_widgets[field["name"]] = {"widget": edit}
+                    layout.addStretch()
+                    self._form_layout.addWidget(container)
+                else:
+                    widget = self._create_field_widget(field)
+                    if widget:
+                        self._form_layout.addWidget(widget)
+            self._connect_field_signals()
+        self._schedule_realtime_update()
+        apply_chinese_context_menus(self._form_container)
+
     def _rebuild_field_form(self, di_key: Tuple[int, int, int, int]):
         """仅重建字段表单区（模式切换时调用，不清空模式控件）"""
         # 清空旧表单（保留模式切换控件，因为它们不在 _form_layout 中）
-        while self._form_layout.count():
-            item = self._form_layout.takeAt(0)
-            w = item.widget()
-            if w:
-                w.deleteLater()
+        self._clear_layout(self._form_layout)
         self._field_widgets.clear()
 
         if not di_key:
@@ -758,6 +1202,530 @@ class FrameGenWidget(QWidget):
             self._connect_field_signals()
         self._schedule_realtime_update()
         apply_chinese_context_menus(self._form_container)
+
+    # ------------------------------------------------------------------
+    # A-XDR 数据类型树形编辑器
+    # ------------------------------------------------------------------
+    A_XDR_TYPE_LIST = [
+        ("null", 0x00, "空"),
+        ("array", 0x01, "数组"),
+        ("structure", 0x02, "结构体"),
+        ("bool", 0x03, "布尔值"),
+        ("bit-string", 0x04, "位串"),
+        ("double-long", 0x05, "32位整数"),
+        ("double-long-unsigned", 0x06, "32位正整数"),
+        ("octet-string", 0x09, "字节串"),
+        ("visible-string", 0x0A, "ASCII字符串"),
+        ("UTF8-string", 0x0C, "UTF8字符串"),
+        ("integer", 0x0F, "8位整数"),
+        ("long", 0x10, "16位整数"),
+        ("unsigned", 0x11, "8位正整数"),
+        ("long-unsigned", 0x12, "16位正整数"),
+        ("long64", 0x14, "64位整数"),
+        ("long64-unsigned", 0x15, "64位正整数"),
+        ("enum", 0x16, "枚举"),
+        ("float32", 0x17, "32位浮点数"),
+        ("float64", 0x18, "64位浮点数"),
+        ("date_time", 0x19, "日期时间SIZE(10)"),
+        ("date", 0x1A, "日期SIZE(5)"),
+        ("time", 0x1B, "时间SIZE(3)"),
+        ("date_time_s", 0x1C, "日期时间SIZE(7)"),
+        ("OI", 0x50, "对象标识"),
+        ("OAD", 0x51, "对象属性描述符"),
+        ("OMD", 0x53, "对象方法描述符"),
+        ("TI", 0x54, "时间间隔"),
+        ("TSA", 0x55, "时间戳"),
+        ("MAC", 0x56, "消息认证码"),
+        ("RN", 0x57, "随机数"),
+    ]
+
+    VAR_LEN_TYPES = {"array", "structure", "octet-string", "visible-string", "UTF8-string", "bit-string"}
+
+    COMPOUND_TYPES = {"array", "structure"}
+
+    def _build_axdr_editor(self, key):
+        """构建 A-XDR 树形编辑器"""
+        from dl_t698_45_axdr import AXDRCoder
+        self._axdr_coder = AXDRCoder()
+        self._axdr_root = {"type": "structure", "tag": 0x02, "value": "root", "children": self._axdr_items or []}
+
+        # 工具栏
+        toolbar_widget = QWidget()
+        toolbar = QHBoxLayout(toolbar_widget)
+        toolbar.setContentsMargins(0, 0, 0, 0)
+        add_btn = QPushButton("+ 添加数据项")
+        add_btn.clicked.connect(self._add_axdr_root_item)
+        toolbar.addWidget(add_btn)
+        toolbar.addStretch()
+        self._form_layout.addWidget(toolbar_widget)
+
+        # 树形容器
+        self._axdr_tree = QWidget()
+        self._axdr_tree_layout = QVBoxLayout(self._axdr_tree)
+        self._axdr_tree_layout.setAlignment(Qt.AlignTop)
+        self._axdr_tree_layout.setSpacing(2)
+        self._form_layout.addWidget(self._axdr_tree)
+
+        # 渲染现有项
+        self._render_all_axdr_items()
+
+    def _render_all_axdr_items(self):
+        """渲染所有 A-XDR 根级项"""
+        if not hasattr(self, '_axdr_tree_layout'):
+            return
+        while self._axdr_tree_layout.count():
+            item = self._axdr_tree_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+
+        for i, child in enumerate(self._axdr_items):
+            self._render_axdr_item(child, self._axdr_tree_layout, 0, i)
+
+    def _render_axdr_item(self, item: dict, parent_layout, level: int, index: int):
+        """渲染单个 A-XDR 数据项"""
+        row = QWidget()
+        row.setStyleSheet("background: transparent;")
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(4 + level * 20, 1, 4, 1)
+        row_layout.setSpacing(4)
+
+        # 类型下拉
+        combo = QComboBox()
+        combo.setFixedWidth(160)
+        combo.setStyleSheet(
+            "QComboBox { background-color: #ffffff; color: #000000; }"
+            "QComboBox QAbstractItemView { background-color: #ffffff; color: #000000; selection-background-color: #e3f2fd; }"
+        )
+        for t_name, t_tag, t_desc in self.A_XDR_TYPE_LIST:
+            combo.addItem(f"{t_desc} (0x{t_tag:02X})", t_tag)
+        # 设置当前类型
+        tag = item.get("tag", 0x11)
+        combo.blockSignals(True)
+        idx = combo.findData(tag)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+        combo.blockSignals(False)
+        combo.currentIndexChanged.connect(
+            lambda idx, it=item: self._on_axdr_type_changed(it)
+        )
+        row_layout.addWidget(combo)
+
+        # 长度/个数输入 (可变长类型与复合类型)
+        t = item.get("type", "unsigned")
+        len_edit = QLineEdit()
+        len_edit.setFixedWidth(50)
+        len_edit.setPlaceholderText("个数" if t in self.COMPOUND_TYPES else "长度")
+
+        if t in self.COMPOUND_TYPES:
+            count = len(item.get("children", []))
+            len_edit.setText(str(count))
+        elif t in self.VAR_LEN_TYPES:
+            val = item.get("value", "")
+            if t in ("octet-string", "bit-string"):
+                try:
+                    count = len(bytes.fromhex(str(val).replace(" ", "")))
+                except ValueError:
+                    count = 0
+            elif t in ("visible-string", "UTF8-string"):
+                count = len(str(val))
+            else:
+                count = item.get("length", 0)
+            len_edit.setText(str(count))
+            item["length"] = count
+        else:
+            len_edit.setEnabled(False)
+            fixed_lengths = {
+                "null": 0, "bool": 1, "integer": 1, "unsigned": 1, "enum": 1,
+                "long": 2, "long-unsigned": 2, "OI": 2,
+                "double-long": 4, "double-long-unsigned": 4, "float32": 4,
+                "OAD": 4, "OMD": 4,
+                "long64": 8, "long64-unsigned": 8, "float64": 8,
+                "date_time": 10, "date": 5, "time": 4, "date_time_s": 7,
+                "TI": 3, "TSA": 7, "MAC": 4, "RN": 4,
+            }
+            len_edit.setText(str(fixed_lengths.get(t, "")))
+
+        len_edit.editingFinished.connect(lambda it=item: self._on_axdr_length_changed(it))
+        len_edit.textChanged.connect(self._schedule_realtime_update)
+        row_layout.addWidget(len_edit)
+        item["_len_edit"] = len_edit
+
+        # 值输入区域
+        value_widget = self._create_axdr_value_widget(item)
+        row_layout.addWidget(value_widget)
+
+        # 操作按钮
+        if t in self.COMPOUND_TYPES:
+            add_btn = QPushButton("+")
+            add_btn.setFixedSize(28, 24)
+            add_btn.setStyleSheet(
+                "QPushButton { color: #000; background: #fff; border: 1px solid #ccc; "
+                "border-radius: 3px; font-weight: bold; font-size: 14px; }"
+                "QPushButton:hover { background: #f0f0f0; }"
+            )
+            add_btn.clicked.connect(lambda checked=False, it=item: self._on_add_axdr_child(it))
+            row_layout.addWidget(add_btn)
+
+        del_btn = QPushButton("删")
+        del_btn.setFixedSize(28, 24)
+        del_btn.setToolTip("删除此项")
+        del_btn.setStyleSheet(
+            "QPushButton { color: #fff; background: #e74c3c; border: 1px solid #c0392b; "
+            "border-radius: 3px; font-weight: bold; font-size: 11px; }"
+            "QPushButton:hover { background: #c0392b; }"
+            "QToolTip { background-color: white; color: black; border: 1px solid #ccc; }"
+        )
+        del_btn.clicked.connect(lambda checked=False, it=item: self._on_del_axdr_item(it))
+        row_layout.addWidget(del_btn)
+
+        row_layout.addStretch()
+        parent_layout.addWidget(row)
+
+        # 存储引用
+        item["_combo"] = combo
+        item["_row"] = row
+        item["_value_widget"] = value_widget
+
+        # 渲染子项（仅 compound 类型）
+        if item["type"] in self.COMPOUND_TYPES:
+            children = item.setdefault("children", [])
+            for ci, child in enumerate(children):
+                self._render_axdr_item(child, parent_layout, level + 1, ci)
+
+    def _create_axdr_value_widget(self, item: dict):
+        """为 A-XDR 数据项创建值输入控件"""
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(3)
+        t = item["type"]
+
+        if t in self.COMPOUND_TYPES:
+            label = QLabel("...")
+            label.setStyleSheet("color: #999; font-size: 11px;")
+            layout.addWidget(label)
+            return container
+
+        if t == "bool":
+            cb = QCheckBox()
+            cb.setChecked(bool(item.get("value", False)))
+            cb.stateChanged.connect(self._schedule_realtime_update)
+            layout.addWidget(cb)
+            return container
+
+        if t in ("octet-string", "bit-string", "date_time", "date", "time", "date_time_s",
+                  "TI", "TSA", "MAC", "RN"):
+            edit = QLineEdit(item.get("value", ""))
+            edit.setPlaceholderText("hex...")
+            edit.setMinimumWidth(100)
+            edit.textChanged.connect(self._schedule_realtime_update)
+            layout.addWidget(edit)
+            return container
+
+        if t in ("visible-string", "UTF8-string"):
+            edit = QLineEdit(str(item.get("value", "")))
+            edit.setMinimumWidth(120)
+            edit.textChanged.connect(self._schedule_realtime_update)
+            layout.addWidget(edit)
+            return container
+
+        if t == "OI":
+            combo = QComboBox()
+            combo.addItem("-- OI --", 0)
+            from dl_t698_45_frame_schema import OI_PRESET_LIST
+            for oi_val, oi_name in OI_PRESET_LIST:
+                combo.addItem(f"{oi_name} (0x{oi_val:04X})", oi_val)
+            cur = item.get("value", 0)
+            idx = combo.findData(cur)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+            combo.currentIndexChanged.connect(self._schedule_realtime_update)
+            layout.addWidget(combo)
+            return container
+
+        if t == "OAD":
+            oi_val = item.get("oi", 0)
+            oi_combo = QComboBox()
+            oi_combo.addItem("OI...", 0)
+            from dl_t698_45_frame_schema import OI_PRESET_LIST
+            for oi_v, oi_name in OI_PRESET_LIST:
+                oi_combo.addItem(f"{oi_name} (0x{oi_v:04X})", oi_v)
+            idx = oi_combo.findData(oi_val)
+            if idx >= 0:
+                oi_combo.setCurrentIndex(idx)
+            oi_combo.currentIndexChanged.connect(self._schedule_realtime_update)
+            layout.addWidget(QLabel("OI:"))
+            layout.addWidget(oi_combo)
+
+            attr_edit = QLineEdit(str(item.get("attr", 2)))
+            attr_edit.setFixedWidth(30)
+            attr_edit.textChanged.connect(self._schedule_realtime_update)
+            layout.addWidget(QLabel("属性:"))
+            layout.addWidget(attr_edit)
+
+            idx_edit = QLineEdit(str(item.get("index", 0)))
+            idx_edit.setFixedWidth(25)
+            idx_edit.textChanged.connect(self._schedule_realtime_update)
+            layout.addWidget(QLabel("索引:"))
+            layout.addWidget(idx_edit)
+            return container
+
+        if t == "OMD":
+            oi_val = item.get("oi", 0)
+            oi_combo = QComboBox()
+            oi_combo.addItem("OI...", 0)
+            from dl_t698_45_frame_schema import OI_PRESET_LIST
+            for oi_v, oi_name in OI_PRESET_LIST:
+                oi_combo.addItem(f"{oi_name} (0x{oi_v:04X})", oi_v)
+            idx = oi_combo.findData(oi_val)
+            if idx >= 0:
+                oi_combo.setCurrentIndex(idx)
+            oi_combo.currentIndexChanged.connect(self._schedule_realtime_update)
+            layout.addWidget(QLabel("OI:"))
+            layout.addWidget(oi_combo)
+
+            method_edit = QLineEdit(str(item.get("method", 1)))
+            method_edit.setFixedWidth(30)
+            method_edit.textChanged.connect(self._schedule_realtime_update)
+            layout.addWidget(QLabel("方法:"))
+            layout.addWidget(method_edit)
+
+            mode_edit = QLineEdit(str(item.get("mode", 0)))
+            mode_edit.setFixedWidth(25)
+            mode_edit.textChanged.connect(self._schedule_realtime_update)
+            layout.addWidget(QLabel("模式:"))
+            layout.addWidget(mode_edit)
+            return container
+
+        # 默认：数值/十六进制输入
+        default_val = item.get("value", 0)
+        edit = QLineEdit(str(default_val))
+        edit.setPlaceholderText("数值")
+        edit.setMinimumWidth(60)
+        edit.textChanged.connect(self._schedule_realtime_update)
+        layout.addWidget(edit)
+        return container
+
+    def _on_axdr_type_changed(self, item: dict):
+        """A-XDR 类型改变时更新 item 并重建渲染"""
+        combo = item.get("_combo")
+        if combo is None:
+            return
+        new_tag = combo.currentData()
+        if new_tag is None:
+            return
+        old_tag = item.get("tag")
+        if new_tag == old_tag:
+            return
+        from dl_t698_45_axdr import get_tag_name
+        new_type = get_tag_name(new_tag)
+        item["tag"] = new_tag
+        item["type"] = new_type
+        if new_type not in self.COMPOUND_TYPES and "children" in item:
+            del item["children"]
+        if new_type in self.COMPOUND_TYPES:
+            item.setdefault("children", [])
+        self._render_all_axdr_items()
+        self._schedule_realtime_update()
+
+    def _on_axdr_length_changed(self, item: dict):
+        """A-XDR 长度/个数改变时更新 item"""
+        len_edit = item.get("_len_edit")
+        if len_edit is None:
+            return
+        try:
+            new_len = int(len_edit.text().strip())
+        except ValueError:
+            return
+        t = item.get("type", "")
+        if t in self.COMPOUND_TYPES:
+            children = item.setdefault("children", [])
+            while len(children) < new_len:
+                children.append({"type": "unsigned", "tag": 0x11, "value": 0})
+            while len(children) > new_len:
+                children.pop()
+            self._render_all_axdr_items()
+            self._schedule_realtime_update()
+        elif t in self.VAR_LEN_TYPES:
+            item["length"] = new_len
+            self._schedule_realtime_update()
+
+    def _add_axdr_root_item(self):
+        """添加根级数据项"""
+        new_item = {"type": "unsigned", "tag": 0x11, "value": 0}
+        self._axdr_items.append(new_item)
+        self._render_all_axdr_items()
+        self._schedule_realtime_update()
+
+    def _on_add_axdr_child(self, parent_item: dict):
+        """为复合类型添加子项"""
+        children = parent_item.setdefault("children", [])
+        new_child = {"type": "unsigned", "tag": 0x11, "value": 0}
+        children.append(new_child)
+        self._render_all_axdr_items()
+        self._schedule_realtime_update()
+
+    def _on_del_axdr_item(self, item: dict):
+        """删除一个 A-XDR 数据项"""
+        for i, ri in enumerate(self._axdr_items):
+            if ri is item:
+                del self._axdr_items[i]
+                self._render_all_axdr_items()
+                self._schedule_realtime_update()
+                return
+        for ri in self._axdr_items:
+            if self._remove_from_children(ri, item):
+                self._render_all_axdr_items()
+                self._schedule_realtime_update()
+                return
+
+    def _remove_from_children(self, parent: dict, target: dict) -> bool:
+        """递归查找并移除子项"""
+        children = parent.get("children", [])
+        for i, child in enumerate(children):
+            if child is target:
+                del children[i]
+                return True
+            if self._remove_from_children(child, target):
+                return True
+        return False
+
+    def _collect_axdr_values(self, item: dict) -> dict:
+        """从 UI 控件收集 A-XDR 数据项的值"""
+        t = item["type"]
+        w = item.get("_value_widget")
+
+        result = {"tag": item["tag"], "type": t}
+
+        # 收集长度/个数
+        len_edit = item.get("_len_edit")
+        if len_edit and len_edit.isEnabled():
+            try:
+                result["length"] = int(len_edit.text().strip())
+            except ValueError:
+                result["length"] = 0
+        else:
+            result["length"] = item.get("length", 0)
+
+        if w is None:
+            result["value"] = item.get("value", 0)
+            if t in self.COMPOUND_TYPES:
+                result["children"] = [self._collect_axdr_values(c) for c in item.get("children", [])]
+            return result
+
+        if t == "bool":
+            cb = w.findChild(QCheckBox)
+            val = cb.isChecked() if cb else False
+        elif t in ("OAD", "OMD"):
+            # 复合子控件
+            combos = w.findChildren(QComboBox)
+            edits = w.findChildren(QLineEdit)
+            oi_val = combos[0].currentData() if combos else item.get("oi", 0)
+            sub_vals = {}
+            for e in edits:
+                try:
+                    sub_vals[e.objectName()] = int(e.text())
+                except ValueError:
+                    sub_vals[e.objectName()] = e.text()
+            if t == "OAD":
+                val = {"OI": oi_val, "属性编号": item.get("attr", 2), "属性特征": 0, "元素索引": item.get("index", 0)}
+            else:
+                val = {"OI": oi_val, "方法标识": item.get("method", 1), "操作模式": item.get("mode", 0)}
+            # Update from edits
+            if len(edits) >= 2:
+                item["attr"] = int(edits[0].text() or 2) if not t == "OMD" else item.get("attr", 2)
+                item["index"] = int(edits[-1].text() or 0) if t == "OAD" else item.get("index", 0)
+        elif t in ("octet-string", "bit-string", "date_time", "date", "time", "date_time_s",
+                    "TI", "TSA", "MAC", "RN"):
+            edit = w.findChild(QLineEdit)
+            val = edit.text().strip() if edit else ""
+        elif t in ("visible-string", "UTF8-string"):
+            edit = w.findChild(QLineEdit)
+            val = edit.text() if edit else ""
+        elif t == "OI":
+            combo = w.findChild(QComboBox)
+            val = combo.currentData() if combo else 0
+        elif t in ("integer", "long", "long64"):
+            edit = w.findChild(QLineEdit)
+            try:
+                val = int(edit.text()) if edit else 0
+            except (ValueError, AttributeError):
+                val = 0
+        elif t in ("float32", "float64"):
+            edit = w.findChild(QLineEdit)
+            try:
+                val = float(edit.text()) if edit else 0.0
+            except (ValueError, AttributeError):
+                val = 0.0
+        else:
+            edit = w.findChild(QLineEdit)
+            try:
+                txt = edit.text().strip() if edit else "0"
+                val = int(txt, 0) if txt else 0
+            except (ValueError, AttributeError):
+                val = 0
+
+        item["value"] = val
+        result["value"] = val
+        if t in self.COMPOUND_TYPES:
+            result["children"] = [self._collect_axdr_values(c) for c in item.get("children", [])]
+
+        return result
+
+    def _encode_axdr_data(self) -> bytes:
+        """将所有 A-XDR 数据项编码为字节"""
+        from dl_t698_45_axdr import AXDRCoder
+        coder = AXDRCoder()
+        data = b""
+        for item in self._axdr_items:
+            collected = self._collect_axdr_values(item)
+            data += self._encode_axdr_item(coder, collected)
+        return data
+
+    def _encode_axdr_item(self, coder, item: dict) -> bytes:
+        """递归编码单个 A-XDR 数据项"""
+        tag = item["tag"]
+        t = item["type"]
+        value = item.get("value", 0)
+        length = item.get("length", 0)
+
+        if t in self.COMPOUND_TYPES:
+            children = item.get("children", [])
+            result = bytes([tag])
+            child_data = b""
+            for child in children:
+                child_data += self._encode_axdr_item(coder, child)
+            result += coder._encode_length(len(child_data))
+            result += child_data
+            return result
+
+        if t == "bool":
+            return coder.encode(value, tag)
+        if t in ("octet-string", "bit-string"):
+            raw = bytes.fromhex(str(value).replace(" ", "")) if isinstance(value, str) and value else b""
+            if length > 0:
+                raw = raw.ljust(length, b'\x00')[:length]
+            return bytes([tag]) + coder._encode_length(len(raw)) + raw
+        if t in ("visible-string", "UTF8-string"):
+            data = str(value).encode('ascii' if t == "visible-string" else 'utf-8', errors='replace')
+            if length > 0:
+                data = data.ljust(length, b'\x00')[:length]
+            return bytes([tag]) + coder._encode_length(len(data)) + data
+        if t in ("date_time", "date", "time", "date_time_s", "TI", "TSA", "MAC", "RN"):
+            raw = bytes.fromhex(str(value).replace(" ", "")) if isinstance(value, str) and value else b""
+            if length > 0:
+                raw = raw.ljust(length, b'\x00')[:length]
+            return bytes([tag]) + coder._encode_length(len(raw)) + raw
+        if t == "OI":
+            return coder.encode(int(value), tag)
+        if t in ("OAD", "OMD"):
+            return coder.encode(value, tag)
+        if t == "null":
+            return coder.encode(None, tag)
+
+        # 数值类型
+        return coder.encode(value, tag)
 
     # ------------------------------------------------------------------
     # 自定义字段模板 UI（参考图2）
@@ -1125,6 +2093,9 @@ class FrameGenWidget(QWidget):
         if self.protocol_mode == "south":
             if not self._current_di_key:
                 return values
+        elif self.protocol_mode == "dlt698":
+            if not self._current_dlt698_key:
+                return values
         else:
             if not self._current_afn_fn:
                 return values
@@ -1148,6 +2119,8 @@ class FrameGenWidget(QWidget):
         else:
             if self.protocol_mode == "south":
                 schema = DI_FIELD_SCHEMA.get(self._current_di_key, {})
+            elif self.protocol_mode == "dlt698":
+                schema = DLT69845_FIELD_SCHEMA.get(self._current_dlt698_key, {})
             else:
                 schema = GDW_AFNFN_SCHEMA.get(self._current_afn_fn, {})
             for field in schema.get("fields", []):
@@ -1221,6 +2194,18 @@ class FrameGenWidget(QWidget):
                                 item_values[item_name] = item_widget.text().strip()
                         items.append(item_values)
                     values[name] = items
+                elif ftype == "oi":
+                    if isinstance(widget, QComboBox):
+                        val = widget.currentData()
+                        values[name] = val if val is not None else 0
+                    else:
+                        text = widget.text().strip()
+                        try:
+                            values[name] = int(text, 16) if text else 0
+                        except ValueError:
+                            values[name] = 0
+                elif ftype == "oad_list":
+                    values[name] = widget.text().strip()
                 else:
                     values[name] = widget.text().strip()
 
@@ -1312,6 +2297,8 @@ class FrameGenWidget(QWidget):
         try:
             if self.protocol_mode == "south":
                 self._do_realtime_update_south()
+            elif self.protocol_mode == "dlt698":
+                self._do_realtime_update_dlt698()
             else:
                 self._do_realtime_update_gdw()
         except Exception:
@@ -1427,6 +2414,128 @@ class FrameGenWidget(QWidget):
             self.preview_table.setItem(row, 2, QTableWidgetItem(str(parsed_value)))
             self.preview_table.setItem(row, 3, QTableWidgetItem(str(comment)))
 
+    def _do_realtime_update_dlt698(self):
+        """698.45实时组帧与解析"""
+        if not self._current_dlt698_key:
+            self.preview_table.setRowCount(0)
+            return
+
+        apdu_type, sub_type = self._current_dlt698_key
+
+        # 收集地址信息
+        sa = self._get_dlt698_sa()
+        ca_text = self.dlt698_ca.text().strip()
+        if not sa:
+            self.preview_table.setRowCount(0)
+            return
+        try:
+            ca = int(ca_text, 0) & 0xFF
+        except (ValueError, TypeError):
+            self.preview_table.setRowCount(0)
+            return
+
+        dir_bit = self.dlt698_dir.currentData()
+        prm_bit = self.dlt698_prm.currentData()
+        sc_bit = self.dlt698_sc.currentData()
+        seg_bit = self.dlt698_seg.currentData()
+        func_code = self.dlt698_func.currentData()
+
+        # A-XDR 模式：使用 A-XDR 数据生成（PIID + OAD/OMD + A-XDR用户数据）
+        if self._axdr_mode:
+            try:
+                axdr_data = self._encode_axdr_data()
+                field_values = self._collect_values()
+                # 补充 OI 下拉框的值
+                for name, widget_info in list(self._field_widgets.items()):
+                    widget = widget_info.get("widget")
+                    if isinstance(widget, QComboBox):
+                        val = widget.currentData()
+                        if val is not None:
+                            field_values[name] = val
+
+                import struct as _struct
+                # PIID = 优先级(D7) | 序号(D6-D0)
+                priority = int(field_values.get("PIID_优先级", 0)) & 0x01
+                seq = int(field_values.get("PIID_序号", 1)) & 0x7F
+                piid = (priority << 7) | seq
+
+                if apdu_type == "_custom_":
+                    apdu_bytes = bytes([0x05, 0x01, piid]) + axdr_data
+                else:
+                    apdu_header = self.dlt698_generator._build_apdu_header(apdu_type, sub_type)
+                    apdu_body = _struct.pack("B", piid)
+
+                    oi_widget = self._field_widgets.get("OI", {}).get("widget")
+                    oi_text = oi_widget.text().strip().replace(" ", "") if isinstance(oi_widget, QLineEdit) else "0000"
+                    try:
+                        oi_bytes = bytes.fromhex(oi_text)
+                    except ValueError:
+                        oi_bytes = b'\x00\x00'
+                    oi_bytes = oi_bytes.ljust(2, b'\x00')[:2]
+
+                    if apdu_type in ("GET-Request", "SET-Request"):
+                        attr = int(field_values.get("属性标识", 2)) & 0x1F
+                        idx = int(field_values.get("索引", 0)) & 0xFF
+                        oad = oi_bytes + _struct.pack("B", attr) + _struct.pack("B", idx)
+                        apdu_body += oad
+                    elif apdu_type == "ACTION-Request":
+                        method = int(field_values.get("方法标识", 1)) & 0x1F
+                        mode = int(field_values.get("操作模式", 0)) & 0xFF
+                        omd = oi_bytes + _struct.pack("B", method) + _struct.pack("B", mode)
+                        apdu_body += omd
+
+                    apdu_body += axdr_data
+
+                    # GET-Request 时间标签
+                    if apdu_type == "GET-Request" and sub_type in ("get_normal", "get_record", "get_normal_list"):
+                        apdu_body += b'\x00'
+
+                    apdu_bytes = apdu_header + apdu_body
+
+                frame = self.dlt698_generator._assemble_frame(
+                    sa, ca,
+                    self.dlt698_generator.build_control(dir_bit=dir_bit, prm_bit=prm_bit,
+                                                          seg_bit=seg_bit, sc_bit=sc_bit, func_code=func_code),
+                    apdu_bytes
+                )
+            except Exception:
+                self.preview_table.setRowCount(0)
+                return
+            table_data = self.dlt698_parser.parse_to_table(frame)
+            self._populate_preview_table(table_data)
+            hex_str = frame.hex().upper()
+            self.result_hex.setText(" ".join(hex_str[i:i+2] for i in range(0, len(hex_str), 2)))
+            return
+
+        field_values = self._collect_values()
+        # OI 字段特殊处理：如果 widget 是 QComboBox，取 currentData
+        if not self._custom_mode:
+            for name, widget_info in list(self._field_widgets.items()):
+                widget = widget_info.get("widget")
+                if isinstance(widget, QComboBox):
+                    val = widget.currentData()
+                    if val is not None:
+                        field_values[name] = val
+
+        try:
+            frame = self.dlt698_generator.generate_frame(
+                apdu_type, sub_type, field_values,
+                sa=sa, ca=ca,
+                dir_bit=dir_bit, prm_bit=prm_bit,
+                seg_bit=seg_bit, sc_bit=sc_bit,
+                func_code=func_code
+            )
+        except Exception:
+            self.preview_table.setRowCount(0)
+            return
+
+        table_data = self.dlt698_parser.parse_to_table(frame)
+        self._populate_preview_table(table_data)
+
+        hex_str = frame.hex().upper()
+        formatted = " ".join(hex_str[i:i+2] for i in range(0, len(hex_str), 2))
+        self.result_hex.setText(formatted)
+
     def _connect_field_signals(self):
         """连接预定义字段widget的实时更新信号"""
         for widget_info in self._field_widgets.values():
@@ -1462,6 +2571,8 @@ class FrameGenWidget(QWidget):
         try:
             if self.protocol_mode == "south":
                 self._generate_south_frame()
+            elif self.protocol_mode == "dlt698":
+                self._generate_dlt698_frame()
             else:
                 self._generate_gdw_frame()
         except Exception as e:
@@ -1559,6 +2670,114 @@ class FrameGenWidget(QWidget):
         formatted = " ".join(hex_str[i:i+2] for i in range(0, len(hex_str), 2))
         self.result_hex.setText(formatted)
 
+    def _generate_dlt698_frame(self):
+        """生成698.45协议帧"""
+        if not self._current_dlt698_key:
+            QMessageBox.warning(self, "警告", "请先选择一个APDU命令")
+            return
+
+        apdu_type, sub_type = self._current_dlt698_key
+
+        sa = self._get_dlt698_sa()
+        ca_text = self.dlt698_ca.text().strip()
+        if not sa:
+            QMessageBox.warning(self, "警告", "请输入有效的SA地址")
+            return
+        try:
+            ca = int(ca_text, 0) & 0xFF
+        except (ValueError, TypeError):
+            QMessageBox.warning(self, "警告", "CA地址格式错误")
+            return
+
+        dir_bit = self.dlt698_dir.currentData()
+        prm_bit = self.dlt698_prm.currentData()
+        sc_bit = self.dlt698_sc.currentData()
+        seg_bit = self.dlt698_seg.currentData()
+        func_code = self.dlt698_func.currentData()
+
+        # A-XDR 模式：使用 A-XDR 数据生成（PIID + OAD/OMD + A-XDR用户数据）
+        if self._axdr_mode:
+            try:
+                axdr_data = self._encode_axdr_data()
+                field_values = self._collect_values()
+                for name, widget_info in list(self._field_widgets.items()):
+                    widget = widget_info.get("widget")
+                    if isinstance(widget, QComboBox):
+                        val = widget.currentData()
+                        if val is not None:
+                            field_values[name] = val
+
+                import struct as _struct
+                priority = int(field_values.get("PIID_优先级", 0)) & 0x01
+                seq = int(field_values.get("PIID_序号", 1)) & 0x7F
+                piid = (priority << 7) | seq
+
+                if apdu_type == "_custom_":
+                    apdu_bytes = bytes([0x05, 0x01, piid]) + axdr_data
+                else:
+                    apdu_header = self.dlt698_generator._build_apdu_header(apdu_type, sub_type)
+                    apdu_body = _struct.pack("B", piid)
+
+                    oi_widget = self._field_widgets.get("OI", {}).get("widget")
+                    oi_text = oi_widget.text().strip().replace(" ", "") if isinstance(oi_widget, QLineEdit) else "0000"
+                    try:
+                        oi_bytes = bytes.fromhex(oi_text)
+                    except ValueError:
+                        oi_bytes = b'\x00\x00'
+                    oi_bytes = oi_bytes.ljust(2, b'\x00')[:2]
+
+                    if apdu_type in ("GET-Request", "SET-Request"):
+                        attr = int(field_values.get("属性标识", 2)) & 0x1F
+                        idx = int(field_values.get("索引", 0)) & 0xFF
+                        oad = oi_bytes + _struct.pack("B", attr) + _struct.pack("B", idx)
+                        apdu_body += oad
+                    elif apdu_type == "ACTION-Request":
+                        method = int(field_values.get("方法标识", 1)) & 0x1F
+                        mode = int(field_values.get("操作模式", 0)) & 0xFF
+                        omd = oi_bytes + _struct.pack("B", method) + _struct.pack("B", mode)
+                        apdu_body += omd
+
+                    apdu_body += axdr_data
+
+                    if apdu_type == "GET-Request" and sub_type in ("get_normal", "get_record", "get_normal_list"):
+                        apdu_body += b'\x00'
+
+                    apdu_bytes = apdu_header + apdu_body
+
+                frame = self.dlt698_generator._assemble_frame(
+                    sa, ca,
+                    self.dlt698_generator.build_control(dir_bit=dir_bit, prm_bit=prm_bit,
+                                                          seg_bit=seg_bit, sc_bit=sc_bit, func_code=func_code),
+                    apdu_bytes
+                )
+            except Exception as e:
+                QMessageBox.critical(self, "错误", f"A-XDR组帧失败：{str(e)}")
+                return
+            hex_str = frame.hex().upper()
+            self.result_hex.setText(" ".join(hex_str[i:i+2] for i in range(0, len(hex_str), 2)))
+            return
+
+        field_values = self._collect_values()
+        if not self._custom_mode:
+            for name, widget_info in list(self._field_widgets.items()):
+                widget = widget_info.get("widget")
+                if isinstance(widget, QComboBox):
+                    val = widget.currentData()
+                    if val is not None:
+                        field_values[name] = val
+
+        frame = self.dlt698_generator.generate_frame(
+            apdu_type, sub_type, field_values,
+            sa=sa, ca=ca,
+            dir_bit=dir_bit, prm_bit=prm_bit,
+            seg_bit=seg_bit, sc_bit=sc_bit,
+            func_code=func_code
+        )
+
+        hex_str = frame.hex().upper()
+        formatted = " ".join(hex_str[i:i+2] for i in range(0, len(hex_str), 2))
+        self.result_hex.setText(formatted)
+
     # ------------------------------------------------------------------
     # 串口功能
     # ------------------------------------------------------------------
@@ -1625,12 +2844,15 @@ class FrameGenWidget(QWidget):
             if schema:
                 name = schema.get("name", "")
             if not name:
-                # 从combo文本解析：【下行】 中文名称  (DI3 DI2 DI1 DI0)
                 text = self.di_combo.currentText()
                 name = self._extract_name_from_label(text)
         elif self.protocol_mode == "gdw" and self._current_afn_fn:
             text = self.afn_fn_combo.currentText()
             name = self._extract_name_from_label(text)
+        elif self.protocol_mode == "dlt698" and self._current_dlt698_key:
+            schema = DLT69845_FIELD_SCHEMA.get(self._current_dlt698_key)
+            if schema:
+                name = schema.get("name", "")
         if not name:
             name = "测试项"
         self.test_plan_added.emit(name, frame_hex.replace(" ", ""))
@@ -1912,6 +3134,9 @@ class FrameGenWidget(QWidget):
             if self.protocol_mode == "south":
                 table_data = self.parser.parse_to_table(frame)
                 key_fields = ("应用功能码 (AFN)", "数据标识 (DI)", "传输方向")
+            elif self.protocol_mode == "dlt698":
+                table_data = self.dlt698_parser.parse_to_table(frame)
+                key_fields = ("控制域", "APDU类型", "DIR+PRM")
             else:
                 table_data = self.gdw_parser.parse_to_table(frame)
                 key_fields = ("应用功能码(AFN)", "数据单元标识(DT)", "传输方向")
@@ -1949,30 +3174,43 @@ class FrameGenWidget(QWidget):
     # 协议模式切换
     # ------------------------------------------------------------------
     def set_protocol_mode(self, mode: str):
-        """切换协议模式: 'south' 或 'gdw'"""
-        if mode not in ("south", "gdw"):
+        """切换协议模式: 'south'='南网', 'gdw'='国网', 'dlt698'='698.45'"""
+        if mode not in ("south", "gdw", "dlt698"):
             return
         self.protocol_mode = mode
+
+        # 隐藏所有配置面板
+        self.di_combo.setVisible(False)
+        self.afn_fn_combo.setVisible(False)
+        self.dlt698_combo.setVisible(False)
+        self.south_config_group.setVisible(False)
+        self.gdw_config_group.setVisible(False)
+        self.dlt698_config_group.setVisible(False)
 
         # 切换命令选择区
         if mode == "south":
             self.cmd_select_group.setTitle("DI 选择")
             self.di_combo.setVisible(True)
-            self.afn_fn_combo.setVisible(False)
             self.south_config_group.setVisible(True)
-            self.gdw_config_group.setVisible(False)
-        else:
+            self.mode_custom_rb.setVisible(True)
+        elif mode == "dlt698":
+            self.cmd_select_group.setTitle("APDU 选择")
+            self.dlt698_combo.setVisible(True)
+            self.dlt698_config_group.setVisible(True)
+            self.mode_custom_rb.setVisible(False)
+            self._custom_mode = False
+        else:  # gdw
             self.cmd_select_group.setTitle("AFN+Fn 选择")
-            self.di_combo.setVisible(False)
             self.afn_fn_combo.setVisible(True)
-            self.south_config_group.setVisible(False)
             self.gdw_config_group.setVisible(True)
 
         # 清空当前选择
         self.di_combo.setCurrentIndex(0)
         self.afn_fn_combo.setCurrentIndex(0)
+        self.dlt698_combo.setCurrentIndex(0)
         self._current_di_key = None
         self._current_afn_fn = None
+        self._current_dlt698_key = None
         self._rebuild_form(None)
         self.result_hex.clear()
         self.preview_table.setRowCount(0)
@@ -1983,10 +3221,16 @@ class FrameGenWidget(QWidget):
     def reset(self):
         self.di_combo.setCurrentIndex(0)
         self.afn_fn_combo.setCurrentIndex(0)
+        self.dlt698_combo.setCurrentIndex(0)
         self.src_addr_input.setText("000000000000")
         self.dst_addr_input.setText("000000000000")
         self.gdw_src_addr.setText("000000000000")
         self.gdw_dst_addr.setText("000000000000")
+        self.dlt698_addr_type.setCurrentIndex(0)
+        self.dlt698_logic_addr.setCurrentIndex(0)
+        self.dlt698_addr_len.setCurrentText("5")
+        self.dlt698_sa_raw.setText("0000000000")
+        self.dlt698_ca.setText("0")
         self.dir_combo.setCurrentIndex(0)
         self.prm_combo.setCurrentIndex(0)
         self.add_combo.setCurrentIndex(0)
@@ -1999,6 +3243,12 @@ class FrameGenWidget(QWidget):
         self.gdw_seq.setText("0")
         self.gdw_channel.setText("0")
         self.gdw_resp_bytes.setText("0")
+        self.dlt698_dir.setCurrentIndex(0)
+        self.dlt698_prm.setCurrentIndex(0)
+        self.dlt698_sc.setCurrentIndex(0)
+        self.dlt698_seg.setCurrentIndex(0)
+        self.dlt698_func.setCurrentIndex(1)
+        self._current_dlt698_key = None
         self.result_hex.clear()
         if hasattr(self, 'preview_table'):
             self.preview_table.setRowCount(0)

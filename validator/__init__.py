@@ -6,8 +6,10 @@ from .gdw_validator import GDWValidator
 from .hdlc_validator import HDLCValidator
 from .plc_rf_validator import PLCRFValidator
 from .dlt645_validator import DLT645Validator
+from .dl_t698_45_validator import DLT69845Validator
 
 __all__ = [
     'ValidationResult', 'CheckItem', 'CheckLevel', 'BaseValidator',
-    'NWValidator', 'GDWValidator', 'HDLCValidator', 'PLCRFValidator', 'DLT645Validator'
+    'NWValidator', 'GDWValidator', 'HDLCValidator', 'PLCRFValidator', 'DLT645Validator',
+    'DLT69845Validator'
 ]
