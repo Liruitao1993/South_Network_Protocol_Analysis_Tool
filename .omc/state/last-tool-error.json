@@ -1,7 +1,7 @@
 {
   "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"sleep 3 && cat C:\\\\Users\\\\lirt3\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\e--python-------\\\\14fb0b5a-0ef4-4382-a1aa-9717e6c33985\\\\tasks\\\\bct8zmamt.output\",\"timeout\":15000,\"description\":\"Check GUI sta...",
-  "error": "Exit code 1\ncat: 'C:Userslirt3AppDataLocalTempclaudee--python-------14fb0b5a-0ef4-4382-a1aa-9717e6c33985tasksbct8zmamt.output': No such file or directory",
-  "timestamp": "2026-05-08T07:54:19.997Z",
-  "retry_count": 2
+  "tool_input_preview": "{\"command\":\"python -c \\\"\\nimport sys\\nfrom PySide6.QtWidgets import QApplication\\napp = QApplication(sys.argv)\\n\\nfrom frame_gen_widget import FrameGenWidget\\nw = FrameGenWidget()\\nw._axdr_mode = True...",
+  "error": "Exit code 1\nTraceback (most recent call last):\r\n  File \"<string>\", line 40, in <module>\r\n    assert len(w._axdr_items[0]['children']) == 4\r\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nAssertionError\r\nAdd root item: OK\r\nAdd children via button: OK\r\nWARN: _len_edit not found (expected without full render)",
+  "timestamp": "2026-05-22T11:13:13.558Z",
+  "retry_count": 1
 }

@@ -113,3 +113,4 @@ Each contains hardcoded test frames with assertions or print-based verification.
 - 关于HDLC解析器的参考文档为，“HDLC.md”和“HDLC解析说明.md”和“IEC 62056-46.PDF”。
 - 关于DLMS解析器的参考文档为，“DLMS_Protocol.md”和“DLMS_Protocol.pdf”。
 - 关于万胜协议解析器的参考文档为，“4.md”。
+- 关于698.45协议，需要参考文档“面向对象的用电信息数据交换协议(20210910).md”，计算校验时请使用crcmod中定义的X-25,CRC16。对于698.45帧当中哪些需要参与CRC计算，文档中有明确的定义。

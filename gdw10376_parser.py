@@ -748,16 +748,20 @@ class GDW10376Parser:
         # AFN=03H 查询数据 - 上行响应
         elif afn == 0x03:
             if fn == 1 and data_len >= 9:  # F1: 厂商代码和版本信息
-                vendor = bytes(data_bytes[0:2]).decode('ascii', errors='replace')
-                chip = bytes(data_bytes[2:4]).decode('ascii', errors='replace')
-                year = data_bytes[4]
-                month = data_bytes[5]
-                day = data_bytes[6]
-                ver = int.from_bytes(data_bytes[7:9], 'big')
-                table_data.append(("  厂商代码", f"0x{data_bytes[0]:02X}{data_bytes[1]:02X}", vendor, "ASCII", base_offset, base_offset + 1))
-                table_data.append(("  芯片代码", f"0x{data_bytes[2]:02X}{data_bytes[3]:02X}", chip, "ASCII", base_offset + 2, base_offset + 3))
-                table_data.append(("  版本日期", f"{year:02X}-{month:02X}-{day:02X}", f"20{year:02X}-{month:02X}-{day:02X}", "BCD编码,YYMMDD", base_offset + 4, base_offset + 6))
-                table_data.append(("  版本", f"0x{data_bytes[7]:02X}{data_bytes[8]:02X}", f"{ver}", "BCD编码", base_offset + 7, base_offset + 8))
+                # 厂商代码：2字节ASCII，小端逆序
+                vendor = bytes(data_bytes[0:2][::-1]).decode('ascii', errors='replace')
+                # 芯片代码：2字节ASCII，小端逆序
+                chip = bytes(data_bytes[2:4][::-1]).decode('ascii', errors='replace')
+                # 版本日期：3字节BCD，小端逆序
+                date_bytes = data_bytes[4:7][::-1]
+                year, month, day = date_bytes[0], date_bytes[1], date_bytes[2]
+                # 版本号：2字节，低字节在前，格式 VXXYY
+                ver_high, ver_low = data_bytes[8], data_bytes[7]
+                ver = f"V{ver_high:02X}{ver_low:02X}"
+                table_data.append(("  厂商代码", f"0x{data_bytes[0]:02X}{data_bytes[1]:02X}", vendor, "ASCII，小端逆序", base_offset, base_offset + 1))
+                table_data.append(("  芯片代码", f"0x{data_bytes[2]:02X}{data_bytes[3]:02X}", chip, "ASCII，小端逆序", base_offset + 2, base_offset + 3))
+                table_data.append(("  版本日期", f"{year:02X}-{month:02X}-{day:02X}", f"20{year:02X}-{month:02X}-{day:02X}", "BCD编码，小端逆序,YYMMDD", base_offset + 4, base_offset + 6))
+                table_data.append(("  版本", f"0x{data_bytes[7]:02X}{data_bytes[8]:02X}", ver, "低字节在前", base_offset + 7, base_offset + 8))
 
             elif fn == 2 and data_len >= 1:  # F2: 噪声值
                 noise = data_bytes[0] & 0x0F
@@ -914,16 +918,16 @@ class GDW10376Parser:
                 reg_date = f"{data_bytes[25]:02X}-{data_bytes[26]:02X}-{data_bytes[27]:02X}"
                 table_data.append(("  协议最后备案日期", reg_date, f"20{data_bytes[27]:02X}-{data_bytes[26]:02X}-{data_bytes[25]:02X}", "BCD编码,YYMMDD", base_offset + 25, base_offset + 27))
                 
-                vendor = bytes(data_bytes[28:30]).decode('ascii', errors='replace')
-                chip = bytes(data_bytes[30:32]).decode('ascii', errors='replace')
-                year = data_bytes[32]
-                month = data_bytes[33]
-                day = data_bytes[34]
-                ver = int.from_bytes(data_bytes[35:37], 'big')
-                table_data.append(("  厂商代码", f"0x{data_bytes[28]:02X}{data_bytes[29]:02X}", vendor, "ASCII", base_offset + 28, base_offset + 29))
-                table_data.append(("  芯片代码", f"0x{data_bytes[30]:02X}{data_bytes[31]:02X}", chip, "ASCII", base_offset + 30, base_offset + 31))
-                table_data.append(("  版本日期", f"{year:02X}-{month:02X}-{day:02X}", f"20{year:02X}-{month:02X}-{day:02X}", "BCD编码,YYMMDD", base_offset + 32, base_offset + 34))
-                table_data.append(("  版本", f"0x{data_bytes[35]:02X}{data_bytes[36]:02X}", f"{ver}", "BCD编码", base_offset + 35, base_offset + 36))
+                vendor = bytes(data_bytes[28:30][::-1]).decode('ascii', errors='replace')
+                chip = bytes(data_bytes[30:32][::-1]).decode('ascii', errors='replace')
+                date_bytes = data_bytes[32:35][::-1]
+                year, month, day = date_bytes[0], date_bytes[1], date_bytes[2]
+                ver_high, ver_low = data_bytes[36], data_bytes[35]
+                ver = f"V{ver_high:02X}{ver_low:02X}"
+                table_data.append(("  厂商代码", f"0x{data_bytes[28]:02X}{data_bytes[29]:02X}", vendor, "ASCII，小端逆序", base_offset + 28, base_offset + 29))
+                table_data.append(("  芯片代码", f"0x{data_bytes[30]:02X}{data_bytes[31]:02X}", chip, "ASCII，小端逆序", base_offset + 30, base_offset + 31))
+                table_data.append(("  版本日期", f"{year:02X}-{month:02X}-{day:02X}", f"20{year:02X}-{month:02X}-{day:02X}", "BCD编码，小端逆序,YYMMDD", base_offset + 32, base_offset + 34))
+                table_data.append(("  版本", f"0x{data_bytes[35]:02X}{data_bytes[36]:02X}", ver, "低字节在前", base_offset + 35, base_offset + 36))
                 
                 offset = 37
                 for i in range(rate_count):

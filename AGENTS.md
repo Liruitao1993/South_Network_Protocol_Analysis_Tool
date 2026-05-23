@@ -2,7 +2,7 @@
 
 ## 项目概览
 
-多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统。
+多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统。当前版本 `1.6.8`。
 
 **支持的协议：**
 - 南网协议 (Q/CSG1209021-2019)
@@ -11,6 +11,7 @@
 - HDLC/DLMS (IEC 62056-46)
 - DLMS Wrapper 裸报文 / DLMS-APDU 裸报文
 - DLT645-2007 电表协议
+- DLT698.45-2017 协议
 
 ## 运行与打包
 
@@ -33,7 +34,7 @@ pyinstaller 协议解析工具.spec       # datas: custom_di.json, dlt645_di.jso
 ## 架构
 
 ```
-main_gui.py                # GUI主程序 (PySide6)，应用入口，~2850行
+main_gui.py                # GUI主程序 (PySide6)，应用入口，~3450行
 ├── 协议解析器
 │   ├── protocol_parser.py   # 南网协议解析器 (ProtocolFrameParser)
 │   │   └── protocol_tool.py   # 控制域结构体(ControlField) + 组帧(Frame)
@@ -43,7 +44,8 @@ main_gui.py                # GUI主程序 (PySide6)，应用入口，~2850行
 │   │   └── dlms_parser.py     # DLMS基础解析器 (DLMSParser)
 │   ├── hdlc_parser.py       # HDLC/DLMS帧解析器 (HDLCParser)
 │   ├── dlms_deep_parser.py  # DLMS-APDU深度解析器 (DLMSDeepParser)
-│   └── dlt645_parser.py     # DLT645-2007电表协议解析器
+│   ├── dlt645_parser.py     # DLT645-2007电表协议解析器
+│   └── dl_t698_45_parser.py # DLT698.45-2017协议解析器 (DLT69845Parser)
 ├── 查询/映射模块
 │   ├── obis_lookup.py       # OBIS码查询 (HDLC/DLMS)
 │   ├── command_lookup.py    # PLC RF命令字查询
@@ -57,12 +59,24 @@ main_gui.py                # GUI主程序 (PySide6)，应用入口，~2850行
 │   ├── preset_buttons.py    # 预设命令按钮组件
 │   ├── test_plan_widget.py  # 测试计划组件
 │   ├── serial_worker.py     # 串口通信线程 (SerialWorker)
-│   └── gui_utils.py         # 右键菜单等GUI工具函数
+│   ├── gui_utils.py         # 右键菜单等GUI工具函数
+│   ├── archive_widget.py    # 档案管理组件
+│   └── topology_widget.py   # 拓扑信息组件
+├── 验证/测试/报表
+│   ├── validator/           # 协议验证引擎 (BaseValidator + 各协议validator)
+│   ├── monitor/frame_monitor.py  # 实时帧监听器
+│   ├── report/excel_reporter.py  # Excel测试报告 (需openpyxl)
+│   ├── templates/test_templates.py # 测试模板库
+│   └── visual_editor/test_item_editor.py # 可视化测试项编辑器
+├── 组帧Schema
+│   ├── frame_generator_schema.py    # 南网帧生成UI schema
+│   └── gdw_frame_generator_schema.py # 国网帧生成UI schema
 └── 数据文件
     ├── custom_di.json       # 南网自定义DI (运行时读写)
     ├── dlt645_di.json       # DLT645 DI映射 (由generate_dlt645_di.py生成，勿手动编辑)
     ├── gdw_custom_afn.json  # 国网自定义AFN+Fn (运行时读写)
     ├── config.json          # 串口配置
+    ├── test_plan.json       # 测试方案自动持久化
     └── NW_command.json / GW_command.json / command.json  # 命令字数据
 ```
 
@@ -117,13 +131,26 @@ python test_snrm_frame.py
 
 - **`main_gui.py` 中的 `_clear_layout`** 会递归删除所有子widget。修改查询标签页逻辑时必须理解此方法，否则会造成widget残留或崩溃
 - **PyInstaller 打包**：两个spec文件的 `datas` 不同——`南网协议解析工具.spec` 只打包 `custom_di.json` + `dlt645_di.json`，`协议解析工具.spec` 额外包含 `gdw_custom_afn.json`
-- **协议切换**：`current_protocol` 索引（0=南网, 1=PLC RF, 2=HDLC, 3=Wrapper, 4=APDU, 5=DLT645, 6=国网）硬编码在 `main_gui.py`，添加新协议必须同时更新 `_on_protocol_changed`、`_update_protocol_lookup_tab` 和 `_extract_frames_for_protocol`
+- **协议切换**：`current_protocol` 索引（0=南网, 1=PLC RF, 2=HDLC, 3=Wrapper, 4=APDU, 5=DLT645, 6=国网, 7=698.45）硬编码在 `main_gui.py`，添加新协议必须同时更新 `_on_protocol_changed`、`_update_protocol_lookup_tab` 和 `_extract_frames_for_protocol`
 - **DLMS深度解析**：双击表格中 `DLMS APDU` 行触发 `dlms_deep_parser`，不是自动触发
 - **HDLC字节填充**：7E帧内遇到7E需转义（7E→7E 5D, 7D→7D 5D），解析器自动处理，组帧时也需注意
 - **组帧/预设标签页可见性**：只在南网(0)和国网(6)协议下显示，通过 `setTabVisible` 控制
 
-## 参考
+## 协议参考文档
+
+解析协议遇到不确定定义时，按解析器检索对应文档（而非凭记忆推断）：
+
+| 解析器 | 参考文档 |
+|--------|----------|
+| 南网 | `PLUZ计量自动化系统技术规范.md`、`LME产品相关信息生产运维接口手册_V2.4_251115.md`、`低压电力线宽带载波深化应用技术手册v1.1.md` |
+| 国网 | `集中器本地通信模块接口-2024.md` |
+| DLT645 | `DLT645-2007.md`、`国网计量中心电能表全性能试验检测公告-第4号补遗-事件记录采集-远程费控功能和负荷曲线抄读功能.pdf` |
+| HDLC | `HDLC.md`、`HDLC解析说明.md`、`IEC 62056-46.PDF` |
+| DLMS | `DLMS_Protocol.md`、`DLMS_Protocol.pdf` |
+| 万胜(PLC RF) | `4.md` |
+| DLT698.45 | `面向对象的用电信息数据交换协议(20210910).md`（CRC使用 crcmod 中 X-25/CRC16，文档明确定义哪些字段参与 CRC） |
+
+## 其他参考
 
 - `QWEN.md` — 项目详细文档（中文），含协议帧格式说明和开发约定
 - `README.md` — 用户面向的简要说明
-- `DLMS_Protocol.md` / `DLT645-2007.md` / `HDLC.md` / `HDLC解析说明.md` — 协议参考文档

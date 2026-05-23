@@ -156,11 +156,15 @@ class GDWFrameGenerator:
         if len(digits) % 2 == 1:
             digits = '0' + digits
 
+        # 正序每2位组成BCD字节
         result = bytearray()
         for i in range(0, len(digits), 2):
             high = int(digits[i])
             low = int(digits[i + 1])
             result.append((high << 4) | low)
+
+        # 国网/南网协议地址域采用小端存储：字节逆序
+        result = result[::-1]
 
         # 截断或补齐
         if len(result) < length:

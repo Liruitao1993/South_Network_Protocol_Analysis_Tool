@@ -1,0 +1,128 @@
+{
+  "commands": [
+    {
+      "protocol": "south",
+      "button_name": "查询厂商代码和版本信息",
+      "group_name": "常用查询",
+      "frame_hex": "68 0C 00 00 03 00 01 03 00 E8 EF 16",
+      "description": "查询厂商代码和版本信息",
+      "config": {
+        "protocol_mode": "south",
+        "current_di_key": [
+          232,
+          0,
+          3,
+          1
+        ],
+        "current_afn_fn": null,
+        "custom_mode": false,
+        "south": {
+          "src_addr": "000000000000",
+          "dst_addr": "000000000000",
+          "dir": 0,
+          "prm": 0,
+          "add": 0
+        },
+        "gdw": {
+          "comm_type": 0,
+          "dir": 0,
+          "prm": 1,
+          "seq": "0",
+          "route_flag": 0,
+          "comm_module": 0,
+          "relay_level": 0,
+          "channel": "0",
+          "resp_bytes": "0",
+          "src_addr": "000000000000",
+          "dst_addr": "000000000000",
+          "relay_addrs": []
+        },
+        "field_values": {},
+        "custom_templates": []
+      },
+      "id": "160981e3"
+    },
+    {
+      "protocol": "south",
+      "button_name": "查询未完成任务数",
+      "group_name": "常用查询",
+      "frame_hex": "68 0C 00 00 02 00 03 02 00 E8 EF 16",
+      "description": "查询任务数量",
+      "config": {
+        "protocol_mode": "south",
+        "current_di_key": [
+          232,
+          0,
+          2,
+          3
+        ],
+        "current_afn_fn": null,
+        "custom_mode": false,
+        "south": {
+          "src_addr": "000000000000",
+          "dst_addr": "000000000000",
+          "dir": 0,
+          "prm": 0,
+          "add": 0
+        },
+        "gdw": {
+          "comm_type": 0,
+          "dir": 0,
+          "prm": 1,
+          "seq": "0",
+          "route_flag": 0,
+          "comm_module": 0,
+          "relay_level": 0,
+          "channel": "0",
+          "resp_bytes": "0",
+          "src_addr": "000000000000",
+          "dst_addr": "000000000000",
+          "relay_addrs": []
+        },
+        "field_values": {},
+        "custom_templates": []
+      },
+      "id": "04c71da9"
+    },
+    {
+      "protocol": "gdw",
+      "button_name": "硬件初始化",
+      "group_name": "常用设置",
+      "frame_hex": "68 0F 00 40 00 00 00 00 00 00 01 01 00 42 16",
+      "description": "",
+      "config": {
+        "protocol_mode": "gdw",
+        "current_di_key": null,
+        "current_afn_fn": [
+          1,
+          1
+        ],
+        "custom_mode": false,
+        "south": {
+          "src_addr": "000000000000",
+          "dst_addr": "000000000000",
+          "dir": 0,
+          "prm": 0,
+          "add": 0
+        },
+        "gdw": {
+          "comm_type": 0,
+          "dir": 0,
+          "prm": 1,
+          "seq": "0",
+          "route_flag": 0,
+          "comm_module": 0,
+          "relay_level": 0,
+          "channel": "0",
+          "resp_bytes": "0",
+          "src_addr": "000000000000",
+          "dst_addr": "000000000000",
+          "relay_addrs": []
+        },
+        "field_values": {},
+        "custom_templates": []
+      },
+      "id": "5e5d7c95"
+    }
+  ]
+}
