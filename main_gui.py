@@ -25,6 +25,7 @@ from hdlc_parser import HDLCParser
 from dlt645_parser import DLT645Parser
 from gdw10376_parser import GDW10376Parser
 from dl_t698_45_parser import DLT69845Parser
+from csg_new_gen_parser import CSGNewGenParser
 from obis_lookup import OBISLookup, get_obis_lookup
 from command_lookup import CommandLookup, get_command_lookup
 from dlt645_di_lookup import DLT645DILookup, get_dlt645_di_lookup
@@ -281,7 +282,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"协议解析工具 v{APP_VERSION}")
         self.setMinimumSize(1000, 700)
 
-        # 协议选择：0=南网协议，1=PLC RF协议，2=HDLC/DLMS协议，3=Wrapper，4=APDU，5=DLT645，6=国网协议，7=698.45
+        # 协议选择：0=南网协议，1=PLC RF协议，2=HDLC/DLMS协议，3=Wrapper，4=APDU，5=DLT645，6=国网协议，7=698.45，8=新一代载波协议(通感一体化)
         self.current_protocol = 0
 
         # 初始化解析器
@@ -291,6 +292,10 @@ class MainWindow(QMainWindow):
         self.dlt645_parser = DLT645Parser()
         self.gdw_parser = GDW10376Parser()
         self.dl_t698_45_parser = DLT69845Parser()
+        self.csg_new_gen_parser = CSGNewGenParser()
+
+        # 新一代载波协议解析级别：auto=自动, fc_pb=FC+PB, fc_only=仅FC, app=应用层
+        self._csg_parse_level = "auto"
 
         # 初始化查询器
         self.obis_lookup = get_obis_lookup()
@@ -346,12 +351,31 @@ class MainWindow(QMainWindow):
         self.protocol_combo.addItem("DLT645-2007 电表协议")
         self.protocol_combo.addItem("国网协议 (Q/GDW 10376.2-2024)")
         self.protocol_combo.addItem("698.45协议 (DL/T 698.45-2017)")
+        self.protocol_combo.addItem("新一代载波协议 (通感一体化)")
         self.protocol_combo.setMinimumWidth(280)
         self.protocol_combo.setFont(QFont("Microsoft YaHei", 10))
         # 让弹出菜单宽度自动适应最宽的文字
         self.protocol_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self.protocol_combo.currentIndexChanged.connect(self._on_protocol_changed)
         proto_layout.addWidget(self.protocol_combo)
+
+        # ---- 新一代载波协议解析级别选择（仅协议索引8时可见）----
+        self.csg_parse_level_label = QLabel("解析级别：")
+        self.csg_parse_level_label.setFont(QFont("Microsoft YaHei", 9))
+        proto_layout.addWidget(self.csg_parse_level_label)
+
+        self.csg_parse_level_combo = QComboBox()
+        self.csg_parse_level_combo.addItem("自动识别", "auto")
+        self.csg_parse_level_combo.addItem("FC+PB解析(完整MPDU)", "fc_pb")
+        self.csg_parse_level_combo.addItem("仅FC解析", "fc_only")
+        self.csg_parse_level_combo.addItem("应用层报文", "app")
+        self.csg_parse_level_combo.setFont(QFont("Microsoft YaHei", 9))
+        self.csg_parse_level_combo.setMinimumWidth(180)
+        self.csg_parse_level_combo.currentIndexChanged.connect(self._on_csg_parse_level_changed)
+        self.csg_parse_level_combo.setVisible(False)
+        proto_layout.addWidget(self.csg_parse_level_combo)
+        self.csg_parse_level_label.setVisible(False)
+
         proto_layout.addStretch()
 
         top_bar.addWidget(proto_group, 1)
@@ -462,7 +486,7 @@ class MainWindow(QMainWindow):
         input_layout = QVBoxLayout(input_group)
 
         self.single_input = QTextEdit()
-        self.single_input.setPlaceholderText("请输入十六进制报文，例如：68 0E 00 00 00 00 01 00 01 E8 00 05 EF 16")
+        self.single_input.setPlaceholderText("请输入十六进制报文，支持空格、逗号、换行等分隔符，例如：68 0E 00 00 00 00 01 00 01 E8 00 05 EF 16")
         self.single_input.setMaximumHeight(80)
         input_layout.addWidget(self.single_input)
 
@@ -1306,8 +1330,10 @@ class MainWindow(QMainWindow):
             self.single_input.setPlaceholderText("请输入DLT645报文，例如：68 AA AA AA AA AA AA 68 11 04 33 33 33 33 CS 16")
         elif index == 6:  # 国网协议
             self.single_input.setPlaceholderText("请输入国网报文，例如：68 0F 00 43 00 00 00 00 00 00 00 00 00 03 01 00 48 16")
-        else:  # index == 7, 698.45
+        elif index == 7:  # 698.45
             self.single_input.setPlaceholderText("请输入698.45报文，例如：68 0E 00 41 01 07 08 09 AE C6 01 00 00 00 00 34 87 16")
+        else:  # index == 8, 新一代载波协议(通感一体化)
+            self.single_input.setPlaceholderText("请输入新一代载波报文，例如：11 01 01 00 00 00 00 01 00 01 00 00")
 
         # 更新查询页面
         self._update_protocol_lookup_tab()
@@ -1359,8 +1385,18 @@ class MainWindow(QMainWindow):
             else:
                 self.topology_tab.clear_nodes()
 
+        # 新一代载波协议解析级别选择：仅协议索引8时可见
+        show_csg_level = (index == 8)
+        self.csg_parse_level_label.setVisible(show_csg_level)
+        self.csg_parse_level_combo.setVisible(show_csg_level)
+
         # 清空当前结果
         self.clear_single()
+
+    def _on_csg_parse_level_changed(self, index: int):
+        """新一代载波协议解析级别改变时的回调"""
+        level_map = {0: "auto", 1: "fc_pb", 2: "fc_only", 3: "app"}
+        self._csg_parse_level = level_map.get(index, "auto")
 
     def _update_protocol_lookup_tab(self):
         """根据当前协议更新查询页面内容"""
@@ -1399,6 +1435,11 @@ class MainWindow(QMainWindow):
             # 698.45协议：OAD查询
             self.tab_widget.setTabText(lookup_tab_index, "OAD查询")
             self._create_oad_lookup_content(self.protocol_lookup_tab_layout)
+
+        elif self.current_protocol == 8:
+            # 新一代载波协议(通感一体化)：业务标识查询
+            self.tab_widget.setTabText(lookup_tab_index, "业务标识查询")
+            self._create_csg_new_gen_lookup_content(self.protocol_lookup_tab_layout)
 
     def _create_oad_lookup_content(self, layout):
         """创建698.45协议OAD查询页面内容"""
@@ -1444,6 +1485,90 @@ class MainWindow(QMainWindow):
 
         # 加载数据
         self._load_oad_map_data()
+
+    def _create_csg_new_gen_lookup_content(self, layout):
+        """创建新一代载波协议(通感一体化)业务标识查询页面内容"""
+        from csg_new_gen_parser import (
+            MSG_PORT_MAP, MSG_ID_MAP, FRAME_TYPE_MAP, DIRECTION_MAP,
+            PRM_MAP, RESPONSE_MAP, EXTENSION_MAP, CONFIRM_SERVICE_MAP,
+            DATA_SERVICE_MAP, CMD_FUNC_SERVICE_MAP, CMD_COMM_SERVICE_MAP,
+            MPDU_VERSION_MAP,
+        )
+
+        # 搜索栏
+        search_layout = QHBoxLayout()
+        search_label = QLabel("搜索：")
+        search_label.setFont(QFont("Microsoft YaHei", 10))
+        search_layout.addWidget(search_label)
+
+        self.csg_new_gen_search = QLineEdit()
+        self.csg_new_gen_search.setPlaceholderText("输入关键词搜索业务标识（如：确认、数据传输、命令...）")
+        self.csg_new_gen_search.setFont(QFont("Microsoft YaHei", 10))
+        self.csg_new_gen_search.textChanged.connect(self._load_csg_new_gen_map_data)
+        search_layout.addWidget(self.csg_new_gen_search)
+        layout.addLayout(search_layout)
+
+        # 统计标签
+        self.csg_new_gen_stats_label = QLabel()
+        self.csg_new_gen_stats_label.setFont(QFont("Microsoft YaHei", 9))
+        layout.addWidget(self.csg_new_gen_stats_label)
+
+        # 查询表格
+        self.csg_new_gen_table = QTableWidget()
+        self.csg_new_gen_table.setColumnCount(4)
+        self.csg_new_gen_table.setHorizontalHeaderLabels(["分类", "代码", "名称", "说明"])
+        self.csg_new_gen_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.csg_new_gen_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.csg_new_gen_table.setAlternatingRowColors(True)
+        self.csg_new_gen_table.verticalHeader().hide()
+        self.csg_new_gen_table.verticalHeader().setDefaultSectionSize(20)
+        table_font = QFont()
+        table_font.setPointSize(8)
+        self.csg_new_gen_table.setFont(table_font)
+        # 表头自适应
+        header = self.csg_new_gen_table.horizontalHeader()
+        header.setStretchLastSection(True)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        layout.addWidget(self.csg_new_gen_table)
+
+        # 存储查找表
+        self._csg_new_gen_entries = []
+        # 构建条目列表
+        for cat, map_dict in [
+            ("报文端口号", MSG_PORT_MAP),
+            ("报文标识符", MSG_ID_MAP),
+            ("帧类型域", FRAME_TYPE_MAP),
+            ("传输方向", DIRECTION_MAP),
+            ("启动标志(PRM)", PRM_MAP),
+            ("响应标识", RESPONSE_MAP),
+            ("业务扩展域", EXTENSION_MAP),
+            ("确认/否认业务", CONFIRM_SERVICE_MAP),
+            ("数据传输业务", DATA_SERVICE_MAP),
+            ("命令-功能业务", CMD_FUNC_SERVICE_MAP),
+            ("命令-通信管理业务", CMD_COMM_SERVICE_MAP),
+            ("MPDU标准版本", MPDU_VERSION_MAP),
+        ]:
+            for code, name in map_dict.items():
+                self._csg_new_gen_entries.append((cat, f"0x{code:02X}" if isinstance(code, int) else code, name, ""))
+
+        self._load_csg_new_gen_map_data()
+
+    def _load_csg_new_gen_map_data(self):
+        """加载/过滤新一代载波协议业务标识数据"""
+        search = self.csg_new_gen_search.text().strip().lower() if hasattr(self, 'csg_new_gen_search') else ""
+        results = [e for e in self._csg_new_gen_entries
+                   if not search or search in e[0].lower() or search in e[1].lower() or search in e[2].lower()]
+
+        self.csg_new_gen_table.setRowCount(len(results))
+        for row, (cat, code, name, note) in enumerate(results):
+            self.csg_new_gen_table.setItem(row, 0, QTableWidgetItem(cat))
+            self.csg_new_gen_table.setItem(row, 1, QTableWidgetItem(str(code)))
+            self.csg_new_gen_table.setItem(row, 2, QTableWidgetItem(name))
+            self.csg_new_gen_table.setItem(row, 3, QTableWidgetItem(note))
+
+        self.csg_new_gen_stats_label.setText(f"匹配 {len(results)} / {len(self._csg_new_gen_entries)} 条记录")
 
     def _load_oad_map_data(self):
         """加载698.45 OI映射数据"""
@@ -2138,10 +2263,29 @@ class MainWindow(QMainWindow):
             return self.gdw_parser
         elif self.current_protocol == 7:  # 698.45
             return self.dl_t698_45_parser
+        elif self.current_protocol == 8:  # 新一代载波协议(通感一体化)
+            # 包装解析器以传递解析级别参数
+            csg_parser = self.csg_new_gen_parser
+            parse_level = getattr(self, '_csg_parse_level', 'auto')
+            class CSGGenGuiParser:
+                def __init__(self, parser, level):
+                    self.parser = parser
+                    self.level = level
+                def parse_to_table(self, data):
+                    return self.parser.parse_to_table(data, parse_level=self.level)
+            return CSGGenGuiParser(csg_parser, parse_level)
 
     def load_example(self, data: str):
         """加载示例数据"""
         self.single_input.setText(data)
+
+    @staticmethod
+    def _clean_hex_input(text: str, keep_newlines: bool = False) -> str:
+        """预处理报文输入：去除空格、逗号、换行等分隔符，仅保留十六进制字符"""
+        import re
+        pattern = r'[^0-9A-Fa-f\n]' if keep_newlines else r'[^0-9A-Fa-f]'
+        return re.sub(pattern, '', text)
+
 
     def parse_single(self):
         """解析单帧报文"""
@@ -2150,8 +2294,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "警告", "请输入报文内容！")
             return
 
-        # 清理输入
-        clean_input = input_text.replace(" ", "").replace("\n", "").replace("\t", "").strip()
+        # 清理输入（支持空格、逗号、换行等分隔符）
+        clean_input = self._clean_hex_input(input_text)
+        clean_input = clean_input.strip()
 
         # 验证输入
         if not all(c in '0123456789abcdefABCDEF' for c in clean_input):
@@ -2188,8 +2333,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "警告", "请输入报文内容！")
             return
 
-        # 清理输入
-        clean_input = input_text.replace(" ", "").replace("\n", "").replace("\t", "").strip()
+        # 清理输入（支持空格、逗号、换行等分隔符）
+        clean_input = self._clean_hex_input(input_text)
+        clean_input = clean_input.strip()
 
         # 验证输入
         if not all(c in '0123456789abcdefABCDEF' for c in clean_input):
@@ -2207,6 +2353,7 @@ class MainWindow(QMainWindow):
             from validator import NWValidator, GDWValidator, HDLCValidator, PLCRFValidator, DLT645Validator
 
             from validator.dl_t698_45_validator import DLT69845Validator
+            from validator.csg_new_gen_validator import CSGNewGenValidator
             validators = {
                 0: NWValidator(),      # 南网
                 1: PLCRFValidator(),   # PLC RF
@@ -2216,6 +2363,7 @@ class MainWindow(QMainWindow):
                 5: DLT645Validator(),  # DLT645
                 6: GDWValidator(),     # 国网
                 7: DLT69845Validator(), # 698.45
+                8: CSGNewGenValidator(), # 新一代载波协议(通感一体化)
             }
 
             validator = validators.get(self.current_protocol)
@@ -2268,8 +2416,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "警告", "请先解析报文！")
             return
 
-        # 清理 HEX
-        clean_hex = input_text.replace(" ", "").replace("\n", "").replace("\t", "").strip()
+        # 清理 HEX（支持空格、逗号、换行等分隔符）
+        clean_hex = self._clean_hex_input(input_text)
+        clean_hex = clean_hex.strip()
 
         if not clean_hex:
             QMessageBox.warning(self, "警告", "请输入报文内容！")
@@ -2519,6 +2668,10 @@ class MainWindow(QMainWindow):
     def parse_batch(self):
         """批量解析 - 支持所有协议"""
         input_text = self.batch_input.toPlainText().strip()
+
+        # 预处理：去除空格、逗号等分隔符，保留换行以区分多帧
+        input_text = self._clean_hex_input(input_text, keep_newlines=True)
+
         if not input_text:
             QMessageBox.warning(self, "警告", "请输入报文内容！")
             return

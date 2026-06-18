@@ -124,7 +124,8 @@ DLT69845_FIELD_SCHEMA: Dict[Tuple[str, str], Dict[str, Any]] = {
         ),
         "fields": [
             {"name": "PIID", "type": "uint8", "length": 1, "default": 1, "desc": "服务序号"},
-            {"name": "OAD列表", "type": "oad_list", "length": 1, "default": "00000000", "desc": "OAD列表，格式：OI(4B)+属性标识(2B)空格分隔，如 0000000002 0001000002"},
+            {"name": "OAD项数", "type": "uint8", "length": 1, "default": 1, "desc": "OAD数量（自动根据下方列表计算）"},
+            {"name": "OAD列表", "type": "oad_list", "length": 1, "default": "00000000", "desc": "多个OAD，每个4字节(OI2B+属性标识1B+索引1B)，十六进制空格分隔"},
         ],
     },
 

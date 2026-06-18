@@ -191,6 +191,8 @@ class DLT69845FrameGenerator:
             elif name == "代理APDU":
                 raw = str(val).replace(" ", "").strip()
                 body += bytes.fromhex(raw) if raw else b""
+            elif name == "OAD项数":
+                body += _struct.pack("B", int(val) & 0xFF)
             elif name == "OAD列表":
                 raw = str(val).replace(" ", "").strip()
                 body += bytes.fromhex(raw) if raw else b""

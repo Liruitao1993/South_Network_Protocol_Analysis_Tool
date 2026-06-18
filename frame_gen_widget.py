@@ -1160,12 +1160,26 @@ class FrameGenWidget(QWidget):
                     label.setMinimumWidth(180)
                     layout.addWidget(label)
                     edit = QLineEdit(field.get("default", "00000000"))
-                    edit.setPlaceholderText("如：0000000002 0001000002")
+                    edit.setPlaceholderText("如：02400102 00400202")
                     edit.textChanged.connect(self._schedule_realtime_update)
+
+                    def _update_oad_count(text):
+                        raw = text.replace(" ", "").strip()
+                        if len(raw) >= 8 and len(raw) % 8 == 0:
+                            count = len(raw) // 8
+                        else:
+                            count = 0
+                        count_info = self._field_widgets.get("OAD项数", {}).get("widget")
+                        if count_info:
+                            count_info.setText(str(count))
+
+                    edit.textChanged.connect(_update_oad_count)
                     layout.addWidget(edit)
                     self._field_widgets[field["name"]] = {"widget": edit}
                     layout.addStretch()
                     self._form_layout.addWidget(container)
+                    # 初始触发一次项数计算
+                    _update_oad_count(edit.text())
                 else:
                     widget = self._create_field_widget(field)
                     if widget:
