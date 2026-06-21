@@ -39,9 +39,23 @@ from serial_worker import SerialWorker
 from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu
 
 
-APP_VERSION = "1.6.8"
+APP_VERSION = "1.7.1"
 
 CHANGELOG = [
+    ("1.7.1", "2026-06-18", [
+        "新一代载波协议（索引8）批量解析：新增监控日志前缀剥离，支持 '<时间> <序号> -> 接收机 Has Get <15字节监控头> <协议报文>' 格式",
+        "新一代载波协议批量解析摘要：区分网络层/应用层报文，展示 MSDU 类型、MMTYPE、定界符类型、业务标识等关键业务内容",
+        "修复：过滤掉非监控前缀且非纯 hex 的日志行（如时间戳、测试标记、中文说明），避免被误解析为伪帧",
+    ]),
+    ("1.7.0", "2026-06-18", [
+        "新增 DL/T 698.45-2017 协议（协议索引7）支持：链路层解析器、APDU 解析器、A-XDR 编解码、OI 查询、帧生成器、校验器",
+        "新增 新一代载波协议（通感一体化，协议索引8）支持：MAC/MSDU 帧解析、应用层业务报文解析、命令载荷解析、校验器",
+        "新一代载波协议支持 4 种解析级别切换：自动识别 / FC+PB 完整 MPDU / 仅 FC / 应用层报文",
+        "新增新一代载波协议业务标识查询页面",
+        "组帧/预设标签页扩展支持 698.45 协议（dlt698 模式）",
+        "校验引擎统一接入 DLT69845Validator 与 CSGNewGenValidator",
+        "新增 crcmod 依赖（698.45 CRC 使用 X-25 / CRC16）",
+    ]),
     ("1.6.8", "2026-05-09", [
         "档案管理：修复缺失 json 导入导致导出失败的问题",
         "档案管理：修复协议切换时错误清空档案数据的问题",
@@ -2286,6 +2300,53 @@ class MainWindow(QMainWindow):
         pattern = r'[^0-9A-Fa-f\n]' if keep_newlines else r'[^0-9A-Fa-f]'
         return re.sub(pattern, '', text)
 
+    # 新一代载波协议监控日志前缀标记与监控头长度
+    # 监控日志格式: "<时间> <序号> -> 接收机 Has Get <N字节监控头> <协议报文>"
+    # 实际报文从标记后的第 16 个字节（1-based）开始，即需要跳过 15 字节监控头
+    CSG_MONITOR_PREFIX = "-> 接收机 Has Get"
+    CSG_MONITOR_HEADER_BYTES = 15  # 标记之后需跳过的监控头字节数
+
+    def _strip_csg_monitor_prefix(self, text: str) -> str:
+        """剥离新一代载波协议监控日志前缀（仅在协议8批量解析时调用）
+
+        监控日志格式示例:
+            15:49:51 254  -> 接收机 Has Get ED A5 00 00 02 EF 01 7E 4E 97 86 01 00 88 00 68 11 01 01 ...
+                                                      ^^^^^^^^^^^^^^^ 15字节监控头 ^^^^^^^^^^^^^^^^
+                                                                                      ^ 第16字节(68)开始为真实协议报文
+
+        处理规则（逐行）:
+          1. 含 "-> 接收机 Has Get" 标记的行：定位标记，取其后内容，跳过前 15 字节
+             (30 个 hex 字符) 监控头，从第 16 字节开始保留作为协议报文
+          2. 不含标记的行：仅当该行整体为纯 hex 报文（允许空格/逗号/短横线分隔）时保留；
+             含中文、时间戳、测试标记、# 等非 hex 内容的日志行直接丢弃，避免时间戳/文本被
+             _clean_hex_input 误清洗成伪帧。
+
+        注意：必须在 _clean_hex_input 之前调用，否则标记中的中文/箭头会被清洗掉，
+        导致无法定位监控头边界。
+        """
+        import re
+        prefix = self.CSG_MONITOR_PREFIX
+        prefix_len = len(prefix)
+        # 非监控前缀行允许的字符：hex 数字、空白、逗号、短横线
+        hex_only_line_re = re.compile(r'^[0-9A-Fa-f\s,\-]*$')
+
+        out_lines = []
+        for line in text.splitlines():
+            pos = line.find(prefix)
+            if pos == -1:
+                # 无监控前缀：仅保留看起来就是纯 hex 报文的行，过滤掉时间戳/中文/测试标记等日志行
+                if hex_only_line_re.match(line):
+                    out_lines.append(line)
+                continue
+            # 标记之后的内容
+            after = line[pos + prefix_len:]
+            # 提取连续 hex token（容忍空格/多空格/非hex分隔符）
+            tokens = re.findall(r'[0-9A-Fa-f]{1,2}', after)
+            # 跳过 15 字节监控头，从第 16 字节开始保留协议报文
+            payload_tokens = tokens[self.CSG_MONITOR_HEADER_BYTES:]
+            out_lines.append(' '.join(payload_tokens))
+        return '\n'.join(out_lines)
+
 
     def parse_single(self):
         """解析单帧报文"""
@@ -2669,6 +2730,12 @@ class MainWindow(QMainWindow):
         """批量解析 - 支持所有协议"""
         input_text = self.batch_input.toPlainText().strip()
 
+        # 新一代载波协议(索引8)：先剥离监控日志前缀（在 hex 清洗前处理原始文本）
+        # 监控日志格式: "<时间> <序号> -> 接收机 Has Get <15字节监控头> <协议报文>"
+        # 需要先识别 "-> 接收机 Has Get" 标记，去除其后 15 字节监控头，再提取协议报文
+        if self.current_protocol == 8:
+            input_text = self._strip_csg_monitor_prefix(input_text)
+
         # 预处理：去除空格、逗号等分隔符，保留换行以区分多帧
         input_text = self._clean_hex_input(input_text, keep_newlines=True)
 
@@ -2867,6 +2934,10 @@ class MainWindow(QMainWindow):
                 summary_parts.append(apdu_type)
             return " | ".join(summary_parts) if summary_parts else "-"
 
+        elif self.current_protocol == 8:
+            # 新一代载波协议：区分网络层报文(MPDU/MAC/MMTYPE)与应用层报文(业务标识)
+            return self._get_csg_new_gen_summary(table_data)
+
         else:
             # 其他协议：取前几个非冗余字段
             for i, item in enumerate(table_data):
@@ -2878,6 +2949,158 @@ class MainWindow(QMainWindow):
                     continue
                 summary_parts.append(f"{parsed_val}")
             return " | ".join(summary_parts) if summary_parts else "-"
+
+    def _get_csg_new_gen_summary(self, table_data: list) -> str:
+        """新一代载波协议(索引8)批量解析摘要生成
+
+        区分报文类型并优先使用 MSDU 类型作为顶层分类：
+        - 含 "管理消息类型(MMTYPE)" → "<MSDU类型> | MMTYPE:..."
+        - 含 "定界符类型" (MPDU/MAC 物理层帧) → "<MSDU类型> | <定界符> | 源/目的TEI"
+        - 含 "业务标识" (应用层) → "<MSDU类型> | <帧类型> | 业务标识:... | 方向 | 核心内容"
+
+        table_data 格式: (field_name, raw_value, parsed_value, comment, byte_start, byte_end)
+        """
+        if not table_data:
+            return "-"
+
+        # 解析失败：提取失败原因
+        for item in table_data:
+            if item[0].startswith("❌"):
+                return item[3] if item[3] else "解析失败"
+
+        # ── 字段索引：快速定位关键字段 ──
+        fields = {item[0]: item for item in table_data}
+
+        # ── 公共：MSDU 类型作为顶层分类（若存在）──
+        msdu_type_prefix = ""
+        if "MSDU类型" in fields:
+            msdu_type_name = fields["MSDU类型"][3]  # 如 "应用层报文"/"网络管理消息"
+            if msdu_type_name:
+                msdu_type_prefix = msdu_type_name
+
+        # ── 网络层：含 MMTYPE 字段（管理消息）──
+        if "管理消息类型(MMTYPE)" in fields:
+            mmtype_item = fields["管理消息类型(MMTYPE)"]
+            mmtype_comment = mmtype_item[3]  # "管理消息: 关联请求(MMeAssocReq)"
+            # 提取冒号后的消息名称
+            mmtype_name = mmtype_comment.split(":", 1)[1].strip() if ":" in mmtype_comment else mmtype_comment
+            prefix = msdu_type_prefix if msdu_type_prefix else "网络层"
+            summary_parts = [f"{prefix} | MMTYPE:{mmtype_name}"]
+            # 附带管理消息版本
+            if "管理消息版本" in fields:
+                ver = fields["管理消息版本"][2]
+                summary_parts.append(f"版本{ver}")
+            return " | ".join(summary_parts)
+
+        # ── 网络层：MPDU/MAC 物理层帧（定界符类型字段）──
+        if "定界符类型" in fields:
+            delim_item = fields["定界符类型"]
+            delim_desc = delim_item[3]  # "SOF帧" / "信标帧" / "选择确认帧(SACK)"
+            prefix = msdu_type_prefix if msdu_type_prefix else "网络层"
+            summary_parts = [f"{prefix} | {delim_desc}"]
+            # 信标帧：额外显示信标类型（发现/代理/中央）
+            if delim_desc == "信标帧" and "信标载荷头" in fields:
+                beacon_head_item = fields["信标载荷头"]
+                beacon_parsed = beacon_head_item[2]  # "类型:发现信标"
+                if isinstance(beacon_parsed, str) and beacon_parsed.startswith("类型:"):
+                    beacon_type = beacon_parsed[3:]
+                    summary_parts.append(f"信标类型:{beacon_type}")
+            # 附带源/目的TEI（若有）
+            if "源TEI" in fields:
+                summary_parts.append(f"源TEI:{fields['源TEI'][2]}")
+            if "目的TEI" in fields:
+                summary_parts.append(f"目的TEI:{fields['目的TEI'][2]}")
+            return " | ".join(summary_parts)
+
+        # ── 应用层报文：含业务标识字段 ──
+        if "业务标识" in fields:
+            summary_parts = [msdu_type_prefix if msdu_type_prefix else "应用层"]
+            # 1. 帧类型域（业务大类）
+            frame_type_item = fields.get("  帧类型域(D3~D0)")
+            if frame_type_item:
+                ft_comment = frame_type_item[3]  # "0 - 确认/否认"
+                ft_name = ft_comment.split(" - ", 1)[1] if " - " in ft_comment else ft_comment
+                summary_parts.append(ft_name)
+            # 2. 业务标识（含描述）
+            svc_item = fields["业务标识"]
+            svc_comment = svc_item[3]  # "业务标识 0 - 确认"
+            svc_desc = svc_comment.split(" - ", 1)[1] if " - " in svc_comment else svc_comment
+            summary_parts.append(f"业务标识:{svc_desc}")
+            # 3. 传输方向
+            dir_item = fields.get("  传输方向位(D15)")
+            if dir_item:
+                dir_comment = dir_item[3]  # "0 - 下行(CCO→STA)"
+                dir_name = dir_comment.split(" - ", 1)[1] if " - " in dir_comment else dir_comment
+                summary_parts.append(dir_name)
+            # 4. 核心内容：从业务数据单元子字段提取关键信息
+            core = self._extract_csg_core_content(table_data)
+            if core:
+                summary_parts.append(core)
+            return " | ".join(summary_parts)
+
+        # ── 兜底：MSDU 负载等未分类报文，取前几个有效字段 ──
+        parts = []
+        for item in table_data[:4]:
+            fn, pv, desc = item[0], item[2], item[3]
+            if any(k in fn for k in ["帧起始", "格式", "长度", "校验", "结束"]):
+                continue
+            parts.append(str(desc) if desc else str(pv))
+        return " | ".join(parts) if parts else "-"
+
+    def _extract_csg_core_content(self, table_data: list) -> str:
+        """从新一代载波协议应用层报文中提取核心业务内容（用于摘要）
+
+        根据不同业务类型，提取最有信息量的字段：
+          - 确认/否认：否认原因码
+          - 数据透传：源/目的地址、转发数据
+          - 关联请求：站点MAC地址
+          - 其他：取业务数据单元中首个有意义的字段
+        """
+        # 收集业务数据单元子字段（带缩进的字段，排除控制域位域解析项）
+        core_candidates = []
+        for item in table_data:
+            fn, raw, pv, desc = item[0], item[1], item[2], item[3]
+            # 跳过控制域位域、报文头、保留、版本、序号、长度等结构字段
+            skip_keys = ["控制域", "传输方向", "启动标志", "响应标识", "业务扩展域标识",
+                         "任务优先级", "保留(D", "帧类型域", "报文端口号", "报文标识符",
+                         "应用版本号", "帧序号", "帧长", "业务标识", "保留",
+                         "MSDU", "VLAN", "级联", "物理块", "MPDU", "MAC"]
+            if any(k in fn for k in skip_keys):
+                continue
+            # 过滤噪声字段（剩余数据/未解析/填充/原始数据等无意义内容）
+            if any(k in fn for k in ["剩余数据", "未解析", "填充", "原始数据", "级联后剩余"]):
+                continue
+            if desc and any(k in desc for k in ["未解析", "可能为填充", "尚未实现"]):
+                continue
+            # 优先选取有描述性内容的字段
+            if desc and desc not in ("保留", "保留字段", "保留位默认填0"):
+                # 业务数据单元本身（汇总行）跳过，取其子字段
+                if fn in ("业务数据单元", "确认/否认负载", "管理消息数据"):
+                    continue
+                core_candidates.append((fn, desc))
+
+        # 按业务类型优先级提取
+        # 否认原因
+        for fn, desc in core_candidates:
+            if "否认原因" in fn or "原因码" in fn:
+                return f"原因:{desc}"
+        # MAC地址类（关联请求/指示中的站点地址）
+        for fn, desc in core_candidates:
+            if "MAC地址" in fn or fn in ("源地址", "目的地址"):
+                return f"{fn}:{desc.split(':')[0] if ':' in desc else desc}"
+        # TEI列表类
+        for fn, desc in core_candidates:
+            if "TEI" in fn:
+                return f"{fn}:{desc}"
+        # 抄读数据结果
+        for fn, desc in core_candidates:
+            if "抄读" in fn or "数据" in fn or "结果" in fn:
+                return f"{fn}:{desc[:20]}"
+        # 通用：取第一个有效字段
+        if core_candidates:
+            fn, desc = core_candidates[0]
+            return f"{fn}:{desc[:20]}"
+        return ""
 
     def _extract_frames_for_protocol(self, text: str, protocol_index: int) -> list:
         """根据协议提取对应格式的帧"""
@@ -2905,6 +3128,10 @@ class MainWindow(QMainWindow):
         elif protocol_index == 4:
             # DLMS-APDU裸报文：按行分割，每行一帧
             return [f.strip() for f in text.splitlines() if f.strip()]
+        elif protocol_index == 8:
+            # 新一代载波协议(通感一体化)：按行提取，过滤无效短帧
+            # 监控前缀已在 parse_batch 中通过 _strip_csg_monitor_prefix 剥离
+            return self._extract_csg_new_gen_frames(text)
         else:
             # 通用：每行一帧
             return [f.strip() for f in text.splitlines() if f.strip()]
@@ -3101,6 +3328,32 @@ class MainWindow(QMainWindow):
         if len(clean) >= min_len * 2 and len(clean) <= max_len * 2:
             return [clean] if len(clean) % 2 == 0 else []
         return []
+
+    def _extract_csg_new_gen_frames(self, text: str) -> list:
+        """提取新一代载波协议帧
+
+        输入 text 已经过 _clean_hex_input(keep_newlines=True) 清洗，
+        且监控前缀已在 parse_batch 中剥离，此处为纯 hex 字符串（含换行）。
+
+        处理规则:
+          - 按行分割（每行一帧，兼容多帧批量输入）
+          - 去除空白后只保留偶数长度的有效 hex 行
+          - 过滤过短的行（< 4 字节，无法构成最小应用层报文）
+        """
+        frames = []
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            # 仅保留 hex 字符（清洗后应已是纯 hex，此处兜底）
+            clean_line = ''.join(c for c in line if c in '0123456789ABCDEFabcdef').upper()
+            if len(clean_line) < 8:  # 至少 4 字节
+                continue
+            if len(clean_line) % 2 != 0:
+                # 奇数长度：丢弃末尾字符以保证字节对齐
+                clean_line = clean_line[:-1]
+            frames.append(clean_line)
+        return frames
 
     def clear_batch(self):
         """清空批量解析内容"""
