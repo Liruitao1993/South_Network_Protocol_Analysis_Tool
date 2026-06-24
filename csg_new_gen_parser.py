@@ -293,6 +293,9 @@ class CSGNewGenParser:
                 if beacon_data:
                     table_data.extend(self._parse_beacon_payload(beacon_data, offset))
                 return table_data
+            # 选择确认帧(定界符类型=2)：仅FC头16字节，无物理块/MSDU
+            elif delimiter_type == 2:
+                return table_data
             else:
                 # MPDU payload = physical blocks (SOF等)
                 pb_data = frame_bytes[offset:]
@@ -762,22 +765,36 @@ class CSGNewGenParser:
                          f"定界符类型{delimiter_type}的可变数据(未解析)", offset, offset + 11))
             offset += 12
 
-        # ── 字节12: 短网络标识高位(1b) + 保留(3b) + 标准版本号(4b) ──
+        # ── 字节12: 公共字段（定界符类型不同含义不同）──
         offset = base_offset + 12  # 确保对齐
         b12 = frame_bytes[offset]
-        short_nid_high = b12 & 0x01
         std_version = (b12 >> 4) & 0x0F
-        full_snid = (short_nid_high << 4) | short_nid_low
-
-        table.append((
-            "短网络标识高位",
-            f"0b{short_nid_high}",
-            str(short_nid_high),
-            f"完整SNID=0x{full_snid:02X}({full_snid})",
-            offset, offset
-        ))
         self._std_version = std_version
         version_name = MPDU_VERSION_MAP.get(std_version, f"保留({std_version})")
+
+        if delimiter_type == 2:
+            # SACK帧: 字节12 = 扩展帧类型(4b) + 标准版本号(4b)
+            ext_type = b12 & 0x0F
+            ext_name = self.SACK_EXT_TYPE_MAP.get(ext_type, f"保留({ext_type})")
+            table.append((
+                "扩展帧类型",
+                f"0x{ext_type:X}",
+                str(ext_type),
+                f"帧类型: {ext_name}",
+                offset, offset
+            ))
+        else:
+            # SOF/信标帧: 字节12 = 短网络标识高位(1b) + 保留(3b) + 标准版本号(4b)
+            short_nid_high = b12 & 0x01
+            full_snid = (short_nid_high << 4) | short_nid_low
+            table.append((
+                "短网络标识高位",
+                f"0b{short_nid_high}",
+                str(short_nid_high),
+                f"完整SNID=0x{full_snid:02X}({full_snid})",
+                offset, offset
+            ))
+
         table.append((
             "标准版本号",
             f"0x{std_version:X}",
@@ -1213,7 +1230,7 @@ class CSGNewGenParser:
     SACK_EXT_TYPE_MAP = {0: "选择确认帧", 1: "网络搜索帧(抄控器)", 2: "同步帧(抄控器)", 3: "Bitloading扩展帧"}
 
     def _parse_mpdu_sack(self, frame_bytes: bytes, offset: int, table: list) -> int:
-        """解析选择确认帧(SACK)可变区域 (字节1-12, 共12字节)"""
+        """解析选择确认帧(SACK)可变区域 (字节1-11, 共11字节; 字节12由公共代码处理)"""
         # 字节1: 接收结果(4b) + 接收状态(4b)
         b1 = frame_bytes[offset]
         rx_result = b1 & 0x0F
@@ -1291,16 +1308,8 @@ class CSGNewGenParser:
         # 字节8[6:7] + 字节9-11: 保留 (26b)
         offset += 3  # 跳过保留字节(byte8高2位已包含在上面, byte9-11)
 
-        # 字节12[0:3]: 扩展帧类型 (4b)
-        ext_type = frame_bytes[offset] & 0x0F
-        ext_name = self.SACK_EXT_TYPE_MAP.get(ext_type, f"保留({ext_type})")
-        table.append(("扩展帧类型",
-                     f"0x{ext_type:X}",
-                     str(ext_type),
-                     f"帧类型: {ext_name}",
-                     offset, offset))
 
-        return offset + 1  # 字节1-12共12字节
+        return offset + 11  # 字节1-11共11字节(字节12由公共代码处理)
 
     def _parse_mac_frame(self, frame_bytes: bytes, base_offset: int = 0) -> Tuple[int, list]:
         """解析 MAC 帧头

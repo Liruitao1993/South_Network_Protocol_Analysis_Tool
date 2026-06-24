@@ -381,6 +381,19 @@ python test_plan_widget.py     # 测试计划组件（需 GUI 环境）
 
 > 本节按版本倒序记录。详细 commit 见 `git log`。每发新版本必须更新此处。
 
+### 1.7.2 — 2026-06-21
+- **修复新一代载波协议(索引8)选择确认帧(SACK)解析**：
+  - `_parse_mpdu_sack` 返回值从 `offset + 1` 修正为 `offset + 11`，与其他子解析器一致
+  - 公共代码 `parse_mpdu` 字节12处理增加 SACK 定界符类型分支：SACK 帧字节12 = 扩展帧类型(4b) + 标准版本号(4b)，不再误解析为短网络标识高位
+  - `parse_to_table` auto 模式增加 SACK 早期返回：SACK 帧仅 FC 头16字节，无物理块/MSDU，解析完 FC 后直接返回，避免将 FC 头误当 MSDU 数据解析
+  - 删除 `_parse_mpdu_sack` 中冗余的字节12读取
+- **新一代载波协议(索引8)批量解析摘要增强**：`_extract_csg_core_content` 按帧类型+业务标识提取关键业务内容
+  - 确认帧：显示确认状态（如"确认报文，无业务数据"）
+  - 否认帧：显示否认原因（如"原因:格式错误"）
+  - 数据传输帧：显示源/目的地址 + 数据长度
+  - 命令帧：显示命令名 + 设备地址 + 关键参数（延时时间/查询数量等）
+- 新增测试 `test_sack_fix.py`（SACK 帧解析验证用例）
+
 ### 1.7.1 — 2026-06-18
 - **新一代载波协议(索引8)批量解析**：新增监控日志前缀剥离预处理
 - 监控日志格式：`<时间> <序号> -> 接收机 Has Get <15字节监控头> <协议报文>`
@@ -458,21 +471,21 @@ python test_plan_widget.py     # 测试计划组件（需 GUI 环境）
 
 ## 11. 最新变更摘要（最近一次 commit 摘要）
 
-> 此处记录最近一次开发会话的修改要点，方便新 Agent 快速定位"刚改了什么"。每次提交后更新。
+**最近一次（2026-06-21）：修复SACK解析 + 增强批量摘要业务内容**
 
-**最近一次（2026-06-18，待提交）：新一代载波协议(索引8)业务摘要增加 MSDU 类型展示**
+修复1：SACK帧字节12被公共代码误解析为"短网络标识高位"，实际应为"扩展帧类型(4b) + 标准版本号(4b)"。
+修复2：SACK帧仅FC头16字节无载荷，auto模式将FC头误当MSDU数据继续解析导致"解析失败"。
+增强3：`_extract_csg_core_content` 按帧类型+业务标识提取关键业务内容，批量摘要不再只显示"业务标识:确认"。
 
-需求：批量解析表格「业务摘要」列需把 MSDU 类型和业务标识同时体现出来，便于快速识别报文类别。
+修复：
+- `csg_new_gen_parser.py` `_parse_mpdu_sack`：返回值从 `offset + 1` 修正为 `offset + 11`（不再消费字节12）
+- `csg_new_gen_parser.py` `_parse_mpdu_frame` 字节12：增加 `delimiter_type == 2` 分支，SACK帧正确解析扩展帧类型
+- `csg_new_gen_parser.py` `parse_to_table`：auto模式增加SACK早期返回（`elif delimiter_type == 2: return table_data`），避免将FC头误当MSDU
+- 删除 `_parse_mpdu_sack` 中冗余的字节12读取（避免重复条目）
+- `main_gui.py` `_extract_csg_core_content`：重写为按帧类型分支提取（确认/否认/数据传输/命令帧各有专属提取逻辑）
 
-修改：
-- `main_gui.py` `_get_csg_new_gen_summary`：优先读取 `MSDU类型` 字段作为顶层分类前缀；
-  - 管理消息：`<MSDU类型> | MMTYPE:... | 版本x`（如 `网络管理消息 | MMTYPE:关联请求(MMeAssocReq) | 版本1`）
-  - MPDU/MAC 物理层帧：`<MSDU类型> | <定界符类型> | 源/目的TEI`
-  - 应用层报文：`<MSDU类型> | <帧类型> | 业务标识:... | 方向 | 核心内容`（如 `应用层报文 | 确认/否认 | 业务标识:确认 | 下行(CCO→STA)`）
-  - 无 MSDU 类型字段时（如 parse_level=app）保持原有 "应用层"/"网络层" 兜底前缀
-- `test_csg_summary.py`：
-  - 同步更新 `get_csg_new_gen_summary` 测试辅助函数
-  - 新增 `test_msdu_type_in_summary` 用例验证完整 MAC 帧解析时摘要同时展示 MSDU 类型与业务标识
+验证：全部 26 项测试通过（18 基础 + 6 摘要 + 1 批量 + 1 SACK 专项）
+
 
 **上一次（2026-06-18，待提交）：修复新一代载波协议(索引8)批量解析误将时间戳/测试标记行解析为伪帧的问题**
 
