@@ -226,8 +226,10 @@ def get_byte_description(offset: int, result: dict) -> str:
 
 # 解析逻辑
 if parse_button and frame_input.strip():
-    # 去除空格和非法字符
-    clean_input = frame_input.replace(" ", "").replace("\n", "").replace("\t", "").strip()
+    # 去除空格、逗号、换行等分隔符，支持0x前缀
+    import re as _re
+    clean_input = _re.sub(r'0[xX]([0-9A-Fa-f])', r'\1', frame_input)
+    clean_input = _re.sub(r'[^0-9A-Fa-f]', '', clean_input).strip()
     
     # 验证输入
     if not all(c in '0123456789abcdefABCDEF' for c in clean_input):

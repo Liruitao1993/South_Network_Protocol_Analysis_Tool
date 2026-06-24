@@ -39,9 +39,13 @@ from serial_worker import SerialWorker
 from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu
 
 
-APP_VERSION = "1.7.1"
+APP_VERSION = "1.7.2"
 
 CHANGELOG = [
+    ("1.7.2", "2026-06-21", [
+        "修复新一代载波协议（索引8）选择确认帧(SACK)解析：字节12正确解析为扩展帧类型+标准版本号",
+        "SACK子解析器返回值修正，与其他帧类型子解析器保持一致",
+    ]),
     ("1.7.1", "2026-06-18", [
         "新一代载波协议（索引8）批量解析：新增监控日志前缀剥离，支持 '<时间> <序号> -> 接收机 Has Get <15字节监控头> <协议报文>' 格式",
         "新一代载波协议批量解析摘要：区分网络层/应用层报文，展示 MSDU 类型、MMTYPE、定界符类型、业务标识等关键业务内容",
@@ -2295,8 +2299,19 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _clean_hex_input(text: str, keep_newlines: bool = False) -> str:
-        """预处理报文输入：去除空格、逗号、换行等分隔符，仅保留十六进制字符"""
+        """预处理报文输入：去除空格、逗号、换行等分隔符，支持0x前缀，仅保留十六进制字符
+
+        支持的输入格式：
+          - 纯 hex: 6811010101
+          - 空格分隔: 68 11 01 01 01
+          - 逗号分隔: 68,11,01,01,01
+          - 混合分隔: 68, 11, 01 - 01. 01
+          - 0x 前缀: 0x68 0x11 0x01 或 0x68,0x11,0x01
+          - 换行分隔(多帧): 每行一帧
+        """
         import re
+        # 先处理 0x/0X 前缀：将 0x68 转为 68，避免 0x 被误清洗导致字节对齐错误
+        text = re.sub(r'0[xX]([0-9A-Fa-f])', r'\1', text)
         pattern = r'[^0-9A-Fa-f\n]' if keep_newlines else r'[^0-9A-Fa-f]'
         return re.sub(pattern, '', text)
 
@@ -3050,57 +3065,94 @@ class MainWindow(QMainWindow):
     def _extract_csg_core_content(self, table_data: list) -> str:
         """从新一代载波协议应用层报文中提取核心业务内容（用于摘要）
 
-        根据不同业务类型，提取最有信息量的字段：
+        根据帧类型+业务标识组合，提取最有信息量的字段：
           - 确认/否认：否认原因码
-          - 数据透传：源/目的地址、转发数据
-          - 关联请求：站点MAC地址
+          - 数据传输帧：源/目的地址 + 数据长度
+          - 命令帧：目标设备地址 + 命令参数
           - 其他：取业务数据单元中首个有意义的字段
         """
-        # 收集业务数据单元子字段（带缩进的字段，排除控制域位域解析项）
-        core_candidates = []
-        for item in table_data:
-            fn, raw, pv, desc = item[0], item[1], item[2], item[3]
-            # 跳过控制域位域、报文头、保留、版本、序号、长度等结构字段
-            skip_keys = ["控制域", "传输方向", "启动标志", "响应标识", "业务扩展域标识",
-                         "任务优先级", "保留(D", "帧类型域", "报文端口号", "报文标识符",
-                         "应用版本号", "帧序号", "帧长", "业务标识", "保留",
-                         "MSDU", "VLAN", "级联", "物理块", "MPDU", "MAC"]
+        fields = {item[0]: item for item in table_data}
+
+        # ── 获取帧类型和业务标识 ──
+        ft_desc = fields.get("  帧类型域(D3~D0)", ("","","",""))[3]
+        svc_desc = fields.get("业务标识", ("","","",""))[3]
+        # 从 "业务标识 N - 名称" 中提取业务名
+        svc_name = svc_desc.split(" - ", 1)[1] if " - " in svc_desc else svc_desc
+
+        # ── 否认帧：显示否认原因 ──
+        if "否认" in svc_name:
+            deny_item = fields.get("否认原因码")
+            if deny_item:
+                return f"原因:{deny_item[3]}"
+            return "否认"
+
+        # ── 确认帧：显示确认状态 ──
+        if "确认" in svc_name and "否认" not in svc_name:
+            confirm_item = fields.get("确认/否认负载")
+            if confirm_item:
+                return confirm_item[3]  # "确认报文，无业务数据"
+            return "确认"
+
+        # ── 数据传输帧：源/目的地址 + 数据长度 ──
+        if "数据传输" in ft_desc:
+            parts = []
+            src = fields.get("源地址")
+            dst = fields.get("目的地址")
+            if src:
+                # 提取冒号后的实际地址值
+                addr = src[3].split(": ", 1)[1] if ": " in src[3] else src[2]
+                parts.append(f"源:{addr}")
+            if dst:
+                addr = dst[3].split(": ", 1)[1] if ": " in dst[3] else dst[2]
+                parts.append(f"目的:{addr}")
+            data_len = fields.get("转发数据长度")
+            if data_len:
+                parts.append(f"{data_len[2]}字节")
+            return " | ".join(parts) if parts else svc_name
+
+        # ── 命令帧：命令名 + 关键参数 ──
+        if "命令" in ft_desc:
+            parts = [svc_name]
+            # 提取设备地址（若有）
+            dev_addr = fields.get("设备地址")
+            if dev_addr:
+                addr = dev_addr[3].split(": ", 1)[1] if ": " in dev_addr[3] else dev_addr[2]
+                parts.append(f"设备:{addr}")
+            # 提取命令关键参数（非保留/非控制域的有意义字段）
+            cmd_skip = {"帧类型域", "传输方向位", "启动标志", "响应标识", "业务扩展域",
+                        "任务优先级", "保留", "业务标识", "帧序号", "帧长", "报文端口号",
+                        "报文标识符", "应用版本号", "业务数据单元", "控制域"}
+            for fn, item in fields.items():
+                if fn.startswith("  "):
+                    continue  # 跳过控制域位域子字段
+                if any(k in fn for k in cmd_skip):
+                    continue
+                desc = item[3]
+                val = item[2]
+                if desc and "保留" not in desc and "默认" not in desc and "未解析" not in desc:
+                    if val and str(val) != "0" and str(val) != "0字节":
+                        # 避免与 svc_name 重复
+                        if desc[:len(svc_name)] != svc_name:
+                            parts.append(f"{desc[:30]}")
+            return " | ".join(parts[:4])  # 最多4段
+
+        # ── 兜底：取业务数据单元中首个有意义的字段 ──
+        skip_keys = ["控制域", "传输方向", "启动标志", "响应标识", "业务扩展域标识",
+                     "任务优先级", "保留(D", "帧类型域", "报文端口号", "报文标识符",
+                     "应用版本号", "帧序号", "帧长", "业务标识", "保留",
+                     "MSDU", "VLAN", "级联", "物理块", "MPDU", "MAC"]
+        for fn, item in fields.items():
             if any(k in fn for k in skip_keys):
                 continue
-            # 过滤噪声字段（剩余数据/未解析/填充/原始数据等无意义内容）
-            if any(k in fn for k in ["剩余数据", "未解析", "填充", "原始数据", "级联后剩余"]):
+            desc = item[3]
+            if not desc or desc in ("保留", "保留字段", "保留位默认填0"):
                 continue
-            if desc and any(k in desc for k in ["未解析", "可能为填充", "尚未实现"]):
+            if any(k in desc for k in ["未解析", "可能为填充", "尚未实现"]):
                 continue
-            # 优先选取有描述性内容的字段
-            if desc and desc not in ("保留", "保留字段", "保留位默认填0"):
-                # 业务数据单元本身（汇总行）跳过，取其子字段
-                if fn in ("业务数据单元", "确认/否认负载", "管理消息数据"):
-                    continue
-                core_candidates.append((fn, desc))
-
-        # 按业务类型优先级提取
-        # 否认原因
-        for fn, desc in core_candidates:
-            if "否认原因" in fn or "原因码" in fn:
-                return f"原因:{desc}"
-        # MAC地址类（关联请求/指示中的站点地址）
-        for fn, desc in core_candidates:
-            if "MAC地址" in fn or fn in ("源地址", "目的地址"):
-                return f"{fn}:{desc.split(':')[0] if ':' in desc else desc}"
-        # TEI列表类
-        for fn, desc in core_candidates:
-            if "TEI" in fn:
-                return f"{fn}:{desc}"
-        # 抄读数据结果
-        for fn, desc in core_candidates:
-            if "抄读" in fn or "数据" in fn or "结果" in fn:
-                return f"{fn}:{desc[:20]}"
-        # 通用：取第一个有效字段
-        if core_candidates:
-            fn, desc = core_candidates[0]
-            return f"{fn}:{desc[:20]}"
-        return ""
+            if fn in ("业务数据单元", "确认/否认负载", "管理消息数据"):
+                continue
+            return f"{fn.strip()}:{desc[:30]}"
+        return svc_name if svc_name else ""
 
     def _extract_frames_for_protocol(self, text: str, protocol_index: int) -> list:
         """根据协议提取对应格式的帧"""
