@@ -841,6 +841,143 @@ def _parse_cmd_district_phase(payload: bytes, direction: int, base_offset: int) 
                base_offset + offset + 2, base_offset + offset + 3)
             offset += 4
 
+    elif collect == 0x03:  # 台区特征信息告知
+        if len(data) >= 8:
+            # TEI(12b) + 采集方式(2b) + 保留(2b) 打包在2字节中
+            w0 = _uint16_le(payload, offset)
+            tei = w0 & 0x0FFF
+            collect_mode = (w0 >> 12) & 0x03
+            _f(table, "TEI", _hex(payload[offset:offset+2]), f"0x{tei:03X}",
+               "CCO(TEI=1)或STA地址", base_offset + offset, base_offset + offset + 1)
+            mode_desc = {0: "保留", 1: "下降沿采集", 2: "上升沿采集", 3: "双沿采集"}.get(collect_mode, "保留")
+            _f(table, "采集方式", f"0x{collect_mode:X}", str(collect_mode),
+               mode_desc + (" (仅工频周期特征有效)" if feature != 3 else ""),
+               base_offset + offset + 1, base_offset + offset + 1)
+            seq = payload[offset + 2]
+            total = payload[offset + 3]
+            _f(table, "采集序列号", f"0x{seq:02X}", str(seq), "第几次采集活动",
+               base_offset + offset + 2, base_offset + offset + 2)
+            _f(table, "告知总数量", f"0x{total:02X}", str(total), "特征序列数据个数",
+               base_offset + offset + 3, base_offset + offset + 3)
+            offset += 4
+
+            # 解析第一组: 起始采集NTB1 + 特征序列1
+            for group_idx, group_label in enumerate(["1", "2"]):
+                if offset + 4 > len(payload):
+                    break
+                start_ntb = _uint32_le(payload, offset)
+                _f(table, f"起始采集NTB{group_label}", _hex(payload[offset:offset+4]),
+                   f"0x{start_ntb:08X}", f"第{group_label}组过零点起始时刻",
+                   base_offset + offset, base_offset + offset + 3)
+                offset += 4
+
+                # 特征序列: 保留(1B) + 三相报告数量(各1B) + 各相数据
+                if offset >= len(payload):
+                    break
+                rsv = payload[offset]
+                _f(table, f"保留(序列{group_label})", f"0x{rsv:02X}", str(rsv), "保留",
+                   base_offset + offset, base_offset + offset)
+                offset += 1
+
+                phase_names = ["第一出线", "第二出线", "第三出线"]
+                phase_counts = []
+                for pi in range(3):
+                    if offset >= len(payload):
+                        break
+                    pc = payload[offset]
+                    phase_counts.append(pc)
+                    _f(table, f"{phase_names[pi]}报告数量(序列{group_label})",
+                       f"0x{pc:02X}", str(pc), f"{phase_names[pi]}特征数据个数",
+                       base_offset + offset, base_offset + offset)
+                    offset += 1
+
+                # 解析各相数据值
+                for pi, pc in enumerate(phase_counts):
+                    if feature == 1:  # 工频电压: BCD XXX.X, 2字节
+                        for vi in range(pc):
+                            if offset + 2 > len(payload):
+                                break
+                            val = payload[offset:offset+2]
+                            # BCD解码: 低字节在前
+                            lo, hi = val[0], val[1]
+                            bcd_str = f"{hi >> 4}{hi & 0x0F}{lo >> 4}.{lo & 0x0F}"
+                            _f(table, f"{phase_names[pi]}V{vi+1}(序列{group_label})",
+                               _hex(val), bcd_str, f"BCD电压值(V)",
+                               base_offset + offset, base_offset + offset + 1)
+                            offset += 2
+                    elif feature == 2:  # 工频频率: BCD XX.XX, 2字节
+                        for fi in range(pc):
+                            if offset + 2 > len(payload):
+                                break
+                            val = payload[offset:offset+2]
+                            lo, hi = val[0], val[1]
+                            bcd_str = f"{hi >> 4}{hi & 0x0F}.{lo >> 4}{lo & 0x0F}"
+                            _f(table, f"{phase_names[pi]}F{fi+1}(序列{group_label})",
+                               _hex(val), bcd_str, f"BCD频率值(Hz)",
+                               base_offset + offset, base_offset + offset + 1)
+                            offset += 2
+                    elif feature == 3:  # 工频周期: 有符号整数偏差, 2字节
+                        for ti in range(pc):
+                            if offset + 2 > len(payload):
+                                break
+                            val = int.from_bytes(payload[offset:offset+2], 'little', signed=True)
+                            _f(table, f"{phase_names[pi]}T{ti+1}(序列{group_label})",
+                               _hex(payload[offset:offset+2]), f"{val}",
+                               f"周期偏差(单位1/3125000s, 相对于20ms)",
+                               base_offset + offset, base_offset + offset + 1)
+                            offset += 2
+
+                # 双沿采集时才有第二组，否则跳出
+                if collect_mode != 3:
+                    break
+
+    elif collect == 0x07:  # 相位特征信息告知
+        if len(data) >= 12:
+            # TEI(12b) + 采集方式(2b) + 保留(2b)
+            w0 = _uint16_le(payload, offset)
+            tei = w0 & 0x0FFF
+            collect_mode = (w0 >> 12) & 0x03
+            _f(table, "TEI", _hex(payload[offset:offset+2]), f"0x{tei:03X}",
+               "STA的TEI", base_offset + offset, base_offset + offset + 1)
+            mode_desc = {0: "保留", 1: "下降沿采集", 2: "上升沿采集"}.get(collect_mode, "保留")
+            _f(table, "采集方式", f"0x{collect_mode:X}", str(collect_mode), mode_desc,
+               base_offset + offset + 1, base_offset + offset + 1)
+            seq = payload[offset + 2]
+            total = payload[offset + 3]
+            _f(table, "采集序列号", f"0x{seq:02X}", str(seq), "第几次采集活动",
+               base_offset + offset + 2, base_offset + offset + 2)
+            _f(table, "告知总数量", f"0x{total:02X}", str(total),
+               "三相过零NTB差值总数(n1+n2+n3)",
+               base_offset + offset + 3, base_offset + offset + 3)
+            base_ntb = _uint32_le(payload, offset + 4)
+            _f(table, "基准NTB", _hex(payload[offset+4:offset+8]), f"0x{base_ntb:08X}",
+               "第一个过零点NTB值", base_offset + offset + 4, base_offset + offset + 7)
+            _f(table, "保留", f"0x{payload[offset+8]:02X}", str(payload[offset+8]), "保留",
+               base_offset + offset + 8, base_offset + offset + 8)
+
+            # 三相过零NTB差值数量
+            phase_counts = []
+            phase_names = ["相线1", "相线2", "相线3"]
+            for pi in range(3):
+                nc = payload[offset + 9 + pi]
+                phase_counts.append(nc)
+                _f(table, f"{phase_names[pi]}过零NTB差值数量",
+                   f"0x{nc:02X}", str(nc), f"{phase_names[pi]}差值个数",
+                   base_offset + offset + 9 + pi, base_offset + offset + 9 + pi)
+            offset += 12
+
+            # 各相过零NTB差值序列 (每个差值 2B, 无符号整数, 单位1/1562500s)
+            for pi, nc in enumerate(phase_counts):
+                for di in range(nc):
+                    if offset + 2 > len(payload):
+                        break
+                    diff = _uint16_le(payload, offset)
+                    _f(table, f"{phase_names[pi]}差值{di+1}",
+                       _hex(payload[offset:offset+2]), str(diff),
+                       f"过零NTB差值(单位1/1562500s)",
+                       base_offset + offset, base_offset + offset + 1)
+                    offset += 2
+
     if offset < len(payload):
         _f(table, "DATA(原始)", _hex(payload[offset:])[:80] + ("..." if len(payload) - offset > 40 else ""),
            f"{len(payload) - offset}字节", "业务数据（详细格式依特征/采集类型而定）",
@@ -853,7 +990,279 @@ _TEST_ID_MAP = {
     0x00: "进入回环测试模式",
     0x01: "进入透明转发模式",
     0x02: "频段切换命令",
+    0x03: "1.0测试",
+    0x04: "2.0测试",
 }
+
+_TEST_EXT_ID_MAP = {
+    0x0001: "Bitloading测试模式",
+    0x0002: "Bitloading表下发",
+    0x0003: "空间映射测试模式",
+    0x0004: "OFDMA测试模式",
+    0x0005: "OFDMA多用户下发",
+    0x0006: "MAC层OFDMA配置",
+    0x0007: "非组网场景TEI配置",
+    0x0008: "业务报文Bitloading收发开关",
+}
+
+
+def _bits(data: bytes, offset: int, bit_start: int, bit_width: int) -> int:
+    """按小端序从 data 中提取位域（bit_start 为字节内最低位位置）"""
+    if offset < 0 or offset >= len(data) or bit_width <= 0:
+        return 0
+    total_bits = bit_start + bit_width
+    end_byte = offset + (total_bits + 7) // 8
+    if end_byte > len(data):
+        return 0
+    val = int.from_bytes(data[offset:end_byte], 'little')
+    return (val >> bit_start) & ((1 << bit_width) - 1)
+
+
+def _parse_test_ext_0001(data: bytes, base_offset: int) -> list:
+    """0x0001: Bitloading测试模式，无扩展数据"""
+    table = []
+    _f(table, "说明", "", "", "进入Bitloading测试模式，无附加数据",
+       base_offset, base_offset + len(data) - 1 if data else base_offset)
+    _remaining(table, data, 0, base_offset)
+    return table
+
+
+def _parse_test_ext_0002(data: bytes, base_offset: int) -> list:
+    """0x0002: Bitloading表下发"""
+    table = []
+    if len(data) < 12:
+        _f(table, "❌ 解析失败", "", "", "Bitloading表下发数据不足12字节", None, None)
+        return table
+    src_tei = _uint16_le(data, 0)
+    dst_tei = _uint16_le(data, 2)
+    stream_count = data[4]
+    subcarrier_group = data[5]
+    cutoff_carrier = _uint16_le(data, 6)
+    bl_table_len = _uint16_le(data, 8)
+    bps = _uint16_le(data, 10)
+    _f(table, "源TEI", _hex(data[0:2]), str(src_tei), "源节点TEI",
+       base_offset, base_offset + 1)
+    _f(table, "目的TEI", _hex(data[2:4]), str(dst_tei), "目的节点TEI",
+       base_offset + 2, base_offset + 3)
+    _f(table, "流数", f"0x{stream_count:02X}", str(stream_count),
+       "1:1流 2:2流", base_offset + 4, base_offset + 4)
+    _f(table, "子载波分组大小", f"0x{subcarrier_group:02X}", str(subcarrier_group),
+       "子载波分组大小", base_offset + 5, base_offset + 5)
+    _f(table, "截止子载波", _hex(data[6:8]), str(cutoff_carrier),
+       "截止子载波编号", base_offset + 6, base_offset + 7)
+    _f(table, "比特加载表长度", _hex(data[8:10]), str(bl_table_len),
+       "比特加载表字节数", base_offset + 8, base_offset + 9)
+    _f(table, "Bps", _hex(data[10:12]), str(bps), "每符号比特数",
+       base_offset + 10, base_offset + 11)
+    offset = 12
+    if bl_table_len > 0 and offset + bl_table_len <= len(data):
+        bl_table = data[offset:offset + bl_table_len]
+        _BIT_MOD_MAP = {0: "不加载", 1: "BPSK", 2: "QPSK", 4: "16QAM", 6: "64QAM"}
+        # 协议定义：每个子载波组占3bit，单流每8组占3字节，双流每8组占6字节(3B流0+3B流1)
+        if stream_count <= 1:
+            # 单流：每3字节含8个子载波组，每组3bit
+            num_entries = (bl_table_len * 8) // 3
+            _f(table, "B表总览", _hex(bl_table)[:80] + ("..." if bl_table_len > 40 else ""),
+               f"{num_entries}组/{bl_table_len}字节",
+               f"3bit/组, 子载波分组大小={subcarrier_group}, 单流",
+               base_offset + offset, base_offset + offset + bl_table_len - 1)
+            for i in range(num_entries):
+                block = i // 8
+                idx_in_block = i % 8
+                bit_pos = idx_in_block * 3
+                byte_in_block = bit_pos // 8
+                bit_in_byte = bit_pos % 8
+                abs_byte = block * 3 + byte_in_block
+                val = 0
+                for b in range(3):
+                    bi = abs_byte + (bit_in_byte + b) // 8
+                    if bi < bl_table_len:
+                        val |= ((bl_table[bi] >> ((bit_in_byte + b) % 8)) & 1) << b
+                mod = _BIT_MOD_MAP.get(val, f"保留({val})")
+                sc_start = i * subcarrier_group
+                sc_end = sc_start + subcarrier_group - 1
+                entry_byte = offset + abs_byte
+                _f(table, f"  组{i} [子载波{sc_start}-{sc_end}]",
+                   f"3bit@{abs_byte}B", f"{val} ({mod})",
+                   f"流0承载{val}bit",
+                   base_offset + entry_byte, base_offset + entry_byte)
+        else:
+            # 双流：每6字节含8组(3B流0+3B流1)，每组流各3bit
+            num_blocks = bl_table_len // 6
+            num_entries = num_blocks * 8
+            _f(table, "B表总览", _hex(bl_table)[:80] + ("..." if bl_table_len > 40 else ""),
+               f"{num_entries}组/{bl_table_len}字节",
+               f"3bit/组/流, 子载波分组大小={subcarrier_group}, 双流",
+               base_offset + offset, base_offset + offset + bl_table_len - 1)
+            for i in range(num_entries):
+                block = i // 8
+                idx_in_block = i % 8
+                bit_pos = idx_in_block * 3
+                byte_in_block = bit_pos // 8
+                bit_in_byte = bit_pos % 8
+                # 流0: block*6 + 0..2, 流1: block*6 + 3..5
+                val0 = 0
+                val1 = 0
+                for b in range(3):
+                    bi0 = block * 6 + byte_in_block + (bit_in_byte + b) // 8
+                    bi1 = block * 6 + 3 + byte_in_block + (bit_in_byte + b) // 8
+                    if bi0 < bl_table_len:
+                        val0 |= ((bl_table[bi0] >> ((bit_in_byte + b) % 8)) & 1) << b
+                    if bi1 < bl_table_len:
+                        val1 |= ((bl_table[bi1] >> ((bit_in_byte + b) % 8)) & 1) << b
+                mod0 = _BIT_MOD_MAP.get(val0, f"保留({val0})")
+                mod1 = _BIT_MOD_MAP.get(val1, f"保留({val1})")
+                sc_start = i * subcarrier_group
+                sc_end = sc_start + subcarrier_group - 1
+                entry_byte = offset + block * 6
+                _f(table, f"  组{i} [子载波{sc_start}-{sc_end}]",
+                   f"流0:{val0} 流1:{val1}",
+                   f"流0:{val0}({mod0}) 流1:{val1}({mod1})",
+                   f"流0承载{val0}bit, 流1承载{val1}bit",
+                   base_offset + entry_byte, base_offset + entry_byte + 5)
+        offset += bl_table_len
+    _remaining(table, data, offset, base_offset)
+    return table
+
+
+def _parse_test_ext_0003(data: bytes, base_offset: int) -> list:
+    """0x0003: 空间映射测试模式"""
+    table = []
+    if len(data) < 1:
+        _f(table, "❌ 解析失败", "", "", "空间映射测试模式数据不足", None, None)
+        return table
+    mode = data[0]
+    _f(table, "映射模式", f"0x{mode:02X}", str(mode), "空间映射模式",
+       base_offset, base_offset)
+    _remaining(table, data, 1, base_offset)
+    return table
+
+
+def _parse_test_ext_0004(data: bytes, base_offset: int) -> list:
+    """0x0004: OFDMA测试模式，无扩展数据"""
+    table = []
+    _f(table, "说明", "", "", "进入OFDMA测试模式，无附加数据",
+       base_offset, base_offset + len(data) - 1 if data else base_offset)
+    _remaining(table, data, 0, base_offset)
+    return table
+
+
+def _parse_test_ext_0005(data: bytes, base_offset: int) -> list:
+    """0x0005: OFDMA多用户下发"""
+    table = []
+    if len(data) < 6:
+        _f(table, "❌ 解析失败", "", "", "OFDMA多用户下发数据不足", None, None)
+        return table
+    # 表8字段从数据域字节3开始（字节0~2保留/未定义）
+    frame_type = _bits(data, 3, 0, 1)
+    band = _bits(data, 3, 1, 3)
+    efc_sym = _bits(data, 3, 4, 4)
+    tf_sym = _bits(data, 4, 0, 4)
+    station_count = _bits(data, 4, 4, 4)
+    _f(table, "帧类型", f"0x{frame_type:01X}", str(frame_type),
+       "0:DL_OFDMA 1:UL_OFDMA", base_offset + 3, base_offset + 3)
+    _f(table, "频段", f"0x{band:01X}", str(band), "通信频段",
+       base_offset + 3, base_offset + 3)
+    _f(table, "eFC符号数", f"0x{efc_sym:01X}", str(efc_sym), "eFC符号数",
+       base_offset + 3, base_offset + 3)
+    _f(table, "TF符号数", f"0x{tf_sym:01X}", str(tf_sym), "TF符号数",
+       base_offset + 4, base_offset + 4)
+    _f(table, "站点个数", f"0x{station_count:01X}", str(station_count), "站点个数",
+       base_offset + 4, base_offset + 4)
+    offset = 5
+    for i in range(station_count):
+        if offset + 3 > len(data):
+            _f(table, f"站点{i}", "", "", "数据不足", base_offset + offset, base_offset + len(data) - 1)
+            break
+        tei = _bits(data, offset, 0, 12)
+        ru = _bits(data, offset + 1, 4, 4)
+        tmi = _bits(data, offset + 2, 0, 5)
+        pb_count = _bits(data, offset + 2, 5, 3)
+        _f(table, f"站点{i} TEI", _hex(data[offset:offset + 2]), str(tei), "站点TEI",
+           base_offset + offset, base_offset + offset + 1)
+        _f(table, f"站点{i} RU", f"0x{ru:01X}", str(ru), "RU编号",
+           base_offset + offset + 1, base_offset + offset + 1)
+        _f(table, f"站点{i} TMI", f"0x{tmi:02X}", str(tmi), "TMI",
+           base_offset + offset + 2, base_offset + offset + 2)
+        _f(table, f"站点{i} 物理块数", f"0x{pb_count:01X}", str(pb_count), "物理块数",
+           base_offset + offset + 2, base_offset + offset + 2)
+        offset += 3
+    _remaining(table, data, offset, base_offset)
+    return table
+
+
+def _parse_test_ext_0006(data: bytes, base_offset: int) -> list:
+    """0x0006: MAC层OFDMA配置"""
+    table = []
+    if len(data) < 4:
+        _f(table, "❌ 解析失败", "", "", "MAC层OFDMA配置数据不足", None, None)
+        return table
+    ofdma_type = _bits(data, 3, 0, 1)
+    node_count = _bits(data, 3, 1, 3)
+    reserved = _bits(data, 3, 4, 4)
+    _f(table, "OFDMA类型", f"0x{ofdma_type:01X}", str(ofdma_type),
+       "0:DL_OFDMA 1:UL_OFDMA", base_offset + 3, base_offset + 3)
+    _f(table, "OFDMA调度节点数", f"0x{node_count:01X}", str(node_count), "调度节点数",
+       base_offset + 3, base_offset + 3)
+    _f(table, "保留", f"0x{reserved:01X}", str(reserved), "保留",
+       base_offset + 3, base_offset + 3)
+    _remaining(table, data, 4, base_offset)
+    return table
+
+
+def _parse_test_ext_0007(data: bytes, base_offset: int) -> list:
+    """0x0007: 非组网场景TEI配置"""
+    table = []
+    if len(data) < 5:
+        _f(table, "❌ 解析失败", "", "", "非组网场景TEI配置数据不足", None, None)
+        return table
+    tei = _bits(data, 3, 0, 12)
+    reserved = _bits(data, 4, 4, 4)
+    _f(table, "TEI", _hex(data[3:5]), str(tei), "配置的TEI",
+       base_offset + 3, base_offset + 4)
+    _f(table, "保留", f"0x{reserved:01X}", str(reserved), "保留",
+       base_offset + 4, base_offset + 4)
+    _remaining(table, data, 5, base_offset)
+    return table
+
+
+def _parse_test_ext_0008(data: bytes, base_offset: int) -> list:
+    """0x0008: 业务报文Bitloading收发开关"""
+    table = []
+    if len(data) < 4:
+        _f(table, "❌ 解析失败", "", "", "Bitloading收发开关数据不足", None, None)
+        return table
+    enable = _bits(data, 3, 0, 1)
+    reserved = _bits(data, 3, 1, 7)
+    _f(table, "采用Bitloading传输数据", f"0x{enable:01X}", str(enable),
+       "0:退出Bitloading模式 1:使用Bitloading模式",
+       base_offset + 3, base_offset + 3)
+    _f(table, "保留", f"0x{reserved:02X}", str(reserved), "保留",
+       base_offset + 3, base_offset + 3)
+    _remaining(table, data, 4, base_offset)
+    return table
+
+
+def _parse_test_ext_payload(ext_id: int, data: bytes, base_offset: int) -> list:
+    """根据扩展ID分发解析"""
+    parsers = {
+        0x0001: _parse_test_ext_0001,
+        0x0002: _parse_test_ext_0002,
+        0x0003: _parse_test_ext_0003,
+        0x0004: _parse_test_ext_0004,
+        0x0005: _parse_test_ext_0005,
+        0x0006: _parse_test_ext_0006,
+        0x0007: _parse_test_ext_0007,
+        0x0008: _parse_test_ext_0008,
+    }
+    parser = parsers.get(ext_id)
+    if parser:
+        return parser(data, base_offset)
+    table = []
+    _f(table, "扩展数据", _hex(data)[:80] + ("..." if len(data) > 40 else ""),
+       f"{len(data)}字节", f"未识别扩展ID 0x{ext_id:04X}数据",
+       base_offset, base_offset + len(data) - 1 if data else base_offset)
+    return table
 
 
 def _parse_cmd_test_frame(payload: bytes, direction: int, base_offset: int) -> list:
@@ -876,14 +1285,43 @@ def _parse_cmd_test_frame(payload: bytes, direction: int, base_offset: int) -> l
     _f(table, "数据区长度", _hex(payload[2:4]), str(data_len), "测试数据区长度",
        base_offset + 2, base_offset + 3)
     offset = 4
-    if data_len > 0 and offset + data_len <= len(payload):
-        data = payload[offset:offset + data_len]
-        band = data[0] if data else None
-        band_desc = f"通信频段: 0x{band:02X}" if band is not None else ""
-        _f(table, "测试数据区", _hex(data)[:80] + ("..." if data_len > 40 else ""),
-           f"{data_len}字节", band_desc,
-           base_offset + offset, base_offset + offset + data_len - 1)
+    if test_id == 0x04:
+        # 2.0测试：APP_TEST_MODE_SPLC 结构
+        if data_len < 4:
+            _f(table, "❌ 解析失败", "", "", "2.0测试数据区长度不足4字节", None, None)
+            return table
+        if offset + data_len > len(payload):
+            _f(table, "❌ 解析失败", "", "", "2.0测试数据区超出负载", None, None)
+            return table
+        agreeon_ver = payload[offset]
+        file_len = payload[offset + 1]
+        ext_id = _uint16_le(payload, offset + 2)
+        _f(table, "协议版本号", f"0x{agreeon_ver:02X}", str(agreeon_ver), "协商版本号",
+           base_offset + offset, base_offset + offset)
+        _f(table, "文件长度", f"0x{file_len:02X}", str(file_len), "文件长度/配置长度",
+           base_offset + offset + 1, base_offset + offset + 1)
+        _f(table, "扩展ID", _hex(payload[offset + 2:offset + 4]), str(ext_id),
+           _TEST_EXT_ID_MAP.get(ext_id, f"保留扩展ID(0x{ext_id:04X})"),
+           base_offset + offset + 2, base_offset + offset + 3)
+        ext_offset = offset + 4
+        ext_data = payload[ext_offset:offset + data_len]
+        ext_table = _parse_test_ext_payload(ext_id, ext_data, base_offset + ext_offset)
+        table.extend(ext_table)
         offset += data_len
+    else:
+        if data_len > 0 and offset + data_len <= len(payload):
+            data = payload[offset:offset + data_len]
+            if test_id in (0x00, 0x01, 0x02) and data_len == 1:
+                band = data[0]
+                desc = f"通信频段: 0x{band:02X}"
+            elif test_id == 0x03:
+                desc = "1.0测试数据区（原有扩展命令格式）"
+            else:
+                desc = "测试数据区"
+            _f(table, "测试数据区", _hex(data)[:80] + ("..." if data_len > 40 else ""),
+               f"{data_len}字节", desc,
+               base_offset + offset, base_offset + offset + data_len - 1)
+            offset += data_len
     _remaining(table, payload, offset, base_offset)
     return table
 

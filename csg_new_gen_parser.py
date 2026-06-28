@@ -13,7 +13,12 @@ CSG New Generation Protocol Parser
 """
 from typing import Dict, List, Tuple, Any, Optional
 import struct
+import crcmod
 from csg_new_gen_cmd_payloads import parse_command_payload
+
+# ── CRC 算法（基于协议规范）──
+_crc24_func = crcmod.mkCrcFun(0x1800063, initCrc=0x000000, rev=True, xorOut=0x000000)
+_crc32_func = crcmod.mkCrcFun(0x104C11DB7, initCrc=0x00000000, rev=True, xorOut=0xffffffff)
 
 
 # ── 常量定义 ──
@@ -229,25 +234,13 @@ class CSGNewGenParser:
 
     @staticmethod
     def _crc32_ieee(data: bytes) -> int:
-        """标准 IEEE 802.3 CRC-32（与 zlib.crc32 一致）。"""
-        import zlib
-        return zlib.crc32(data) & 0xFFFFFFFF
+        """CRC-32 (IEEE 802.3): poly=0x104C11DB7, init=0, rev=True, xorOut=0xFFFFFFFF"""
+        return _crc32_func(data)
 
     @staticmethod
-    def _crc24(data: bytes, init: int = 0xB704CE, poly: int = 0x864CFB) -> int:
-        """
-        CRC-24 (ITU-T / RFC 2440 多项式 0x864CFB)。
-        新一代协议 FC FCS 具体多项式需以规范为准，此处使用常见 CRC-24 实现。
-        """
-        crc = init
-        for byte in data:
-            crc ^= (byte << 16)
-            for _ in range(8):
-                if crc & 0x800000:
-                    crc = ((crc << 1) ^ poly) & 0xFFFFFF
-                else:
-                    crc = (crc << 1) & 0xFFFFFF
-        return crc
+    def _crc24(data: bytes) -> int:
+        """CRC-24: poly=0x1800063, init=0, rev=True, xorOut=0x000000"""
+        return _crc24_func(data)
 
     def parse_to_table(self, frame_bytes: bytes, parse_level: str = "auto",
                     pb_frame_type: str = "sof") -> list:
@@ -285,6 +278,34 @@ class CSGNewGenParser:
             table_data.extend(mpdu_table)
 
             if parse_level == "fc_only":
+                return table_data
+
+            # ── eFC 扩展帧控制解析（OFDMA帧，type!=1时）──
+            # 预校验 CRC-24：若校验失败说明该帧实际不含 eFC（如非OFDMA帧被误判），跳过eFC解析
+            if (getattr(self, '_ofdma_frame_type', -1) >= 0
+                    and self._ofdma_frame_type != 1
+                    and delimiter_type == 1):  # 仅SOF帧携带eFC
+                efc_size = 16
+                if offset + efc_size <= frame_len:
+                    efc_data = frame_bytes[offset:offset + efc_size]
+                    # CRC-24 预校验：前13字节计算，字节13-15为FCS（小端序）
+                    efc_crc_calc = self._crc24(efc_data[:13])
+                    efc_crc_stored = int.from_bytes(efc_data[13:16], 'little')
+                    if efc_crc_calc == efc_crc_stored:
+                        efc_end = self._parse_efc(
+                            efc_data, offset,
+                            self._ofdma_frame_type,
+                            self._ofdma_station_count,
+                            table_data)
+                        offset = efc_end
+                    # CRC校验失败时不解析eFC，后续数据作为PB处理
+                else:
+                    table_data.append(("⚠️ eFC数据不足", "",
+                                      "", f"需要{efc_size}字节但仅剩{frame_len - offset}字节",
+                                      offset, frame_len - 1))
+
+            # FC+eFC解析模式：解析完FC和eFC后直接返回，不解析物理块
+            if parse_level == "fc_efc":
                 return table_data
 
             # 信标帧(定界符类型=0)：FC后直接为信标载荷，无物理块头
@@ -446,27 +467,40 @@ class CSGNewGenParser:
                 # 更新 offset 到 MSDU 起始位置（FC + PB头 + MAC头）
                 offset += pb_hdr_len + mac_hdr_len
         else:
-            # ── 步骤1: 检测 MAC 帧 ──
-            header_type = (first_byte >> 0) & 0x01
-            version = (first_byte >> 1) & 0x03
-            is_mac_frame = (header_type in (0, 1) and version in (1, 2) and frame_len >= 12)
+            # ── 步骤1: 先检测直接应用层报文（优先于MAC帧检测）──
+            # 端口号(0x11/0x13) + 标识符(0x0101) 的组合足够特异，可避免与MAC帧误判
+            is_direct_app = False
+            if frame_len >= 3:
+                port_byte = frame_bytes[0]
+                id_bytes = (frame_bytes[1] << 8) | frame_bytes[2]
+                if port_byte in (0x11, 0x13) and id_bytes == 0x0101:
+                    is_direct_app = True
 
-            if is_mac_frame:
-                mac_header_size = 12 if header_type == 1 else 32
-                offset, mac_table = self._parse_mac_frame(frame_bytes, offset)
-                table_data.extend(mac_table)
-                # 读取MSDU长度（MAC帧头 bytes 2-3）
-                if len(frame_bytes) >= 4:
-                    msdu_len = int.from_bytes(frame_bytes[2:4], 'little')
-                    msdu_payload = frame_bytes[mac_header_size:mac_header_size + msdu_len]
-                else:
-                    msdu_payload = frame_bytes[mac_header_size:]
-            else:
+            if is_direct_app:
+                # 直接应用层报文，跳过MAC帧解析
                 msdu_payload = frame_bytes
+            else:
+                # ── 步骤2: 检测 MAC 帧 ──
+                header_type = (first_byte >> 0) & 0x01
+                version = (first_byte >> 1) & 0x03
+                is_mac_frame = (header_type in (0, 1) and version in (1, 2) and frame_len >= 12)
+
+                if is_mac_frame:
+                    mac_header_size = 12 if header_type == 1 else 32
+                    offset, mac_table = self._parse_mac_frame(frame_bytes, offset)
+                    table_data.extend(mac_table)
+                    # 读取MSDU长度（MAC帧头 bytes 2-3）
+                    if len(frame_bytes) >= 4:
+                        msdu_len = int.from_bytes(frame_bytes[2:4], 'little')
+                        msdu_payload = frame_bytes[mac_header_size:mac_header_size + msdu_len]
+                    else:
+                        msdu_payload = frame_bytes[mac_header_size:]
+                else:
+                    msdu_payload = frame_bytes
 
         # ── 判断数据层次：MSDU头 还是 直接应用层 ──
-        is_direct_app = False
-        if len(msdu_payload) >= 3:
+        # 注意：is_direct_app 可能在早期检测中已设为True，此处仅对未确定的情况再检测
+        if not is_direct_app and len(msdu_payload) >= 3:
             # 检测应用层报文特征：端口号(0x11或0x13) + 标识符(0x0101)
             port_byte = msdu_payload[0]
             id_bytes = (msdu_payload[1] << 8) | msdu_payload[2]
@@ -783,8 +817,18 @@ class CSGNewGenParser:
                 f"帧类型: {ext_name}",
                 offset, offset
             ))
-        else:
-            # SOF/信标帧: 字节12 = 短网络标识高位(1b) + 保留(3b) + 标准版本号(4b)
+        elif delimiter_type == 1 and std_version == 1:
+            # BPLC SOF帧: 字节12 bit 0-3 = 扩展载波映射表索引（表20）
+            ext_cmt = b12 & 0x0F
+            table.append((
+                "扩展载波映射表索引",
+                f"0x{ext_cmt:X}",
+                str(ext_cmt),
+                f"扩展载波映射表索引: {ext_cmt}",
+                offset, offset
+            ))
+        elif delimiter_type == 1 and std_version == 2:
+            # ISAC-PLC SOF帧: 字节12 bit 0 = 短网络标识高位（表23/24/25/26）
             short_nid_high = b12 & 0x01
             full_snid = (short_nid_high << 4) | short_nid_low
             table.append((
@@ -794,6 +838,8 @@ class CSGNewGenParser:
                 f"完整SNID=0x{full_snid:02X}({full_snid})",
                 offset, offset
             ))
+        # 信标帧(delimiter_type==0): 字节12 bit 0 是符号数bit8，bit 1 才是SNID高位，
+        # SNID高位已在 _parse_mpdu_beacon 中处理，此处不再添加。
 
         table.append((
             "标准版本号",
@@ -806,8 +852,13 @@ class CSGNewGenParser:
 
         # ── 字节13-15: FC校验序列 (24-bit CRC) ──
         fcs_bytes = frame_bytes[offset:offset + 3]
-        fcs_val = (fcs_bytes[0] << 16) | (fcs_bytes[1] << 8) | fcs_bytes[2]
+        fcs_val = int.from_bytes(fcs_bytes, 'little')  # 小端序
+        # CRC-24 校验：计算范围 FC 前13字节（字节0-12）
+        fc_data_for_crc = frame_bytes[base_offset:base_offset + 13]
+        crc24_calc = self._crc24(fc_data_for_crc)
+        crc24_match = (crc24_calc == fcs_val)
         fcs_desc = f"24位CRC校验FC前13字节，FCS=0x{fcs_val:06X}"
+        fcs_desc += "，校验通过" if crc24_match else f"，校验失败(计算值=0x{crc24_calc:06X})"
         table.append((
             "FC校验序列(FCS)",
             ' '.join(f'{b:02X}' for b in fcs_bytes),
@@ -837,10 +888,14 @@ class CSGNewGenParser:
                      f"优先级/业务分类: {link_id}", offset + 3, offset + 3))
 
         # 短网络标识高位(1b) + 保留(15b): byte5[0] + byte5[1:7] + byte6[0:7]
+        short_nid_low = (frame_bytes[offset - 1] >> 4) & 0x0F
+        short_nid_high = frame_bytes[offset + 4] & 0x01
+        full_snid = (short_nid_high << 4) | short_nid_low
         table.append(("短网络标识高位",
-                     f"0b{frame_bytes[offset + 4] & 0x01}",
-                     str(frame_bytes[offset + 4] & 0x01),
-                     "SNID高1位", offset + 4, offset + 4))
+                     f"0b{short_nid_high}",
+                     str(short_nid_high),
+                     f"SNID高1位, 完整SNID=0x{full_snid:02X}({full_snid})",
+                     offset + 4, offset + 4))
 
         # 物理块个数(4b) + 载波映射表索引(4b): byte7[0:3] + byte7[4:7]
         b7 = frame_bytes[offset + 6]
@@ -868,10 +923,6 @@ class CSGNewGenParser:
         table.append(("符号数", f"0x{symbol_count:03X}", str(symbol_count),
                      f"OFDM符号数: {symbol_count}", offset + 9, offset + 10))
 
-        # 扩展载波映射表索引(4b): byte12[0:3]
-        ext_cmt = frame_bytes[offset + 10] & 0x0F if offset + 10 < len(frame_bytes) else 0
-        # note: offset+10 is byte 11 from start; byte 12 index is actually FC byte 12 (already parsed after)
-
         # 存储cmt_index供后续物理块解析使用
         self._cmt_index = cmt_index
         return offset + 11
@@ -888,23 +939,70 @@ class CSGNewGenParser:
         table.append(("目的TEI", f"0x{dst_tei:03X}", str(dst_tei),
                      f"接收站点TEI", offset + 1, offset + 2))
 
-        # 字节4: 多站点帧标识(1b) + 训练帧标识(1b) + PB数(4b) + 流数(2b)
+        # 字节4: bit0 = 多站点帧标识
         b4 = frame_bytes[offset + 3]
         multi_site = b4 & 0x01
-        training = (b4 >> 1) & 0x01
-        pb_count = (b4 >> 2) & 0x0F
-        streams = (b4 >> 6) & 0x03
         table.append(("多站点帧标识", f"0b{multi_site}", str(multi_site),
                      "多站点帧(OFDMA)" if multi_site else "单站点帧", offset + 3, offset + 3))
-        table.append(("训练帧标识", f"0b{training}", str(training),
-                     "训练帧" if training else "数据帧", offset + 3, offset + 3))
-        table.append(("物理块个数", f"0x{pb_count:X}", str(pb_count),
-                     f"{pb_count}个PB", offset + 3, offset + 3))
-        table.append(("流数", f"0x{streams:X}", str(streams),
-                     f"{streams + 1}流", offset + 3, offset + 3))
 
-        if not multi_site and not training:
-            # 数据帧：TF符号数(3b) + PL频段(3b) + TF扩展频段(1b) + 保留(1b)
+        if multi_site:
+            # OFDMA帧时 byte4 bit1-7 为 OFDMA专用字段（在下方OFDMA块解析）
+            pass
+        else:
+            # 非OFDMA: bit1=训练帧标识, bit2-5=PB数, bit6-7=流数
+            training = (b4 >> 1) & 0x01
+            pb_count = (b4 >> 2) & 0x0F
+            streams = (b4 >> 6) & 0x03
+            table.append(("训练帧标识", f"0b{training}", str(training),
+                         "训练帧" if training else "数据帧", offset + 3, offset + 3))
+            table.append(("物理块个数", f"0x{pb_count:X}", str(pb_count),
+                         f"{pb_count}个PB", offset + 3, offset + 3))
+            table.append(("流数", f"0x{streams:X}", str(streams),
+                         f"{streams + 1}流", offset + 3, offset + 3))
+
+        # 存储OFDMA相关状态供后续eFC解析使用
+        self._ofdma_frame_type = -1  # -1=非OFDMA
+        self._ofdma_station_count = 0
+        self._efc_symbol_count = 0
+
+        if multi_site:
+            # ── OFDMA帧 (表26) ──
+            b4 = frame_bytes[offset + 3]
+            ofdma_type = (b4 >> 1) & 0x03
+            band_id = (b4 >> 3) & 0x07
+            station_count = ((b4 >> 6) & 0x03) + 1
+            self._ofdma_frame_type = ofdma_type
+            self._ofdma_station_count = station_count
+            OFDMA_TYPE_MAP = {0: "DL-OFDMA帧", 1: "DL-OFDMA SACK/UL-OFDMA帧",
+                              2: "UL-OFDMA trigger帧", 3: "UL-OFDMA SACK帧"}
+            table.append(("OFDMA帧类型", f"0b{ofdma_type:02b}", str(ofdma_type),
+                         OFDMA_TYPE_MAP.get(ofdma_type, f"保留({ofdma_type})"),
+                         offset + 3, offset + 3))
+            table.append(("频段标识", f"0x{band_id:X}", str(band_id),
+                         f"频段{band_id}", offset + 3, offset + 3))
+            table.append(("站点数", f"0x{station_count:X}", str(station_count),
+                         f"{station_count}个站点", offset + 3, offset + 3))
+            # eFC符号个数(2b) + 保留(6b)
+            b5 = frame_bytes[offset + 4]
+            efc_sym_cfg = b5 & 0x03
+            efc_sym_map = {0: 2, 1: 4, 2: 8, 3: 12}
+            self._efc_symbol_count = efc_sym_map.get(efc_sym_cfg, 2)
+            table.append(("eFC符号个数", f"0b{efc_sym_cfg:02b}", str(self._efc_symbol_count),
+                         f"{self._efc_symbol_count}个eFC符号", offset + 4, offset + 4))
+            # PL符号数(9b): byte6[0:7]+byte7[0]
+            b6 = frame_bytes[offset + 5]
+            b7 = frame_bytes[offset + 6]
+            pl_symbols = b6 | ((b7 & 0x01) << 8)
+            table.append(("PL符号数", f"0x{pl_symbols:03X}", str(pl_symbols),
+                         f"{pl_symbols}个PL符号", offset + 5, offset + 6))
+            # 帧长(12b): byte8[0:7]+byte9[0:3]
+            b8 = frame_bytes[offset + 7]
+            b9 = frame_bytes[offset + 8]
+            frame_len_pb = b8 | ((b9 & 0x0F) << 8)
+            table.append(("帧长", f"0x{frame_len_pb:03X}", f"{frame_len_pb * 10}μs",
+                         f"占用信道时长", offset + 7, offset + 8))
+        elif not training:
+            # ── 数据帧(非OFDMA)：TF符号数(3b) + PL频段(3b) + TF扩展频段(1b) + 保留(1b) ──
             b5 = frame_bytes[offset + 4]
             tf_symbols = (b5 & 0x07) * 2 + 2
             pl_band = (b5 >> 3) & 0x07
@@ -920,7 +1018,7 @@ class CSGNewGenParser:
             b6 = frame_bytes[offset + 5]
             bitloading = b6 & 0x01
             tmi = (b6 >> 1) & 0x1F
-            self._cmt_index = tmi  # 存储TMI供后续PB大小计算
+            self._cmt_index = tmi
             if bitloading:
                 pb_size = self.ISAC_PB_MAP.get(tmi, 136)
                 table.append(("Bitloading/PB大小", f"0x{tmi:X}", str(tmi),
@@ -935,10 +1033,153 @@ class CSGNewGenParser:
             frame_len_pb = b8 | ((b9 & 0x0F) << 8)
             table.append(("帧长", f"0x{frame_len_pb:03X}", f"{frame_len_pb * 10}μs",
                          f"占用信道时长", offset + 7, offset + 8))
+        # 训练帧(multi_site==0 && training==1)的byte4-8已在前面解析
 
         return offset + 11
 
-    # ── 信标帧可变区域 (字节1-12) ──
+    # ── eFC 扩展帧控制解析 ──
+
+    @staticmethod
+    def _extract_bits(data: bytes, start_bit: int, width: int) -> int:
+        """从字节流提取位域，start_bit为绝对位偏移(LSB优先，bit0=byte0.bit0)"""
+        val = 0
+        for i in range(width):
+            bp = start_bit + i
+            byte_idx = bp // 8
+            bit_idx = bp % 8
+            if byte_idx < len(data):
+                val |= ((data[byte_idx] >> bit_idx) & 1) << i
+        return val
+
+    def _parse_efc(self, efc_data: bytes, base_offset: int, ofdma_type: int,
+                   station_count: int, table: list) -> int:
+        """解析eFC(扩展帧控制)，16字节。返回eFC结束偏移"""
+        if len(efc_data) < 16:
+            table.append(("❌ eFC解析失败", "", "", "eFC数据不足16字节", None, None))
+            return base_offset + len(efc_data)
+        eb = efc_data  # eFC字节(相对偏移)
+        table.append(("eFC原始数据",
+                     ' '.join(f'{b:02X}' for b in eb[:16]),
+                     "16字节", "扩展帧控制",
+                     base_offset, base_offset + 15))
+        if ofdma_type == 0:
+            self._parse_efc_dl_ofdma(eb, base_offset, station_count, table)
+        elif ofdma_type == 2:
+            self._parse_efc_ul_trigger(eb, base_offset, station_count, table)
+        elif ofdma_type == 3:
+            self._parse_efc_ul_sack(eb, base_offset, station_count, table)
+        else:
+            table.append(("eFC(未知类型)", f"type={ofdma_type}", "", "无法解析",
+                         base_offset, base_offset + 15))
+        return base_offset + 16
+
+    def _parse_efc_dl_ofdma(self, eb: bytes, base_offset: int, sta_count: int, table: list):
+        """表27: DL-OFDMA帧eFC"""
+        tf_count = self._extract_bits(eb, 0, 2)
+        actual_tf = (tf_count + 1) * 2
+        table.append(("eFC: TF个数", f"0b{tf_count:02b}", str(actual_tf),
+                     f"实际TF个数={actual_tf}", base_offset, base_offset))
+        # 每站点25bit: PB个数(1)+TEI(12)+TMI(5)+RU(4)+SACK_RU(3)
+        bit_pos = 2
+        for s in range(min(sta_count, 4)):
+            bp = bit_pos + s * 25
+            pb_cnt = self._extract_bits(eb, bp, 1) + 1
+            tei = self._extract_bits(eb, bp + 1, 12)
+            tmi = self._extract_bits(eb, bp + 13, 5)
+            ru = self._extract_bits(eb, bp + 18, 4)
+            sack_ru = self._extract_bits(eb, bp + 22, 3)
+            start_byte = base_offset + bp // 8
+            end_byte = base_offset + (bp + 24) // 8
+            table.append((f"eFC: 站点{s} PB个数", f"0b{pb_cnt-1}", str(pb_cnt),
+                         f"{pb_cnt}个PB", start_byte, start_byte))
+            table.append((f"eFC: 站点{s} TEI", f"0x{tei:03X}", str(tei),
+                         f"目的站点TEI", start_byte, end_byte))
+            table.append((f"eFC: 站点{s} TMI", f"0x{tmi:02X}", str(tmi),
+                         f"TMI={tmi}", start_byte, end_byte))
+            table.append((f"eFC: 站点{s} RU", f"0x{ru:X}", str(ru),
+                         f"RU{ru}", start_byte, end_byte))
+            table.append((f"eFC: 站点{s} SACK_RU", f"0x{sack_ru:X}", str(sack_ru),
+                         f"回复SACK用RU{sack_ru}", start_byte, end_byte))
+        # CRC: 前13字节CRC-24校验，字节13-15为FCS（小端序）
+        crc_val = int.from_bytes(eb[13:16], 'little')
+        crc24_calc = self._crc24(eb[:13])
+        crc24_match = (crc24_calc == crc_val)
+        crc_desc = f"24位CRC校验eFC前13字节，FCS=0x{crc_val:06X}"
+        crc_desc += "，校验通过" if crc24_match else f"，校验失败(计算值=0x{crc24_calc:06X})"
+        table.append(("eFC CRC校验", ' '.join(f'{b:02X}' for b in eb[13:16]),
+                     f"0x{crc_val:06X}", crc_desc,
+                     base_offset + 13, base_offset + 15))
+
+    def _parse_efc_ul_trigger(self, eb: bytes, base_offset: int, sta_count: int, table: list):
+        """表28: UL-OFDMA trigger帧eFC"""
+        TX_PWR_MAP = {i: f"{i*4}dB" for i in range(8)}
+        tf_count = self._extract_bits(eb, 0, 2)
+        actual_tf = (tf_count + 1) * 2
+        table.append(("eFC: TF个数", f"0b{tf_count:02b}", str(actual_tf),
+                     f"实际TF个数={actual_tf}", base_offset, base_offset))
+        # 每站点25bit: PB个数(1)+TEI(12)+TMI(5)+RU(4)+Tx功率回退(3)
+        bit_pos = 2
+        for s in range(min(sta_count, 4)):
+            bp = bit_pos + s * 25
+            pb_cnt = self._extract_bits(eb, bp, 1) + 1
+            tei = self._extract_bits(eb, bp + 1, 12)
+            tmi = self._extract_bits(eb, bp + 13, 5)
+            ru = self._extract_bits(eb, bp + 18, 4)
+            tx_backoff = self._extract_bits(eb, bp + 22, 3)
+            start_byte = base_offset + bp // 8
+            end_byte = base_offset + (bp + 24) // 8
+            table.append((f"eFC: 站点{s} PB个数", f"0b{pb_cnt-1}", str(pb_cnt),
+                         f"{pb_cnt}个PB", start_byte, start_byte))
+            table.append((f"eFC: 站点{s} TEI", f"0x{tei:03X}", str(tei),
+                         f"目的站点TEI", start_byte, end_byte))
+            table.append((f"eFC: 站点{s} TMI", f"0x{tmi:02X}", str(tmi),
+                         f"TMI={tmi}", start_byte, end_byte))
+            table.append((f"eFC: 站点{s} RU", f"0x{ru:X}", str(ru),
+                         f"RU{ru}", start_byte, end_byte))
+            table.append((f"eFC: 站点{s} Tx功率回退",
+                         f"0x{tx_backoff:X}", str(tx_backoff),
+                         f"回退{TX_PWR_MAP.get(tx_backoff, '?')}",
+                         start_byte, end_byte))
+        crc_val = int.from_bytes(eb[13:16], 'little')
+        crc24_calc = self._crc24(eb[:13])
+        crc24_match = (crc24_calc == crc_val)
+        crc_desc = f"24位CRC校验eFC前13字节，FCS=0x{crc_val:06X}"
+        crc_desc += "，校验通过" if crc24_match else f"，校验失败(计算值=0x{crc24_calc:06X})"
+        table.append(("eFC CRC校验", ' '.join(f'{b:02X}' for b in eb[13:16]),
+                     f"0x{crc_val:06X}", crc_desc,
+                     base_offset + 13, base_offset + 15))
+
+    def _parse_efc_ul_sack(self, eb: bytes, base_offset: int, sta_count: int, table: list):
+        """表29: UL-OFDMA SACK帧eFC
+        每站点3字节(24bit): TEI(12bit) + 接收状态(4bit) + 保留(8bit)
+        """
+        for s in range(min(sta_count, 4)):
+            base_bit = s * 24  # 每站点24bit
+            tei = self._extract_bits(eb, base_bit, 12)
+            rx_status = self._extract_bits(eb, base_bit + 12, 4)
+            reserved = self._extract_bits(eb, base_bit + 16, 8)
+            start_byte = base_offset + base_bit // 8
+            end_byte = base_offset + (base_bit + 23) // 8
+            pb0 = "OK" if (rx_status & 1) else "FAIL"
+            pb1 = "OK" if (rx_status & 2) else "FAIL"
+            table.append((f"eFC: 站点{s} TEI", f"0x{tei:03X}", str(tei),
+                         f"站点TEI", start_byte, end_byte))
+            table.append((f"eFC: 站点{s} 接收状态", f"0x{rx_status:X}",
+                         f"PB0:{pb0} PB1:{pb1}",
+                         f"PB接收结果(bit0=PB0,bit1=PB1)",
+                         start_byte, end_byte))
+            table.append((f"eFC: 站点{s} 保留", f"0x{reserved:02X}", str(reserved),
+                         "保留字段", start_byte + 2, end_byte))
+        crc_val = int.from_bytes(eb[13:16], 'little')
+        crc24_calc = self._crc24(eb[:13])
+        crc24_match = (crc24_calc == crc_val)
+        crc_desc = f"24位CRC校验eFC前13字节，FCS=0x{crc_val:06X}"
+        crc_desc += "，校验通过" if crc24_match else f"，校验失败(计算值=0x{crc24_calc:06X})"
+        table.append(("eFC CRC校验", ' '.join(f'{b:02X}' for b in eb[13:16]),
+                     f"0x{crc_val:06X}", crc_desc,
+                     base_offset + 13, base_offset + 15))
+
+    # ── 信标帧可变区域 (字节1-12) ───
 
     BEACON_PHASE_MAP = {0: "未知相线", 1: "A相线", 2: "B相线", 3: "C相线"}
 
@@ -1509,7 +1750,12 @@ class CSGNewGenParser:
         if frame_len >= new_offset + 4:
             crc_bytes = frame_bytes[msdu_end:msdu_end + 4]
             crc_val = int.from_bytes(crc_bytes, 'little')
+            # CRC-32 校验：计算范围 MSDU 负载（new_offset 已是相对偏移，无需加 base_offset）
+            msdu_data_for_crc = frame_bytes[new_offset:msdu_end]
+            crc32_calc = self._crc32_ieee(msdu_data_for_crc)
+            crc32_match = (crc32_calc == crc_val)
             crc_desc = f"32位循环冗余校验(CRC-32)，计算范围: MSDU负载，CRC32=0x{crc_val:08X}"
+            crc_desc += "，校验通过" if crc32_match else f"，校验失败(计算值=0x{crc32_calc:08X})"
             table.append((
                 "完整性校验(CRC-32)",
                 ' '.join(f'{b:02X}' for b in crc_bytes),
@@ -1920,7 +2166,7 @@ class CSGNewGenParser:
                 table.append((
                     "  软件版本号",
                     ' '.join(f'{b:02X}' for b in sw_ver),
-                    f"{sw_ver[0]:02X}{sw_ver[1]:02X}",
+                    f"{sw_ver[1]:02X}{sw_ver[0]:02X}",
                     "软件版本号(BCD)",
                     base_offset + offset, base_offset + offset + 1
                 ))
@@ -1948,7 +2194,7 @@ class CSGNewGenParser:
                 table.append((
                     "  厂商代码",
                     ' '.join(f'{b:02X}' for b in vendor_code),
-                    vendor_str,
+                    vendor_str[::-1],
                     "厂商代码(ASCII)",
                     base_offset + offset, base_offset + offset + 1
                 ))
@@ -1960,7 +2206,7 @@ class CSGNewGenParser:
                 table.append((
                     "  芯片代码",
                     ' '.join(f'{b:02X}' for b in chip_code),
-                    chip_str,
+                    chip_str[::-1],
                     "芯片代码(ASCII)",
                     base_offset + offset, base_offset + offset + 1
                 ))
@@ -3725,6 +3971,48 @@ class CSGNewGenParser:
     # 数据透传业务代码
     DATA_FORWARD_SERVICE_CODE_MAP = {
         0x00: "默认透传",
+        0x01: "精准对时",
+        0x02: "负荷曲线采集与存储",
+    }
+
+    # 负荷曲线数据标识码 → (名称, 数据长度字节)
+    _LOAD_CURVE_DATA_ITEM_MAP = {
+        (0x06, 0x12, 0x01, 0x01): ("A相电压", 2),
+        (0x06, 0x12, 0x01, 0x02): ("B相电压", 2),
+        (0x06, 0x12, 0x01, 0x03): ("C相电压", 2),
+        (0x06, 0x12, 0x01, 0xFF): ("电压曲线数据块", 6),       # ABC三相×2B
+        (0x06, 0x12, 0x02, 0x01): ("A相电流", 3),
+        (0x06, 0x12, 0x02, 0x02): ("B相电流", 3),
+        (0x06, 0x12, 0x02, 0x03): ("C相电流", 3),
+        (0x06, 0x12, 0x02, 0xFF): ("电流曲线数据块", 9),       # ABC三相×3B
+        (0x06, 0x12, 0x03, 0x00): ("总有功功率", 3),
+        (0x06, 0x12, 0x03, 0x01): ("A相有功功率", 3),
+        (0x06, 0x12, 0x03, 0x02): ("B相有功功率", 3),
+        (0x06, 0x12, 0x03, 0x03): ("C相有功功率", 3),
+        (0x06, 0x12, 0x03, 0xFF): ("有功功率曲线数据块", 12),  # 总+ABC=4项×3B
+        (0x06, 0x12, 0x04, 0x00): ("总无功功率", 3),
+        (0x06, 0x12, 0x04, 0x01): ("A相无功功率", 3),
+        (0x06, 0x12, 0x04, 0x02): ("B相无功功率", 3),
+        (0x06, 0x12, 0x04, 0x03): ("C相无功功率", 3),
+        (0x06, 0x12, 0x04, 0xFF): ("无功功率曲线数据块", 12),  # 总+ABC=4项×3B
+        (0x06, 0x12, 0x05, 0x00): ("总功率因数", 2),
+        (0x06, 0x12, 0x05, 0x01): ("A功率因数", 2),
+        (0x06, 0x12, 0x05, 0x02): ("B功率因数", 2),
+        (0x06, 0x12, 0x05, 0x03): ("C功率因数", 2),
+        (0x06, 0x12, 0x05, 0xFF): ("功率因数曲线数据块", 8),  # 总+ABC=4项×2B
+        (0x06, 0x12, 0x06, 0x01): ("正向有功总电能", 4),
+        (0x06, 0x12, 0x06, 0x02): ("反向有功总电能", 4),
+        (0x06, 0x12, 0x06, 0x03): ("组合无功1总电能", 4),
+        (0x06, 0x12, 0x06, 0x04): ("组合无功2总电能", 4),
+        (0x06, 0x12, 0x06, 0xFF): ("有功无功总电能数据块", 16), # 4项×4B
+        (0x06, 0x12, 0x07, 0x01): ("第一象限无功总电能", 4),
+        (0x06, 0x12, 0x07, 0x02): ("第二象限无功总电能", 4),
+        (0x06, 0x12, 0x07, 0x03): ("第三象限无功总电能", 4),
+        (0x06, 0x12, 0x07, 0x04): ("第四象限无功总电能", 4),
+        (0x06, 0x12, 0x07, 0xFF): ("四象限无功曲线数据块", 16), # 4象限×4B
+        (0x06, 0x12, 0x08, 0x01): ("当前有功需量", 3),
+        (0x06, 0x12, 0x08, 0x02): ("当前无功需量", 3),
+        (0x06, 0x12, 0x08, 0xFF): ("当前需量曲线数据块", 6),   # 有功+无功=2项×3B
     }
 
     def _parse_payload_data_transfer(
@@ -3875,14 +4163,22 @@ class CSGNewGenParser:
             ))
             offset += 2
             if data_len > 0 and offset + data_len <= len(payload):
-                data_bytes = payload[offset:offset + data_len]
-                table.append((
-                    "数据转发内容",
-                    ' '.join(f'{b:02X}' for b in data_bytes[:30]) + ("..." if data_len > 30 else ""),
-                    f"{data_len}字节",
-                    "待转发/已转发的模块数据",
-                    base_offset + offset, base_offset + offset + data_len - 1
-                ))
+                fwd_data = payload[offset:offset + data_len]
+                # 根据业务代码深入解析转发数据内容
+                if svc_code == 0x01:
+                    sub = self._parse_precise_timing(fwd_data, base_offset + offset)
+                    table.extend(sub)
+                elif svc_code == 0x02:
+                    sub = self._parse_load_curve(fwd_data, direction, base_offset + offset)
+                    table.extend(sub)
+                else:
+                    table.append((
+                        "数据转发内容",
+                        ' '.join(f'{b:02X}' for b in fwd_data[:30]) + ("..." if data_len > 30 else ""),
+                        f"{data_len}字节",
+                        "待转发/已转发的模块数据",
+                        base_offset + offset, base_offset + offset + data_len - 1
+                    ))
                 offset += data_len
 
         if offset < len(payload):
@@ -3894,6 +4190,188 @@ class CSGNewGenParser:
                 "未解析数据",
                 base_offset + offset, base_offset + len(payload) - 1
             ))
+        return table
+
+    def _parse_precise_timing(
+        self, data: bytes, base_offset: int
+    ) -> list:
+        """解析精准对时转发数据内容 (业务代码0x01, 表57)"""
+        table = []
+        offset = 0
+        ln = len(data)
+
+        if ln < 8:
+            table.append(("精准对时数据", ' '.join(f'{b:02X}' for b in data),
+                          f"{ln}字节", "数据不足", base_offset, base_offset + ln - 1 if ln else base_offset))
+            return table
+
+        # 端口号 (2B)
+        port = self._uint16_le(data, offset)
+        table.append(("端口号", f"0x{port:04X}", str(port),
+                       "精准对时端口" if port == 0x01 else "",
+                       base_offset + offset, base_offset + offset + 1))
+        offset += 2
+
+        # 序号 (1B)
+        seq = data[offset]
+        table.append(("序号", f"0x{seq:02X}", str(seq),
+                       "CCO下发广播报文序号", base_offset + offset, base_offset + offset))
+        offset += 1
+
+        # 保留 (1B)
+        rsv = data[offset]
+        table.append(("保留", f"0x{rsv:02X}", str(rsv),
+                       "保留", base_offset + offset, base_offset + offset))
+        offset += 1
+
+        # CCO网络基准时间 (4B, little-endian)
+        ntb = self._read_u32_le(data, offset)
+        table.append(("CCO网络基准时间", f"0x{ntb:08X}", str(ntb),
+                       "CCO当前NTB (计数频率25MHz)", base_offset + offset, base_offset + offset + 3))
+        offset += 4
+
+        # 校时报文 (剩余字节, DL/T 645)
+        if offset < ln:
+            timing_msg = data[offset:]
+            table.append(("校时报文(DL/T645)",
+                          ' '.join(f'{b:02X}' for b in timing_msg[:40]) + ("..." if len(timing_msg) > 40 else ""),
+                          f"{len(timing_msg)}字节",
+                          "DL/T 645广播校时报文",
+                          base_offset + offset, base_offset + ln - 1))
+        return table
+
+    def _parse_load_curve(
+        self, data: bytes, direction: int, base_offset: int
+    ) -> list:
+        """解析负荷曲线采集与存储转发数据内容 (业务代码0x02, 表65-67)"""
+        table = []
+        offset = 0
+        ln = len(data)
+        if ln < 1:
+            return table
+
+        # 功能码 (1B)
+        func_code = data[offset]
+        func_desc = {0x01: "配置采集间隔", 0x02: "抄读数据项"}.get(func_code, f"保留(0x{func_code:02X})")
+        table.append(("功能码", f"0x{func_code:02X}", str(func_code),
+                       func_desc, base_offset + offset, base_offset + offset))
+        offset += 1
+
+        if func_code == 0x01:
+            # ---- 配置采集间隔 (表65): 采集间隔(4B) ----
+            if offset + 4 <= ln:
+                interval = self._read_u32_le(data, offset)
+                table.append(("采集间隔", f"0x{interval:08X}", str(interval),
+                               f"{interval}分钟", base_offset + offset, base_offset + offset + 3))
+                offset += 4
+            elif offset < ln:
+                rem = data[offset:]
+                table.append(("采集间隔(不完整)", ' '.join(f'{b:02X}' for b in rem),
+                              f"{len(rem)}字节", "数据不足4字节",
+                              base_offset + offset, base_offset + ln - 1))
+                offset = ln
+
+        elif func_code == 0x02:
+            # ---- 抄读数据项 (表66下行/表67上行) ----
+            if offset >= ln:
+                return table
+
+            # 表类型 (1B)
+            meter_type = data[offset]
+            mt_desc = {0x00: "单相表", 0x01: "三相表"}.get(meter_type, f"保留(0x{meter_type:02X})")
+            table.append(("表类型", f"0x{meter_type:02X}", str(meter_type),
+                           mt_desc, base_offset + offset, base_offset + offset))
+            offset += 1
+
+            # 起始点时间 (5B BCD, YYMMDDhhmm)
+            if offset + 5 <= ln:
+                bcd_bytes = data[offset:offset + 5]
+                # 低字节在前: mm hh DD MM YY
+                mm, hh, dd, mo, yy = bcd_bytes
+                time_str = f"20{yy:02X}-{mo:02X}-{dd:02X} {hh:02X}:{mm:02X}"
+                table.append(("起始点时间", ' '.join(f'{b:02X}' for b in bcd_bytes),
+                               time_str, "YYMMDDhhmm (BCD, 低字节在前)",
+                               base_offset + offset, base_offset + offset + 4))
+                offset += 5
+            else:
+                offset = ln
+                return table
+
+            # 采集点数量 (1B)
+            if offset >= ln:
+                return table
+            point_count = data[offset]
+            table.append(("采集点数量", f"0x{point_count:02X}", str(point_count),
+                           f"{point_count}个采集点", base_offset + offset, base_offset + offset))
+            offset += 1
+
+            # 采集时间间隔 (1B)
+            if offset >= ln:
+                return table
+            collect_interval = data[offset]
+            table.append(("采集时间间隔", f"0x{collect_interval:02X}", str(collect_interval),
+                           f"{collect_interval}分钟", base_offset + offset, base_offset + offset))
+            offset += 1
+
+            # 数据项数量 m (1B)
+            if offset >= ln:
+                return table
+            item_count = data[offset]
+            table.append(("数据项数量", f"0x{item_count:02X}", str(item_count),
+                           f"{item_count}项", base_offset + offset, base_offset + offset))
+            offset += 1
+
+            # 解析每个数据标识 (4B) 及其对应的数据(仅上行)
+            data_item_sizes = []  # 记录每个标识对应的数据长度
+            for i in range(item_count):
+                if offset + 4 > ln:
+                    break
+                di = data[offset:offset + 4]
+                di_key = (di[3], di[2], di[1], di[0])  # DI3,DI2,DI1,DI0
+                item_name, item_size = self._LOAD_CURVE_DATA_ITEM_MAP.get(
+                    di_key, (f"未知标识(0x{di[3]:02X}{di[2]:02X}{di[1]:02X}{di[0]:02X})", 0)
+                )
+                table.append((f"数据标识{i+1}",
+                              f"{di[0]:02X} {di[1]:02X} {di[2]:02X} {di[3]:02X}",
+                              item_name,
+                              f"DI3={di[3]:02X} DI2={di[2]:02X} DI1={di[1]:02X} DI0={di[0]:02X}",
+                              base_offset + offset, base_offset + offset + 3))
+                offset += 4
+                data_item_sizes.append((item_name, item_size))
+
+                # 上行报文(方向1): 每个数据标识后紧跟 n 个采集点的数据
+                if direction == 1 and point_count > 0 and item_size > 0:
+                    for pt in range(point_count):
+                        if offset + item_size > ln:
+                            break
+                        pt_data = data[offset:offset + item_size]
+                        val_hex = ' '.join(f'{b:02X}' for b in pt_data)
+                        # 判断是否全FF(无数据)
+                        if all(b == 0xFF for b in pt_data):
+                            val_str = "无数据(FF)"
+                        else:
+                            val_str = val_hex
+                        table.append((f"{item_name}-点{pt+1}", val_hex, val_str,
+                                       f"第{pt+1}个采集点数据({item_size}字节)",
+                                       base_offset + offset, base_offset + offset + item_size - 1))
+                        offset += item_size
+
+            # 如果还有剩余数据
+            if offset < ln:
+                rem = data[offset:]
+                table.append(("负荷曲线剩余数据",
+                              ' '.join(f'{b:02X}' for b in rem[:30]) + ("..." if len(rem) > 30 else ""),
+                              f"{len(rem)}字节", "未解析数据",
+                              base_offset + offset, base_offset + ln - 1))
+
+        else:
+            # 未知功能码, 输出剩余原始数据
+            if offset < ln:
+                rem = data[offset:]
+                table.append(("功能码数据", ' '.join(f'{b:02X}' for b in rem[:30]) + ("..." if len(rem) > 30 else ""),
+                              f"{len(rem)}字节", f"功能码0x{func_code:02X}的数据",
+                              base_offset + offset, base_offset + ln - 1))
+
         return table
 
     def _parse_concurrent_meter_read(
@@ -4158,12 +4636,18 @@ class CSGNewGenParser:
 
                 if data_len > 0 and offset + data_len <= len(payload):
                     event_data = payload[offset:offset + data_len]
-                    table.append((
-                        "事件数据内容",
-                        ' '.join(f'{b:02X}' for b in event_data[:30]) + ("..." if data_len > 30 else ""),
-                        f"{data_len}字节", "事件原始数据",
-                        base_offset + offset, base_offset + offset + data_len - 1
-                    ))
+                    # 停上电事件深入解析
+                    if service_id == 0x01:
+                        sub = self._parse_power_outage_report(
+                            event_data, direction, base_offset + offset)
+                        table.extend(sub)
+                    else:
+                        table.append((
+                            "事件数据内容",
+                            ' '.join(f'{b:02X}' for b in event_data[:30]) + ("..." if data_len > 30 else ""),
+                            f"{data_len}字节", "事件原始数据",
+                            base_offset + offset, base_offset + offset + data_len - 1
+                        ))
                     offset += data_len
 
         if offset < len(payload):
@@ -4173,6 +4657,110 @@ class CSGNewGenParser:
                 f"{len(remaining)}字节", "未解析数据",
                 base_offset + offset, base_offset + len(payload) - 1
             ))
+        return table
+
+    def _parse_power_outage_report(
+        self, data: bytes, direction: int, base_offset: int
+    ) -> list:
+        """解析停上电事件上报数据 (业务标识0x01, 表46-49)"""
+        table = []
+        offset = 0
+        ln = len(data)
+        if ln < 9:
+            table.append(("停电事件数据", ' '.join(f'{b:02X}' for b in data),
+                          f"{ln}字节", "数据不足",
+                          base_offset, base_offset + ln - 1 if ln else base_offset))
+            return table
+
+        # 帧头长度 (1B)
+        hdr_len = data[offset]
+        table.append(("帧头长度", f"0x{hdr_len:02X}", str(hdr_len),
+                       "除数据域外的长度(通常12字节)",
+                       base_offset + offset, base_offset + offset))
+        offset += 1
+
+        # STA MAC (6B)
+        mac_raw, mac = self._mac_addr(data, offset)
+        table.append(("STA MAC", mac_raw, mac, "停电事件源STA地址",
+                       base_offset + offset, base_offset + offset + 5))
+        offset += 6
+
+        # 功能码 (1B)
+        func_code = data[offset]
+        func_desc = {1: "STA主动上报(模块触发)", 2: "STA主动上报(采集器触发)"}.get(
+            func_code, f"保留(0x{func_code:02X})")
+        table.append(("功能码", f"0x{func_code:02X}", str(func_code), func_desc,
+                       base_offset + offset, base_offset + offset))
+        offset += 1
+
+        # 数据长度 (1B)
+        data_len = data[offset]
+        table.append(("数据长度", f"0x{data_len:02X}", str(data_len),
+                       f"数据域长度: {data_len}字节",
+                       base_offset + offset, base_offset + offset))
+        offset += 1
+
+        # 数据域
+        if offset >= ln:
+            return table
+
+        event_type = data[offset]
+        if event_type == 1:
+            # 位图式停电 (表48)
+            table.append(("事件类型", f"0x{event_type:02X}", str(event_type),
+                           "停电事件(位图)", base_offset + offset, base_offset + offset))
+            offset += 1
+            if offset + 2 <= ln:
+                start_tei = self._uint16_le(data, offset)
+                table.append(("起始TEI", f"0x{start_tei:04X}", str(start_tei),
+                               "发生事件站点起始TEI",
+                               base_offset + offset, base_offset + offset + 1))
+                offset += 2
+            if offset < ln:
+                bitmap = data[offset:]
+                bits_set = []
+                for bi, byte in enumerate(bitmap):
+                    for bit in range(8):
+                        if byte & (1 << bit):
+                            bits_set.append(str(start_tei + bi * 8 + bit))
+                table.append(("节点位图", ' '.join(f'{b:02X}' for b in bitmap),
+                               f"停电TEI: {','.join(bits_set)}" if bits_set else "无停电节点",
+                               "对应bit置1表示该TEI节点发生停电",
+                               base_offset + offset, base_offset + ln - 1))
+
+        elif event_type in (3, 4):
+            # 地址式停电/上电 (表49)
+            type_desc = {3: "停电事件(地址)", 4: "上电事件(地址)"}.get(event_type, "")
+            table.append(("事件类型", f"0x{event_type:02X}", str(event_type), type_desc,
+                           base_offset + offset, base_offset + offset))
+            offset += 1
+            if offset + 2 <= ln:
+                meter_count = self._uint16_le(data, offset)
+                table.append(("电表个数", f"0x{meter_count:04X}", str(meter_count),
+                               f"{meter_count}只电表",
+                               base_offset + offset, base_offset + offset + 1))
+                offset += 2
+            for mi in range(meter_count):
+                if offset + 7 > ln:
+                    break
+                addr_raw, addr = self._mac_addr(data, offset)
+                table.append((f"电表{mi+1}地址", addr_raw, addr,
+                               "发生事件的电表地址",
+                               base_offset + offset, base_offset + offset + 5))
+                offset += 6
+                status = data[offset]
+                status_desc = "未停电" if status == 1 else "停电" if status == 0 else f"保留(0x{status:02X})"
+                table.append((f"电表{mi+1}带电状态", f"0x{status:02X}", str(status),
+                               status_desc,
+                               base_offset + offset, base_offset + offset))
+                offset += 1
+        else:
+            # 未知事件类型，输出原始数据
+            rem = data[offset:]
+            table.append(("事件数据", ' '.join(f'{b:02X}' for b in rem[:30]) + ("..." if len(rem) > 30 else ""),
+                          f"{len(rem)}字节", f"事件类型0x{event_type:02X}",
+                          base_offset + offset, base_offset + ln - 1))
+
         return table
 
     # ── 0x4 抄控器协议 ──
