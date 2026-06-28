@@ -385,6 +385,7 @@ class MainWindow(QMainWindow):
         self.csg_parse_level_combo = QComboBox()
         self.csg_parse_level_combo.addItem("自动识别", "auto")
         self.csg_parse_level_combo.addItem("FC+PB解析(完整MPDU)", "fc_pb")
+        self.csg_parse_level_combo.addItem("FC+eFC解析", "fc_efc")
         self.csg_parse_level_combo.addItem("仅FC解析", "fc_only")
         self.csg_parse_level_combo.addItem("应用层报文", "app")
         self.csg_parse_level_combo.setFont(QFont("Microsoft YaHei", 9))
@@ -535,6 +536,23 @@ class MainWindow(QMainWindow):
         clear_btn.setMinimumHeight(32)
         clear_btn.clicked.connect(self.clear_single)
         btn_layout.addWidget(clear_btn)
+
+        # CRC 填充按钮
+        self.fill_crc24_btn = QPushButton("填充CRC-24")
+        self.fill_crc24_btn.setMinimumHeight(32)
+        self.fill_crc24_btn.setStyleSheet(
+            "QPushButton { background-color: #FF9800; color: white; border-radius: 3px; padding: 4px 12px; }"
+        )
+        self.fill_crc24_btn.clicked.connect(self._fill_crc24)
+        btn_layout.addWidget(self.fill_crc24_btn)
+
+        self.fill_crc32_btn = QPushButton("填充CRC-32")
+        self.fill_crc32_btn.setMinimumHeight(32)
+        self.fill_crc32_btn.setStyleSheet(
+            "QPushButton { background-color: #9C27B0; color: white; border-radius: 3px; padding: 4px 12px; }"
+        )
+        self.fill_crc32_btn.clicked.connect(self._fill_crc32)
+        btn_layout.addWidget(self.fill_crc32_btn)
 
         btn_layout.addStretch()
         input_layout.addLayout(btn_layout)
@@ -1413,7 +1431,7 @@ class MainWindow(QMainWindow):
 
     def _on_csg_parse_level_changed(self, index: int):
         """新一代载波协议解析级别改变时的回调"""
-        level_map = {0: "auto", 1: "fc_pb", 2: "fc_only", 3: "app"}
+        level_map = {0: "auto", 1: "fc_pb", 2: "fc_efc", 3: "fc_only", 4: "app"}
         self._csg_parse_level = level_map.get(index, "auto")
 
     def _update_protocol_lookup_tab(self):
@@ -2511,6 +2529,138 @@ class MainWindow(QMainWindow):
         # 添加到测试方案
         self.test_plan_tab.add_item(name, clean_hex)
         QMessageBox.information(self, "成功", f"已添加到测试方案: {name}")
+
+    def _get_frame_bytes_for_fill(self):
+        """获取当前输入框的帧字节，返回 (frame_bytes, hex_str) 或 None"""
+        input_text = self.single_input.toPlainText().strip()
+        if not input_text:
+            QMessageBox.warning(self, "警告", "请先输入报文内容！")
+            return None
+        clean_input = self._clean_hex_input(input_text).strip()
+        if not all(c in '0123456789abcdefABCDEF' for c in clean_input):
+            QMessageBox.critical(self, "错误", "输入包含非法字符！")
+            return None
+        if len(clean_input) % 2 != 0:
+            QMessageBox.critical(self, "错误", "输入长度必须为偶数！")
+            return None
+        return bytes.fromhex(clean_input), clean_input.upper()
+
+    def _update_input_hex(self, frame_bytes: bytes):
+        """将更新后的帧字节写回输入框"""
+        hex_display = ' '.join(f'{b:02X}' for b in frame_bytes)
+        self.single_input.setPlainText(hex_display)
+
+    def _fill_crc24(self):
+        """填充 CRC-24 校验位（FC FCS + eFC CRC）"""
+        result = self._get_frame_bytes_for_fill()
+        if result is None:
+            return
+        frame_bytes, hex_str = result
+        frame_len = len(frame_bytes)
+
+        if frame_len < 16:
+            QMessageBox.warning(self, "警告", "帧长度不足 16 字节，无法填充 FC FCS！")
+            return
+
+        from csg_new_gen_parser import _crc24_func
+        modified = bytearray(frame_bytes)
+        filled = []
+
+        # ── FC FCS: 字节0-12的CRC-24，写入字节13-15（小端序）──
+        fc_crc = _crc24_func(bytes(modified[0:13]))
+        modified[13] = fc_crc & 0xFF
+        modified[14] = (fc_crc >> 8) & 0xFF
+        modified[15] = (fc_crc >> 16) & 0xFF
+        filled.append(f"FC FCS=0x{fc_crc:06X}(字节13-15)")
+
+        # ── eFC CRC: 字节16-28的CRC-24，写入字节29-31（小端序）──
+        # 判断是否为 SOF 帧且 OFDMA 需要 eFC
+        if frame_len >= 32:
+            # 检查定界符类型（字节0 bit0-2）
+            delimiter_type = modified[0] & 0x07
+            if delimiter_type == 1:  # SOF帧
+                # 检查ISAC帧的multi_site位 (byte19 bit0)
+                if modified[19] & 0x01:  # multi_site=1
+                    # OFDMA type (byte19 bit1-2): type1不携带eFC
+                    ofdma_type = (modified[19] >> 1) & 0x03
+                    if ofdma_type != 1:
+                        efc_crc = _crc24_func(bytes(modified[16:29]))
+                        modified[29] = efc_crc & 0xFF
+                        modified[30] = (efc_crc >> 8) & 0xFF
+                        modified[31] = (efc_crc >> 16) & 0xFF
+                        filled.append(f"eFC CRC=0x{efc_crc:06X}(字节29-31)")
+
+        self._update_input_hex(bytes(modified))
+        QMessageBox.information(self, "成功", "已填充: " + "\n".join(filled))
+
+    def _fill_crc32(self):
+        """填充 CRC-32 校验位（MAC 帧完整性校验）"""
+        result = self._get_frame_bytes_for_fill()
+        if result is None:
+            return
+        frame_bytes, hex_str = result
+        frame_len = len(frame_bytes)
+
+        if frame_len < 20:
+            QMessageBox.warning(self, "警告", "帧长度不足，无法填充 CRC-32！")
+            return
+
+        from csg_new_gen_parser import _crc32_func
+        modified = bytearray(frame_bytes)
+
+        # 确定 MAC 帧的起始位置
+        # 检查是否为完整 MPDU（FC头 + PB + MAC帧）
+        delimiter_type = modified[0] & 0x07
+        if delimiter_type == 1 and frame_len >= 24:
+            # SOF帧: FC=16字节, PB头=4字节, MAC帧从字节20开始
+            mac_start = 20
+            # MAC头大小: 短头12字节(byte20 bit0=1), 长头32字节(byte20 bit0=0)
+            mac_header_size = 12 if (modified[20] & 0x01) else 32
+            # MSDU 长度字段: MAC bytes 2-3 (全局偏移 mac_start+2)
+            if mac_start + 4 <= frame_len:
+                msdu_len = int.from_bytes(modified[mac_start+2:mac_start+4], 'little')
+            else:
+                msdu_len = frame_len - mac_start - mac_header_size - 4
+            msdu_start = mac_start + mac_header_size
+            msdu_end = msdu_start + msdu_len
+            crc_pos = msdu_end  # CRC-32 写入位置
+        else:
+            # 非MPDU格式: 假设整个帧就是一个 MAC 帧，最后4字节是CRC-32
+            mac_start = 0
+            mac_header_size = 12 if (modified[0] & 0x01) else 32
+            if mac_start + 4 <= frame_len:
+                msdu_len = int.from_bytes(modified[2:4], 'little')
+            else:
+                msdu_len = frame_len - mac_header_size - 4
+            msdu_start = mac_start + mac_header_size
+            msdu_end = msdu_start + msdu_len
+            crc_pos = msdu_end
+
+        # 确保 CRC 位置在帧内
+        if crc_pos + 4 > frame_len:
+            # 帧长度不够，将 CRC 放在帧末尾
+            crc_pos = frame_len - 4
+            msdu_end = crc_pos
+
+        if msdu_end <= msdu_start:
+            QMessageBox.warning(self, "警告", "MSDU 范围无效，无法计算 CRC-32！")
+            return
+
+        # 计算 CRC-32 (覆盖 MSDU 载荷，不包括 MAC 帧头)
+        msdu_data = bytes(modified[msdu_start:msdu_end])
+        crc_val = _crc32_func(msdu_data)
+
+        # 写入 CRC-32 (小端序)
+        modified[crc_pos]     = crc_val & 0xFF
+        modified[crc_pos + 1] = (crc_val >> 8) & 0xFF
+        modified[crc_pos + 2] = (crc_val >> 16) & 0xFF
+        modified[crc_pos + 3] = (crc_val >> 24) & 0xFF
+
+        self._update_input_hex(bytes(modified))
+        QMessageBox.information(self, "成功",
+            f"已填充 CRC-32=0x{crc_val:08X}\n"
+            f"计算范围: MSDU载荷(字节{msdu_start}-{msdu_end-1}, {len(msdu_data)}字节)\n"
+            f"写入位置: 字节{crc_pos}-{crc_pos+3}")
 
     def clear_single(self):
         """清空单帧解析输入和结果"""

@@ -1,0 +1,8 @@
+{
+  "serial": {
+    "port": "COM5",
+    "baudrate": "9600",
+    "parity": "偶"
+  },
+  "file_paths": {}
+}
