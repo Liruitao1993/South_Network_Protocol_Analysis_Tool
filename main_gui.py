@@ -8,7 +8,7 @@ import sys
 import json
 import subprocess
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -37,13 +37,19 @@ from archive_widget import ArchiveWidget
 from topology_widget import TopologyWidget
 from preset_buttons import PresetButtonWidget
 from test_plan_widget import TestPlanWidget
+from diff_widget import DiffWidget
 from serial_worker import SerialWorker
 from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu
 
 
-APP_VERSION = "1.8.0"
+APP_VERSION = "1.8.2"
 
 CHANGELOG = [
+    ("1.8.2", "2026-07-06", [
+        "新增「报文对比」标签页：双报文字节级/字段级对比分析，支持字段感知对齐",
+        "支持差异高亮（修改/新增/删除）、人话解读、忽略校验和/序列号、导出报告",
+        "新增 frame_diff_engine.py（对比引擎）和 diff_widget.py（GUI 组件）",
+    ]),
     ("1.8.1", "2026-06-27", [
         "测试方案新增 Lua 脚本支持：可在测试流程中嵌入可编程逻辑，支持条件分支、循环遍历、数据解析、变量共享",
         "新增 lua_script_engine.py（Lua 脚本引擎），提供 send/wait/log/hex_to_bytes 等 API 函数",
@@ -340,6 +346,9 @@ class MainWindow(QMainWindow):
         # 字节高亮映射
         self._byte_ranges: list = []
 
+        # 上次单帧解析的 hex（供报文对比载入）
+        self._last_parsed_hex: Optional[str] = None
+
         # 应用配置（先加载，setup_ui 会用到）
         self._config_path = Path(__file__).parent / "config.json"
         self._app_config: Dict[str, Any] = {}
@@ -544,6 +553,10 @@ class MainWindow(QMainWindow):
         self.topology_tab = TopologyWidget()
         self.topology_tab.set_serial_worker(self.serial_worker)
         self._topology_tab_index = self.tab_widget.addTab(self.topology_tab, "拓扑信息")
+
+        # 报文对比页面
+        self.diff_tab = DiffWidget()
+        self._diff_tab_index = self.tab_widget.addTab(self.diff_tab, "报文对比")
 
         main_layout.addWidget(self.tab_widget, 1)
 
@@ -1560,6 +1573,11 @@ class MainWindow(QMainWindow):
         # 清空当前结果
         self.clear_single()
 
+        # 同步协议到报文对比标签页
+        if hasattr(self, 'diff_tab'):
+            self.diff_tab.set_protocol(index)
+            self.diff_tab.set_parser(self._get_current_parser())
+
     def _on_csg_parse_level_changed(self, index: int):
         """新一代载波协议解析级别改变时的回调"""
         level_map = {0: "auto", 1: "fc_pb", 2: "fc_efc", 3: "fc_only", 4: "app"}
@@ -2575,6 +2593,7 @@ class MainWindow(QMainWindow):
 
             # 保存当前结果
             self.current_result = frame_bytes
+            self._last_parsed_hex = hex_display
 
         except Exception as e:
             QMessageBox.critical(self, "解析错误", f"解析失败：{str(e)}")
