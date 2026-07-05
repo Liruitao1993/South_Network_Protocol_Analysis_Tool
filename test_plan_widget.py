@@ -12,6 +12,7 @@
 
 import json
 import re
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
@@ -20,15 +21,389 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox,
     QComboBox, QSpinBox, QMessageBox, QFileDialog, QTextEdit,
-    QDialog, QLineEdit, QGroupBox, QMenu
+    QDialog, QLineEdit, QGroupBox, QMenu, QPlainTextEdit
 )
-from PySide6.QtCore import Qt, Signal, QTimer
-from PySide6.QtGui import QFont, QColor
+from PySide6.QtCore import Qt, Signal, QTimer, QObject
+from PySide6.QtGui import QFont, QColor, QTextCursor, QKeySequence
 
 from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu
 
+try:
+    from lua_script_engine import LuaScriptEngine, LUA_TEMPLATES
+    LUA_AVAILABLE = True
+except ImportError:
+    LUA_AVAILABLE = False
+
 # 自动持久化文件路径
 TEST_PLAN_PATH = Path(__file__).parent / "test_plan.json"
+
+
+# ------------------------------------------------------------------------------
+# 轻量 Vim 模式处理器（QPlainTextEdit Vim 键绑定）
+# ------------------------------------------------------------------------------
+class VimHandler(QObject):
+    """轻量 Vim 模式处理器
+
+    支持模式:
+      - INSERT: 正常输入（默认）
+      - NORMAL: Vim 命令模式
+      - VISUAL: 可视化选择模式
+
+    NORMAL 模式快捷键:
+      h/j/k/l  左/下/上/右
+      w/b      下一个单词/上一个单词
+      0/$      行首/行尾
+      gg/G     文首/文末
+      i/a/I/A  进入插入模式
+      o/O      下方/上方新建行
+      dd       删除当前行
+      yy       复制当前行
+      p/P      粘贴到下方/上方
+      u        撤销
+      Ctrl+r   重做
+      x        删除字符
+      :w       保存（发信号）
+      :q       退出（发信号）
+    """
+
+    mode_changed = Signal(str)   # 模式变化信号
+    command = Signal(str)        # 命令信号（如 :w, :q）
+
+    def __init__(self, editor: QPlainTextEdit, parent=None):
+        super().__init__(parent)
+        self._editor = editor
+        self._mode = "INSERT"     # 默认插入模式
+        self._pending = ""        # 待处理按键序列（如 dd, gg）
+        self._yank_buffer = ""    # 复制缓冲区
+        self._command_buffer = "" # :命令缓冲区
+        self._in_command_line = False  # 是否正在输入 : 命令
+        editor.installEventFilter(self)
+        self._update_cursor_style()
+
+    @property
+    def mode(self) -> str:
+        return self._mode
+
+    def set_mode(self, mode: str):
+        if mode != self._mode:
+            self._mode = mode
+            self._pending = ""
+            self._in_command_line = False
+            self._command_buffer = ""
+            self._update_cursor_style()
+            self.mode_changed.emit(mode)
+
+    def _update_cursor_style(self):
+        """根据模式更新光标样式"""
+        base = (
+            "background-color: #1E1E1E; color: #D4D4D4; "
+            "border-radius: 3px; selection-background-color: #264F78;"
+        )
+        if self._mode == "INSERT":
+            self._editor.setCursorWidth(2)
+            self._editor.setStyleSheet(f"QPlainTextEdit {{ {base} border: 1px solid #555; }}")
+        elif self._mode == "NORMAL":
+            self._editor.setCursorWidth(8)
+            self._editor.setStyleSheet(f"QPlainTextEdit {{ {base} border: 2px solid #4FC3F7; }}")
+        elif self._mode == "VISUAL":
+            self._editor.setCursorWidth(2)
+            self._editor.setStyleSheet(f"QPlainTextEdit {{ {base} border: 2px solid #FFB74D; }}")
+
+    def eventFilter(self, obj, event):
+        """事件过滤器，拦截键盘事件"""
+        from PySide6.QtCore import QEvent
+        from PySide6.QtGui import QKeyEvent
+
+        if obj != self._editor:
+            return False
+
+        if event.type() == QEvent.Type.KeyPress:
+            key_event = event
+            return self._handle_key_press(key_event)
+
+        return False
+
+    def _handle_key_press(self, event) -> bool:
+        """处理按键事件，返回 True 表示已处理"""
+        key = event.key()
+        modifiers = event.modifiers()
+        text = event.text()
+
+        # ---- : 命令输入模式 ----
+        if self._in_command_line:
+            return self._handle_command_input(key, text)
+
+        # ---- INSERT 模式 ----
+        if self._mode == "INSERT":
+            if key == Qt.Key.Key_Escape:
+                self.set_mode("NORMAL")
+                return True
+            # Ctrl+[ 也退出到 NORMAL
+            if key == Qt.Key.Key_BracketLeft and modifiers & Qt.KeyboardModifier.ControlModifier:
+                self.set_mode("NORMAL")
+                return True
+            return False  # 其他按键正常输入
+
+        # ---- VISUAL 模式 ----
+        if self._mode == "VISUAL":
+            return self._handle_visual_key(key, text)
+
+        # ---- NORMAL 模式 ----
+        return self._handle_normal_key(key, modifiers, text)
+
+    def _handle_normal_key(self, key, modifiers, text: str) -> bool:
+        """处理 NORMAL 模式按键"""
+        cursor = self._editor.textCursor()
+
+        # Ctrl 快捷键
+        if modifiers & Qt.KeyboardModifier.ControlModifier:
+            if key == Qt.Key.Key_R:
+                self._editor.redo()
+                return True
+            if key == Qt.Key.Key_C:
+                # Ctrl+C 退出到 NORMAL（不复制）
+                self.set_mode("NORMAL")
+                return True
+            return False
+
+        # 待处理序列（dd, gg 等）
+        if self._pending:
+            pending = self._pending + text
+            self._pending = ""
+            if pending == "dd":
+                cursor.select(QTextCursor.SelectionType.LineUnderCursor)
+                self._yank_buffer = cursor.selectedText().replace("\u2029", "\n")
+                cursor.removeSelectedText()
+                cursor.deleteChar()  # 删除换行符
+                self._editor.setTextCursor(cursor)
+                return True
+            elif pending == "yy":
+                cursor.select(QTextCursor.SelectionType.LineUnderCursor)
+                self._yank_buffer = cursor.selectedText().replace("\u2029", "\n")
+                cursor.clearSelection()
+                self._editor.setTextCursor(cursor)
+                return True
+            # 未识别的双键序列，忽略
+            return True
+
+        # 单键命令
+        if text == "h":
+            cursor.movePosition(QTextCursor.MoveOperation.Left)
+            self._editor.setTextCursor(cursor)
+            return True
+        elif text == "j":
+            cursor.movePosition(QTextCursor.MoveOperation.Down)
+            self._editor.setTextCursor(cursor)
+            return True
+        elif text == "k":
+            cursor.movePosition(QTextCursor.MoveOperation.Up)
+            self._editor.setTextCursor(cursor)
+            return True
+        elif text == "l":
+            cursor.movePosition(QTextCursor.MoveOperation.Right)
+            self._editor.setTextCursor(cursor)
+            return True
+        elif text == "w":
+            cursor.movePosition(QTextCursor.MoveOperation.NextWord)
+            self._editor.setTextCursor(cursor)
+            return True
+        elif text == "b":
+            cursor.movePosition(QTextCursor.MoveOperation.PreviousWord)
+            self._editor.setTextCursor(cursor)
+            return True
+        elif text == "0":
+            cursor.movePosition(QTextCursor.MoveOperation.StartOfLine)
+            self._editor.setTextCursor(cursor)
+            return True
+        elif text == "$":
+            cursor.movePosition(QTextCursor.MoveOperation.EndOfLine)
+            self._editor.setTextCursor(cursor)
+            return True
+        elif text == "G":
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            self._editor.setTextCursor(cursor)
+            return True
+        elif text == "g":
+            self._pending = "g"
+            return True
+        elif text == "i":
+            self.set_mode("INSERT")
+            return True
+        elif text == "a":
+            cursor.movePosition(QTextCursor.MoveOperation.Right)
+            self._editor.setTextCursor(cursor)
+            self.set_mode("INSERT")
+            return True
+        elif text == "I":
+            cursor.movePosition(QTextCursor.MoveOperation.StartOfLine)
+            self._editor.setTextCursor(cursor)
+            self.set_mode("INSERT")
+            return True
+        elif text == "A":
+            cursor.movePosition(QTextCursor.MoveOperation.EndOfLine)
+            self._editor.setTextCursor(cursor)
+            self.set_mode("INSERT")
+            return True
+        elif text == "o":
+            cursor.movePosition(QTextCursor.MoveOperation.EndOfLine)
+            cursor.insertText("\n")
+            self._editor.setTextCursor(cursor)
+            self.set_mode("INSERT")
+            return True
+        elif text == "O":
+            cursor.movePosition(QTextCursor.MoveOperation.StartOfLine)
+            cursor.insertText("\n")
+            cursor.movePosition(QTextCursor.MoveOperation.Up)
+            self._editor.setTextCursor(cursor)
+            self.set_mode("INSERT")
+            return True
+        elif text == "d":
+            self._pending = "d"
+            return True
+        elif text == "y":
+            self._pending = "y"
+            return True
+        elif text == "p":
+            if self._yank_buffer:
+                cursor.movePosition(QTextCursor.MoveOperation.EndOfLine)
+                cursor.insertText("\n" + self._yank_buffer.rstrip("\n"))
+                self._editor.setTextCursor(cursor)
+            return True
+        elif text == "P":
+            if self._yank_buffer:
+                cursor.movePosition(QTextCursor.MoveOperation.StartOfLine)
+                cursor.insertText(self._yank_buffer.rstrip("\n") + "\n")
+                self._editor.setTextCursor(cursor)
+            return True
+        elif text == "x":
+            cursor.deleteChar()
+            self._editor.setTextCursor(cursor)
+            return True
+        elif text == "u":
+            self._editor.undo()
+            return True
+        elif text == "v":
+            self.set_mode("VISUAL")
+            return True
+        elif text == "V":
+            cursor.select(QTextCursor.SelectionType.LineUnderCursor)
+            self._editor.setTextCursor(cursor)
+            self.set_mode("VISUAL")
+            return True
+        elif text == ":":
+            self._in_command_line = True
+            self._command_buffer = ""
+            self.mode_changed.emit(":")
+            return True
+        elif text == "/":
+            # 简单搜索：暂不实现，避免复杂化
+            return True
+
+        # 数字前缀（如 3j, 5l）
+        if text.isdigit() and text != "0":
+            # 暂不实现数字重复，忽略
+            return True
+
+        return True  # NORMAL 模式下吞掉所有按键
+
+    def _handle_visual_key(self, key, text: str) -> bool:
+        """处理 VISUAL 模式按键"""
+        cursor = self._editor.textCursor()
+
+        if key == Qt.Key.Key_Escape:
+            cursor.clearSelection()
+            self._editor.setTextCursor(cursor)
+            self.set_mode("NORMAL")
+            return True
+
+        if text == "h":
+            cursor.movePosition(QTextCursor.MoveOperation.Left, QTextCursor.MoveMode.KeepAnchor)
+            self._editor.setTextCursor(cursor)
+            return True
+        elif text == "j":
+            cursor.movePosition(QTextCursor.MoveOperation.Down, QTextCursor.MoveMode.KeepAnchor)
+            self._editor.setTextCursor(cursor)
+            return True
+        elif text == "k":
+            cursor.movePosition(QTextCursor.MoveOperation.Up, QTextCursor.MoveMode.KeepAnchor)
+            self._editor.setTextCursor(cursor)
+            return True
+        elif text == "l":
+            cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor)
+            self._editor.setTextCursor(cursor)
+            return True
+        elif text == "w":
+            cursor.movePosition(QTextCursor.MoveOperation.NextWord, QTextCursor.MoveMode.KeepAnchor)
+            self._editor.setTextCursor(cursor)
+            return True
+        elif text == "b":
+            cursor.movePosition(QTextCursor.MoveOperation.PreviousWord, QTextCursor.MoveMode.KeepAnchor)
+            self._editor.setTextCursor(cursor)
+            return True
+        elif text == "y":
+            self._yank_buffer = cursor.selectedText().replace("\u2029", "\n")
+            cursor.clearSelection()
+            self._editor.setTextCursor(cursor)
+            self.set_mode("NORMAL")
+            return True
+        elif text == "d" or text == "x":
+            self._yank_buffer = cursor.selectedText().replace("\u2029", "\n")
+            cursor.removeSelectedText()
+            self._editor.setTextCursor(cursor)
+            self.set_mode("NORMAL")
+            return True
+        elif text == ">":
+            # 缩进
+            selected = cursor.selectedText().replace("\u2029", "\n")
+            indented = "  " + selected.replace("\n", "\n  ")
+            cursor.insertText(indented)
+            self.set_mode("NORMAL")
+            return True
+        elif text == "<":
+            # 反缩进
+            selected = cursor.selectedText().replace("\u2029", "\n")
+            dedented = "\n".join(
+                line[2:] if line.startswith("  ") else line
+                for line in selected.split("\n")
+            )
+            cursor.insertText(dedented)
+            self.set_mode("NORMAL")
+            return True
+
+        return True  # 吞掉其他按键
+
+    def _handle_command_input(self, key, text: str) -> bool:
+        """处理 : 命令输入"""
+        if key == Qt.Key.Key_Escape:
+            self._in_command_line = False
+            self._command_buffer = ""
+            self.mode_changed.emit(self._mode)
+            return True
+        elif key == Qt.Key.Key_Return or key == Qt.Key.Key_Enter:
+            cmd = self._command_buffer.strip()
+            self._in_command_line = False
+            self._command_buffer = ""
+            if cmd in ("w", "write"):
+                self.command.emit("w")
+            elif cmd in ("q", "quit"):
+                self.command.emit("q")
+            elif cmd in ("wq", "x"):
+                self.command.emit("wq")
+            self.mode_changed.emit(self._mode)
+            return True
+        elif key == Qt.Key.Key_Backspace:
+            if self._command_buffer:
+                self._command_buffer = self._command_buffer[:-1]
+                self.mode_changed.emit(":" + self._command_buffer)
+            else:
+                self._in_command_line = False
+                self.mode_changed.emit(self._mode)
+            return True
+        elif text and text.isprintable():
+            self._command_buffer += text
+            self.mode_changed.emit(":" + self._command_buffer)
+            return True
+        return True
 
 # ------------------------------------------------------------------------------
 # 响应帧动态处理引擎（时间填充 / 校验自动计算）
@@ -234,6 +609,154 @@ def process_response_frame(frame_hex: str) -> str:
     return result.replace(" ", "")
 
 
+# ------------------------------------------------------------------------------
+# Lua 代码编辑器（带列线指示器 + 行号）
+# ------------------------------------------------------------------------------
+class LuaCodeEditor(QPlainTextEdit):
+    """带列线指示器和行号的 Lua 代码编辑器
+
+    功能：
+      - 垂直列线：在指定列位置绘制辅助线（默认 40/80/120 列）
+      - 行号栏：左侧显示行号，当前行高亮
+      - 等宽字体：自动计算字符宽度绘制列线
+    """
+
+    # 列线位置（字符列号）
+    COLUMN_GUIDES = (40, 80, 120)
+    # 列线颜色
+    _GUIDE_COLOR = QColor(60, 60, 60, 80)       # 普通列线（半透明深灰）
+    _GUIDE_80_COLOR = QColor(80, 60, 60, 120)    # 80 列线（稍明显）
+    _LINE_NUM_COLOR = QColor(100, 100, 100)      # 行号颜色
+    _CURRENT_LINE_COLOR = QColor(40, 40, 40, 100) # 当前行高亮
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._line_num_area = _LineNumberArea(self)
+        self.blockCountChanged.connect(self._update_line_num_area_width)
+        self.updateRequest.connect(self._update_line_num_area)
+        self._update_line_num_area_width()
+        self._char_width = 0
+        self._update_char_width()
+
+    def setFont(self, font):
+        super().setFont(font)
+        self._update_char_width()
+        self._update_line_num_area_width()
+
+    def _update_char_width(self):
+        """计算等宽字体单字符宽度"""
+        fm = self.fontMetrics()
+        self._char_width = fm.horizontalAdvance("M")
+
+    # ---- 行号区域 ----
+    def line_num_area_width(self) -> int:
+        digits = max(1, len(str(self.blockCount())))
+        return 8 + self._char_width * (digits + 1)
+
+    def _update_line_num_area_width(self):
+        self.setViewportMargins(self.line_num_area_width(), 0, 0, 0)
+
+    def _update_line_num_area(self, rect: 'QRect', dy: int):
+        if dy:
+            self._line_num_area.scroll(0, dy)
+        else:
+            self._line_num_area.update(0, rect.y(), self._line_num_area.width(), rect.height())
+        if rect.contains(self.viewport().rect()):
+            self._update_line_num_area_width()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        cr = self.contentsRect()
+        self._line_num_area.setGeometry(
+            cr.left(), cr.top(), self.line_num_area_width(), cr.height()
+        )
+
+    def line_num_area_paint(self, event):
+        """绘制行号区域"""
+        from PySide6.QtGui import QPainter, QPen
+        painter = QPainter(self._line_num_area)
+        painter.fillRect(event.rect(), QColor(30, 30, 30))  # 与编辑器背景一致
+
+        block = self.firstVisibleBlock()
+        block_number = block.blockNumber()
+        top = int(self.blockBoundingGeometry(block).translated(self.contentOffset()).top())
+        bottom = top + int(self.blockBoundingRect(block).height())
+        current_block = self.textCursor().blockNumber()
+
+        while block.isValid() and top <= event.rect().bottom():
+            if block.isVisible() and bottom >= event.rect().top():
+                number = str(block_number + 1)
+                if block_number == current_block:
+                    painter.setPen(QPen(QColor(200, 200, 200)))
+                else:
+                    painter.setPen(QPen(self._LINE_NUM_COLOR))
+                painter.drawText(
+                    0, top, self._line_num_area.width() - 4,
+                    self.fontMetrics().height(),
+                    Qt.AlignmentFlag.AlignRight, number
+                )
+            block = block.next()
+            top = bottom
+            bottom = top + int(self.blockBoundingRect(block).height())
+            block_number += 1
+        painter.end()
+
+    # ---- 列线 + 当前行高亮 ----
+    def paintEvent(self, event):
+        """重写绘制事件：先画列线和高亮行，再画文本"""
+        from PySide6.QtGui import QPainter, QPen
+
+        # 先画列线和当前行高亮（在文本下方）
+        painter = QPainter(self.viewport())
+        offset = self.contentOffset()
+        fm = self.fontMetrics()
+        line_h = fm.height()
+
+        # 当前行高亮
+        cursor_block = self.textCursor().blockNumber()
+        first_visible = self.firstVisibleBlock().blockNumber()
+        block = self.firstVisibleBlock()
+        top = int(self.blockBoundingGeometry(block).translated(offset).top())
+        viewport_h = self.viewport().height()
+
+        while block.isValid() and top < viewport_h:
+            if block.blockNumber() == cursor_block:
+                bh = int(self.blockBoundingRect(block).height())
+                painter.fillRect(0, top, self.viewport().width(), bh, self._CURRENT_LINE_COLOR)
+                break
+            block = block.next()
+            top += int(self.blockBoundingRect(block).height())
+
+        # 列线
+        line_num_w = self.line_num_area_width()
+        vp_height = self.viewport().height()
+        for col in self.COLUMN_GUIDES:
+            x = line_num_w + col * self._char_width + offset.x()
+            if x < self.viewport().width():
+                color = self._GUIDE_80_COLOR if col == 80 else self._GUIDE_COLOR
+                painter.setPen(QPen(color, 1, Qt.PenStyle.DotLine))
+                painter.drawLine(x, 0, x, vp_height)
+        painter.end()
+
+        # 绘制文本和光标
+        super().paintEvent(event)
+
+
+class _LineNumberArea(QWidget):
+    """行号区域控件"""
+
+    def __init__(self, editor: LuaCodeEditor):
+        super().__init__(editor)
+        self._editor = editor
+
+    def sizeHint(self):
+        from PySide6.QtCore import QSize
+        return QSize(self._editor.line_num_area_width(), 0)
+
+    def paintEvent(self, event):
+        self._editor.line_num_area_paint(event)
+
+
 class AddTestItemDialog(QDialog):
     """添加/编辑测试项对话框"""
 
@@ -249,6 +772,8 @@ class AddTestItemDialog(QDialog):
     @staticmethod
     def _derive_nature(item: Dict[str, Any]) -> str:
         """从 item 字段推导性质"""
+        if item.get("is_lua_script", False):
+            return "Lua脚本"
         if item.get("persistent", False):
             return "后台监听"
         if not item.get("send_enabled", True) and not item.get("match_enabled", True):
@@ -260,10 +785,16 @@ class AddTestItemDialog(QDialog):
         nature = self.nature_combo.currentText()
         if nature == "发送帧":
             self._set_nature_state(send=True, match=True, persistent=False)
+            self._apply_lua_mode(False)
         elif nature == "后台监听":
             self._set_nature_state(send=False, match=True, persistent=True)
+            self._apply_lua_mode(False)
         elif nature == "纯等待":
             self._set_nature_state(send=False, match=False, persistent=False)
+            self._apply_lua_mode(False)
+        elif nature == "Lua脚本":
+            self._set_nature_state(send=False, match=False, persistent=False)
+            self._apply_lua_mode(True)
 
     def _set_nature_state(self, send: bool, match: bool, persistent: bool):
         """同步控件状态，屏蔽信号避免循环触发"""
@@ -281,6 +812,8 @@ class AddTestItemDialog(QDialog):
 
     def _init_ui(self, data: Dict[str, Any]):
         nature = self._derive_nature(data)
+        # Lua 脚本内容（编辑模式）
+        self._lua_script = data.get("script", "")
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
 
@@ -288,15 +821,53 @@ class AddTestItemDialog(QDialog):
         row = QHBoxLayout()
         row.addWidget(QLabel("性质:"))
         self.nature_combo = QComboBox()
-        self.nature_combo.addItems(["发送帧", "后台监听", "纯等待"])
+        self.nature_combo.addItems(["发送帧", "后台监听", "纯等待", "Lua脚本"])
         self.nature_combo.setCurrentText(nature)
         self.nature_combo.currentTextChanged.connect(self._apply_nature)
-        nature_help = QLabel("发送帧→发后匹配置  后台→全时监听匹配回复  纯等待→忽略帧仅等超时")
+        nature_help = QLabel("发送帧→发后匹配  后台→全时监听  纯等待→忽略帧  Lua→脚本控制")
         nature_help.setStyleSheet("color: #888; font-size: 11px;")
         row.addWidget(self.nature_combo)
         row.addWidget(nature_help)
         row.addStretch()
         layout.addLayout(row)
+
+        # Lua 脚本编辑器（仅 Lua 模式下显示）
+        script_header = QHBoxLayout()
+        self.script_label = QLabel("Lua 脚本:")
+        self.script_label.setVisible(False)
+        script_header.addWidget(self.script_label)
+        script_header.addStretch()
+        # Vim 模式指示器
+        self.vim_mode_label = QLabel("-- INSERT --")
+        self.vim_mode_label.setStyleSheet(
+            "QLabel { color: #1E1E1E; background-color: #4FC3F7; padding: 1px 8px; "
+            "border-radius: 2px; font-size: 11px; font-weight: bold; font-family: Consolas; }"
+        )
+        self.vim_mode_label.setVisible(False)
+        script_header.addWidget(self.vim_mode_label)
+        # Vim 帮助提示
+        vim_help = QLabel("<span style='color:#888;font-size:10px'>ESC=普通模式 | hjkl=移动 | i=插入 | :w=保存 | :q=关闭</span>")
+        vim_help.setVisible(False)
+        self._vim_help_label = vim_help
+        script_header.addWidget(vim_help)
+        layout.addLayout(script_header)
+
+        self.script_input = LuaCodeEditor()
+        self.script_input.setPlaceholderText("-- Lua 脚本代码\nlog('hello')")
+        script_font = QFont("Consolas", 10)
+        self.script_input.setFont(script_font)
+        self.script_input.setMinimumHeight(160)
+        self.script_input.setMaximumHeight(400)
+        self.script_input.setStyleSheet(
+            "QPlainTextEdit { background-color: #1E1E1E; color: #D4D4D4; "
+            "border: 1px solid #555; border-radius: 3px; selection-background-color: #264F78; }"
+        )
+        self.script_input.setVisible(False)
+        layout.addWidget(self.script_input)
+
+        # 初始化 Vim 处理器
+        self._vim_handler = VimHandler(self.script_input)
+        self._vim_handler.mode_changed.connect(self._on_vim_mode_changed)
 
         layout.addWidget(QLabel("名称:"))
         self.name_input = QLineEdit(data.get("name", ""))
@@ -356,6 +927,63 @@ class AddTestItemDialog(QDialog):
         btn_layout.addWidget(cancel_btn)
         layout.addLayout(btn_layout)
 
+        # 初始化 Lua 模式
+        if nature == "Lua脚本":
+            self.script_input.setPlainText(self._lua_script or "")
+            self._apply_lua_mode(True)
+
+    def _apply_lua_mode(self, is_lua: bool):
+        """切换 Lua 脚本模式：隐藏/显示帧相关字段"""
+        self.script_label.setVisible(is_lua)
+        self.script_input.setVisible(is_lua)
+        self.vim_mode_label.setVisible(is_lua)
+        self._vim_help_label.setVisible(is_lua)
+        # 隐藏/显示帧相关字段
+        self.frame_input.setVisible(not is_lua)
+        self.frame_input.parent()  # label 也需要隐藏
+        for widget in self.findChildren(QLabel):
+            if "帧内容" in widget.text() or "匹配规则" in widget.text() or "匹配模式" in widget.text():
+                widget.setVisible(not is_lua)
+            if "响应帧" in widget.text():
+                widget.setVisible(not is_lua)
+        self.match_input.setVisible(not is_lua)
+        self.mode_combo.setVisible(not is_lua)
+        self.send_enabled.setVisible(not is_lua)
+        self.match_enabled.setVisible(not is_lua)
+        self.response_input.setVisible(not is_lua)
+        # Lua 模式下禁用超时微调（使用脚本内部等待）
+        self.timeout_spin.setVisible(not is_lua)
+        for widget in self.findChildren(QLabel):
+            if "超时" in widget.text():
+                widget.setVisible(not is_lua)
+
+    def _on_vim_mode_changed(self, mode_text: str):
+        """更新 Vim 模式指示器"""
+        if mode_text == "INSERT":
+            self.vim_mode_label.setText("-- INSERT --")
+            self.vim_mode_label.setStyleSheet(
+                "QLabel { color: #1E1E1E; background-color: #4FC3F7; padding: 1px 8px; "
+                "border-radius: 2px; font-size: 11px; font-weight: bold; font-family: Consolas; }"
+            )
+        elif mode_text == "NORMAL":
+            self.vim_mode_label.setText("-- NORMAL --")
+            self.vim_mode_label.setStyleSheet(
+                "QLabel { color: #FFFFFF; background-color: #616161; padding: 1px 8px; "
+                "border-radius: 2px; font-size: 11px; font-weight: bold; font-family: Consolas; }"
+            )
+        elif mode_text == "VISUAL":
+            self.vim_mode_label.setText("-- VISUAL --")
+            self.vim_mode_label.setStyleSheet(
+                "QLabel { color: #1E1E1E; background-color: #FFB74D; padding: 1px 8px; "
+                "border-radius: 2px; font-size: 11px; font-weight: bold; font-family: Consolas; }"
+            )
+        elif mode_text.startswith(":"):
+            self.vim_mode_label.setText(mode_text)
+            self.vim_mode_label.setStyleSheet(
+                "QLabel { color: #FFFFFF; background-color: #333333; padding: 1px 8px; "
+                "border-radius: 2px; font-size: 11px; font-weight: bold; font-family: Consolas; }"
+            )
+
     def _on_manual_toggle(self):
         """用户手动切换发送/匹配复选框时，同步性质下拉为「自定义」"""
         send = self.send_enabled.isChecked()
@@ -379,22 +1007,35 @@ class AddTestItemDialog(QDialog):
         nature = self.nature_combo.currentText()
         send_enabled = self.send_enabled.isChecked()
         match_enabled = self.match_enabled.isChecked()
+        is_lua = (nature == "Lua脚本")
         if not name:
             QMessageBox.warning(self, "输入错误", "名称不能为空")
             return
-        if send_enabled and not frame:
-            QMessageBox.warning(self, "输入错误", "发送帧模式下帧内容不能为空")
-            return
+        if is_lua:
+            script = self.script_input.toPlainText().strip()
+            if not script:
+                QMessageBox.warning(self, "输入错误", "Lua 脚本不能为空")
+                return
+            if not LUA_AVAILABLE:
+                QMessageBox.warning(self, "依赖缺失", "lupa 库未安装，请运行: pip install lupa")
+                return
+        else:
+            script = ""
+            if send_enabled and not frame:
+                QMessageBox.warning(self, "输入错误", "发送帧模式下帧内容不能为空")
+                return
         self._result = {
             "name": name,
-            "frame_hex": frame,
+            "frame_hex": frame if not is_lua else "",
             "match_rule": self.match_input.text().strip(),
             "match_mode": self.mode_combo.currentText(),
             "timeout_ms": self.timeout_spin.value(),
-            "send_enabled": send_enabled,
-            "match_enabled": match_enabled,
+            "send_enabled": send_enabled if not is_lua else False,
+            "match_enabled": match_enabled if not is_lua else False,
             "response_frame": self.response_input.text().strip(),
             "persistent": nature == "后台监听",
+            "is_lua_script": is_lua,
+            "script": script,
         }
         self.accept()
 
@@ -421,6 +1062,8 @@ class TestPlanWidget(QWidget):
         self._any_frame_received: bool = False
         self._test_start_time: Optional[datetime] = None  # 测试开始时间
         self._test_end_time: Optional[datetime] = None    # 测试结束时间
+        self._test_vars: Dict[str, Any] = {}              # Lua 脚本共享变量
+        self._lua_engine = None                           # 当前运行的 Lua 引擎
         self.setup_ui()
 
     # ------------------------------------------------------------------
@@ -652,6 +1295,8 @@ class TestPlanWidget(QWidget):
         self.table.blockSignals(True)
         self.table.setRowCount(len(self._items))
         for row, item in enumerate(self._items):
+            is_lua = item.get("is_lua_script", False)
+            persistent = item.get("persistent", False)
             # 序号（不可编辑）
             no_item = QTableWidgetItem(str(row + 1))
             no_item.setFlags(no_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -659,10 +1304,19 @@ class TestPlanWidget(QWidget):
             # 名称
             self.table.setItem(row, 1, QTableWidgetItem(item["name"]))
             # 帧内容
-            self.table.setItem(row, 2, QTableWidgetItem(self._fmt_hex(item["frame_hex"])))
-            persistent = item.get("persistent", False)
+            if is_lua:
+                script_preview = item.get("script", "")[:60].replace("\n", " ")
+                frame_text = f"[Lua] {script_preview}..."
+            else:
+                frame_text = self._fmt_hex(item["frame_hex"])
+            self.table.setItem(row, 2, QTableWidgetItem(frame_text))
             # 操作按钮
-            if persistent:
+            if is_lua:
+                send_btn = QPushButton("Lua")
+                send_btn.setStyleSheet(
+                    "QPushButton { background-color: #9C27B0; color: white; border-radius: 2px; padding: 1px 4px; font-size: 11px; }"
+                )
+            elif persistent:
                 send_btn = QPushButton("后台")
                 send_btn.setStyleSheet(
                     "QPushButton { background-color: #4CAF50; color: white; border-radius: 2px; padding: 1px 4px; font-size: 11px; }"
@@ -676,7 +1330,7 @@ class TestPlanWidget(QWidget):
             self.table.setCellWidget(row, 3, send_btn)
             # 发送（使用复选框项）
             send_chk = QTableWidgetItem()
-            if persistent:
+            if persistent or is_lua:
                 send_chk.setFlags(send_chk.flags() & ~Qt.ItemFlag.ItemIsUserCheckable)
                 send_chk.setCheckState(Qt.CheckState.Unchecked)
             else:
@@ -820,7 +1474,10 @@ class TestPlanWidget(QWidget):
                 }
                 self._items.append(item)
                 self._refresh_table()
-                self._log(f"[添加] {item['name']}: {self._fmt_hex(item['frame_hex'])}")
+                if item.get("is_lua_script"):
+                    self._log(f"[添加] {item['name']}: [Lua脚本]")
+                else:
+                    self._log(f"[添加] {item['name']}: {self._fmt_hex(item['frame_hex'])}")
                 self._auto_save()
                 self._update_bg_status()
 
@@ -916,6 +1573,9 @@ class TestPlanWidget(QWidget):
                     "send_enabled": item.get("send_enabled", True),
                     "match_enabled": item["match_enabled"],
                     "response_frame": item.get("response_frame", ""),
+                    "persistent": item.get("persistent", False),
+                    "is_lua_script": item.get("is_lua_script", False),
+                    "script": item.get("script", ""),
                 }
                 for item in self._items
             ]
@@ -951,6 +1611,8 @@ class TestPlanWidget(QWidget):
                     "match_enabled": entry.get("match_enabled", True),
                     "response_frame": entry.get("response_frame", ""),
                     "persistent": entry.get("persistent", False),
+                    "is_lua_script": entry.get("is_lua_script", False),
+                    "script": entry.get("script", ""),
                     "match_count": entry.get("match_count", 0),
                     "test_result": "未测",
                     "status": "待测",
@@ -1047,6 +1709,8 @@ class TestPlanWidget(QWidget):
         self._log("=" * 40)
         self._log("[测试开始] 顺序执行测试项...")
         self._update_bg_status()
+        # 重置 Lua 测试变量
+        self._test_vars = {}
         # 列出后台监听项
         bg_items = [f"#{i+1} {p['name']}" for i, p in enumerate(self._items) if p.get("persistent")]
         if bg_items:
@@ -1061,6 +1725,10 @@ class TestPlanWidget(QWidget):
         self._stop_requested = True
         if self._wait_timer and self._wait_timer.isActive():
             self._wait_timer.stop()
+        # 停止正在运行的 Lua 引擎
+        if self._lua_engine:
+            self._lua_engine.request_stop()
+            self._log("[Lua停止] 已请求停止脚本执行")
         self._testing = False
         self._waiting_for_response = False
         self._any_frame_received = False
@@ -1109,6 +1777,12 @@ class TestPlanWidget(QWidget):
         item["status"] = "测试中"
         item["test_result"] = "未测"
         self._refresh_table_row(row)
+
+        # Lua 脚本项：在子线程中执行
+        if item.get("is_lua_script", False):
+            self._run_lua_script(row, item)
+            return
+
         send_enabled = item.get("send_enabled", True)
         frame = item["frame_hex"].replace(" ", "")
         timeout = item.get("timeout_ms", 2000)
@@ -1146,6 +1820,86 @@ class TestPlanWidget(QWidget):
                 self._finish_test()
                 return
         self._any_frame_received = False
+        if self._testing:
+            self._current_test_index += 1
+            self._execute_next()
+
+    def _run_lua_script(self, row: int, item: Dict[str, Any]):
+        """在子线程中执行 Lua 脚本"""
+        if not LUA_AVAILABLE:
+            self._log(f"[{row + 1}] Lua错误 -> lupa 库未安装，请运行: pip install lupa")
+            item["test_result"] = "失败"
+            item["status"] = "已测试"
+            self._refresh_table_row(row)
+            if self._testing:
+                self._current_test_index += 1
+                self._execute_next()
+            return
+        script = item.get("script", "")
+        if not script:
+            self._log(f"[{row + 1}] Lua错误 -> 脚本内容为空")
+            item["test_result"] = "失败"
+            item["status"] = "已测试"
+            self._refresh_table_row(row)
+            if self._testing:
+                self._current_test_index += 1
+                self._execute_next()
+            return
+        self._log(f"[{row + 1}] Lua -> 执行脚本: {item['name']}")
+        self._lua_engine = LuaScriptEngine()
+        self._lua_engine.set_serial_worker(self._serial_worker)
+        self._lua_engine.set_test_vars(self._test_vars)
+        # 日志信号连接到测试日志
+        self._lua_engine.log_signal.connect(self._on_lua_log)
+        # 完成信号
+        self._lua_engine.finished_signal.connect(
+            lambda ok, result: self._on_lua_finished(row, ok, result)
+        )
+        # 设置脚本最大执行时间超时（使用 item 的 timeout_ms）
+        timeout = item.get("timeout_ms", 60000)
+        self._wait_timer.start(timeout)
+        self._wait_timer.timeout.connect(self._on_lua_timeout)
+        # 在子线程中运行
+        t = threading.Thread(target=self._lua_engine.run, args=(script,), daemon=True)
+        t.start()
+
+    def _on_lua_log(self, msg: str):
+        """将 Lua 引擎日志输出到测试日志"""
+        self.log_edit.appendPlainText(msg)
+
+    def _on_lua_timeout(self):
+        """Lua 脚本超时"""
+        if self._lua_engine:
+            self._lua_engine.request_stop()
+            self._log(f"[Lua超时] 脚本执行超过最大时间，已请求停止")
+
+    def _on_lua_finished(self, row: int, success: bool, result: str):
+        """Lua 脚本执行完成回调"""
+        # 停止超时计时器
+        if self._wait_timer and self._wait_timer.isActive():
+            self._wait_timer.stop()
+            try:
+                self._wait_timer.timeout.disconnect(self._on_lua_timeout)
+            except RuntimeError:
+                pass
+        if 0 <= row < len(self._items):
+            item = self._items[row]
+            item["status"] = "已测试"
+            if success:
+                item["test_result"] = "通过"
+                self._log(f"[{row + 1}] Lua -> 完成: {result}")
+            else:
+                item["test_result"] = "失败"
+                self._log(f"[{row + 1}] Lua -> 失败: {result}")
+            # 同步 Lua 测试变量
+            if self._lua_engine:
+                self._test_vars = self._lua_engine._test_vars
+            self._refresh_table_row(row)
+            if self._testing and self.chk_stop_on_fail.isChecked() and item["test_result"] == "失败":
+                self._log("[测试停止] 失败时停止已启用")
+                self._finish_test()
+                return
+        self._lua_engine = None
         if self._testing:
             self._current_test_index += 1
             self._execute_next()
@@ -1411,6 +2165,8 @@ class TestPlanWidget(QWidget):
                     "match_enabled": item["match_enabled"],
                     "response_frame": item.get("response_frame", ""),
                     "persistent": item.get("persistent", False),
+                    "is_lua_script": item.get("is_lua_script", False),
+                    "script": item.get("script", ""),
                 }
                 for item in self._items
             ]
@@ -1442,6 +2198,8 @@ class TestPlanWidget(QWidget):
                     "match_enabled": entry.get("match_enabled", True),
                     "response_frame": entry.get("response_frame", ""),
                     "persistent": entry.get("persistent", False),
+                    "is_lua_script": entry.get("is_lua_script", False),
+                    "script": entry.get("script", ""),
                     "match_count": entry.get("match_count", 0),
                     "test_result": "未测",
                     "status": "待测",

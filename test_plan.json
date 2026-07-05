@@ -8,7 +8,9 @@
     "send_enabled": true,
     "match_enabled": true,
     "response_frame": "680E00880000010001E800007216",
-    "persistent": false
+    "persistent": false,
+    "is_lua_script": false,
+    "script": ""
   },
   {
     "name": "回复集中器时间",
@@ -19,7 +21,9 @@
     "send_enabled": false,
     "match_enabled": true,
     "response_frame": "681200000606010606E8【\"time\",6,Y-M-D-h-m-s,\"little\"】【\"CS\",1,3:-2,\"little\"】16",
-    "persistent": true
+    "persistent": true,
+    "is_lua_script": false,
+    "script": ""
   },
   {
     "name": "查询最大网络规模",
@@ -30,7 +34,9 @@
     "send_enabled": true,
     "match_enabled": true,
     "response_frame": "",
-    "persistent": false
+    "persistent": false,
+    "is_lua_script": false,
+    "script": ""
   },
   {
     "name": "查询多网络信息",
@@ -41,7 +47,9 @@
     "send_enabled": true,
     "match_enabled": true,
     "response_frame": "",
-    "persistent": false
+    "persistent": false,
+    "is_lua_script": false,
+    "script": ""
   },
   {
     "name": "查询并发数",
@@ -52,7 +60,9 @@
     "send_enabled": true,
     "match_enabled": true,
     "response_frame": "",
-    "persistent": false
+    "persistent": false,
+    "is_lua_script": false,
+    "script": ""
   },
   {
     "name": "查询宽带载波频段",
@@ -63,7 +73,9 @@
     "send_enabled": true,
     "match_enabled": true,
     "response_frame": "",
-    "persistent": false
+    "persistent": false,
+    "is_lua_script": false,
+    "script": ""
   },
   {
     "name": "查询主节点运行信息",
@@ -74,7 +86,9 @@
     "send_enabled": true,
     "match_enabled": true,
     "response_frame": "",
-    "persistent": false
+    "persistent": false,
+    "is_lua_script": false,
+    "script": ""
   },
   {
     "name": "查询台区组网成功率",
@@ -85,7 +99,9 @@
     "send_enabled": true,
     "match_enabled": true,
     "response_frame": "",
-    "persistent": false
+    "persistent": false,
+    "is_lua_script": false,
+    "script": ""
   },
   {
     "name": "初始化档案",
@@ -96,7 +112,9 @@
     "send_enabled": true,
     "match_enabled": true,
     "response_frame": "",
-    "persistent": false
+    "persistent": false,
+    "is_lua_script": false,
+    "script": ""
   },
   {
     "name": "添加从节点",
@@ -107,7 +125,9 @@
     "send_enabled": true,
     "match_enabled": true,
     "response_frame": "",
-    "persistent": false
+    "persistent": false,
+    "is_lua_script": false,
+    "script": ""
   },
   {
     "name": "查询从节点数量",
@@ -118,7 +138,9 @@
     "send_enabled": true,
     "match_enabled": true,
     "response_frame": "",
-    "persistent": false
+    "persistent": false,
+    "is_lua_script": false,
+    "script": ""
   },
   {
     "name": "等待组网",
@@ -129,7 +151,9 @@
     "send_enabled": false,
     "match_enabled": false,
     "response_frame": "",
-    "persistent": false
+    "persistent": false,
+    "is_lua_script": false,
+    "script": ""
   },
   {
     "name": "查询网络拓扑信息",
@@ -140,7 +164,9 @@
     "send_enabled": true,
     "match_enabled": true,
     "response_frame": "",
-    "persistent": false
+    "persistent": false,
+    "is_lua_script": false,
+    "script": ""
   },
   {
     "name": "初始化任务",
@@ -151,7 +177,9 @@
     "send_enabled": true,
     "match_enabled": true,
     "response_frame": "",
-    "persistent": false
+    "persistent": false,
+    "is_lua_script": false,
+    "script": ""
   },
   {
     "name": "启动任务",
@@ -162,7 +190,9 @@
     "send_enabled": true,
     "match_enabled": true,
     "response_frame": "",
-    "persistent": false
+    "persistent": false,
+    "is_lua_script": false,
+    "script": ""
   },
   {
     "name": "添加任务",
@@ -173,7 +203,9 @@
     "send_enabled": true,
     "match_enabled": true,
     "response_frame": "",
-    "persistent": false
+    "persistent": false,
+    "is_lua_script": false,
+    "script": ""
   },
   {
     "name": "延时等待任务数据上报",
@@ -184,6 +216,21 @@
     "send_enabled": false,
     "match_enabled": true,
     "response_frame": "680E00880000010001E800007216",
-    "persistent": false
+    "persistent": false,
+    "is_lua_script": false,
+    "script": ""
+  },
+  {
+    "name": "遍历地址发送",
+    "frame_hex": "",
+    "match_rule": "",
+    "match_mode": "HEX",
+    "timeout_ms": 600000,
+    "send_enabled": false,
+    "match_enabled": false,
+    "response_frame": "",
+    "persistent": false,
+    "is_lua_script": true,
+    "script": "-- 遍历地址 01~10，逐帧发送并等待响应\nfor addr = 1, 10 do\n    local addr_hex = string.format(\"%02X\", addr)\n    local frame = \"68 0E 00 \" .. addr_hex .. \" 00 00 68 11 04 33 33 33 33 16\"\n\n    log(string.format(\"发送地址 %02d: %s\", addr, frame))\n    send(frame)\n\n    local resp = wait_for_response(2000)\n    if resp ~= \"\" then\n        local last_byte = string.byte(resp, -1)\n          if last_byte ~= 0x16 then\n              log(string.format(\"地址 %02d 响应: %s\", addr, resp))\n          else\n              log(string.format(\"地址 %02d 响应末字节: 0x%02X\", addr, last_byte))\n          end\n    else\n        log(string.format(\"地址 %02d 超时\", addr))\n    end\n\n    wait(200)  -- 帧间隔 200ms\nend"
   }
 ]
