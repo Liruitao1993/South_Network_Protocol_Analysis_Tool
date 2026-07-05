@@ -9,21 +9,22 @@
 
 ## 1. 项目概览
 
-多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.7.1`）。
+多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.8.0`；CHANGELOG 头部已含 `1.8.1` Lua 脚本条目，待发版 bump）。
 
-**支持的协议（共 9 种，对应 GUI 协议下拉框 `current_protocol` 索引）：**
+**支持的协议（共 10 种，对应 GUI 协议下拉框 `current_protocol` 索引）：**
 
 | 索引 | 协议名（GUI显示） | 标准号 | 字节序 | 校验算法 |
 |------|------------------|--------|--------|----------|
 | 0 | 南网协议 | Q/CSG1209021-2019 | 小端 | 8位位组算术和（不溢出） |
 | 1 | PLC RF 协议（万胜海外） | 万胜 V1_04 | 大端 | 累加和 & 0xFF |
-| 2 | HDLC/DLMS | IEC 62056-46 | 大端（网络序） | CRC-16/FCS（CCITT） |
-| 3 | DLMS Wrapper 裸报文 | IEC 62056-46 | 大端 | 无（裸 APDU） |
-| 4 | DLMS-APDU 裸报文 | IEC 62056-46 | 大端 | 无 |
-| 5 | DLT645-2007 电表协议 | DL/T 645-2007 | BCD，地址低字节在前 | 累加和 & 0xFF |
-| 6 | 国网协议 | Q/GDW 10376.2—2024 | 小端 | 8位位组算术和（不溢出） |
-| 7 | 698.45 协议 | DL/T 698.45-2017 | 小端 | **CRC-16（crcmod 的 `x-25`）** |
-| 8 | 新一代载波协议（通感一体化） | 通感一体化低压电力线宽带载波通信规约（2026校对版） | 小端 | CRC-32（MAC帧） |
+| 2 | HDLC/国网DLMS | IEC 62056-46 | 大端（网络序） | CRC-16/FCS（CCITT） |
+| 3 | DLMS-APDU(国网) | IEC 62056-46 | 大端 | 无 |
+| 4 | DLMS Wrapper 裸报文 | IEC 62056-46 | 大端 | 无（裸 APDU） |
+| 5 | DLMS-APDU 裸报文 | IEC 62056-46 | 大端 | 无 |
+| 6 | DLT645-2007 电表协议 | DL/T 645-2007 | BCD，地址低字节在前 | 累加和 & 0xFF |
+| 7 | 国网协议 | Q/GDW 10376.2—2024 | 小端 | 8位位组算术和（不溢出） |
+| 8 | 698.45 协议 | DL/T 698.45-2017 | 小端 | **CRC-16（crcmod 的 `x-25`）** |
+| 9 | 新一代载波协议（通感一体化） | 通感一体化低压电力线宽带载波通信规约（2026校对版） | 小端 | CRC-32（MAC帧） |
 
 ---
 
@@ -46,11 +47,16 @@ pyinstaller 南网协议解析工具.spec       # 南网精简版：custom_di.js
 - `pip install streamlit`（Web 版）
 - `pip install crcmod`（698.45 协议 CRC 校验，**1.7.0 起新增**）
 - `pip install openpyxl`（Excel 测试报告，可选）
+- `pip install lupa`（测试方案 Lua 脚本引擎，**1.8.1 新增**，未安装时静默降级为不可用）
 
 **运行环境注意：**
 - Windows 优先；中文路径需保证 UTF-8 / GBK 编码兼容
 - `main_gui.py` 内有 `_get_git_changelog()` 会调用 `git log`，无 git 环境时静默降级
 - PyInstaller spec 文件中 `excludes` 列表用于减小体积（PyQt5/matplotlib/scipy/numpy 等）
+- 两个 `.spec` 文件当前 `datas` 完全一致（均含 `custom_di.json` + `dlt645_di.json` + `gdw_custom_afn.json` + `icons/`）；差异仅在 exe 名称与打包模式（`协议解析工具.spec` 为 `COLLECT` 目录型，`南网协议解析工具.spec` 为单文件 `EXE`）
+- Lua 脚本引擎依赖 `lupa`，打包时需作为 hidden import 或确保运行环境已安装
+- `docs/Lua脚本使用说明.md` 是 Lua 功能的用户文档
+- Inno Setup 安装脚本 `南网解析工具.iss` / `2222.iss` 中 `MyAppVersion` 仍为 `1.7.2`，发版时需手动同步
 
 ---
 
@@ -59,7 +65,7 @@ pyinstaller 南网协议解析工具.spec       # 南网精简版：custom_di.js
 ```
 main_gui.py                     # GUI主程序 (PySide6)，应用入口，~3600行，MainWindow 类
 │                                #  - APP_VERSION、CHANGELOG（手写）+ _get_git_changelog()（动态）
-│                                #  - current_protocol 硬编码索引(0~8)，见 §6
+│                                #  - current_protocol 硬编码索引(0~9)，见 §6
 │                                #  - ConfigDialog：配置文件路径管理（自定义 JSON 路径）
 │
 ├── 协议解析器（parser）── 每个返回嵌套 dict，字段约定见 §4
@@ -123,6 +129,10 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，~3600�
 │   ├── templates/test_templates.py # 测试模板库
 │   └── visual_editor/test_item_editor.py # 可视化测试项编辑器
 │
+├── 脚本引擎 / 用户文档
+│   ├── lua_script_engine.py     # 测试方案 Lua 脚本引擎（依赖 lupa，1.8.1 新增）
+│   └── docs/Lua脚本使用说明.md   # Lua 脚本用户使用文档
+│
 ├── 数据提取/生成脚本（一次性或离线使用，不要打包）
 │   ├── generate_dlt645_di.py       # 生成 dlt645_di.json（勿手动编辑该 JSON）
 │   ├── generate_oi_lookup.py       # 生成 dl_t698_45_oi_lookup.py 中的 OI_NAME_MAP
@@ -155,8 +165,8 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，~3600�
 ```
 用户输入 hex
   → main_gui.py 根据 current_protocol 选择 parser
-    (0:ProtocolFrameParser / 1:PLCRFProtocolParser / 2~4:HDLCParser / 5:DLT645Parser
-     6:GDW10376Parser / 7:DLT69845Parser(+APDUParser+AXDRCoder) / 8:CSGNewGenParser)
+    (0:ProtocolFrameParser / 1:PLCRFProtocolParser / 2~5:HDLCParser / 6:DLT645Parser
+     7:GDW10376Parser / 8:DLT69845Parser(+APDUParser+AXDRCoder) / 9:CSGNewGenParser)
   → parser.parse(frame_bytes) 返回结构化嵌套 dict
   → GUI: QTableWidget 展示分层 + 字节高亮（点击行联动输入框）
   → 可选: 校验（validator.verify()）、DLMS 深度弹窗（双击 DLMS APDU 行）
@@ -303,12 +313,12 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，~3600�
 | `_parse_single_frame`（~L2195+） | 选择 parser 调用 |
 | `_update_protocol_lookup_tab`（~L1434+） | 查询标签页内容（DI/AFN/OBIS/命令字/业务标识） |
 | `_run_validation`（~L2353+） | validator 字典映射 |
-| `setTabVisible`（~L1342-1386） | 组帧/预设(0,6,7)、档案(0,6)、拓扑(0,6) 可见性 |
+| `setTabVisible`（~L1342-1386） | 组帧/预设(0,7,8)、档案(0,7)、拓扑(0,7) 可见性 |
 
 **Tab 可见性规则：**
-- 组帧 / 预设命令：南网(0) / 国网(6) / 698.45(7) — 三种模式 `south` / `gdw` / `dlt698`
-- 档案管理 / 拓扑信息：仅南网(0) / 国网(6)
-- 新一代解析级别下拉：仅索引 8
+- 组帧 / 预设命令：南网(0) / 国网(7) / 698.45(8) — 三种模式 `south` / `gdw` / `dlt698`
+- 档案管理 / 拓扑信息：仅南网(0) / 国网(7)
+- 新一代解析级别下拉：仅索引 9
 
 ---
 
@@ -341,9 +351,9 @@ python test_plan_widget.py     # 测试计划组件（需 GUI 环境）
 
 1. **`_clear_layout` 递归销毁**（`main_gui.py`）：递归删除所有子 widget。改查询标签页逻辑时必须理解此方法，否则 widget 残留或崩溃。
 2. **`current_protocol` 硬编码索引**：见 §6，添加协议要改 8+ 处。
-3. **PyInstaller spec 的 datas 不同**：
-   - `协议解析工具.spec`：`custom_di.json` + `dlt645_di.json` + `gdw_custom_afn.json`，`excludes` 较多
-   - `南网协议解析工具.spec`：仅前两个，`excludes` 为空
+3. **PyInstaller spec 当前 datas 相同**：
+   - 两个 spec 的 `datas` 完全一致：`custom_di.json` + `dlt645_di.json` + `gdw_custom_afn.json` + `icons/`，`excludes` 也相同（PyQt5/PyQt6/matplotlib/scipy/PIL/tkinter/numpy）
+   - 差异仅在 exe 名称与打包模式：`协议解析工具.spec` → COLLECT 目录型；`南网协议解析工具.spec` → 单文件 EXE
    - **新增需打包的数据文件，两个 spec 都要同步**
 4. **DLMS 深度解析是双击触发**，不是自动：双击表格中 `DLMS APDU` 行才弹 `dlms_deep_parser`。
 5. **HDLC 字节填充**：组帧时 7E/7D 必须转义（见 §4.6）。
@@ -353,6 +363,8 @@ python test_plan_widget.py     # 测试计划组件（需 GUI 环境）
 9. **字节序修复历史**：1.6.4~1.6.7 系统性修复了多字节字段小端序、ASCII/BCD 反转问题。改多字节字段解析时参考此段历史，避免回退。
 10. **`dlt645_di.json` 勿手改**：由 `generate_dlt645_di.py` 生成；`OI_NAME_MAP` 由 `generate_oi_lookup.py` 生成。
 11. **新一代载波协议(8)批量解析的监控前缀剥离时机**：`_strip_csg_monitor_prefix` **必须在 `_clean_hex_input` 之前调用**（在 `parse_batch` 内）。因为监控标记 `-> 接收机 Has Get` 含中文/箭头，若先清洗 hex 会破坏标记导致无法定位 15 字节监控头边界。改批量解析流程时注意此顺序。
+12. **Lua 脚本引擎依赖 `lupa`**：未安装时 `LUA_AVAILABLE=False`，测试方案中 Lua 脚本类型不可用但其余功能正常。`lua_script_engine.py` 通过 `raw_data_received` 信号直接接收串口原始字节（绕过 FT1.2 帧解析），改串口数据流时注意此旁路。
+13. **Inno Setup 版本号滞后**：`南网解析工具.iss` / `2222.iss` 中 `MyAppVersion` 为 `1.7.2`，落后于 `APP_VERSION`，发版时需手动同步。
 
 ---
 
@@ -380,6 +392,21 @@ python test_plan_widget.py     # 测试计划组件（需 GUI 环境）
 ## 10. 变更日志（与 `main_gui.py:CHANGELOG` 保持同步）
 
 > 本节按版本倒序记录。详细 commit 见 `git log`。每发新版本必须更新此处。
+
+### 1.8.0 — 2026-07-04
+### 1.8.1（待发版，CHANGELOG 已写入 `main_gui.py`）— 2026-06-27
+- **测试方案新增 Lua 脚本支持**：测试项「性质」新增「Lua脚本」类型，可在测试流程中嵌入可编程逻辑（条件分支、循环遍历、数据解析、变量共享、动态组帧、延时控制）
+- 新增 `lua_script_engine.py`（Lua 脚本引擎），通过 `lupa`（Python-Lua 桥接）提供 API：`send` / `wait_for_response` / `wait` / `log` / `hex_to_bytes` / `bytes_to_hex` / `get_last_response` / `get_test_var` / `set_test_var` / `stop`
+- 新增 `test_lua_engine.py`（Lua 引擎测试）
+- 新增 `docs/Lua脚本使用说明.md`（Lua 功能用户文档）
+- `test_plan_widget.py` 新增 `LuaCodeEditor`（带行号+列线指示器的代码编辑器）与 Lua 模式切换逻辑
+- `serial_worker.py` 新增 `raw_data_received` 信号供 Lua 引擎桥接器接收原始串口数据
+- 依赖：`lupa`（未安装时 `LUA_AVAILABLE=False`，Lua 脚本类型不可用但其他功能不受影响）
+
+### 1.8.0 — 2026-07-04
+- **新增 DLMS-APDU(国网) 协议选项（索引3）**：复用 HDLC 解析器的 APDU 深度解析功能，专门服务国网 DLMS 报文
+- **HDLC/DLMS 协议重命名为 HDLC/国网DLMS**：明确国网协议背景，与新增的 DLMS-APDU(国网) 配套
+- **协议索引重新编号**：原 3~8 顺延为 4~9，共 10 种协议，所有索引硬编码位置已同步更新
 
 ### 1.7.2 — 2026-06-21
 - **修复新一代载波协议(索引8)选择确认帧(SACK)解析**：
@@ -471,7 +498,40 @@ python test_plan_widget.py     # 测试计划组件（需 GUI 环境）
 
 ## 11. 最新变更摘要（最近一次 commit 摘要）
 
-**最近一次（2026-06-21）：修复SACK解析 + 增强批量摘要业务内容**
+**最近一次（2026-07-04）：新增 DLMS-APDU(国网) 协议选项，协议索引重编号**
+**最近一次（未提交，CHANGELOG 标记 1.8.1）：测试方案新增 Lua 脚本支持**
+
+变更：
+- 新增 `lua_script_engine.py`：基于 `lupa` 的 Lua 脚本引擎，提供 send/wait/log/hex_to_bytes 等 API
+- `test_plan_widget.py`：新增 `LuaCodeEditor`（行号+列线指示器），测试项「性质」新增「Lua脚本」类型，编辑器按性质切换帧字段/Lua 脚本模式
+- `serial_worker.py`：新增 `raw_data_received` 信号，供 `LuaEngineBridge` 直接接收串口原始数据（不经过 FT1.2 帧解析）
+- 新增 `test_lua_engine.py`（Lua 引擎测试用例）
+- 新增 `docs/Lua脚本使用说明.md`（用户文档，含 API 参考、示例、模板）
+- `main_gui.py` CHANGELOG 头部写入 `1.8.1` 条目（`APP_VERSION` 仍为 `1.8.0`，待发版时 bump）
+
+涉及文件：
+- 新增：`lua_script_engine.py`、`test_lua_engine.py`、`docs/Lua脚本使用说明.md`
+- 修改：`main_gui.py`、`test_plan_widget.py`、`serial_worker.py`
+
+依赖：`lupa`（pip install lupa），未安装时静默降级。
+
+---
+
+**上一次（2026-07-04）：新增 DLMS-APDU(国网) 协议选项，协议索引重编号**
+
+变更：
+- `main_gui.py`：下拉框插入“DLMS-APDU(国网)”（索引3），“HDLC/DLMS”重命名为“HDLC/国网DLMS”
+- `main_gui.py`：所有索引 3~8 硬编码位置顺延为 4~9，共 10 种协议
+- 新协议复用 HDLCParser.parse_apdu_to_table，无需新增解析器文件
+- 校验器、帧提取、方向提取、字节剔除、摘要生成等均已同步更新索引
+
+涉及文件：
+- 修改：`main_gui.py`、`AGENTS.md`
+
+验证：GUI 手动检查各协议切换、解析、查询页正常（待执行）
+
+
+**上一次（2026-06-21）：SACK解析 + 增强批量摘要业务内容**
 
 修复1：SACK帧字节12被公共代码误解析为"短网络标识高位"，实际应为"扩展帧类型(4b) + 标准版本号(4b)"。
 修复2：SACK帧仅FC头16字节无载荷，auto模式将FC头误当MSDU数据继续解析导致"解析失败"。

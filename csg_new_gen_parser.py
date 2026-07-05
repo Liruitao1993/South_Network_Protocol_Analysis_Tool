@@ -266,6 +266,8 @@ class CSGNewGenParser:
         mac_data = None
         first_byte = frame_bytes[0]
 
+        is_direct_app = False
+
         # ── 步骤0: 检测 MPDU 帧（FC帧控制，16字节头）──
         # MPDU特征：bit3=1（接入指示）+ bits0-2=定界符类型(0~3)
         delimiter_type = first_byte & 0x07       # bits 0-2

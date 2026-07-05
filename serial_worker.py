@@ -21,6 +21,7 @@ class SerialWorker(QThread):
 
     # 信号定义
     frame_received = Signal(bytes)       # 收到一帧完整数据
+    raw_data_received = Signal(bytes)   # 收到原始串口数据（未经帧解析）
     log_message = Signal(str)            # 日志消息（供文本框显示）
     connection_changed = Signal(bool)    # 连接状态变化
     error_occurred = Signal(str)         # 错误信息
@@ -118,6 +119,7 @@ class SerialWorker(QThread):
             try:
                 if self._ser.in_waiting:
                     raw = self._ser.read(self._ser.in_waiting)
+                    self.raw_data_received.emit(raw)  # 发射原始数据信号
                     self._buffer.extend(raw)
                     self._process_buffer()
                 else:

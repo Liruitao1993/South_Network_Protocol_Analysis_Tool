@@ -1,3 +1,4 @@
+import pathlib
 """
 南网协议解析工具 - PySide6 GUI版
 简洁界面，支持单帧解析和批量解析
@@ -14,10 +15,11 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QTextEdit,
     QTableWidget, QTableWidgetItem, QFileDialog, QMessageBox,
     QHeaderView, QSplitter, QGroupBox, QDialog, QTabWidget, QComboBox,
-    QListView, QFrame, QMenuBar
+    QListView, QFrame, QMenuBar, QSpinBox
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QTextCursor, QTextCharFormat, QColor
+from PySide6.QtWidgets import QStyle
+from PySide6.QtGui import QFont, QTextCursor, QTextCharFormat, QColor, QIcon
 
 from protocol_parser import ProtocolFrameParser
 from plc_rf_parser import PLCRFProtocolParser
@@ -39,9 +41,19 @@ from serial_worker import SerialWorker
 from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu
 
 
-APP_VERSION = "1.7.2"
+APP_VERSION = "1.8.0"
 
 CHANGELOG = [
+    ("1.8.1", "2026-06-27", [
+        "测试方案新增 Lua 脚本支持：可在测试流程中嵌入可编程逻辑，支持条件分支、循环遍历、数据解析、变量共享",
+        "新增 lua_script_engine.py（Lua 脚本引擎），提供 send/wait/log/hex_to_bytes 等 API 函数",
+        "依赖：lupa（Python-Lua 桥接，pip install lupa）",
+    ]),
+    ("1.8.0", "2026-07-04", [
+        "新增 DLMS-APDU(国网) 协议选项（索引3），使用 HDLC 解析器的 APDU 深度解析功能",
+        "HDLC/DLMS 协议重命名为 HDLC/国网DLMS，明确国网协议背景",
+        "协议索引重新编号：原 3~8 顺延为 4~9，共 10 种协议",
+    ]),
     ("1.7.2", "2026-06-21", [
         "修复新一代载波协议（索引8）选择确认帧(SACK)解析：字节12正确解析为扩展帧类型+标准版本号",
         "SACK子解析器返回值修正，与其他帧类型子解析器保持一致",
@@ -300,7 +312,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"协议解析工具 v{APP_VERSION}")
         self.setMinimumSize(1000, 700)
 
-        # 协议选择：0=南网协议，1=PLC RF协议，2=HDLC/DLMS协议，3=Wrapper，4=APDU，5=DLT645，6=国网协议，7=698.45，8=新一代载波协议(通感一体化)
+        # 协议选择：0=南网协议，1=PLC RF协议，2=HDLC/国网DLMS，3=DLMS-APDU(国网)，4=Wrapper，5=APDU，6=DLT645，7=国网协议，8=698.45，9=新一代载波协议(通感一体化)
         self.current_protocol = 0
 
         # 初始化解析器
@@ -314,6 +326,8 @@ class MainWindow(QMainWindow):
 
         # 新一代载波协议解析级别：auto=自动, fc_pb=FC+PB, fc_only=仅FC, app=应用层
         self._csg_parse_level = "auto"
+        # 字节剔除缓存：记录上次剔除后成功解析的hex，避免重复剔除
+        self._csg_last_stripped_hex = ""
 
         # 初始化查询器
         self.obis_lookup = get_obis_lookup()
@@ -363,7 +377,8 @@ class MainWindow(QMainWindow):
         self.protocol_combo = QComboBox()
         self.protocol_combo.addItem("南网协议 (Q/CSG1209021-2019)")
         self.protocol_combo.addItem("PLC RF协议 (万胜海外 V1_04)")
-        self.protocol_combo.addItem("HDLC/DLMS协议 (IEC 62056-46)")
+        self.protocol_combo.addItem("HDLC/国网DLMS (IEC 62056-46)")
+        self.protocol_combo.addItem("DLMS-APDU(国网)")
         self.protocol_combo.addItem("DLMS Wrapper裸报文")
         self.protocol_combo.addItem("DLMS-APDU裸报文")
         self.protocol_combo.addItem("DLT645-2007 电表协议")
@@ -377,7 +392,7 @@ class MainWindow(QMainWindow):
         self.protocol_combo.currentIndexChanged.connect(self._on_protocol_changed)
         proto_layout.addWidget(self.protocol_combo)
 
-        # ---- 新一代载波协议解析级别选择（仅协议索引8时可见）----
+        # ---- 新一代载波协议解析级别选择（仅协议索引9时可见）----
         self.csg_parse_level_label = QLabel("解析级别：")
         self.csg_parse_level_label.setFont(QFont("Microsoft YaHei", 9))
         proto_layout.addWidget(self.csg_parse_level_label)
@@ -395,6 +410,35 @@ class MainWindow(QMainWindow):
         proto_layout.addWidget(self.csg_parse_level_combo)
         self.csg_parse_level_label.setVisible(False)
 
+        # ---- 新一代载波协议字节剔除（仅协议索引9时可见）----
+        self.csg_strip_head_label = QLabel("剔除前:")
+        self.csg_strip_head_label.setFont(QFont("Microsoft YaHei", 9))
+        self.csg_strip_head_label.setVisible(False)
+        proto_layout.addWidget(self.csg_strip_head_label)
+
+        self.csg_strip_head_spin = QSpinBox()
+        self.csg_strip_head_spin.setRange(0, 999)
+        self.csg_strip_head_spin.setValue(0)
+        self.csg_strip_head_spin.setSuffix(" 字节")
+        self.csg_strip_head_spin.setFont(QFont("Microsoft YaHei", 9))
+        self.csg_strip_head_spin.setVisible(False)
+        self.csg_strip_head_spin.setToolTip("解析前剔除报文头部指定字节数（0=不剔除）")
+        proto_layout.addWidget(self.csg_strip_head_spin)
+
+        self.csg_strip_tail_label = QLabel("尾部:")
+        self.csg_strip_tail_label.setFont(QFont("Microsoft YaHei", 9))
+        self.csg_strip_tail_label.setVisible(False)
+        proto_layout.addWidget(self.csg_strip_tail_label)
+
+        self.csg_strip_tail_spin = QSpinBox()
+        self.csg_strip_tail_spin.setRange(0, 999)
+        self.csg_strip_tail_spin.setValue(0)
+        self.csg_strip_tail_spin.setSuffix(" 字节")
+        self.csg_strip_tail_spin.setFont(QFont("Microsoft YaHei", 9))
+        self.csg_strip_tail_spin.setVisible(False)
+        self.csg_strip_tail_spin.setToolTip("解析前剔除报文尾部指定字节数（0=不剔除）")
+        proto_layout.addWidget(self.csg_strip_tail_spin)
+
         proto_layout.addStretch()
 
         top_bar.addWidget(proto_group, 1)
@@ -409,6 +453,21 @@ class MainWindow(QMainWindow):
         self.serial_port_combo = QComboBox()
         self.serial_port_combo.setMinimumWidth(80)
         serial_layout.addWidget(self.serial_port_combo)
+
+        self.serial_refresh_btn = QPushButton()
+        _icon_dir = pathlib.Path(__file__).parent / "icons"
+        self.serial_refresh_btn.setIcon(QIcon(str(_icon_dir / "refresh.svg")))
+        self.serial_refresh_btn.setToolTip("刷新串口列表")
+        self.serial_refresh_btn.setMaximumWidth(30)
+        self.serial_refresh_btn.setMinimumHeight(24)
+        self.serial_refresh_btn.setFlat(True)
+        self.serial_refresh_btn.setStyleSheet("QPushButton { background: transparent; border: none; padding: 2px; }"
+            "QPushButton:hover { background: rgba(0,0,0,20); border-radius: 3px; }"
+            "QPushButton:pressed { background: rgba(0,0,0,40); }")
+        from PySide6.QtCore import QSize
+        self.serial_refresh_btn.setIconSize(QSize(18, 18))
+        self.serial_refresh_btn.clicked.connect(self._refresh_serial_ports)
+        serial_layout.addWidget(self.serial_refresh_btn)
 
         serial_layout.addWidget(QLabel("波特率:"))
         self.serial_baud_combo = QComboBox()
@@ -593,6 +652,19 @@ class MainWindow(QMainWindow):
         # 存储每行对应的字节范围
         self._byte_ranges: list = []
 
+        # 导出图片按钮行
+        export_row = QHBoxLayout()
+        export_row.addStretch()
+        self.export_result_btn = QPushButton("导出图片")
+        self.export_result_btn.setToolTip("将解析结果表格导出为完整的PNG图片")
+        self.export_result_btn.setStyleSheet(
+            "QPushButton { background-color: #2196F3; color: white; border-radius: 3px; padding: 3px 12px; }"
+            "QPushButton:hover { background-color: #1976D2; }"
+        )
+        self.export_result_btn.clicked.connect(self._export_result_image)
+        export_row.addWidget(self.export_result_btn)
+        result_layout.addLayout(export_row)
+
         result_layout.addWidget(self.result_table_widget)
 
         # === 校验结果区域 ===
@@ -607,6 +679,59 @@ class MainWindow(QMainWindow):
         layout.addWidget(result_group, 1)
 
         return tab
+
+    def _export_result_image(self):
+        """将解析结果表格导出为完整的PNG图片"""
+        table = self.result_table_widget
+        if table.rowCount() == 0:
+            QMessageBox.warning(self, "提示", "当前没有解析结果可以导出！")
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "导出解析结果图片",
+            f"解析结果_{self.current_protocol}.png",
+            "PNG 图片 (*.png)"
+        )
+        if not file_path:
+            return
+
+        from PySide6.QtCore import QSize
+        from PySide6.QtGui import QPixmap, QPainter
+
+        # 保存当前状态
+        orig_h = table.height()
+        orig_min_h = table.minimumHeight()
+        orig_max_h = table.maximumHeight()
+        orig_vscroll_policy = table.verticalScrollBarPolicy()
+
+        # 计算完整高度：表头 + 所有行 + 边距
+        header_h = table.horizontalHeader().height()
+        total_row_h = sum(table.rowHeight(i) for i in range(table.rowCount()))
+        full_h = header_h + total_row_h + 10
+        full_w = table.viewport().width() + 2  # 略宽于可视区
+
+        try:
+            # 临时调整表格尺寸以显示全部行
+            table.setMinimumHeight(full_h)
+            table.setMaximumHeight(full_h)
+            table.verticalScrollBar().setVisible(False)
+            table.adjustSize()
+            QApplication.processEvents()
+
+            # 使用 grab() 截取完整表格
+            pixmap = table.grab()
+
+            pixmap.save(file_path, "PNG")
+            QMessageBox.information(self, "导出成功",
+                f"解析结果已导出为图片：\n{file_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "导出失败", f"导出图片时出错：{str(e)}")
+        finally:
+            # 恢复原始状态
+            table.setMinimumHeight(orig_min_h)
+            table.setMaximumHeight(orig_max_h)
+            table.verticalScrollBar().setVisible(orig_vscroll_policy != Qt.ScrollBarAlwaysOff)
+            table.resize(table.width(), orig_h)
 
     def create_di_lookup_tab(self) -> QWidget:
         """创建DI查询标签页"""
@@ -1358,17 +1483,19 @@ class MainWindow(QMainWindow):
             self.single_input.setPlaceholderText("请输入PLC RF报文，例如：02 00 05 C0 20 01 00 99")
         elif index == 2:
             self.single_input.setPlaceholderText("请输入HDLC报文，例如：7E A0 07 01 01 93 ... 7E")
-        elif index == 3:
+        elif index == 3:  # DLMS-APDU(国网)
+            self.single_input.setPlaceholderText("请输入国网DLMS APDU报文，例如：C0 01 C1 00 ...")
+        elif index == 4:  # DLMS Wrapper裸报文
             self.single_input.setPlaceholderText("请输入Wrapper报文，例如：00 01 00 02 00 1E ...")
-        elif index == 4:  # DLMS-APDU裸报文
+        elif index == 5:  # DLMS-APDU裸报文
             self.single_input.setPlaceholderText("请输入APDU报文，例如：C0 01 C1 00 ...")
-        elif index == 5:  # DLT645-2007
+        elif index == 6:  # DLT645-2007
             self.single_input.setPlaceholderText("请输入DLT645报文，例如：68 AA AA AA AA AA AA 68 11 04 33 33 33 33 CS 16")
-        elif index == 6:  # 国网协议
+        elif index == 7:  # 国网协议
             self.single_input.setPlaceholderText("请输入国网报文，例如：68 0F 00 43 00 00 00 00 00 00 00 00 00 03 01 00 48 16")
-        elif index == 7:  # 698.45
+        elif index == 8:  # 698.45
             self.single_input.setPlaceholderText("请输入698.45报文，例如：68 0E 00 41 01 07 08 09 AE C6 01 00 00 00 00 34 87 16")
-        else:  # index == 8, 新一代载波协议(通感一体化)
+        else:  # index == 9, 新一代载波协议(通感一体化)
             self.single_input.setPlaceholderText("请输入新一代载波报文，例如：11 01 01 00 00 00 00 01 00 01 00 00")
 
         # 更新查询页面
@@ -1376,12 +1503,12 @@ class MainWindow(QMainWindow):
 
         # 协议组帧页面和预设命令页面在南网、国网、698.45协议下显示
         if hasattr(self, '_frame_gen_tab_index'):
-            show_frame_gen = index in (0, 6, 7)
+            show_frame_gen = index in (0, 7, 8)
             self.tab_widget.setTabVisible(self._frame_gen_tab_index, show_frame_gen)
             if show_frame_gen:
                 if index == 0:
                     mode = "south"
-                elif index == 6:
+                elif index == 7:
                     mode = "gdw"
                 else:
                     mode = "dlt698"
@@ -1389,18 +1516,18 @@ class MainWindow(QMainWindow):
             else:
                 self.frame_gen_tab.reset()
         if hasattr(self, '_preset_tab_index'):
-            self.tab_widget.setTabVisible(self._preset_tab_index, index in (0, 6, 7))
-            if index in (0, 6, 7):
+            self.tab_widget.setTabVisible(self._preset_tab_index, index in (0, 7, 8))
+            if index in (0, 7, 8):
                 if index == 0:
                     mode = "south"
-                elif index == 6:
+                elif index == 7:
                     mode = "gdw"
                 else:
                     mode = "dlt698"
                 self.preset_tab.set_protocol(mode)
         # 档案管理页面在南网、国网协议下显示
         if hasattr(self, '_archive_tab_index'):
-            show_archive = index in (0, 6)
+            show_archive = index in (0, 7)
             self.tab_widget.setTabVisible(self._archive_tab_index, show_archive)
             if show_archive:
                 if index == 0:
@@ -1410,7 +1537,7 @@ class MainWindow(QMainWindow):
                 self.archive_tab.set_protocol_mode(mode)
         # 拓扑信息页面在南网、国网协议下显示
         if hasattr(self, '_topology_tab_index'):
-            show_topology = index in (0, 6)
+            show_topology = index in (0, 7)
             self.tab_widget.setTabVisible(self._topology_tab_index, show_topology)
             if show_topology:
                 if index == 0:
@@ -1421,10 +1548,14 @@ class MainWindow(QMainWindow):
             else:
                 self.topology_tab.clear_nodes()
 
-        # 新一代载波协议解析级别选择：仅协议索引8时可见
-        show_csg_level = (index == 8)
+        # 新一代载波协议解析级别选择和字节剔除：仅协议索引9时可见
+        show_csg_level = (index == 9)
         self.csg_parse_level_label.setVisible(show_csg_level)
         self.csg_parse_level_combo.setVisible(show_csg_level)
+        self.csg_strip_head_label.setVisible(show_csg_level)
+        self.csg_strip_head_spin.setVisible(show_csg_level)
+        self.csg_strip_tail_label.setVisible(show_csg_level)
+        self.csg_strip_tail_spin.setVisible(show_csg_level)
 
         # 清空当前结果
         self.clear_single()
@@ -1452,27 +1583,27 @@ class MainWindow(QMainWindow):
             self.tab_widget.setTabText(lookup_tab_index, "命令字查询")
             self._create_command_lookup_content(self.protocol_lookup_tab_layout)
 
-        elif self.current_protocol in (2, 3, 4):
-            # HDLC/Wrapper/DLMS-APDU：OBIS查询
+        elif self.current_protocol in (2, 3, 4, 5):
+            # HDLC/DLMS-APDU(国网)/Wrapper/DLMS-APDU：OBIS查询
             self.tab_widget.setTabText(lookup_tab_index, "OBIS查询")
             self._create_obis_lookup_content(self.protocol_lookup_tab_layout)
             
-        elif self.current_protocol == 5:
+        elif self.current_protocol == 6:
             # DLT645-2007协议：DI查询
             self.tab_widget.setTabText(lookup_tab_index, "DI查询")
             self._create_dlt645_di_lookup_content(self.protocol_lookup_tab_layout)
 
-        elif self.current_protocol == 6:
+        elif self.current_protocol == 7:
             # 国网协议：AFN查询
             self.tab_widget.setTabText(lookup_tab_index, "AFN查询")
             self._create_gdw_lookup_content(self.protocol_lookup_tab_layout)
 
-        elif self.current_protocol == 7:
+        elif self.current_protocol == 8:
             # 698.45协议：OAD查询
             self.tab_widget.setTabText(lookup_tab_index, "OAD查询")
             self._create_oad_lookup_content(self.protocol_lookup_tab_layout)
 
-        elif self.current_protocol == 8:
+        elif self.current_protocol == 9:
             # 新一代载波协议(通感一体化)：业务标识查询
             self.tab_widget.setTabText(lookup_tab_index, "业务标识查询")
             self._create_csg_new_gen_lookup_content(self.protocol_lookup_tab_layout)
@@ -2232,9 +2363,17 @@ class MainWindow(QMainWindow):
             return self.parser
         elif self.current_protocol == 1:
             return self.plc_rf_parser
-        elif self.current_protocol == 2:  # HDLC/DLMS协议 (完整HDLC帧)
+        elif self.current_protocol == 2:  # HDLC/国网DLMS (完整HDLC帧)
             return self.hdlc_parser
-        elif self.current_protocol == 3:  # DLMS Wrapper裸报文 (直接解析Wrapper+APDU)
+        elif self.current_protocol == 3:  # DLMS-APDU(国网) (直接解析APDU)
+            # 返回一个匿名对象，调用parse_apdu_to_table
+            class APDUParserGuowang:
+                def __init__(self, hdlc_parser):
+                    self.hdlc_parser = hdlc_parser
+                def parse_to_table(self, data):
+                    return self.hdlc_parser.parse_apdu_to_table(data)
+            return APDUParserGuowang(self.hdlc_parser)
+        elif self.current_protocol == 4:  # DLMS Wrapper裸报文 (直接解析Wrapper+APDU)
             # 返回一个匿名对象，调用parse_wrapper_to_table
             class WrapperParser:
                 def __init__(self, hdlc_parser):
@@ -2242,7 +2381,7 @@ class MainWindow(QMainWindow):
                 def parse_to_table(self, data):
                     return self.hdlc_parser.parse_wrapper_to_table(data)
             return WrapperParser(self.hdlc_parser)
-        elif self.current_protocol == 4:  # DLMS-APDU裸报文 (直接解析APDU)
+        elif self.current_protocol == 5:  # DLMS-APDU裸报文 (直接解析APDU)
             # 返回一个匿名对象，调用parse_apdu_to_table
             class APDUParser:
                 def __init__(self, hdlc_parser):
@@ -2250,7 +2389,7 @@ class MainWindow(QMainWindow):
                 def parse_to_table(self, data):
                     return self.hdlc_parser.parse_apdu_to_table(data)
             return APDUParser(self.hdlc_parser)
-        elif self.current_protocol == 5:  # DLT645-2007
+        elif self.current_protocol == 6:  # DLT645-2007
             class DLT645GuiParser:
                 def __init__(self, parser):
                     self.parser = parser
@@ -2295,11 +2434,11 @@ class MainWindow(QMainWindow):
 
                     return table
             return DLT645GuiParser(self.dlt645_parser)
-        elif self.current_protocol == 6:  # 国网协议
+        elif self.current_protocol == 7:  # 国网协议
             return self.gdw_parser
-        elif self.current_protocol == 7:  # 698.45
+        elif self.current_protocol == 8:  # 698.45
             return self.dl_t698_45_parser
-        elif self.current_protocol == 8:  # 新一代载波协议(通感一体化)
+        elif self.current_protocol == 9:  # 新一代载波协议(通感一体化)
             # 包装解析器以传递解析级别参数
             csg_parser = self.csg_new_gen_parser
             parse_level = getattr(self, '_csg_parse_level', 'auto')
@@ -2409,6 +2548,26 @@ class MainWindow(QMainWindow):
             hex_display = ' '.join(f'{b:02X}' for b in frame_bytes)
             self.single_input.setPlainText(hex_display)
 
+            # 通感一体化协议：字节剔除（在解析前执行，支持缓存避免重复剔除）
+            if self.current_protocol == 9:
+                strip_head = self.csg_strip_head_spin.value()
+                strip_tail = self.csg_strip_tail_spin.value()
+                current_hex = clean_input.lower()
+                # 如果当前输入与上次剔除后的结果相同，说明已经剔除过，跳过
+                if (strip_head > 0 or strip_tail > 0) and current_hex != self._csg_last_stripped_hex:
+                    total = len(frame_bytes)
+                    tail_end = total - strip_tail if strip_tail > 0 else total
+                    if strip_head >= tail_end:
+                        QMessageBox.critical(self, "错误",
+                            f"剔除字节数过多（前{strip_head}+尾{strip_tail}={strip_head+strip_tail}），"
+                            f"报文仅{total}字节！")
+                        return
+                    frame_bytes = frame_bytes[strip_head:tail_end]
+                    hex_display = ' '.join(f'{b:02X}' for b in frame_bytes)
+                    self.single_input.setPlainText(hex_display)
+                    # 缓存剔除后的hex（无空格小写），供下次比对
+                    self._csg_last_stripped_hex = ''.join(f'{b:02x}' for b in frame_bytes)
+
             # 使用当前选中的解析器
             current_parser = self._get_current_parser()
             table_data = current_parser.parse_to_table(frame_bytes)
@@ -2451,13 +2610,14 @@ class MainWindow(QMainWindow):
             validators = {
                 0: NWValidator(),      # 南网
                 1: PLCRFValidator(),   # PLC RF
-                2: HDLCValidator(),    # HDLC
-                3: HDLCValidator(),    # Wrapper
-                4: HDLCValidator(),    # APDU
-                5: DLT645Validator(),  # DLT645
-                6: GDWValidator(),     # 国网
-                7: DLT69845Validator(), # 698.45
-                8: CSGNewGenValidator(), # 新一代载波协议(通感一体化)
+                2: HDLCValidator(),    # HDLC/国网DLMS
+                3: HDLCValidator(),    # DLMS-APDU(国网)
+                4: HDLCValidator(),    # Wrapper
+                5: HDLCValidator(),    # APDU
+                6: DLT645Validator(),  # DLT645
+                7: GDWValidator(),     # 国网
+                8: DLT69845Validator(), # 698.45
+                9: CSGNewGenValidator(), # 新一代载波协议(通感一体化)
             }
 
             validator = validators.get(self.current_protocol)
@@ -2895,10 +3055,10 @@ class MainWindow(QMainWindow):
         """批量解析 - 支持所有协议"""
         input_text = self.batch_input.toPlainText().strip()
 
-        # 新一代载波协议(索引8)：先剥离监控日志前缀（在 hex 清洗前处理原始文本）
+        # 新一代载波协议(索引9)：先剥离监控日志前缀（在 hex 清洗前处理原始文本）
         # 监控日志格式: "<时间> <序号> -> 接收机 Has Get <15字节监控头> <协议报文>"
         # 需要先识别 "-> 接收机 Has Get" 标记，去除其后 15 字节监控头，再提取协议报文
-        if self.current_protocol == 8:
+        if self.current_protocol == 9:
             input_text = self._strip_csg_monitor_prefix(input_text)
 
         # 预处理：去除空格、逗号等分隔符，保留换行以区分多帧
@@ -2932,7 +3092,7 @@ class MainWindow(QMainWindow):
                 table_data = current_parser.parse_to_table(frame_bytes)
 
                 # 南网协议/国网协议/698.45提取方向
-                if self.current_protocol in (0, 6, 7):
+                if self.current_protocol in (0, 7, 8):
                     direction = self._extract_direction_from_table(table_data)
 
                 # 从表格数据生成摘要（取前3个字段作为摘要）
@@ -2985,7 +3145,7 @@ class MainWindow(QMainWindow):
 
             # 方向：南网协议/国网协议/698.45从控制域DIR位解析，其他协议暂无
             direction = "-"
-            if self.current_protocol in (0, 6, 7):
+            if self.current_protocol in (0, 7, 8):
                 direction = self._extract_direction_from_table(table_data)
             self.result_table.setItem(row, 3, QTableWidgetItem(direction))
 
@@ -3053,7 +3213,7 @@ class MainWindow(QMainWindow):
                 summary_parts.append(f"SEQ:{seq_val}")
             return " | ".join(summary_parts) if summary_parts else "-"
 
-        elif self.current_protocol == 6:
+        elif self.current_protocol == 7:
             # 国网协议：提取 AFN 名称、Fn 说明、传输方向
             afn_name = None
             fn_desc = None
@@ -3076,7 +3236,7 @@ class MainWindow(QMainWindow):
                 summary_parts.append(fn_desc)
             return " | ".join(summary_parts) if summary_parts else "-"
 
-        elif self.current_protocol == 7:
+        elif self.current_protocol == 8:
             # 698.45：提取 APDU 类型、DIR+PRM、功能码
             apdu_type = None
             dir_prm = None
@@ -3099,7 +3259,7 @@ class MainWindow(QMainWindow):
                 summary_parts.append(apdu_type)
             return " | ".join(summary_parts) if summary_parts else "-"
 
-        elif self.current_protocol == 8:
+        elif self.current_protocol == 9:
             # 新一代载波协议：区分网络层报文(MPDU/MAC/MMTYPE)与应用层报文(业务标识)
             return self._get_csg_new_gen_summary(table_data)
 
@@ -3116,7 +3276,7 @@ class MainWindow(QMainWindow):
             return " | ".join(summary_parts) if summary_parts else "-"
 
     def _get_csg_new_gen_summary(self, table_data: list) -> str:
-        """新一代载波协议(索引8)批量解析摘要生成
+        """新一代载波协议(索引9)批量解析摘要生成
 
         区分报文类型并优先使用 MSDU 类型作为顶层分类：
         - 含 "管理消息类型(MMTYPE)" → "<MSDU类型> | MMTYPE:..."
@@ -3308,11 +3468,11 @@ class MainWindow(QMainWindow):
         """根据协议提取对应格式的帧"""
         import re
 
-        if protocol_index in (0, 6):
+        if protocol_index in (0, 7):
             # 南网协议 / 国网协议：68开头，16结束，FT1.2帧格式
             clean = re.sub(r'[^0-9A-Fa-f]', '', text).upper()
             return self._extract_68_frames(clean)
-        elif protocol_index == 7:
+        elif protocol_index == 8:
             # 698.45：68开头，16结束，但长度域定义不同
             clean = re.sub(r'[^0-9A-Fa-f]', '', text).upper()
             return self._extract_69845_frames(clean)
@@ -3325,12 +3485,15 @@ class MainWindow(QMainWindow):
             clean = re.sub(r'[^0-9A-Fa-f]', '', text).upper()
             return self._extract_hdlc_frames(clean)
         elif protocol_index == 3:
+            # DLMS-APDU(国网)：按行分割，每行一帧
+            return [f.strip() for f in text.splitlines() if f.strip()]
+        elif protocol_index == 4:
             # DLMS Wrapper裸报文：识别Wrapper头部(8字节)并分割
             return self._extract_wrapper_frames(text)
-        elif protocol_index == 4:
+        elif protocol_index == 5:
             # DLMS-APDU裸报文：按行分割，每行一帧
             return [f.strip() for f in text.splitlines() if f.strip()]
-        elif protocol_index == 8:
+        elif protocol_index == 9:
             # 新一代载波协议(通感一体化)：按行提取，过滤无效短帧
             # 监控前缀已在 parse_batch 中通过 _strip_csg_monitor_prefix 剥离
             return self._extract_csg_new_gen_frames(text)
