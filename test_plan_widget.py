@@ -24,7 +24,10 @@ from PySide6.QtWidgets import (
     QDialog, QLineEdit, QGroupBox, QMenu, QPlainTextEdit
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QObject
-from PySide6.QtGui import QFont, QColor, QTextCursor, QKeySequence
+from PySide6.QtGui import (
+    QFont, QColor, QTextCursor, QKeySequence,
+    QSyntaxHighlighter, QTextCharFormat, QBrush
+)
 
 from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu
 
@@ -610,43 +613,250 @@ def process_response_frame(frame_hex: str) -> str:
 
 
 # ------------------------------------------------------------------------------
-# Lua 代码编辑器（带列线指示器 + 行号）
+# Lua 语法高亮器
+# ------------------------------------------------------------------------------
+class LuaSyntaxHighlighter(QSyntaxHighlighter):
+    """Lua 语法高亮器
+
+    支持：关键字、内置函数、字符串、注释（单行/多行）、数字、运算符
+    """
+
+    # Lua 关键字
+    LUA_KEYWORDS = (
+        'and', 'break', 'do', 'else', 'elseif', 'end', 'false', 'for',
+        'function', 'goto', 'if', 'in', 'local', 'nil', 'not', 'or',
+        'repeat', 'return', 'then', 'true', 'until', 'while',
+    )
+
+    # Lua 内置函数
+    LUA_BUILTINS = (
+        'print', 'type', 'tostring', 'tonumber', 'error', 'pcall', 'xpcall',
+        'select', 'unpack', 'rawget', 'rawset', 'rawequal', 'rawlen',
+        'setmetatable', 'getmetatable', 'require', 'dofile', 'loadfile',
+        'load', 'next', 'pairs', 'ipairs', 'assert', 'collectgarbage',
+        'coroutine', 'string', 'table', 'math', 'io', 'os', 'debug',
+    )
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._rules: List[Tuple['re.Pattern', QTextCharFormat]] = []
+        self._build_rules()
+
+    # ---- 格式工厂 ----
+    @staticmethod
+    def _fmt(color: str, bold: bool = False, italic: bool = False) -> QTextCharFormat:
+        f = QTextCharFormat()
+        f.setForeground(QBrush(QColor(color)))
+        if bold:
+            f.setFontWeight(QFont.Weight.Bold)
+        if italic:
+            f.setFontItalic(True)
+        return f
+
+    def _build_rules(self):
+        kw_fmt  = self._fmt('#569CD6', bold=True)   # 关键字：蓝
+        bi_fmt  = self._fmt('#4EC9B0')               # 内置函数：青绿
+        num_fmt = self._fmt('#B5CEA8')               # 数字：浅绿
+        str_fmt = self._fmt('#CE9178')               # 字符串：橙棕
+        op_fmt  = self._fmt('#D4D4D4')               # 运算符：浅灰
+
+        # 关键字（全词匹配）
+        kw_pat = r'\b(' + '|'.join(self.LUA_KEYWORDS) + r')\b'
+        self._rules.append((re.compile(kw_pat), kw_fmt))
+
+        # 内置函数
+        bi_pat = r'\b(' + '|'.join(self.LUA_BUILTINS) + r')\s*(?=\()'
+        self._rules.append((re.compile(bi_pat), bi_fmt))
+
+        # 数字：十六进制 / 浮点 / 整数
+        self._rules.append((re.compile(r'\b0[xX][0-9a-fA-F]+\b'), num_fmt))
+        self._rules.append((re.compile(r'\b\d+\.?\d*(?:[eE][+-]?\d+)?\b'), num_fmt))
+
+        # 双引号字符串（含转义）
+        self._rules.append((re.compile(r'"(?:\\.|[^"\\])*"'), str_fmt))
+        # 单引号字符串（含转义）
+        self._rules.append((re.compile(r"'(?:\\.|[^'\\])*'"), str_fmt))
+
+        # 运算符
+        self._rules.append((re.compile(r'[+\-*/%^#=<>~:;,.\(\)\{\}\[\]]'), op_fmt))
+
+    # ---- 多行注释状态 ----
+    # userState: 0 = 正常, 1 = 在多行注释内
+    def highlightBlock(self, text: str):
+        comment_fmt = self._fmt('#6A9955', italic=True)  # 注释：绿色斜体
+
+        # 处理多行注释延续
+        if self.previousBlockState() == 1:
+            end_idx = text.find(']]')
+            if end_idx == -1:
+                self.setFormat(0, len(text), comment_fmt)
+                self.setCurrentBlockState(1)
+                return
+            else:
+                self.setFormat(0, end_idx + 2, comment_fmt)
+                start = end_idx + 2
+                self.setCurrentBlockState(0)
+        else:
+            start = 0
+
+        # 单行规则
+        remaining = text[start:]
+        for pat, fmt in self._rules:
+            for m in pat.finditer(remaining):
+                self.setFormat(start + m.start(), m.end() - m.start(), fmt)
+
+        # 单行注释 --（需在其他规则之后处理，避免被覆盖）
+        single_comment_fmt = self._fmt('#6A9955', italic=True)
+        idx = self._find_single_comment(text, start)
+        if idx != -1:
+            self.setFormat(idx, len(text) - idx, single_comment_fmt)
+
+        # 多行注释开始 --[[ 或 --[=..=[
+        ml_start = self._find_multiline_comment_start(text, start)
+        if ml_start != -1:
+            # 检查同一行是否有结束 ]]
+            content_start = text.find('[[', ml_start)
+            if content_start == -1:
+                # --[==[ 形式，找 [[ 之前的位置
+                content_start = ml_start + 2
+            else:
+                content_start += 2
+            end_idx = text.find(']]', content_start)
+            if end_idx == -1:
+                self.setFormat(ml_start, len(text) - ml_start, single_comment_fmt)
+                self.setCurrentBlockState(1)
+            else:
+                self.setFormat(ml_start, end_idx + 2 - ml_start, single_comment_fmt)
+
+    @staticmethod
+    def _find_single_comment(text: str, start_from: int = 0) -> int:
+        """查找单行注释 -- 的位置（排除字符串内的）"""
+        idx = start_from
+        in_str = None
+        while idx < len(text):
+            ch = text[idx]
+            if in_str:
+                if ch == '\\':
+                    idx += 2
+                    continue
+                if ch == in_str:
+                    in_str = None
+            else:
+                if ch in ('"', "'"):
+                    in_str = ch
+                elif ch == '-' and idx + 1 < len(text) and text[idx + 1] == '-':
+                    return idx
+            idx += 1
+        return -1
+
+    @staticmethod
+    def _find_multiline_comment_start(text: str, start_from: int = 0) -> int:
+        """查找多行注释 --[[ 或 --[==[ 的开始位置"""
+        idx = start_from
+        in_str = None
+        while idx < len(text) - 1:
+            ch = text[idx]
+            if in_str:
+                if ch == '\\':
+                    idx += 2
+                    continue
+                if ch == in_str:
+                    in_str = None
+            else:
+                if ch in ('"', "'"):
+                    in_str = ch
+                elif ch == '-' and text[idx + 1] == '-':
+                    # 检查后面是否跟 [=[ 或 [[
+                    rest = text[idx + 2:]
+                    if rest.startswith('[[') or re.match(r'=+\[', rest):
+                        return idx
+            idx += 1
+        return -1
+
+
+# ------------------------------------------------------------------------------
+# Lua 代码编辑器（语法高亮 + 列线 + 行号 + 自动缩进 + 括号匹配）
 # ------------------------------------------------------------------------------
 class LuaCodeEditor(QPlainTextEdit):
-    """带列线指示器和行号的 Lua 代码编辑器
+    """功能完善的 Lua 代码编辑器
 
     功能：
+      - Lua 语法高亮（关键字/内置函数/字符串/注释/数字）
       - 垂直列线：在指定列位置绘制辅助线（默认 40/80/120 列）
       - 行号栏：左侧显示行号，当前行高亮
-      - 等宽字体：自动计算字符宽度绘制列线
+      - 自动缩进：回车保持缩进，Tab 插入 4 空格
+      - 括号匹配：输入 )] } 时短暂高亮对应左括号
+      - 暗色主题：VS Code Dark+ 风格配色
     """
 
     # 列线位置（字符列号）
     COLUMN_GUIDES = (40, 80, 120)
     # 列线颜色
-    _GUIDE_COLOR = QColor(60, 60, 60, 80)       # 普通列线（半透明深灰）
-    _GUIDE_80_COLOR = QColor(80, 60, 60, 120)    # 80 列线（稍明显）
-    _LINE_NUM_COLOR = QColor(100, 100, 100)      # 行号颜色
-    _CURRENT_LINE_COLOR = QColor(40, 40, 40, 100) # 当前行高亮
+    _GUIDE_COLOR = QColor(60, 60, 60, 80)
+    _GUIDE_80_COLOR = QColor(80, 60, 60, 120)
+    _LINE_NUM_COLOR = QColor(100, 100, 100)
+    _CURRENT_LINE_COLOR = QColor(40, 40, 40, 100)
+    # 括号匹配高亮颜色
+    _BRACKET_MATCH_COLOR = QColor(80, 120, 80, 160)
+    # 括号不匹配颜色
+    _BRACKET_ERROR_COLOR = QColor(180, 60, 60, 180)
+    # 配对括号映射
+    _BRACKET_PAIRS = {'(': ')', '[': ']', '{': '}'}
+    _BRACKET_OPEN = {')': '(', ']': '[', '}': '{'}
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._setup_editor_style()
         self._line_num_area = _LineNumberArea(self)
-        self.blockCountChanged.connect(self._update_line_num_area_width)
-        self.updateRequest.connect(self._update_line_num_area)
-        self._update_line_num_area_width()
         self._char_width = 0
         self._update_char_width()
+        # 语法高亮器
+        self._highlighter = LuaSyntaxHighlighter(self.document())
+        # 信号连接
+        self.blockCountChanged.connect(self._update_line_num_area_width)
+        self.updateRequest.connect(self._update_line_num_area)
+        self.cursorPositionChanged.connect(self._highlight_current_line)
+        self._update_line_num_area_width()
+        # 括号匹配用的额外 selection
+        self._bracket_selections: list = []
+
+    # ---- 编辑器基础样式 ----
+    def _setup_editor_style(self):
+        """设置暗色主题和等宽字体"""
+        font = QFont('Consolas', 10)
+        font.setStyleHint(QFont.StyleHint.Monospace)
+        font.setFixedPitch(True)
+        self.setFont(font)
+        self.setTabStopDistance(self.fontMetrics().horizontalAdvance(' ') * 4)
+        self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        # 暗色主题样式表
+        self.setStyleSheet(
+            "QPlainTextEdit {"
+            "  background-color: #1E1E1E;"
+            "  color: #D4D4D4;"
+            "  selection-background-color: #264F78;"
+            "  selection-color: #FFFFFF;"
+            "  border: 1px solid #3C3C3C;"
+            "}"
+        )
 
     def setFont(self, font):
         super().setFont(font)
         self._update_char_width()
         self._update_line_num_area_width()
+        # 同步 Tab 宽度
+        if self._char_width:
+            self.setTabStopDistance(self._char_width * 4)
 
     def _update_char_width(self):
         """计算等宽字体单字符宽度"""
         fm = self.fontMetrics()
         self._char_width = fm.horizontalAdvance("M")
+
+    # ---- 当前行高亮 ----
+    def _highlight_current_line(self):
+        """光标移动时刷新以更新当前行高亮"""
+        self.viewport().update()
 
     # ---- 行号区域 ----
     def line_num_area_width(self) -> int:
@@ -675,7 +885,7 @@ class LuaCodeEditor(QPlainTextEdit):
         """绘制行号区域"""
         from PySide6.QtGui import QPainter, QPen
         painter = QPainter(self._line_num_area)
-        painter.fillRect(event.rect(), QColor(30, 30, 30))  # 与编辑器背景一致
+        painter.fillRect(event.rect(), QColor(30, 30, 30))
 
         block = self.firstVisibleBlock()
         block_number = block.blockNumber()
@@ -701,20 +911,16 @@ class LuaCodeEditor(QPlainTextEdit):
             block_number += 1
         painter.end()
 
-    # ---- 列线 + 当前行高亮 ----
+    # ---- 列线 + 当前行高亮 + 括号匹配绘制 ----
     def paintEvent(self, event):
         """重写绘制事件：先画列线和高亮行，再画文本"""
         from PySide6.QtGui import QPainter, QPen
 
-        # 先画列线和当前行高亮（在文本下方）
         painter = QPainter(self.viewport())
         offset = self.contentOffset()
-        fm = self.fontMetrics()
-        line_h = fm.height()
 
         # 当前行高亮
         cursor_block = self.textCursor().blockNumber()
-        first_visible = self.firstVisibleBlock().blockNumber()
         block = self.firstVisibleBlock()
         top = int(self.blockBoundingGeometry(block).translated(offset).top())
         viewport_h = self.viewport().height()
@@ -740,6 +946,189 @@ class LuaCodeEditor(QPlainTextEdit):
 
         # 绘制文本和光标
         super().paintEvent(event)
+
+    # ---- 按键处理：自动缩进 / Tab / 括号自动补全 ----
+    def keyPressEvent(self, event):
+        key = event.key()
+        modifiers = event.modifiers()
+        text = event.text()
+
+        # Enter：自动缩进（保持上一行缩进）
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            cursor = self.textCursor()
+            block_text = cursor.block().text()
+            # 提取当前行的前导空白
+            indent = ''
+            for ch in block_text:
+                if ch in (' ', '\t'):
+                    indent += ch
+                else:
+                    break
+            # 如果上一行以 then/do/function/else/elseif/for/if/repeat/while 结尾，增加一级缩进
+            stripped = block_text.rstrip()
+            indent_increase_keywords = (
+                'then', 'do', 'else', 'elseif', 'function', 'for',
+                'if', 'repeat', 'while', '{',
+            )
+            last_word = stripped.split()[-1] if stripped.split() else ''
+            if last_word in indent_increase_keywords or stripped.endswith('{'):
+                indent += '    '
+            cursor.insertText('\n' + indent)
+            self.setTextCursor(cursor)
+            return
+
+        # Tab：插入 4 空格
+        if key == Qt.Key.Key_Tab and modifiers == Qt.KeyboardModifier.NoModifier:
+            cursor = self.textCursor()
+            if cursor.hasSelection():
+                # 选中文本时 Tab = 增加缩进
+                self._indent_selection(indent=True)
+            else:
+                cursor.insertText('    ')
+            return
+
+        # Shift+Tab：减少缩进
+        if key == Qt.Key.Key_Backtab:
+            self._indent_selection(indent=False)
+            return
+
+        # 括号自动补全：输入 ( [ { 时自动插入配对
+        if text in self._BRACKET_PAIRS and modifiers == Qt.KeyboardModifier.NoModifier:
+            cursor = self.textCursor()
+            close_ch = self._BRACKET_PAIRS[text]
+            cursor.insertText(text + close_ch)
+            cursor.movePosition(QTextCursor.MoveOperation.Left)
+            self.setTextCursor(cursor)
+            # 触发括号匹配高亮
+            QTimer.singleShot(0, self._update_bracket_match)
+            return
+
+        # 输入 ) ] } 时检查匹配
+        if text in self._BRACKET_OPEN:
+            super().keyPressEvent(event)
+            QTimer.singleShot(0, self._update_bracket_match)
+            return
+
+        super().keyPressEvent(event)
+        # 任何按键后都检查括号匹配
+        QTimer.singleShot(0, self._update_bracket_match)
+
+    def _indent_selection(self, indent: bool = True):
+        """对选中行增加或减少缩进"""
+        cursor = self.textCursor()
+        start = cursor.selectionStart()
+        end = cursor.selectionEnd()
+        cursor.setPosition(start)
+        cursor.beginEditBlock()
+        block = cursor.block()
+        while block.isValid() and block.position() <= end:
+            cursor.setPosition(block.position())
+            text = block.text()
+            if indent:
+                cursor.insertText('    ')
+            else:
+                # 移除最多 4 个前导空格
+                spaces = 0
+                for ch in text:
+                    if ch == ' ' and spaces < 4:
+                        spaces += 1
+                    elif ch == '\t':
+                        spaces += 4
+                    else:
+                        break
+                if spaces > 0:
+                    cursor.movePosition(
+                        QTextCursor.MoveOperation.Right,
+                        QTextCursor.MoveMode.KeepAnchor,
+                        min(spaces, len(text))
+                    )
+                    cursor.removeSelectedText()
+            block = block.next()
+        cursor.endEditBlock()
+
+    # ---- 括号匹配高亮 ----
+    def _update_bracket_match(self):
+        """查找并高亮当前光标处的配对括号"""
+        from PySide6.QtGui import QPlainTextEdit, QTextCharFormat, QTextCursor
+        # 清除旧的高亮
+        extra = [s for s in self.extraSelections()
+                 if not hasattr(s, '_is_bracket') or not s._is_bracket]
+        cursor = self.textCursor()
+        pos = cursor.position()
+        doc = self.document()
+        # 检查光标前一个字符
+        if pos > 0:
+            cursor.setPosition(pos - 1)
+            cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor)
+            ch = cursor.selectedText()
+            if ch in self._BRACKET_OPEN or ch in self._BRACKET_PAIRS:
+                match_pos = self._find_matching_bracket(doc, pos - 1, ch)
+                if match_pos is not None:
+                    sel = QPlainTextEdit.ExtraSelection()
+                    sel.cursor = QTextCursor(doc)
+                    sel.cursor.setPosition(match_pos)
+                    sel.cursor.movePosition(
+                        QTextCursor.MoveOperation.Right,
+                        QTextCursor.MoveMode.KeepAnchor
+                    )
+                    sel.format = QTextCharFormat()
+                    sel.format.setBackground(self._BRACKET_MATCH_COLOR)
+                    sel._is_bracket = True
+                    extra.append(sel)
+                    # 也高亮当前括号
+                    sel2 = QPlainTextEdit.ExtraSelection()
+                    sel2.cursor = QTextCursor(doc)
+                    sel2.cursor.setPosition(pos - 1)
+                    sel2.cursor.movePosition(
+                        QTextCursor.MoveOperation.Right,
+                        QTextCursor.MoveMode.KeepAnchor
+                    )
+                    sel2.format = QTextCharFormat()
+                    sel2.format.setBackground(self._BRACKET_MATCH_COLOR)
+                    sel2._is_bracket = True
+                    extra.append(sel2)
+                else:
+                    # 括号不匹配，标红
+                    sel = QPlainTextEdit.ExtraSelection()
+                    sel.cursor = QTextCursor(doc)
+                    sel.cursor.setPosition(pos - 1)
+                    sel.cursor.movePosition(
+                        QTextCursor.MoveOperation.Right,
+                        QTextCursor.MoveMode.KeepAnchor
+                    )
+                    sel.format = QTextCharFormat()
+                    sel.format.setBackground(self._BRACKET_ERROR_COLOR)
+                    sel._is_bracket = True
+                    extra.append(sel)
+        self.setExtraSelections(extra)
+
+    def _find_matching_bracket(self, doc, pos: int, ch: str) -> Optional[int]:
+        """在文档中查找 pos 处括号的配对位置"""
+        if ch in self._BRACKET_PAIRS:
+            # 向右查找
+            open_ch = ch
+            close_ch = self._BRACKET_PAIRS[ch]
+            direction = 1
+        else:
+            # 向左查找
+            close_ch = ch
+            open_ch = self._BRACKET_OPEN[ch]
+            direction = -1
+
+        depth = 0
+        i = pos
+        text = doc.toPlainText()
+        length = len(text)
+        while 0 <= i < length:
+            c = text[i]
+            if c == open_ch:
+                depth += 1
+            elif c == close_ch:
+                depth -= 1
+                if depth == 0:
+                    return i
+            i += direction
+        return None
 
 
 class _LineNumberArea(QWidget):

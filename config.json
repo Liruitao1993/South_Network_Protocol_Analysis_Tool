@@ -1,6 +1,6 @@
 {
   "serial": {
-    "port": "COM2",
+    "port": "COM4",
     "baudrate": "115200",
     "parity": "偶"
   },

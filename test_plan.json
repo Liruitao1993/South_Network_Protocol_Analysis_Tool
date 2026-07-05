@@ -120,7 +120,7 @@
     "name": "添加从节点",
     "frame_hex": "681300000400020402E8012200000000001716",
     "match_rule": "680E00880000010001E800007216",
-    "match_mode": "HEX",
+    "match_mode": "ASCII",
     "timeout_ms": 2000,
     "send_enabled": true,
     "match_enabled": true,

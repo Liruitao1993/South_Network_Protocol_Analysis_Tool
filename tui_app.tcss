@@ -1,0 +1,198 @@
+/*
+ * 协议解析工具 TUI 样式
+ */
+
+/* ── 全局 ── */
+Screen {
+    background: #1a1a2e;
+    color: #e0e0e0;
+}
+
+Header {
+    background: #16213e;
+    color: #00d4ff;
+    text-style: bold;
+}
+
+Footer {
+    background: #16213e;
+    color: #888888;
+}
+
+/* ── 顶部栏 ── */
+#top-bar {
+    padding: 0 1 0 1;
+    margin: 1 0 0 0;
+    height: 3;
+}
+
+#protocol-bar {
+    align: center middle;
+    height: 3;
+}
+
+#proto-label {
+    width: 12;
+    color: #00d4ff;
+    text-style: bold;
+}
+
+#protocol-select {
+    width: 40;
+}
+
+/* ── Tab 内容区 ── */
+TabbedContent {
+    padding: 0 1 0 1;
+}
+
+TabPane {
+    padding: 0;
+}
+
+/* ── 单帧解析 ── */
+#single-layout {
+    height: 1fr;
+}
+
+#single-input-bar {
+    height: 3;
+    margin-bottom: 1;
+}
+
+#single-input {
+    width: 1fr;
+}
+
+#hex-highlight {
+    height: 3;
+    min-height: 3;
+    padding: 0 1;
+    margin-bottom: 1;
+    background: #0f0f23;
+    border: solid #333366;
+}
+
+#result-container {
+    height: 1fr;
+    border: solid #333366;
+}
+
+#result-table {
+    height: 1fr;
+}
+
+/* ── 批量解析 ── */
+#batch-layout {
+    height: 1fr;
+}
+
+#batch-input {
+    height: 15;
+    min-height: 8;
+    margin-bottom: 1;
+    border: solid #333366;
+}
+
+#batch-stats {
+    height: 1;
+    color: #00d4ff;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#batch-summary-table {
+    height: 1fr;
+    border: solid #333366;
+}
+
+/* ── 校验 ── */
+#validate-layout {
+    height: 1fr;
+}
+
+#validate-status {
+    height: 1;
+    color: #00d4ff;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#validate-table {
+    height: 1fr;
+    border: solid #333366;
+}
+
+/* ── DataTable 通用 ── */
+DataTable {
+    background: #0f0f23;
+}
+
+DataTable > .datatable-header {
+    background: #16213e;
+    color: #00d4ff;
+    text-style: bold;
+}
+
+DataTable > .datatable-cursor {
+    background: #2a2a5a;
+    color: #ffffff;
+}
+
+DataTable > .datatable-row--highlight {
+    background: #1a1a3e;
+}
+
+/* ── Select 下拉 ── */
+Select {
+    background: #0f0f23;
+    color: #e0e0e0;
+}
+
+Select:focus {
+    border: solid #00d4ff;
+}
+
+/* ── Input ── */
+Input {
+    background: #0f0f23;
+    color: #e0e0e0;
+    border: solid #333366;
+}
+
+Input:focus {
+    border: solid #00d4ff;
+}
+
+/* ── TextArea ── */
+TextArea {
+    background: #0f0f23;
+    color: #e0e0e0;
+    border: solid #333366;
+}
+
+TextArea:focus {
+    border: solid #00d4ff;
+}
+
+/* ── Label ── */
+Label {
+    color: #e0e0e0;
+}
+
+/* ── Scrollbar ── */
+Scrollbar {
+    background: #16213e;
+    color: #444488;
+}
+
+Scrollbar:hover {
+    color: #6666aa;
+}
+
+/* ── 通知 ── */
+Notification {
+    background: #16213e;
+    color: #e0e0e0;
+    border: solid #00d4ff;
+}
