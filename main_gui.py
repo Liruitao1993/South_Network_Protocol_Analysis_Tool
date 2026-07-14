@@ -3766,12 +3766,12 @@ class MainWindow(QMainWindow):
 
         # 显示导出选项对话框
         from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QDialogButtonBox
-        from PySide6.QtWidgets import QLabel, QRadioButton, QPushButton
+        from PySide6.QtWidgets import QLabel, QRadioButton, QPushButton, QLineEdit, QFileDialog
         from PySide6.QtCore import Qt
 
         dialog = QDialog(self)
         dialog.setWindowTitle("批量解析导出")
-        dialog.setMinimumWidth(450)
+        dialog.setMinimumWidth(500)
 
         layout = QVBoxLayout(dialog)
         layout.setSpacing(12)
@@ -3802,6 +3802,50 @@ class MainWindow(QMainWindow):
         info_label.setWordWrap(True)
         layout.addWidget(info_label)
 
+        # 文件路径选择
+        layout.addWidget(QLabel("输出路径:"))
+
+        path_layout = QHBoxLayout()
+        path_edit = QLineEdit()
+        path_edit.setPlaceholderText("选择导出文件保存位置...")
+        path_layout.addWidget(path_edit)
+
+        browse_btn = QPushButton("浏览...")
+        browse_btn.setMaximumWidth(80)
+        path_layout.addWidget(browse_btn)
+        layout.addLayout(path_layout)
+
+        # 浏览按钮点击事件
+        def browse_path():
+            if excel_radio.isChecked():
+                default_name = f"batch_parse_{protocol_name}.xlsx"
+                filter_str = "Excel 文件 (*.xlsx);;所有文件 (*)"
+            else:
+                default_name = f"batch_parse_{protocol_name}.json"
+                filter_str = "JSON 文件 (*.json);;所有文件 (*)"
+
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, "选择导出位置", default_name, filter_str
+            )
+            if file_path:
+                path_edit.setText(file_path)
+
+        browse_btn.clicked.connect(browse_path)
+
+        # 格式切换时更新默认文件名
+        def update_default_name():
+            if excel_radio.isChecked():
+                default_name = f"batch_parse_{protocol_name}.xlsx"
+            else:
+                default_name = f"batch_parse_{protocol_name}.json"
+            path_edit.setText(default_name)
+
+        excel_radio.toggled.connect(update_default_name)
+        json_radio.toggled.connect(update_default_name)
+
+        # 初始化默认路径
+        update_default_name()
+
         # 按钮
         button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         button_box.button(QDialogButtonBox.StandardButton.Ok).setText("导出")
@@ -3809,11 +3853,31 @@ class MainWindow(QMainWindow):
 
         def do_export():
             try:
+                file_path = path_edit.text().strip()
+                if not file_path:
+                    QMessageBox.warning(self, "警告", "请选择导出路径！")
+                    return
+
+                # 获取导出目录和文件名
+                export_dir = str(Path(file_path).parent)
+                file_name = Path(file_path).stem
+
+                # 创建导出器，指定导出目录
+                exporter = EnhancedBatchResultExporter(export_dir)
+
                 if excel_radio.isChecked():
-                    path = exporter.export_to_excel(self.batch_results, protocol_name)
+                    # Excel 导出需要完整的文件路径
+                    result_path = exporter.export_to_excel(
+                        self.batch_results, protocol_name,
+                        output_file=file_path
+                    )
                 else:
-                    path = exporter.export_to_json(self.batch_results, protocol_name)
-                QMessageBox.information(self, "导出成功", f"结果已保存到:\n{path}")
+                    result_path = exporter.export_to_json(
+                        self.batch_results, protocol_name,
+                        output_file=file_path
+                    )
+
+                QMessageBox.information(self, "导出成功", f"结果已保存到:\n{result_path}")
                 dialog.accept()
             except Exception as e:
                 QMessageBox.critical(self, "导出失败", str(e))

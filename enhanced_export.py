@@ -30,7 +30,8 @@ class EnhancedBatchResultExporter:
         self.export_dir.mkdir(exist_ok=True)
     
     def export_to_json(self, batch_results: List[Dict[str, Any]],
-                      protocol_name: str = "unknown") -> str:
+                      protocol_name: str = "unknown",
+                      output_file: Optional[str] = None) -> str:
         """
         导出到 JSON 格式。
         
@@ -42,9 +43,13 @@ class EnhancedBatchResultExporter:
             保存的 JSON 文件路径
         """
         timestamp = datetime.now()
-        timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
-        filename = f"batch_parse_{protocol_name}_{timestamp_str}.json"
-        file_path = self.export_dir / filename
+        if output_file:
+            file_path = Path(output_file)
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
+            filename = f"batch_parse_{protocol_name}_{timestamp_str}.json"
+            file_path = self.export_dir / filename
         
         export_data = {
             "metadata": {
@@ -121,7 +126,8 @@ class EnhancedBatchResultExporter:
         return str(file_path)
     
     def export_to_excel(self, batch_results: List[Dict[str, Any]],
-                       protocol_name: str = "unknown") -> str:
+                       protocol_name: str = "unknown",
+                       output_file: Optional[str] = None) -> str:
         """
         导出到 Excel 格式（Sheet1 汇总 + Sheet2 每帧详细解析）。
         
@@ -149,10 +155,14 @@ class EnhancedBatchResultExporter:
                 "运行: pip install pandas openpyxl"
             )
         
-        timestamp = datetime.now()
-        timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
-        filename = f"batch_parse_{protocol_name}_{timestamp_str}.xlsx"
-        file_path = self.export_dir / filename
+        if output_file:
+            file_path = Path(output_file)
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            timestamp = datetime.now()
+            timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
+            filename = f"batch_parse_{protocol_name}_{timestamp_str}.xlsx"
+            file_path = self.export_dir / filename
         
         # 创建工作簿
         wb = Workbook()
