@@ -40,6 +40,7 @@ from test_plan_widget import TestPlanWidget
 from diff_widget import DiffWidget
 from serial_worker import SerialWorker
 from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu
+from enhanced_export import EnhancedBatchResultExporter
 
 
 APP_VERSION = "1.8.2"
@@ -3747,22 +3748,88 @@ class MainWindow(QMainWindow):
         self.update_stats("待解析")
 
     def export_batch(self):
-        """导出批量解析结果"""
+        """增强版批量解析结果导出 - 支持 JSON/Excel 多格式，Excel 含 Sheet2 详细解析"""
         if not self.batch_results:
             QMessageBox.warning(self, "警告", "没有可导出的解析结果！")
             return
 
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "保存批量解析结果", "batch_parse_result.json", "JSON文件 (*.json)"
-        )
+        # 获取协议名称
+        protocol_names = [
+            "南网协议", "PLC_RF协议", "HDLC协议", "DLMS_APDU",
+            "DLMS_Wrapper", "DLMS_APDU", "DLT645协议",
+            "国网协议", "698.45协议", "新一代载波协议"
+        ]
+        protocol_name = protocol_names[self.current_protocol] if self.current_protocol < len(protocol_names) else f"协议{self.current_protocol}"
 
-        if file_path:
+        # 创建导出器
+        exporter = EnhancedBatchResultExporter()
+
+        # 显示导出选项对话框
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QDialogButtonBox
+        from PySide6.QtWidgets import QLabel, QRadioButton, QPushButton
+        from PySide6.QtCore import Qt
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("批量解析导出")
+        dialog.setMinimumWidth(450)
+
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # 标题
+        title = QLabel(f"导出协议: {protocol_name}  |  共 {len(self.batch_results)} 条结果")
+        title.setStyleSheet("font-size: 13px; font-weight: bold; color: #2196F3;")
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+
+        # 格式选择
+        layout.addWidget(QLabel("选择导出格式:"))
+
+        excel_radio = QRadioButton("Excel 格式（Sheet1 汇总 + Sheet2 每帧详细解析）")
+        excel_radio.setChecked(True)
+        layout.addWidget(excel_radio)
+
+        json_radio = QRadioButton("JSON 格式（完整数据 + 元数据）")
+        layout.addWidget(json_radio)
+
+        # 检查依赖
+        try:
+            import pandas
+            import openpyxl
+            excel_radio.setEnabled(True)
+        except ImportError:
+            excel_radio.setEnabled(False)
+            excel_radio.setText("Excel 格式（需安装: pip install pandas openpyxl）")
+            json_radio.setChecked(True)
+
+        # 说明
+        info_label = QLabel("Excel 导出包含两个工作表：\n  Sheet1「汇总表」- 帧序号/状态/摘要\n  Sheet2「详细解析」- 每帧所有字段逐行展开")
+        info_label.setStyleSheet("color: #666; font-size: 11px;")
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+
+        # 按钮
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        button_box.button(QDialogButtonBox.StandardButton.Ok).setText("导出")
+        button_box.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+
+        def do_export():
             try:
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    json.dump(self.batch_results, f, ensure_ascii=False, indent=2)
-                QMessageBox.information(self, "成功", f"结果已保存到：{file_path}")
+                if excel_radio.isChecked():
+                    path = exporter.export_to_excel(self.batch_results, protocol_name)
+                else:
+                    path = exporter.export_to_json(self.batch_results, protocol_name)
+                QMessageBox.information(self, "导出成功", f"结果已保存到:\n{path}")
+                dialog.accept()
             except Exception as e:
-                QMessageBox.critical(self, "错误", f"保存失败：{str(e)}")
+                QMessageBox.critical(self, "导出失败", str(e))
+
+        button_box.button(QDialogButtonBox.StandardButton.Ok).clicked.connect(do_export)
+        button_box.button(QDialogButtonBox.StandardButton.Cancel).clicked.connect(dialog.reject)
+        layout.addWidget(button_box)
+
+        dialog.exec()
 
     def show_detail_dialog(self, row, col):
         """单击列表行时弹出详细解析窗口（表格形式）"""
