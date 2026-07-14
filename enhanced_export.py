@@ -95,13 +95,7 @@ class EnhancedBatchResultExporter:
         Raises:
             ImportError: 如果 pandas 未安装
         """
-        try:
-            import pandas as pd
-        except ImportError:
-            raise ImportError(
-                "安装 pandas 后才能导出 CSV 格式。\n"
-                "运行: pip install pandas"
-            )
+        import pandas as pd
         
         timestamp = datetime.now()
         timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
@@ -144,16 +138,10 @@ class EnhancedBatchResultExporter:
         Raises:
             ImportError: 如果 pandas 或 openpyxl 未安装
         """
-        try:
-            import pandas as pd
-            from openpyxl import Workbook
-            from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-            from openpyxl.utils import get_column_letter
-        except ImportError:
-            raise ImportError(
-                "安装 pandas 和 openpyxl 后才能导出 Excel 格式。\n"
-                "运行: pip install pandas openpyxl"
-            )
+        import pandas as pd
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
         
         if output_file:
             file_path = Path(output_file)
