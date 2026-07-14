@@ -3793,15 +3793,8 @@ class MainWindow(QMainWindow):
         json_radio = QRadioButton("JSON 格式（完整数据 + 元数据）")
         layout.addWidget(json_radio)
 
-        # 检查依赖
-        try:
-            import pandas
-            import openpyxl
-            excel_radio.setEnabled(True)
-        except ImportError:
-            excel_radio.setEnabled(False)
-            excel_radio.setText("Excel 格式（需安装: pip install pandas openpyxl）")
-            json_radio.setChecked(True)
+        # Excel 已打包进 exe，直接启用
+        excel_radio.setEnabled(True)
 
         # 说明
         info_label = QLabel("Excel 导出包含两个工作表：\n  Sheet1「汇总表」- 帧序号/状态/摘要\n  Sheet2「详细解析」- 每帧所有字段逐行展开")
