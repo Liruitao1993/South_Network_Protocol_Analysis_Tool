@@ -289,17 +289,19 @@ body {
     box-shadow: inset 3px 0 0 var(--accent-primary);
 }
 
-/* Table container border */
+/* Table container — border + scroll */
 .dense-table .q-table__container {
     border-radius: var(--radius-md) !important;
     border: 1px solid #e5e7eb !important;
+    overflow: auto !important;
+    max-height: 100% !important;
 }
 
-/* ============================================
-   Virtual Scroll Optimization
-   ============================================ */
-.q-table--virtual-scroll .q-table__container {
-    contain: layout paint;
+
+/* Dense table fill parent height */
+.dense-table {
+    flex: 1;
+    min-height: 0;
 }
 
 /* ============================================

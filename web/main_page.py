@@ -40,6 +40,8 @@ class MainPage:
     def build(self):
         HEADER_H = 72
         FOOTER_H = 32
+        CSG_CTRLS_H = 56
+        TAB_BAR_H = 44
 
         # ── Header ──────────────────────────────────────────────────
         with ui.header().classes("app-header").style(
@@ -74,7 +76,8 @@ class MainPage:
                     ui.html('<span class="status-dot"></span>').classes("p-0 m-0")
                     ui.label("就绪").classes("status-text text-xs text-white")
 
-        # ── Global control bar (CSG controls) ─────────────────────────
+        # ── Main content area ───────────────────────────────────────
+        # CSG 控制条（仅新一代载波显示）
         self.protocol_selector.build_csg_controls()
 
         # ── Tab definitions ─────────────────────────────────────────
@@ -92,13 +95,13 @@ class MainPage:
             for key, label, icon in tab_defs:
                 tabs[key] = ui.tab(label, icon=icon)
 
-        # ── Tab panels ──────────────────────────────────────────────
-        panel_h = HEADER_H + FOOTER_H
+        # ── Tab panels: 固定高度 + 内容滚动，避免顶栏重叠 ───────────
+        content_h = f"calc(100vh - {HEADER_H + FOOTER_H + 44}px)"
         with ui.tab_panels(tab_bar, value=tabs["single"]).classes(
-            f"w-full h-[calc(100vh-{panel_h}px)]"
+            f"w-full h-[{content_h}] overflow-auto"
         ):
             for key, _, _ in tab_defs:
-                with ui.tab_panel(tabs[key]):
+                with ui.tab_panel(tabs[key]).classes("w-full"):
                     self._build_tab(key)
 
         # ── Footer ──────────────────────────────────────────────────

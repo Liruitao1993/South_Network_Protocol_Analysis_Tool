@@ -29,7 +29,7 @@ class ParseTable:
         self._last_click_row = -1
     
     def build(self):
-        with ui.card().classes("w-full shadow-2 rounded-borders"):
+        with ui.card().classes("w-full h-full shadow-2 rounded-borders").style("overflow: auto;"):
             # 标题栏
             with ui.row().classes("w-full items-center q-pb-sm"):
                 ui.icon("table_chart", size="sm", color="primary")
@@ -54,7 +54,7 @@ class ParseTable:
                 rows=[],
                 row_key="id",
                 selection="single",
-            ).classes("dense-table parse-table-striped w-full").props("flat bordered separator=cell virtual-scroll")
+            ).classes("dense-table parse-table-striped w-full").props("flat bordered separator=cell")
             
             # 行交替色 CSS
             ui.add_head_html("""
