@@ -3,7 +3,7 @@
 """
 协议解析工具 — TUI 版本 (基于 Textual)
 
-支持 9 种电力通信协议的终端图形化解析，替代 PySide6 GUI：
+支持 10 种电力通信协议的终端图形化解析：
   - 单帧解析 + 字节高亮
   - 批量多帧解析 + 摘要
   - 协议一致性校验
@@ -69,27 +69,29 @@ from validator.csg_new_gen_validator import CSGNewGenValidator
 
 # ── 常量 ──
 PROTOCOL_NAMES = [
-    "南网协议 (Q/CSG1209021-2019)",
-    "PLC RF 协议 (万胜海外)",
-    "HDLC/DLMS (IEC 62056-46)",
-    "DLMS Wrapper 裸报文",
-    "DLMS-APDU 裸报文",
-    "DLT645-2007 电表协议",
-    "国网协议 (Q/GDW 10376.2-2024)",
-    "698.45 协议 (DL/T 698.45-2017)",
-    "新一代载波协议 (通感一体化)",
+    "南网协议 (Q/CSG1209021-2019)",       # 0
+    "PLC RF 协议 (万胜海外)",             # 1
+    "HDLC/国网DLMS (IEC 62056-46)",       # 2
+    "DLMS-APDU(国网)",                    # 3
+    "DLMS Wrapper 裸报文",                # 4
+    "DLMS-APDU 裸报文",                   # 5
+    "DLT645-2007 电表协议",              # 6
+    "国网协议 (Q/GDW 10376.2-2024)",     # 7
+    "698.45 协议 (DL/T 698.45-2017)",    # 8
+    "新一代载波协议 (通感一体化)",         # 9
 ]
 
 PROTOCOL_SHORT = [
-    "南网",
-    "PLC RF",
-    "HDLC",
-    "Wrapper",
-    "APDU",
-    "DLT645",
-    "国网",
-    "698.45",
-    "新一代",
+    "南网",       # 0
+    "PLC RF",     # 1
+    "HDLC",       # 2
+    "APDU(国网)", # 3
+    "Wrapper",    # 4
+    "APDU",       # 5
+    "DLT645",     # 6
+    "国网",       # 7
+    "698.45",     # 8
+    "新一代",     # 9
 ]
 
 # 新一代载波协议监控日志前缀
@@ -130,10 +132,10 @@ def strip_csg_monitor_prefix(text: str) -> str:
 
 def extract_frames_for_protocol(text: str, protocol_index: int) -> list:
     """根据协议提取对应格式的帧"""
-    if protocol_index in (0, 6):
+    if protocol_index in (0, 7):
         clean = re.sub(r'[^0-9A-Fa-f]', '', text).upper()
         return _extract_68_frames(clean)
-    elif protocol_index == 7:
+    elif protocol_index == 8:
         clean = re.sub(r'[^0-9A-Fa-f]', '', text).upper()
         return _extract_69845_frames(clean)
     elif protocol_index == 1:
@@ -143,10 +145,12 @@ def extract_frames_for_protocol(text: str, protocol_index: int) -> list:
         clean = re.sub(r'[^0-9A-Fa-f]', '', text).upper()
         return _extract_hdlc_frames(clean)
     elif protocol_index == 3:
-        return _extract_wrapper_frames(text)
-    elif protocol_index == 4:
         return [f.strip() for f in text.splitlines() if f.strip()]
-    elif protocol_index == 8:
+    elif protocol_index == 4:
+        return _extract_wrapper_frames(text)
+    elif protocol_index == 5:
+        return [f.strip() for f in text.splitlines() if f.strip()]
+    elif protocol_index == 9:
         return _extract_csg_new_gen_frames(text)
     else:
         return [f.strip() for f in text.splitlines() if f.strip()]
@@ -323,7 +327,7 @@ class HexHighlighter(Static):
         self.update(rt)
 
     def show_empty(self):
-        self.update(RichText("(无报文)", style=Style(color="dim")))
+        self.update(RichText("(无报文)", style=Style(dim=True)))
 
 
 class ProtocolParserTUI(App):
@@ -361,12 +365,13 @@ class ProtocolParserTUI(App):
             0: NWValidator(),
             1: PLCRFValidator(),
             2: HDLCValidator(),
-            3: HDLCValidator(),
-            4: HDLCValidator(),
-            5: DLT645Validator(),
-            6: GDWValidator(),
-            7: DLT69845Validator(),
-            8: CSGNewGenValidator(),
+            3: HDLCValidator(),       # DLMS-APDU(国网)
+            4: HDLCValidator(),       # Wrapper
+            5: HDLCValidator(),       # APDU
+            6: DLT645Validator(),
+            7: GDWValidator(),
+            8: DLT69845Validator(),
+            9: CSGNewGenValidator(),  # 新一代载波
         }
 
     # ── 布局 ──
@@ -428,15 +433,24 @@ class ProtocolParserTUI(App):
 
         # 初始化结果表格
         result_table = self.query_one("#result-table", DataTable)
-        result_table.add_columns("字段名", "原始值", "解析值", "说明")
+        result_table.add_column("字段名", width=22)
+        result_table.add_column("原始值", width=18)
+        result_table.add_column("解析值", width=22)
+        result_table.add_column("说明", width=40)
 
         # 初始化批量摘要表格
         batch_table = self.query_one("#batch-summary-table", DataTable)
-        batch_table.add_columns("#", "状态", "摘要")
+        batch_table.add_column("#", width=4)
+        batch_table.add_column("状态", width=6)
+        batch_table.add_column("摘要", width=60)
 
         # 初始化校验表格
         val_table = self.query_one("#validate-table", DataTable)
-        val_table.add_columns("校验项", "级别", "期望值", "实际值", "说明")
+        val_table.add_column("校验项", width=20)
+        val_table.add_column("级别", width=8)
+        val_table.add_column("期望值", width=12)
+        val_table.add_column("实际值", width=12)
+        val_table.add_column("说明", width=30)
 
         # 设置输入框焦点
         self.set_focus(self.query_one("#single-input", Input))
@@ -533,7 +547,33 @@ class ProtocolParserTUI(App):
                 table.add_row(field, raw_str, parsed_str, desc_str, key=f"row-{len(table.rows)}")
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        """点击表格行时高亮对应字节"""
+        """点击表格行时高亮对应字节；批量摘要行点击查看详情"""
+        # 批量摘要表格：点击行查看该帧详情
+        if event.data_table.id == "batch-summary-table":
+            row_idx = event.cursor_row
+            if 0 <= row_idx < len(self._batch_results):
+                result = self._batch_results[row_idx]
+                if "_table_data" in result:
+                    self._parsed_table_data = result["_table_data"]
+                    if "_bytes" in result:
+                        self._parsed_bytes = result["_bytes"]
+                        hex_display = ' '.join(f'{b:02X}' for b in self._parsed_bytes)
+                        highlighter = self.query_one("#hex-highlight", HexHighlighter)
+                        highlighter.show_hex(hex_display)
+                    else:
+                        try:
+                            self._parsed_bytes = bytes.fromhex(result["_input"])
+                            hex_display = ' '.join(f'{b:02X}' for b in self._parsed_bytes)
+                            highlighter = self.query_one("#hex-highlight", HexHighlighter)
+                            highlighter.show_hex(hex_display)
+                        except Exception:
+                            pass
+                    self._populate_result_table(self._parsed_table_data)
+                    tabs = self.query_one("#main-tabs", TabbedContent)
+                    tabs.active = "tab-single"
+            return
+
+        # 结果表格：点击行高亮对应字节
         if event.data_table.id != "result-table":
             return
 
@@ -550,32 +590,6 @@ class ProtocolParserTUI(App):
                 highlighter = self.query_one("#hex-highlight", HexHighlighter)
                 highlighter.show_hex(hex_display, highlight_start=b_start, highlight_end=b_end)
 
-        # 同时更新批量摘要表格的双击行为
-        if event.data_table.id == "batch-summary-table":
-            row_idx = event.cursor_row
-            if 0 <= row_idx < len(self._batch_results):
-                result = self._batch_results[row_idx]
-                if "_table_data" in result:
-                    self._parsed_table_data = result["_table_data"]
-                    if "_bytes" in result:
-                        self._parsed_bytes = result["_bytes"]
-                        hex_display = ' '.join(f'{b:02X}' for b in self._parsed_bytes)
-                        highlighter = self.query_one("#hex-highlight", HexHighlighter)
-                        highlighter.show_hex(hex_display)
-                    else:
-                        # 尝试从 _input 重建 bytes
-                        try:
-                            self._parsed_bytes = bytes.fromhex(result["_input"])
-                            hex_display = ' '.join(f'{b:02X}' for b in self._parsed_bytes)
-                            highlighter = self.query_one("#hex-highlight", HexHighlighter)
-                            highlighter.show_hex(hex_display)
-                        except Exception:
-                            pass
-                    self._populate_result_table(self._parsed_table_data)
-                    # 切换到单帧解析 tab
-                    tabs = self.query_one("#main-tabs", TabbedContent)
-                    tabs.active = "tab-single"
-
     # ── 批量解析 ──
 
     def action_parse_batch(self) -> None:
@@ -587,7 +601,7 @@ class ProtocolParserTUI(App):
             return
 
         # 新一代协议需要先剥离监控前缀
-        if self.current_protocol == 8:
+        if self.current_protocol == 9:
             input_text = strip_csg_monitor_prefix(input_text)
 
         input_text = clean_hex_input(input_text, keep_newlines=True)
@@ -672,7 +686,7 @@ class ProtocolParserTUI(App):
                     parts.insert(0, f"DI:{comment}")
             return " | ".join(parts) if parts else "-"
 
-        elif self.current_protocol == 6:
+        elif self.current_protocol == 7:
             # 国网协议
             parts = []
             for item in table_data:
@@ -683,15 +697,15 @@ class ProtocolParserTUI(App):
                     parts.append(f"SEQ:{parsed}")
             return " | ".join(parts) if parts else "-"
 
-        elif self.current_protocol in (2, 3, 4):
-            # HDLC/DLMS
+        elif self.current_protocol in (2, 3, 4, 5):
+            # HDLC/DLMS 系列
             for item in table_data:
                 field = str(item[0])
                 if "帧类型" in field and str(item[2]):
                     return f"帧类型: {item[2]}"
-            return "HDLC 帧"
+            return "HDLC/DLMS 帧"
 
-        elif self.current_protocol == 8:
+        elif self.current_protocol == 9:
             # 新一代载波
             return self._get_csg_summary(table_data)
 
@@ -800,7 +814,7 @@ class ProtocolParserTUI(App):
             f"  Ctrl+Q  - 退出\n"
             f"  F1      - 显示帮助\n\n"
             f"[bold]Tab 切换:[/bold] 点击对应标签页\n\n"
-            f"[bold]支持 9 种协议:[/bold]\n"
+            f"[bold]支持 10 种协议:[/bold]\n"
         )
         for i, name in enumerate(PROTOCOL_NAMES):
             help_text += f"  {i}. {name}\n"
@@ -849,27 +863,29 @@ class ProtocolParserTUI(App):
         elif self.current_protocol == 2:
             return self._parser_hdlc
         elif self.current_protocol == 3:
-            # Wrapper: 包装 HDLCParser
+            # DLMS-APDU(国网)
             hdlc = self._parser_hdlc
-
+            class APDUParserGW:
+                def parse_to_table(self, data):
+                    return hdlc.parse_apdu_to_table(data)
+            return APDUParserGW()
+        elif self.current_protocol == 4:
+            # Wrapper
+            hdlc = self._parser_hdlc
             class WrapperParser:
                 def parse_to_table(self, data):
                     return hdlc.parse_wrapper_to_table(data)
-
             return WrapperParser()
-        elif self.current_protocol == 4:
-            # APDU: 包装 HDLCParser
+        elif self.current_protocol == 5:
+            # APDU
             hdlc = self._parser_hdlc
-
             class APDUParser:
                 def parse_to_table(self, data):
                     return hdlc.parse_apdu_to_table(data)
-
             return APDUParser()
-        elif self.current_protocol == 5:
-            # DLT645: 自定义包装
+        elif self.current_protocol == 6:
+            # DLT645
             dlt645 = self._parser_dlt645
-
             class DLT645GuiParser:
                 def parse_to_table(self, data):
                     result = dlt645.parse(data)
@@ -911,11 +927,11 @@ class ProtocolParserTUI(App):
                     return table
 
             return DLT645GuiParser()
-        elif self.current_protocol == 6:
-            return self._parser_gdw
         elif self.current_protocol == 7:
-            return self._parser_69845
+            return self._parser_gdw
         elif self.current_protocol == 8:
+            return self._parser_69845
+        elif self.current_protocol == 9:
             csg = self._parser_csg
 
             class CSGGenGuiParser:

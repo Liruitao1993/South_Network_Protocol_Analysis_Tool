@@ -41,7 +41,7 @@ print(f"   Batch frames extracted: {len(batch_frames)}")
 # Test 6: CSG frame extraction
 print("\n6. CSG frame extraction...")
 csg_text = "A0000000000000000000000000000000B000000000000000"
-csg_frames = extract_frames_for_protocol(csg_text, 8)
+csg_frames = extract_frames_for_protocol(csg_text, 9)
 print(f"   CSG frames: {len(csg_frames)}")
 
 print("\n=== Smoke test complete ===")

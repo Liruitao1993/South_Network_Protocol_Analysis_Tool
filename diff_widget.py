@@ -17,8 +17,9 @@ from PySide6.QtWidgets import (
     QCheckBox, QGroupBox, QSplitter, QFrame, QScrollArea,
     QSizePolicy,
 )
+from PySide6.QtWidgets import QDialog
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont, QColor, QTextCharFormat, QBrush, QTextCursor
+from PySide6.QtGui import QFont, QColor, QTextCharFormat, QBrush, QTextCursor, QIcon
 
 from frame_diff_engine import FrameDiffEngine, _format_bytes
 
@@ -33,6 +34,42 @@ _COLOR_DEL_BG = QColor(236, 239, 241)
 _COLOR_DEL_FG = QColor(144, 164, 174)
 _COLOR_HEADER_BG = QColor(240, 240, 240)
 _COLOR_BORDER = QColor(220, 220, 220)
+
+
+# ---- 表格弹窗 ----
+class TablePopupDialog(QDialog):
+    """表格详情弹窗：以独立窗口展示完整的对比表格"""
+
+    def __init__(self, title: str, table_builder, parent=None):
+        """
+        Args:
+            title: 窗口标题
+            table_builder: 可调用对象，返回填充好的 QTableWidget
+            parent: 父窗口
+        """
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.resize(1200, 700)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+
+        table = table_builder()
+        layout.addWidget(table)
+
+        # 关闭按钮
+        btn_close = QPushButton("关闭")
+        btn_close.setFixedSize(80, 28)
+        btn_close.setStyleSheet(
+            "QPushButton { background-color: #fff; color: #666; border: 1px solid #dcdcdc; "
+            "border-radius: 3px; padding: 4px 12px; }"
+            "QPushButton:hover { background-color: #f0f0f0; }"
+        )
+        btn_close.clicked.connect(self.accept)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_row.addWidget(btn_close)
+        layout.addLayout(btn_row)
 
 
 class DiffWidget(QWidget):
@@ -307,16 +344,40 @@ class DiffWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
 
+        # 标题行（含最大化按钮）
+        title_row = QHBoxLayout()
         title = QLabel("字节级对比（按字段对齐）")
         title.setFont(QFont("Microsoft YaHei", 10, QFont.Weight.Bold))
         title.setStyleSheet("color: #333; padding: 2px 0;")
-        layout.addWidget(title)
+        title_row.addWidget(title)
+        title_row.addStretch()
+
+        btn_max = QPushButton("⊞")
+        btn_max.setFixedSize(24, 24)
+        btn_max.setToolTip("最大化显示表格")
+        btn_max.setStyleSheet(
+            "QPushButton { background-color: #fff; color: #666; border: 1px solid #dcdcdc; "
+            "border-radius: 3px; font-size: 14px; padding: 0; }"
+            "QPushButton:hover { background-color: #e3f2fd; border-color: #42a5f5; color: #1976d2; }"
+        )
+        btn_max.clicked.connect(lambda: self._open_table_popup(
+            "字节级对比详情", lambda: self._build_byte_diff_table(byte_diff)
+        ))
+        title_row.addWidget(btn_max)
+        layout.addLayout(title_row)
 
         subtitle = QLabel('— 协议感知：长度不同的帧也能把"校验和"对"校验和"、"结束符"对"结束符"')
         subtitle.setStyleSheet("color: #999; font-size: 11px;")
         layout.addWidget(subtitle)
 
         # 用 QTableWidget 展示
+        table = self._build_byte_diff_table(byte_diff)
+        layout.addWidget(table)
+
+        return container
+
+    def _build_byte_diff_table(self, byte_diff: list) -> QTableWidget:
+        """构建字节级对比表格（可复用）"""
         table = QTableWidget()
         table.setColumnCount(3)
         table.setHorizontalHeaderLabels(["字段", "报文 A 字节", "报文 B 字节"])
@@ -352,9 +413,7 @@ class DiffWidget(QWidget):
 
         # 设置行高
         table.verticalHeader().setDefaultSectionSize(28)
-        layout.addWidget(table)
-
-        return container
+        return table
 
     def _make_byte_label(self, byte_details: list, side: str) -> QLabel:
         """创建带颜色高亮的字节 QLabel（用于 QTableWidget.setCellWidget）"""
@@ -395,15 +454,39 @@ class DiffWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
 
+        # 标题行（含最大化按钮）
+        title_row = QHBoxLayout()
         title = QLabel("字段级语义对比")
         title.setFont(QFont("Microsoft YaHei", 10, QFont.Weight.Bold))
         title.setStyleSheet("color: #333; padding: 2px 0;")
-        layout.addWidget(title)
+        title_row.addWidget(title)
+        title_row.addStretch()
+
+        btn_max = QPushButton("⊞")
+        btn_max.setFixedSize(24, 24)
+        btn_max.setToolTip("最大化显示表格")
+        btn_max.setStyleSheet(
+            "QPushButton { background-color: #fff; color: #666; border: 1px solid #dcdcdc; "
+            "border-radius: 3px; font-size: 14px; padding: 0; }"
+            "QPushButton:hover { background-color: #e3f2fd; border-color: #42a5f5; color: #1976d2; }"
+        )
+        btn_max.clicked.connect(lambda: self._open_table_popup(
+            "字段级对比详情", lambda: self._build_field_diff_table(field_diff)
+        ))
+        title_row.addWidget(btn_max)
+        layout.addLayout(title_row)
 
         subtitle = QLabel('— 直接告诉你"哪个字段的含义变了"，而不只是看字节')
         subtitle.setStyleSheet("color: #999; font-size: 11px;")
         layout.addWidget(subtitle)
 
+        table = self._build_field_diff_table(field_diff)
+        layout.addWidget(table)
+
+        return container
+
+    def _build_field_diff_table(self, field_diff: list) -> QTableWidget:
+        """构建字段级语义对比表格（可复用）"""
         table = QTableWidget()
         table.setColumnCount(6)
         table.setHorizontalHeaderLabels(["字段", "偏移", "长度", "报文 A", "报文 B", "差异"])
@@ -458,9 +541,7 @@ class DiffWidget(QWidget):
             table.setItem(row, 5, diff_item)
 
         table.verticalHeader().setDefaultSectionSize(26)
-        layout.addWidget(table)
-
-        return container
+        return table
 
     def _build_explanation_section(self, explanation: list) -> QWidget:
         """构建差异说明区"""
@@ -501,6 +582,11 @@ class DiffWidget(QWidget):
     # =========================================================================
     # 事件处理
     # =========================================================================
+
+    def _open_table_popup(self, title: str, table_builder):
+        """打开表格详情弹窗"""
+        dialog = TablePopupDialog(title, table_builder, self)
+        dialog.exec()
 
     def _on_compare(self):
         """开始对比"""
