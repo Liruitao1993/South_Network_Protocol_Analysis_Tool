@@ -35,7 +35,7 @@ class SingleParseTab:
         ui.add_head_html(
             '<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>'
         )
-        with ui.column().classes("w-full h-full q-pa-md q-gutter-md"):
+        with ui.column().classes("w-full h-full q-pa-md q-gutter-md").style("overflow: auto;"):
             # 输入区 - HexInput 自身已包含卡片，不再外层嵌套
             self._hex_input = HexInput(
                 on_parse=self._on_parse,
@@ -65,7 +65,7 @@ class SingleParseTab:
                         self._btn_crc32.set_visibility(False)
 
             # 结果区
-            with ui.splitter(value=70).classes("w-full flex-grow") as splitter:
+            with ui.splitter(value=70).classes("w-full").style("flex: 1; min-height: 0;") as splitter:
                 with splitter.before:
                     with ui.card().classes("w-full h-full shadow-2 rounded-borders"):
                         self._section_header("analytics", "解析结果")

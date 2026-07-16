@@ -34,7 +34,10 @@
 # 运行 GUI（唯一入口点）
 python main_gui.py
 
-# 运行 Web 版
+# 运行 NiceGUI Web 版（完整功能，1.8.2 新增）
+python web_app.py
+
+# 运行 Streamlit Web 版（功能子集）
 streamlit run streamlit_app.py
 
 # 打包 exe（两个 spec 的 datas 不同，见下方说明）
@@ -44,7 +47,9 @@ pyinstaller 南网协议解析工具.spec       # 南网精简版：custom_di.js
 
 **依赖：**
 - `pip install pyside6`（GUI 必需）
-- `pip install streamlit`（Web 版）
+- `pip install nicegui`（NiceGUI Web 版，**1.8.2 新增**）
+- `pip install pyserial`（NiceGUI Web 版串口通信，**1.8.2 新增**）
+- `pip install streamlit`（Streamlit Web 版）
 - `pip install crcmod`（698.45 协议 CRC 校验，**1.7.0 起新增**）
 - `pip install openpyxl`（Excel 测试报告，可选）
 - `pip install lupa`（测试方案 Lua 脚本引擎，**1.8.1 新增**，未安装时静默降级为不可用）
@@ -113,7 +118,34 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，~3600�
 │   ├── archive_widget.py           # 档案管理 (ArchiveWidget) - 仅南网(0)/国网(6)
 │   ├── topology_widget.py          # 拓扑信息 (TopologyWidget) - 仅南网(0)/国网(6)
 │   ├── diff_widget.py              # 报文对比标签页 (DiffWidget) - 双报文输入，字节/字段级对比
+│   ├── diff_widget.py              # 报文对比标签页 (DiffWidget) - 双报文输入，字节/字段级对比
 │   ├── streamlit_app.py            # Web 版（功能子集）
+│   ├── web_app.py                  # NiceGUI Web 版入口（1.8.2 新增）
+│   └── web/                        # NiceGUI Web 版（1.8.2 新增）
+│       ├── main_page.py            #   主页面布局
+│       ├── protocol_registry.py    #   协议注册表（解析器/校验器映射）
+│       ├── frame_extractor.py      #   帧提取工具
+│       ├── adapters/               #   适配器
+│       │   └── serial_adapter.py   #     串口通信适配器
+│       ├── components/             #   UI 组件
+│       │   ├── hex_input.py        #     十六进制输入
+│       │   ├── parse_table.py      #     解析结果表格
+│       │   ├── protocol_selector.py#     协议选择器
+│       │   ├── byte_highlighter.py #     字节高亮
+│       │   └── serial_panel.py     #     串口面板
+│       ├── tabs/                   #   标签页
+│       │   ├── single_parse.py     #     单帧解析
+│       │   ├── batch_parse.py      #     批量解析
+│       │   ├── diff.py             #     报文对比
+│       │   ├── lookup.py           #     查询页
+│       │   ├── frame_gen.py        #     帧生成
+│       │   ├── preset_cmd.py       #     预设命令
+│       │   ├── test_plan.py        #     测试计划
+│       │   ├── archive.py          #     档案管理
+│       │   └── topology.py         #     拓扑信息
+│       └── styles/
+│           └── custom.css          #     自定义暗色主题样式
+│
 │   └── tui_app.py                  # TUI 版（基于 Textual，终端图形化解析）
 │
 ├── 验证引擎 validator/ ── BaseValidator + 各协议 validator，统一 ValidationResult
@@ -512,7 +544,25 @@ python test_plan_widget.py     # 测试计划组件（需 GUI 环境）
 
 ## 11. 最新变更摘要（最近一次 commit 摘要）
 
-**最近一次（2026-07-06，commit `087d03e`）：新增协议感知报文对比功能模块 + TUI 版本**
+**最近一次（2026-07-16，commit `6e6e8ac`）：新增 NiceGUI Web 版本 + 报文对比增强 + 增强导出功能**
+
+变更：
+- **新增 NiceGUI Web 版本**（`web_app.py` + `web/` 目录）：基于 NiceGUI 框架的浏览器解析器，支持完整 10 种协议解析，支持单帧/批量/报文对比/组帧/预设/查询/测试计划/档案/拓扑等标签页，集成串口通信（SerialAdapter），暗色主题自定义 CSS，健康检查端点 `/health`
+- **报文对比增强**（`diff_widget.py`）：新增差异人话解读（自然语言描述业务含义）、配置选项（忽略校验和/序列号、仅显示差异）、导出对比报告功能
+- **增强导出功能**（`enhanced_export.py`）：Excel 增强导出（支持协议元数据、字节高亮样式、分 Sheet 导出），CSV/TXT/JSON 多格式导出
+- **TUI 版本优化**（`tui_app.py`）：优化批量解析摘要显示，修复协议切换时的界面刷新问题
+- **Web 布局调整**（`web/main_page.py`、`web/tabs/single_parse.py`、`web/components/parse_table.py`）：固定高度 + 内容滚动，避免顶栏重叠；CSG 控制条仅在协议 9 下显示
+- `test_plan_widget.py`：功能增强（+421 行）
+
+涉及文件：
+- 新增：`web_app.py`、`web/` 目录（`main_page.py`、`tabs/`、`components/`、`adapters/`、`styles/custom.css`、`protocol_registry.py`、`frame_extractor.py`）、`enhanced_export.py`、`docs/superpowers/specs/2026-07-15-nicegui-web-version-design.md`、`docs/superpowers/plans/2026-07-15-nicegui-web-version-plan.md`
+- 修改：`main_gui.py`、`test_plan_widget.py`、`config.json`、`test_plan.json`、`diff_widget.py`、`tui_app.py`
+
+依赖：`nicegui`（Web 版）、`pyserial`（Web 版串口）、`textual`（TUI 版，可选），`pip install nicegui pyserial textual`
+
+---
+
+**上一次（2026-07-06，commit `087d03e`）：新增协议感知报文对比功能模块 + TUI 版本**
 
 变更：
 - 新增 `diff_widget.py`（DiffWidget）：报文对比标签页，支持双报文输入、字节级对比（字段感知对齐+差异高亮）、字段级语义对比（偏移/长度/值/差异类型）、差异人话解读、导出对比报告
@@ -578,12 +628,14 @@ python test_plan_widget.py     # 测试计划组件（需 GUI 环境）
 ## 12. 其他参考文档
 
 - `QWEN.md` — 项目详细文档（中文），含协议帧格式说明和开发约定（**部分内容可能滞后，以本文件为准**）
-- `README.md` — 用户面向的简要说明（功能列表，偏旧，未含 698.45/新一代协议）
+- `README.md` — 用户面向的简要说明（功能列表、运行方式、项目结构，包含 Web 版/698.45/新一代协议等）
 - `CLAUDE.md` — Claude Code 专用指南（与本文档部分重叠，**以 AGENTS.md 为权威**）
 - `work_list.md` — 工作清单/字段定义（开发参考）
 - `docs/superpowers/specs/2026-05-12-dl-t698-45-parser-design.md` — 698.45 解析器设计规格
 - `docs/superpowers/plans/2026-05-12-dl-t698-45-parser.md` — 698.45 实现计划
 - `docs/superpowers/specs/2026-05-09-topology-formation-timing-design.md` — 拓扑组网时序设计
+- `docs/superpowers/specs/2026-07-15-nicegui-web-version-design.md` — NiceGUI Web 版设计规格
+- `docs/superpowers/plans/2026-07-15-nicegui-web-version-plan.md` — NiceGUI Web 版实现计划
 - `.sisyphus/plans/csg_new_gen_parser.md` — 新一代载波解析器实现计划
 
 > **冲突处理**：当 AGENTS.md 与 QWEN.md / CLAUDE.md / README.md 内容冲突时，**以 AGENTS.md 为准**。本文档随代码同步更新。

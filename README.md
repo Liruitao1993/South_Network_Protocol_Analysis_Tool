@@ -2,7 +2,7 @@
 
 多种电力通信协议的图形化解析工具，基于 Python / PySide6 开发，支持单帧解析、批量解析、协议校验、帧生成、串口通信、测试计划、Lua 脚本等完整工作流。
 
-当前版本见 [`main_gui.py`](main_gui.py) 中的 `APP_VERSION`（`1.8.0`）。
+当前版本见 [`main_gui.py`](main_gui.py) 中的 `APP_VERSION`（`1.8.2`）。
 
 ## 支持协议
 
@@ -35,6 +35,9 @@
 - **档案管理 / 拓扑信息**：南网/国网协议专用，支持档案导入导出、拓扑组网统计
 - **查询页**：南网 DI、国网 AFN、DLT645 DI、OBIS 码、PLC RF 命令字、新一代业务标识查询
 - **新一代载波解析级别**：auto / fc_pb / fc_only / app 四种级别切换
+- **报文对比**：双报文输入，支持字节级对比（字段感知对齐+差异高亮）和字段级语义对比（偏移/长度/值/差异类型）
+- **NiceGUI Web 版**（1.8.2 新增）：基于 NiceGUI 框架的浏览器解析器，支持完整 10 种协议解析、单帧/批量解析、报文对比、组帧发送、预设命令、查询页、测试计划、档案管理、拓扑信息等标签页，集成串口通信，暗色主题，健康检查端点
+- **TUI 终端版**（1.8.2 新增）：基于 Textual 的终端图形化解析器，支持单帧解析+字节高亮、批量多帧解析+摘要、协议一致性校验
 
 ## 运行环境
 
@@ -45,10 +48,12 @@
 
 ```bash
 pip install pyside6        # GUI 必需
+pip install nicegui        # NiceGUI Web 版（1.8.2 起）
+pip install pyserial       # NiceGUI Web 版串口通信（1.8.2 起）
 pip install crcmod         # 698.45 协议 CRC 校验（1.7.0 起）
 pip install lupa           # 测试方案 Lua 脚本引擎（1.8.1 起，可选）
 pip install openpyxl       # Excel 测试报告（可选）
-pip install streamlit      # Web 版（可选）
+pip install streamlit      # Streamlit Web 版（可选，功能子集）
 ```
 
 > `lupa` 未安装时 Lua 脚本功能不可用，其余功能不受影响。
@@ -59,7 +64,10 @@ pip install streamlit      # Web 版（可选）
 # GUI 版（主入口）
 python main_gui.py
 
-# Web 版（功能子集）
+# NiceGUI Web 版（完整功能，1.8.2 新增）
+python web_app.py
+
+# Streamlit Web 版（功能子集）
 streamlit run streamlit_app.py
 ```
 
@@ -144,6 +152,31 @@ monitor/frame_monitor.py     # 实时帧监听器
 report/excel_reporter.py     # Excel 测试报告
 templates/test_templates.py  # 测试模板库
 docs/Lua脚本使用说明.md       # Lua 脚本用户文档
+web_app.py                   # NiceGUI Web 版入口（1.8.2 新增）
+web/                         # NiceGUI Web 版组件（1.8.2 新增）
+├── main_page.py             #   主页面布局
+├── protocol_registry.py     #   协议注册表（解析器/校验器映射）
+├── frame_extractor.py       #   帧提取工具
+├── adapters/                #   适配器
+│   └── serial_adapter.py    #     串口通信适配器
+├── components/              #   UI 组件
+│   ├── hex_input.py         #     十六进制输入
+│   ├── parse_table.py       #     解析结果表格
+│   ├── protocol_selector.py #     协议选择器
+│   ├── byte_highlighter.py  #     字节高亮
+│   └── serial_panel.py      #     串口面板
+├── tabs/                    #   标签页
+│   ├── single_parse.py      #     单帧解析
+│   ├── batch_parse.py       #     批量解析
+│   ├── diff.py              #     报文对比
+│   ├── lookup.py            #     查询页
+│   ├── frame_gen.py         #     帧生成
+│   ├── preset_cmd.py        #     预设命令
+│   ├── test_plan.py         #     测试计划
+│   ├── archive.py           #     档案管理
+│   └── topology.py          #     拓扑信息
+└── styles/
+    └── custom.css           #     自定义暗色主题样式
 ```
 
 协议定义、解析器与参考文档的完整映射详见 [`AGENTS.md`](AGENTS.md) §5。
