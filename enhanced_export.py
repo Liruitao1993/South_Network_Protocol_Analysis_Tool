@@ -8,9 +8,22 @@ Sheet2: 每帧详细解析结果（按帧序号依次排列）
 
 import json
 import csv
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+
+
+def _sanitize_for_excel(value: Any) -> Any:
+    """清洗字符串中的控制字符，使其可安全写入 Excel 单元格
+
+    openpyxl 不允许单元格中包含 ASCII 0x00-0x1F 的控制字符（除 \t \n \r 外）。
+    此函数将控制字符替换为可见的 Unicode 替代符。
+    """
+    if not isinstance(value, str):
+        return value
+    # 替换控制字符（保留 \t \n \r）
+    return re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '□', value)
 
 
 class EnhancedBatchResultExporter:
@@ -185,7 +198,7 @@ class EnhancedBatchResultExporter:
             
             ws_summary.cell(row=row_idx, column=1, value=i + 1).border = thin_border
             
-            status = result.get("_status", result.get("状态", ""))
+            status = _sanitize_for_excel(result.get("_status", result.get("状态", "")))
             status_cell = ws_summary.cell(row=row_idx, column=2, value=status)
             status_cell.border = thin_border
             if status == "成功":
@@ -193,9 +206,9 @@ class EnhancedBatchResultExporter:
             elif status in ("失败", "异常"):
                 status_cell.font = Font(color="FF0000")
             
-            ws_summary.cell(row=row_idx, column=3, value=result.get("摘要", result.get("summary", ""))).border = thin_border
-            ws_summary.cell(row=row_idx, column=4, value=result.get("_input", result.get("原始数据", ""))).border = thin_border
-            ws_summary.cell(row=row_idx, column=5, value=result.get("错误", "")).border = thin_border
+            ws_summary.cell(row=row_idx, column=3, value=_sanitize_for_excel(result.get("摘要", result.get("summary", "")))).border = thin_border
+            ws_summary.cell(row=row_idx, column=4, value=_sanitize_for_excel(result.get("_input", result.get("原始数据", "")))).border = thin_border
+            ws_summary.cell(row=row_idx, column=5, value=_sanitize_for_excel(result.get("错误", ""))).border = thin_border
             ws_summary.cell(row=row_idx, column=6, value="是" if "_table_data" in result else "否").border = thin_border
         
         # 调整汇总表列宽
@@ -220,10 +233,10 @@ class EnhancedBatchResultExporter:
             
             # 帧标题行
             ws_detail.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=5)
-            frame_title = f"第 {frame_num} 帧"
-            status = result.get("_status", result.get("状态", ""))
-            summary = result.get("摘要", result.get("summary", ""))
-            frame_title += f"  |  状态: {status}  |  {summary}"
+            frame_num_str = f"第 {frame_num} 帧"
+            status = _sanitize_for_excel(result.get("_status", result.get("状态", "")))
+            summary = _sanitize_for_excel(result.get("摘要", result.get("summary", "")))
+            frame_title = f"{frame_num_str}  |  状态: {status}  |  {summary}"
             
             frame_cell = ws_detail.cell(row=current_row, column=1, value=frame_title)
             frame_cell.font = frame_header_font
@@ -235,7 +248,7 @@ class EnhancedBatchResultExporter:
             current_row += 1
             
             # 原始数据行
-            raw_data = result.get("_input", result.get("原始数据", ""))
+            raw_data = _sanitize_for_excel(result.get("_input", result.get("原始数据", "")))
             if raw_data:
                 ws_detail.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=5)
                 ws_detail.cell(row=current_row, column=1, value=f"原始报文: {raw_data}").border = thin_border
@@ -254,10 +267,10 @@ class EnhancedBatchResultExporter:
             if table_data:
                 for item in table_data:
                     # item 格式: (field_name, raw_value, parsed_value, comment, byte_start, byte_end)
-                    field_name = str(item[0]) if len(item) > 0 else ""
-                    raw_value = str(item[1]) if len(item) > 1 else ""
-                    parsed_value = str(item[2]) if len(item) > 2 else ""
-                    comment = str(item[3]) if len(item) > 3 else ""
+                    field_name = _sanitize_for_excel(str(item[0]) if len(item) > 0 else "")
+                    raw_value = _sanitize_for_excel(str(item[1]) if len(item) > 1 else "")
+                    parsed_value = _sanitize_for_excel(str(item[2]) if len(item) > 2 else "")
+                    comment = _sanitize_for_excel(str(item[3]) if len(item) > 3 else "")
                     
                     # 字节偏移
                     byte_offset = ""
@@ -275,7 +288,7 @@ class EnhancedBatchResultExporter:
                     current_row += 1
             else:
                 # 无详细数据时显示错误信息
-                error_msg = result.get("错误", "无详细解析数据")
+                error_msg = _sanitize_for_excel(result.get("错误", "无详细解析数据"))
                 ws_detail.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=5)
                 ws_detail.cell(row=current_row, column=1, value=f"错误: {error_msg}").border = thin_border
                 current_row += 1

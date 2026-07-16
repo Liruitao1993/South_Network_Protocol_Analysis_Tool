@@ -1,1 +1,16 @@
+__pycache__/
 .opencode
+build/
+dist/
+*.pyc
+*.exe
+batch_parse_*.csv
+batch_parse_*.xlsx
+tmp_*.py
+screenshot_*.png
+*.backup
+test_export.xlsx
+integrate_enhanced_export.py
+integration_script.py
+enhanced_batch_export.py
+main_gui.py.backup

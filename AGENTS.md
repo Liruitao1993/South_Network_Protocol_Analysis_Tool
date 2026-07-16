@@ -9,7 +9,7 @@
 
 ## 1. 项目概览
 
-多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.8.0`；CHANGELOG 头部已含 `1.8.1` Lua 脚本条目，待发版 bump）。
+多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.8.2`）。
 
 **支持的协议（共 10 种，对应 GUI 协议下拉框 `current_protocol` 索引）：**
 
@@ -93,6 +93,9 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，~3600�
 │   ├── gdw_afn_lookup.py           # 国网 AFN
 │   └── (698.45 OI 查询内嵌于 dl_t698_45_oi_lookup.py)
 │
+├── 对比引擎
+│   └── frame_diff_engine.py        # 协议感知帧对比引擎 (FrameDiffEngine) — 字节级/字段级 diff
+│
 ├── 组帧/发送（frame generation）
 │   ├── send_frame_lib.py           # 南网帧生成 (ProtocolFrameGenerator)
 │   ├── gdw_send_frame_lib.py       # 国网帧生成 (GDWFrameGenerator)
@@ -109,7 +112,9 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，~3600�
 │   ├── gui_utils.py                # 中文右键菜单等工具
 │   ├── archive_widget.py           # 档案管理 (ArchiveWidget) - 仅南网(0)/国网(6)
 │   ├── topology_widget.py          # 拓扑信息 (TopologyWidget) - 仅南网(0)/国网(6)
-│   └── streamlit_app.py            # Web 版（功能子集）
+│   ├── diff_widget.py              # 报文对比标签页 (DiffWidget) - 双报文输入，字节/字段级对比
+│   ├── streamlit_app.py            # Web 版（功能子集）
+│   └── tui_app.py                  # TUI 版（基于 Textual，终端图形化解析）
 │
 ├── 验证引擎 validator/ ── BaseValidator + 各协议 validator，统一 ValidationResult
 │   ├── __init__.py                 # 导出所有 validator
@@ -338,6 +343,7 @@ python test_snrm_frame.py      # SNRM 帧
 python test_dl_t698_45.py      # 698.45 协议
 python test_oad_enrichment.py  # 698.45 OAD 增强
 python test_csg_new_gen.py     # 新一代载波协议
+python test_diff_engine.py    # 报文对比引擎
 python test_plan_widget.py     # 测试计划组件（需 GUI 环境）
 
 # 调试用临时脚本（可清理）：test_mac_*.py / test_msdu_debug.py / test_user_frame.py / test_full_debug.py / test_len_debug.py
@@ -393,8 +399,16 @@ python test_plan_widget.py     # 测试计划组件（需 GUI 环境）
 
 > 本节按版本倒序记录。详细 commit 见 `git log`。每发新版本必须更新此处。
 
-### 1.8.0 — 2026-07-04
-### 1.8.1（待发版，CHANGELOG 已写入 `main_gui.py`）— 2026-06-27
+### 1.8.2 — 2026-07-06
+- **新增「报文对比」标签页**：协议感知的双报文对比分析，支持字节级对比（字段感知对齐+差异高亮）和字段级语义对比（偏移/长度/值/差异类型）
+- 支持差异人话解读（自然语言解释业务含义）、配置选项（忽略校验和/序列号、仅显示差异）、导出对比报告
+- 新增 `frame_diff_engine.py`（帧对比引擎，FrameDiffEngine）和 `diff_widget.py`（GUI 组件，DiffWidget）
+- **新增 TUI 版本**：`tui_app.py` + `tui_app.tcss`，基于 Textual 框架，支持单帧解析+字节高亮、批量多帧解析+摘要、协议一致性校验
+- 新增 `test_diff_engine.py`（对比引擎测试）、`_tui_smoke_test.py`（TUI 冒烟测试）
+- `main_gui.py`：集成 DiffWidget 标签页，`APP_VERSION` bump 至 `1.8.2`
+- `test_plan_widget.py`：功能增强（+421 行）
+
+### 1.8.1 — 2026-06-27
 - **测试方案新增 Lua 脚本支持**：测试项「性质」新增「Lua脚本」类型，可在测试流程中嵌入可编程逻辑（条件分支、循环遍历、数据解析、变量共享、动态组帧、延时控制）
 - 新增 `lua_script_engine.py`（Lua 脚本引擎），通过 `lupa`（Python-Lua 桥接）提供 API：`send` / `wait_for_response` / `wait` / `log` / `hex_to_bytes` / `bytes_to_hex` / `get_last_response` / `get_test_var` / `set_test_var` / `stop`
 - 新增 `test_lua_engine.py`（Lua 引擎测试）
@@ -498,22 +512,22 @@ python test_plan_widget.py     # 测试计划组件（需 GUI 环境）
 
 ## 11. 最新变更摘要（最近一次 commit 摘要）
 
-**最近一次（2026-07-04）：新增 DLMS-APDU(国网) 协议选项，协议索引重编号**
-**最近一次（未提交，CHANGELOG 标记 1.8.1）：测试方案新增 Lua 脚本支持**
+**最近一次（2026-07-06，commit `087d03e`）：新增协议感知报文对比功能模块 + TUI 版本**
 
 变更：
-- 新增 `lua_script_engine.py`：基于 `lupa` 的 Lua 脚本引擎，提供 send/wait/log/hex_to_bytes 等 API
-- `test_plan_widget.py`：新增 `LuaCodeEditor`（行号+列线指示器），测试项「性质」新增「Lua脚本」类型，编辑器按性质切换帧字段/Lua 脚本模式
-- `serial_worker.py`：新增 `raw_data_received` 信号，供 `LuaEngineBridge` 直接接收串口原始数据（不经过 FT1.2 帧解析）
-- 新增 `test_lua_engine.py`（Lua 引擎测试用例）
-- 新增 `docs/Lua脚本使用说明.md`（用户文档，含 API 参考、示例、模板）
-- `main_gui.py` CHANGELOG 头部写入 `1.8.1` 条目（`APP_VERSION` 仍为 `1.8.0`，待发版时 bump）
+- 新增 `diff_widget.py`（DiffWidget）：报文对比标签页，支持双报文输入、字节级对比（字段感知对齐+差异高亮）、字段级语义对比（偏移/长度/值/差异类型）、差异人话解读、导出对比报告
+- 新增 `frame_diff_engine.py`（FrameDiffEngine）：协议感知帧对比引擎，支持完整对比流程和结果结构化
+- 新增 `tui_app.py`（936行）+ `tui_app.tcss`：基于 Textual 的终端图形化解析器，支持 9 种协议的解析、批量多帧解析+摘要、协议一致性校验
+- 新增 `test_diff_engine.py`（对比引擎测试）、`_tui_smoke_test.py`（TUI 冒烟测试）、`docs/_gen_diff_mockup.py`（对比 UI 原型生成）
+- `main_gui.py`（+23 行）：导入并集成 DiffWidget 标签页
+- `test_plan_widget.py`（+421 行）：功能增强
+- `config.json`：串口端口号改为 COM4
 
 涉及文件：
-- 新增：`lua_script_engine.py`、`test_lua_engine.py`、`docs/Lua脚本使用说明.md`
-- 修改：`main_gui.py`、`test_plan_widget.py`、`serial_worker.py`
+- 新增：`diff_widget.py`、`frame_diff_engine.py`、`tui_app.py`、`tui_app.tcss`、`test_diff_engine.py`、`_tui_smoke_test.py`、`docs/_gen_diff_mockup.py`、`docs/diff_mockup.html`、`docs/diff_mockup.png`
+- 修改：`main_gui.py`、`test_plan_widget.py`、`config.json`、`test_plan.json`
 
-依赖：`lupa`（pip install lupa），未安装时静默降级。
+依赖：`textual`（TUI 版本，`pip install textual`），可选
 
 ---
 
