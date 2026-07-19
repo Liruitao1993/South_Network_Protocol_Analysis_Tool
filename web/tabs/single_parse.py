@@ -35,7 +35,7 @@ class SingleParseTab:
         ui.add_head_html(
             '<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>'
         )
-        with ui.column().classes("w-full h-full q-pa-md q-gutter-md").style("overflow: auto;"):
+        with ui.column().classes("w-full q-pa-md q-gutter-md").style("height: 100%; display: flex; flex-direction: column; overflow: hidden;"):
             # 输入区 - HexInput 自身已包含卡片，不再外层嵌套
             self._hex_input = HexInput(
                 on_parse=self._on_parse,

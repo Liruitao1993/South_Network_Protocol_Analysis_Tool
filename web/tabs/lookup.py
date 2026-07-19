@@ -118,15 +118,15 @@ class LookupTab:
     
     def _load_plc_rf_commands(self):
         lookup = get_command_lookup()
-        for cmd, desc in lookup.cmd_map.items():
+        for code, name, desc, _ in lookup._data:
             self._data.append({
-                "id": f"{cmd:04X}",
-                "col1": f"{cmd:04X}",
+                "id": f"{code:04X}",
+                "col1": f"0x{code:04X}",
                 "col2": "",
                 "col3": "",
                 "col4": "",
                 "col5": "",
-                "desc": desc,
+                "desc": f"{name} - {desc}",
             })
         self._table.columns = [
             {"name": "col1", "label": "命令字", "field": "col1", "align": "left"},
@@ -135,15 +135,16 @@ class LookupTab:
     
     def _load_obis(self):
         lookup = get_obis_lookup()
-        for obis, desc in lookup.obis_map.items():
+        for obis, name, desc, _ in lookup._data:
+            obis_str = ".".join(str(x) for x in obis)
             self._data.append({
-                "id": obis.replace(".", ""),
-                "col1": obis,
+                "id": obis_str.replace(".", ""),
+                "col1": obis_str,
                 "col2": "",
                 "col3": "",
                 "col4": "",
                 "col5": "",
-                "desc": desc,
+                "desc": f"{name} - {desc}",
             })
         self._table.columns = [
             {"name": "col1", "label": "OBIS码", "field": "col1", "align": "left"},
@@ -152,10 +153,17 @@ class LookupTab:
     
     def _load_dlt645_di(self):
         lookup = get_dlt645_di_lookup()
-        for di, desc in lookup.di_map.items():
+        for di_code, info in lookup._di_map.items():
+            di_name = info.get("name", "")
+            unit = info.get("unit", "")
+            data_type = info.get("data_type", "")
+            length = info.get("length", 4)
+            desc = f"{di_name} | 类型:{data_type} | 长度:{length}字节"
+            if unit:
+                desc += f" | 单位:{unit}"
             self._data.append({
-                "id": di.replace(" ", ""),
-                "col1": di,
+                "id": di_code.replace(" ", ""),
+                "col1": di_code,
                 "col2": "",
                 "col3": "",
                 "col4": "",

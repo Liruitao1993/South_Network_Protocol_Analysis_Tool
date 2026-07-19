@@ -27,7 +27,7 @@ class DiffTab:
         }
 
     def build(self):
-        with ui.column().classes("w-full h-full q-pa-md q-gutter-md"):
+        with ui.column().classes("w-full q-pa-md q-gutter-md").style("height: 100%; display: flex; flex-direction: column; overflow: hidden;"):
             # ── 输入区 ──
             with ui.card().classes("w-full shadow-2 rounded-borders"):
                 with ui.row().classes("w-full q-gutter-md q-pa-md"):
@@ -59,7 +59,7 @@ class DiffTab:
             ui.separator().classes("q-my-xs")
 
             # ── 结果区 ──
-            with ui.splitter(value=50).classes("w-full h-[calc(100%-300px)]") as splitter:
+            with ui.splitter(value=50).classes("w-full").style("flex: 1; min-height: 0;") as splitter:
                 with splitter.before:
                     with ui.card().classes("w-full h-full shadow-2 rounded-borders"):
                         with ui.row().classes("w-full items-center q-mb-sm q-px-md"):

@@ -1,4 +1,5 @@
-# -*- coding: utf-8 -*-
+# coding: utf-8
+"""Main page layout with fixed header, tab bar, and scrollable content areas."""
 """主页面布局：顶部栏 + 标签页容器"""
 import logging
 import re
@@ -96,12 +97,19 @@ class MainPage:
                 tabs[key] = ui.tab(label, icon=icon)
 
         # ── Tab panels: 固定高度 + 内容滚动，避免顶栏重叠 ───────────
-        content_h = f"calc(100vh - {HEADER_H + FOOTER_H + 44}px)"
-        with ui.tab_panels(tab_bar, value=tabs["single"]).classes(
-            f"w-full h-[{content_h}] overflow-auto"
-        ):
+        # Tab panels with fixed height - inner areas scroll independently
+
+        content_h = f"calc(100vh - {HEADER_H + FOOTER_H + CSG_CTRLS_H + 44}px)"
+        with ui.tab_panels(tab_bar, value=tabs["single"]).classes("w-full").style("height: calc(100vh - 204px); overflow: hidden;"):
             for key, _, _ in tab_defs:
-                with ui.tab_panel(tabs[key]).classes("w-full"):
+                with ui.tab_panel(tabs[key]).classes("w-full").style("height: 100%;"):
+                    self._build_tab(key)
+
+
+        with ui.tab_panels(tab_bar, value=tabs["single"]).classes(
+            "w-full"
+        ):            for key, _, _ in tab_defs:
+                with ui.tab_panel(tabs[key]).classes("w-full").style("height: 100%;"):
                     self._build_tab(key)
 
         # ── Footer ──────────────────────────────────────────────────
