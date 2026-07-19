@@ -11,7 +11,7 @@
 
 多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.8.2`）。
 
-**支持的协议（共 10 种，对应 GUI 协议下拉框 `current_protocol` 索引）：**
+**支持的协议（共 11 种，对应 GUI 协议下拉框 `current_protocol` 索引）：**
 
 | 索引 | 协议名（GUI显示） | 标准号 | 字节序 | 校验算法 |
 |------|------------------|--------|--------|----------|
@@ -25,6 +25,7 @@
 | 7 | 国网协议 | Q/GDW 10376.2—2024 | 小端 | 8位位组算术和（不溢出） |
 | 8 | 698.45 协议 | DL/T 698.45-2017 | 小端 | **CRC-16（crcmod 的 `x-25`）** |
 | 9 | 新一代载波协议（通感一体化） | 通感一体化低压电力线宽带载波通信规约（2026校对版） | 小端 | CRC-32（MAC帧） |
+| 10 | 国网新一代双模通信互联互通 | 国网新一代双模通信互联互通技术规范 | 小端 | CRC-32（MAC帧） |
 
 ---
 
@@ -40,9 +41,8 @@ python web_app.py
 # 运行 Streamlit Web 版（功能子集）
 streamlit run streamlit_app.py
 
-# 打包 exe（两个 spec 的 datas 不同，见下方说明）
-pyinstaller 协议解析工具.spec         # 完整版：custom_di.json + dlt645_di.json + gdw_custom_afn.json
-pyinstaller 南网协议解析工具.spec       # 南网精简版：custom_di.json + dlt645_di.json
+pyinstaller 协议解析工具.spec         # 完整版：custom_di.json + dlt645_di.json + gdw_custom_afn.json + icons/
+pyinstaller 南网协议解析工具.spec       # 南网精简版：custom_di.json + dlt645_di.json + gdw_custom_afn.json + icons/ + enhanced_export.py
 ```
 
 **依赖：**
@@ -56,9 +56,9 @@ pyinstaller 南网协议解析工具.spec       # 南网精简版：custom_di.js
 
 **运行环境注意：**
 - Windows 优先；中文路径需保证 UTF-8 / GBK 编码兼容
-- `main_gui.py` 内有 `_get_git_changelog()` 会调用 `git log`，无 git 环境时静默降级
-- PyInstaller spec 文件中 `excludes` 列表用于减小体积（PyQt5/matplotlib/scipy/numpy 等）
-- 两个 `.spec` 文件当前 `datas` 完全一致（均含 `custom_di.json` + `dlt645_di.json` + `gdw_custom_afn.json` + `icons/`）；差异仅在 exe 名称与打包模式（`协议解析工具.spec` 为 `COLLECT` 目录型，`南网协议解析工具.spec` 为单文件 `EXE`）
+- `协议解析工具.spec` excludes: PyQt5/PyQt6/matplotlib/scipy/PIL/tkinter/numpy（4 个 datas，COLLECT 目录型）
+- `南网协议解析工具.spec` excludes: PyQt5/PyQt6/matplotlib/scipy/PIL/tkinter + IPython/notebook/jupyter/pytest/unittest（5 个 datas，含 enhanced_export.py，单文件 EXE；不排除 numpy，因 pandas 依赖）
+- **两个 spec 的 datas 和 excludes 不完全相同**：南网 spec 额外包含 `enhanced_export.py`，且 excludes 列表不同；新增需打包的数据文件时**两个 spec 都要检查并同步**
 - Lua 脚本引擎依赖 `lupa`，打包时需作为 hidden import 或确保运行环境已安装
 - `docs/Lua脚本使用说明.md` 是 Lua 功能的用户文档
 - Inno Setup 安装脚本 `南网解析工具.iss` / `2222.iss` 中 `MyAppVersion` 仍为 `1.7.2`，发版时需手动同步
@@ -68,9 +68,9 @@ pyinstaller 南网协议解析工具.spec       # 南网精简版：custom_di.js
 ## 3. 架构总览
 
 ```
-main_gui.py                     # GUI主程序 (PySide6)，应用入口，~3600行，MainWindow 类
+main_gui.py                     # GUI主程序 (PySide6)，应用入口，~4480行，MainWindow 类
 │                                #  - APP_VERSION、CHANGELOG（手写）+ _get_git_changelog()（动态）
-│                                #  - current_protocol 硬编码索引(0~9)，见 §6
+│                                #  - current_protocol 硬编码索引(0~10)，见 §6
 │                                #  - ConfigDialog：配置文件路径管理（自定义 JSON 路径）
 │
 ├── 协议解析器（parser）── 每个返回嵌套 dict，字段约定见 §4
@@ -87,9 +87,10 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，~3600�
 │   │   └── dl_t698_45_apdu_parser.py # 698.45 APDU (DLT69845APDUParser) - 延迟导入避免循环依赖
 │   │       └── dl_t698_45_axdr.py     # A-XDR 编解码 (AXDRCoder, DL/T 790.6-2010)
 │   │           └── dl_t698_45_oi_lookup.py  # OI 对象标识查询 (OILookup)
-│   ├── csg_new_gen_parser.py       # 新一代载波 (CSGNewGenParser) ~4370行
+│   ├── csg_new_gen_parser.py       # 新一代载波 (CSGNewGenParser) ~4970行
 │   │   └── csg_new_gen_cmd_payloads.py # 应用层命令业务数据单元解析
-│   └── (新一代解析级别 auto/fc_pb/fc_only/app 由 _csg_parse_level 控制)
+│   ├── gw_new_gen_parser.py        # 国网新一代双模 (GWNewGenParser) — 国网新一代双模通信互联互通
+│   └── (新一代/国网新一代解析级别 auto/fc_pb/fc_only/app 由 _csg_parse_level/_gwcsg_parse_level 控制)
 │
 ├── 查询/映射模块（lookup）── 单例 get_xxx_lookup() 提供全局实例
 │   ├── obis_lookup.py              # OBIS码 (HDLC/DLMS)
@@ -117,7 +118,6 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，~3600�
 │   ├── gui_utils.py                # 中文右键菜单等工具
 │   ├── archive_widget.py           # 档案管理 (ArchiveWidget) - 仅南网(0)/国网(6)
 │   ├── topology_widget.py          # 拓扑信息 (TopologyWidget) - 仅南网(0)/国网(6)
-│   ├── diff_widget.py              # 报文对比标签页 (DiffWidget) - 双报文输入，字节/字段级对比
 │   ├── diff_widget.py              # 报文对比标签页 (DiffWidget) - 双报文输入，字节/字段级对比
 │   ├── streamlit_app.py            # Web 版（功能子集）
 │   ├── web_app.py                  # NiceGUI Web 版入口（1.8.2 新增）
@@ -158,7 +158,8 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，~3600�
 │   ├── plc_rf_validator.py         # PLC RF (PLCRFValidator)
 │   ├── dlt645_validator.py         # DLT645 (DLT645Validator)
 │   ├── dl_t698_45_validator.py     # 698.45 (DLT69845Validator) - 使用 crcmod
-│   └── csg_new_gen_validator.py    # 新一代载波 (CSGNewGenValidator)
+│   ├── csg_new_gen_validator.py    # 新一代载波 (CSGNewGenValidator)
+│   └── gw_new_gen_validator.py     # 国网新一代双模 (GWNewGenValidator)
 │
 ├── 监听/报表/模板/可视化编辑
 │   ├── monitor/frame_monitor.py    # 实时帧监听器（串口数据自动解析）
@@ -203,7 +204,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，~3600�
 用户输入 hex
   → main_gui.py 根据 current_protocol 选择 parser
     (0:ProtocolFrameParser / 1:PLCRFProtocolParser / 2~5:HDLCParser / 6:DLT645Parser
-     7:GDW10376Parser / 8:DLT69845Parser(+APDUParser+AXDRCoder) / 9:CSGNewGenParser)
+     7:GDW10376Parser / 8:DLT69845Parser(+APDUParser+AXDRCoder) / 9:CSGNewGenParser / 10:GWNewGenParser)
   → parser.parse(frame_bytes) 返回结构化嵌套 dict
   → GUI: QTableWidget 展示分层 + 字节高亮（点击行联动输入框）
   → 可选: 校验（validator.verify()）、DLMS 深度弹窗（双击 DLMS APDU 行）
@@ -217,7 +218,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，~3600�
 - **类名** CamelCase：`ProtocolFrameParser`、`CSGNewGenParser`
 - **函数/变量** snake_case：`parse_frame`、`current_protocol`
 - **常量** UPPER_CASE：`AFN_MAP`、`DI_COMBINATION_MAP`、`MSG_PORT_MAP`
-- GUI 代码集中在 `main_gui.py` 单文件，`MainWindow` 类约 2500 行；**新增 UI 组件必须拆分到独立文件**（参考 `frame_gen_widget.py`），由 `main_gui.py` 导入组合
+- GUI 代码集中在 `main_gui.py` 单文件，`MainWindow` 类约 4000+ 行；**新增 UI 组件必须拆分到独立文件**（参考 `frame_gen_widget.py`），由 `main_gui.py` 导入组合
 - 所有 parser 返回**嵌套 dict**，禁止返回自定义类给 GUI 层
 
 ### 4.2 解析结果 dict 标准字段
@@ -227,8 +228,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，~3600�
 - `说明` / `名称` / `业务说明` — 中文描述
 - `偏移` / `长度` — 字节定位（用于高亮）
 
-### 4.3 字节序（**极易出错，务必逐协议确认**）
-- **南网(0) / 国网(6) / 698.45(7) / 新一代(8)**：长度域、DI、多字节字段 → **小端序 (little-endian)**
+- **南网(0) / 国网(6) / 698.45(7) / 新一代(8) / 国网新一代(10)**：长度域、DI、多字节字段 → **小端序 (little-endian)**
 - **HDLC/DLMS(2,3,4)**：网络字节序 **big-endian**
 - **DLT645(5)**：BCD 编码，地址域低字节在前
 - **PLC RF(1)**：大端
@@ -239,15 +239,13 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，~3600�
 - 国网(6)：同南网（控制域 + 用户数据区算术和）
 - DLT645(5)：所有字节累加和 `& 0xFF`
 - HDLC(2)：CRC-16/FCS（CCITT，`base.py:_calc_crc16_ccitt`）
-- **698.45(7)：`crcmod.predefined.Crc('x-25')`**（CRC16），HCS 覆盖"长度域+控制域+地址域"，FCS 覆盖"长度域…链路用户数据"
-- 新一代(8)：MAC 帧 CRC-32
+- 新一代(8) / 国网新一代(10)：MAC 帧 CRC-32
 
 ### 4.5 自定义数据持久化
 | 文件 | 内容 | 来源 |
 |------|------|------|
 | `custom_di.json` | 南网自定义 DI | GUI 运行时增删 |
 | `gdw_custom_afn.json` | 国网自定义 AFN+Fn | GUI 运行时增删 |
-| `dlt645_di_custom.json` | DLT645 自定义 DI | GUI 运行时增删 |
 | `dlt645_di.json` | DLT645 标准 DI 映射 | `generate_dlt645_di.py` 生成，**勿手改** |
 | `dl_t698_45_oi_lookup.py` 内 `OI_NAME_MAP` | 698.45 OI 名称 | `generate_oi_lookup.py` 生成 |
 | `oi_to_class.json` | 698.45 OI→类 | `extract_oi_to_class.py` 生成 |
@@ -334,8 +332,21 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，~3600�
   - `5-...第5部分 应用层通信协议（文本校对）.md` — **应用层（业务报文结构）**
   - `6-...第6部分：检验规范（文本校对）.md` — 检验规范
   - 源 docx 可用 `convert_docx_to_md.py` 重新转换
+### 5.8 国网新一代双模通信互联互通（索引 10）
+- **解析器**：`gw_new_gen_parser.py` (GWNewGenParser) — 国网新一代双模通信互联互通协议解析
+- **校验器**：`validator/gw_new_gen_validator.py` (GWNewGenValidator)
+- **GUI 特性**：协议索引 10 时显示"解析级别"下拉（auto / fc_pb / fc_only / app），由 `_gwcsg_parse_level` 控制
+- **参考文档**（位于 `国网新一代协议/` 目录）：
+  - `双模通信互联互通技术规范 第1部分：总则.md` — 总则
+  - `双模通信互联互通技术规范 第2部分：技术要求20251229.md` — 技术要求
+  - `第4-1部分：物理层通信协议_智芯合稿_20260108.md` — 物理层
+  - `双模通信互联互通技术规范 第4-2部分：数据链路层通信协议.md` — **数据链路层（MAC/MSDU 帧格式）**
+  - `双模通信互联互通技术规范 第4-3部分：新一代应用层协议.md` — **应用层（业务报文结构）**
+  - `双模通信互联互通技术规范 第3部分：检验方法-20251222.md` — 检验方法
+  - 源文件（.doc/.docx）可用 markitdown 重新转换
 
 ---
+
 
 ## 6. GUI 协议集成点（添加/修改协议必读）
 
@@ -349,13 +360,10 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，~3600�
 | `_extract_frames_for_protocol`（~L1409+） | 多帧提取逻辑（不同协议起始符不同） |
 | `_parse_single_frame`（~L2195+） | 选择 parser 调用 |
 | `_update_protocol_lookup_tab`（~L1434+） | 查询标签页内容（DI/AFN/OBIS/命令字/业务标识） |
-| `_run_validation`（~L2353+） | validator 字典映射 |
-| `setTabVisible`（~L1342-1386） | 组帧/预设(0,7,8)、档案(0,7)、拓扑(0,7) 可见性 |
-
 **Tab 可见性规则：**
-- 组帧 / 预设命令：南网(0) / 国网(7) / 698.45(8) — 三种模式 `south` / `gdw` / `dlt698`
+- 组帧 / 预设命令：南网(0) / 国网(7) / 698.45(8) / 新一代(9) / 国网新一代(10) — 五种模式 `south` / `gdw` / `dlt698` / `csg` / `gw`
 - 档案管理 / 拓扑信息：仅南网(0) / 国网(7)
-- 新一代解析级别下拉：仅索引 9
+- 新一代解析级别下拉：仅索引 9（新一代载波）和 10（国网新一代双模）
 
 ---
 
@@ -375,6 +383,7 @@ python test_snrm_frame.py      # SNRM 帧
 python test_dl_t698_45.py      # 698.45 协议
 python test_oad_enrichment.py  # 698.45 OAD 增强
 python test_csg_new_gen.py     # 新一代载波协议
+python test_gw_new_gen.py      # 国网新一代双模协议
 python test_diff_engine.py    # 报文对比引擎
 python test_plan_widget.py     # 测试计划组件（需 GUI 环境）
 
@@ -389,10 +398,10 @@ python test_plan_widget.py     # 测试计划组件（需 GUI 环境）
 
 1. **`_clear_layout` 递归销毁**（`main_gui.py`）：递归删除所有子 widget。改查询标签页逻辑时必须理解此方法，否则 widget 残留或崩溃。
 2. **`current_protocol` 硬编码索引**：见 §6，添加协议要改 8+ 处。
-3. **PyInstaller spec 当前 datas 相同**：
-   - 两个 spec 的 `datas` 完全一致：`custom_di.json` + `dlt645_di.json` + `gdw_custom_afn.json` + `icons/`，`excludes` 也相同（PyQt5/PyQt6/matplotlib/scipy/PIL/tkinter/numpy）
-   - 差异仅在 exe 名称与打包模式：`协议解析工具.spec` → COLLECT 目录型；`南网协议解析工具.spec` → 单文件 EXE
-   - **新增需打包的数据文件，两个 spec 都要同步**
+3. **PyInstaller spec datas/excludes 不完全相同**：
+   - `协议解析工具.spec`：4 个 datas（`custom_di.json` + `dlt645_di.json` + `gdw_custom_afn.json` + `icons/`），excludes 含 numpy
+   - `南网协议解析工具.spec`：5 个 datas（额外含 `enhanced_export.py`），excludes 不含 numpy（pandas 依赖），额外排除 IPython/notebook/jupyter/pytest/unittest
+   - **新增需打包的数据文件，两个 spec 都要检查并同步**
 4. **DLMS 深度解析是双击触发**，不是自动：双击表格中 `DLMS APDU` 行才弹 `dlms_deep_parser`。
 5. **HDLC 字节填充**：组帧时 7E/7D 必须转义（见 §4.6）。
 6. **698.45 CRC 范围**：HCS / FCS 覆盖字段不同，必须查文档，不能照抄南网/国网。
@@ -547,15 +556,16 @@ python test_plan_widget.py     # 测试计划组件（需 GUI 环境）
 **最近一次（2026-07-16，commit `6e6e8ac`）：新增 NiceGUI Web 版本 + 报文对比增强 + 增强导出功能**
 
 变更：
-- **新增 NiceGUI Web 版本**（`web_app.py` + `web/` 目录）：基于 NiceGUI 框架的浏览器解析器，支持完整 10 种协议解析，支持单帧/批量/报文对比/组帧/预设/查询/测试计划/档案/拓扑等标签页，集成串口通信（SerialAdapter），暗色主题自定义 CSS，健康检查端点 `/health`
+- **新增 NiceGUI Web 版本**（`web_app.py` + `web/` 目录）：基于 NiceGUI 框架的浏览器解析器，支持完整 11 种协议解析，支持单帧/批量/报文对比/组帧/预设/查询/测试计划/档案/拓扑等标签页，集成串口通信（SerialAdapter），暗色主题自定义 CSS，健康检查端点 `/health`
 - **报文对比增强**（`diff_widget.py`）：新增差异人话解读（自然语言描述业务含义）、配置选项（忽略校验和/序列号、仅显示差异）、导出对比报告功能
 - **增强导出功能**（`enhanced_export.py`）：Excel 增强导出（支持协议元数据、字节高亮样式、分 Sheet 导出），CSV/TXT/JSON 多格式导出
 - **TUI 版本优化**（`tui_app.py`）：优化批量解析摘要显示，修复协议切换时的界面刷新问题
 - **Web 布局调整**（`web/main_page.py`、`web/tabs/single_parse.py`、`web/components/parse_table.py`）：固定高度 + 内容滚动，避免顶栏重叠；CSG 控制条仅在协议 9 下显示
 - `test_plan_widget.py`：功能增强（+421 行）
+- **新增国网新一代双模通信互联互通协议（索引10）**：`gw_new_gen_parser.py` (GWNewGenParser) + `validator/gw_new_gen_validator.py`，复用新一代载波解析框架
 
 涉及文件：
-- 新增：`web_app.py`、`web/` 目录（`main_page.py`、`tabs/`、`components/`、`adapters/`、`styles/custom.css`、`protocol_registry.py`、`frame_extractor.py`）、`enhanced_export.py`、`docs/superpowers/specs/2026-07-15-nicegui-web-version-design.md`、`docs/superpowers/plans/2026-07-15-nicegui-web-version-plan.md`
+- 新增：`web_app.py`、`web/` 目录（`main_page.py`、`tabs/`、`components/`、`adapters/`、`styles/custom.css`、`protocol_registry.py`、`frame_extractor.py`）、`enhanced_export.py`、`gw_new_gen_parser.py`、`validator/gw_new_gen_validator.py`、`docs/superpowers/specs/2026-07-15-nicegui-web-version-design.md`、`docs/superpowers/plans/2026-07-15-nicegui-web-version-plan.md`
 - 修改：`main_gui.py`、`test_plan_widget.py`、`config.json`、`test_plan.json`、`diff_widget.py`、`tui_app.py`
 
 依赖：`nicegui`（Web 版）、`pyserial`（Web 版串口）、`textual`（TUI 版，可选），`pip install nicegui pyserial textual`
