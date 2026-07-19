@@ -12,6 +12,7 @@ def _lazy_import_parsers() -> Dict[int, Type]:
     from gdw10376_parser import GDW10376Parser
     from dl_t698_45_parser import DLT69845Parser
     from csg_new_gen_parser import CSGNewGenParser
+    from gw_new_gen_parser import GWNewGenParser
     return {
         0: ProtocolFrameParser,
         1: PLCRFProtocolParser,
@@ -23,6 +24,7 @@ def _lazy_import_parsers() -> Dict[int, Type]:
         7: GDW10376Parser,
         8: DLT69845Parser,
         9: CSGNewGenParser,
+        10: GWNewGenParser,
     }
 
 
@@ -31,6 +33,7 @@ def _lazy_import_validators() -> Dict[int, Type]:
         NWValidator, PLCRFValidator, HDLCValidator,
         DLT645Validator, GDWValidator, DLT69845Validator, CSGNewGenValidator,
     )
+    from validator.gw_new_gen_validator import GWNewGenValidator
     return {
         0: NWValidator,
         1: PLCRFValidator,
@@ -42,6 +45,7 @@ def _lazy_import_validators() -> Dict[int, Type]:
         7: GDWValidator,
         8: DLT69845Validator,
         9: CSGNewGenValidator,
+        10: GWNewGenValidator,
     }
 
 

@@ -54,7 +54,9 @@ class ParseTable:
                 rows=[],
                 row_key="id",
                 selection="single",
-            ).classes("dense-table parse-table-striped w-full").props("flat bordered separator=cell")
+            ).classes("dense-table parse-table-striped w-full").props(
+                "flat bordered separator=cell virtual-scroll style='max-height: calc(100vh - 320px); overflow-y: auto;'"
+            )
             
             # 行交替色 CSS
             ui.add_head_html("""
