@@ -46,7 +46,7 @@ class BatchParseTab:
         </style>
         ''')
 
-        with ui.column().classes("w-full h-full"):
+        with ui.column().classes("w-full").style("height: 100%; display: flex; flex-direction: column; overflow: hidden;"):
             # ── 输入区 ──
             with ui.card().classes("w-full batch-card").style("margin: 8px 12px;"):
                 # 标题行 + 分割线
