@@ -220,42 +220,49 @@ class GWNewGenParser:
         return result
 
     def _parse_msdu_from_frame(self, data: bytes, offset: int) -> List[Tuple]:
-        """从帧数据中定位并解析MSDU"""
-        result = []
+        """从帧数据中定位并解析MSDU
 
-        # 跳过可能的HCS(3字节)和物理块头，寻找MAC帧
-        # 尝试在offset之后寻找MAC帧结构
+        FC(16B) 之后的结构：
+          HCS(3B) + 物理块头(1B) + MSDU
+        物理块头字节 = 段序号(4b) + 段数(4b)，其后是 MSDU 载荷。
+        """
+        result = []
         msdu_start = offset
         msdu_end = len(data)
 
         if msdu_start >= msdu_end:
             return result
 
-        # 尝试解析MAC帧头
+        # ── 跳过 HCS(3字节) ──
+        if msdu_start + 3 <= msdu_end:
+            msdu_start += 3
+
+        # ── 跳过物理块头(1字节: 段序号+段数) ──
+        if msdu_start < msdu_end:
+            msdu_start += 1
+
+        # ── 解析 MAC 帧头 ──
         mac_result = self._parse_mac_header(data, msdu_start)
         if mac_result:
             result.extend(mac_result)
 
-            # 从MAC帧头获取方向（发送类型在字节2的高4位）
+            # 从 MAC 帧头获取方向（发送类型在字节2的高4位）
             direction = 0  # 默认下行
             if len(data) > msdu_start + 2:
                 b2 = data[msdu_start + 2]
                 send_type = (b2 >> 4) & 0x0F
                 # send_type: 0=单播, 1=全网广播, 2=本地广播, 3=代理广播
-                # 方向需要从其他字段判断，这里暂用默认值
 
             # 检查是否为应用层报文(MSDU类型=48)
-            # 从MAC帧头中获取MSDU类型和长度
             if len(data) > msdu_start + 7:
-                msdu_type = data[msdu_start + 7]  # MSDU类型在MAC帧头字节7
+                msdu_type = data[msdu_start + 7]
                 if msdu_type == 48:  # 应用层报文
-                    # MSDU从MAC帧头之后开始
                     mac_header_len = self._get_mac_header_length(data, msdu_start)
                     if mac_header_len > 0 and msdu_start + mac_header_len < msdu_end:
                         app_result = self._parse_application_layer(data, msdu_start + mac_header_len, direction)
                         result.extend(app_result)
         else:
-            # 无法解析MAC帧头，尝试直接解析应用层
+            # 无法解析 MAC 帧头，尝试直接解析应用层
             app_result = self._parse_application_layer(data, msdu_start, 0)
             result.extend(app_result)
 
