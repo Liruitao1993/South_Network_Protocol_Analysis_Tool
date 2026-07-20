@@ -1349,3 +1349,49 @@ def _parse_power_distribution_report(payload: bytes, base_offset: int, direction
         _f(table, "数据(DATA)", _hex(data)[:80], f"{len(data)}字节",
            "配电信息数据", base_offset + offset, base_offset + len(payload) - 1)
     return table
+
+
+# ═══════════════════════════════════════════════════════════
+# 公共入口：按 msg_id 分派到各子解析器
+# ═══════════════════════════════════════════════════════════
+_COMMAND_PARSERS = {
+    0x0001: _parse_terminal_meter_reading,
+    0x0002: _parse_route_meter_reading,
+    0x0003: _parse_parallel_meter_reading,
+    0x0004: _parse_time_sync,
+    0x0005: _parse_single_phase,
+    0x0006: _parse_comm_test,
+    0x0008: _parse_event_report,
+    0x0009: _parse_query_node_registration,
+    0x000A: _parse_start_node_registration,
+    0x000B: _parse_stop_node_registration,
+    0x000C: _parse_confirm_deny,
+    0x0030: _parse_start_upgrade,
+    0x0031: _parse_stop_upgrade,
+    0x0032: _parse_file_transfer,
+    0x0033: _parse_file_transfer_broadcast,
+    0x0034: _parse_query_upgrade_status,
+    0x0035: _parse_execute_upgrade,
+    0x0036: _parse_query_site_info,
+    0x0040: _parse_meter_controller_cco,
+    0x0041: _parse_meter_controller_serial,
+    0x00A0: _parse_auth_security,
+    0x00A1: _parse_district_transformer,
+    0x00A2: _parse_query_id_info,
+    0x00A3: _parse_precise_time_sync,
+    0x00A4: _parse_power_distribution_report,
+}
+
+
+def parse_command_payload(
+    payload: bytes,
+    msg_id: int,
+    direction: int,
+    port: int,
+    base_offset: int,
+) -> list:
+    """按功能码(msg_id)分派到对应子解析器，返回表格行列表"""
+    parser = _COMMAND_PARSERS.get(msg_id)
+    if parser:
+        return parser(payload, direction, base_offset)
+    return []
