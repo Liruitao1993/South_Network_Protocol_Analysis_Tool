@@ -4183,8 +4183,15 @@ class MainWindow(QMainWindow):
         extracted_bytes = bytes(extracted_bytes)
         dialog_title = ""
         try:
-            # 先检测是否是DLT645协议帧
-            if len(extracted_bytes) >=12 and extracted_bytes[0] == 0x68 and extracted_bytes[7] == 0x68 and extracted_bytes[-1] == 0x16:
+            if self.current_protocol == 10:
+                # 国网新一代双模通信互联互通
+                parsed_data = self.gw_new_gen_parser.parse_to_table(extracted_bytes)
+                dialog_title = f"深度解析国网新一代 (提取 {len(extracted_bytes)} 字节)"
+            elif self.current_protocol in (8, 9):
+                # 698.45 / 新一代载波
+                parsed_data = self.gw_new_gen_parser.parse_to_table(extracted_bytes)
+                dialog_title = f"深度解析新一代载波 (提取 {len(extracted_bytes)} 字节)"
+            elif len(extracted_bytes) >=12 and extracted_bytes[0] == 0x68 and extracted_bytes[7] == 0x68 and extracted_bytes[-1] == 0x16:
                 # DLT645协议
                 result = self.dlt645_parser.parse(extracted_bytes)
                 parsed_data = []
