@@ -88,9 +88,10 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，~4480�
 │   │       └── dl_t698_45_axdr.py     # A-XDR 编解码 (AXDRCoder, DL/T 790.6-2010)
 │   │           └── dl_t698_45_oi_lookup.py  # OI 对象标识查询 (OILookup)
 │   ├── csg_new_gen_parser.py       # 新一代载波 (CSGNewGenParser) ~4970行
-│   │   └── csg_new_gen_cmd_payloads.py # 应用层命令业务数据单元解析
-│   ├── gw_new_gen_parser.py        # 国网新一代双模 (GWNewGenParser) — 国网新一代双模通信互联互通
-│   └── (新一代/国网新一代解析级别 auto/fc_pb/fc_only/app 由 _csg_parse_level/_gwcsg_parse_level 控制)
+│   └── csg_new_gen_cmd_payloads.py # 应用层命令业务数据单元解析
+├── gw_new_gen_parser.py        # 国网新一代双模 (GWNewGenParser) — 国网新一代双模通信互联互通
+│   └── gw_new_gen_cmd_payloads.py # 国网新一代应用层命令载荷解析
+└── (新一代/国网新一代解析级别 auto/fc_pb/fc_only/app 由 _csg_parse_level/_gwcsg_parse_level 控制)
 │
 ├── 查询/映射模块（lookup）── 单例 get_xxx_lookup() 提供全局实例
 │   ├── obis_lookup.py              # OBIS码 (HDLC/DLMS)
@@ -119,6 +120,8 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，~4480�
 │   ├── archive_widget.py           # 档案管理 (ArchiveWidget) - 仅南网(0)/国网(6)
 │   ├── topology_widget.py          # 拓扑信息 (TopologyWidget) - 仅南网(0)/国网(6)
 │   ├── diff_widget.py              # 报文对比标签页 (DiffWidget) - 双报文输入，字节/字段级对比
+│   ├── message_tool_widget.py       # 报文工具标签页 (MessageToolWidget) - ASCII/HEX转换/CRC/校验
+│   ├── enhanced_export.py           # 增强导出功能 (EnhancedBatchResultExporter) - Excel/CSV/TXT/JSON
 │   ├── streamlit_app.py            # Web 版（功能子集）
 │   ├── web_app.py                  # NiceGUI Web 版入口（1.8.2 新增）
 │   └── web/                        # NiceGUI Web 版（1.8.2 新增）
@@ -449,6 +452,12 @@ python test_plan_widget.py     # 测试计划组件（需 GUI 环境）
 - `main_gui.py`：集成 DiffWidget 标签页，`APP_VERSION` bump 至 `1.8.2`
 - `test_plan_widget.py`：功能增强（+421 行）
 
+### 后续更新（2026-07-20 ~ 2026-07-29）
+- **新增「报文工具」标签页**（`message_tool_widget.py`）：ASCII/HEX 双向转换、DLT645 偏移（±0x33H）、字节逆序、报文↔Pn/Fn 转换、CRC/校验和计算、HEX↔bitstring 转换，20/20 功能测试通过
+- **修复国网新一代双模协议双击深度解析**：`main_gui.py` 修复双击表格行无法触发深度解析
+- **修复国网新一代 MSDU 定位**：`gw_new_gen_parser.py` 跳过 HCS(3B)+物理块头(1B)，正确定位 MSDU 起始
+- **添加 `parse_command_payload` 入口函数**：`gw_new_gen_cmd_payloads.py` 修复 ImportError
+
 ### 1.8.1 — 2026-06-27
 - **测试方案新增 Lua 脚本支持**：测试项「性质」新增「Lua脚本」类型，可在测试流程中嵌入可编程逻辑（条件分支、循环遍历、数据解析、变量共享、动态组帧、延时控制）
 - 新增 `lua_script_engine.py`（Lua 脚本引擎），通过 `lupa`（Python-Lua 桥接）提供 API：`send` / `wait_for_response` / `wait` / `log` / `hex_to_bytes` / `bytes_to_hex` / `get_last_response` / `get_test_var` / `set_test_var` / `stop`
@@ -549,11 +558,23 @@ python test_plan_widget.py     # 测试计划组件（需 GUI 环境）
 ### 1.0.0 — 2026-04-14
 - 初始版本：南网/PLC RF/HDLC/DLMS 多协议解析；单帧/批量解析；DI/命令字/OBIS 查询
 
----
-
 ## 11. 最新变更摘要（最近一次 commit 摘要）
 
-**最近一次（2026-07-16，commit `6e6e8ac`）：新增 NiceGUI Web 版本 + 报文对比增强 + 增强导出功能**
+**最近一次（2026-07-29，commit `f8d92ff`）：新增报文工具标签页 + 国网新一代修复**
+
+变更：
+- **新增「报文工具」标签页**（`message_tool_widget.py`，MessageToolWidget）：提供协议报文处理常用工具，包括 ASCII/HEX 双向转换、DLT645 偏移（±0x33H）、字节逆序、报文↔Pn/Fn 转换、CRC-16/24/32 校验和计算、HEX↔bitstring 转换等
+- **修复国网新一代双模协议支持双击深度解析**（`main_gui.py`）：修复双击表格行无法触发深度解析的问题
+- **修复国网新一代解析器 MSDU 定位**（`gw_new_gen_parser.py`）：跳过 HCS(3B)+物理块头(1B)，正确定位 MSDU 起始
+- **添加 `parse_command_payload` 入口函数**（`gw_new_gen_cmd_payloads.py`）：修复 ImportError
+
+涉及文件：
+- 新增：`message_tool_widget.py`（377 行）
+- 修改：`main_gui.py`（+9 行）、`gw_new_gen_parser.py`（+18/-11 行）、`gw_new_gen_cmd_payloads.py`（+46 行）
+
+---
+
+**上一次（2026-07-16，commit `6e6e8ac`）：新增 NiceGUI Web 版本 + 报文对比增强 + 增强导出功能**
 
 变更：
 - **新增 NiceGUI Web 版本**（`web_app.py` + `web/` 目录）：基于 NiceGUI 框架的浏览器解析器，支持完整 11 种协议解析，支持单帧/批量/报文对比/组帧/预设/查询/测试计划/档案/拓扑等标签页，集成串口通信（SerialAdapter），暗色主题自定义 CSS，健康检查端点 `/health`
@@ -594,7 +615,7 @@ python test_plan_widget.py     # 测试计划组件（需 GUI 环境）
 **上一次（2026-07-04）：新增 DLMS-APDU(国网) 协议选项，协议索引重编号**
 
 变更：
-- `main_gui.py`：下拉框插入“DLMS-APDU(国网)”（索引3），“HDLC/DLMS”重命名为“HDLC/国网DLMS”
+- `main_gui.py`：下拉框插入"DLMS-APDU(国网)"（索引3），"HDLC/DLMS"重命名为"HDLC/国网DLMS"
 - `main_gui.py`：所有索引 3~8 硬编码位置顺延为 4~9，共 10 种协议
 - 新协议复用 HDLCParser.parse_apdu_to_table，无需新增解析器文件
 - 校验器、帧提取、方向提取、字节剔除、摘要生成等均已同步更新索引
@@ -604,6 +625,7 @@ python test_plan_widget.py     # 测试计划组件（需 GUI 环境）
 
 验证：GUI 手动检查各协议切换、解析、查询页正常（待执行）
 
+---
 
 **上一次（2026-06-21）：SACK解析 + 增强批量摘要业务内容**
 
@@ -620,6 +642,7 @@ python test_plan_widget.py     # 测试计划组件（需 GUI 环境）
 
 验证：全部 26 项测试通过（18 基础 + 6 摘要 + 1 批量 + 1 SACK 专项）
 
+---
 
 **上一次（2026-06-18，待提交）：修复新一代载波协议(索引8)批量解析误将时间戳/测试标记行解析为伪帧的问题**
 

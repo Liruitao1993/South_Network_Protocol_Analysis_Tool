@@ -6,7 +6,7 @@
 
 ## 支持协议
 
-工具支持 10 种电力通信协议，下拉框索引即协议编号：
+工具支持 11 种电力通信协议，下拉框索引即协议编号：
 
 | 索引 | 协议 | 标准号 | 字节序 | 校验 |
 |------|------|--------|--------|------|
@@ -20,6 +20,7 @@
 | 7 | 国网协议 | Q/GDW 10376.2—2024 | 小端 | 8位位组算术和 |
 | 8 | 698.45 协议 | DL/T 698.45-2017 | 小端 | CRC-16（crcmod `x-25`） |
 | 9 | 新一代载波协议（通感一体化） | 通感一体化宽带载波通信规约 | 小端 | CRC-32（MAC帧） |
+| 10 | 国网新一代双模通信互联互通 | 国网新一代双模通信互联互通技术规范 | 小端 | CRC-32（MAC帧） |
 
 ## 主要功能
 
@@ -35,9 +36,9 @@
 - **档案管理 / 拓扑信息**：南网/国网协议专用，支持档案导入导出、拓扑组网统计
 - **查询页**：南网 DI、国网 AFN、DLT645 DI、OBIS 码、PLC RF 命令字、新一代业务标识查询
 - **新一代载波解析级别**：auto / fc_pb / fc_only / app 四种级别切换
-- **报文对比**：双报文输入，支持字节级对比（字段感知对齐+差异高亮）和字段级语义对比（偏移/长度/值/差异类型）
-- **NiceGUI Web 版**（1.8.2 新增）：基于 NiceGUI 框架的浏览器解析器，支持完整 10 种协议解析、单帧/批量解析、报文对比、组帧发送、预设命令、查询页、测试计划、档案管理、拓扑信息等标签页，集成串口通信，暗色主题，健康检查端点
+- **NiceGUI Web 版**（1.8.2 新增）：基于 NiceGUI 框架的浏览器解析器，支持完整 11 种协议解析、单帧/批量解析、报文对比、组帧发送、预设命令、查询页、测试计划、档案管理、拓扑信息等标签页，集成串口通信，暗色主题，健康检查端点
 - **TUI 终端版**（1.8.2 新增）：基于 Textual 的终端图形化解析器，支持单帧解析+字节高亮、批量多帧解析+摘要、协议一致性校验
+- **报文工具**：ASCII/HEX 双向转换、DLT645 偏移（±0x33H）、字节逆序、报文↔Pn/Fn 转换、CRC/校验和计算、HEX↔bitstring 转换
 
 ## 运行环境
 
@@ -137,6 +138,9 @@ dl_t698_45_parser.py         # 698.45 链路层解析器
 dl_t698_45_apdu_parser.py    # 698.45 APDU 解析器
 dl_t698_45_axdr.py           # A-XDR 编解码
 csg_new_gen_parser.py        # 新一代载波协议解析器
+gw_new_gen_parser.py         # 国网新一代双模通信互联互通解析器
+gw_new_gen_cmd_payloads.py   # 国网新一代应用层命令载荷解析
+frame_diff_engine.py         # 协议感知帧对比引擎
 send_frame_lib.py            # 南网帧生成
 gdw_send_frame_lib.py        # 国网帧生成
 dl_t698_45_frame_gen.py      # 698.45 帧生成
@@ -147,6 +151,11 @@ serial_worker.py             # 串口通信线程
 lua_script_engine.py         # Lua 脚本引擎（1.8.1）
 archive_widget.py            # 档案管理组件
 topology_widget.py           # 拓扑信息组件
+diff_widget.py               # 报文对比标签页组件
+message_tool_widget.py       # 报文工具标签页组件
+enhanced_export.py           # 增强导出功能（Excel/CSV/TXT/JSON）
+tui_app.py                   # TUI 终端版（基于 Textual）
+tui_app.tcss                 # TUI 样式表
 validator/                   # 协议校验引擎（BaseValidator + 各协议 validator）
 monitor/frame_monitor.py     # 实时帧监听器
 report/excel_reporter.py     # Excel 测试报告
