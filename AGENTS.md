@@ -9,7 +9,7 @@
 
 ## 1. 项目概览
 
-多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.8.2`）。
+多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.10.0`）。
 
 **支持的协议（共 11 种，对应 GUI 协议下拉框 `current_protocol` 索引）：**
 
@@ -62,6 +62,28 @@ pyinstaller 南网协议解析工具.spec       # 南网精简版：custom_di.js
 - Lua 脚本引擎依赖 `lupa`，打包时需作为 hidden import 或确保运行环境已安装
 - `docs/Lua脚本使用说明.md` 是 Lua 功能的用户文档
 - Inno Setup 安装脚本 `南网解析工具.iss` / `2222.iss` 中 `MyAppVersion` 仍为 `1.7.2`，发版时需手动同步
+
+**编译原则（exe打包）：**
+
+1. **窗口标题包含编译日期**：每次打包前必须更新 `main_gui.py` 中的 `BUILD_DATE` 变量为当前日期（格式：`YYYY-MM-DD`）
+   ```python
+   APP_VERSION = "1.9.5"
+   BUILD_DATE = "2026-07-31"  # 编译日期，每次打包前更新
+   ```
+   窗口标题格式：`协议解析工具 v{APP_VERSION} ({BUILD_DATE})`
+
+2. **打包流程**：
+   ```bash
+   # 1. 更新 BUILD_DATE 为当前日期
+   # 2. 执行打包命令
+   pyinstaller 南网协议解析工具.spec --noconfirm
+   # 3. 验证 exe 文件生成
+   ```
+
+3. **版本号管理**：
+   - `APP_VERSION`：功能版本号，仅在有功能变更时更新
+   - `BUILD_DATE`：编译日期，每次打包前必须更新
+   - 两者共同构成完整版本标识，便于区分不同时间编译的版本
 
 ---
 
@@ -122,6 +144,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，~4480�
 │   ├── diff_widget.py              # 报文对比标签页 (DiffWidget) - 双报文输入，字节/字段级对比
 │   ├── message_tool_widget.py       # 报文工具标签页 (MessageToolWidget) - ASCII/HEX转换/CRC/校验
 │   ├── enhanced_export.py           # 增强导出功能 (EnhancedBatchResultExporter) - Excel/CSV/TXT/JSON
+│   ├── theme_settings.py            # 主题与字体设置 (ThemeManager + ThemeSettingsDialog) - 5套主题/QSS/字体持久化
 │   ├── streamlit_app.py            # Web 版（功能子集）
 │   ├── web_app.py                  # NiceGUI Web 版入口（1.8.2 新增）
 │   └── web/                        # NiceGUI Web 版（1.8.2 新增）
@@ -443,6 +466,13 @@ python test_plan_widget.py     # 测试计划组件（需 GUI 环境）
 
 > 本节按版本倒序记录。详细 commit 见 `git log`。每发新版本必须更新此处。
 
+### 1.10.0 — 2026-07-31
+- **新增「主题与字体设置」**（菜单 配置→主题与字体）：5 套主题（默认浅色 / Fusion经典 / Fusion暗色 / Windows原生 / WindowsVista原生），切换即时预览
+- 全局样式表升级为**应用级**：QMessageBox / 文件对话框等所有弹窗统一跟随主题
+- **字体设置**：字体族（系统字体列表）+ 字号（8~24pt），与主题一起持久化到 `config.json` 的 `ui` 段
+- 暗色主题下自动适配统计标签 / 串口状态 / 批量状态等动态控件配色（`_restyle_for_theme` + `_make_stats_label` 等辅助方法）
+- 新增 `theme_settings.py`（主题注册表 + ThemeManager + ThemeSettingsDialog）与 `test_theme_settings.py`
+
 ### 1.8.2 — 2026-07-06
 - **新增「报文对比」标签页**：协议感知的双报文对比分析，支持字节级对比（字段感知对齐+差异高亮）和字段级语义对比（偏移/长度/值/差异类型）
 - 支持差异人话解读（自然语言解释业务含义）、配置选项（忽略校验和/序列号、仅显示差异）、导出对比报告
@@ -560,7 +590,22 @@ python test_plan_widget.py     # 测试计划组件（需 GUI 环境）
 
 ## 11. 最新变更摘要（最近一次 commit 摘要）
 
-**最近一次（2026-07-29，commit `f8d92ff`）：新增报文工具标签页 + 国网新一代修复**
+**最近一次（2026-07-31）：新增主题与字体设置**
+
+变更：
+- **新增「主题与字体设置」**（`theme_settings.py`，ThemeSettingsDialog）：主题下拉 5 套内置主题（默认浅色/Fusion经典/Fusion暗色/Windows原生/WindowsVista原生），切换即时预览；字体族（QFontComboBox 系统字体列表）+ 字号（QSpinBox 8~24pt）
+- **全局样式表升级为应用级**：原 `MainWindow.apply_styles` 的浅色 QSS 迁入 `theme_settings.py:LIGHT_QSS` 并在 `main()` 通过 `ThemeManager.apply_from_file(app)` 应用，QMessageBox/文件对话框等所有弹窗统一跟随主题
+- **新增 Fusion 暗色主题**（`DARK_QSS`）：完整覆盖按钮/表格/菜单/滚动条/下拉框/复选框等全部控件配色
+- **字体设置持久化**：`config.json` 新增 `ui` 段（`theme`/`font_family`/`font_size`），`_save_app_config`/`_load_app_config` 读写；`ThemeManager.load_from_config`/`to_config` 封装
+- **暗色主题动态控件适配**：`_restyle_for_theme` + `_make_stats_label`/`_batch_count_style`/`_batch_status_style`/`_serial_status_style`/`_serial_refresh_style` 辅助方法，统计标签/串口状态/批量状态/刷新按钮随主题重设
+
+涉及文件：
+- 新增：`theme_settings.py`、`test_theme_settings.py`
+- 修改：`main_gui.py`（主题/字体应用、菜单入口、配置持久化、动态控件适配）、`AGENTS.md`
+
+---
+
+**上一次（2026-07-29，commit `f8d92ff`）：新增报文工具标签页 + 国网新一代修复**
 
 变更：
 - **新增「报文工具」标签页**（`message_tool_widget.py`，MessageToolWidget）：提供协议报文处理常用工具，包括 ASCII/HEX 双向转换、DLT645 偏移（±0x33H）、字节逆序、报文↔Pn/Fn 转换、CRC-16/24/32 校验和计算、HEX↔bitstring 转换等

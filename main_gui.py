@@ -15,9 +15,9 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QTextEdit,
     QTableWidget, QTableWidgetItem, QFileDialog, QMessageBox,
     QHeaderView, QSplitter, QGroupBox, QDialog, QTabWidget, QComboBox,
-    QListView, QFrame, QMenuBar, QSpinBox
+    QListView, QFrame, QMenuBar, QSpinBox, QCheckBox
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QStyle
 from PySide6.QtGui import QFont, QTextCursor, QTextCharFormat, QColor, QIcon
 
@@ -39,14 +39,67 @@ from topology_widget import TopologyWidget
 from preset_buttons import PresetButtonWidget
 from test_plan_widget import TestPlanWidget
 from diff_widget import DiffWidget
+from monitor_widget import RealtimeMonitorWidget
+from message_tool_widget import MessageToolWidget
 from serial_worker import SerialWorker
 from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu
 from enhanced_export import EnhancedBatchResultExporter
+from theme_settings import ThemeManager, ThemeSettingsDialog
 
 
-APP_VERSION = "1.8.2"
+APP_VERSION = "1.10.0"
+BUILD_DATE = "2026-07-31"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    ("1.10.0", "2026-07-31", [
+        "新增「主题与字体设置」（菜单 配置→主题与字体）：5 套主题（默认浅色 / Fusion 经典 / Fusion 暗色 / Windows 原生 / Windows Vista 原生），切换即时预览",
+        "全局样式表升级为应用级：QMessageBox / 文件对话框等所有弹窗统一跟随主题",
+        "字体设置：字体族（系统字体列表）+ 字号（8~24pt），与主题一起持久化到 config.json 的 ui 段",
+        "暗色主题下自动适配统计标签 / 串口状态 / 批量状态等动态控件配色",
+        "新增 theme_settings.py（主题注册表 + ThemeManager + ThemeSettingsDialog）与 test_theme_settings.py",
+    ]),
+    ("1.9.5", "2026-06-27", [
+        "国网新一代(索引10)自动区分 HDC 1.0(旧版双模) / HDC 2.0(新一代)：依据FC字节12 D[7:4]标准版本号",
+        "FC解析后新增「协议版本判定」行，据此自动选择MAC帧头解析规则(0=HDC 1.0, 1=HDC 2.0)",
+        "标准MAC帧头：HDC 1.0下 D5(聚合帧标志)/发送帧序号/链路标识符 三处新增字段回退标注为「保留」",
+        "单跳MAC帧头：HDC 1.0用旧消息类型表(0=发现列表消息)、D7标注保留；HDC 2.0用新表(0=无线发现列表)、D7=聚合帧标志",
+        "std_version 参数贯穿 parse_to_table→_parse_msdu_from_frame/_parse_pb_by_frame_type→_parse_mac_header→标准/单跳帧头",
+        "参考旧版规范 Q/GDW 12087.41/42-2020(国网新一代协议/HDC-国网双模协议 PDF)；test_gw_new_gen.py 新增3组版本区分用例(共36断言)",
+    ]),
+    ("1.9.4", "2026-06-27", [
+        "国网新一代(索引10)解析级别新增「FC+PB解析(完整MPDU)」：FC(16B) + 完整物理块PB(PBH 1B + MAC帧头 + MSDU)",
+        "修正「FC+MAC解析」未计算物理块头PBH(1B)的缺陷：原直接从偏移16解析MAC, 导致MAC头错位1字节",
+        "fc_mac 现用 _locate_pbh_mac 定位 PBH+MAC, 正确先显示 PBH 行再解析 MAC 帧头",
+    ]),
+    ("1.9.3", "2026-06-27", [
+        "修复国网新一代(索引10)完整帧结构解析：正确的帧格式为 FC(16B) + PB(物理块)",
+        "PB = PBH(物理块头,1B) + MAC帧头 + MSDU；FC末3字节为FCCS(FC自身CRC校验), 其后直接为PB, 无独立HCS",
+        "原代码误设 FC 后有 HCS(3B)+PBH(1B) 跳4字节, 导致 MAC 头从错误偏移解析(版本无效、TEI错乱)",
+        "新增 _locate_pbh_mac：用 FC 的源/目的TEI 强校验定位 PBH+MAC 起始, 正确跳过1字节PBH",
+        "新增 _pbh_row 生成物理块头行(D[5:0]=序列号 D6=帧起始 D7=帧结束)",
+    ]),
+    ("1.9.2", "2026-06-27", [
+        "国网新一代(索引10)监控/批量摘要增强：对齐参考监控工具风格体现关键业务信息",
+        "摘要字段：网络标识(NID)|帧类型(信标/SOF/选择确认/网间协调)|管理消息类型(MMTYPE)|源→目的TEI|msduSeq|单播/广播|报文ID+方向|报文序号|规约(698.45)|数据长度",
+        "新增 _get_gw_new_gen_summary（按去缩进字段名索引，FC级优先），接入监控器与批量摘要两处",
+        "新增 test_gw_monitor_summary.py（11个断言，复用 MainWindow 方法免 GUI 驱动）",
+    ]),
+    ("1.9.1", "2026-06-27", [
+        "监控器新增「监控解帧(96..16)」模式(默认开启)：按监控设备包装格式自动解帧，彻底解决串口连帧",
+        "包装格式 96H+RSSI(1)+NTB(4,小端)+[LEN(12b)+协议类型(3b)+CHANNEL(1b)]+DATA(LEN)+CS(1)+16H",
+        "按 LEN 定界逐包抽取，正确处理连帧与 DATA 内含 0x16 的情况；分片到达自动缓存补齐",
+        "伪帧头(LEN超限/帧尾非0x16)自动跳过恢复；CS校验(帧头到CS前累加和&0xFF)错误时标红",
+        "详情表前置监控包装头信息(RSSI/NTB/协议类型/CHANNEL/CS)，摘要加[RSSI/信道/CS]前缀",
+        "开启解帧时禁用静默间隔/剔除设置(由LEN自动定界)；新增 test_monitor_deframe.py(7用例)",
+    ]),
+    ("1.9.0", "2026-07-08", [
+        "新增「监控器」标签页：南网新一代(9)/国网新一代(10)协议实时报文监控",
+        "串口原始字节流按静默间隔(默认30ms，10-200ms可调)自动组帧并实时解析",
+        "监控器支持解析前剔除报文头/尾字节(包装头+校验尾)，剔除后的帧用于解析/详情HEX/字节高亮",
+        "左侧帧列表(序号/时间/方向/长度/摘要)环形缓冲1000帧，支持自动滚动/暂停/清空/导出CSV",
+        "右侧详情：完整解析表格+原始HEX，点击解析行高亮对应字节；双击帧行送入单帧解析页",
+        "新增 monitor_widget.py（RealtimeMonitorWidget 组件）与 test_monitor_widget.py",
+    ]),
     ("1.8.2", "2026-07-06", [
         "新增「报文对比」标签页：双报文字节级/字段级对比分析，支持字段感知对齐",
         "支持差异高亮（修改/新增/删除）、人话解读、忽略校验和/序列号、导出报告",
@@ -320,7 +373,7 @@ class ConfigDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"协议解析工具 v{APP_VERSION}")
+        self.setWindowTitle(f"协议解析工具 v{APP_VERSION} ({BUILD_DATE})")
         self.setMinimumSize(1000, 700)
 
         # 协议选择：0=南网协议，1=PLC RF协议，2=HDLC/国网DLMS，3=DLMS-APDU(国网)，4=Wrapper，5=APDU，6=DLT645，7=国网协议，8=698.45，9=新一代载波协议(通感一体化)
@@ -341,7 +394,7 @@ class MainWindow(QMainWindow):
         # 字节剔除缓存：记录上次剔除后成功解析的hex，避免重复剔除
         self._csg_last_stripped_hex = ""
 
-        # 国网新一代解析级别：auto=自动, fc_only=仅FC, fc_mac=FC+MAC, app=应用层
+        # 国网新一代解析级别：auto=自动, fc_pb=FC+完整PB, fc_only=仅FC, fc_mac=FC+PB头+MAC, app=应用层
         self._gw_parse_level = "auto"
 
         # 初始化查询器
@@ -364,9 +417,14 @@ class MainWindow(QMainWindow):
         self._file_paths: Dict[str, Path] = {}
         self._load_app_config()
 
+        # 主题与字体配置（应用级样式由 main() 在 QApplication 上应用，此处仅保存配置供动态控件适配）
+        self._theme_id, self._font_family, self._font_size = ThemeManager.load_from_config(self._app_config)
+        self._stats_labels: List[tuple] = []      # (QLabel, 字号) 列表，主题切换时统一重设
+        self._serial_status_color = "#999"       # 串口状态标签当前颜色（主题切换时重设）
+        self._serial_status_bold = False       # 串口状态标签当前是否粗体（主题切换时重设）
+
         self.setup_ui()
         self._setup_menu_bar()
-        self.apply_styles()
 
     def setup_ui(self):
         """设置UI布局"""
@@ -422,12 +480,29 @@ class MainWindow(QMainWindow):
         self.csg_parse_level_combo.addItem("FC+eFC解析", "fc_efc")
         self.csg_parse_level_combo.addItem("仅FC解析", "fc_only")
         self.csg_parse_level_combo.addItem("应用层报文", "app")
+        self.csg_parse_level_combo.addItem("仅PB解析(完整物理块)", "pb_only")
         self.csg_parse_level_combo.setFont(QFont("Microsoft YaHei", 9))
         self.csg_parse_level_combo.setMinimumWidth(180)
         self.csg_parse_level_combo.currentIndexChanged.connect(self._on_csg_parse_level_changed)
         self.csg_parse_level_combo.setVisible(False)
         proto_layout.addWidget(self.csg_parse_level_combo)
         self.csg_parse_level_label.setVisible(False)
+
+        # ---- 南网新一代PB帧类型选择（仅pb_only模式可见）----
+        self.csg_pb_frame_type_label = QLabel("帧类型：")
+        self.csg_pb_frame_type_label.setFont(QFont("Microsoft YaHei", 9))
+        self.csg_pb_frame_type_label.setVisible(False)
+        proto_layout.addWidget(self.csg_pb_frame_type_label)
+
+        self.csg_pb_frame_type_combo = QComboBox()
+        self.csg_pb_frame_type_combo.addItem("SOF帧", "sof")
+        self.csg_pb_frame_type_combo.addItem("信标帧", "beacon")
+        self.csg_pb_frame_type_combo.addItem("ACK帧(SACK)", "sack")
+        self.csg_pb_frame_type_combo.addItem("NET帧", "net")
+        self.csg_pb_frame_type_combo.setFont(QFont("Microsoft YaHei", 9))
+        self.csg_pb_frame_type_combo.setMinimumWidth(120)
+        self.csg_pb_frame_type_combo.setVisible(False)
+        proto_layout.addWidget(self.csg_pb_frame_type_combo)
 
         # ---- 新一代载波协议字节剔除（仅协议索引9时可见）----
         self.csg_strip_head_label = QLabel("剔除前:")
@@ -466,7 +541,10 @@ class MainWindow(QMainWindow):
 
         self.gw_parse_level_combo = QComboBox()
         self.gw_parse_level_combo.addItem("自动识别", "auto")
+        self.gw_parse_level_combo.addItem("FC+PB解析(完整MPDU)", "fc_pb")
         self.gw_parse_level_combo.addItem("仅FC解析", "fc_only")
+        self.gw_parse_level_combo.addItem("仅MAC帧", "mac_only")
+        self.gw_parse_level_combo.addItem("仅PB", "pb_only")
         self.gw_parse_level_combo.addItem("FC+MAC解析", "fc_mac")
         self.gw_parse_level_combo.addItem("应用层报文", "app")
         self.gw_parse_level_combo.setFont(QFont("Microsoft YaHei", 9))
@@ -474,6 +552,22 @@ class MainWindow(QMainWindow):
         self.gw_parse_level_combo.currentIndexChanged.connect(self._on_gw_parse_level_changed)
         self.gw_parse_level_combo.setVisible(False)
         proto_layout.addWidget(self.gw_parse_level_combo)
+
+        # ---- 国网新一代PB帧类型选择（仅pb_only模式可见）----
+        self.gw_pb_frame_type_label = QLabel("帧类型：")
+        self.gw_pb_frame_type_label.setFont(QFont("Microsoft YaHei", 9))
+        self.gw_pb_frame_type_label.setVisible(False)
+        proto_layout.addWidget(self.gw_pb_frame_type_label)
+
+        self.gw_pb_frame_type_combo = QComboBox()
+        self.gw_pb_frame_type_combo.addItem("SOF帧", 1)
+        self.gw_pb_frame_type_combo.addItem("信标帧", 0)
+        self.gw_pb_frame_type_combo.addItem("ACK帧(SACK)", 2)
+        self.gw_pb_frame_type_combo.addItem("NET帧", 3)
+        self.gw_pb_frame_type_combo.setFont(QFont("Microsoft YaHei", 9))
+        self.gw_pb_frame_type_combo.setMinimumWidth(120)
+        self.gw_pb_frame_type_combo.setVisible(False)
+        proto_layout.addWidget(self.gw_pb_frame_type_combo)
 
         proto_layout.addStretch()
 
@@ -497,9 +591,7 @@ class MainWindow(QMainWindow):
         self.serial_refresh_btn.setMaximumWidth(30)
         self.serial_refresh_btn.setMinimumHeight(24)
         self.serial_refresh_btn.setFlat(True)
-        self.serial_refresh_btn.setStyleSheet("QPushButton { background: transparent; border: none; padding: 2px; }"
-            "QPushButton:hover { background: rgba(0,0,0,20); border-radius: 3px; }"
-            "QPushButton:pressed { background: rgba(0,0,0,40); }")
+        self.serial_refresh_btn.setStyleSheet(self._serial_refresh_style())
         from PySide6.QtCore import QSize
         self.serial_refresh_btn.setIconSize(QSize(18, 18))
         self.serial_refresh_btn.clicked.connect(self._refresh_serial_ports)
@@ -507,7 +599,11 @@ class MainWindow(QMainWindow):
 
         serial_layout.addWidget(QLabel("波特率:"))
         self.serial_baud_combo = QComboBox()
-        self.serial_baud_combo.addItems(["1200", "2400", "4800", "9600", "19200", "38400", "57600", "115200"])
+        self.serial_baud_combo.setEditable(True)  # 允许手动输入自定义波特率
+        self.serial_baud_combo.addItems([
+            "1200", "2400", "4800", "9600", "19200", "38400", "57600", "115200",
+            "230400", "460800", "921600", "1000000", "2000000", "3000000",
+        ])
         self.serial_baud_combo.setCurrentText("9600")
         self.serial_baud_combo.setMinimumWidth(80)
         serial_layout.addWidget(self.serial_baud_combo)
@@ -528,7 +624,7 @@ class MainWindow(QMainWindow):
         serial_layout.addWidget(self.serial_open_btn)
 
         self.serial_status_label = QLabel("未连接")
-        self.serial_status_label.setStyleSheet("color: #999; font-size: 12px;")
+        self.serial_status_label.setStyleSheet(self._serial_status_style("#999"))
         serial_layout.addWidget(self.serial_status_label)
 
         serial_layout.addStretch()
@@ -584,6 +680,17 @@ class MainWindow(QMainWindow):
         # 报文对比页面
         self.diff_tab = DiffWidget()
         self._diff_tab_index = self.tab_widget.addTab(self.diff_tab, "报文对比")
+
+        # 报文工具页面（所有协议可见）
+        self.message_tool_tab = MessageToolWidget()
+        self.tab_widget.addTab(self.message_tool_tab, "报文工具")
+
+        # 实时监控器页面（南网新一代(9)/国网新一代(10) 专用，默认隐藏）
+        self.monitor_tab = RealtimeMonitorWidget()
+        self.monitor_tab.set_serial_worker(self.serial_worker)
+        self.monitor_tab.set_send_to_single_handler(self._send_frame_to_single_parse)
+        self._monitor_tab_index = self.tab_widget.addTab(self.monitor_tab, "监控器")
+        self.tab_widget.setTabVisible(self._monitor_tab_index, False)
 
         main_layout.addWidget(self.tab_widget, 1)
 
@@ -652,6 +759,12 @@ class MainWindow(QMainWindow):
         )
         self.fill_crc32_btn.clicked.connect(self._fill_crc32)
         btn_layout.addWidget(self.fill_crc32_btn)
+
+        # ED 监控协议勾选项（仅南网新一代协议显示）
+        self.ed_monitor_chk = QCheckBox("ED监控协议")
+        self.ed_monitor_chk.setToolTip("勾选后解析 ED..EE 监控包装头（PLC2.0 收发机报文格式），\n前置显示 RSSI/NTB/信道等信息，再解析业务帧")
+        self.ed_monitor_chk.setVisible(False)
+        btn_layout.addWidget(self.ed_monitor_chk)
 
         btn_layout.addStretch()
         input_layout.addLayout(btn_layout)
@@ -792,8 +905,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(search_layout)
 
         # 统计标签
-        self.di_stats_label = QLabel()
-        self.di_stats_label.setStyleSheet("color: #666; font-size: 12px;")
+        self.di_stats_label = self._make_stats_label()
         layout.addWidget(self.di_stats_label)
 
         # 表格
@@ -1026,13 +1138,19 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "成功", "已删除自定义DI")
 
     def create_batch_parse_tab(self) -> QWidget:
-        """创建批量解析标签页"""
+        """创建批量解析标签页（左右分栏布局：左侧摘要 + 右侧详情）"""
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        layout.setSpacing(15)
+        layout.setSpacing(10)
+
+        # ── 输入区 ──────────────────────────────────────────────
+        input_group = QGroupBox("批量输入报文")
+        input_layout = QVBoxLayout(input_group)
+        input_layout.setSpacing(8)
 
         # 工具栏
         toolbar = QHBoxLayout()
+        toolbar.setSpacing(6)
 
         self.load_file_btn = QPushButton("从文件加载")
         self.load_file_btn.setToolTip("支持每行一帧的文本文件")
@@ -1043,10 +1161,8 @@ class MainWindow(QMainWindow):
         self.paste_btn.clicked.connect(self.paste_from_clipboard)
         toolbar.addWidget(self.paste_btn)
 
-        toolbar.addStretch()
-
         self.batch_parse_btn = QPushButton("开始批量解析")
-        self.batch_parse_btn.setMinimumHeight(35)
+        self.batch_parse_btn.setMinimumHeight(30)
         self.batch_parse_btn.clicked.connect(self.parse_batch)
         toolbar.addWidget(self.batch_parse_btn)
 
@@ -1054,376 +1170,154 @@ class MainWindow(QMainWindow):
         self.clear_batch_btn.clicked.connect(self.clear_batch)
         toolbar.addWidget(self.clear_batch_btn)
 
-        layout.addLayout(toolbar)
+        # 分隔线
+        sep = QFrame()
+        sep.setFrameShape(QFrame.VLine)
+        sep.setFrameShadow(QFrame.Sunken)
+        toolbar.addWidget(sep)
 
-        # 输入区
-        input_group = QGroupBox("输入报文列表（每行一帧，自动根据当前协议识别）")
-        input_layout = QVBoxLayout(input_group)
+        # 导出按钮
+        self.batch_export_excel_btn = QPushButton("导出 Excel")
+        self.batch_export_excel_btn.clicked.connect(lambda: self.export_batch("excel"))
+        toolbar.addWidget(self.batch_export_excel_btn)
 
+        self.batch_export_json_btn = QPushButton("导出 JSON")
+        self.batch_export_json_btn.clicked.connect(lambda: self.export_batch("json"))
+        toolbar.addWidget(self.batch_export_json_btn)
+
+        toolbar.addStretch()
+
+        # 帧计数徽章
+        self.batch_frame_count_label = QLabel("共 0 帧")
+        self.batch_frame_count_label.setStyleSheet(self._batch_count_style())
+        toolbar.addWidget(self.batch_frame_count_label)
+
+        input_layout.addLayout(toolbar)
+
+        # 输入文本框
         self.batch_input = QTextEdit()
-        self.batch_input.setPlaceholderText("粘贴或输入报文数据，支持多种协议：\n南网/国网协议：68开头，16结束\nHDLC协议：7E开头，7E结束\n其他协议：每行一帧直接解析")
-        self.batch_input.setMaximumHeight(150)
+        self.batch_input.setPlaceholderText(
+            "粘贴或输入报文数据，支持多种协议：\n"
+            "南网/国网协议：68开头，16结束\n"
+            "HDLC协议：7E开头，7E结束\n"
+            "其他协议：每行一帧直接解析"
+        )
+        self.batch_input.setMaximumHeight(140)
         input_layout.addWidget(self.batch_input)
+
+        # 帧计数防抖定时器
+        self._frame_count_timer = QTimer(self)
+        self._frame_count_timer.setSingleShot(True)
+        self._frame_count_timer.setInterval(200)
+        self._frame_count_timer.timeout.connect(self._do_count_frames)
+        self.batch_input.textChanged.connect(self._frame_count_timer.start)
 
         layout.addWidget(input_group)
 
-        # 结果统计
-        self.stats_label = QLabel("状态：待解析")
-        self.stats_label.setStyleSheet("color: #666; font-size: 12px;")
-        layout.addWidget(self.stats_label)
+        # ── 结果区分栏（左侧摘要 + 右侧详情） ───────────────────
+        self.result_splitter = QSplitter(Qt.Horizontal)
 
-        # 结果表格
-        result_group = QGroupBox("解析结果")
-        result_layout = QVBoxLayout(result_group)
+        # 左侧：摘要列表
+        summary_group = QGroupBox("解析结果摘要")
+        summary_layout = QVBoxLayout(summary_group)
+        summary_layout.setContentsMargins(8, 10, 8, 8)
 
-        self.result_table = QTableWidget()
-        self.result_table.setColumnCount(6)
-        self.result_table.setHorizontalHeaderLabels([
-            "序号", "原始数据", "长度", "方向", "业务摘要", "状态"
+        self.batch_summary_table = QTableWidget()
+        self.batch_summary_table.setColumnCount(5)
+        self.batch_summary_table.setHorizontalHeaderLabels([
+            "#", "状态", "长度", "协议/类型", "摘要"
         ])
-        self.result_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.result_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
-        self.result_table.setColumnWidth(0, 50)
-        self.result_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.result_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.result_table.setAlternatingRowColors(True)
-        # 紧凑字体和行高
+        header = self.batch_summary_table.horizontalHeader()
+        # 列宽设置
+        self.batch_summary_table.setColumnWidth(0, 40)
+        self.batch_summary_table.setColumnWidth(1, 50)
+        self.batch_summary_table.setColumnWidth(2, 60)
+        header.setSectionResizeMode(0, QHeaderView.Fixed)
+        header.setSectionResizeMode(1, QHeaderView.Fixed)
+        header.setSectionResizeMode(2, QHeaderView.Fixed)
+        header.setSectionResizeMode(3, QHeaderView.Interactive)
+        header.setSectionResizeMode(4, QHeaderView.Stretch)
+        self.batch_summary_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.batch_summary_table.setSelectionMode(QTableWidget.SingleSelection)
+        self.batch_summary_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.batch_summary_table.setAlternatingRowColors(True)
+        self.batch_summary_table.verticalHeader().hide()
         table_font = QFont()
         table_font.setPointSize(8)
-        self.result_table.setFont(table_font)
-        self.result_table.verticalHeader().setDefaultSectionSize(20)
-        self.result_table.verticalHeader().hide()
-        self.result_table.cellClicked.connect(self.show_detail_dialog)
-        result_layout.addWidget(self.result_table)
+        self.batch_summary_table.setFont(table_font)
+        self.batch_summary_table.verticalHeader().setDefaultSectionSize(22)
+        # 选中行/项变化时更新详情
+        self.batch_summary_table.cellClicked.connect(self._on_batch_row_selected)
+        self.batch_summary_table.itemSelectionChanged.connect(self._on_batch_row_selected)
+        summary_layout.addWidget(self.batch_summary_table)
 
-        # 批量导出按钮
-        export_batch_btn = QPushButton("导出全部结果(JSON)")
-        export_batch_btn.clicked.connect(self.export_batch)
-        result_layout.addWidget(export_batch_btn)
+        self.result_splitter.addWidget(summary_group)
 
-        layout.addWidget(result_group, 1)
+        # 右侧：详情面板
+        detail_group = QGroupBox("选中帧详细解析")
+        detail_layout = QVBoxLayout(detail_group)
+        detail_layout.setContentsMargins(8, 10, 8, 8)
+        detail_layout.setSpacing(6)
+
+        # 原始报文行
+        hex_row = QHBoxLayout()
+        hex_row.setSpacing(6)
+        hex_label = self._make_stats_label("原始报文：", 12)
+        hex_row.addWidget(hex_label)
+
+        self.batch_detail_hex = QTextEdit()
+        self.batch_detail_hex.setReadOnly(True)
+        self.batch_detail_hex.setMaximumHeight(60)
+        self.batch_detail_hex.setFont(QFont("Consolas", 9))
+        self.batch_detail_hex.setPlaceholderText("选择左侧列表中的帧以查看详情…")
+        hex_row.addWidget(self.batch_detail_hex, 1)
+
+        self.batch_copy_hex_btn = QPushButton("复制")
+        self.batch_copy_hex_btn.setMaximumWidth(60)
+        self.batch_copy_hex_btn.clicked.connect(self._copy_batch_detail_hex)
+        hex_row.addWidget(self.batch_copy_hex_btn)
+
+        detail_layout.addLayout(hex_row)
+
+        # 详情表格
+        self.batch_detail_table = QTableWidget()
+        self.batch_detail_table.setColumnCount(4)
+        self.batch_detail_table.setHorizontalHeaderLabels([
+            "字段", "原始值", "解析值", "说明"
+        ])
+        detail_header = self.batch_detail_table.horizontalHeader()
+        detail_header.setStretchLastSection(True)
+        detail_header.setSectionResizeMode(QHeaderView.Interactive)
+        self.batch_detail_table.setColumnWidth(0, 180)
+        self.batch_detail_table.setColumnWidth(1, 120)
+        self.batch_detail_table.setColumnWidth(2, 200)
+        self.batch_detail_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.batch_detail_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.batch_detail_table.setAlternatingRowColors(True)
+        self.batch_detail_table.verticalHeader().hide()
+        detail_font = QFont()
+        detail_font.setPointSize(8)
+        self.batch_detail_table.setFont(detail_font)
+        self.batch_detail_table.verticalHeader().setDefaultSectionSize(20)
+        detail_layout.addWidget(self.batch_detail_table)
+
+        self.result_splitter.addWidget(detail_group)
+
+        # 初始分割比例（约 45:55）
+        self.result_splitter.setSizes([450, 550])
+
+        layout.addWidget(self.result_splitter, 1)
+
+        # ── 底部状态栏 ──────────────────────────────────────────
+        self.batch_status_bar = QLabel("就绪")
+        self.batch_status_bar.setStyleSheet(self._batch_status_style())
+        layout.addWidget(self.batch_status_bar)
+
+        # 兼容：保留 stats_label 引用（初始化为空，不显示到布局中）
+        self.stats_label = QLabel("状态：待解析")
+        self.stats_label.setVisible(False)
 
         return tab
-
-    def apply_styles(self):
-        """应用样式表 - 全局白色背景黑色字体"""
-        self.setStyleSheet("""
-            /* ========== 全局基础 ========== */
-            * {
-                color: #000000;
-            }
-            QWidget {
-                background-color: #ffffff;
-                color: #000000;
-            }
-            QMainWindow {
-                background-color: #f5f5f5;
-            }
-
-            /* ========== 对话框 / 弹窗 ========== */
-            QDialog {
-                background-color: #ffffff;
-                color: #000000;
-            }
-            QMessageBox {
-                background-color: #ffffff;
-                color: #000000;
-            }
-            QMessageBox QLabel {
-                color: #000000;
-                background-color: transparent;
-            }
-            QMessageBox QPushButton {
-                background-color: #2196F3;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 6px 20px;
-                font-weight: bold;
-                min-width: 80px;
-            }
-            QMessageBox QPushButton:hover {
-                background-color: #1976D2;
-            }
-
-            /* ========== 右键菜单 ========== */
-            QMenu {
-                background-color: #ffffff;
-                color: #000000;
-                border: 1px solid #cccccc;
-                padding: 4px;
-            }
-            QMenu::item {
-                padding: 6px 30px 6px 20px;
-                background-color: #ffffff;
-                color: #000000;
-            }
-            QMenu::item:selected {
-                background-color: #e3f2fd;
-                color: #000000;
-            }
-            QMenu::separator {
-                height: 1px;
-                background-color: #e0e0e0;
-                margin: 4px 8px;
-            }
-
-            /* ========== 工具提示 ========== */
-            QToolTip {
-                background-color: #ffffff;
-                color: #000000;
-                border: 1px solid #cccccc;
-                padding: 4px;
-            }
-
-            /* ========== 滚动条 ========== */
-            QScrollBar:vertical {
-                background-color: #f5f5f5;
-                width: 10px;
-                border: none;
-            }
-            QScrollBar::handle:vertical {
-                background-color: #c0c0c0;
-                min-height: 30px;
-                border-radius: 5px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background-color: #a0a0a0;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                height: 0px;
-            }
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
-                background: none;
-            }
-            QScrollBar:horizontal {
-                background-color: #f5f5f5;
-                height: 10px;
-                border: none;
-            }
-            QScrollBar::handle:horizontal {
-                background-color: #c0c0c0;
-                min-width: 30px;
-                border-radius: 5px;
-            }
-            QScrollBar::handle:horizontal:hover {
-                background-color: #a0a0a0;
-            }
-            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
-                width: 0px;
-            }
-            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
-                background: none;
-            }
-
-            /* ========== 分组框 ========== */
-            QGroupBox {
-                font-weight: bold;
-                border: 1px solid #cccccc;
-                border-radius: 4px;
-                margin-top: 6px;
-                padding-top: 6px;
-                background-color: #ffffff;
-                color: #000000;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 8px;
-                padding: 0 4px;
-                color: #000000;
-            }
-
-            /* ========== 按钮 ========== */
-            QPushButton {
-                background-color: #2196F3;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #1976D2;
-            }
-            QPushButton:pressed {
-                background-color: #0D47A1;
-            }
-            QPushButton#secondary {
-                background-color: #757575;
-            }
-
-            /* ========== 文本编辑框 ========== */
-            QTextEdit {
-                border: 1px solid #cccccc;
-                border-radius: 4px;
-                padding: 5px;
-                background-color: #ffffff;
-                font-family: Consolas, Monaco, monospace;
-                color: #000000;
-            }
-
-            /* ========== 行编辑框 ========== */
-            QLineEdit {
-                border: 1px solid #cccccc;
-                border-radius: 4px;
-                padding: 5px;
-                background-color: #ffffff;
-                color: #000000;
-            }
-
-            /* ========== 表格 ========== */
-            QTableWidget {
-                border: 1px solid #cccccc;
-                border-radius: 4px;
-                background-color: #ffffff;
-                gridline-color: #e0e0e0;
-                color: #000000;
-                font-size: 9pt;
-            }
-            QTableWidget::item:!alternate {
-                background-color: #ffffff;
-                color: #000000;
-                padding: 2px 4px;
-            }
-            QTableWidget::item:alternate {
-                background-color: #e8e8e8;
-                color: #000000;
-                padding: 2px 4px;
-            }
-            QTableWidget::item:selected {
-                background-color: #2196F3;
-                color: white;
-            }
-            QHeaderView::section {
-                background-color: #f5f5f5;
-                padding: 4px 8px;
-                border: 1px solid #d0d0d0;
-                font-weight: bold;
-                color: #000000;
-                font-size: 9pt;
-            }
-
-            /* ========== 标签 ========== */
-            QLabel {
-                color: #000000;
-                background-color: transparent;
-            }
-
-            /* ========== 选项卡 ========== */
-            QTabWidget::pane {
-                border: 1px solid #cccccc;
-                border-radius: 4px;
-                background-color: #ffffff;
-            }
-            QTabBar::tab {
-                padding: 6px 14px;
-                margin-right: 2px;
-                border: 1px solid #cccccc;
-                border-bottom: none;
-                border-top-left-radius: 4px;
-                border-top-right-radius: 4px;
-                background-color: #f5f5f5;
-                color: #000000;
-            }
-            QTabBar::tab:selected {
-                background-color: #2196F3;
-                color: white;
-            }
-            QTabBar::tab:hover:!selected {
-                background-color: #e0e0e0;
-            }
-
-            /* ========== 下拉框 ========== */
-            QComboBox {
-                border: 1px solid #888;
-                border-radius: 2px;
-                padding: 4px 22px 4px 6px;
-                background-color: #ffffff;
-                color: #000000;
-                min-height: 18px;
-            }
-            QComboBox:hover {
-                border: 1px solid #666;
-            }
-            QComboBox:focus {
-                border: 1px solid #6699cc;
-            }
-            QComboBox::drop-down {
-                border: none;
-                width: 18px;
-            }
-            QComboBox::down-arrow {
-                width: 0;
-                height: 0;
-                border-left: 4px solid transparent;
-                border-right: 4px solid transparent;
-                border-top: 5px solid #666;
-            }
-            QComboBox QAbstractItemView {
-                border: 1px solid #888;
-                background-color: #ffffff;
-                selection-background-color: #80b8e8;
-                selection-color: #000000;
-            }
-            QComboBox QListView::item {
-                background-color: #ffffff;
-                color: #000000;
-                padding: 3px 6px;
-            }
-            QComboBox QListView::item:selected {
-                background-color: #80b8e8;
-                color: #000000;
-            }
-            QComboBox QListView::item:hover {
-                background-color: #e3f2fd;
-                color: #000000;
-            }
-
-            /* ========== 复选框 / 单选框 ========== */
-            QCheckBox, QRadioButton {
-                color: #000000;
-                background-color: transparent;
-            }
-
-            /* ========== 文件对话框 ========== */
-            QFileDialog {
-                background-color: #ffffff;
-                color: #000000;
-            }
-
-            /* ========== 输入对话框 ========== */
-            QInputDialog {
-                background-color: #ffffff;
-                color: #000000;
-            }
-
-            /* ========== 菜单栏 ========== */
-            QMenuBar {
-                background-color: #f5f5f5;
-                color: #000000;
-                border-bottom: 1px solid #d0d0d0;
-                padding: 2px;
-            }
-            QMenuBar::item {
-                padding: 4px 10px;
-                background-color: transparent;
-            }
-            QMenuBar::item:selected {
-                background-color: #e0e0e0;
-            }
-            QMenu {
-                background-color: #ffffff;
-                color: #000000;
-                border: 1px solid #cccccc;
-                padding: 4px;
-            }
-            QMenu::item {
-                padding: 6px 30px 6px 20px;
-            }
-            QMenu::item:selected {
-                background-color: #e3f2fd;
-            }
-        """)
 
     # ==================== 串口功能 ====================
 
@@ -1455,7 +1349,9 @@ class MainWindow(QMainWindow):
             if not port or port == "无可用串口":
                 QMessageBox.warning(self, "警告", "请选择一个有效的串口")
                 return
-            baud = int(self.serial_baud_combo.currentText())
+            baud = self._get_baud_value()
+            if baud is None:
+                return
             parity = self.serial_parity_combo.currentText()
             self.serial_worker.configure(port, baudrate=baud, parity=parity)
             if self.serial_worker.open_port():
@@ -1471,10 +1367,10 @@ class MainWindow(QMainWindow):
         """串口连接状态变化回调"""
         if connected:
             self.serial_status_label.setText("已连接")
-            self.serial_status_label.setStyleSheet("color: #4CAF50; font-size: 12px; font-weight: bold;")
+            self.serial_status_label.setStyleSheet(self._serial_status_style("#4CAF50", bold=True))
         else:
             self.serial_status_label.setText("未连接")
-            self.serial_status_label.setStyleSheet("color: #999; font-size: 12px;")
+            self.serial_status_label.setStyleSheet(self._serial_status_style("#999"))
             self.serial_open_btn.setText("打开串口")
             self.serial_open_btn.setStyleSheet(
                 "QPushButton { background-color: #4CAF50; color: white; border-radius: 3px; padding: 4px 12px; font-weight: bold; }"
@@ -1598,6 +1494,10 @@ class MainWindow(QMainWindow):
         self.csg_strip_head_spin.setVisible(show_csg_level)
         self.csg_strip_tail_label.setVisible(show_csg_level)
         self.csg_strip_tail_spin.setVisible(show_csg_level)
+        self.csg_pb_frame_type_label.setVisible(show_csg_level and self._csg_parse_level == "pb_only")
+        self.csg_pb_frame_type_combo.setVisible(show_csg_level and self._csg_parse_level == "pb_only")
+        # ED 监控协议勾选项：仅协议索引9（南网新一代）时可见
+        self.ed_monitor_chk.setVisible(show_csg_level)
 
         # 国网新一代解析级别选择：仅协议索引10时可见
         show_gw_level = (index == 10)
@@ -1612,15 +1512,51 @@ class MainWindow(QMainWindow):
             self.diff_tab.set_protocol(index)
             self.diff_tab.set_parser(self._get_current_parser())
 
+        # 监控器标签页：仅南网新一代(9)/国网新一代(10)可见，并注入对应解析器与摘要函数
+        if hasattr(self, '_monitor_tab_index'):
+            show_monitor = index in (9, 10)
+            self.tab_widget.setTabVisible(self._monitor_tab_index, show_monitor)
+            if show_monitor:
+                parser = self.csg_new_gen_parser if index == 9 else self.gw_new_gen_parser
+                # 协议9(新一代通感一体化/PLC2.0收发机)用 ED..EE 包装；
+                # 协议10(国网新一代/HPLC)用 96..16 包装
+                wrapper = "plc2" if index == 9 else "hplc"
+                self.monitor_tab.set_protocol(parser, self._get_monitor_summary,
+                                              wrapper_format=wrapper)
+
+    def _get_monitor_summary(self, table_data: list) -> str:
+        """监控器摘要生成：按当前协议分派到对应摘要函数"""
+        if self.current_protocol == 9:
+            return self._get_csg_new_gen_summary(table_data)
+        if self.current_protocol == 10:
+            return self._get_gw_new_gen_summary(table_data)
+        return self._get_summary_from_table_data(table_data)
+
+    def _send_frame_to_single_parse(self, hex_str: str):
+        """监控器双击帧：送入单帧解析页并触发解析"""
+        self.single_input.setPlainText(hex_str)
+        self.tab_widget.setCurrentIndex(0)
+        self.parse_single()
+
     def _on_csg_parse_level_changed(self, index: int):
         """新一代载波协议解析级别改变时的回调"""
-        level_map = {0: "auto", 1: "fc_pb", 2: "fc_efc", 3: "fc_only", 4: "app"}
-        self._csg_parse_level = level_map.get(index, "auto")
+        level = self.csg_parse_level_combo.currentData()
+        self._csg_parse_level = level or "auto"
+        # pb_only模式显示帧类型选择
+        show_frame_type = (self._csg_parse_level == "pb_only")
+        self.csg_pb_frame_type_label.setVisible(show_frame_type)
+        self.csg_pb_frame_type_combo.setVisible(show_frame_type)
 
     def _on_gw_parse_level_changed(self, index: int):
         """国网新一代解析级别改变时的回调"""
-        level_map = {0: "auto", 1: "fc_only", 2: "fc_mac", 3: "app"}
-        self._gw_parse_level = level_map.get(index, "auto")
+        # 从combo box获取当前值
+        level = self.gw_parse_level_combo.currentData()
+        self._gw_parse_level = level or "auto"
+        
+        # 根据解析级别显示/隐藏帧类型选择
+        show_frame_type = (self._gw_parse_level == "pb_only")
+        self.gw_pb_frame_type_label.setVisible(show_frame_type)
+        self.gw_pb_frame_type_combo.setVisible(show_frame_type)
 
     def _update_protocol_lookup_tab(self):
         """根据当前协议更新查询页面内容"""
@@ -1687,8 +1623,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(search_layout)
 
         # 统计标签
-        self.oad_stats_label = QLabel()
-        self.oad_stats_label.setStyleSheet("color: #666; font-size: 12px;")
+        self.oad_stats_label = self._make_stats_label()
         layout.addWidget(self.oad_stats_label)
 
         # 表格
@@ -1923,8 +1858,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(search_layout)
 
         # 统计标签
-        self.gdw_stats_label = QLabel()
-        self.gdw_stats_label.setStyleSheet("color: #666; font-size: 12px;")
+        self.gdw_stats_label = self._make_stats_label()
         layout.addWidget(self.gdw_stats_label)
 
         # 表格
@@ -2088,8 +2022,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(search_layout)
 
         # 统计标签
-        self.di_stats_label = QLabel()
-        self.di_stats_label.setStyleSheet("color: #666; font-size: 12px;")
+        self.di_stats_label = self._make_stats_label()
         layout.addWidget(self.di_stats_label)
 
         # 表格
@@ -2145,8 +2078,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(search_layout)
 
         # 统计标签
-        self.obis_stats_label = QLabel()
-        self.obis_stats_label.setStyleSheet("color: #666; font-size: 11px;")
+        self.obis_stats_label = self._make_stats_label(size=11)
         layout.addWidget(self.obis_stats_label)
 
         # 表格
@@ -2383,8 +2315,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(search_layout)
 
         # 统计标签
-        self.cmd_stats_label = QLabel()
-        self.cmd_stats_label.setStyleSheet("color: #666; font-size: 11px;")
+        self.cmd_stats_label = self._make_stats_label(size=11)
         layout.addWidget(self.cmd_stats_label)
 
         # 表格
@@ -2570,24 +2501,40 @@ class MainWindow(QMainWindow):
             # 包装解析器以传递解析级别参数
             csg_parser = self.csg_new_gen_parser
             parse_level = getattr(self, '_csg_parse_level', 'auto')
+            # pb_only模式下获取帧类型
+            frame_type = None
+            if parse_level == 'pb_only':
+                frame_type = self.csg_pb_frame_type_combo.currentData()
             class CSGGenGuiParser:
-                def __init__(self, parser, level):
+                def __init__(self, parser, level, ftype=None):
                     self.parser = parser
                     self.level = level
+                    self.frame_type = ftype
                 def parse_to_table(self, data):
-                    return self.parser.parse_to_table(data, parse_level=self.level)
-            return CSGGenGuiParser(csg_parser, parse_level)
+                    kwargs = {'parse_level': self.level}
+                    if self.frame_type is not None:
+                        kwargs['pb_frame_type'] = self.frame_type
+                    return self.parser.parse_to_table(data, **kwargs)
+            return CSGGenGuiParser(csg_parser, parse_level, frame_type)
         elif self.current_protocol == 10:  # 国网新一代双模通信互联互通
             # 包装解析器以传递解析级别参数
             gw_parser = self.gw_new_gen_parser
             parse_level = getattr(self, '_gw_parse_level', 'auto')
+            # pb_only模式下获取帧类型
+            frame_type = None
+            if parse_level == 'pb_only':
+                frame_type = self.gw_pb_frame_type_combo.currentData()
             class GWGenGuiParser:
-                def __init__(self, parser, level):
+                def __init__(self, parser, level, ftype=None):
                     self.parser = parser
                     self.level = level
+                    self.frame_type = ftype
                 def parse_to_table(self, data):
-                    return self.parser.parse_to_table(data, parse_level=self.level)
-            return GWGenGuiParser(gw_parser, parse_level)
+                    kwargs = {'parse_level': self.level}
+                    if self.frame_type is not None:
+                        kwargs['frame_type'] = self.frame_type
+                    return self.parser.parse_to_table(data, **kwargs)
+            return GWGenGuiParser(gw_parser, parse_level, frame_type)
 
     def load_example(self, data: str):
         """加载示例数据"""
@@ -2614,23 +2561,22 @@ class MainWindow(QMainWindow):
     # 新一代载波协议监控日志前缀标记与监控头长度
     # 监控日志格式: "<时间> <序号> -> 接收机 Has Get <N字节监控头> <协议报文>"
     # 实际报文从标记后的第 16 个字节（1-based）开始，即需要跳过 15 字节监控头
-    CSG_MONITOR_PREFIX = "-> 接收机 Has Get"
+    CSG_MONITOR_PREFIX = "> 接收机 Has Get"
     CSG_MONITOR_HEADER_BYTES = 15  # 标记之后需跳过的监控头字节数
 
     def _strip_csg_monitor_prefix(self, text: str) -> str:
         """剥离新一代载波协议监控日志前缀（仅在协议8批量解析时调用）
 
         监控日志格式示例:
-            15:49:51 254  -> 接收机 Has Get ED A5 00 00 02 EF 01 7E 4E 97 86 01 00 88 00 68 11 01 01 ...
+            15:49:51 254  -> 接收机 Has Get ED A5 00 00 02 EF 01 7E 4E 97 86 01 00 88 00 69 19 09 ...
                                                       ^^^^^^^^^^^^^^^ 15字节监控头 ^^^^^^^^^^^^^^^^
-                                                                                      ^ 第16字节(68)开始为真实协议报文
+                                                                                      ^ 第16字节(69)开始为真实协议报文
 
         处理规则（逐行）:
-          1. 含 "-> 接收机 Has Get" 标记的行：定位标记，取其后内容，跳过前 15 字节
-             (30 个 hex 字符) 监控头，从第 16 字节开始保留作为协议报文
-          2. 不含标记的行：仅当该行整体为纯 hex 报文（允许空格/逗号/短横线分隔）时保留；
-             含中文、时间戳、测试标记、# 等非 hex 内容的日志行直接丢弃，避免时间戳/文本被
-             _clean_hex_input 误清洗成伪帧。
+          1. 仅保留含 "> 接收机 Has Get" 标记的行，其余行（时间戳、测试标记、
+             纯文本日志、空行等）全部丢弃，避免被 _clean_hex_input 误清洗成伪帧
+          2. 对保留的行：定位标记，取其后内容，跳过前 15 字节监控头，
+             从第 16 字节开始保留作为协议报文
 
         注意：必须在 _clean_hex_input 之前调用，否则标记中的中文/箭头会被清洗掉，
         导致无法定位监控头边界。
@@ -2638,16 +2584,12 @@ class MainWindow(QMainWindow):
         import re
         prefix = self.CSG_MONITOR_PREFIX
         prefix_len = len(prefix)
-        # 非监控前缀行允许的字符：hex 数字、空白、逗号、短横线
-        hex_only_line_re = re.compile(r'^[0-9A-Fa-f\s,\-]*$')
 
         out_lines = []
         for line in text.splitlines():
             pos = line.find(prefix)
             if pos == -1:
-                # 无监控前缀：仅保留看起来就是纯 hex 报文的行，过滤掉时间戳/中文/测试标记等日志行
-                if hex_only_line_re.match(line):
-                    out_lines.append(line)
+                # 不含监控标记的行：直接丢弃（时间戳/测试标记/纯文本日志等）
                 continue
             # 标记之后的内容
             after = line[pos + prefix_len:]
@@ -2655,8 +2597,266 @@ class MainWindow(QMainWindow):
             tokens = re.findall(r'[0-9A-Fa-f]{1,2}', after)
             # 跳过 15 字节监控头，从第 16 字节开始保留协议报文
             payload_tokens = tokens[self.CSG_MONITOR_HEADER_BYTES:]
-            out_lines.append(' '.join(payload_tokens))
+            if payload_tokens:
+                out_lines.append(' '.join(payload_tokens))
         return '\n'.join(out_lines)
+
+    def _strip_gw_new_gen_prefix(self, text: str) -> str:
+        """剥离国网新一代双模协议日志前缀（仅在协议10批量解析时调用）
+
+        日志格式示例:
+            Line 339: 260718-111145-349: B1D[3] mrd:ar[75]:110300000132F303420D2305683D0043...
+
+        处理规则（逐行）:
+          1. 找到最后一个冒号 ':'，其后为 hex 报文数据
+          2. 清理非 hex 字符，仅保留十六进制
+          3. 若解析级别为 app，扫描 '11' 定位应用层报文起始位置
+          4. 过短的行（<4 hex字符）直接丢弃
+
+        注意：必须在 _clean_hex_input 之前调用，否则前缀中的数字会被误当作 hex 数据。
+        """
+        import re
+        parse_level = getattr(self, '_gw_parse_level', 'auto')
+        out_lines = []
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            # 找到最后一个冒号，其后为报文数据
+            last_colon = line.rfind(':')
+            if last_colon >= 0:
+                hex_part = line[last_colon + 1:].strip()
+            else:
+                hex_part = line
+            # 清理非 hex 字符
+            hex_clean = re.sub(r'[^0-9A-Fa-f]', '', hex_part).upper()
+            if len(hex_clean) < 4:
+                continue
+            # app 级别：扫描 '11' 定位应用层报文起始
+            if parse_level == 'app':
+                found = False
+                i = 0
+                while i < len(hex_clean) - 1:
+                    if hex_clean[i:i+2] == '11' and len(hex_clean) - i >= 8:
+                        hex_clean = hex_clean[i:]
+                        found = True
+                        break
+                    i += 2
+                if not found:
+                    continue  # 未找到应用层起始，跳过该行
+            out_lines.append(hex_clean)
+        return '\n'.join(out_lines)
+
+    def _strip_csg_new_gen_frame_prefix(self, text: str, parse_level: str = "auto") -> str:
+        """南网新一代通感一体化批量解析预处理（在 _clean_hex_input 之前调用）
+
+        主动定位帧起始并剔除非报文内容，逻辑对齐国网新一代 _strip_gw_new_gen_prefix，
+        但依据南网帧结构与物理块头(4字节)特征：
+
+        - 若文本含监控日志标记 ``> 接收机 Has Get``：沿用 _strip_csg_monitor_prefix，
+          仅保留监控行并剥离 15 字节监控头（保留既有已测行为）。
+        - 否则按行处理：取最后一个冒号后的 hex（兼容 "Line XXX: ...: hex" 日志），
+          清洗为纯 hex，再按解析级别定位帧起始：
+            * fc_pb / fc_only / fc_efc / auto  → 扫描 FC 起始特征字节
+              (bit3=接入指示=1, bits0-2=定界符类型∈{0,1,2,3}，即低4位∈{0x8,0x9,0xA,0xB})
+              如典型 SOF 起始 0x09 / 0x89 ...
+            * pb_only  → 输入即物理块本身，直接保留整行（无FC签名）
+            * app      → 扫描端口 0x11 定位应用层报文起始
+          过短的行（<4 hex字符）直接丢弃。
+        - TCP 包装报文：检测 ``EDA5`` 固定前缀，从 ``ED`` 偏移 15 字节（30 hex字符）定位 FC 起始，
+          剥离 15 字节 TCP 包装头后即为 FC+PB 帧数据（适用于除 pb_only 外的所有级别）。
+        """
+        import re
+        # 监控日志格式：沿用已有逻辑（仅保留监控行，剥离监控头）
+        if self.CSG_MONITOR_PREFIX in text:
+            return self._strip_csg_monitor_prefix(text)
+
+        out_lines = []
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+
+            # 兼容格式: --USER--port_sta receive tcp data:len:33: 'ED...'
+            # 取单引号/双引号内的 hex 数据，若无引号则取最后一个冒号后的内容
+            hex_part = ""
+            # 优先匹配第一个引号内的纯 hex 字符串
+            quote_match = re.search(r"['\"]([0-9A-Fa-f\s]+)['\"]", line)
+            if quote_match:
+                hex_part = quote_match.group(1)
+            else:
+                # 取最后一个冒号后的 hex 数据（兼容日志前缀）
+                last_colon = line.rfind(':')
+                if last_colon >= 0:
+                    hex_part = line[last_colon + 1:].strip()
+                else:
+                    hex_part = line
+            hex_clean = re.sub(r'[^0-9A-Fa-f]', '', hex_part).upper()
+            if len(hex_clean) < 4:
+                continue
+            # 奇偶对齐需在 EDA5 检测前完成（保证按字节偏移剥离）
+            if len(hex_clean) % 2 != 0:
+                hex_clean = hex_clean[:-1]
+            # 检测 TCP 包装前缀 EDA5：从 ED 偏移 15 字节(30 hex)定位 FC 起始
+            # 适用于除 pb_only 外所有级别（pb_only 输入应为裸PB，无TCP包装）
+            if parse_level != "pb_only" and hex_clean.startswith("EDA5"):
+                # 需至少 15字节TCP头 + 16字节FC = 62 hex字符
+                if len(hex_clean) >= 62:
+                    hex_clean = hex_clean[30:]
+                    out_lines.append(hex_clean)
+                continue
+
+            if parse_level == "pb_only":
+                # 仅物理块输入：直接保留（无 FC 签名可扫描）
+                pass
+            elif parse_level == "app":
+                # 扫描端口 0x11 定位应用层报文起始
+                found = False
+                i = 0
+                while i < len(hex_clean) - 1:
+                    if hex_clean[i:i+2] == '11' and len(hex_clean) - i >= 8:
+                        hex_clean = hex_clean[i:]
+                        found = True
+                        break
+                    i += 2
+                if not found:
+                    continue
+            else:
+                # fc_pb / fc_only / fc_efc / auto：扫描 FC 起始特征字节
+                # 首字节低4位 ∈ {0x8,0x9,0xA,0xB}（bit3=接入指示1, bits0-2=定界符类型0~3）
+                # 注意：ED 包装帧（以 ED 开头）由后续 _extract_csg_new_gen_frames 处理，
+                # 此处不应扫描 FC 起始，否则会把 ED 数据域内部的 0x3A/0x1A 误判为 FC 头。
+                if hex_clean.startswith("ED"):
+                    # ED 包装帧直接保留，交给后续 ED 提取逻辑
+                    pass
+                else:
+                    found = False
+                    i = 0
+                    # FC头最小16字节(32 hex)；不足则视为时间戳等噪声导致的误匹配
+                    while i + 32 <= len(hex_clean):
+                        byte_val = int(hex_clean[i:i+2], 16)
+                        low = byte_val & 0x0F
+                        if low in (0x08, 0x09, 0x0A, 0x0B):
+                            hex_clean = hex_clean[i:]
+                            found = True
+                            break
+                        i += 2
+                    if not found:
+                        # 未扫描到 FC 起始特征，可能是 ED 包装帧，直接保留给后续 ED 提取处理
+                        pass
+            out_lines.append(hex_clean)
+        return '\n'.join(out_lines)
+
+
+    # ── PLC2.0 收发机监控包装头(ED..EE)解析 ──
+    # 常量定义（与 monitor_widget 保持一致）
+    _PLC2_CTRL1_NAMES = {0x00: "数据报文", 0x01: "控制报文"}
+    _PLC2_CTRL2_DATA_NAMES = {
+        0x01: "FC数据", 0x02: "FC+Payload数据", 0x03: "Payload数据",
+        0x04: "发送完成", 0x05: "选择确认帧发送完成",
+        0x06: "RF和HPLC同时发送FC+Payload", 0x07: "FC+Payload数据",
+        0x08: "UL-OFDMA帧(DL-OFDMA的SACK帧)",
+    }
+    _PLC2_CHANNEL_NAMES = {
+        0x01: "HPLC", 0x02: "RF", 0x03: "HPLC+RF", 0x20: "PLC2.0 OFDMA",
+    }
+
+    def _plc2_channel_name(self, ch: int) -> str:
+        if ch in self._PLC2_CHANNEL_NAMES:
+            return self._PLC2_CHANNEL_NAMES[ch]
+        if 0x10 <= ch <= 0x1C:
+            return f"PLC2.0 MIMO(0x{ch:02X})"
+        return f"保留(0x{ch:02X})"
+
+    def _parse_ed_monitor_header(self, frame_bytes: bytes):
+        """解析 ED..EE PLC2.0 监控包装头
+
+        包结构: ED(1)+帧长(2,LE)+控制域1(1)+控制域2(1)+EF(1)+数据域(变长)+CS(1)+EE(1)
+        数据报文(ctrl1=0x00) ctrl2=0x01/0x02/0x03 的数据域公共头(9字节):
+          物理信道(1)+时间戳(4,LE)+物理块个数(1)+保留/CRC(1)+单个物理块长度(2,LE)
+
+        Returns:
+            (meta_rows, business_bytes, business_offset) 成功时返回前置行列表、业务字节、
+                业务字节在原始帧中的偏移量
+            (None, None, None) 帧不是有效的 ED 包装格式
+        """
+        n = len(frame_bytes)
+        if n < 8 or frame_bytes[0] != 0xED:
+            return None, None, None
+
+        frame_len = frame_bytes[1] | (frame_bytes[2] << 8)  # = 数据域长度 + 4
+        if frame_len < 4 or frame_len > 4096:
+            return None, None, None
+        total = frame_len + 4  # ED(1)+帧长(2)+[控制域1..CS=帧长]+EE(1)
+        if total > n:
+            return None, None, None
+        # 强定界校验
+        if frame_bytes[5] != 0xEF or frame_bytes[total - 1] != 0xEE:
+            return None, None, None
+
+        ctrl1 = frame_bytes[3]
+        ctrl2 = frame_bytes[4]
+        data_len = frame_len - 4
+        data_start = 6
+        data = frame_bytes[data_start:data_start + data_len]
+        cs_offset = data_start + data_len
+        cs = frame_bytes[cs_offset]
+        ee_offset = total - 1
+        calc_cs = sum(frame_bytes[:cs_offset]) & 0xFF
+
+        ctrl1_name = self._PLC2_CTRL1_NAMES.get(ctrl1, f"保留(0x{ctrl1:02X})")
+        ctrl2_name = (self._PLC2_CTRL2_DATA_NAMES if ctrl1 == 0x00 else {}).get(
+            ctrl2, f"保留(0x{ctrl2:02X})")
+        cs_txt = "✓ 正确" if cs == calc_cs else ("保留(0xFF)" if cs == 0xFF else "✗ 错误")
+
+        rows = [
+            ("── PLC2.0 监控包装头 ──", "", "", "ED..EE 监控设备附加信息（不属于业务帧）", None, None),
+            ("起始符(ED)", f"0x{frame_bytes[0]:02X}", "ED", "PLC2.0 收发机包装起始标识", 0, 0),
+            ("帧长", f"{frame_bytes[1]:02X} {frame_bytes[2]:02X}", f"{frame_len} 字节",
+             "控制域1+控制域2+EF+数据域+CS(小端)", 1, 2),
+            ("控制域1", f"0x{ctrl1:02X}", ctrl1_name, "0x00-数据报文 0x01-控制报文", 3, 3),
+            ("控制域2", f"0x{ctrl2:02X}", ctrl2_name, "报文子类型", 4, 4),
+            ("数据域起始符(EF)", f"0x{frame_bytes[5]:02X}", "EF", "数据域起始标识", 5, 5),
+            ("数据域长度", str(data_len), f"{data_len} 字节", f"字节 {data_start}~{cs_offset-1}", data_start, cs_offset - 1),
+        ]
+
+        business = b""
+        business_offset = data_start  # 默认偏移
+        # 数据报文 0x01/0x02/0x03：解析 9 字节公共头
+        if ctrl1 == 0x00 and ctrl2 in (0x01, 0x02, 0x03) and data_len >= 9:
+            ch = data[0]
+            ts = int.from_bytes(data[1:5], "little")
+            pb_cnt = data[5]
+            flag6 = data[6]
+            pb_len = int.from_bytes(data[7:9], "little")
+            business = data[9:]
+            business_offset = data_start + 9  # 业务帧从数据域第10字节开始
+            crc_txt = "错误" if (ctrl2 == 0x02 and flag6 == 1) else "正确/保留"
+            rows += [
+                ("物理信道", f"0x{ch:02X}", self._plc2_channel_name(ch),
+                 "0x01-HPLC 0x02-RF 0x03-HPLC+RF 0x10~0x1C-MIMO 0x20-OFDMA",
+                 data_start, data_start),
+                ("时间戳", f"0x{ts:08X}", str(ts), "HW→PC 接收开始时间(小端)",
+                 data_start + 1, data_start + 4),
+                ("物理块个数", str(pb_cnt), str(pb_cnt), None,
+                 data_start + 5, data_start + 5),
+                ("Payload CRC", f"0x{flag6:02X}", crc_txt,
+                 "ctrl2=0x02时: 0-正确 1-错误；其余保留",
+                 data_start + 6, data_start + 6),
+                ("单个物理块长度", str(pb_len), f"{pb_len} 字节(小端)", None,
+                 data_start + 7, data_start + 8),
+            ]
+        else:
+            business = data
+
+        rows += [
+            ("校验(CS)", f"0x{cs:02X}", cs_txt,
+             "ED..数据域末所有字节求和取低8bit", cs_offset, cs_offset),
+            ("结束符(EE)", f"0x{frame_bytes[ee_offset]:02X}", "EE", "PLC2.0 包装结束标识", ee_offset, ee_offset),
+            ("── 业务帧 ──", "", "", "以下为载波业务帧解析结果", business_offset, cs_offset - 1),
+        ]
+
+        return rows, business, business_offset
 
 
     def parse_single(self):
@@ -2707,13 +2907,45 @@ class MainWindow(QMainWindow):
                     # 缓存剔除后的hex（无空格小写），供下次比对
                     self._csg_last_stripped_hex = ''.join(f'{b:02x}' for b in frame_bytes)
 
+            # ED 监控协议头解析（仅南网新一代协议 + 勾选项启用时）
+            full_frame_bytes = frame_bytes  # 保存完整帧（用于高亮定位和 current_result）
+            ed_meta_rows = None
+            ed_business_offset = 0
+            if (self.current_protocol == 9
+                    and self.ed_monitor_chk.isChecked()
+                    and len(frame_bytes) >= 8
+                    and frame_bytes[0] == 0xED):
+                ed_rows, business, ed_business_offset = self._parse_ed_monitor_header(frame_bytes)
+                if ed_rows is not None and business is not None:
+                    ed_meta_rows = ed_rows
+                    frame_bytes = business  # 后续解析使用业务载荷
+                    # 不替换 hex_display，保持输入框显示完整帧
+
             # 使用当前选中的解析器
             current_parser = self._get_current_parser()
             table_data = current_parser.parse_to_table(frame_bytes)
+            # ED 监控头前置 + 业务行偏移修正
+            if ed_meta_rows:
+                # 业务行的 byte_start/byte_end 需要加上 ED 头偏移
+                shifted_table = []
+                for row in table_data:
+                    if len(row) >= 6 and row[4] is not None and row[5] is not None:
+                        shifted_row = (
+                            row[0], row[1], row[2], row[3],
+                            row[4] + ed_business_offset,
+                            row[5] + ed_business_offset,
+                        )
+                        # 处理可能的第 7 个元素 (is_child)
+                        if len(row) > 6:
+                            shifted_row = shifted_row + (row[6],)
+                        shifted_table.append(shifted_row)
+                    else:
+                        shifted_table.append(row)
+                table_data = ed_meta_rows + shifted_table
             self._populate_table_from_data(table_data)
 
-            # 保存当前结果
-            self.current_result = frame_bytes
+            # 保存当前结果（使用完整帧，确保高亮和双击提取正确）
+            self.current_result = full_frame_bytes
             self._last_parsed_hex = hex_display
 
         except Exception as e:
@@ -3032,6 +3264,8 @@ class MainWindow(QMainWindow):
         config_menu = menubar.addMenu("配置(&C)")
         config_action = config_menu.addAction("配置文件路径(&P)...")
         config_action.triggered.connect(self._show_config_dialog)
+        theme_action = config_menu.addAction("主题与字体(&T)...")
+        theme_action.triggered.connect(self._show_theme_settings_dialog)
 
         help_menu = menubar.addMenu("帮助(&H)")
 
@@ -3201,7 +3435,14 @@ class MainWindow(QMainWindow):
         # 监控日志格式: "<时间> <序号> -> 接收机 Has Get <15字节监控头> <协议报文>"
         # 需要先识别 "-> 接收机 Has Get" 标记，去除其后 15 字节监控头，再提取协议报文
         if self.current_protocol == 9:
-            input_text = self._strip_csg_monitor_prefix(input_text)
+            input_text = self._strip_csg_new_gen_frame_prefix(
+                input_text, getattr(self, '_csg_parse_level', 'auto'))
+
+        # 国网新一代双模协议(索引10)：剥离日志前缀（在 hex 清洗前处理原始文本）
+        # 日志格式: "Line XXX: timestamp: metadata:hex_data"
+        # 取最后一个冒号后的 hex 数据，app 级别时扫描 '11' 定位应用层起始
+        if self.current_protocol == 10:
+            input_text = self._strip_gw_new_gen_prefix(input_text)
 
         # 预处理：去除空格、逗号等分隔符，保留换行以区分多帧
         input_text = self._clean_hex_input(input_text, keep_newlines=True)
@@ -3218,14 +3459,22 @@ class MainWindow(QMainWindow):
 
         # 清空之前的结果
         self.batch_results = []
-        self.result_table.setRowCount(0)
+        self.batch_summary_table.setRowCount(0)
+        self.batch_detail_table.setRowCount(0)
+        self.batch_detail_hex.clear()
 
         success_count = 0
         fail_count = 0
 
-        for i, frame_hex in enumerate(frames):
+        for i, frame_item in enumerate(frames):
+            # 协议9返回元组(frame_hex, ed_data_type)，其他协议返回纯字符串
+            if isinstance(frame_item, tuple):
+                frame_hex, ed_data_type = frame_item
+            else:
+                frame_hex = frame_item
+                ed_data_type = ""
+
             table_data = []
-            direction = "-"
             try:
                 frame_bytes = bytes.fromhex(frame_hex)
                 # 使用当前协议对应的解析器
@@ -3233,12 +3482,11 @@ class MainWindow(QMainWindow):
                 # 调用parse_to_table生成表格数据
                 table_data = current_parser.parse_to_table(frame_bytes)
 
-                # 南网协议/国网协议/698.45提取方向
-                if self.current_protocol in (0, 7, 8):
-                    direction = self._extract_direction_from_table(table_data)
-
-                # 从表格数据生成摘要（取前3个字段作为摘要）
+                # 从表格数据生成摘要
                 summary = self._get_summary_from_table_data(table_data)
+                # ED 监控帧数据来源标记
+                if ed_data_type:
+                    summary = f"[ED:{ed_data_type}] {summary}"
 
                 # 检查解析是否失败（校验错误、长度不匹配等）
                 is_parse_failed = any(item[0] == "❌ 解析失败" for item in table_data)
@@ -3266,7 +3514,6 @@ class MainWindow(QMainWindow):
                 status = "异常"
                 summary = str(e)[:50]
                 fail_count += 1
-                # 异常时 table_data 为空，方向保持 "-"
                 self.batch_results.append({
                     "_input": frame_hex,
                     "_status": status,
@@ -3274,35 +3521,47 @@ class MainWindow(QMainWindow):
                     "摘要": summary
                 })
 
-            # 添加到表格
-            row = self.result_table.rowCount()
-            self.result_table.insertRow(row)
-            self.result_table.setItem(row, 0, QTableWidgetItem(str(i + 1)))
+            # 添加到摘要表格
+            row = self.batch_summary_table.rowCount()
+            self.batch_summary_table.insertRow(row)
 
-            hex_display = ' '.join(frame_hex[j:j+2] for j in range(0, len(frame_hex), 2))
-            if len(hex_display) > 50:
-                hex_display = hex_display[:50] + "..."
-            self.result_table.setItem(row, 1, QTableWidgetItem(hex_display))
-            self.result_table.setItem(row, 2, QTableWidgetItem(str(len(frame_hex) // 2)))
+            # 序号
+            num_item = QTableWidgetItem(str(i + 1))
+            num_item.setTextAlignment(Qt.AlignCenter)
+            self.batch_summary_table.setItem(row, 0, num_item)
 
-            # 方向：南网协议/国网协议/698.45从控制域DIR位解析，其他协议暂无
-            direction = "-"
-            if self.current_protocol in (0, 7, 8):
-                direction = self._extract_direction_from_table(table_data)
-            self.result_table.setItem(row, 3, QTableWidgetItem(direction))
-
-            # 业务摘要
-            self.result_table.setItem(row, 4, QTableWidgetItem(summary))
-
-            # 状态
-            status_item = QTableWidgetItem(status)
+            # 状态（emoji）
+            status_emoji = "✅" if status == "成功" else "❌"
+            status_item = QTableWidgetItem(status_emoji)
+            status_item.setTextAlignment(Qt.AlignCenter)
             if status == "成功":
                 status_item.setForeground(Qt.darkGreen)
             else:
                 status_item.setForeground(Qt.red)
-            self.result_table.setItem(row, 5, status_item)
+            self.batch_summary_table.setItem(row, 1, status_item)
 
-        self.update_stats(f"解析完成：成功 {success_count} 帧，失败 {fail_count} 帧，共 {len(frames)} 帧")
+            # 长度
+            len_item = QTableWidgetItem(str(len(frame_hex) // 2))
+            len_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            self.batch_summary_table.setItem(row, 2, len_item)
+
+            # 协议/类型
+            proto_type = self._get_frame_type_name(table_data, status)
+            proto_item = QTableWidgetItem(proto_type)
+            if status != "成功":
+                proto_item.setForeground(Qt.red)
+            self.batch_summary_table.setItem(row, 3, proto_item)
+
+            # 摘要
+            self.batch_summary_table.setItem(row, 4, QTableWidgetItem(summary))
+
+        # 更新状态栏
+        self._update_status_bar(success_count, fail_count, len(frames))
+
+        # 自动选中第一行并显示详情
+        if self.batch_summary_table.rowCount() > 0:
+            self.batch_summary_table.selectRow(0)
+            self._on_batch_row_selected()
 
     def _extract_direction_from_table(self, table_data: list) -> str:
         """从南网/国网协议表格数据中提取传输方向"""
@@ -3404,6 +3663,10 @@ class MainWindow(QMainWindow):
         elif self.current_protocol == 9:
             # 新一代载波协议：区分网络层报文(MPDU/MAC/MMTYPE)与应用层报文(业务标识)
             return self._get_csg_new_gen_summary(table_data)
+
+        elif self.current_protocol == 10:
+            # 国网新一代：网络标识/帧类型/TEI/MSDU序列/发送类型/报文等关键信息
+            return self._get_gw_new_gen_summary(table_data)
 
         else:
             # 其他协议：取前几个非冗余字段
@@ -3606,6 +3869,111 @@ class MainWindow(QMainWindow):
             return f"{fn.strip()}:{desc[:30]}"
         return svc_name if svc_name else ""
 
+    def _get_gw_new_gen_summary(self, table_data: list) -> str:
+        """国网新一代(索引10)监控/批量摘要生成
+
+        体现监控工具关注的关键业务信息：
+          网络标识(NID) | 帧类型(信标/SOF/选择确认/网间协调) | 管理消息类型(MMTYPE) |
+          源→目的TEI | MSDU序列号 | 发送类型(单播/广播) | MSDU类型 |
+          应用层端口/报文ID(方向)/报文序号/规约类型/数据长度
+
+        table_data 格式: (field, raw, parsed, comment, byte_start, byte_end, is_child)
+        """
+        if not table_data:
+            return "-"
+
+        # 解析失败：直接返回失败原因
+        for item in table_data:
+            if str(item[0]).startswith("❌"):
+                return item[3] if item[3] else "解析失败"
+
+        # 以去除缩进的字段名建立索引（首个出现优先：FC 在 MAC/应用层之前）
+        fs = {}
+        for item in table_data:
+            key = str(item[0]).strip()
+            if key:
+                fs.setdefault(key, item)
+
+        def val(name):
+            it = fs.get(name)
+            return str(it[2]).strip() if it and it[2] not in (None, "") else ""
+
+        def cmt(name):
+            it = fs.get(name)
+            return str(it[3]).strip() if it and it[3] not in (None, "") else ""
+
+        parts = []
+
+        # 1. 网络标识(NID)
+        nid = val("网络标识(NID)")
+        if nid:
+            parts.append(f"NID:{nid}")
+
+        # 2. 帧类型（定界符类型），comment 形如 "DT=1: SOF帧"
+        delim = cmt("定界符类型")
+        frame_type_name = ""
+        if delim:
+            frame_type_name = delim.split(":", 1)[1].strip() if ":" in delim else delim
+            sof_sub = val("帧类型")  # SOF帧子类型: 数据帧/信道探测帧
+            if "SOF" in frame_type_name and sof_sub:
+                parts.append(f"{frame_type_name}({sof_sub})")
+            else:
+                parts.append(frame_type_name)
+
+        # 3. 管理消息类型(MMTYPE)：如 关联确认(MMeAssocCnf)/发现列表
+        mmtype = cmt("管理消息类型(MMTYPE)")
+        if mmtype:
+            parts.append(f"MMTYPE:{mmtype}")
+
+        # 4. 源→目的TEI：优先 FC 级，其次 MAC 级原始源/目的
+        src = val("源TEI") or val("原始源TEI")
+        dst = val("目的TEI") or val("原始目的TEI")
+        if src or dst:
+            parts.append(f"{src or '?'}→{dst or '?'}")
+
+        # 5. MSDU序列号
+        seq = val("MSDU序列号")
+        if seq:
+            parts.append(f"msduSeq:{seq}")
+
+        # 6. 发送类型（单播/本地广播/...）
+        send_type = cmt("发送类型")
+        if send_type and "保留" not in send_type:
+            parts.append(send_type)
+
+        # 7. MSDU类型（非保留且未在别处体现）
+        msdu_type = cmt("MSDU类型")
+        if msdu_type and "保留" not in msdu_type and "网络管理" not in msdu_type:
+            parts.append(msdu_type)
+
+        # 8. 应用层：报文端口 + 报文ID(含方向) + 报文序号 + 规约类型 + 数据长度
+        port = val("报文端口号")
+        if port:
+            parts.append(f"端口:{port}")
+        msg_id = val("报文ID")
+        if msg_id:
+            # 方向(上行/下行)在"应用层报文"行 comment 中，如 "...报文ID=xxx 下行"
+            app_cmt = cmt("应用层报文")
+            direction = ""
+            for d in ("下行", "上行"):
+                if d in app_cmt:
+                    direction = d
+                    break
+            parts.append(f"报文:{msg_id}({direction})" if direction else f"报文:{msg_id}")
+        # 报文序号（STA 应答时返回）
+        msg_seq = val("报文序号")
+        if msg_seq:
+            parts.append(f"序号:{msg_seq}")
+        # 规约类型（如 DL/T 698.45），精简展示
+        proto = val("规约类型")
+        if proto:
+            parts.append(f"规约:{proto.replace('DL/T ', '')}")
+        dlen = val("转发数据长度")
+        if dlen:
+            parts.append(f"数据:{dlen}")
+
+        return " | ".join(parts) if parts else "-"
+
     def _extract_frames_for_protocol(self, text: str, protocol_index: int) -> list:
         """根据协议提取对应格式的帧"""
         import re
@@ -3639,6 +4007,10 @@ class MainWindow(QMainWindow):
             # 新一代载波协议(通感一体化)：按行提取，过滤无效短帧
             # 监控前缀已在 parse_batch 中通过 _strip_csg_monitor_prefix 剥离
             return self._extract_csg_new_gen_frames(text)
+        elif protocol_index == 10:
+            # 国网新一代双模：按行提取，每行一帧
+            # 前缀已在 parse_batch 中通过 _strip_gw_new_gen_prefix 剥离
+            return [f.strip() for f in text.splitlines() if f.strip() and len(f.strip()) >= 4]
         else:
             # 通用：每行一帧
             return [f.strip() for f in text.splitlines() if f.strip()]
@@ -3846,6 +4218,12 @@ class MainWindow(QMainWindow):
           - 按行分割（每行一帧，兼容多帧批量输入）
           - 去除空白后只保留偶数长度的有效 hex 行
           - 过滤过短的行（< 4 字节，无法构成最小应用层报文）
+          - **ED 监控帧处理**：若帧以 ED 开头，解析 ED..EE 包装头，提取业务帧
+
+        Returns:
+            list of tuple: [(frame_hex, ed_data_type), ...]
+              - frame_hex: 提取后的帧 hex 字符串
+              - ed_data_type: ED 数据类型描述（如 "FC数据"、"FC+Payload数据"），非 ED 帧为空字符串
         """
         frames = []
         for line in text.splitlines():
@@ -3859,18 +4237,120 @@ class MainWindow(QMainWindow):
             if len(clean_line) % 2 != 0:
                 # 奇数长度：丢弃末尾字符以保证字节对齐
                 clean_line = clean_line[:-1]
-            frames.append(clean_line)
+
+            ed_data_type = ""
+            # ED 监控帧处理：解析 ED..EE 包装头，提取业务帧
+            if clean_line.startswith("ED"):
+                business_hex, data_type = self._extract_business_from_ed_frame(clean_line)
+                if business_hex:
+                    clean_line = business_hex
+                    ed_data_type = data_type
+                # 如果 ED 解析失败，保留原始帧
+
+            frames.append((clean_line, ed_data_type))
         return frames
+    def _extract_business_from_ed_frame(self, hex_str: str) -> tuple:
+        """从 ED..EE PLC2.0 监控包装帧中提取业务数据
+
+        包结构: ED(1)+帧长(2,LE)+控制域1(1)+控制域2(1)+EF(1)+数据域(变长)+CS(1)+EE(1)
+        数据域公共头(9字节): 物理信道(1)+时间戳(4,LE)+物理块个数(1)+保留(1)+物理块长度(2,LE)
+
+        注意：监控日志可能在 ED 帧后附加 FF EE 标记，需要正确处理
+
+        Returns:
+            (business_hex, data_type_desc) 成功时返回业务数据hex和类型描述
+            ("", "") 解析失败
+        """
+        try:
+            frame_bytes = bytes.fromhex(hex_str)
+        except ValueError:
+            return "", ""
+
+        n = len(frame_bytes)
+        if n < 8 or frame_bytes[0] != 0xED:
+            return "", ""
+
+        # 解析帧长字段
+        frame_len = frame_bytes[1] | (frame_bytes[2] << 8)
+        if frame_len < 4 or frame_len > 4096:
+            return "", ""
+
+        # 计算预期的整包长度
+        expected_total = frame_len + 4  # ED(1) + 帧长(2) + [内容:frame_len字节] + EE(1)
+
+        # 查找实际的 EE 终止符位置
+        # 优先使用帧长计算的位置，如果该位置不是 EE，则搜索
+        ee_pos = -1
+        if expected_total <= n and frame_bytes[expected_total - 1] == 0xEE:
+            ee_pos = expected_total - 1
+        else:
+            # 帧长字段可能不准确，或者后面有多余数据(如 FF EE 标记)
+            # 从位置6后搜索第一个 EE
+            for i in range(6, min(n, expected_total + 10)):  # 允许一定偏差
+                if frame_bytes[i] == 0xEE:
+                    ee_pos = i
+                    break
+
+        if ee_pos < 0:
+            return "", ""  # 找不到 EE 终止符
+
+        # 验证 EF 起始符
+        if frame_bytes[5] != 0xEF:
+            return "", ""
+
+        # 计算实际的数据范围
+        # ED帧结构: ED(0) + 帧长(1-2) + ctrl1(3) + ctrl2(4) + EF(5) + 数据域 + CS + EE(ee_pos)
+        data_start = 6
+        data_end = ee_pos - 1  # 排除 CS(ee_pos-1) 和 EE(ee_pos)
+
+        if data_end <= data_start:
+            return "", ""
+
+        data = frame_bytes[data_start:data_end]
+        data_len = len(data)
+
+        ctrl1 = frame_bytes[3]
+        ctrl2 = frame_bytes[4]
+
+        # 非数据报文或数据域不足，返回空
+        if ctrl1 != 0x00 or ctrl2 not in (0x01, 0x02, 0x03) or data_len < 9:
+            return "", ""
+
+        # 跳过 9 字节公共头，提取业务数据
+        business = data[9:]
+        if len(business) < 4:
+            return "", ""
+
+        # 根据 ctrl2 确定数据类型描述
+        ctrl2_desc = {
+            0x01: "FC数据",
+            0x02: "FC+Payload数据",
+            0x03: "Payload数据",
+        }.get(ctrl2, f"未知(0x{ctrl2:02X})")
+
+        return business.hex().upper(), ctrl2_desc
 
     def clear_batch(self):
         """清空批量解析内容"""
         self.batch_input.clear()
-        self.result_table.setRowCount(0)
+        self.batch_summary_table.setRowCount(0)
+        self.batch_detail_table.setRowCount(0)
+        self.batch_detail_hex.clear()
         self.batch_results = []
+        self.batch_status_bar.setText("就绪")
+        self.batch_frame_count_label.setText("共 0 帧")
         self.update_stats("待解析")
 
-    def export_batch(self):
-        """增强版批量解析结果导出 - 支持 JSON/Excel 多格式，Excel 含 Sheet2 详细解析"""
+    def export_batch(self, fmt=None):
+        """增强版批量解析结果导出 - 支持 JSON/Excel 多格式，Excel 含 Sheet2 详细解析
+
+        Args:
+            fmt: 导出格式，可选 "excel" / "json" / None
+                 - "excel" 或 "json": 直接弹出保存对话框，跳过格式选择
+                 - None: 显示完整的导出选项对话框（默认，向后兼容）
+        """
+        from PySide6.QtWidgets import QFileDialog
+        
         if not self.batch_results:
             QMessageBox.warning(self, "警告", "没有可导出的解析结果！")
             return
@@ -3883,12 +4363,47 @@ class MainWindow(QMainWindow):
         ]
         protocol_name = protocol_names[self.current_protocol] if self.current_protocol < len(protocol_names) else f"协议{self.current_protocol}"
 
+        # 快速路径：指定格式时直接弹出保存文件对话框
+        if fmt in ("excel", "json"):
+            if fmt == "excel":
+                default_name = f"batch_parse_{protocol_name}.xlsx"
+                filter_str = "Excel 文件 (*.xlsx);;所有文件 (*)"
+            else:
+                default_name = f"batch_parse_{protocol_name}.json"
+                filter_str = "JSON 文件 (*.json);;所有文件 (*)"
+
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, "选择导出位置", default_name, filter_str
+            )
+            if not file_path:
+                return
+
+            try:
+                export_dir = str(Path(file_path).parent)
+                exporter = EnhancedBatchResultExporter(export_dir)
+
+                if fmt == "excel":
+                    result_path = exporter.export_to_excel(
+                        self.batch_results, protocol_name,
+                        output_file=file_path
+                    )
+                else:
+                    result_path = exporter.export_to_json(
+                        self.batch_results, protocol_name,
+                        output_file=file_path
+                    )
+
+                QMessageBox.information(self, "导出成功", f"结果已保存到:\n{result_path}")
+            except Exception as e:
+                QMessageBox.critical(self, "导出失败", str(e))
+            return
+
         # 创建导出器
         exporter = EnhancedBatchResultExporter()
 
         # 显示导出选项对话框
         from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QDialogButtonBox
-        from PySide6.QtWidgets import QLabel, QRadioButton, QPushButton, QLineEdit, QFileDialog
+        from PySide6.QtWidgets import QLabel, QRadioButton, QPushButton, QLineEdit
         from PySide6.QtCore import Qt
 
         dialog = QDialog(self)
@@ -4089,9 +4604,197 @@ class MainWindow(QMainWindow):
 
         dialog.exec()
 
+    def _get_frame_type_name(self, table_data: list, status: str) -> str:
+        """从解析表格数据中提取帧类型名称（用于摘要表的"协议/类型"列）"""
+        if status != "成功" or not table_data:
+            if status == "失败":
+                return "解析失败"
+            elif status == "异常":
+                return "异常"
+            else:
+                return "-"
+
+        if self.current_protocol == 0:  # 南网协议
+            for item in table_data:
+                field = str(item[0])
+                if "AFN" in field and not field.startswith(" "):
+                    return str(item[3] or item[2] or "南网协议")
+            return "南网协议"
+
+        elif self.current_protocol == 7:  # 国网协议
+            for item in table_data:
+                field = str(item[0])
+                if "AFN" in field and not field.startswith(" "):
+                    return str(item[3] or item[2] or "国网协议")
+            return "国网协议"
+
+        elif self.current_protocol == 8:  # 698.45
+            for item in table_data:
+                field = str(item[0])
+                if ("APDU" in field or "功能码" in field or "服务" in field) and not field.startswith(" "):
+                    return str(item[3] or item[2] or "698.45协议")
+            return "698.45协议"
+
+        elif self.current_protocol in (2, 3, 4, 5):  # DLMS 族
+            for item in table_data:
+                field = str(item[0])
+                if ("帧类型" in field or "服务" in field or "功能" in field) and not field.startswith(" "):
+                    val = str(item[3] or item[2] or "")
+                    if val:
+                        return val
+            proto_names = {2: "HDLC", 3: "DLMS-APDU", 4: "DLMS-Wrapper", 5: "DLMS-APDU"}
+            return proto_names[self.current_protocol]
+
+        elif self.current_protocol == 9:  # 新一代载波
+            for item in table_data:
+                field = str(item[0])
+                if ("帧类型" in field or field.strip() == "FC") and not field.startswith(" "):
+                    return str(item[3] or item[2] or "新一代载波")
+            return "新一代载波"
+
+        elif self.current_protocol == 10:  # 国网新一代
+            for item in table_data:
+                field = str(item[0])
+                if ("帧类型" in field or "MSDU类型" in field) and not field.startswith(" "):
+                    return str(item[3] or item[2] or "国网新一代")
+            return "国网新一代"
+
+        elif self.current_protocol == 6:  # DLT645
+            for item in table_data:
+                if "控制码" in str(item[0]) and not str(item[0]).startswith(" "):
+                    return str(item[3] or item[2] or "DLT645")
+            return "DLT645协议"
+
+        elif self.current_protocol == 1:  # PLC RF
+            for item in table_data:
+                field = str(item[0])
+                if ("命令字" in field or "功能" in field) and not field.startswith(" "):
+                    return str(item[3] or item[2] or "PLC RF")
+            return "PLC RF协议"
+
+        else:
+            return self.protocol_combo.currentText().split(" ")[0]
+
+    def _on_batch_row_selected(self, row=None, col=None):
+        """批量解析摘要表行选中时的处理（填充右侧详情面板）"""
+        # 获取当前选中行
+        if row is not None:
+            index = row
+        else:
+            current_row = self.batch_summary_table.currentRow()
+            if current_row < 0:
+                return
+            index = current_row
+
+        if index < 0 or index >= len(self.batch_results):
+            return
+
+        self._populate_batch_detail(index)
+
+    def _populate_batch_detail(self, index: int):
+        """填充批量解析详情面板（右侧表格 + 原始报文）"""
+        if index < 0 or index >= len(self.batch_results):
+            return
+
+        result = self.batch_results[index]
+        raw_hex = result.get("_input", "")
+
+        # 填充原始报文
+        if raw_hex:
+            hex_display = ' '.join(raw_hex[j:j+2] for j in range(0, len(raw_hex), 2))
+            self.batch_detail_hex.setPlainText(hex_display)
+        else:
+            self.batch_detail_hex.clear()
+
+        # 填充详情表格
+        self.batch_detail_table.setRowCount(0)
+
+        status = result.get("_status", "")
+        if status == "异常":
+            # 异常帧：显示错误信息
+            error_text = result.get("错误", str(result))
+            self.batch_detail_table.insertRow(0)
+            err_item = QTableWidgetItem(f"❌ 解析异常：{error_text}")
+            err_item.setForeground(Qt.red)
+            self.batch_detail_table.setItem(0, 0, err_item)
+            return
+
+        table_data = result.get("_table_data", [])
+        if not table_data:
+            return
+
+        for r, item in enumerate(table_data):
+            field_name = str(item[0]) if item[0] is not None else ""
+            raw_val = str(item[1]) if item[1] is not None else ""
+            parsed_val = str(item[2]) if item[2] is not None else ""
+            comment = str(item[3]) if item[3] is not None else ""
+
+            # 检测子字段：优先用 is_child 标志(index 6)，其次用前导空格判断
+            is_child = False
+            if len(item) > 6:
+                is_child = bool(item[6])
+            if not is_child and (field_name.startswith("  ") or field_name.startswith("\t")):
+                is_child = True
+
+            # 构造显示用字段名
+            if is_child:
+                display_name = "  └ " + field_name.lstrip()
+            else:
+                display_name = field_name
+
+            self.batch_detail_table.insertRow(r)
+
+            field_item = QTableWidgetItem(display_name)
+            if is_child:
+                field_item.setForeground(QColor("#555555"))
+            self.batch_detail_table.setItem(r, 0, field_item)
+            self.batch_detail_table.setItem(r, 1, QTableWidgetItem(raw_val))
+            self.batch_detail_table.setItem(r, 2, QTableWidgetItem(parsed_val))
+            self.batch_detail_table.setItem(r, 3, QTableWidgetItem(comment))
+
+    def _do_count_frames(self):
+        """实时统计输入中的帧数量（防抖调用）"""
+        text = self.batch_input.toPlainText().strip()
+        if not text:
+            self.batch_frame_count_label.setText("共 0 帧")
+            return
+
+        try:
+            if self.current_protocol in (9, 10):
+                # 新一代协议按行近似统计（精确统计需要完整前缀剥离，代价较高）
+                count = sum(1 for line in text.splitlines() if line.strip())
+            else:
+                frames = self._extract_frames_for_protocol(text, self.current_protocol)
+                count = len(frames)
+        except Exception:
+            count = 0
+
+        self.batch_frame_count_label.setText(f"共 {count} 帧")
+
+    def _copy_batch_detail_hex(self):
+        """复制当前选中帧的原始报文到剪贴板"""
+        text = self.batch_detail_hex.toPlainText().strip()
+        if not text:
+            return
+        clipboard = QApplication.clipboard()
+        clipboard.setText(text)
+        # 临时更新状态栏提示
+        old_text = self.batch_status_bar.text()
+        self.batch_status_bar.setText("原始报文已复制到剪贴板")
+        QTimer.singleShot(1500, lambda: self.batch_status_bar.setText(old_text))
+
+    def _update_status_bar(self, success_count: int, fail_count: int, total: int):
+        """更新批量解析底部状态栏"""
+        self.batch_status_bar.setText(
+            f"解析完成 — 共 {total} 帧（✅ {success_count} 成功，❌ {fail_count} 失败）"
+        )
+
     def update_stats(self, text: str):
-        """更新状态标签"""
-        self.stats_label.setText(f"状态：{text}")
+        """更新状态标签（兼容旧 stats_label，同时更新批量解析状态栏）"""
+        if hasattr(self, 'stats_label') and self.stats_label:
+            self.stats_label.setText(f"状态：{text}")
+        if hasattr(self, 'batch_status_bar') and self.batch_status_bar:
+            self.batch_status_bar.setText(text)
     
     # ==================== 表格结果填充与字节高亮 ====================
 
@@ -4283,6 +4986,18 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    def _get_baud_value(self) -> Optional[int]:
+        """获取并校验波特率输入（支持编辑框自定义值），无效返回 None 并提示"""
+        baud_text = self.serial_baud_combo.currentText().strip()
+        try:
+            baud = int(baud_text)
+            if baud <= 0:
+                raise ValueError
+            return baud
+        except ValueError:
+            QMessageBox.warning(self, "警告", f"波特率无效：{baud_text}，请输入正整数")
+            return None
+
     def _resolve_config_path(self, raw: str) -> Path:
         """将配置文件路径字符串解析为绝对 Path"""
         p = Path(raw)
@@ -4336,6 +5051,9 @@ class MainWindow(QMainWindow):
                     file_paths[key] = str(path)
         config["file_paths"] = file_paths
 
+        # 更新主题与字体配置
+        config["ui"] = ThemeManager.to_config(self._theme_id, self._font_family, self._font_size)
+
         try:
             with open(self._config_path, "w", encoding="utf-8") as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)
@@ -4380,6 +5098,80 @@ class MainWindow(QMainWindow):
         """保存串口配置到 config.json（保留现有 file_paths）"""
         self._save_app_config()
 
+    # ==================== 主题与字体 ====================
+
+    def _is_dark_theme(self) -> bool:
+        """当前是否为暗色主题"""
+        return self._theme_id == "dark"
+
+    def _make_stats_label(self, text: str = "", size: int = 12) -> QLabel:
+        """创建随主题适配的统计/状态标签（注册到列表，主题切换时统一重设）"""
+        lbl = QLabel(text)
+        lbl.setStyleSheet(self._stats_style(size))
+        self._stats_labels.append((lbl, size))
+        return lbl
+
+    def _stats_style(self, size: int = 12) -> str:
+        """统计/状态标签样式（暗色主题下用浅灰文字）"""
+        color = "#aaa" if self._is_dark_theme() else "#666"
+        return f"color: {color}; font-size: {size}px;"
+
+    def _batch_count_style(self) -> str:
+        """批量解析帧计数标签样式"""
+        if self._is_dark_theme():
+            return "color: #bbb; font-size: 12px; padding: 2px 10px; background: #3a3a3a; border-radius: 10px;"
+        return "color: #666; font-size: 12px; padding: 2px 10px; background: #f0f0f0; border-radius: 10px;"
+
+    def _batch_status_style(self) -> str:
+        """批量解析状态栏样式"""
+        if self._is_dark_theme():
+            return ("color: #bbb; font-size: 12px; padding: 4px 10px; "
+                    "background: #333333; border: 1px solid #555555; border-radius: 4px;")
+        return ("color: #666; font-size: 12px; padding: 4px 10px; "
+                "background: #f8f9fa; border: 1px solid #e0e0e0; border-radius: 4px;")
+
+    def _serial_status_style(self, color: str, bold: bool = False) -> str:
+        """串口状态标签样式（灰色在暗色下提亮；同时记录当前颜色/粗体供主题切换重设）"""
+        self._serial_status_color = color
+        self._serial_status_bold = bold
+        if self._is_dark_theme() and color == "#999":
+            color = "#bbb"
+        weight = " font-weight: bold;" if bold else ""
+        return f"color: {color}; font-size: 12px;{weight}"
+
+    def _serial_refresh_style(self) -> str:
+        """串口刷新按钮样式（hover 色随主题明暗）"""
+        if self._is_dark_theme():
+            return ("QPushButton { background: transparent; border: none; padding: 2px; }"
+                    "QPushButton:hover { background: rgba(255,255,255,25); border-radius: 3px; }"
+                    "QPushButton:pressed { background: rgba(255,255,255,50); }")
+        return ("QPushButton { background: transparent; border: none; padding: 2px; }"
+                "QPushButton:hover { background: rgba(0,0,0,20); border-radius: 3px; }"
+                "QPushButton:pressed { background: rgba(0,0,0,40); }")
+
+    def _restyle_for_theme(self):
+        """主题切换后重设动态控件样式（统计标签/串口状态/批量状态等）"""
+        for lbl, size in self._stats_labels:
+            lbl.setStyleSheet(self._stats_style(size))
+        if hasattr(self, "serial_status_label"):
+            self.serial_status_label.setStyleSheet(
+                self._serial_status_style(self._serial_status_color, self._serial_status_bold))
+        if hasattr(self, "serial_refresh_btn"):
+            self.serial_refresh_btn.setStyleSheet(self._serial_refresh_style())
+        if hasattr(self, "batch_frame_count_label"):
+            self.batch_frame_count_label.setStyleSheet(self._batch_count_style())
+        if hasattr(self, "batch_status_bar"):
+            self.batch_status_bar.setStyleSheet(self._batch_status_style())
+
+    def _show_theme_settings_dialog(self):
+        """显示主题与字体设置对话框"""
+        dialog = ThemeSettingsDialog(self._theme_id, self._font_family, self._font_size, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._theme_id, self._font_family, self._font_size = dialog.get_settings()
+            self._save_app_config()
+        # 无论确定/取消（取消时对话框已还原主题），同步动态控件样式
+        self._restyle_for_theme()
+
     def _refresh_serial_ports(self):
         """刷新可用串口列表"""
         from serial_worker import SerialWorker
@@ -4407,14 +5199,16 @@ class MainWindow(QMainWindow):
             self.serial_baud_combo.setEnabled(True)
             self.serial_parity_combo.setEnabled(True)
             self.serial_status_label.setText("未连接")
-            self.serial_status_label.setStyleSheet("color: #999; font-size: 12px;")
+            self.serial_status_label.setStyleSheet(self._serial_status_style("#999"))
             self._save_serial_config()
         else:
             port = self.serial_port_combo.currentText()
             if not port:
                 QMessageBox.warning(self, "警告", "请先选择串口端口")
                 return
-            baud = int(self.serial_baud_combo.currentText())
+            baud = self._get_baud_value()
+            if baud is None:
+                return
             parity = self.serial_parity_combo.currentText()
             self.serial_worker.configure(port, baudrate=baud, parity=parity)
             if self.serial_worker.open_port():
@@ -4443,42 +5237,28 @@ class MainWindow(QMainWindow):
             self.serial_baud_combo.setEnabled(True)
             self.serial_parity_combo.setEnabled(True)
             self.serial_status_label.setText("未连接")
-            self.serial_status_label.setStyleSheet("color: #999; font-size: 12px;")
+            self.serial_status_label.setStyleSheet(self._serial_status_style("#999"))
 
     def _on_serial_error(self, msg: str):
         """串口错误回调"""
         self.serial_status_label.setText(f"错误: {msg}")
-        self.serial_status_label.setStyleSheet("color: #f44336; font-size: 12px;")
+        self.serial_status_label.setStyleSheet(self._serial_status_style("#f44336"))
 
 
 def main():
+    # 修复 Windows 终端中文乱码：将 stdout/stderr 切换为 UTF-8
+    # PyInstaller GUI 模式（console=False）下 sys.stdout/stderr 为 None，需守卫
+    if sys.platform == 'win32':
+        import io
+        if sys.stdout is not None:
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        if sys.stderr is not None:
+            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
     app = QApplication(sys.argv)
 
-    # 设置应用样式
-    app.setStyle('Fusion')
-
-    # 设置字体
-    font = QFont()
-    font.setPointSize(10)
-    app.setFont(font)
-
-    # 全局复选框样式：白色背景 + 黑色边框，确保在浅色主题下清晰可见
-    app.setStyleSheet("""
-        QCheckBox::indicator {
-            width: 16px;
-            height: 16px;
-            border: 1px solid black;
-            background-color: white;
-        }
-        QCheckBox::indicator:checked {
-            background-color: #2196F3;
-            border: 1px solid black;
-        }
-        QCheckBox::indicator:indeterminate {
-            background-color: #90CAF9;
-            border: 1px solid black;
-        }
-    """)
+    # 应用主题与字体设置（从 config.json 读取，未配置时使用默认浅色主题 + 微软雅黑 10pt）
+    ThemeManager.apply_from_file(app)
 
     window = MainWindow()
     window.show()
