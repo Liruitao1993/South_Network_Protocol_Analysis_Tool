@@ -16,6 +16,12 @@
 import re
 import zlib
 from typing import List, Tuple, Any, Optional
+
+try:
+    import crcmod
+    _CRC24_MPDU_FUN = crcmod.mkCrcFun(0x1800063, initCrc=0x000000, rev=True, xorOut=0x000000)
+except ImportError:
+    _CRC24_MPDU_FUN = None
 from gw_new_gen_cmd_payloads import parse_command_payload
 from gw_new_gen_mme_parser import parse_management_message, parse_singlehop_msdu
 
@@ -158,12 +164,26 @@ class GWNewGenParser:
         if len(data) < 2:
             return [("❌ 解析失败", "", "", "帧数据过短，无法解析", None, None, False)]
 
+        # ── 直接网络管理消息：首字节即MMTYPE(2B大端) ──
+        # 管理消息报文头(表42): MMTYPE(2B) + 保留(2B)。部分帧直接以管理消息输入。
+        from gw_new_gen_mme_parser import MMETYPE_NAMES
+        if len(data) >= 4 and ((data[0] << 8) | data[1]) in MMETYPE_NAMES:
+            return self._parse_mgmt_if_direct(data, 0)
+
         # ── 应用层模式：输入即为应用层报文 ──
         if parse_level == "app":
             # 如果首字节是有效端口号，直接从偏移0解析
             known_ports = set(self.PORT_NAMES.keys())
             if len(data) >= 1 and data[0] in known_ports:
                 return self._parse_application_layer(data, 0)
+            # 若输入以MPDU FC帧头开头(可能带管理消息), 剥离FC后检测管理消息
+            stripped, fc_off = self._strip_fc_prefix_if_present(data, [])
+            if fc_off > 0:
+                mm_result = self._parse_mgmt_if_direct(stripped, fc_off)
+                if mm_result is not None:
+                    return mm_result
+                # 剥离FC后可能是PB+MAC或应用层, 交给后续逻辑
+                data = stripped
             # 否则使用智能扫描定位应用层起始位置
             app_result = self._parse_msdu_from_frame(data, 0, std_version)
             if app_result:
@@ -176,10 +196,18 @@ class GWNewGenParser:
             result = []
             # 添加帧类型说明（默认SOF帧）
             result.append(("解析模式", "", "仅MAC帧", "默认按SOF帧结构解析", None, None, False))
+            # 若输入以FC帧头开头(FCCS校验通过)或16字节前缀后为管理消息, 剥离FC
+            data, fc_offset = self._strip_fc_prefix_if_present(data, result)
+            # 剥离后若直接是网络管理消息(MMTYPE大端且保留字段为0), 直接按管理消息解析
+            mm_result = self._parse_mgmt_if_direct(data, fc_offset)
+            if mm_result is not None:
+                result.extend(mm_result)
+                return result
             # 先解析PB头，再解析MAC头
             pb_result = self._parse_pb_by_frame_type(data, 0, 1, std_version)  # 1=SOF帧
             if pb_result:
-                result.extend(pb_result)
+                # 剥离FC后行坐标整体偏移
+                result.extend(self._shift_rows(pb_result, fc_offset))
             else:
                 result.append(("❌ 解析失败", "", "", "MAC帧头解析失败，数据可能不完整", None, None, False))
             return result
@@ -191,10 +219,17 @@ class GWNewGenParser:
             dt_names = {0: "信标帧", 1: "SOF帧", 2: "ACK帧(SACK)", 3: "NET帧"}
             dt_name = dt_names.get(frame_type, f"未知({frame_type})")
             result.append(("解析模式", "", f"仅PB - {dt_name}", f"帧类型={frame_type}", None, None, False))
+            # 若输入以FC帧头开头(FCCS校验通过)或16字节前缀后为管理消息, 剥离FC
+            data, fc_offset = self._strip_fc_prefix_if_present(data, result)
+            # 剥离后若直接是网络管理消息(MMTYPE大端且保留字段为0), 直接按管理消息解析
+            mm_result = self._parse_mgmt_if_direct(data, fc_offset)
+            if mm_result is not None:
+                result.extend(mm_result)
+                return result
             # PB解析根据帧类型有所不同
             pb_result = self._parse_pb_by_frame_type(data, 0, frame_type, std_version)
             if pb_result:
-                result.extend(pb_result)
+                result.extend(self._shift_rows(pb_result, fc_offset))
             return result
 
         result = []
@@ -242,6 +277,91 @@ class GWNewGenParser:
             result.extend(msdu_result)
 
         return result
+
+    @staticmethod
+    def _crc24_mpdu(data: bytes) -> int:
+        """CRC-24: poly=0x1800063(反射), init=0, xorOut=0 (与南网csg解析器一致)
+
+        用于FC帧头FCCS校验, 判定输入是否为完整MPDU帧。
+        """
+        if _CRC24_MPDU_FUN is not None:
+            return _CRC24_MPDU_FUN(data)
+        # 无crcmod时的等价实现(反射模式)
+        crc = 0
+        for b in data:
+            crc ^= b
+            for _ in range(8):
+                if crc & 1:
+                    crc = (crc >> 1) ^ 0x1800063
+                else:
+                    crc >>= 1
+        return crc & 0xFFFFFF
+
+    def _strip_fc_prefix_if_present(self, data: bytes, result: list) -> Tuple[bytes, int]:
+        """若输入以MPDU帧控制(FC)头开头, 剥离16字节FC后返回(PB/MAC数据, 偏移)
+
+        FC特征: 首字节 bit3=接入指示=1 且 bits0-2=定界符类型(0~3)。
+        用于 mac_only/pb_only 解析级别: 用户可能直接粘贴完整MPDU帧。
+        返回 (剥离后数据, 坐标偏移): 未剥离时偏移=0。
+        """
+        if len(data) >= 17:
+            b0 = data[0]
+            delimiter_type = b0 & 0x07
+            # 剥离条件(任一):
+            #  1. FCCS(前13字节CRC-24)校验通过 -> 确定性MPDU
+            #  2. 16字节前缀后为网络管理消息(MMTYPE大端匹配且保留字段为0)
+            if delimiter_type <= 3 and len(data) >= 16:
+                after = data[16:]
+                fcs_valid = False
+                fcs_stored = int.from_bytes(data[13:16], 'little')
+                fcs_calc = self._crc24_mpdu(data[:13])
+                fcs_valid = (fcs_calc == fcs_stored)
+                from gw_new_gen_mme_parser import MMETYPE_NAMES
+                looks_like_mgmt = (
+                    len(after) >= 4
+                    and ((after[0] << 8) | after[1]) in MMETYPE_NAMES
+                    and after[2] == 0 and after[3] == 0  # 保留字段必须为0
+                )
+                if fcs_valid or looks_like_mgmt:
+                    fc_hex = ' '.join(f'{b:02X}' for b in data[:16])
+                    result.append(("FC帧头", fc_hex, "16字节",
+                                   "检测到MPDU帧控制头，自动剥离后解析PB/MAC",
+                                   0, 15, False))
+                    return data[16:], 16
+        return data, 0
+
+    def _parse_mgmt_if_direct(self, data: bytes, fc_offset: int):
+        """若 data 以网络管理消息头(MMTYPE 2B大端)开头, 返回管理消息解析结果
+
+        fc_offset: 已剥离的FC头字节数(0=未剥离), 用于行坐标对齐。
+        返回解析行列表; 非管理消息返回 None。
+        """
+        from gw_new_gen_mme_parser import MMETYPE_NAMES
+        if len(data) >= 4:
+            mmtype = (data[0] << 8) | data[1]
+            if mmtype in MMETYPE_NAMES:
+                rows = parse_management_message(data, 0)
+                if fc_offset:
+                    rows = self._shift_rows(rows, fc_offset)
+                return rows
+        return None
+
+    @staticmethod
+    def _shift_rows(rows: list, offset: int) -> list:
+        """将解析结果行的 byte_start/byte_end 整体偏移（剥离FC头后坐标对齐）"""
+        if offset == 0:
+            return rows
+        shifted = []
+        for row in rows:
+            if len(row) >= 6 and row[4] is not None and row[5] is not None:
+                s, e = row[4], row[5]
+                if s >= 0 and e >= 0:
+                    shifted_row = (row[0], row[1], row[2], row[3],
+                                   s + offset, e + offset) + tuple(row[6:])
+                    shifted.append(shifted_row)
+                    continue
+            shifted.append(row)
+        return shifted
 
     def _parse_fc(self, data: bytes, offset: int) -> List[Tuple]:
         """解析MPDU帧控制(FC)字段 - 16字节"""
