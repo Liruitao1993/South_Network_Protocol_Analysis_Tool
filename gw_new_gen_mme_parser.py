@@ -968,21 +968,34 @@ def _parse_rf_channel_conflict(data: bytes, off: int, result: List[Tuple]) -> No
         return
     result.append(("  CCO MAC地址", _raw(data, off, off + 6), "",
                    "与本网络发生冲突的邻居网络CCO MAC", off, off + 6, True))
-    count = data[off + 6]
+    # 表89: CCO MAC(6B) + 保留(1B) + 邻居网络个数(1B) + 条目
+    reserved = data[off + 6]
+    result.append(("  保留", f"0x{reserved:02X}", str(reserved),
+                   "保留字段(语义未定义,疑似网络号字节宽度)", off + 6, off + 7, True))
+    count = data[off + 7]
     result.append(("  邻居网络个数", f"0x{count:02X}", str(count),
-                   "周边可见邻居网络个数", off + 6, off + 7, True))
-    # 邻居网络条目: 表90, 每条2字节(信道号1B + option 1B)
-    pos = off + 7
+                   "周边可见邻居网络个数", off + 7, off + 8, True))
+    # 邻居网络条目(表90): 分组布局, 先N个无线信道号再N个option
+    #   邻居网络(0)信道号 ... 邻居网络(N-1)信道号 | 邻居网络(0)option ... 邻居网络(N-1)option
+    pos = off + 8
+    channels = []
     for i in range(count):
-        if pos + 2 > end:
-            result.append(("  邻居网络条目(截断)", _raw(data, pos, end), "",
+        if pos >= end:
+            result.append((f"  邻居网络[{i}]信道号(截断)", _raw(data, pos, end), "",
                            "", pos, end, True))
             return
-        ch = data[pos]
-        opt = data[pos + 1]
-        result.append((f"  邻居网络[{i}]", _raw(data, pos, pos + 2),
-                       f"信道号={ch} option=0x{opt:02X}", "", pos, pos + 2, True))
-        pos += 2
+        channels.append(data[pos])
+        pos += 1
+    for i in range(count):
+        if pos >= end:
+            result.append((f"  邻居网络[{i}]option(截断)", _raw(data, pos, end), "",
+                           "", pos, end, True))
+            return
+        opt = data[pos]
+        result.append((f"  邻居网络[{i}]", f"信道号=0x{channels[i]:02X} option=0x{opt:02X}",
+                       f"信道号={channels[i]} option=0x{opt:02X}",
+                       "先信道号后option(表90)", off + 8 + i, pos, True))
+        pos += 1
     if pos < end:
         result.append(("  剩余数据", _raw(data, pos, end), f"{end - pos}字节",
                        "", pos, end, True))
