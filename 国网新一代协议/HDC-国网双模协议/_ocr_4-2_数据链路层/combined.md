@@ -1,0 +1,4770 @@
+
+
+<!-- ===== Page 1 ===== -->
+
+ICS 29.240
+
+国家电网有限公司企业标准
+
+Q/GDW 12087.42 2020
+
+# 双模通信互联互通技术规范 第4—2部分：数据链路层通信协议
+
+# Dual mode communication interoperability technical specification Part42: Data link layer protocol
+
+2021 03 26 发布
+
+2021 03 26 实施
+
+国家电网有限公司 发布
+
+<!-- ===== Page 2 ===== -->
+
+
+
+<!-- ===== Page 3 ===== -->
+
+## 目次
+
+前言.....Ⅱ  
+1 范围.....1  
+2 规范性引用文件.....1  
+3 术语和定义.....1  
+4 缩略语.....3  
+5 数据链路层.....5  
+附录A（规范性附录）白名单管理说明.....136  
+附录B（参考性附录）CSMA退避流程.....137  
+编制说明.....139
+
+<!-- ===== Page 4 ===== -->
+
+## 前言
+
+为规范电力用户用电信息采集系统双模通信的协议要求，包括应用层报文格式。MAC子层功能。网络管理子层功能等内容，制定本部分。
+
+《双模通信互联互通技术规范》标准分为6个部分：
+
+第1部分：总则；
+
+第2部分：技术要求：
+
+第3部分：检验方法：
+
+第4 1部分：物理层通信协议；
+
+第42部分：数据链路层通信协议；
+
+第43部分：应用层通信协议
+
+本部分是《双模通信互联互通技术规范》标准的第42部分。
+
+本部分由国家电网有限公司市场营销部提出并解释。
+
+本部分由国家电网有限公司科技部归口。
+
+本部分起草单位：中国电力科学研究院有限公司，国家电网有限公司，国网重庆市电力公司，国网北京市电力公司，国网天津市电力公司，国网冀北电力有限公司，国网宁夏电力有限公司，国网河北省电力有限公司，国网浙江省电力有限公司，国网江苏省电力有限公司，国网湖南省电力有限公司，国网山东省电力公司电力科学研究院，国网新疆电力有限公司，全球能源互联网研究院有限公司，国网信息通信产业集团有限公司，国网上海市电力公司。
+
+本部分主要起草人：刘宣。唐悦。李然。任毅。周晖。彭楚宁。王齐。崔文武。谢广成。叶方彬。周超。李飞。宋玮琼。梁飞。黄瑞。赵旭。安春燕。王新刚。阿辽沙。叶。窦健。郑国权。卢继哲。郄爽。
+
+本部分首次发布
+
+本部分在执行过程中的意见或建议反馈至国家电网有限公司科技部。
+
+<!-- ===== Page 5 ===== -->
+
+# 双模通信互联互通技术规范 第42部分：数据链路层通信协议
+
+## 1 范围
+
+本部分规定了电力用户用电信息采集系统双模通信网络的数据链路层的要求。
+
+本部分适用于用电信息采集系统的集中器双模通信单元与电能表双模通信单元。采集器双模通信单元之间的数据交换。
+
+## 2 规范性引用文件
+
+下列文件对于本文件的应用是必不可少的。凡是注日期的引用文件，仅注日期的版本适用于本文件。凡是不注日期的引用文件，其最新版本（包括所有的修改单）适用于本文件。
+
+Q/GDW 11612.41 2018 低压电力线高速载波通信互联互通技术规范 第41部分：物理层通信协议
+
+DL/T 645 2007 多功能电能表通信协议
+
+Q/GDW 10376.2 2019 用电信息采集系统通信协议 第2部分：集中器本地通信模块接口
+
+## 3 术语和定义
+
+## 31 
+
+下列术语和定义适用于本文件。
+
+关联 association
+
+## 32 
+
+用来在通信网络中创建成员隶属关系的一种服务。
+
+协议数据单元 protocol data unit
+
+两个对等实体之间交换的数据单元。
+
+## 33 
+
+高速载波通信网络 high speed carrier communication network
+
+高速载波通信网络是以低压电力线为通信媒介，实现低压电力用户用电信息汇聚。传输、交互的通信网络，其主要采用正交频分复用技术，频段使用0.7MHz~12MHz。
+
+## 34 
+
+中央协调器 central coordinator
+
+通信网络中的主节点角色，负责完成组网控制。网络维护管理等功能，其对应的设备实体为集中器本地通信单元。
+
+<!-- ===== Page 6 ===== -->
+
+## 35 
+
+## 站点 station
+
+通信网络中的从节点角色，其对应的设备实体为通信单元，包括电能表双模通信单元。I型采集器双模通信单元或双模II型采集器。
+
+## 36 
+
+## 代理协调器proxy coordinator
+
+为中央协调器与站点或者站点与站点之间进行数据中继转发的站点，简称代理。
+
+## 37 
+
+## 信标 beacon
+
+中央协调器。代理和站点发送的携带有网络管理和维护信息的。用于特定目的的管理消息。中央协调器发送的信标叫中央信标，代理发送的信标叫代理信标，站点发送的信标叫发现信标。
+
+## 38 
+
+## 信标周期 beacon period
+
+## 39 
+
+中央协调器根据网络规模确定的周期性发送中央信标的时间间隔。
+
+## 代理主路径 the preferred path via proxy
+
+## 3 10
+
+站点与代理之间形成的路径
+
+## 代理变更 proxy switching
+
+## 3 11
+
+站点根据网络通信情况选择不同站点作为代理的过程
+
+## 业务报文 service datagram
+
+应用层产生的。用于获取抄表数据的报文。应用层所承载的业务报文应符合 DL/T 645 2007。Q/GDW 10376.2 2019 的规定。
+
+## 3 12
+
+## 路由 routing
+
+通信网络中建立和维护从中央协调器到各个站点的传输路径以及从各个站点至中央协调器的传输路径的过程。
+
+## 3 13
+
+## 绑定载波侦听多址接入 carrier sense multiple access (CSMA)
+
+信标周期中可以分配给某个特定优先级或某个特定种类的业务使用的CSMA时隙，当有多个站点都满足使用绑定CSMA时隙的条件时，多个站点之间进一步通过CSMA竞争机制获取绑定CSMA的使用权。
+
+<!-- ===== Page 7 ===== -->
+
+## 心跳检测 heartbeats detection
+
+站点周期性发送心跳报文，其它站点以及中央协调器据此判断此站点的在线或离线状态的过程。
+
+## 3 15
+
+## 管理消息 management message
+
+用于完成双模通信网络组网。网络维护等功能而定义的报文。
+
+## 3 16
+
+## 发现列表 discover lists
+
+通信网络中所有节点周期性广播发送的。携带有邻居站点列表信息的管理消息。
+
+## 3 17
+
+## 白名单 white lists
+
+## 3 18
+
+通信网络中设置的允许接入该网络的终端设备的 MAC 地址列表。
+
+## 黑名单 black lists
+
+通信网络中设置的不允许接入该网络的终端设备的 MAC 地址列表。
+
+## 3 19
+
+## 多网络共存coexistence of multiple networks
+
+多个中央协调器距离较近，信号相互干扰的场景。
+
+## 3 20
+
+网络标识符 network identifier
+
+网络标识符是用于标识一个双模通信网络的唯一身份识别号。
+
+## 3 21
+
+多网络协调 coordination of multiple networks
+
+在多网络共存场景下，各个网络的中央协调器进行网络标识符和带宽的协调，保证多个网络同时正常工作。
+
+## 3 22
+
+## 网络标识符协调 coordination of NID
+
+多网络共存场景下，多个网络的网络标识符存在冲突，各个网络的中央协调器之间通过协商保证网络标识符不冲突的过程。
+
+## 3 23
+
+带宽协调 coordination of bandwidth
+
+多网络共存场景下，中央协调器之间进行带宽协调的过程。
+
+## 4 缩略语
+
+<!-- ===== Page 8 ===== -->
+
+下列缩略语适用于本文件。
+
+BIFS：突发帧间隔（Burst Inter Frame Space）
+
+BPC: 信标周期计数（Beacon Period Count）
+
+BPCS：信标帧载荷校验序列（Beacon Payload Check Sequence）
+
+BT：信标类型 (Beacon Type)
+
+BTS：信标时间戳（Beacon Time Stamp）
+
+CCO：中央协调器（Central Coordinator）
+
+CIFS: 竞争帧间隔（Contention Inter Frame Space）
+
+CRC：循环冗余校验（Cyclic Redundancy Check）
+
+CSMA CA: 带冲突避免的载波侦听多址（Carrier sense multiple access with collision avoidance）
+
+DT：定界符类型（Delimiter Type）
+
+EIFS：扩展帧间隔（Extension Inter Frame Space）
+
+FC: 帧控制（Frame Control）
+
+FCCS：帧控制校验序列（Frame Control Check Sequence）
+
+FL: 帧长（Frame Length）
+
+ICV：完整性校验值（Integrity Check Value）
+
+ITU：国际电信联盟（International Telecommunication Union）
+
+LID：链路标识符（Link Identifier）
+
+LSB：最低位（Least Significant Bit）
+
+MAC：媒介访问控制（Media Access Control）
+
+MME：管理消息表项（Management Message Entry）
+
+MPDU：MAC 层协议数据单元（MAC Protocol Data Unit）
+
+MSDU: MAC 层服务数据单元（MAC Service Data Unit）
+
+NID：网络标识符（Network Identifier）
+
+NTB：网络基准时间（Network Time Base）
+
+ODA：原始目的地址（Original Destination Address）
+
+ODTEI：原始目的终端设备标识（Original Destination Terminal Equipment Identifier）
+
+OFDM：正交频分复用（Orthogonal Frequency Division Multiplexing）
+
+OSA：原始源地址（Original Source Address）
+
+OSTEI：原始源终端设备标识（Original Source Terminal Equipment Identifier）
+
+PBCS：物理块校验序列（PHY Block Check Sequence）
+
+PCO：代理协调器（Proxy Coordinator）
+
+PHY：物理层（Physical Layer）
+
+PLC: 电力线载波（Power Line Carrier）
+
+RF：射频（Radio Frequency）
+
+RSVD: 保留（Reserved）
+
+SACK：选择确认（Selective Acknowledgement）
+
+SNR：信噪比（Signal to Noise Ratio）
+
+SOF：帧起始（Start of Frame）
+
+SSN：分段序列号（Segment Sequence Number）
+
+STA：站点（Station）
+
+TDMA：时分多址（Time Division Multiple Access）
+
+TEI：终端设备标识（Terminal Equipment Identifier）
+
+<!-- ===== Page 9 ===== -->
+
+VCS: 虚拟载波侦听（Virtual Carrier Sensing）
+
+VF: 可变区域（Variant Field）
+
+VLAN: 虚拟局域网（Virtual Local Area Network）
+
+## 5 数据链路层
+
+## 51 帧格式
+
+## 511 MAC 帧格式
+
+## 5 1 1 1 MAC 帧格式定义
+
+MAC帧是不同站点的MAC层之间进行数据传送的基本传输单元 $ ^{x} $。一个MAC帧由MAC帧头，MAC业务数据单元和完整性校验值组成。载波MAC帧的基本格式如图1所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_175_632_1038_827.jpg" alt="Image" width="72%" /></div>
+
+
+<div style="text-align: center;">图 1 载波 MAC 帧格式</div>
+
+
+无线MAC帧的基本格式如图2所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_178_941_1038_1136.jpg" alt="Image" width="72%" /></div>
+
+
+<div style="text-align: center;">图 2 无线 MAC 帧格式</div>
+
+
+## 5 1 1 2 MAC 帧头固定域格式
+
+MAC帧头固定格式如表1所示。
+
+<div style="text-align: center;">表1 MAC 帧头固定域字段</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小(比特)</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>版本</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>03</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>可变区域</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>可变长</td><td style='text-align: center; word-wrap: break-word;'>L（可变长）</td></tr></table>
+
+版本是一个4比特的字段。该字段用来指示MAC帧头的字段定义版本号。版本字段的含义如表2所示。
+
+<!-- ===== Page 10 ===== -->
+
+<div style="text-align: center;">表2 版本</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>标准帧协议</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>单跳帧协议</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>其他</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+载波和无线信道可使用的版本如表3所示。
+
+<div style="text-align: center;">表3 版本与信道对应关系</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td><td style='text-align: center; word-wrap: break-word;'>载波</td><td style='text-align: center; word-wrap: break-word;'>无线</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>标准帧协议</td><td style='text-align: center; word-wrap: break-word;'>支持</td><td style='text-align: center; word-wrap: break-word;'>支持</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>单跳帧协议</td><td style='text-align: center; word-wrap: break-word;'>不支持</td><td style='text-align: center; word-wrap: break-word;'>支持</td></tr></table>
+
+## 5113 标准 MAC 帧头格式
+
+## 51131 帧头格式
+
+标准MAC帧头格式如表4所示。
+
+<div style="text-align: center;">表4 标准 MAC 帧头格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小(比特)</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>版本</td><td rowspan="2">0</td><td style='text-align: center; word-wrap: break-word;'>0 3</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td rowspan="2">原始源 TEI</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td rowspan="2">12</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td rowspan="2">原始目的 TEI</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12</td></tr><tr><td rowspan="2">3</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>发送类型</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>发送次数限值</td><td rowspan="2">4</td><td style='text-align: center; word-wrap: break-word;'>0 4</td><td style='text-align: center; word-wrap: break-word;'>5</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>5 7</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td rowspan="2">MSDU 序列号</td><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">16</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>MSDU 类型</td><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td rowspan="2">MSDU 长度</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">11</td></tr><tr><td rowspan="3">9</td><td style='text-align: center; word-wrap: break-word;'>0 2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>重启次数</td><td style='text-align: center; word-wrap: break-word;'>3 6</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>代理主路径标识</td><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>路由总跳数</td><td rowspan="2">10</td><td style='text-align: center; word-wrap: break-word;'>0 3</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>路由剩余跳数</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>广播方向</td><td rowspan="4">11</td><td style='text-align: center; word-wrap: break-word;'>0 1</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>路径修复标志</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>MAC 地址标志</td><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>12</td></tr></table>
+
+<!-- ===== Page 11 ===== -->
+
+<div style="text-align: center;">表4（续）</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>12</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>12</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>组网序列号</td><td style='text-align: center; word-wrap: break-word;'>13</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>14</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>15</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>原始源 MAC 地址</td><td style='text-align: center; word-wrap: break-word;'>0 或者 16 21</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>0 或者 48</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>原始目的 MAC 地址</td><td style='text-align: center; word-wrap: break-word;'>0 或者 22 27</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>0 或者 48</td></tr></table>
+
+## 51132 版本
+
+版本是一个4比特的字段。该字段用来指示MAC帧头的字段定义版本号。标准MAC帧头中值为0。
+
+## 51133 原始源 TEI
+
+MSDU的原始源终端设备的标识，即最初产生MSDU的源终端设备的TEI。
+
+## 5 1 1 3 4 原始目的 TEI
+
+MSDU的最终目的终端设备的标识，即最终需要处理MSDU的目的终端设备的TEI。
+
+## 51135 发送类型
+
+报文发送的类型，含义如表5所示。
+
+<div style="text-align: center;">表5 发送类型</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>单播</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>全网广播</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>本地广播</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>代理广播</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>其他</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+## 51136 发送次数限值
+
+站点对报文最大发送次数。如果该字段值为零，则可以使用本地重发次数。
+
+需要确认回应的报文，如果回应为成功，则不需要继续重发。
+
+不需要确认回应的报文，则报文的总发送次数必须达到发送次数限值。
+
+## 51137 MSDU序列号
+
+指产生MSDU的原始设备分配给该MSDU的递增序列号。
+
+## 51138 MSDU长度
+
+MAC帧中携带的MSDU的长度。
+
+<!-- ===== Page 12 ===== -->
+
+## 51139 重启次数
+
+指站点的重启次数。当一个站点初次上电时，重启次数的值缺省为0，此后，每次站点重新上电，该值加1，仅用于MAC帧唯一性辅助判断。该值在0 15的范围内变化，达到最大值时，从0开始重新递增。
+
+## 5 1 1 3 10 代理主路径标识
+
+当前报文是否根据代理主路径模式进行转发的标志，含义如表6所示。
+
+<div style="text-align: center;">表6 代理主路径</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>未启用代理主路径模式</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>当前使用代理主路径模式</td></tr></table>
+
+## 511311 路由总跳数
+
+路由总跳数指MAC帧可以被转发的总跳数。报文在转发过程中，该字段的值不能修改，保持与原报文数值一致。
+
+## 5 1 1 3 12 路由剩余跳数
+
+路由剩余跳数指MAC帧可以被转发的剩余跳数。每个站点确定需要转发时，需要对该值减1。当该值减为0时，则该报文不能再进行转发。
+
+## 511313 广播方向
+
+广播报文的传输方向，含义如表7所示。
+
+<div style="text-align: center;">表7 广播方向</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>双向广播（不限定方向）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>下行广播（从 CCO 发起广播至 STA）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>上行广播（从 STA 发起广播至 CCO）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>其他</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+## 511314 路径修复标志
+
+路径修复标志，标识本帧报文在传输中是否触发过路径修复。1代表已触发过路径修复过程，0代表未触发过路径修复，含义如表8所示。
+
+<div style="text-align: center;">表8 路径修复标志</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>当前报文未触发过路径修复</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>当前报文已触发过路径修复</td></tr></table>
+
+<!-- ===== Page 13 ===== -->
+
+## 5 1 1 3 15 MAC 地址标志
+
+MAC地址标志字段，用于指示MAC帧头中是否携带MAC地址，含义如表9所示。
+
+<div style="text-align: center;">表9 MAC 地址标志</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>未携带 MAC 地址</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>携带 MAC 地址</td></tr></table>
+
+## 5 1 1 3 16 组网序列号
+
+组网序列号是一个8比特的字段，表示当前组网的序列号。该值为顺序递加的值，CCO每次重新组网后都需要加1。
+
+## 511317 MSDU 类型
+
+MSDU类型字段用于指示MSDU帧的类型，如表10所示。
+
+<div style="text-align: center;">表10 MSDU类型</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>网络管理消息</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1 47</td><td style='text-align: center; word-wrap: break-word;'>数据链路层待扩展</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>48</td><td style='text-align: center; word-wrap: break-word;'>应用层报文</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>49</td><td style='text-align: center; word-wrap: break-word;'>IP 报文</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>其他</td><td style='text-align: center; word-wrap: break-word;'>待扩展</td></tr></table>
+
+## 5 1 1 3 18 原始源 MAC 地址
+
+原始源MAC地址是48比特字段，指最初产生MSDU帧的站点MAC地址。该字段只有在“MAC地址标志”字段值为1时存在。原始源MAC地址不能为FF FF FF FF FF；00 00 00 00 00 00为非法地址。
+
+## 5 1 1 3 19 原始目的 MAC 地址
+
+原始目的MAC地址是48比特字段，指MSDU帧的最终目的站点MAC地址。该字段只有在“MAC地址标志”字段值为1时存在。
+
+## 5 1 1 4 单跳 MAC 帧头格式
+
+## 51141 帧头格式
+
+单跳MAC帧头格式如表11所示。单跳MAC帧仅用于无线信道。
+
+<div style="text-align: center;">表 11 单跳 MAC 帧头格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小(比特)</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>版本</td><td rowspan="2">0</td><td style='text-align: center; word-wrap: break-word;'>0 3</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr></table>
+
+<!-- ===== Page 14 ===== -->
+
+<div style="text-align: center;">表11（续）</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小(比特)</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>消息类型</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td rowspan="2">MSDU 长度</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">11</td></tr><tr><td rowspan="2">3</td><td style='text-align: center; word-wrap: break-word;'>0 2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>3 7</td><td style='text-align: center; word-wrap: break-word;'>5</td></tr></table>
+
+## 51142 版本
+
+版本是一个4比特的字段。该字段用来指示MAC帧头的字段定义版本号。单跳MAC帧头中值为1。
+
+## 51143 消息类型
+
+承载MSDU报文消息的类型，含义如表12所示。
+
+<div style="text-align: center;">表12 消息类型</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>发现列表消息</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1 127</td><td style='text-align: center; word-wrap: break-word;'>保留（用于管理消息类型扩展）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>128</td><td style='text-align: center; word-wrap: break-word;'>应用层报文</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>129</td><td style='text-align: center; word-wrap: break-word;'>IPV4 报文</td></tr></table>
+
+## 51144 MSDU长度
+
+MAC帧中携带的MSDU的长度。
+
+## 5115 MSDU
+
+MAC层业务数据单元，可以是需要传送的应用层业务数据，也可以是MAC层的管理消息。
+
+## 5116 完整性校验
+
+完整性校验是针对MAC帧计算的循环冗余校验值。计算完整性校验值时，不包括MAC帧头。完整性校验使用的是32比特的循环冗余校验算法。
+
+## 512 MPDU 帧格式
+
+## 5121 MPDU 帧格式定义
+
+MPDU是MAC层协议数据单元，由MAC子层提供给物理层，在不同站点的物理层之间传送数据的基本传输单元。载波信道上带有多个物理块载荷的MPDU称为长MPDU，带有一个或者不携带物理块载荷称为短MPDU。载波MPDU帧格式如图3所示。
+
+<!-- ===== Page 15 ===== -->
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_175_209_1039_401.jpg" alt="Image" width="72%" /></div>
+
+
+<div style="text-align: center;">图 3 载波 MPDU 帧格式</div>
+
+
+无线信道上仅支持1个物理块载荷的MPDU。无线MPDU帧格式如图4所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_179_513_1040_708.jpg" alt="Image" width="72%" /></div>
+
+
+<div style="text-align: center;">图 4 无线 MPDU 帧格式</div>
+
+
+## 5122 MPDU 帧控制格式
+
+## 51221 MPDU 帧控制格式定义
+
+MPDU的帧控制字段长度为16字节。MPDU帧控制字段的格式如表13所示。
+
+<div style="text-align: center;">表 13 MPDU 帧控制字段</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>定界符类型</td><td rowspan="2">0</td><td style='text-align: center; word-wrap: break-word;'>0 2</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>网络类型</td><td style='text-align: center; word-wrap: break-word;'>3 7</td><td style='text-align: center; word-wrap: break-word;'>5</td></tr><tr><td rowspan="3">网络标识</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="3">24</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td rowspan="2">可变区域</td><td style='text-align: center; word-wrap: break-word;'>4 11</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">68</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>12</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>标准版本号</td><td style='text-align: center; word-wrap: break-word;'>12</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>帧控制校验序列</td><td style='text-align: center; word-wrap: break-word;'>13 15</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>24</td></tr></table>
+
+## 51222 定界符类型
+
+定界符类型长度为3比特，用来指示MPDU的帧类型。MPDU帧类型的不同，可变区域也不同。定界符类型的取值如表14所示。
+
+<!-- ===== Page 16 ===== -->
+
+<div style="text-align: center;">表14 定界符类型</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>信标帧</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>SOF 帧</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>选择确认帧</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>网间协调帧</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>其他</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+## 51223 网络类型
+
+网络类型是一个的5比特的字段，用于指示发送MPDU站点所在的网络类型。网络类型字段的取值和所代表的含义如表15所示。
+
+<div style="text-align: center;">表 15 网络类型</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>MPDU 在用电信息采集系统中传输</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>其他</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+## 51224 网络标识
+
+网络标识是一个24比特的字段，用于区分不同的高速载波通信网络。有效取值范围为1 16777215。每个高速载波通信网络都必须有一个唯一的NID。
+
+## 51225 标准版本号
+
+标准版本号是一个4比特字段，用来表示标准演进的不同版本。标准版本号用以识别发送报文站点或者网络所使用的标准版本。其含义如表16所示。
+
+<div style="text-align: center;">表16 标准版本号</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>本标准</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>其他</td><td style='text-align: center; word-wrap: break-word;'>待演进</td></tr></table>
+
+## 51226 帧控制校验序列
+
+帧控制校验序列为帧控制的末尾24比特，校验计算帧控制中除帧控制校验序列以外的字段。帧控制校验序列采用的是24比特的循环冗余校验算法。
+
+## 51227 载波可变区域
+
+可变区域的内容由定界符类型决定。
+
+信标帧用于CCO进行网络管理。信标帧的可变区域的格式如表17所示。信标时间戳是发送信标的设备在发送信标时标记的网络基准时间，网络基准时间由CCO维护，全网站点需要和CCO的网络基准时间保持同步，在中央信标中，信标时间戳是网络基准时间，在代理信标中，信标时间戳是由PCO评估
+
+<!-- ===== Page 17 ===== -->
+
+出的网络基准时间，在发现信标中，信标时间戳是由STA评估出的网络基准时间。源TEI表示发送信标的站点的TEI。分集拷贝基本模式标识信标帧发送时采用的分集拷贝基本模式应符合Q/GDW11612.41 2018中5.1.7.6分集拷贝基本模式中的要求。符号数指OFDM符号数量，表示在信标帧的载荷中包含的OFDM符号的个数。相线标识，表示信标帧需要发送到的目的相线。相线的取值和所代表的含义如表18所示。
+
+<div style="text-align: center;">表 17 信标帧的可变区域</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特）</td></tr><tr><td rowspan="4">信标时间戳</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>07</td><td rowspan="4">32</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>07</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>07</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>07</td></tr><tr><td rowspan="2">源 TEI</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>07</td><td rowspan="2">12</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>9</td><td style='text-align: center; word-wrap: break-word;'>03</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>分集拷贝基本模式</td><td style='text-align: center; word-wrap: break-word;'>9</td><td style='text-align: center; word-wrap: break-word;'>47</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td rowspan="2">符号数</td><td style='text-align: center; word-wrap: break-word;'>10</td><td style='text-align: center; word-wrap: break-word;'>07</td><td rowspan="2">9</td></tr><tr><td rowspan="3">11</td><td style='text-align: center; word-wrap: break-word;'>0</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>相线</td><td style='text-align: center; word-wrap: break-word;'>12</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr><tr><td rowspan="2">保留</td><td style='text-align: center; word-wrap: break-word;'>37</td><td rowspan="2">9</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>12</td><td style='text-align: center; word-wrap: break-word;'>03</td></tr></table>
+
+<div style="text-align: center;">表 18 相线取值</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>表示未知相线</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>表示A相线</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>表示B相线</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>表示C相线</td></tr></table>
+
+SOF帧主要用于设备之间传输数据。SOF帧的可变区域内容如表19所示。源TEI，表示发送SOF帧的源设备站点的TEI，目的TEI，表示SOF帧的目的设备站点的TEI，SOF帧的目的设备在接收到SOF帧后，如果发现目的TEI是本站点的TEI，则需要对SOF帧进行应答，发送选择确认帧给SOF帧的发送设备。链路标识符，表示不同的优先级或者不同的业务分类。含义如表20所示。帧长，指示SOF帧的传送过程以及帧间隔等所要占用的信道的时长，单位，10微秒。帧长的主要场景有以下几种：SOF帧单帧传输。不需要选择确认的场景，其帧长包括SOF帧的帧载荷传输时间和竞争帧间隔时间，定义如图5所示。SOF帧单帧传输。且需要选择确认的场景，帧长包括SOF帧的帧载荷传输时间。应答帧帧间隔时间。选择确认传输时间以及竞争帧间隔时间，定义如图6所示。物理块个数，表示SOF帧的帧载荷中携带的物理块数量，SOF帧可支持1至4个物理块规格，物理块的大小支持72/136/264/520字节四种规格。符号数，表示在SOF帧的载荷部分包含的OFDM符号个数。广播标志位，表示该SOF帧是否为广播报文，含义如表21所示。重传标志位，表示该SOF帧是否为重传报文，含义如表22所示。加密标志位为预留信息段，为增加链路层加密机制提供支持。分集拷贝基本模式，分集拷贝基本模式是一个4比特字段，该字段表示SOF帧的帧载荷调制使用的分集拷贝基本模式，同时，分集拷贝基本模式也指示了SOF帧的物理传输块
+
+<!-- ===== Page 18 ===== -->
+
+大小，不同分集拷贝基本模式可支持的物理块数量不同，应符合Q/GDW 11612.41 2018中5.1.7.6分集拷贝基本模式中的要求，分集拷贝扩展模式，分集拷贝扩展模式是一个4比特字段，其基本含义与分集拷贝基本模式没有区别。用法和分集拷贝基本模式有关联，当分集拷贝基本模式的值为15时，表示本SOF帧的载荷是使用分集拷贝扩展模式调制，接收方需要解析本字段，获取对载荷进行译码的分集拷贝扩展模式。分集拷贝扩展模式的取值和所代表的含义参照Q/GDW 11612.41 2018中5.1.7.6分集拷贝基本模式。
+
+<div style="text-align: center;">表 19 SOF 帧的可变区域</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特）</td></tr><tr><td rowspan="2">源 TEI</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12</td></tr><tr><td rowspan="2">5</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td rowspan="2">目的 TEI</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td rowspan="2">12</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>链路标识符</td><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td rowspan="2">帧长</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12</td></tr><tr><td rowspan="2">9</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>物理块个数</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td rowspan="2">符号数</td><td style='text-align: center; word-wrap: break-word;'>10</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">9</td></tr><tr><td rowspan="3">11</td><td style='text-align: center; word-wrap: break-word;'>0</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>广播标志位</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>重传标志位</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>加密标志位</td><td style='text-align: center; word-wrap: break-word;'>11</td><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>分集拷贝基本模式</td><td style='text-align: center; word-wrap: break-word;'>11</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>分集拷贝扩展模式</td><td style='text-align: center; word-wrap: break-word;'>12</td><td style='text-align: center; word-wrap: break-word;'>0 3</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr></table>
+
+<div style="text-align: center;">表20 链路标识符定义</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0 3</td><td style='text-align: center; word-wrap: break-word;'>报文优先级</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>4 254</td><td style='text-align: center; word-wrap: break-word;'>业务分类 LID</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>255</td><td style='text-align: center; word-wrap: break-word;'>无效值</td></tr><tr><td colspan="2">注：链路标识符越大，优先级越高。</td></tr></table>
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_248_1257_1013_1414.jpg" alt="Image" width="64%" /></div>
+
+
+<div style="text-align: center;">图 5 无选择确认的单帧传输</div>
+
+
+<!-- ===== Page 19 ===== -->
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_250_200_1014_355.jpg" alt="Image" width="64%" /></div>
+
+
+<div style="text-align: center;">图 6 带选择确认的单帧传输</div>
+
+
+<div style="text-align: center;">表21 广播标志位</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>说明</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>非广播报文</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>广播报文</td></tr></table>
+
+<div style="text-align: center;">表22 重传标志位</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>说明</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>非重传报文</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>重传报文</td></tr></table>
+
+选择确认帧是接收设备用来向发送设备反馈SOF帧的接收情况×接收SOF帧的设备，如果判断需要回复选择确认帧时，则发送选择确认帧，选择确认帧的可变区域内容表23所示，接收结果，表示SOF帧的接收结果，接收结果的取值和解释如表24所示，接收状态，接收状态是一个4比特的字段，用来表示普通模式时，SOF帧的物理块的校验结果×一个SOF帧最多可以携带4个物理块，每一个比特，表示一个物理块是否校验成功，比特0表示序列号为0的物理块的校验结果，比特1表示序列号为1的物理块的校验结果，其余类推，接收状态的比特位为0时，则表示对应的物理块校验失败，比特位为1时，则表示对应的物理块校验成功，源TEI是一个12比特字段，表示为选择确认帧的源终端的TEI×目的TEI是一个12比特字段，表示为选择确认帧的目的终端的TEI×接收物理块个数，接收的物理块个数，包括解析错误的物理块个数×信道质量，表示站点在接收本帧所对应的SOF报文时，计算得到的信道质量×信道质量用原始信噪比数据表示×站点负载，表示选择确认帧的源站点的负载，取值为该源站点上未发送的缓存报文的数量×扩展帧类型，表示在定界符类型之上，所扩展定义的帧类型，含义如表25所示×
+
+<div style="text-align: center;">表23 选择确认的可变区域</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>接收结果</td><td rowspan="2">4</td><td style='text-align: center; word-wrap: break-word;'>0 3</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>接收状态</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td rowspan="2">源 TEI</td><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12</td></tr><tr><td rowspan="2">6</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td rowspan="2">目的 TEI</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td rowspan="2">12</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr></table>
+
+<!-- ===== Page 20 ===== -->
+
+<div style="text-align: center;">表23（续）</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>接收物理块个数</td><td rowspan="2">8</td><td style='text-align: center; word-wrap: break-word;'>02</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>37</td><td style='text-align: center; word-wrap: break-word;'>5</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信道质量</td><td style='text-align: center; word-wrap: break-word;'>9</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>站点负载</td><td style='text-align: center; word-wrap: break-word;'>10</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>11</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>扩展帧类型</td><td style='text-align: center; word-wrap: break-word;'>12</td><td style='text-align: center; word-wrap: break-word;'>03</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr></table>
+
+<div style="text-align: center;">表24 接收结果值</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>表示 SOF 帧全部接收成功。</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>表示 SOF 帧的物理块存在循环冗余校验失败的情形。</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>其他</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+<div style="text-align: center;">表25 扩展帧类型</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>说明</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>表示为选择确认帧 $ _{x} $</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>其他</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+网间协调帧用于CCO进行网间时隙的竞争协调，一般用于在多个高速载波通信网络共存的场景中，CCO之间进行带宽协商×网间协调帧的可变区域内容如表26所示×持续时间，持续时间是一个16比特的字段，表示本网络需要申请占用的时隙长度×单位：1毫秒×带宽开始偏移，下个带宽时隙开始时刻的时间偏移，单位：1毫秒，当下个带宽时隙未开始时，该偏移时间表示从当前时刻，到下个带宽时隙开始时刻的时间偏移，当下个带宽时隙已经开始时，该偏移时间的值为0×接收到邻居网络号，能够接收到邻居网络的网络号，表示本网络能够接收到该网络的信号，每次发送多网络协调帧时携带一个邻居网络号，通过多次发送，告知周边邻居网络本网络可接收到的邻居网络×本网络无线信道编号，告知邻居网络本网络使用无线信道编号×
+
+<div style="text-align: center;">表26 网间协调的可变区域</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特）</td></tr><tr><td rowspan="2">持续时间</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">16</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td rowspan="2">带宽开始偏移</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">16</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td rowspan="3">接收到的邻居网络号</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="3">24</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>9</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>10</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>本网络无线信道编号</td><td style='text-align: center; word-wrap: break-word;'>11</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>12</td><td style='text-align: center; word-wrap: break-word;'>0 3</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr></table>
+
+<!-- ===== Page 21 ===== -->
+
+## 51228 无线可变区域
+
+可变区域的内容由定界符类型决定。
+
+信标帧用于CCO进行网络管理。信标帧的可变区域的格式如表27所示。信标时间戳是发送信标的设备在发送信标时标记的网络基准时间，网络基准时间由CCO维护，全网站点需要和CCO的网络基准时间保持同步，在中央信标中，信标时间戳是网络基准时间，在代理信标中，信标时间戳是由PCO评估出的网络基准时间，在发现信标中，信标时间戳是由STA评估出的网络基准时间。源TEI表示发送信标的站点的TEI。MCS表示载荷采用的调制。编码以及拷贝方式，MCS取值和所代表的含义如表28所示。载荷PB块大小表示载荷PB的长度。取值和所代表的含义如表29所示。
+
+<div style="text-align: center;">表27 信标帧的可变区域</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特）</td></tr><tr><td rowspan="4">信标时间戳</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>07</td><td rowspan="4">32</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>07</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>07</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>07</td></tr><tr><td rowspan="2">源 TEI</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>07</td><td rowspan="2">12</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>9</td><td style='text-align: center; word-wrap: break-word;'>03</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>MCS</td><td style='text-align: center; word-wrap: break-word;'>9</td><td style='text-align: center; word-wrap: break-word;'>47</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>载荷 PB 大小</td><td style='text-align: center; word-wrap: break-word;'>10</td><td style='text-align: center; word-wrap: break-word;'>03</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td rowspan="2">保留</td><td style='text-align: center; word-wrap: break-word;'>11</td><td style='text-align: center; word-wrap: break-word;'>47</td><td rowspan="2">16</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>12</td><td style='text-align: center; word-wrap: break-word;'>03</td></tr></table>
+
+<div style="text-align: center;">表28 MCS 取值</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>MCS 值</td><td style='text-align: center; word-wrap: break-word;'>分集次数</td><td style='text-align: center; word-wrap: break-word;'>调制方式</td><td style='text-align: center; word-wrap: break-word;'>码率</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>BPSK</td><td style='text-align: center; word-wrap: break-word;'>1/2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>BPSK</td><td style='text-align: center; word-wrap: break-word;'>1/2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>QPSK</td><td style='text-align: center; word-wrap: break-word;'>1/2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>QPSK</td><td style='text-align: center; word-wrap: break-word;'>1/2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>QPSK</td><td style='text-align: center; word-wrap: break-word;'>4/5</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>16QAM</td><td style='text-align: center; word-wrap: break-word;'>1/2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>16QAM</td><td style='text-align: center; word-wrap: break-word;'>4/5</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>其他</td><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+<div style="text-align: center;">表 29 载荷 PB 块大小</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>PB大小</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>16</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>40</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>72</td></tr></table>
+
+<!-- ===== Page 22 ===== -->
+
+<div style="text-align: center;">表29（续）</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>PB大小</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>136</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>264</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>520</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>其他</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+SOF帧主要用于设备之间传输数据× SOF帧的可变区域内容如表30所示× 源TEI，表示发送SOF帧的源设备站点的TEI× 目的TEI，表示SOF帧的目的设备站点的TEI，SOF帧的目的设备在接收到SOF帧后，如果发现目的TEI是本站点的TEI，则需要对SOF帧进行应答，发送选择确认帧给SOF帧的发送设备×链路标识符，表示不同的优先级或者不同的业务分类，含义如表31所示× 帧长，指示SOF帧的传送过程以及帧间隔等所要占用的信道的时长，单位，100微秒× 帧长的主要场景有以下几种：SOF帧单帧传输×不需要选择确认的场景，其帧长包括SOF帧的帧载荷传输时间和竞争帧间隔时间，定义如图7所示× SOF帧单帧传输×且需要选择确认的场景，帧长包括SOF帧的帧载荷传输时间× 应答帧帧间隔时间× 选择确认传输时间以及竞争帧间隔时间，定义如图8所示× 载荷PB块大小，表示SOF帧的帧载荷中携带的物理块长度，物理块的大小支持16/40/72/136/264/520字节6种规格× 广播标志位，表示该SOF帧是否为广播报文，含义如表32所示× 重传标志位，表示该SOF帧是否为重传报文，含义如表33所示× 加密标志位为预留信息段，为增加链路层加密机制提供支持× 载荷PB块大小表示载荷PB的长度，取值和所代表的含义如表29所示×
+
+<div style="text-align: center;">表 30 SOF 帧的可变区域</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特）</td></tr><tr><td rowspan="2">源 TEI</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12</td></tr><tr><td rowspan="2">5</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td rowspan="2">目的 TEI</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td rowspan="2">12</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>链路标识符</td><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td rowspan="2">帧长</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12</td></tr><tr><td rowspan="2">9</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>载荷 PB 大小</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td rowspan="2">保留</td><td style='text-align: center; word-wrap: break-word;'>10</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">9</td></tr><tr><td rowspan="3">11</td><td style='text-align: center; word-wrap: break-word;'>0</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>广播标志位</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>重传标志位</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>加密标志位</td><td style='text-align: center; word-wrap: break-word;'>11</td><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>MCS</td><td style='text-align: center; word-wrap: break-word;'>11</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>12</td><td style='text-align: center; word-wrap: break-word;'>0 3</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr></table>
+
+<!-- ===== Page 23 ===== -->
+
+<div style="text-align: center;">表31 链路标识符定义</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0 3</td><td style='text-align: center; word-wrap: break-word;'>报文优先级</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>4 254</td><td style='text-align: center; word-wrap: break-word;'>业务分类 LID</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>255</td><td style='text-align: center; word-wrap: break-word;'>无效值</td></tr><tr><td colspan="2">注：链路标识符越大，优先级越高。</td></tr></table>
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_248_441_1013_595.jpg" alt="Image" width="64%" /></div>
+
+
+<div style="text-align: center;">图7 无选择确认的单帧传输</div>
+
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_249_670_1014_828.jpg" alt="Image" width="64%" /></div>
+
+
+<div style="text-align: center;">图 8 带选择确认的单帧传输</div>
+
+
+<div style="text-align: center;">表 32 广播标志位</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>说明</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>非广播报文</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>广播报文</td></tr></table>
+
+<div style="text-align: center;">表 33 重传标志位</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>说明</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>非重传报文</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>重传报文</td></tr></table>
+
+选择确认帧是接收设备用来向发送设备反馈SOF帧的接收情况×接收SOF帧的设备，如果判断需要回复选择确认帧时，则发送选择确认帧×选择确认帧的可变区域内容表34所示×接收结果，表示SOF帧的接收结果，接收结果的取值和解释如表35所示×源TEI是一个12比特字段，表示为选择确认帧的源终端的TEI×目的TEI是一个12比特字段，表示为选择确认帧的目的终端的TEI×信道质量，表示站点在接收本帧所对应的SOF报文时，计算得到的信号强度×站点负载，表示选择确认帧的源站点的负载，取值为该源站点上未发送的缓存报文的数量×扩展帧类型，表示在定界符类型之上，所扩展定义的帧类型，含义如表36所示×
+
+<!-- ===== Page 24 ===== -->
+
+<div style="text-align: center;">表 34 选择确认的可变区域</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>接收结果</td><td rowspan="2">4</td><td style='text-align: center; word-wrap: break-word;'>03</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>47</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td rowspan="2">源 TEI</td><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>07</td><td rowspan="2">12</td></tr><tr><td rowspan="2">6</td><td style='text-align: center; word-wrap: break-word;'>03</td></tr><tr><td rowspan="2">目的 TEI</td><td style='text-align: center; word-wrap: break-word;'>47</td><td rowspan="2">12</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>07</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信道质量</td><td style='text-align: center; word-wrap: break-word;'>9</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>站点负载</td><td style='text-align: center; word-wrap: break-word;'>10</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>11</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>扩展帧类型</td><td style='text-align: center; word-wrap: break-word;'>12</td><td style='text-align: center; word-wrap: break-word;'>03</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr></table>
+
+<div style="text-align: center;">表 35 接收结果值</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>表示 SOF 帧接收成功。</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>表示 SOF 帧的物理块存在循环冗余校验失败的情形。</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>其他</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+<div style="text-align: center;">表 36 扩展帧类型</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>说明</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>表示为选择确认帧。</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>其他</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+## 5123 SOF 帧MPDU 帧载荷格式
+
+载波载荷的物理块格式有4种，物理块的大小可选为72/136/264/520字节。无线载荷的物理块格式有6种，物理块的大小可选为16/40/72/136/264/520字节。
+
+每个物理块适配到单个物理层前向纠错编码块×每个物理块包含一个物理块头×物理块体和物理块检查序列×物理块头为1个字节，物理块检查序列为3个字节×物理块的格式如图5所示×
+
+物理块头包含物理块体的属性信息× 物理块头的格式如表37所示× 序列号是一个6比特的字段，初始值为0，表示MPDU的载荷中物理块的序号，一个MAC帧，被分割为物理块后，每个物理块需要对应一个物理块的序号，例如，如果一个MAC帧，封装在一个MPDU中，共携带了4个物理块，则第一个物理块的物理块头中，序列号的值是0；第二个物理块的物理块头中，序列号的值是1；第三个物理块的物理块头中，序列号的值是2；第四个物理块的物理块头中，序列号的值是3× 帧起始标志是一个1比特的字段，当对应的物理块体，是MAC帧分片后的第一个物理块体时，需设置本字段的值为1；否则，需设置本字段的值为0× 帧结束标志是一个1比特的字段，当对应的物理块体，是MAC帧分片后的最后一个物理块体时，需设置本字段的值为1；否则，需设置本字段的值为0×
+
+<!-- ===== Page 25 ===== -->
+
+物理块体中携带由MSDU所组成的MAC帧的分段，大小为12/36/68/132/260/516字节。
+
+物理块检查序列是一个24比特的字段，校验时，以物理块头和物理块体两部分为目标，使用24比特的循环冗余校验算法，进行校验，校验值填充在物理块检查序列的位置，MPDU被接收后，使用每个物理块的物理块检查序列来作校验，校验成功的物理块说明物理传输成功，否则说明物理传输失败。
+
+<!-- ===== Page 26 ===== -->
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_170_196_617_576.jpg" alt="Image" width="37%" /></div>
+
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_176_605_680_791.jpg" alt="Image" width="42%" /></div>
+
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_171_828_802_1016.jpg" alt="Image" width="52%" /></div>
+
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_170_1057_926_1244.jpg" alt="Image" width="63%" /></div>
+
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_171_1300_1026_1487.jpg" alt="Image" width="71%" /></div>
+
+
+<!-- ===== Page 27 ===== -->
+
+<div style="text-align: center;">图 9 SOF 帧物理块格式</div>
+
+
+<div style="text-align: center;">表 37 物理块头的格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特数）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>序列号</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0 5</td><td style='text-align: center; word-wrap: break-word;'>6</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>帧起始标志</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>帧结束标志</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr></table>
+
+## 5124 信标 MPDU 帧载荷格式
+
+## 51241 物理块格式
+
+无线信道载荷的物理块格式有6种，物理块的大小可选为16/40/72/136/264/520字节。信标帧支持40/72/136/264/520种物理块大小。载波信道载荷物理块格式有4种，物理块的大小为72/136/264/520字节，信标帧的载荷只支持一个物理块；缺省支持136/520字节的两种规格物理块格式，可选支持72/264字节的物理块格式。
+
+物理块格式如图10所示。
+
+<!-- ===== Page 28 ===== -->
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_157_212_1028_1431.jpg" alt="Image" width="73%" /></div>
+
+
+<div style="text-align: center;">图 10 物理块格式</div>
+
+
+<!-- ===== Page 29 ===== -->
+
+其中，帧载荷校验序列是信标帧载荷内容的校验值，校验的范围是信标物理块中帧载荷部分的内容。帧载荷校验序列使用的是32比特的循环冗余校验算法。
+
+物理块检查序列是一个24比特的字段。校验时，以帧载荷和帧载荷校验序列两部分为目标，使用24比特的循环冗余校验算法，进行校验，校验值填充在物理块检查序列的位置。
+
+## 51242 标准信标帧载荷格式
+
+标准信标帧载荷字段的格式如表38所示。信标类型是一个3比特的字段，标识信标的类型×信标类型的取值和含义如表39所示。组网标志位是一个1比特字段，标识自组网是否完成×组网标志位的取值和含义如表40所示。精简信标标志是一个1比特字段，标识信标帧的是否为精简信标帧，精简信标标志的取值和含义如表41所示。开始关联标志位是一个1比特的字段，表示当前阶段是否允许站点发起关联请求×开始关联标志位的取值和含义如表42所示。信标使用标志位是一个1比特的字段，表示是否允许使用信标报文进行信道评估×信标使用标志位的取值和含义如表43所示。组网序列号是一个8比特的字段，表示当前组网的序列号×该值为顺序递加的值，CCO每次重新组网后都需要自动加1×CCO MAC地址字段指本网络CCO的MAC地址。信标周期计数是由CCO维护的信标周期的递增计数。CCO每安排一个信标周期，则信标周期计数递增。本网络无线信道编号是指网络中采用的无线信道编号，无线信道编号由CCO决定。信标管理信息是信标帧的可变长字段×信标管理信息字段的格式如表44所示。信标条目数，信标条目数是一个1字节的字段，标识信标帧载荷中存在的总信标条目数×信标条目数的取值和含义如表45所示。信标条目头，信标条目头是一个1字节的字段，指示信标条目的类型。信标管理信息中的信标条目根据信标条目依次排列×信标条目头的取值和格式如表46所示。信标条目长度，信标条目长度，表示信标条目的长度，单位是字节。根据条目类型的不同，信标条目长度字段的大小不一样，在下文的条目内容中，同时描述了条目头和条目长度字段，条目长度字段的大小会各自描述。信标条目类型的不同，长度字段的大小也不同，如表46所示，部分信标条目的长度字段为1字节，部分信标条目的长度字段为2字节。信标条目，信标条目内容由信标条目头决定。各种信标条目的格式以下章节分别描述×站点能力条目的格式如表47所示。路由参数通知条目的格式如表48所示。频段通知条目的格式如表49所示。时隙分配条目的格式如表50所示。非中央信标信息字段的格式如表51所示。非中央信标信息字段，指明了代理站点和发现站点发送信标的时隙；在中央信标和代理信标中，包含了本字段；在发现信标中，为节省报文空间，省略了该字段；省略该字段，不会影响时隙的计算。CSMA时隙信息字段的格式如表52所示。绑定CSMA时隙信息字段的格式如表53所示。无线路由参数条目的格式如表54所示。无线信道变更条目格式如表55所示。精简信标站点信息及时隙条目用于精简信标帧，定义见51.2.4.3。
+
+信标帧载荷校验序列是一个32比特的字段，用来检查信标帧载荷的完整性。信标帧载荷校验序列是信标帧载荷的32位循环冗余计算结果，循环冗余计算不包括信标帧载荷校验序列。
+
+物理块检验序列是一个24比特的字段×校验时，以帧载荷和BPCS信标帧载荷校验序列两部分为目标，计算出24位循环冗余的校验值，填充在物理块检查序列的最后24比特的位置×一旦MPDU被发送到目的地，每个物理块的物理块检查序列被用来进行校验，校验成功的物理块说明物理传输成功，否则说明物理传输失败×
+
+<div style="text-align: center;">表 38 标准信标帧载荷字段</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信标类型</td><td rowspan="3">0</td><td style='text-align: center; word-wrap: break-word;'>0 2</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>组网标志位</td><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>精简信标标志</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr></table>
+
+<!-- ===== Page 30 ===== -->
+
+<div style="text-align: center;">表38（续）</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td rowspan="3">0</td><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>开始关联标志位</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信标使用标志位</td><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>组网序列号</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td rowspan="6">CCO MAC 地址</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="6">48</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td rowspan="4">信标周期计数</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="4">32</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>9</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>10</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>11</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>本网络无线信道编号</td><td style='text-align: center; word-wrap: break-word;'>12</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>13 19</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>56</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信标管理信息</td><td style='text-align: center; word-wrap: break-word;'>20 32/64/128/256/516</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>L（可变长）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>帧载荷校验序列</td><td style='text-align: center; word-wrap: break-word;'>33 36 或65 68 或129 132 或257 260 或513 516</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>32</td></tr></table>
+
+<div style="text-align: center;">表 39 信标类型</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>发现信标</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>代理信标</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>中央信标</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>其他</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+<!-- ===== Page 31 ===== -->
+
+<div style="text-align: center;">表40 组网标志位</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>组网未完成</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>组网完成</td></tr></table>
+
+<div style="text-align: center;">表41 精简信标标志位</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>标准信标帧</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>精简信标帧</td></tr></table>
+
+<div style="text-align: center;">表42 开始关联标志位</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>不允许站点发起关联请求</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>允许站点发起关联请求</td></tr></table>
+
+<div style="text-align: center;">表43 信标使用标志位</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>不允许使用信标进行信道评估</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>允许使用信标进行信道评估</td></tr></table>
+
+<div style="text-align: center;">表44 信标管理信息格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>字段大小(字节)</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信标条目数</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>Beacon 条目数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信标条目头 1</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>第一个 Beacon 条目头</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信标条目长度 1</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>第一个 Beacon 条目长度\n=N(1)</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信标条目 1</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>N(1)</td><td style='text-align: center; word-wrap: break-word;'>第一个 Beacon 条目</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信标条目头 L</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>第 L 个 Beacon 条目头</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信标条目长度 L</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>第 L 个 Beacon 条目长度=N(L)</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信标条目 L</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>N(L)</td><td style='text-align: center; word-wrap: break-word;'>第 L 个 Beacon 条目</td></tr></table>
+
+<div style="text-align: center;">表45 信标条目数</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x00</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+<!-- ===== Page 32 ===== -->
+
+<div style="text-align: center;">表45（续）</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x01</td><td style='text-align: center; word-wrap: break-word;'>存在 1 个信标条目</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x02</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x03</td><td style='text-align: center; word-wrap: break-word;'>存在 3 个信标条目，如此类推</td></tr></table>
+
+<div style="text-align: center;">表46 信标条目头</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td><td style='text-align: center; word-wrap: break-word;'>对应信标条目长度字段大小</td><td style='text-align: center; word-wrap: break-word;'>定义说明</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x00</td><td style='text-align: center; word-wrap: break-word;'>站点能力条目</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>标准信标帧。必选</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x01</td><td style='text-align: center; word-wrap: break-word;'>路由参数条目</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>标准信标帧。必选</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x02</td><td style='text-align: center; word-wrap: break-word;'>频段变更条目</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>标准信标帧。可选</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x03</td><td style='text-align: center; word-wrap: break-word;'>无线路由参数条目</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>标准信标帧。必选</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x04</td><td style='text-align: center; word-wrap: break-word;'>无线信道变更条目</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>标准信标帧。可选</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x05</td><td style='text-align: center; word-wrap: break-word;'>精简信标站点信息及时隙条目</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>精简信标帧。必选</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x06 0xBF</td><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0xC0</td><td style='text-align: center; word-wrap: break-word;'>时隙分配条目</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>标准信标帧。必选</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0xC1 0xFF</td><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+<div style="text-align: center;">表47 站点能力条目</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特）</td><td style='text-align: center; word-wrap: break-word;'>定义说明</td></tr><tr><td rowspan="2">TEI</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12</td><td rowspan="2">站点 TEI</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td rowspan="2">代理站点 TEI</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>12</td><td style='text-align: center; word-wrap: break-word;'>发送信标站点的代理站点 TEI</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>站点到 CCO 整个路径的最低通信成功率。\nCCO 时，成功率为 100%</td></tr><tr><td rowspan="6">发送信标站点 MAC 地址</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="6">48</td><td rowspan="6">信标发送站点 MAC 地址</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>9</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr></table>
+
+<!-- ===== Page 33 ===== -->
+
+<div style="text-align: center;">表47 (续)</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特）</td><td style='text-align: center; word-wrap: break-word;'>定义说明</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>角色</td><td style='text-align: center; word-wrap: break-word;'>10</td><td style='text-align: center; word-wrap: break-word;'>0 3</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>站点角色\n角色定义：\n0x0:未知；\n0x1:STA；\n0x2:PCO；\n0x4:CCO；\n其他：保留</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>层级数</td><td style='text-align: center; word-wrap: break-word;'>10</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>层级数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>代理站点信道质量</td><td style='text-align: center; word-wrap: break-word;'>11</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>与代理站点之间的信道质量</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>相线</td><td rowspan="3">12</td><td style='text-align: center; word-wrap: break-word;'>0 1</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>站点所属相线\n相线定义：\n0x0: 全相线；\n0x1: A 相线；\n0x2: B 相线；\n0x3: C 相线</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>链路上 RF 跳数</td><td style='text-align: center; word-wrap: break-word;'>2 5</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>站点到 CCO 路径上使用的 RF 条数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>6 7</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+<div style="text-align: center;">表48 路由参数通知条目</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特）</td><td style='text-align: center; word-wrap: break-word;'>定义说明</td></tr><tr><td rowspan="2">路由周期</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>07</td><td rowspan="2">16</td><td rowspan="2">路由周期。表示用于路由评估的时间周期。\n单位：秒</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>07</td></tr><tr><td rowspan="2">路由评估剩余时间</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>07</td><td rowspan="2">16</td><td rowspan="2">距离下次路由评估的剩余时间。\n单位：秒</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>07</td></tr><tr><td rowspan="2">代理站点发现列表周期</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>07</td><td rowspan="2">16</td><td rowspan="2">代理站点发送发现列表报文的间隔周期。\n单位：秒</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>07</td></tr><tr><td rowspan="2">发现站点发现列表周期</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>07</td><td rowspan="2">16</td><td rowspan="2">发现站点发送发现列表报文的间隔周期。\n单位：秒</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>07</td></tr></table>
+
+<!-- ===== Page 34 ===== -->
+
+<div style="text-align: center;">表49 频段通知条目</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特）</td><td style='text-align: center; word-wrap: break-word;'>定义说明</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>目标频段</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>需要切换到的目标频段值定义：0x00:\n频段 0:\n0x01：频段 1；\n其他：保留具体值。请参考《低压电力线高速载波通信互联互通技术规范 第41部分：物理层通信协议》相关章节</td></tr><tr><td rowspan="4">频段切换剩余时间</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>07</td><td rowspan="4">32</td><td rowspan="4">距离实施频段切换，剩余的时间长度：\n单位：毫秒</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>07</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>07</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>07</td></tr></table>
+
+<div style="text-align: center;">表50 时隙分配条目</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小\n(比特)</td><td style='text-align: center; word-wrap: break-word;'>定义说明</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>非中央信标时隙总数</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>非中央信标时隙总数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>中央信标时隙总数</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>0 3</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>中央信标时隙总数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>CSMA 时隙支持的相线个数</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>4 5</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>CSMA 时隙支持的相线个数\n取值范围：1 3</td></tr><tr><td rowspan="2">保留</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>6 7</td><td rowspan="2">10</td><td rowspan="2">保留</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>代理信标时隙总数</td><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>代理信标时隙总数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信标时隙长度</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>每个信标时隙占用的时隙长度\n单位：1 毫秒</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>CSMA 时隙分片长度</td><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>CSMA 时隙分片的大小\n单位：10 毫秒</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>绑定 CSMA 时隙相线个数</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>绑定 CSMA 时隙支持的相线个数\n取值范围：1 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>绑定 CSMA 时隙链路标识符</td><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>绑定 CSMA 时隙支持的业务报文 Iid</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>TDMA 时隙长度</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>TDMA 时隙长度\n单位：1 毫秒</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>TDMA 时隙链路标识符</td><td style='text-align: center; word-wrap: break-word;'>9</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>TDMA 时隙支持的业务报文 Iid</td></tr><tr><td rowspan="4">信标周期起始网络基准时</td><td style='text-align: center; word-wrap: break-word;'>10</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="4">32</td><td rowspan="4">信标周期的开始时刻 NTB 值</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>11</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>12</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>13</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr></table>
+
+<!-- ===== Page 35 ===== -->
+
+<div style="text-align: center;">表50（续）</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特）</td><td style='text-align: center; word-wrap: break-word;'>定义说明</td></tr><tr><td rowspan="4">信标周期长度</td><td style='text-align: center; word-wrap: break-word;'>14</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="4">32</td><td rowspan="4">信标周期的时间长度。\n单位：1 毫秒</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>15</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>16</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>17</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td rowspan="2">RF 信标时隙长度</td><td style='text-align: center; word-wrap: break-word;'>18</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">10</td><td rowspan="2">RF 链路上信标时隙长度。\n单位：1 毫秒</td></tr><tr><td rowspan="2">19</td><td style='text-align: center; word-wrap: break-word;'>0 1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>2 7</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>非中央信标信息</td><td style='text-align: center; word-wrap: break-word;'>可变长</td><td style='text-align: center; word-wrap: break-word;'>可变长</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>代理信标和发现信标的信息字段。\n字段大小是可变长度。\n根据 &quot;非中央信标时隙总数&quot;\n计算字段占用总大小。\n信息的字段定义如表 51 所示。</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>CSMA 时隙信息</td><td style='text-align: center; word-wrap: break-word;'>可变长</td><td style='text-align: center; word-wrap: break-word;'>可变长</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>CSMA 时隙的信息字段。\n字段大小是可变长度。根据 &quot;CSMA 时隙支持的相线个数&quot;\n计算字段占用总大小。\n信息字段的定义如表 52 所示。</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>绑定 CSMA 时隙信息</td><td style='text-align: center; word-wrap: break-word;'>可变长</td><td style='text-align: center; word-wrap: break-word;'>可变长</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>绑定 CSMA 时隙的信息字段。\n字段大小是可变长度。根据 &quot;绑定 CSMA 时隙相线个数&quot;\n计算字段占用总大小。\n信息字段的定义如表 53 所示。</td></tr></table>
+
+<div style="text-align: center;">表51 非中央信标信息字段</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特）</td><td style='text-align: center; word-wrap: break-word;'>定义说明</td></tr><tr><td rowspan="2">TEI</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>8</td><td rowspan="2">指定发送信标的站点的 TEI</td></tr><tr><td rowspan="2">1</td><td style='text-align: center; word-wrap: break-word;'>0 3</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信标类型</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>信标类型：\n0x0：发现信标；\n0x1：代理信标</td></tr></table>
+
+<!-- ===== Page 36 ===== -->
+
+<div style="text-align: center;">表51 (续)</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小\n(比特)</td><td style='text-align: center; word-wrap: break-word;'>定义说明</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>无线信标标志</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>57</td><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>无线信标发送类型:\n0x00: 仅发送高速载波信标;\n0x01: 仅发送无线标准信标;\n0x02: 发送高速载波信标。并在该时隙结束后发送无线标准信标;\n0x03: 发送高速载波信标。并在该时隙结束后发送无线精简信标;\n0x04: 发送高速载波信标。并在 CSMA 时隙发送无线精简信标</td></tr></table>
+
+<div style="text-align: center;">表52 CSMA 时隙信息字段</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节数</td><td style='text-align: center; word-wrap: break-word;'>位数</td><td style='text-align: center; word-wrap: break-word;'>字段大小</td><td style='text-align: center; word-wrap: break-word;'>定义说明</td></tr><tr><td rowspan="3">CSMA 时隙长度</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="3">24</td><td rowspan="3">CSMA 时隙的长度\n单位：1 毫秒</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>CSMA 时隙相线</td><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>0 1</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>定义：\n0x0：全相线；\n0x1：A 相线；\n0x2：B 相线；\n0x3：C 相线</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>2 7</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+<div style="text-align: center;">表 53 绑定 CSMA 时隙信息字段</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小(比特)</td><td style='text-align: center; word-wrap: break-word;'>定义说明</td></tr><tr><td rowspan="3">绑定 CSMA 时隙长度</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="3">24</td><td rowspan="3">绑定 CSMA 时隙的长度;\n单位：1 毫秒</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>绑定 CSMA 时隙的相线</td><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>0 1</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>0x0: 全相线; 0x1: A 相线;\n0x2: B 相线; 0x3: C 相线</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>2 7</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+<!-- ===== Page 37 ===== -->
+
+<div style="text-align: center;">表54 无线路由参数条目</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特）</td><td style='text-align: center; word-wrap: break-word;'>定义说明</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>无线发现列表周期</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>无线上发现列表周期长度。单位：1 秒</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>无线接收率老化周期个数</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>无线接收率老化周期个数。单位：无线发现列表周期</td></tr></table>
+
+<div style="text-align: center;">表55 无线信道变更条目</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特）</td><td style='text-align: center; word-wrap: break-word;'>定义说明</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>目标信道</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>需要切换到的目标信道号</td></tr><tr><td rowspan="4">信道切换剩余时间</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>07</td><td rowspan="4">32</td><td rowspan="4">距离实施信道切换的剩余时间。单位：1 毫秒</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>07</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>07</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>07</td></tr></table>
+
+## 51243 精简信标帧载荷格式
+
+精简信标帧载荷字段的格式如表56所示。信标类型、组网标志位、精简信标标志位、开始关联标志位、信标使用标志位、组网序列号、CCO MAC地址、信标周期计数、信标管理信息字段与5.1.2.4.2定义一致、精简信标帧载荷中仅定义了精简信标站点信息及时隙条目，格式如表57所示。
+
+<div style="text-align: center;">表56 精简信标帧载荷字段</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信标类型</td><td rowspan="6">0</td><td style='text-align: center; word-wrap: break-word;'>0 2</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>组网标志位</td><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>精简信标标志</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>开始关联标志位</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信标使用标志位</td><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>组网序列号</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr></table>
+
+<!-- ===== Page 38 ===== -->
+
+<div style="text-align: center;">表56（续）</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特）</td></tr><tr><td rowspan="6">CCO MAC 地址</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="6">48</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td rowspan="4">信标周期计数</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="4">32</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>9</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>10</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>11</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信标管理信息</td><td style='text-align: center; word-wrap: break-word;'>12 32</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>L（可变长）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>帧载荷校验序列</td><td style='text-align: center; word-wrap: break-word;'>33 36</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr></table>
+
+<div style="text-align: center;">表57 精简信标站点能力及时隙条目</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特）</td></tr><tr><td rowspan="2">TEI</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12</td></tr><tr><td rowspan="2">1</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td rowspan="2">代理站点 TEI</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td rowspan="2">12</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>角色</td><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>0 3</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>层级数</td><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td rowspan="6">发送信标站点 MAC 地址</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="6">48</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>9</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>链路上 RF 跳数</td><td rowspan="2">10</td><td style='text-align: center; word-wrap: break-word;'>0 3</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td rowspan="4">CSMA 时隙开始时间</td><td style='text-align: center; word-wrap: break-word;'>11</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="4">32</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>12</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>13</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>14</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr></table>
+
+<!-- ===== Page 39 ===== -->
+
+<div style="text-align: center;">表57（续）</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特）</td></tr><tr><td rowspan="2">CSMA 时隙长度</td><td style='text-align: center; word-wrap: break-word;'>15</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">16</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>16</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr></table>
+
+## 513 管理消息帧格式
+
+## 5131 管理消息帧格式定义
+
+MAC层的管理消息报文头的定义如表58所示。
+
+<div style="text-align: center;">表58 管理消息报文头格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>字段大小(字节)</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>管理消息类型（MMTYPE）</td><td style='text-align: center; word-wrap: break-word;'>01</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>23</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr></table>
+
+管理消息类型（MMTYPE）的定义如表59所示。
+
+<div style="text-align: center;">表59 管理消息类型</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>管理消息名称</td><td style='text-align: center; word-wrap: break-word;'>管理消息类型标识符</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>关联请求（MMeAssocReq）</td><td style='text-align: center; word-wrap: break-word;'>0x0000</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>关联确认（MMeAssocCnf）</td><td style='text-align: center; word-wrap: break-word;'>0x0001</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>关联汇总指示（MMeAssocGatherInd）</td><td style='text-align: center; word-wrap: break-word;'>0x0002</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>代理变更请求（MMeChangeProxyReq）</td><td style='text-align: center; word-wrap: break-word;'>0x0003</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>代理变更确认（MMeChangeProxyCnf）</td><td style='text-align: center; word-wrap: break-word;'>0x0004</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>代理变更确认（MMeChangeProxyBitMapCnf）</td><td style='text-align: center; word-wrap: break-word;'>0x0005</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>离线指示（MMeLeaveInd）</td><td style='text-align: center; word-wrap: break-word;'>0x0006</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>心跳检测（MMeHeartbeatCheck）</td><td style='text-align: center; word-wrap: break-word;'>0x0007</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>发现列表（MMeDiscoverNodeList）</td><td style='text-align: center; word-wrap: break-word;'>0x0008</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>通信成功率上报（MMeSuccessRateReport）</td><td style='text-align: center; word-wrap: break-word;'>0x0009</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>网络冲突上报（MMeNetworkConflictReport）</td><td style='text-align: center; word-wrap: break-word;'>0x000A</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>过零 NTB 采集指示（MMeZeroCrossNTBCollectInd）</td><td style='text-align: center; word-wrap: break-word;'>0x000B</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>过零 NTB 上报（MMeZeroCrossNTBReport）</td><td style='text-align: center; word-wrap: break-word;'>0x000C</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>0x000D 0x4E</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>网络诊断报文</td><td style='text-align: center; word-wrap: break-word;'>0x4F</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>路由请求(MMeRouteRequest)</td><td style='text-align: center; word-wrap: break-word;'>0x0050</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>路由回复(MMeRouteReply)</td><td style='text-align: center; word-wrap: break-word;'>0x0051</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>路由错误(MMeRouteError)</td><td style='text-align: center; word-wrap: break-word;'>0x0052</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>路由应答(MMeRouteAck)</td><td style='text-align: center; word-wrap: break-word;'>0x0053</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>链路确认请求(MMeLinkConfirmRequest)</td><td style='text-align: center; word-wrap: break-word;'>0x0054</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>链路确认回应(MMeLinkConfirmResponse)</td><td style='text-align: center; word-wrap: break-word;'>0x0055</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>0x0056 0x7F</td></tr></table>
+
+<!-- ===== Page 40 ===== -->
+
+<div style="text-align: center;">表59（续）</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>管理消息名称</td><td style='text-align: center; word-wrap: break-word;'>管理消息类型标识符</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>无线信道冲突上报（MMeRFChannelConflictReport）</td><td style='text-align: center; word-wrap: break-word;'>0x0080</td></tr></table>
+
+## 5132 关联请求报文
+
+## 51321 关联请求报文格式定义
+
+关联请求报文（MMeAssocReq）格式的定义如表60所示。
+
+<div style="text-align: center;">表 60 关联请求报文格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小(字节)</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>站点 MAC 地址</td><td style='text-align: center; word-wrap: break-word;'>0 5</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>6</td></tr><tr><td rowspan="2">候选代理 TEI0</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12 比特</td></tr><tr><td rowspan="3">7</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>链路类型</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>1 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>5 7</td><td style='text-align: center; word-wrap: break-word;'>3 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td></tr><tr><td rowspan="2">候选代理 TEI4</td><td style='text-align: center; word-wrap: break-word;'>14</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12 比特</td></tr><tr><td rowspan="3">15</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>链路类型</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>1 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>3 比特</td></tr><tr><td rowspan="3">相线</td><td rowspan="4">16</td><td style='text-align: center; word-wrap: break-word;'>0 1</td><td style='text-align: center; word-wrap: break-word;'>2 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2 3</td><td style='text-align: center; word-wrap: break-word;'>2 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>4 5</td><td style='text-align: center; word-wrap: break-word;'>2 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>6 7</td><td style='text-align: center; word-wrap: break-word;'>2 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>设备类型</td><td style='text-align: center; word-wrap: break-word;'>17</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>MAC 地址类型</td><td style='text-align: center; word-wrap: break-word;'>18</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>模块类型</td><td rowspan="2">19</td><td style='text-align: center; word-wrap: break-word;'>0 1</td><td style='text-align: center; word-wrap: break-word;'>2 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>2 7</td><td style='text-align: center; word-wrap: break-word;'>6 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>站点关联随机数</td><td style='text-align: center; word-wrap: break-word;'>20 23</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>厂家自定义信息</td><td style='text-align: center; word-wrap: break-word;'>24 41</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>18</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>站点版本信息</td><td style='text-align: center; word-wrap: break-word;'>42 51</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>10</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>硬复位累积次数</td><td style='text-align: center; word-wrap: break-word;'>52 53</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>软复位累积次数</td><td style='text-align: center; word-wrap: break-word;'>54 55</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>代理类型</td><td style='text-align: center; word-wrap: break-word;'>56</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>57 59</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>端到端序列号</td><td style='text-align: center; word-wrap: break-word;'>60 63</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>管理 ID 信息</td><td style='text-align: center; word-wrap: break-word;'>64 87</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>24</td></tr></table>
+
+## 51322 站点 MAC 地址
+
+<!-- ===== Page 41 ===== -->
+
+表示发起关联请求的站点的MAC地址，长度为6字节。
+
+## 51323 候选代理 TEI
+
+包含了候选代理站点列表，最多支持携带5个候选代理站点的TEI。
+
+## 51324 链路类型
+
+表示发送关联请求站点与候选代理的通信链路类型，链路类型值定义如表61所示。
+
+<div style="text-align: center;">表61 链路类型值</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>高速载波链路</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>无线链路</td></tr></table>
+
+## 51325 相线
+
+表示本站点的所属相线的评估结果，最低比特位字段存放评估出的所属相线，其他字节依次填入可能的备选相位，相线的值定义如表62所示。
+
+<div style="text-align: center;">表62 相线值</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>表示未知相线</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>表示A相线</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>表示B相线</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>表示C相线</td></tr></table>
+
+## 51326 设备类型
+
+表示终端设备的类型，定义如表63所示。
+
+<div style="text-align: center;">表63 设备类型字段</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>抄控器</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>集中器本地通信单元</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>电表通信单元</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>中继器</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>II 型采集器</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>I 型采集器单元</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>三相电表通信单元</td></tr></table>
+
+## 5 1 3 2 7 MAC 地址类型
+
+表示关联入网时使用的 MAC 地址的来源，定义如表 64 所示。
+
+<!-- ===== Page 42 ===== -->
+
+<div style="text-align: center;">表 64 MAC 地址类型字段</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>电能表地址作为入网 MAC 地址</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>通信模块本身的 MAC 地址作为入网 MAC 地址</td></tr></table>
+
+## 51328 模块类型
+
+表示发送关联请求站点通信模块的类型，定义如表65所示。
+
+<div style="text-align: center;">表65 模块类型值</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>高速载波单模模块</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>双模高速载波和无线模块</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>无线单模模块</td></tr></table>
+
+## 51329 站点关联随机数
+
+表示模块关联入网的随机数，设备出厂后，初次上电时会自动获取一个32比特的随机值作为关联随机数，后续掉电后再上电，不再重新获取。
+
+## 513210 厂家自定义信息
+
+表示厂家可随关联请求附带的自定义信息，根据实际需要使用。
+
+## 513211 站点版本信息
+
+版本信息定义如表66所示。
+
+<div style="text-align: center;">表66 版本信息字</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>字段大小（字节）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>系统启动原因</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>BOOT 版本号</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>软件版本号</td><td style='text-align: center; word-wrap: break-word;'>2 3</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>版本时间</td><td style='text-align: center; word-wrap: break-word;'>4 5</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>厂商代码</td><td style='text-align: center; word-wrap: break-word;'>6 7</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>芯片代码</td><td style='text-align: center; word-wrap: break-word;'>8 9</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr></table>
+
+系统启动的原因，定义如表67所示。
+
+<div style="text-align: center;">表67 系统启动原因字段</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x0</td><td style='text-align: center; word-wrap: break-word;'>正常启动</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x1</td><td style='text-align: center; word-wrap: break-word;'>断电重启</td></tr></table>
+
+<!-- ===== Page 43 ===== -->
+
+<div style="text-align: center;">表67（续）</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x2</td><td style='text-align: center; word-wrap: break-word;'>看门狗复位</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x3</td><td style='text-align: center; word-wrap: break-word;'>程序指针异常</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>其他</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+Boot版本号用于定义Boot的版本号。
+
+软件版本号，是一个2字节字段，使用BCD码表示，与本地通信模块接口协议保持一致。版本时间，是一个2字节字段，使用BIN码表示。年月日的具体表示方法，如表68所示。
+
+<div style="text-align: center;">表 68 版本时间字段</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特号</td><td style='text-align: center; word-wrap: break-word;'>字段大小（字节）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>年</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>06</td><td style='text-align: center; word-wrap: break-word;'>7</td></tr><tr><td rowspan="2">月</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>7</td><td rowspan="2">4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>02</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>日</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>37</td><td style='text-align: center; word-wrap: break-word;'>5</td></tr></table>
+
+厂商代码，是一个2字节字段，使用ASCII码表示，与本地通信模块接口协议保持一致。
+
+## 513212 硬复位累积次数
+
+记录设备的硬件复位的累计次数。
+
+## 513213 软复位累积次数
+
+记录设备的软件复位的累计次数。
+
+## 513214 代理类型
+
+表示代理站点的类型，定义如表69所示。
+
+<div style="text-align: center;">表69 代理类型</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>表示是站点动态选择的代理。</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>其他</td><td style='text-align: center; word-wrap: break-word;'>保留。</td></tr></table>
+
+## 513215 端到端序列号
+
+表示端到端的管理消息序列号。请求入网的站点，在产生关联请求报文时，需要获取一个序列号，CCO在确认关联入网时，需要在确认报文中携带关联请求报文中的端到端管理报文序列号。
+
+## 513216 管理 ID 信息
+
+管理ID信息为24字节的标识符，用于对双模通信芯片的唯一性标识。
+
+## 5133 关联确认报文
+
+<!-- ===== Page 44 ===== -->
+
+## 51331 关联确认报文格式定义
+
+关联确认报文（MMeAssocCnf）格式的定义如表70所示。
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小(字节)</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>站点MAC地址</td><td style='text-align: center; word-wrap: break-word;'>0 5</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>6</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>CCO MAC 地址</td><td style='text-align: center; word-wrap: break-word;'>6 11</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>6</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>结果</td><td style='text-align: center; word-wrap: break-word;'>12</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>站点层级</td><td style='text-align: center; word-wrap: break-word;'>13</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td rowspan="2">站点 TEI</td><td style='text-align: center; word-wrap: break-word;'>14</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12 比特</td></tr><tr><td rowspan="4">15</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>链路类型</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>1 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>载波频段</td><td style='text-align: center; word-wrap: break-word;'>5 6</td><td style='text-align: center; word-wrap: break-word;'>2 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>1 比特</td></tr><tr><td rowspan="2">代理 TEI</td><td style='text-align: center; word-wrap: break-word;'>16</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12 比特</td></tr><tr><td rowspan="2">17</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>总分包数</td><td style='text-align: center; word-wrap: break-word;'>18</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>分包序号</td><td style='text-align: center; word-wrap: break-word;'>19</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>站点关联随机数</td><td style='text-align: center; word-wrap: break-word;'>20 23</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>重新关联时间</td><td style='text-align: center; word-wrap: break-word;'>24 27</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>端到端序列号</td><td style='text-align: center; word-wrap: break-word;'>28 31</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>路径序号</td><td style='text-align: center; word-wrap: break-word;'>32 35</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>36 39</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>路由表信息</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>L（可变长）</td></tr></table>
+
+## 51332 站点 MAC 地址
+
+用来标识关联确认报文的目的终端设备的MAC地址。
+
+## 51333 CCO MAC 地址
+
+表示本网络的CCO的MAC地址。
+
+## 51334 结果
+
+关联请求的确认结果，定义如表71所示。
+
+<div style="text-align: center;">表 71 关联请求的确认结果</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x00</td><td style='text-align: center; word-wrap: break-word;'>表示关联请求成功</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x01</td><td style='text-align: center; word-wrap: break-word;'>表示该站点不在白名单中</td></tr></table>
+
+<!-- ===== Page 45 ===== -->
+
+<div style="text-align: center;">表71 (续)</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x02</td><td style='text-align: center; word-wrap: break-word;'>表示该站点在黑名单中</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x03</td><td style='text-align: center; word-wrap: break-word;'>表示加入的站点个数超过上限</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x04</td><td style='text-align: center; word-wrap: break-word;'>表示没有设置白名单列表</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x05</td><td style='text-align: center; word-wrap: break-word;'>表示代理站点个数超过上限</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x06</td><td style='text-align: center; word-wrap: break-word;'>表示子站点个数超过上限</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x07</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x08</td><td style='text-align: center; word-wrap: break-word;'>表示重复的 MAC 地址</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x09</td><td style='text-align: center; word-wrap: break-word;'>表示超过拓扑层级</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x0A</td><td style='text-align: center; word-wrap: break-word;'>表示站点再次关联请求入网成功</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x0B</td><td style='text-align: center; word-wrap: break-word;'>表示新的站点试图以自己的子站点为代理来入网</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x0C</td><td style='text-align: center; word-wrap: break-word;'>表示组网拓扑中存在环路</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x0D</td><td style='text-align: center; word-wrap: break-word;'>表示 CCO 端未知原因出错</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x0E</td><td style='text-align: center; word-wrap: break-word;'>表示无线代理达到上限</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>其他</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+## 51335 站点层级
+
+表示站点入网后的所处拓扑层级。
+
+## 51336 站点TEI
+
+CCO在确认该站点可以入网后，为该站点分配的设备标识TEI。
+
+## 51337 链路类型
+
+表示代理与关联确认目标站点的通信链路类型，链路类型值定义如表72所示。
+
+<div style="text-align: center;">表72 链路类型值</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>高速载波链路</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>无线链路</td></tr></table>
+
+## 51338 载波频段
+
+表示网络采用的载波频段，载波频段值定义如表73所示。
+
+<div style="text-align: center;">表 73 载波频段值</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>1.953~11.96</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>2.441~5.615</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>0.781~2.930</td></tr></table>
+
+<!-- ===== Page 46 ===== -->
+
+<div style="text-align: center;">表73（续）</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>1.758-2.930</td></tr></table>
+
+## 51339 代理 TEI
+
+CCO为该站点选定的代理站点的设备标识TEI。
+
+## 513310 总分包数
+
+表示关联回复消息报文分包后，分包的总个数。
+
+## 513311 分包序号
+
+表示关联确认报文分包的索引值。当关联确认报文需要分割发送时，每个分割后的分包都被分配一个递增的索引值，第一个分包的索引值为1。
+
+## 513312 站点关联随机数
+
+表示站点关联请求随机数，是请求入网的站点在发送的关联请求报文中携带的站点关联随机数。
+
+## 513313 重新关联时间
+
+表示STA站点可以重新发起关联请求的时间间隔 $ ^{x} $。当STA的关联请求被CCO拒绝后，CCO会通知STA站点下次可以重新向本网络发起关联请求的间隔时间 $ ^{x} $。单位：毫秒 $ ^{x} $。
+
+## 5 1 3 3 14 端到端序列号
+
+表示端到端管理报文序列号，当STA向CCO发起一次入网关联请求时，获取一个端到端管理报文序列号。
+
+CCO在处理入网关联请求时，在发送的关联确认报文中，需要携带原始关联请求报文的端到端管理报文序列号。
+
+## 513315 路径序号
+
+表示路径通知序列号。
+
+在关联确认报文中，会携带路由路径信息 x CCO 每次发送关联确认报文时，需要获取一个路径通知序列号，获取的路径序列号是递加的。如发送第一个关联确认报文时，取值为 0，则发送第二个关联确认报文时，取值为 1，以此类推。
+
+代理站点或者STA，在刷新路由表项时，需要判断路径序列号是否为最新的。
+
+## 513316 路由表信息
+
+CCO在关联确认报消息中会携带与关联入网站点相关的路由信息。该信息中包括新入网站点的所有直连STA站点和直连代理站点以及代理站点的所有子站点。路由表信息字段的定义如表74所示。
+
+<!-- ===== Page 47 ===== -->
+
+<div style="text-align: center;">表 74 路由信息字段</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>字段大小（字节）</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>直连站点数</td><td style='text-align: center; word-wrap: break-word;'>0 1</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>新入网站点的直连 STA 站点个数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>直连代理数</td><td style='text-align: center; word-wrap: break-word;'>2 3</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>新入网站点的直连代理站点个数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>路由表大小</td><td style='text-align: center; word-wrap: break-word;'>4 5</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>路由信息表大小（单位：字节）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>6 7</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>保留位</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>路由表</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>L（可变长）</td><td style='text-align: center; word-wrap: break-word;'>记录直连子站点信息总长度可变。具体参照 Table 定义</td></tr></table>
+
+路由表的定义如表75所示。
+
+<div style="text-align: center;">表 75 子站点表</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td rowspan="2">直连站点[0]</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12 比特</td><td rowspan="2">直连 STA 的 TEI</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>链路类型</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>1 比特</td><td style='text-align: center; word-wrap: break-word;'>与直连站点的链路类型</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>5 7</td><td style='text-align: center; word-wrap: break-word;'>3 比特</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>直连 STA 的 TEI</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>直连站点[N 1]</td><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>直连 STA 的  $ TEI_{{k}} $\nN=直连站点数</td></tr><tr><td rowspan="2">直连代理[0]</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12 比特</td><td rowspan="2">直连代理 PCO 的 TEI</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>链路类型</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>1 比特</td><td style='text-align: center; word-wrap: break-word;'>与直连代理的链路类型</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>5 7</td><td style='text-align: center; word-wrap: break-word;'>3 比特</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>该代理下子站点数</td><td style='text-align: center; word-wrap: break-word;'>2 3</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>2 字节</td><td style='text-align: center; word-wrap: break-word;'>该 PCO 下所有子站点的个数</td></tr><tr><td rowspan="2">子站点[0]</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12 比特</td><td rowspan="2">该 PCO 下的子站点 TEI</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4 比特</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>该 PCO 下的子站点 TEI</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>子站点[M0 1]</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>该 PCO 下的子站点  $ TEI_{{k}} $\nM0=直连代理[0]下的子站点数</td></tr></table>
+
+<!-- ===== Page 48 ===== -->
+
+<div style="text-align: center;">表75（续）</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td rowspan="2">直连代理[1]</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>07</td><td rowspan="2">12 比特</td><td rowspan="2">直连代理 PCO 的 TEI</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>03</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>链路类型</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>1 比特</td><td style='text-align: center; word-wrap: break-word;'>与直连代理的链路类型</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>57</td><td style='text-align: center; word-wrap: break-word;'>3 比特</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>该代理下子站点数</td><td style='text-align: center; word-wrap: break-word;'>2 3</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>2 字节</td><td style='text-align: center; word-wrap: break-word;'>该 PCO 下所有子站点的个数</td></tr><tr><td rowspan="2">子站点[0]</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12 比特</td><td rowspan="2">该 PCO 下的子站点 TEI</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4 比特</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>该 PCO 下的子站点 TEI</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>子站点[M1 1]</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>该 PCO 下的子站点 TEI $ _{{s}} $\nM1=直连代理[1]下的子站点数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td></tr><tr><td rowspan="2">直连代理[S]</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12 比特</td><td rowspan="2">直连代理 PCO 的 TEI $ _{{s}} $\nS=直连站点数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>链路类型</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>1 比特</td><td style='text-align: center; word-wrap: break-word;'>与直连代理的链路类型</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>5 7</td><td style='text-align: center; word-wrap: break-word;'>3 比特</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>该代理下子站点数</td><td style='text-align: center; word-wrap: break-word;'>2 3</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>2 字节</td><td style='text-align: center; word-wrap: break-word;'>该 PCO 下所有子站点的个数</td></tr><tr><td rowspan="2">子站点[0]</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12 比特</td><td rowspan="2">该 PCO 下的子站点 TEI</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4 比特</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>该 PCO 下的子站点 TEI</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>子站点[MS 1]</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>该 PCO 下的子站点 TEI $ _{{s}} $\nMS=直连代理[S]下的子站点数</td></tr></table>
+
+直连站点，当描述站点B为站点A的直连站点时，一般是指站点B与站点A之间可以直接通信，不需要中继×子站点，当描述站点C为站点A的子站点时，C一般为需要通过A来与CCO完成通信的A的所有子孙站点中的一个×直连子站点，当站点D为站点A的直连子站点时，说明站点D既是站点A的直连站点，也是站点A的子站点×当路由表过大，不能在一个报文中传输完成时，需要对路由表进行分包传输×分包规则：每个分包中都有一个路由信息字段和子站点表，路由信息字段的内容指示的是当前分包中的子
+
+<!-- ===== Page 49 ===== -->
+
+站点表的信息，每一个分包的路由表项都要保证能够无歧义解析。所有分包中，需要顺序先传输直连子站点，直连子站点未满一个分包，可继续传输直连代理子站点及其子站点；如果一个代理站点的子站点数量过大，需要多个分包时，每个分包的第一个表项必须填写该代理子站点，第二表项填写该分包中该代理站点子站点的数量，即所有分包中传输直连代理站点及其子站点时，必须保证如下格式顺序：直连代理站点TEI，该代理站点下子站点数量，子站点TEI。
+
+## 5134 关联汇总指示报文
+
+## 51341 关联汇总指示格式
+
+关联汇总指示报文（MMeAssocGatherInd）格式的定义如表76所示。
+
+<div style="text-align: center;">表 76 关联汇总指示报文格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（字节）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>结果</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>站点层级</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>CCO MAC 地址</td><td style='text-align: center; word-wrap: break-word;'>2 7</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>6</td></tr><tr><td rowspan="2">代理 TEI</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12 比特</td></tr><tr><td rowspan="3">9</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>载波频段</td><td style='text-align: center; word-wrap: break-word;'>4 5</td><td style='text-align: center; word-wrap: break-word;'>2 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>6 7</td><td style='text-align: center; word-wrap: break-word;'>2 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>10</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>汇总站点数</td><td style='text-align: center; word-wrap: break-word;'>11</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>12 15</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>站点信息</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>L（可变长）</td></tr></table>
+
+## 51342 结果
+
+表示关联请求的结果，固定值为0，表示允许加入网络。
+
+## 51343 站点层级
+
+表示所有新入网站点所处的网络层级
+
+## 51344 CCO MAC 地址
+
+表示本网络中CCO的设备MAC地址。
+
+## 51345 代理TEI
+
+表示代理站点的设备标识，为所通知的所有新入网站点的代理站点的TEI。
+
+## 51346 载波频段
+
+表示网络采用的载波频段，载波频段值定义如表77所示。
+
+<!-- ===== Page 50 ===== -->
+
+<div style="text-align: center;">表 77 载波频段值</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>1.953~11.96</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>2.441~5.615</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>0.781~2.930</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>1.758~2.930</td></tr></table>
+
+## 51347 汇总站点数
+
+表示关联汇总指示报文中通知的新入网站点的个数。
+
+按照长帧头或短帧头，分别允许最大可支持58和59。
+
+## 51348 站点信息
+
+表示关联汇总指示报文中，所有新入网站点的信息。
+
+站点信息字段的定义如表78所示。
+
+<div style="text-align: center;">表 78 站点信息字段</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>站点 MAC 地址 1</td><td style='text-align: center; word-wrap: break-word;'>0 5</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>6 字节</td><td style='text-align: center; word-wrap: break-word;'>站点的 MAC 地址</td></tr><tr><td rowspan="2">站点 TEI1</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12 比特</td><td rowspan="2">分配给站点的 TEI</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4 比特</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>站点 MAC 地址 2</td><td style='text-align: center; word-wrap: break-word;'>8 13</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>6 字节</td><td style='text-align: center; word-wrap: break-word;'>站点的 MAC 地址</td></tr><tr><td rowspan="2">站点 TEI2</td><td style='text-align: center; word-wrap: break-word;'>14</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12 比特</td><td rowspan="2">分配给站点的 TEI</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>15</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>15</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4 比特</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>--</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>站点 MAC 地址 N</td><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>站点的 MAC 地址\nN=汇总站点数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>站点 TEIN</td><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>分配给站点的 TEIN\nN=汇总站点数</td></tr></table>
+
+## 5135 代理变更请求报文
+
+## 51351 代理变更请求报文格式
+
+代理变更请求报文（MMeChangeProxyReq）格式的定义如表79所示。
+
+<div style="text-align: center;">表 79 代理变更请求报文格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小</td></tr><tr><td rowspan="2">站点 TEI</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr></table>
+
+<!-- ===== Page 51 ===== -->
+
+<div style="text-align: center;">表79（续）</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>47</td><td style='text-align: center; word-wrap: break-word;'>4比特</td></tr><tr><td rowspan="2">新代理 TEIO</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>07</td><td rowspan="2">12比特</td></tr><tr><td rowspan="3">3</td><td style='text-align: center; word-wrap: break-word;'>03</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>链路类型</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>1比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>57</td><td style='text-align: center; word-wrap: break-word;'>3比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>--</td></tr><tr><td rowspan="2">新代理 TEI4</td><td style='text-align: center; word-wrap: break-word;'>10</td><td style='text-align: center; word-wrap: break-word;'>07</td><td rowspan="2">12比特</td></tr><tr><td rowspan="3">11</td><td style='text-align: center; word-wrap: break-word;'>03</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>链路类型</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>1比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>57</td><td style='text-align: center; word-wrap: break-word;'>3比特</td></tr><tr><td rowspan="2">旧代理 TEI</td><td style='text-align: center; word-wrap: break-word;'>12</td><td style='text-align: center; word-wrap: break-word;'>07</td><td rowspan="2">12比特</td></tr><tr><td rowspan="2">13</td><td style='text-align: center; word-wrap: break-word;'>03</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>47</td><td style='text-align: center; word-wrap: break-word;'>4比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>代理类型</td><td style='text-align: center; word-wrap: break-word;'>14</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>1字节</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>原因</td><td style='text-align: center; word-wrap: break-word;'>15</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>1字节</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>端到端序列号</td><td style='text-align: center; word-wrap: break-word;'>16 19</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>4字节</td></tr><tr><td rowspan="3">站点相线</td><td rowspan="4">20</td><td style='text-align: center; word-wrap: break-word;'>01</td><td style='text-align: center; word-wrap: break-word;'>2比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>23</td><td style='text-align: center; word-wrap: break-word;'>2比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>45</td><td style='text-align: center; word-wrap: break-word;'>2比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>67</td><td style='text-align: center; word-wrap: break-word;'>2比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>21 23</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>24比特</td></tr></table>
+
+## 51352 站点TEI
+
+表示申请进行代理变更站点的设备标识。
+
+## 51353 新代理 TEI
+
+表示候选代理站点的设备标识。每2个字节可携带一个设备标识，最多可携带5个。由发起代理变更请求的站点，向CCO提出的候选代理站点，最多支持5个。CCO会在候选代理中，指定该站点的新代理。
+
+## 51354 链路类型
+
+表示发起代理变更站点与候选代理之间通信链路类型，链路类型值定义如表80所示。
+
+<div style="text-align: center;">表80 链路类型值</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>高速载波链路</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>无线链路</td></tr></table>
+
+## 51355 旧代理TEI
+
+<!-- ===== Page 52 ===== -->
+
+表示申请代理变更站点的原代理站点的设备标识。
+
+## 51356 代理类型
+
+表示申请代理变更站点的原代理类型，定义如表81所示。
+
+<div style="text-align: center;">表81 代理类型</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>表示站点动态选择的代理</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>其他</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+## 51357 原因
+
+表示站点发起代理变更原因，定义如表82所示。
+
+<div style="text-align: center;">表82 代理变更原因</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>未知</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>表示周期代理变更</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>其他</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+## 51358 站点相线
+
+表示发起代理变更请求站点的相线信息，最低字节存放评估出的所属相线，其他字节依次填入可能的备选相位，相线的值定义如表83所示。
+
+<div style="text-align: center;">表 83 相线评估信息</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>表示未知相线</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>表示A相线</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>表示B相线</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>表示C相线</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>其他</td><td style='text-align: center; word-wrap: break-word;'>无效</td></tr></table>
+
+## 51359 端到端序列号
+
+表示端到端的报文序列号。
+
+请求代理变更的站点，在产生代理变更请求报文时，需要获取一个序列号，CCO在确认代理变更时，需要在确认报文中携带代理变更请求报文中的端到端报文序列号。
+
+该序列号由发起请求的站点维护。
+
+## 5136 代理变更请求确认报文
+
+## 5 1 3 6 1 代理变更请求确认报文格式
+
+<!-- ===== Page 53 ===== -->
+
+代理变更请求确认报文（MMeChangeProxyCnf）格式的定义如表84所示。
+
+<div style="text-align: center;">表 84 代理变更请求确认报文格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（字节）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>结果</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>总分包数</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>分包序号</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td rowspan="2">站点 TEI</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12 比特</td></tr><tr><td rowspan="3">5</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>链路类型</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>1 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>5 7</td><td style='text-align: center; word-wrap: break-word;'>3 比特</td></tr><tr><td rowspan="2">代理 TEI</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12 比特</td></tr><tr><td rowspan="2">7</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>端到端序列号</td><td style='text-align: center; word-wrap: break-word;'>8 11</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>路径序号</td><td style='text-align: center; word-wrap: break-word;'>12 15</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>子站点数</td><td style='text-align: center; word-wrap: break-word;'>16 17</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>18 19</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>子站点条目</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>L（可变长）</td></tr></table>
+
+## 51362 结果
+
+表示代理变更结果，定义如表85所示。
+
+<div style="text-align: center;">表 85 代理变更结果</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>表示变更成功</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>其他</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+## 51363 总分包数
+
+表示代理变更请求确认报文的总的分包数。当报文超过传输限制时，可以分包进行传输。
+
+## 51364 分包序号
+
+表示代理变更请求确认报文的分包索引。当代理变更请求确认报文需要分割发送时，每个分割后的分包都被分配一个递增的索引值，第一个分包的索引值为1，之后每一个分包的索引值都在前一个分包的索引值基础上加1。
+
+## 51365 站点TEI
+
+表示申请代理变更的站点的TEI。
+
+## 51366 链路类型
+
+<!-- ===== Page 54 ===== -->
+
+表示发起代理变更站点与新代理之间通信链路类型，链路类型值定义如表86所示。
+
+<div style="text-align: center;">表86 链路类型值</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>高速载波链路</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>无线链路</td></tr></table>
+
+## 51367 代理 TEI
+
+表示申请代理变更站点的新代理站点的TEI。
+
+## 51368 子站点数
+
+表示申请代理变更站点的所有子站点的数目。
+
+## 51369 端到端序列号
+
+表示端到端的报文序列号。请求代理变更的站点，在产生代理变更请求报文时，需要获取一个序列号，CCO在确认代理变更时，需要在代理变更请求确认报文中携带代理变更请求报文中的端到端报文序列号。
+
+## 513610 路径序号
+
+表示路径通知序列号。在代理变更请求确认报文中，会携带路由路径信息。每次代理变更请求确认报文的发送，CCO会获取一个路径通知序列号，获取的路径序列号是递加的。代理站点或者STA站点，在刷新路由表项时，需要判断路径序列号是否为最新的。
+
+## 513611 子站点条目
+
+包含子站点信息，即代理变更请求发起站点的所有子站点的TEI，定义如表87所示。
+
+<div style="text-align: center;">表87 子站点条目</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小(比特)</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td rowspan="2">TEI[0]</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12</td><td rowspan="2">子站点的 TEI</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr><tr><td rowspan="2">TEI[1]</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12</td><td rowspan="2">子站点的 TEI</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>子站点的 TEI</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>TEI[N 1]</td><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>子站点的 TEI\nN=子站点数</td></tr></table>
+
+## 5137 代理变更请求确认报文（位图版）
+
+## 51371 代理变更请求确认报文（位图版）格式
+
+<!-- ===== Page 55 ===== -->
+
+代理变更请求确认报文（位图版）（MMeChangeProxyBitMapCnf）格式的定义如表88所示。
+
+<div style="text-align: center;">表 88 代理变更请求确认报文（位图版）格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小(字节)</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>结果</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>位图大小</td><td style='text-align: center; word-wrap: break-word;'>23</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr><tr><td rowspan="2">站点 TEI</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>07</td><td rowspan="2">12 比特</td></tr><tr><td rowspan="3">5</td><td style='text-align: center; word-wrap: break-word;'>03</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>链路类型</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>1 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>57</td><td style='text-align: center; word-wrap: break-word;'>3 比特</td></tr><tr><td rowspan="2">代理 TEI</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>07</td><td rowspan="2">12 比特</td></tr><tr><td rowspan="2">7</td><td style='text-align: center; word-wrap: break-word;'>03</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>47</td><td style='text-align: center; word-wrap: break-word;'>4 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>端到端序列号</td><td style='text-align: center; word-wrap: break-word;'>8 11</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>路径序号</td><td style='text-align: center; word-wrap: break-word;'>12 15</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>16 19</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>子站点位图</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>L (可变长)</td></tr></table>
+
+## 51372 结果
+
+表示代理变更结果，定义如表89所示。
+
+<div style="text-align: center;">表 89 代理变更结果</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>表示变更成功</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>其他</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+## 51373 站点TEI
+
+表示申请代理变更的站点的TEI。
+
+## 51374 链路类型
+
+表示发起代理变更站点与新代理之间通信链路类型，链路类型值定义如表90所示。
+
+<div style="text-align: center;">表90 链路类型值</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>高速载波链路</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>无线链路</td></tr></table>
+
+## 51375 代理TEI
+
+<!-- ===== Page 56 ===== -->
+
+表示申请代理变更站点的新代理站点的TEI。
+
+## 51376 端到端序列号
+
+表示端到端的报文序列号。请求代理变更的站点，在产生代理变更请求报文时，需要获取一个序列号，CCO在确认代理变更时，需要在代理变更请求确认报文中携带代理变更请求报文中的端到端报文序列号。
+
+## 51377 路径序号
+
+表示路径通知序列号。在代理变更请求确认报文中，会携带路由路径信息。每次代理变更请求确认报文的发送，CCO会获取一个路径通知序列号，获取的路径序列号是递加的。代理站点或者STA站点，在刷新路由表项时，需要判断路径序列号是否为最新的。
+
+## 51378 位图大小
+
+表示“子站点位图”字段的大小，单位是字节。
+
+## 51379 子站点位图
+
+采用位图表示代理变更请求发起站点的所有子站点的TEI×根据TEI大小在比特图中相应的位置上填写标志，当比特位的值为1时，表示对应的TEI有效。如第0字节的第1比特值为1，表示的TEI为1的站点为此次发起代理变更的站点的子站点；第1字节的第0比特值为1，表示的TEI为8的站点为此次发起代理变更的站点的子站点。
+
+## 5138 离线指示报文
+
+## 51381 离线指示报文格式
+
+离线指示报文（MMeLeaveInd）格式的定义如表91所示。
+
+<div style="text-align: center;">表 91 离线指示报文格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字段大小(字节)</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>原因</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>站点总数</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>延迟时间</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>10</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>站点MAC地址</td><td style='text-align: center; word-wrap: break-word;'>L（可变长）</td></tr></table>
+
+## 51382 原因
+
+表示CCO告知站点需要离线的原因，定义如表92所示。
+
+<div style="text-align: center;">表92 原因字段</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>CCO 通知站点立即离线</td></tr></table>
+
+<!-- ===== Page 57 ===== -->
+
+<div style="text-align: center;">表92（续）</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>CCO 判断网络拓扑的层级超过上限</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>CCO 判断站点不在最新的白名单中</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>其他</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+## 51383 站点总数
+
+表示CCO告知的需要离线的站点个数。
+
+## 51384 延迟时间
+
+表示需要离线的站点可以在延迟时间到期后离线。单位为秒。
+
+## 51385 站点 MAC 地址
+
+包含离线站点的MAC地址，是可变长度字段，根据离线站点数目的不同，长度可变。定义如表93所示。
+
+<div style="text-align: center;">表93 站点 MAC 地址字段</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>字段大小(byte)</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>MAC[0]</td><td style='text-align: center; word-wrap: break-word;'>0 5</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>需要离线站点的 MAC</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>MAC[1]</td><td style='text-align: center; word-wrap: break-word;'>6 11</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>需要离线站点的 MAC</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>需要离线站点的 MAC</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>MAC[N 1]</td><td style='text-align: center; word-wrap: break-word;'>(6*(N 1)) (6*(N 1) +5)</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>需要离线站点的 MAC\nN=站点总数</td></tr></table>
+
+## 5139 心跳检测报文
+
+## 51391 心跳检测报文格式
+
+心跳检测报文（MMeHeartBeatCheck）格式的定义如表94所示。
+
+<div style="text-align: center;">表 94 心跳检测报文格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（字节）</td></tr><tr><td rowspan="2">原始源 TEI</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4 比特</td></tr><tr><td rowspan="2">发现站点数最大的站点\nTEI</td><td style='text-align: center; word-wrap: break-word;'>2 3</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4 比特</td></tr></table>
+
+<!-- ===== Page 58 ===== -->
+
+<div style="text-align: center;">表94（续）</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小(字节)</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>最大的发现站点数</td><td style='text-align: center; word-wrap: break-word;'>45</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>位图大小</td><td style='text-align: center; word-wrap: break-word;'>67</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>发现站点位图</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>L（可变长）</td></tr></table>
+
+## 51392 原始源 TEI
+
+设置为初始产生心跳检测报文的站点的TEI，该报文被各级代理转发时，OSTEI不变更。
+
+## 51393 发现站点数最大的站点 TEI
+
+表示发现站点数量最多的站点的TEI。心跳检测报文被转发给CCO时，本字段记录的是沿途转发站点中，发现周围站点数量最多的站点的TEI。
+
+## 51394 最大的发现站点数
+
+表示最大的发现站点数量。心跳检测报文被转发给CCO时，本字段记录的是沿途转发站点中，发现站点数最大的站点所发现的周围站点的数量。
+
+## 51395 位图大小
+
+表示“发现站点位图”字段的大小，单位是字节。
+
+## 51396 发现站点位图
+
+表示可发现的站点的TEI，按照位图的形式表示。这里的可发现站点，是心跳报文传输过程中，对各个站点的发现站点的汇总表示。根据TEI大小在位图中相应的位置上填写标志，当比特位的值为1时，表示对应的TEI有效。如第0字节的第1比特值为1，表示可以发现TEI为1的站点；第1字节的第0比特值为1，表示可以发现TEI为8的站点。
+
+## 5 1 3 10 发现列表报文
+
+## 5 1 3 10 1 发现列表报文格式
+
+发现列表报文（MMeDiscoverNodeList）格式的定义如表95所示。
+
+<div style="text-align: center;">表95 发现列表报文格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小(比特)</td></tr><tr><td rowspan="2">TEI</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td rowspan="2">代理 TEI</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td rowspan="2">12</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>0 7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>角色</td><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>0 3</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>层级</td><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>MAC 地址</td><td style='text-align: center; word-wrap: break-word;'>4 9</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>48</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>CCO MAC 地址</td><td style='text-align: center; word-wrap: break-word;'>10 15</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>48</td></tr></table>
+
+<!-- ===== Page 59 ===== -->
+
+<div style="text-align: center;">表95（续）</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小(比特)</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>相线</td><td style='text-align: center; word-wrap: break-word;'>16</td><td style='text-align: center; word-wrap: break-word;'>0 5</td><td style='text-align: center; word-wrap: break-word;'>6</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>16</td><td style='text-align: center; word-wrap: break-word;'>6 7</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>代理站点信道质量</td><td style='text-align: center; word-wrap: break-word;'>17</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>代理站点通信成功率</td><td style='text-align: center; word-wrap: break-word;'>18</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>代理站点下行通信成功率</td><td style='text-align: center; word-wrap: break-word;'>19</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>站点总数</td><td style='text-align: center; word-wrap: break-word;'>20 21</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>16</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>发送发现列表报文个数</td><td style='text-align: center; word-wrap: break-word;'>22</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>上行路由条目总数</td><td style='text-align: center; word-wrap: break-word;'>23</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>路由周期到期剩余时间</td><td style='text-align: center; word-wrap: break-word;'>24 25</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>16</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>位图大小</td><td style='text-align: center; word-wrap: break-word;'>26 27</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>16</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>最小通信成功率</td><td style='text-align: center; word-wrap: break-word;'>28</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>29 31</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>24</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>上行路由条目信息</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>L（可变长）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>发现站点列表位图</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>L（可变长）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>接收发现列表信息</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>L（可变长）</td></tr></table>
+
+## 513102 TEI
+
+表示发送发现列表报文的站点的终端设备标识TEI。
+
+## 513103 代理 TEI
+
+表示发送发现列表报文的站点的代理站点的TEI。
+
+## 513104 角色
+
+表示发送发现列表报文的站点的角色。
+
+## 513105 层级
+
+表示发送发现列表报文的站点的网络层级。
+
+## 513106 MAC地址
+
+表示发送发现列表报文的站点的MAC地址。
+
+## 513107 CCO MAC 地址
+
+指本网络CCO的MAC地址。
+
+## 513108 相线
+
+表示发送发现列表报文的站点，评估出的本站点的所属相线，按照优先顺序填写。其中第一相线表示是本站点最有可能所属的相线。站点相线信息，需要根据接收的信标帧中的相线信息进行评估。
+
+定义如表96所示。
+
+<!-- ===== Page 60 ===== -->
+
+<div style="text-align: center;">表 96 相线评估信息字段</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>比特位号</td><td style='text-align: center; word-wrap: break-word;'>字段大小(比特)</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>相线 1</td><td style='text-align: center; word-wrap: break-word;'>0 1</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>评估出的第一相线</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>相线 2</td><td style='text-align: center; word-wrap: break-word;'>2 3</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>评估出的第二相线</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>相线 3</td><td style='text-align: center; word-wrap: break-word;'>4 5</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>评估出的第三相线</td></tr></table>
+
+## 513109 代理站点信道质量
+
+表示发送发现列表报文的站点，评估出的接收其代理站点报文时的信道质量。信道质量用原始信噪比数据表示。
+
+## 5 1 3 10 10 代理站点通信成功率
+
+表示发送发现列表报文的站点，与其代理站点之间的上下行通信成功率。
+
+使用百分比数据表示，如与代理站点的通信成功率为78%，则该值填写为78。
+
+## 5 1 3 10 11 代理站点下行通信成功率
+
+表示发送发现列表报文的站点，接收其代理站点的下行报文的成功率。
+
+## 5131012 站点总数
+
+表示发送发现列表报文的站点，在发现列表报文中，携带了发现站点信息的站点数量。
+
+## 5 1 3 10 13 发送发现列表报文个数
+
+表示发送发现列表报文的站点在上个路由周期内发送的发现列表报文的总数，若信标帧中“信标使用标志位”为1，发送发现列表报文个数包含站点在上个路由周期内发送的信标帧的个数。
+
+## 5 1 3 10 14 上行路由条目总数
+
+表示发送发现列表报文的站点到达CCO的上行路由表项数目，最大支持5条路由表项。
+
+## 5131015 路由周期到期剩余时间
+
+表示发送发现列表报文的站点，计算出的距离当前路由周期到期的剩余时间，单位：秒。
+
+## 5131016 最小通信成功率
+
+表示发送发现列表报文的站点到CCO的整个路径中，某级最弱连接的通信成功率x
+
+## 5131017 位图大小
+
+表示“发现站点列表位图”字段的大小，单位是字节。
+
+## 5 1 3 10 18 上行路由条目信息
+
+表示发送发现列表的站点，到达CCO的上行路由表项信息。表项的长度是2字节。上行路由条目总数，定义如表97所示。
+
+<!-- ===== Page 61 ===== -->
+
+<div style="text-align: center;">表97 上行路由信息字段</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小(比特)</td></tr><tr><td rowspan="2">下一跳站点 TEI0</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>路由类型 0</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>--</td></tr><tr><td rowspan="2">下一跳站点 TEI4</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>9</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>路由类型 4</td><td style='text-align: center; word-wrap: break-word;'>9</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr></table>
+
+路由类型定义如表98所示。同级路由，指使用与本站点层级相同站点，作为下一跳路由站点；上级路由，指使用比本站点低一个层级的站点，作为下一跳路由站点；代理主路径路由，指使用本站点的代理站点，作为下一跳路由站点；上上级路由，指使用比本站点低两个层级的站点，作为下一条路由站点。
+
+<div style="text-align: center;">表 98 路由类型字段</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>表示错误的路由类型</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>表示同级路由类型</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>表示上级路由类型</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>表示代理主路径路由类型</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>表示上上级路由类型</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>其他</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+## 5 1 3 10 19 发现站点列表位图
+
+表示发现站点列表的位域图，比特位的值为1表示该比特位对应的TEI站点，是可被发现的x，并且本报文中，也携带了对应的发现站点信息x
+
+如0字节的1比特值为1，表示的TEI为1；1字节的0比特值为1，表示的TEI为8。
+
+## 5131020 接收发现列表信息
+
+表示发送发现列表报文的站点，在上个路由周期中，接收到其他站点的发现列表报文的总数，若信标帧中“信标使用标志位”为1，则接收其他站点的信标帧的个数。
+
+其中，接收发现列表数0字段，记录的是发现站点列表位图域中，从0字节开始，第一个有效的TEI站点的值。其他的依次类推。
+
+比如，发现站点列表位图域中，从0字节开始，第一个为1的比特位是1字节的0比特，那么接收发现列表数0字段的值，就是指接收TEI为8的站点的发现报文数量。
+
+接收发现列表信息字段如表99所示。
+
+<div style="text-align: center;">表99 接收发现列表信息字段</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>字段大小(字节)</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>接收发现列表数 0</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>接收的发现列表报文数量</td></tr></table>
+
+<!-- ===== Page 62 ===== -->
+
+<div style="text-align: center;">表99（续）</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>字段大小(字节)</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>接收发现列表数 1</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>接收的发现列表报文数量</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>接收的发现列表报文数量</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>接收发现列表数 N</td><td style='text-align: center; word-wrap: break-word;'>N</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>接收的发现列表报文数量</td></tr></table>
+
+## 5 1 3 11 通信成功率上报报文
+
+## 513111 通信成功率上报报文格式
+
+通信成功率上报报文（MMeSuccessRateReport）格式的定义如表100所示。本报文只需要由代理站点发送。
+
+<div style="text-align: center;">表 100 通信成功率上报报文格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小(字节)</td></tr><tr><td rowspan="2">TEI</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>07</td><td rowspan="2">12 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>03</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>47</td><td style='text-align: center; word-wrap: break-word;'>4 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>站点总数</td><td style='text-align: center; word-wrap: break-word;'>23</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>2 字节</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>通信成功率信息</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>L（可变长）</td></tr></table>
+
+## 513112 TEI
+
+表示代理站点自身的设备标识TEI。通信成功率报文，由代理站点发送。
+
+## 513113 站点总数
+
+表示代理站点的子站点个数。同时也是通信成功率信息字段中STA表项的数目。
+
+## 513114 通信成功率信息
+
+表示通信成功率信息，包含了代理站点的每个子站点的通信成功率×通信成功率信息字段中，每个STA成功率信息的定义如表101所示×表示子站点的设备标识×下行通信成功率（DownCommRate）表示代理站点到子站点的下行通信成功率×上行通信成功率（UpCommRate）表示子站点到代理站点的上行通信成功率×
+
+<div style="text-align: center;">表101 成功率信息</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节数</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小(字节)</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td rowspan="2">站点的 TEI</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12 比特</td><td rowspan="2">站点的 TEI</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4 比特</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>下行通信成功率</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>下行通信成功率</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>上行通信成功率</td><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>上行通信成功率</td></tr></table>
+
+<!-- ===== Page 63 ===== -->
+
+## 51312 网络冲突上报报文
+
+## 513121 网络冲突上报报文格式
+
+网络冲突上报报文（MMeNetworkConflictReport）格式的定义如表102所示。该报文在STA识别出存在NID重复后，上报至CCO，CCO可根据冲突网络信息进行NID调整。
+
+<div style="text-align: center;">表 102 网络冲突上报报文格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>字段大小（字节）</td></tr><tr><td rowspan="6">CCO MAC 地址</td><td style='text-align: center; word-wrap: break-word;'>0</td><td rowspan="6">6</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>5</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>邻居网络个数</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>网络号字节宽度</td><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>邻居网络条目</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>L（可变长）</td></tr></table>
+
+## 513122 CCO MAC 地址
+
+表示与本网络发生冲突的邻居网络的CCO MAC地址。
+
+## 5 1 3 12 3 邻居网络个数
+
+周边可见邻居网络的个数。
+
+## 513124 网络号字节宽度
+
+网络号的字节宽度，单位是字节。本协议中网络号字节宽度默认为3。
+
+## 5 1 3 12 5 邻居网络条目
+
+邻居网络信息，具体如表103所示。
+
+<div style="text-align: center;">表 103 邻居网络条目</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>字段大小（字节）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>邻居网络（0）</td><td style='text-align: center; word-wrap: break-word;'>0 2</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>邻居网络（1）</td><td style='text-align: center; word-wrap: break-word;'>3 5</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>邻居网络（N）</td><td style='text-align: center; word-wrap: break-word;'>3N (3N+2)</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr></table>
+
+## 51313 过零 NTB 采集指示报文
+
+## 513131 过零 NTB 采集指示报文格式
+
+过零NTB采集指示报文（MMeZeroCrossNTBCollectInd）格式的定义如表104所示。
+
+<!-- ===== Page 64 ===== -->
+
+本报文由CCO创建发送。
+
+<div style="text-align: center;">表 104 过零 NTB 采集指示报文格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小(字节)</td></tr><tr><td rowspan="2">TEI</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>07</td><td rowspan="2">12 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>03</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>47</td><td style='text-align: center; word-wrap: break-word;'>4 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>采集站点</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>采集周期</td><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>采集数量</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>57</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr></table>
+
+## 513132 TEI
+
+需要进行过零NTB采集的站点的TEI。
+
+该指定的TEI，只有在指定单站点采集时有效，需要结合“采集站点”字段来判断。
+
+## 513133 采集站点
+
+指示需要进行过零NTB采集的站点，定义如表105所示。
+
+<div style="text-align: center;">表 105 过零 NTB 采集站点</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>指定单站点采集</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>指定全网站点采集</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>其他</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+## 513134 采集周期
+
+指示采集过零NTB的周期。在50Hz的电力线上，一个电力线周期是指一个正弦波的周期20毫秒。采集的过零NTB的时刻，与理论过零时刻的偏差，必须保证在 $ \pm1.2 $毫秒以内。定义如表106所示。
+
+<div style="text-align: center;">表 106 过零 NTB 采集周期</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>二分之一电力线周期</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>一个电力线周期</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>其他</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+## 513135 采集数量
+
+表示需要采集的过零NTB的数量。
+
+在指示报文下发后，所指定的站点，需要连续的采集过零点NTB的数量。
+
+## 51314 过零 NTB 告知报文
+
+<!-- ===== Page 65 ===== -->
+
+## 513141 过零 NTB 告知报文格式
+
+过零NTB告知报文（MMeZeroCrossNTBReport）格式的定义如表107所示。本报文可由STA站点或者CCO站点创建发送。
+
+<div style="text-align: center;">表 107 过零 NTB 告知报文格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小(字节)</td></tr><tr><td rowspan="2">TEI</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>07</td><td rowspan="2">12 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>03</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>47</td><td style='text-align: center; word-wrap: break-word;'>4 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>告知总数量</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>相线 1 差值告知数量</td><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>相线 2 差值告知数量</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>相线 3 差值告知数量</td><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>基准 NTB</td><td style='text-align: center; word-wrap: break-word;'>69</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>相线 1 过零 NTB 差值</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>L (可变长)</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>相线 2 过零 NTB 差值</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>L (可变长)</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>相线 3 过零 NTB 差值</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>L (可变长)</td></tr></table>
+
+## 513142 TEI
+
+表示告知过零NTB信息的站点。
+
+## 513143 告知总数量
+
+表示站点告知的过零NTB的数量。
+
+## 513144 相线差值告知数量
+
+表示站点告知相应相线的过零NTB差值的数量。
+
+## 513145 基准NTB
+
+表示站点告知的基准NTB。该NTB是站点告知的第一个过零点NTB值，是后续过零NTB用来计算差值的基准NTB。该字段保存的NTB值，是采集的过零点NTB值原始32比特数据，右移8比特之后的数据，相当于原始数据的高24比特数据。
+
+## 513146 相线过零 NTB 差值
+
+表示每个相线的过零NTB与前一个NTB的差值的全部数据，按照相线13的顺序依次保存。
+
+过零NTB差值的计算方法：以基准NTB为开始，后续的每一个过零NTB，都与前一个NTB做差值计算；将计算得到的差值数据，右移8bit，只保留高比特位的部分。
+
+将最终得到的差值，作为过零NTB差值，按照时间顺序，存入“过零NTB差值”字段，上报CCO
+
+说明：在电力线的工频周期中，过零点的间隔一般在10毫秒左右，两个过零点之间的NTB差值不会超过20个比特位的表示区间。所以，过零点NTB差值，在右移8比特后，需要用12比特的字段来表示。
+
+每个相线的过零NTB差值存储的定义如表108所示。
+
+<!-- ===== Page 66 ===== -->
+
+<div style="text-align: center;">表 108 过零 NTB 差值格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特号</td><td style='text-align: center; word-wrap: break-word;'>字段大小\n(比特)</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td rowspan="2">过零 NTB 差值[0]</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>过零 NTB 差值[0]低 8 位</td></tr><tr><td rowspan="2">1</td><td style='text-align: center; word-wrap: break-word;'>0 3</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>过零 NTB 差值[0]高 4 位</td></tr><tr><td rowspan="2">过零 NTB 差值[1]</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>过零 NTB 差值[1]低 4 位</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>过零 NTB 差值[1]高 8 位</td></tr><tr><td rowspan="2">过零 NTB 差值[2]</td><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>过零 NTB 差值[2]低 8 位</td></tr><tr><td rowspan="2">4</td><td style='text-align: center; word-wrap: break-word;'>0 3</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>过零 NTB 差值[2]高 4 位</td></tr><tr><td rowspan="2">过零 NTB 差值[3]</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>过零 NTB 差值[3]低 4 位</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>过零 NTB 差值[3]高 8 位</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td></tr></table>
+
+## 5 1 3 15 网络诊断报文
+
+网络诊断报文（MMeDiagnose）为各厂商非标准的自定义报文，供各厂商对网络的故障进行定位使用，对格式不做统一要求。网络诊断报文格式如表109所示，芯片厂商ID定义如表110所示。
+
+<div style="text-align: center;">表 109 网络诊断报文格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>芯片厂商 ID</td><td style='text-align: center; word-wrap: break-word;'>0 1</td><td style='text-align: center; word-wrap: break-word;'>16</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>厂家自定义</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>L（可变长）</td></tr></table>
+
+<div style="text-align: center;">表 110 芯片厂商 ID 定义</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>芯片厂商</td><td style='text-align: center; word-wrap: break-word;'>ID 值</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x0000</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x0001</td><td style='text-align: center; word-wrap: break-word;'>HS</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x0002</td><td style='text-align: center; word-wrap: break-word;'>ES</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x0003</td><td style='text-align: center; word-wrap: break-word;'>TC</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x0004</td><td style='text-align: center; word-wrap: break-word;'>LH</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x0005</td><td style='text-align: center; word-wrap: break-word;'>HT</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x0006</td><td style='text-align: center; word-wrap: break-word;'>RS</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x0007</td><td style='text-align: center; word-wrap: break-word;'>SW</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x0008</td><td style='text-align: center; word-wrap: break-word;'>SC</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x0009</td><td style='text-align: center; word-wrap: break-word;'>YM</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x000A</td><td style='text-align: center; word-wrap: break-word;'>QJ</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x000B</td><td style='text-align: center; word-wrap: break-word;'>HZ</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x000C</td><td style='text-align: center; word-wrap: break-word;'>ZC</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x000D</td><td style='text-align: center; word-wrap: break-word;'>SP</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x000E</td><td style='text-align: center; word-wrap: break-word;'>PE</td></tr></table>
+
+<!-- ===== Page 67 ===== -->
+
+<div style="text-align: center;">表110（续）</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>芯片厂商</td><td style='text-align: center; word-wrap: break-word;'>ID 值</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x000F</td><td style='text-align: center; word-wrap: break-word;'>NR</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x0010</td><td style='text-align: center; word-wrap: break-word;'>SL</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x0011</td><td style='text-align: center; word-wrap: break-word;'>MT</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x0012</td><td style='text-align: center; word-wrap: break-word;'>SI</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x0013</td><td style='text-align: center; word-wrap: break-word;'>RS</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x0014</td><td style='text-align: center; word-wrap: break-word;'>XY</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0x0015 0xFFFF</td><td style='text-align: center; word-wrap: break-word;'>待扩展</td></tr></table>
+
+## 51316 路由请求报文
+
+## 513161 路由请求报文格式
+
+路由请求报文（MMeRouteRequest）的格式定义如表111所示。
+
+<div style="text-align: center;">表 111 路由请求报文格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>版本</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>路由请求序列号</td><td style='text-align: center; word-wrap: break-word;'>14</td><td style='text-align: center; word-wrap: break-word;'>32</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>路径优选标志</td><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>负载数据类型</td><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>负载数据长度</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>负载数据</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>L（可变长）</td></tr></table>
+
+## 513162 版本
+
+指路由修复算法版本号。该字段用于表示实时路由修复算法的演进版本。默认值为0。
+
+## 513163 路由请求序列号
+
+指一次路由修复请求的标识。路由请求序列号的生成规则为，2字节的业务报文原始源地址，加上业务报文的MSDU序列号。例如：
+
+当某站点要转发的业务报文的 OSTEI 为 0x0118，MSDU 序列号为 0x2345，则针对该业务报文发起路由修复时，路由请求序列号为 0x01182345。
+
+## 513164 路径优选标志
+
+路径优选标志，在构成到达路由请求报文发起站点的路径时，该标志用于标识转发路由请求报文的当前站点是否具有优先被选择地位，即站点具有优先被选择地位时，转发的路由请求报文将携带该标志。
+
+如果具有优选地位，则设置本标志为1，否则设置本标志为0。
+
+## 513165 负载数据类型
+
+<!-- ===== Page 68 ===== -->
+
+负载数据类型，含义如表112所示。
+
+<div style="text-align: center;">表 112 负载数据类型</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>未携带负载数据</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>传播路径列表</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>其他</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+## 513166 负载数据长度
+
+路由请求报文所携带的负载数据的长度，可以为0。
+
+## 513167 负载数据
+
+路由请求报文所携带的负载数据的内容。当负载数据类型为 0x1 时，负载数据的内容格式如表 113 所示。TEI 表示路由请求报文转发过程中途经的站点。每途经一个站点，则传播路径列表中，多一组数据。通信成功率表示该站点与前一跳站点之间的上下行通信成功率。用百分比数值表示。信道质量表示该站点接收路由请求报文时，计算得到的信道质量。信道质量用原始信噪比数据表示。
+
+<div style="text-align: center;">表 113 传播路径列表格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小</td></tr><tr><td rowspan="2">TEI0</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>通信成功率0</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>1 字节</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信道质量0</td><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>1 字节</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>--</td></tr><tr><td rowspan="2">TEIn</td><td style='text-align: center; word-wrap: break-word;'>n</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>n+1</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>n+1</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>通信成功率n</td><td style='text-align: center; word-wrap: break-word;'>n+2</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>1 字节</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信道质量n</td><td style='text-align: center; word-wrap: break-word;'>n+3</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>1 字节</td></tr></table>
+
+## 51317 路由回复报文
+
+## 513171 路由回复报文格式
+
+路由回复报文（MMeRouteReply）的格式定义如表114所示。
+
+<div style="text-align: center;">表 114 路由回复报文格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>版本</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>路由请求序列号</td><td style='text-align: center; word-wrap: break-word;'>14</td><td style='text-align: center; word-wrap: break-word;'>32</td></tr></table>
+
+<!-- ===== Page 69 ===== -->
+
+<div style="text-align: center;">表114（续）</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>负载数据类型</td><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>负载数据长度</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>负载数据</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>L（可变长）</td></tr></table>
+
+## 513172 版本
+
+指路由修复算法版本号。该字段用于表示实时路由修复算法的演进版本。默认值为0。
+
+## 513173 路由请求序列号
+
+指一次路由修复请求的标识。
+
+路由回复报文中的该字段，使用对应的路由请求报文中的该字段值填充。
+
+## 5 1 3 17 4 负载数据类型
+
+负载数据类型，含义如表115所示。
+
+<div style="text-align: center;">表 115 负载数据类型</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>未携带负载数据</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>传播路径列表</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>其他</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+## 513175 负载数据长度
+
+路由回复报文所携带的负载数据的长度，可以为0。
+
+## 513176 负载数据
+
+路由回复报文所携带的负载数据的内容×当负载数据类型为0x1时，负载数据的内容格式如表116所示×TEI表示路由回复报文转发过程中途经的站点×每途经一个站点，则传播路径列表中，多一组数据×通信成功率表示该站点与前一跳站点之间的上下行通信成功率×用百分比数值表示×信道质量表示该站点接收路由回复报文时，计算得到的信道质量×信道质量用原始信噪比数据表示×
+
+<div style="text-align: center;">表 116 传播路径列表格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小</td></tr><tr><td rowspan="2">TEIO</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>07</td><td rowspan="2">12 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>03</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>47</td><td style='text-align: center; word-wrap: break-word;'>4 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>通信成功率0</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>1 字节</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信道质量0</td><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>1 字节</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td></tr></table>
+
+<!-- ===== Page 70 ===== -->
+
+<div style="text-align: center;">表116（续）</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小</td></tr><tr><td rowspan="2">TEIn</td><td style='text-align: center; word-wrap: break-word;'>n</td><td style='text-align: center; word-wrap: break-word;'>07</td><td rowspan="2">12 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>n+1</td><td style='text-align: center; word-wrap: break-word;'>03</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>n+1</td><td style='text-align: center; word-wrap: break-word;'>47</td><td style='text-align: center; word-wrap: break-word;'>4 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>通信成功率 n</td><td style='text-align: center; word-wrap: break-word;'>n+2</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>1 字节</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信道质量 n</td><td style='text-align: center; word-wrap: break-word;'>n+3</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>1 字节</td></tr></table>
+
+## 51318 路由错误报文
+
+## 513181 路由错误报文格式
+
+路由错误报文（MMeRouteError）的格式定义如表117所示。
+
+<div style="text-align: center;">表 117 路由错误报文格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>字段大小（字节）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>版本</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>路由请求序列号</td><td style='text-align: center; word-wrap: break-word;'>14</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>不可达站点数量</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>不可达站点列表</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>L（可变长）</td></tr></table>
+
+## 513182 版本
+
+指路由修复算法版本号。该字段用于表示实时路由修复算法的演进版本。默认值为0。
+
+## 513183 路由请求序列号
+
+指一次路由修复请求的标识。
+
+路由错误报文中的该字段，使用对应的路由请求报文中的该字段值填充。
+
+## 513184 不可达站点数量
+
+不可达站点列表中站点的数量。
+
+## 513185 不可达站点列表
+
+表示从该站点无路由可达的站点列表。
+
+每个地址占用2字节，表示不可达站点的TEI。
+
+## 51319 路由应答报文
+
+## 513191 路由应答报文格式
+
+路由应答报文（MMeRouteAck）的格式定义如表118所示。
+
+<!-- ===== Page 71 ===== -->
+
+<div style="text-align: center;">表 118 路由应答报文格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>字段大小(字节)</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>版本</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>13</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>路由请求序列号</td><td style='text-align: center; word-wrap: break-word;'>47</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr></table>
+
+## 513192 版本
+
+指路由修复算法版本号。该字段用于表示实时路由修复算法的演进版本。默认值为0。
+
+## 513193 路由请求序列号
+
+指一次路由修复请求的标识。
+
+路由应答报文中的该字段，使用对应的路由请求报文中的该字段值填充。
+
+## 51320 链路确认请求报文
+
+## 513201 链路确认请求报文格式
+
+链路确认请求报文（MMeLinkConfirmRequest）的格式定义如表119所示。
+
+<div style="text-align: center;">表 119 链路确认请求报文格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>字段大小（字节）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>版本</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>路由请求序列号</td><td style='text-align: center; word-wrap: break-word;'>14</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>确认站点数量</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>确认站点列表</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>L（可变长）</td></tr></table>
+
+## 513202 版本
+
+指路由修复算法版本号。该字段用于表示实时路由修复算法的演进版本。默认值为0。
+
+## 513203 路由请求序列号
+
+指一次路由修复请求的标识。
+
+链路确认请求报文中的该字段，使用对应的路由请求报文中的该字段值填充。
+
+## 513204 确认站点数量
+
+需要进行链路确认站点的数量。
+
+## 513205 确认站点列表
+
+表示需要进行链路确认的具体站点的列表。
+
+每个站点占用2字节，表示确认站点的TEI。
+
+## 51321 链路确认回应报文
+
+<!-- ===== Page 72 ===== -->
+
+## 5 1 3 21 1 链路确认回应报文格式
+
+链路确认回应报文（MMeLinkConfirmResponse）的格式定义如表120所示。
+
+<div style="text-align: center;">表 120 链路确认回应报文格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>字段大小（比特）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>版本</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>层级</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信道质量</td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>路径优选标志</td><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>7</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>路由请求序列号</td><td style='text-align: center; word-wrap: break-word;'>47</td><td style='text-align: center; word-wrap: break-word;'>32</td></tr></table>
+
+## 513212 版本
+
+指路由修复算法版本号。该字段用于表示实时路由修复算法的演进版本。默认值为0。
+
+## 513213 路由请求序列号
+
+指一次路由修复请求的标识。
+
+链路确认回应报文中的该字段，使用对应的路由请求报文中的该字段值填充。
+
+## 513214 层级
+
+指发送链路确认回应报文的站点，在网络中所处的层级。
+
+## 5 1 3 21 5 信道质量
+
+表示该站点在接收对应的链路确认请求报文时，计算得到的信道质量。信道质量用原始信噪比数据表示。
+
+## 513216 路径优选标志
+
+路径优选标志，在构成到达路由请求报文发起站点的路径时，该标志用于标识转发路由请求报文的当前站点是否具有优先被选择地位。
+
+如果具有优选地位，则设置本标志为1，否则设置本标志为0。
+
+## 51322 无线信道冲突上报
+
+## 5 1 3 22 1 报文格式定义
+
+无线信道冲突上报报文（MMeRFChannelConflictReport）的格式定义如表 121 所示。
+
+<div style="text-align: center;">表 121 无线信道冲突上报报文格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小(字节)</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>CCO MAC 地址</td><td style='text-align: center; word-wrap: break-word;'>0 5</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>6</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>邻居网络个数</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>邻居网络条目</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>L（可变长）</td></tr></table>
+
+<!-- ===== Page 73 ===== -->
+
+## 513222 CCO MAC 地址
+
+表示与本网络发生冲突的邻居网络的 CCO MAC 地址。
+
+## 5 1 3 22 3 邻居网络个数
+
+周边可见邻居网络的个数。
+
+## 5 1 3 22 4 邻居网络条目
+
+邻居网络信息，具体如表122所示。
+
+<div style="text-align: center;">表122 邻居网络条目</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>字段大小（字节）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>邻居网络（0）无线信道号</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>邻居网络（1）无线信道号</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>... ...</td><td style='text-align: center; word-wrap: break-word;'>... ...</td><td style='text-align: center; word-wrap: break-word;'>... ...</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>邻居网络（N）无线信道号</td><td style='text-align: center; word-wrap: break-word;'>N 1</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr></table>
+
+## 51323 无线发现列表报文
+
+## 5 1 3 23 1 报文格式定义
+
+无线发现列表报文（MMeRF DiscoverNodeList）格式定义如表 123 所示。
+
+<div style="text-align: center;">表 123 无线发现列表报文格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小(字节)</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>站点MAC地址</td><td style='text-align: center; word-wrap: break-word;'>05</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>6</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>统计序号</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信息单元1类型</td><td rowspan="2">7</td><td style='text-align: center; word-wrap: break-word;'>06</td><td style='text-align: center; word-wrap: break-word;'>7比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信息单元1长度类型</td><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>1比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信息单元1长度</td><td style='text-align: center; word-wrap: break-word;'>8/9</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>1/2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信息单元1内容</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>L（可变长）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>......</td><td style='text-align: center; word-wrap: break-word;'>......</td><td style='text-align: center; word-wrap: break-word;'>......</td><td style='text-align: center; word-wrap: break-word;'>L（可变长）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信息单元N类型</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>06</td><td style='text-align: center; word-wrap: break-word;'>7比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信息单元N长度类型</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>1比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信息单元N长度</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>1/2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信息单元N内容</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>L（可变长）</td></tr></table>
+
+## 513232 站点 MAC 地址
+
+发送无线发现列表报文节点的 MAC 地址。
+
+## 513233 统计序号
+
+<!-- ===== Page 74 ===== -->
+
+无线发现列表报文的统计序号，每次发送一个无线发送列表报文时，统计序号递增1，达到255后，环回为0。
+
+## 513234 信息单元类型
+
+用于指示信息单元内容，信息单元类型取值如表 124 所示。
+
+<div style="text-align: center;">表 124 信息单元类型字段定义</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>站点属性信息</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>站点路由信息</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>邻居节点信道信息非位图版</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>邻居节点信道信息位图版</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>其他</td><td style='text-align: center; word-wrap: break-word;'>保留</td></tr></table>
+
+## 513235 长度类型
+
+指示信息单元长度字段的位宽，长度类型取值如表 125 所示。
+
+<div style="text-align: center;">表125 长度类型取值</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>值</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>信息单元长度位宽为1字节</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>信息单元长度位宽为2字节</td></tr></table>
+
+## 513236 信息单元长度
+
+表示信息单元内容的长度，不包括信息单元类型、长度类型、信息单元长度的字段的内容。
+
+## 513237 站点属性信息格式
+
+表示站点的基本属性，站点属性信息格式如表126所示。
+
+<div style="text-align: center;">表 126 站点属性信息格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小(字节)</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>CCO MAC 地址</td><td style='text-align: center; word-wrap: break-word;'>0 5</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>6</td></tr><tr><td rowspan="2">代理 TEI</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12 比特</td></tr><tr><td rowspan="2">7</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>角色</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>层级</td><td rowspan="2">8</td><td style='text-align: center; word-wrap: break-word;'>0 3</td><td style='text-align: center; word-wrap: break-word;'>4 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>链路 RF 跳数</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>代理上行接收率</td><td style='text-align: center; word-wrap: break-word;'>9</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>代理下行接收率</td><td style='text-align: center; word-wrap: break-word;'>10</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr></table>
+
+<!-- ===== Page 75 ===== -->
+
+<div style="text-align: center;">表126（续）</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（字节）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>链路最小接收率</td><td style='text-align: center; word-wrap: break-word;'>11</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>无线发现列表周期</td><td style='text-align: center; word-wrap: break-word;'>12</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>无线接收率老化周期个数</td><td style='text-align: center; word-wrap: break-word;'>13</td><td style='text-align: center; word-wrap: break-word;'>07</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr></table>
+
+## 513238 站点路由信息格式
+
+表示站点多路径信息，站点路由信息格式如表127所示。
+
+<div style="text-align: center;">表 127 站点路由信息格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小(字节)</td></tr><tr><td rowspan="2">下一跳站点 TEI[1]</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12 比特</td></tr><tr><td rowspan="2">1</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>路由类型[1]</td><td style='text-align: center; word-wrap: break-word;'>0 4</td><td style='text-align: center; word-wrap: break-word;'>4 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>... ...</td><td style='text-align: center; word-wrap: break-word;'>... ...</td><td style='text-align: center; word-wrap: break-word;'>... ...</td><td style='text-align: center; word-wrap: break-word;'>... ...</td></tr><tr><td rowspan="2">下一跳站点 TEI[N]</td><td style='text-align: center; word-wrap: break-word;'>2N 2</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12 比特</td></tr><tr><td rowspan="2">2N 1</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>路由类型[N]</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4 比特</td></tr></table>
+
+路由类型定义如表98所示。同级路由，指使用与本站点层级相同站点，作为下一跳路由站点；上级路由，指使用比本站点低一个层级的站点，作为下一跳路由站点；代理主路径路由，指使用本站点的代理站点，作为下一跳路由站点；上上级路由，指使用比本站点低两个层级的站点，作为下一条路由站点。
+
+## 5 1 3 23 9 邻居节点信道信息非位图格式
+
+邻居节点信道信息非位图格式如表128所示。
+
+<div style="text-align: center;">表 128 邻居节点信道信息非位图格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（字节）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信道信息组合类型</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0 3</td><td style='text-align: center; word-wrap: break-word;'>4 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>邻居节点信道信息 $ ^{[1]} $</td><td style='text-align: center; word-wrap: break-word;'>可变长</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>可变长</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>... ...</td><td style='text-align: center; word-wrap: break-word;'>... ...</td><td style='text-align: center; word-wrap: break-word;'>... ...</td><td style='text-align: center; word-wrap: break-word;'>... ...</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>邻居节点信道信息 $ ^{[N]} $</td><td style='text-align: center; word-wrap: break-word;'>可变长</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>可变长</td></tr></table>
+
+信道信息组合类型取值和含义如表129所示。
+
+<!-- ===== Page 76 ===== -->
+
+<div style="text-align: center;">表 129 信道信息组合类型取值与字段长度</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>类型值</td><td style='text-align: center; word-wrap: break-word;'>TEI 长度</td><td style='text-align: center; word-wrap: break-word;'>接收率长度</td><td style='text-align: center; word-wrap: break-word;'>平均信噪比</td><td style='text-align: center; word-wrap: break-word;'>信号强度</td><td style='text-align: center; word-wrap: break-word;'>总长度（比特）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>12</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>20</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>12</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>16</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>12</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>20</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>12</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>16</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>12</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>24</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>12</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>24</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>12</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>24</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>12</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>32</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>12</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>20</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>9</td><td style='text-align: center; word-wrap: break-word;'>12</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>24</td></tr></table>
+
+接收率长度定义如表130所示。
+
+<div style="text-align: center;">表 130 接收率长度定义</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>接收率长度</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>表示未携带接收率信息</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>接收率信息长度为6比特。报文接收率=实际接收率/2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>接收率信息长度为8比特。报文接收率=实际接收率</td></tr></table>
+
+实际接收率的范围为[0，100]。
+
+平均信噪比长度定义如表131所示。
+
+<div style="text-align: center;">表 131 平均信噪比长度定义</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>平均信噪比长度</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>表示未携带平均信噪比信息</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>平均信噪比信息长度为4比特 $ _{i} $. 平均信噪比的映射关系如表132所示</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>平均信噪比信息长度为6比特 $ _{i} $. 映射关系为SNR≤6  $ dB_{i} $ 量化值=0 $ _{i} $\nSNR&gt;6  $ dB_{i} $. 量化值=SNR 结果+6</td></tr></table>
+
+<div style="text-align: center;">表 132 比特时平均信噪比映射值</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>SNR结果</td><td style='text-align: center; word-wrap: break-word;'>量化值</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>SNR≤ 6 dB</td><td style='text-align: center; word-wrap: break-word;'>0000</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>6 dB&lt;SNR≤ 4 dB</td><td style='text-align: center; word-wrap: break-word;'>0001</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>4 dB&lt;SNR≤ 2 dB</td><td style='text-align: center; word-wrap: break-word;'>0010</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2 dB&lt;SNR≤0 dB</td><td style='text-align: center; word-wrap: break-word;'>0011</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0 dB&lt;SNR≤2 dB</td><td style='text-align: center; word-wrap: break-word;'>0100</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2 dB&lt;SNR≤4 dB</td><td style='text-align: center; word-wrap: break-word;'>0101</td></tr></table>
+
+<!-- ===== Page 77 ===== -->
+
+<div style="text-align: center;">表132（续）</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>SNR结果</td><td style='text-align: center; word-wrap: break-word;'>量化值</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>4 dB&lt;SNR≤6 dB</td><td style='text-align: center; word-wrap: break-word;'>0110</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>6 dB&lt;SNR≤8 dB</td><td style='text-align: center; word-wrap: break-word;'>0111</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>8 dB&lt;SNR≤10 dB</td><td style='text-align: center; word-wrap: break-word;'>1000</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>10 dB&lt;SNR≤12 dB</td><td style='text-align: center; word-wrap: break-word;'>1001</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>12 dB&lt;SNR≤14 dB</td><td style='text-align: center; word-wrap: break-word;'>1010</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>14 dB&lt;SNR≤16 dB</td><td style='text-align: center; word-wrap: break-word;'>1011</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>16 dB&lt;SNR≤19 dB</td><td style='text-align: center; word-wrap: break-word;'>1100</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>19 dB&lt;SNR≤22 dB</td><td style='text-align: center; word-wrap: break-word;'>1101</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>22 dB&lt;SNR≤25 dB</td><td style='text-align: center; word-wrap: break-word;'>1110</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>SNR&gt;25 dB</td><td style='text-align: center; word-wrap: break-word;'>1111</td></tr></table>
+
+信号强度长度定义如表133所示。
+
+<div style="text-align: center;">表 133 信号强度长度定义</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>信号强度长度</td><td style='text-align: center; word-wrap: break-word;'>定义</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>表示未携带信号强度信息</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>信号强度信息长度为4比特，信号强度映射关系如表134所示</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>信号强度信息长度为6比特，信号强度映射关系如表135所示</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>信号强度信息长度为8比特，信号强度映射关系为： $ RSSI \leq 110 $ dBm时，量化值=0， $ RSSI &gt; 110 $ dBm时，量化值=RSSI结果+110</td></tr></table>
+
+<div style="text-align: center;">表 134 4 比特信号强度长度映射</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>RSSI结果</td><td style='text-align: center; word-wrap: break-word;'>量化值</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>RSSI≤105 dBm</td><td style='text-align: center; word-wrap: break-word;'>0000</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>105 dBm&lt;RSSI≤95 dBm</td><td style='text-align: center; word-wrap: break-word;'>0001</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>95 dBm&lt;RSSI≤86 dBm</td><td style='text-align: center; word-wrap: break-word;'>0010</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>86 dBm&lt;RSSI≤80 dBm</td><td style='text-align: center; word-wrap: break-word;'>0011</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>80 dBm&lt;RSSI≤74 dBm</td><td style='text-align: center; word-wrap: break-word;'>0100</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>74 dBm&lt;RSSI≤68 dBm</td><td style='text-align: center; word-wrap: break-word;'>0101</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>68 dBm&lt;RSSI≤62 dBm</td><td style='text-align: center; word-wrap: break-word;'>0110</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>62 dBm&lt;RSSI≤56 dBm</td><td style='text-align: center; word-wrap: break-word;'>0111</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>56 dBm&lt;RSSI≤48 dBm</td><td style='text-align: center; word-wrap: break-word;'>1000</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>48 dBm&lt;RSSI≤42 dBm</td><td style='text-align: center; word-wrap: break-word;'>1001</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>42 dBm&lt;RSSI≤36 dBm</td><td style='text-align: center; word-wrap: break-word;'>1010</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>36 dBm&lt;RSSI≤30 dBm</td><td style='text-align: center; word-wrap: break-word;'>1011</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>30 dBm&lt;RSSI≤20 dBm</td><td style='text-align: center; word-wrap: break-word;'>1100</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>20 dBm&lt;RSSI≤10 dBm</td><td style='text-align: center; word-wrap: break-word;'>1101</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>10 dBm&lt;RSSI≤0 dBm</td><td style='text-align: center; word-wrap: break-word;'>1110</td></tr></table>
+
+<!-- ===== Page 78 ===== -->
+
+<div style="text-align: center;">表134 (续)</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>RSSI结果</td><td style='text-align: center; word-wrap: break-word;'>量化值</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>RSSI&gt;0 dBm</td><td style='text-align: center; word-wrap: break-word;'>1111</td></tr></table>
+
+<div style="text-align: center;">表 135 6 比特信号强度长度映射关系</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>RSSI结果</td><td style='text-align: center; word-wrap: break-word;'>量化值</td><td style='text-align: center; word-wrap: break-word;'>RSSI结果</td><td style='text-align: center; word-wrap: break-word;'>量化值</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>RSSI≤110 dBm</td><td style='text-align: center; word-wrap: break-word;'>000000</td><td style='text-align: center; word-wrap: break-word;'>48 dBm&lt;RSSI≤46 dBm</td><td style='text-align: center; word-wrap: break-word;'>100000</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>110 dBm&lt;RSSI≤108 dBm</td><td style='text-align: center; word-wrap: break-word;'>000001</td><td style='text-align: center; word-wrap: break-word;'>46 dBm&lt;RSSI≤44 dBm</td><td style='text-align: center; word-wrap: break-word;'>100001</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>108 dBm&lt;RSSI≤106 dBm</td><td style='text-align: center; word-wrap: break-word;'>000010</td><td style='text-align: center; word-wrap: break-word;'>44 dBm&lt;RSSI≤42 dBm</td><td style='text-align: center; word-wrap: break-word;'>100010</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>106 dBm&lt;RSSI≤104 dBm</td><td style='text-align: center; word-wrap: break-word;'>000011</td><td style='text-align: center; word-wrap: break-word;'>42 dBm&lt;RSSI≤40 dBm</td><td style='text-align: center; word-wrap: break-word;'>100011</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>104 dBm&lt;RSSI≤102 dBm</td><td style='text-align: center; word-wrap: break-word;'>000100</td><td style='text-align: center; word-wrap: break-word;'>40 dBm&lt;RSSI≤38 dBm</td><td style='text-align: center; word-wrap: break-word;'>100100</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>102 dBm&lt;RSSI≤100 dBm</td><td style='text-align: center; word-wrap: break-word;'>000101</td><td style='text-align: center; word-wrap: break-word;'>38 dBm&lt;RSSI≤36 dBm</td><td style='text-align: center; word-wrap: break-word;'>100101</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>100 dBm&lt;RSSI≤98 dBm</td><td style='text-align: center; word-wrap: break-word;'>000110</td><td style='text-align: center; word-wrap: break-word;'>36 dBm&lt;RSSI≤34 dBm</td><td style='text-align: center; word-wrap: break-word;'>100110</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>98 dBm&lt;RSSI≤96 dBm</td><td style='text-align: center; word-wrap: break-word;'>000111</td><td style='text-align: center; word-wrap: break-word;'>34 dBm&lt;RSSI≤32 dBm</td><td style='text-align: center; word-wrap: break-word;'>100111</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>96 dBm&lt;RSSI≤94 dBm</td><td style='text-align: center; word-wrap: break-word;'>001000</td><td style='text-align: center; word-wrap: break-word;'>32 dBm&lt;RSSI≤30 dBm</td><td style='text-align: center; word-wrap: break-word;'>101000</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>94 dBm&lt;RSSI≤92 dBm</td><td style='text-align: center; word-wrap: break-word;'>001001</td><td style='text-align: center; word-wrap: break-word;'>30 dBm&lt;RSSI≤28 dBm</td><td style='text-align: center; word-wrap: break-word;'>101001</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>92 dBm&lt;RSSI≤90 dBm</td><td style='text-align: center; word-wrap: break-word;'>001010</td><td style='text-align: center; word-wrap: break-word;'>28 dBm&lt;RSSI≤26 dBm</td><td style='text-align: center; word-wrap: break-word;'>101010</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>90 dBm&lt;RSSI≤88 dBm</td><td style='text-align: center; word-wrap: break-word;'>001011</td><td style='text-align: center; word-wrap: break-word;'>26 dBm&lt;RSSI≤24 dBm</td><td style='text-align: center; word-wrap: break-word;'>101011</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>88 dBm&lt;RSSI≤86 dBm</td><td style='text-align: center; word-wrap: break-word;'>001100</td><td style='text-align: center; word-wrap: break-word;'>24 dBm&lt;RSSI≤22 dBm</td><td style='text-align: center; word-wrap: break-word;'>101100</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>86 dBm&lt;RSSI≤84 dBm</td><td style='text-align: center; word-wrap: break-word;'>001101</td><td style='text-align: center; word-wrap: break-word;'>22 dBm&lt;RSSI≤20 dBm</td><td style='text-align: center; word-wrap: break-word;'>101101</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>84 dBm&lt;RSSI≤82 dBm</td><td style='text-align: center; word-wrap: break-word;'>001110</td><td style='text-align: center; word-wrap: break-word;'>20 dBm&lt;RSSI≤18 dBm</td><td style='text-align: center; word-wrap: break-word;'>101110</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>82 dBm&lt;RSSI≤80 dBm</td><td style='text-align: center; word-wrap: break-word;'>001111</td><td style='text-align: center; word-wrap: break-word;'>18 dBm&lt;RSSI≤16 dBm</td><td style='text-align: center; word-wrap: break-word;'>101111</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>80 dBm&lt;RSSI≤78 dBm</td><td style='text-align: center; word-wrap: break-word;'>010000</td><td style='text-align: center; word-wrap: break-word;'>16 dBm&lt;RSSI≤14 dBm</td><td style='text-align: center; word-wrap: break-word;'>110000</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>78 dBm&lt;RSSI≤76 dBm</td><td style='text-align: center; word-wrap: break-word;'>010001</td><td style='text-align: center; word-wrap: break-word;'>14 dBm&lt;RSSI≤12 dBm</td><td style='text-align: center; word-wrap: break-word;'>110001</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>76 dBm&lt;RSSI≤74 dBm</td><td style='text-align: center; word-wrap: break-word;'>010010</td><td style='text-align: center; word-wrap: break-word;'>12 dBm&lt;RSSI≤10 dBm</td><td style='text-align: center; word-wrap: break-word;'>110010</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>74 dBm&lt;RSSI≤72 dBm</td><td style='text-align: center; word-wrap: break-word;'>010011</td><td style='text-align: center; word-wrap: break-word;'>10 dBm&lt;RSSI≤8 dBm</td><td style='text-align: center; word-wrap: break-word;'>110011</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>72 dBm&lt;RSSI≤70 dBm</td><td style='text-align: center; word-wrap: break-word;'>010100</td><td style='text-align: center; word-wrap: break-word;'>8 dBm&lt;RSSI≤6 dBm</td><td style='text-align: center; word-wrap: break-word;'>110100</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>70 dBm&lt;RSSI≤68 dBm</td><td style='text-align: center; word-wrap: break-word;'>010101</td><td style='text-align: center; word-wrap: break-word;'>6 dBm&lt;RSSI≤4 dBm</td><td style='text-align: center; word-wrap: break-word;'>110101</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>68 dBm&lt;RSSI≤66 dBm</td><td style='text-align: center; word-wrap: break-word;'>010110</td><td style='text-align: center; word-wrap: break-word;'>4 dBm&lt;RSSI≤2 dBm</td><td style='text-align: center; word-wrap: break-word;'>110110</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>66 dBm&lt;RSSI≤64 dBm</td><td style='text-align: center; word-wrap: break-word;'>010111</td><td style='text-align: center; word-wrap: break-word;'>2 dBm&lt;RSSI≤0 dBm</td><td style='text-align: center; word-wrap: break-word;'>110111</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>64 dBm&lt;RSSI≤62 dBm</td><td style='text-align: center; word-wrap: break-word;'>011000</td><td style='text-align: center; word-wrap: break-word;'>0 dBm&lt;RSSI≤2 dBm</td><td style='text-align: center; word-wrap: break-word;'>111000</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>62 dBm&lt;RSSI≤60 dBm</td><td style='text-align: center; word-wrap: break-word;'>011001</td><td style='text-align: center; word-wrap: break-word;'>2 dBm&lt;RSSI≤4 dBm</td><td style='text-align: center; word-wrap: break-word;'>111001</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>60 dBm&lt;RSSI≤58 dBm</td><td style='text-align: center; word-wrap: break-word;'>011010</td><td style='text-align: center; word-wrap: break-word;'>4 dBm&lt;RSSI≤6 dBm</td><td style='text-align: center; word-wrap: break-word;'>111010</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>58 dBm&lt;RSSI≤56 dBm</td><td style='text-align: center; word-wrap: break-word;'>011011</td><td style='text-align: center; word-wrap: break-word;'>6 dBm&lt;RSSI≤8 dBm</td><td style='text-align: center; word-wrap: break-word;'>111011</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>56 dBm&lt;RSSI≤54 dBm</td><td style='text-align: center; word-wrap: break-word;'>011100</td><td style='text-align: center; word-wrap: break-word;'>8 dBm&lt;RSSI≤10 dBm</td><td style='text-align: center; word-wrap: break-word;'>111100</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>54 dBm&lt;RSSI≤52 dBm</td><td style='text-align: center; word-wrap: break-word;'>011101</td><td style='text-align: center; word-wrap: break-word;'>10 dBm&lt;RSSI≤12 dBm</td><td style='text-align: center; word-wrap: break-word;'>111101</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>52 dBm&lt;RSSI≤50 dBm</td><td style='text-align: center; word-wrap: break-word;'>011110</td><td style='text-align: center; word-wrap: break-word;'>12 dBm&lt;RSSI≤14 dBm</td><td style='text-align: center; word-wrap: break-word;'>111110</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>50 dBm&lt;RSSI≤48 dBm</td><td style='text-align: center; word-wrap: break-word;'>011111</td><td style='text-align: center; word-wrap: break-word;'>RSSI&gt;14 dBm</td><td style='text-align: center; word-wrap: break-word;'>111111</td></tr></table>
+
+## 5132310 邻居节点信道信息位图格式
+
+<!-- ===== Page 79 ===== -->
+
+邻居节点信道信息位图格式定义如表136所示，位图版信道信息组合类型如表137所示。
+
+<div style="text-align: center;">表 136 邻居节点信道信息位图格式</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段</td><td style='text-align: center; word-wrap: break-word;'>字节号</td><td style='text-align: center; word-wrap: break-word;'>比特位</td><td style='text-align: center; word-wrap: break-word;'>字段大小（字节）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信道信息组合类型</td><td rowspan="2">0</td><td style='text-align: center; word-wrap: break-word;'>0 3</td><td style='text-align: center; word-wrap: break-word;'>4 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4 比特</td></tr><tr><td rowspan="2">位图起始 TEI[1]</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td rowspan="2">12 比特</td></tr><tr><td rowspan="2">2</td><td style='text-align: center; word-wrap: break-word;'>0 3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>位图[1]大小</td><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>位图[1]</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>L（可变长）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>邻居节点信道信息[ $ I_1 $]</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>L（可变长）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>邻居节点信道信息[ $ N_1 $]</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>L（可变长）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>位图起始 TEI[K]</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>12 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>0 3</td><td style='text-align: center; word-wrap: break-word;'></td></tr><tr><td style='text-align: center; word-wrap: break-word;'>保留</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>4 7</td><td style='text-align: center; word-wrap: break-word;'>4 比特</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>位图[K]大小</td><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>位图[K]</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>L（可变长）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>邻居节点信道信息[ $ I_k $]</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>L（可变长）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>邻居节点信道信息[ $ N_k $]</td><td style='text-align: center; word-wrap: break-word;'>可变</td><td style='text-align: center; word-wrap: break-word;'>0 7</td><td style='text-align: center; word-wrap: break-word;'>L（可变长）</td></tr></table>
+
+<div style="text-align: center;">表 137 位图版信道信息组合类型</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>类型值</td><td style='text-align: center; word-wrap: break-word;'>接收率长度</td><td style='text-align: center; word-wrap: break-word;'>平均信噪比</td><td style='text-align: center; word-wrap: break-word;'>信号强度</td><td style='text-align: center; word-wrap: break-word;'>总长度（比特）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>12</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>16</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>12</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>20</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>16</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>9</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>10</td><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>12</td></tr></table>
+
+## 52 MAC 子层功能描述
+
+## 521 基本机制
+
+<!-- ===== Page 80 ===== -->
+
+高速载波和无线通信使用基于信标帧的信道访问机制，本节描述信标周期内信道访问机制之间的关系
+
+CCO周期性地发送信标帧，信标帧中包含了CCO分配的信标周期内的信标时隙，TDMA时隙，CSMA时隙，绑定CSMA时隙等时隙的规划信息。高速载波和无线双模通信网络中的子节点，必须遵循CCO分配的时隙，进行信道访问。
+
+一般的，信标时隙和TDMA时隙等明确分配给CCO或具体STA使用的时隙，统称为非竞争时隙（TDMA时隙）；CSMA时隙和绑定CSMA时隙等未指明使用者的时隙，需要由有需求的STA竞争使用的时隙，统称为竞争时隙（CSMA时隙）。
+
+在多个高速载波和无线双模通信网络并存并且相互干扰的时候，CCO之间需要进行时隙协调。
+
+CCO在进行载波信道访问时，需要考虑电力线的相线因素。不同电力线相线上的STA，与CCO进行通信时，也需要考虑电力线相线的因素。可根据自身所在的相线，选择与之对应的时隙与CCO进行通信。CCO与STA通过无线信道通信时，可以不考虑STA自身所在的电力线相线。
+
+CCO在时隙规划时，根据业务需要，可以分配绑定CSMA时隙，由某种业务单独占有该时隙，凡是涉及该业务的STA，可以在该绑定CSMA时隙中，竞争发送该业务的报文。
+
+信标周期的时隙划分如图11所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_189_667_1067_852.jpg" alt="Image" width="73%" /></div>
+
+
+<div style="text-align: center;">图 11 时隙划分示意图</div>
+
+
+## 522 信标机制
+
+## 5221 信标分类
+
+高速载波和无线双模通信网络中有三种类型的信标帧：中央信标，代理信标和发现信标。信标帧必须在信标时隙中进行发送。信标时隙由CCO进行分配，分配时需要指明具体STA可以使用的对应时隙，部分STA可以在CSMA时隙上发送无线精简信标帧。
+
+其中，中央信标和代理信标在每个信标周期内都必须发送。发现信标要求每一个STA站点，从加入网络后每170秒时间周期内至少发送两个信标帧。
+
+STA在接收到信标帧后，一旦确定CCO指定其在某个时隙内发送信标帧，则必须在相应的时隙内，发送相应的信标帧。部分STA可以在CSMA时隙上竞争发送无线精简信标帧。
+
+## 5222 中央信标
+
+由CCO生成，在中央信标中，包含当前高速载波和无线双模通信网络的网络基准时间NTB，通过信标帧中的BTS字段，实时的通知给网络中STA。
+
+同时，中央信标中包括了CCO的时隙分配结果，这些时隙分配结果决定了网络中的STA访问信道的方式和时隙。
+
+在单个高速载波和无线双模通信网络中，中央信标是定周期发送的，发送的周期可自定义；在多个高速载波通信网络共存的场景中，CCO的中央信标的发送时隙（与其他类型信标时隙作为一个整体的带宽，一体协调），需要在多个高速载波通信网络的CCO之间协调，协调的原则是尽量保证各个CCO的中央信标能够在一定偏移下按照周期发送。
+
+<!-- ===== Page 81 ===== -->
+
+中央信标发送时，可以选择在多个相线上发送，或者单个相线上发送。不同相线上发送时需要不同的TDMA时隙。
+
+未入网的STA，在接收到中央信标后，可以根据代理信标中的时隙安排等内容，发起加入网络的请求。
+
+## 5223 代理信标
+
+代理信标由代理站点(PCO)发送，代理信标中包含了中央信标的全部时隙安排内容，并且携带了代理STA的基本属性。
+
+代理站点必须按照中央信标中指定的信标时隙，发送代理信标。
+
+未入网的STA，在接收到代理信标后，可以根据代理信标中的时隙安排等内容，发起加入网络的请求。
+
+## 5224 发现信标
+
+发现信标由STA站点发送，发现信标必须在CCO指定给该STA的信标时隙内发送。
+
+发现信标，主要用于发现周围可能的隐藏STA。信标中包含了用于隐藏STA加入网络的竞争时隙安排等内容。
+
+未入网的STA，在接收到发现信标后，可以根据发现信标中的时隙安排等内容，发起加入网络的请求
+
+## 523 时隙管理
+
+## 5231 时隙管理算法
+
+CCO，PCO，STA三个角色，对于信标中时隙的管理算法必须保持统一× CCO将信标周期中的时隙分配，按照统一的算法，填充到信标中的时隙分配条目，通过信标发送，通知给PCO和STA等站点× PCO和STA对于信标中的时隙分配条目的解析（见5.1.2.4小节），也同样需要遵照统一的算法× 基本的时隙划分如图11所示，具体的时隙管理算法如下文描述×
+
+整个信标周期的长度，是由“信标周期长度”字段确定，单位是1毫秒。
+
+时隙的分配，是以相对时间计算，即分配从0时刻起，到信标周期长度的整个时间范围。
+
+每个信标周期的起始时刻（即0时刻），CCO都指定了其起始网络基准时间（NTB），即“信标周期起始网络基准时间”字段。
+
+整个信标周期中，如果时隙类型齐全的话，一般会按照如图11所示的分配顺序排列。
+
+## 5232 信标时隙
+
+## 5 2 3 2 1 信标时隙分割
+
+整个信标周期中，信标的时隙一般按照如图12所示进行分割。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_157_1292_1049_1501.jpg" alt="Image" width="74%" /></div>
+
+
+<div style="text-align: center;">图 12 信标时隙分割示意图</div>
+
+
+<!-- ===== Page 82 ===== -->
+
+## 5 2 3 2 2 中央信标时隙
+
+如图12所示，中央信标时隙必须是从0时刻起分割，如果存在多个时隙，则依次按照相线进行分割，如图中的A，B，C分别指分割出来三个CCO的中央信标时隙。CCO需要在ABC三个相线上进行中央信标发送。
+
+中央信标时隙的总数，由“中央信标时隙总数”字段确定。
+
+每个时隙的长度，由“信标时隙长度”字段确定，单位是1毫秒。
+
+## 5 2 3 2 3 代理信标时隙
+
+如图12所示，代理信标时隙在分割时，需要偏移过中央信标时隙后，开始计算。
+
+代理信标时隙分割时，需要按照时隙安排中的“非中央信标信息”字段逐个进行分割。每个时隙对应一个“非中央信标信息”字段。该字段中定义了每个信标时隙属于哪个STA，以及该时隙应该发送的信标类型是否为代理信标。
+
+每个时隙的长度，由“信标时隙长度”字段确定，单位是1毫秒。
+
+## 5 2 3 2 4 发现信标时隙
+
+如图12所示，发现信标时隙在分割时，需要偏移过中央信标时隙和代理信标时隙之后，开始计算。
+
+发现信标时隙分割的方法和代理信标时隙分割方法一致，需要按照时隙安排中的“非中央信标信息”字段逐个进行分割。每个时隙对应一个“非中央信标信息”字段。该字段中定义了每个信标时隙属于哪一个STA，以及该时隙应该发送的信标类型是否为发现信标。
+
+每个时隙的长度，由“信标时隙长度”确定，单位是1毫秒。
+
+## 5233 TDMA时隙
+
+如图13所示，TDMA时隙分割时，指明了该时隙分配给了哪个STA使用。具体的STA序列，复用了中央信标和代理信标的STA。每个TDMA时隙的所属的STA和中央信标时隙和代理信标时隙所属CCO和STA序列保持一致。每个时隙的长度，由“TDMA时隙长度”确定，单位是1毫秒。
+
+所有TDMA时隙，只能指定给同一种业务使用，指定的业务由“TDMA时隙链路标识符”确定。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_192_1038_1024_1257.jpg" alt="Image" width="69%" /></div>
+
+
+<div style="text-align: center;">图 13 TDMA 时隙分割示意图</div>
+
+
+## 5234 CSMA时隙
+
+载波上STA分布在不同的相线上，因此需要将CSMA时隙分为3个相线，3相CSMA时隙如图14所示，为了降低多相线的通信时延，需要对CSMA时隙进一步进行分片×CSMA时隙在分割时，需要进行均衡分割×在信标时隙中通知的CSMA时隙，只指明了归属于某个相线的总的时隙长度×每个相线的时隙总长度之和，构成了整个CSMA时隙的长度×整个CSMA时隙，需要按照相线的个数，进行均衡分割×
+
+<!-- ===== Page 83 ===== -->
+
+均衡分割是指，将每个相线的时隙，按照 “CSMA时隙大小” 的门限进行分割，将分割后的每个相线的时隙，按照一定的算法进行排列，使得最终的每个相线的时间片，在整个CSMA时隙中的分布，达到相对的均衡。
+
+如果一个相线的CSMA时隙长度超过“CSMA时隙大小”的门限，则必须以“CSMA时隙大小”为单位进行分片。
+
+如 “CSMA时隙大小” 的值为10，三个相线的时隙长度分别为0，8，12，则三个相线的时隙分别可分为0，1，1片。
+
+## 具体分割算法如下：
+
+假设N个相线可分为N1，N2，N3片，N1 <= N2 <= N3，则一共存在M片=N1+N2+N3。任意两相或三相分片相同，时隙排列按照相位顺序排列；
+
+先分配第一个相线的时隙片，位置如下0，M/N1，2M/N1， $ (\mathrm{N}1\ 1)\mathrm{M}/\mathrm{N}1 $;
+
+第二个相线时隙片位置如下，1， $ 1+M/N2 $， $ \ldots $， $ 1+(N2\ 1)M/N2 $，若对应位置已经存放时隙片，则往后寻找一个空位；
+
+最后一个相线时隙片，存放后剩余的空位中。
+
+对于分配后的时隙，进行判断，如果相邻时隙的相线相同，则合并为一个时隙。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_180_671_1001_874.jpg" alt="Image" width="68%" /></div>
+
+
+<div style="text-align: center;">图 14 载波 CSMA 时隙分割示意图</div>
+
+
+无线上由于没有相线的区分，因此在无线上只有一块CSMA时隙，不在根据相线对CSMA时隙进行分片。CSMA时隙如图15所示。
+
+## 0（信标周期起始时刻）
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_152_1021_1063_1243.jpg" alt="Image" width="76%" /></div>
+
+
+<div style="text-align: center;">图 15 无线 CSMA 时隙示意图</div>
+
+
+## 5235 绑定 CSMA 时隙
+
+载波绑定CSMA时隙如图16所示，绑定CSMA分割时，分割算法和CSMA时隙一致，即如果存在多个时隙，每个时隙指明了所属的相线，则最终的时隙计算，需要按照CSMA时隙的均衡分割算法进行计算。每个时隙的长度，由“绑定CSMA时隙信息”字段中的“绑定CSMA时隙长度”确定，该时隙所属的相线，由“相线”确定。无线上CSMA时隙如图17所示，无线上不需要对CSMA时隙分割。
+
+<!-- ===== Page 84 ===== -->
+
+所有绑定CSMA时隙，只能指定给同一种业务使用，指定的业务由“绑定CSMA时隙链路标识符”确定。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_192_263_1026_501.jpg" alt="Image" width="70%" /></div>
+
+
+<div style="text-align: center;">图 16 载波绑定 CSMA 时隙分割示意图</div>
+
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_195_576_1029_815.jpg" alt="Image" width="70%" /></div>
+
+
+<div style="text-align: center;">图 17 无线绑定 CSMA 时隙示意图</div>
+
+
+## 524 信道访问
+
+## 5241 载波和无线信道工作机制
+
+载波和无线具备同时接收的能力，即载波信道接收数据时，无线信道也可以同时接收数据，两者可以并行工作。
+
+载波在发送时，无线可以进行接收；无线在发送时，载波可以进行接收。
+
+载波和无线两个信道具备同时发送的能力，可以根据通信模块的负载能力，选择分时发送还是同时发送。在本协议中，CCO通信模块可以在载波和无线上同时进行发送，非STA通信模块上，载波和无线采用分时发送机制。
+
+## 5 2 4 2 CSMA/CA 信道访问
+
+## 52421 信道访问规则
+
+CSMA时隙（包括绑定CSMA）中，站点必须通过信道竞争，冲突避免后，才能占用信道，进行报文发送。
+
+在CSMA时隙中发送的报文，必须保证能够在相应的CSMA时隙中传送完成，不能跨越时隙。尤其保证不能跨越到信标时隙和TDMA时隙等非竞争时隙中。
+
+在CSMA时隙中进行信道竞争时，需要进行基本的冲突判断和避免，并且通过VCS机制对信道状态进一步预判。
+
+## 52422 冲突
+
+<!-- ===== Page 85 ===== -->
+
+在CSMA时隙里，导致冲突的原因基本上是多个站点，退避在一个较小甚至完全重叠的时刻，进行了报文发送，导致冲突。
+
+一般情况下，在以下a）b）两种情形中，发送端节点在发送报文后，需要等待一个回应报文，可通过以下c）d）两种情形，判断出现了冲突：
+
+a）单播的 SOF 帧，需要接收节点回应“选择确认”报文；
+
+b) 广播的 SOF 帧但是指定一个节点来回应“选择确认”；
+
+c) 当报文发送完成后，在等待一个回应报文时，没有收到回应报文，或者收到一个无效的或者非预期的报文；
+
+d) 当 SOF 帧发送后，接收到的“选择确认”帧中，提示 PHY 对全部 PB 块没有解析成功。
+
+## 5 2 4 2 3 VCS
+
+虚拟载波侦听（VCS），是主要用在CSMA时隙中的一种时隙预判机制，每个节点都需要支持× VCS 机制根据报文传输时间以及帧间隔确定，采用VCS定时器以及定时器到期后的信道状态实现×其中VCS定时器时长计算方法和到期后状态如表138所示×
+
+<div style="text-align: center;">表 138 VCS 定时器时长和状态迁移</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>事件</td><td style='text-align: center; word-wrap: break-word;'>VCS 定时器时长</td><td style='text-align: center; word-wrap: break-word;'>VCS 定时器到期后信道状态</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>检测到冲突</td><td style='text-align: center; word-wrap: break-word;'>扩展帧间间隔</td><td style='text-align: center; word-wrap: break-word;'>空闲</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>检测到前导</td><td style='text-align: center; word-wrap: break-word;'>扩展帧间间隔</td><td style='text-align: center; word-wrap: break-word;'>空闲</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>解析到 SOF 的帧控制</td><td style='text-align: center; word-wrap: break-word;'>帧长*10 微秒（载波）；\n帧长*100 微秒（无线）</td><td style='text-align: center; word-wrap: break-word;'>空闲</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>解析到选择确认</td><td style='text-align: center; word-wrap: break-word;'>竞争帧间间隔</td><td style='text-align: center; word-wrap: break-word;'>空闲</td></tr></table>
+
+## 52424 优先级
+
+站点在CSMA时隙中，竞争信道时，需要支持优先级 $ ^{x} $。优先级高的报文，相对于优先级低的报文，应该具有更高的信道竞争能力。
+
+## 52425 绑定 CSMA
+
+绑定CSMA是指一段CSMA时隙，可以分配给某个优先级的业务或者某个种类的业务报文的传输。在该时隙内，只能传输所分配的优先级或者种类的业务报文。
+
+各个节点在绑定CSMA时隙中，需要按照一般的CSMA机制，进行信道竞争，竞争成功后，才能发送对应优先级或者种类的业务报文。
+
+## 52426 多相线 CSMA
+
+多相线CSMA是指分配给不同相线的电力线上站点使用的时隙×STA需要和CCO进行通信时，要按照多相线的时隙规划使用多相线时隙×不同相线的STA，只能在对应相线的时隙里，才能向CCO发送报文×
+
+多相线CSMA时隙，是由同一相线下的所有STA竞争使用的。
+
+## 52427 CSMA 退避机制
+
+BE（Backoff Exponent）退避指数，SLOT TIME指退避时间单位。CSMA退避机制参数如表139所示。
+
+<!-- ===== Page 86 ===== -->
+
+<div style="text-align: center;">表 139 CSMA/CA 退避参数</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>参数名称</td><td style='text-align: center; word-wrap: break-word;'>意义</td><td style='text-align: center; word-wrap: break-word;'>取值</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>minBE</td><td style='text-align: center; word-wrap: break-word;'>最小退避指数</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>maxBE</td><td style='text-align: center; word-wrap: break-word;'>最大退避指数</td><td style='text-align: center; word-wrap: break-word;'>8</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>BE</td><td style='text-align: center; word-wrap: break-word;'>退避指数</td><td style='text-align: center; word-wrap: break-word;'>minBE→maxBE</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>SLOT TIME</td><td style='text-align: center; word-wrap: break-word;'>退避时间单位</td><td style='text-align: center; word-wrap: break-word;'>根据优先级从低到高0-3（0为低优先级），依次取值为10，8，6，4个OFDM符号。</td></tr></table>
+
+## 5 2 4 3 TDMA 信道访问
+
+TDMA是指由CCO分配给指定节点的TDMA时隙。
+
+在该时隙内，节点不需要进行信道竞争，可以独占被分配的TDMA时隙，进行报文的发送。
+
+TMDA时隙一般分配给某个优先级的业务或者某个种类的业务，该时隙内只能传输对应的业务报文。
+
+## 5244 帧间隔
+
+## 52441 帧间隔定义
+
+帧间隔是指线路上传输的物理层协议帧之间需要保证的最少时间间隔。
+
+## 52442 帧间隔类型
+
+突发帧间隔（BIFS），一般指在不需要竞争的时隙中，连续发送报文时，物理层的协议帧之间需要保证的最小帧间隔。主要的应用场景有信标的连续发送等。信标发送场景中，突发帧间隔（BIFS）如图18所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_225_1005_1040_1118.jpg" alt="Image" width="68%" /></div>
+
+
+<div style="text-align: center;">图 18 突发帧间隔示意图</div>
+
+
+竞争帧间隔（CIFS），一般指在需要竞争的时隙中，当站点需要发送报文时，物理层的协议帧之间需要保证的最小帧间隔。SOF帧不等选择确认(SACK)的场景中，竞争帧间隔（CIFS）如图19所示。SOF帧需要等选择确认(SACK)的场景中，竞争帧间隔(CIFS)如图20所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_224_1317_1041_1484.jpg" alt="Image" width="68%" /></div>
+
+
+<div style="text-align: center;">图 19 竞争帧间隔示意图 1</div>
+
+
+<!-- ===== Page 87 ===== -->
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_223_199_1043_369.jpg" alt="Image" width="68%" /></div>
+
+
+<div style="text-align: center;">图 20 竞争帧间隔示意图 2</div>
+
+
+回应帧间隔(RIFS)，一般指需要等待回应帧的场景中，在报文和报文的回应帧之间，物理层的协议帧之间需要保证的最小帧间隔。SOF帧需要等选择确认(SACK)的场景中，回应帧间隔(RIFS)如图21所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_223_507_1043_675.jpg" alt="Image" width="68%" /></div>
+
+
+<div style="text-align: center;">图 21 回应帧间隔示意图</div>
+
+
+扩展帧间隔(EIFS)，不是一般的连续的两个帧的帧间隔，而是对于普遍的SOF帧的竞争场景的时隙间隔的预期值，主要用来在发送报文时，设置最长的退避时间间隔x，当在退避发送时，如果检测到了报文的前导，那么缺省先需要按照扩展帧间隔的时间间隔进行退避。当“帧控制”等解析成功时，可以根据“帧控制”等的具体时隙需求退避。扩展帧间隔（EIFS）如图22所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_310_877_954_1045.jpg" alt="Image" width="54%" /></div>
+
+
+<div style="text-align: center;">图 22 扩展帧间隔示意图</div>
+
+
+## 52443 帧间隔的测量
+
+在两个物理层协议帧之间的帧间隔，是通过计算在线路上最后一个OFDM的最后一个非零样本，与线路上第一个跟随帧的第一个非零样本之间的间隔时间。这种帧间隔是由传输器在发送前导时测量的，保证前导的发出时，帧间隔的测量已经完成而且足够。
+
+实际帧间隔的测量如图23所示。其他种类的帧间隔也是按照同样的方式进行测量。
+
+<!-- ===== Page 88 ===== -->
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_178_199_1037_391.jpg" alt="Image" width="72%" /></div>
+
+
+<div style="text-align: center;">图 23 帧间隔测量示意图</div>
+
+
+## 52444 帧间隔范围
+
+载波帧间隔取值范围定义如表140所示。
+
+<div style="text-align: center;">表 140 载波帧间隔取值范围</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>类型</td><td style='text-align: center; word-wrap: break-word;'>取值范围</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>竞争帧间隔 CIFS</td><td style='text-align: center; word-wrap: break-word;'>400 微秒</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>突发帧间隔 BIFS</td><td style='text-align: center; word-wrap: break-word;'>400 微秒</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>回应帧间隔 RIFS</td><td style='text-align: center; word-wrap: break-word;'>400~2300 微秒</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>扩展帧间隔 EIFS</td><td style='text-align: center; word-wrap: break-word;'>20 毫秒</td></tr></table>
+
+无线帧间隔取值范围定义如表141所示。
+
+<div style="text-align: center;">表 141 无线帧间隔取值范围</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>类型</td><td style='text-align: center; word-wrap: break-word;'>取值范围</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>竞争帧间隔 CIFS</td><td style='text-align: center; word-wrap: break-word;'>800 微秒</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>突发帧间隔 BIFS</td><td style='text-align: center; word-wrap: break-word;'>800 微秒</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>回应帧间隔 RIFS</td><td style='text-align: center; word-wrap: break-word;'>800~2300 微秒</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>扩展帧间隔 EIFS</td><td style='text-align: center; word-wrap: break-word;'>70 毫秒</td></tr></table>
+
+## 525 数据处理
+
+## 5251 数据处理过程
+
+MAC层处理的基本业务数据单元称作MSDU
+
+MAC层处理MSDU时，先将MSDU封装生成MAC帧×MAC帧是不同站点的MAC层之间进行数据传送的基本传输单元×
+
+MAC层根据MAC帧头中的“原始源MAC地址”和“原始目的MAC地址”字段，来区分MSDU的原始源地址和原始目的地址，并且在高速载波和无线双模通信网络中传输时，使用“原始源TEI”和“原始目的TEI”与之相对应。
+
+## 5252 MAC 帧生成
+
+<!-- ===== Page 89 ===== -->
+
+MSDU包含一个MSDU载荷或者一个管理消息。MAC帧是通过在每个MSDU载荷上预填充一个MAC帧头部，在尾部添加一个完整性校验值生成的，具体帧格式详见第5.1.1节。
+
+MAC帧头部中的“MSDU长度”被设置为MSDU载荷的长度。“完整性校验”用于验证正确的解码和接收端MSDU载荷的重组，完整性校验值的计算覆盖MSDU载荷，不包括MAC帧头部。一个MAC帧只能由一个完整的MSDU生成。
+
+载波MAC帧的生成如图24所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_222_377_992_702.jpg" alt="Image" width="64%" /></div>
+
+
+<div style="text-align: center;">图 24 载波 MAC 帧生成示意图</div>
+
+
+无线MAC帧的生成如图25所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_208_805_981_1134.jpg" alt="Image" width="64%" /></div>
+
+
+<div style="text-align: center;">图 25 无线 MAC 帧生成示意图</div>
+
+
+## 5253 分片
+
+一个MAC帧由一个MSDU生成，载波上一个MAC帧可能要分多片，才能使用MPDU进行传输。PHY层在传输数据时，必须按照FEC块进行传输，FEC块支持4种大小，分别为72/136/264/520字节。所以MAC帧在交给PHY层传输前，必须适配MPDU的格式。
+
+在对MAC帧进行分片时，参照MPDU的物理块的格式× MAC帧分片后，每一片可以作为一个“物理块体”。
+
+分片时，可根据物理层的限制，选用合适的分片规格；并且只能用同一种规格，完成对MAC帧的分片；最后一个分片中，如果数据的大小不足时，全部以0来补充。
+
+每一个MAC帧的分片与一个“序列号”相关联。每帧的第一个分片的“序列号”被初始化为零，一个新分片产生时进行递增。
+
+<!-- ===== Page 90 ===== -->
+
+无线仅支持一个物理块，分为16/40/72/136/264/520字节，不支持对一个MAC帧进行分片。
+
+## 5 2 5 4 MPDU 的生成
+
+当一个MAC帧在分片后，存在多个分片时，可以使用长MPDU进行传输，也可以使用多个短MPDU进行传输。
+
+长MPDU的生成，如图26所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_193_377_1020_887.jpg" alt="Image" width="69%" /></div>
+
+
+<div style="text-align: center;">图26 长MPDU生成示意图</div>
+
+
+短MPDU的生成，如图27所示。
+
+<!-- ===== Page 91 ===== -->
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_207_193_1009_829.jpg" alt="Image" width="67%" /></div>
+
+
+<div style="text-align: center;">图 27 短 MPDU 生成示意图</div>
+
+
+## 5255 重组
+
+当一个MAC帧的分片后的“物理块体”，被接收方接收成功后，则需要将该MAC帧所有的“物理块体”重组成为一个MAC帧。
+
+重组时，需要根据“物理块头”中的“序列号”，“帧起始标志”，“帧结束标志”，将所有的“物理块体”进行有序的重组。重组的分片，可以是来自于同一个MPDU中的“物理块体”，也可以是来自连续的多个MPDU中的“物理块体”。
+
+重组完成后，需要进行完整性校验，以判断MAC帧的传输完整。一个重组后的MAC帧只能提取一个完整的MSDU。
+
+MAC帧重组的过程，正好和MAC帧分片的过程相反，如图28所示。
+
+<!-- ===== Page 92 ===== -->
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_189_204_1021_696.jpg" alt="Image" width="69%" /></div>
+
+
+<div style="text-align: center;">图 28 MAC 帧重组示意图</div>
+
+
+## 526 选择确认重传
+
+SOF帧发送时，可以指定站点进行回应，所指定的站点，在接收到该SOF帧后，以“选择确认”(SACK)帧进行回应。“选择确认”，对于发送站点，是可选策略，对于接收站点，如果被指定回应“选择确认”，则被指定的接收站点，必须回应。
+
+回应“选择确认”帧的站点，是通过SOF帧“帧控制”中的“目的TEI”来指定，当接收站点的TEI与接收到的SOF帧的“帧控制”中的“目的TEI”一致时，则接收站点需要回复“选择确认”报文。
+
+SOF帧的发送站点，可以根据SOF帧的接收站点回复的“选择确认”帧，判断SOF帧的接收情况。载波上“选择确认”帧中的“接收结果”字段和“接收状态”字段，说明了接收站点对于SOF帧的“帧载荷”中具体的“物理块”的接收情况。无线上，由于仅支持一个物理块，因此“选择确认”帧中的“接收结果”字段判断无线MPDU帧接收情况。
+
+对于没有成功接收的“物理块”，需要将整个报文进行重传。
+
+发送站点对于重传的报文，需要在SOF帧的“帧控制”中设置“重传标志位”字段，接收站点可以根据前一个报文的成功“物理块”，和重传报文的成功“物理块”，重组完整的MAC帧。
+
+## 527 报文过滤
+
+在高速载波通信网络中，对于端到端的同一个MAC数据报文，转发站点在转发时，需要判断该报文是否为重复报文，对于重复的报文，不需要根据MPDU的触发，而进行重复的转发。
+
+报文过滤原理如示意图如图29所示，对于同一个MAC帧MAC0，当转发站点2判断MAC0已经转发过一次，则不需要根据MPDU3的触发，而转发MAC0两次。
+
+<!-- ===== Page 93 ===== -->
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_360_191_851_856.jpg" alt="Image" width="41%" /></div>
+
+
+<div style="text-align: center;">源站点</div>
+
+
+<div style="text-align: center;">图 29 报文过滤示意图</div>
+
+
+## 528 单播/广播
+
+对于SOF帧，在高速载波通信网络中发送时，可采用单播和广播机制，来控制报文转发的范围。单播报文和广播报文通过SOF帧的“帧控制”中的“广播标志位”字段来区别。
+
+单播方式，是指报文发送时，通过SOF帧“帧控制”的“目的TEI”来指定了具体的接收站点，其他站点从线路上检出单播报文时，如果“目的TEI”不是本站点，则不需要处理。
+
+单播报文收发的示意图如图30所示。CCO发送的报文，指定目的地址是STA1时，则PCO1也在可正确接收报文的范围内，但是不需要处理。
+
+<!-- ===== Page 94 ===== -->
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_354_196_866_930.jpg" alt="Image" width="42%" /></div>
+
+
+<div style="text-align: center;">图 30 单播报文收发示意图</div>
+
+
+广播方式，是指报文发送时，通过设置“广播标志位”字段为1来指定该报文是广播报文，接收站点在接收到广播报文时，必须进行处理。
+
+根据处理方式的不同，广播报文区分为本地广播，代理广播和全网广播，可根据MAC帧头中的“发送类型”字段，判断该报文的广播类型。本地广播报文，接收站点在接收后，不需要再次转发。代理广播和全网广播的报文，站点在处理后，还需要进一步判断是否需要转发。对于广播报文，转发是需要判断广播报文的转发方向，广播报文的转发方向可根据MAC帧头中的“广播方向”字段来确定。对于上行报文，只有上行方向上的站点需要转发，对于下行报文，只有下行方向上的站点需要转发；对于需要双向转发的报文，上下行方向上的站点都可参与转发。广播报文在发送时，也可以指定某个站点，对该广播报文进行“选择确认”帧回应。站点对于转发过的广播报文，不需要再次转发。
+
+本地广播报文的转发，如图31所示，CCO发送的本地广播报文，STA1和PCO1接收后，并不进行转发。
+
+<!-- ===== Page 95 ===== -->
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_354_198_866_930.jpg" alt="Image" width="42%" /></div>
+
+
+<div style="text-align: center;">图 31 本地广播收发示意图</div>
+
+
+下行代理广播，如图32所示。CCO发送的下行代理广播报文，STA1和PCO1在接收后，由PCO1进行了转发，PCO1转发的代理广播报文，PCO2也进行了转发，达到了全网站点都能接收处理的目的。上行代理广播报文的转发方式与下行类似，只有代理站点参与转发。
+
+<!-- ===== Page 96 ===== -->
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_355_197_865_929.jpg" alt="Image" width="42%" /></div>
+
+
+<div style="text-align: center;">图 32 代理广播收发示意图</div>
+
+
+全网广播报文的转发，除所有站点都可以参与转发外，其他处理与代理广播报文的转发处理基本一致。
+
+## 529 PHY 时钟与网络时间同步
+
+## 5291 网络时间定义
+
+一个高速载波和无线双模通信网络中的所有设备必须同步到一个共用的时钟。
+
+CCO必须维护一个32位的计时器，叫做网络基准时间（Network Time Base，NTB）。它的时钟由CCO的25MHz时钟提供。
+
+NTB由在CCO在中央信标中“信标时间戳”发送（见第5.1.2.2节），高速载波通信网络中的每个STA设备必须同步到这个NTB。
+
+高速载波通信网络中的所有STA设备都应该在本地维护一个32位的计时器，叫做NTB STA，这个计时器在频率和绝对值上应该与CCO的NTB保持同步。NTB的同步通过接收CCO的中央信标，或者代理的代理信标来完成。
+
+同步到CCO的NTB的主要作用是以此为基准，解析CCO的时隙分配，从而能够达到全网站点对时隙分配的统一理解和使用。同时NTB的同步，可以用于物理层的时钟同步，以便能够正确的发送报文信号和解析报文信号。
+
+<!-- ===== Page 97 ===== -->
+
+NTB STA的准确性没有被明确规定，并且同步的实现可以采用任何方法，只要它满足必要的时序规定。
+
+STA设备的晶体时钟频率应该在CCO设备的晶体时钟频率的 $ \pm25\text{ppm} $之内。
+
+## 5292 中央信标“信标时间戳”
+
+CCO在发送中央信标时，需要在信标帧的帧控制中，嵌入一个32位的“信标时间戳”，详见第5.1.2.1节。“信标时间戳”是中央信标发送时的NTB值，即信标传输时间（BTT）的值，BTT被定义为信标MPDU的“帧控制”的第一个非零样本出现在发射端设备的模拟输出上的那一瞬时的时间。BTS的抖动（BTS JITTER）应该不大于0.25微秒。
+
+BTS JITTER，以微秒为单位，定义见公式（1）
+
+ $$ \begin{array}{c} BTS\quad JITTER=\underset{j,k}{^{MAX}}\left|\left(BTT_{j}\quad BTT_{k}\right)\quad\left(BTS_{j}\quad BTS_{k}\right)/25\right|\end{array} $$ 
+
+式(1)中：
+
+ $ BT T_{i} $ 任意信标BTT 值；
+
+ $ BT T_{k} $ 另一任意信标BTT 值；
+
+ $ BTS_{i} $ 对应任意信标帧“帧控制”中“信标时间戳”的值；
+
+ $ BTS_{k} $ 对应另一任意信标帧“帧控制”中“信标时间戳”的值；
+
+BTT_{i} 及 BTT_{k} 是一个可跟踪到同一个 CCO 的 STA 时钟的两次取样，以微秒为单位测得。
+
+一个信标实际发送时间的NTB值和相应“帧控制”中的“信标时间戳”相差应该不大于 $ \pm1250 $抽样点（ $ \pm50 $微秒）。
+
+## 5293 代理信标“信标时间戳”
+
+代理站点在发送代理信标时，需要在本站点的NTB与CCO的NTB同步的基础之上，进行发送。发送的代理信标中，同样需要嵌入32位的“信标时间戳”。
+
+“信标时间戳”的取值定义，以及指标偏差，和中央信标一致。
+
+## 5294 发现信标“信标时间戳”
+
+发现站点在发送代理信标时，需要在本站点的NTB与CCO或者代理站点的NTB同步的基础之上，进行发送。发送的发现信标中，同样需要嵌入32位的“信标时间戳”。
+
+“信标时间戳”的取值定义，以及指标偏差，和中央信标一致。
+
+## 5295 多网络的网络时钟
+
+多个高速载波通信网络环境中，CCO之间的NTB不需要进行同步，各自维护一个本地的NTB，并且使用该NTB作为该高速载波通信网络的网络基准时间。
+
+为了保证多个CCO之间能够互相通信，各个CCO的采样率必须达到以下标准：50MHz±5ppm。
+
+## 53 网络管理子层功能
+
+## 531 功能分类
+
+网络管理子层主要的功能包括高速载波和无线双模通信网络的多网络网间协调。单网络组网和网络维护。其中网络维护包括中继路由的生成和维护。代理变更。站点离线等。
+
+## 532 多网络共存及协调
+
+<!-- ===== Page 98 ===== -->
+
+## 5321 网络标识
+
+网络标识(NID)，是用于标识一个高速载波和无线双模通信网络的唯一ID。
+
+同一个高速载波和无线双模通信网络中的站点，包括CCO，在发送报文时，都需要在MPDU的“帧控制”中指明NID，表示当前的报文所属的高速载波通信网络。
+
+NID的可用范围为 $ 1\sim16777215 $。
+
+## 5322 无线信道
+
+无线分为多个信道，每一个网络使用同一个无线信道×CCO决定网络使用的无线信道号，STA上电依次在每个无线信道上扫描，发现无线信道上存在网络，则尝试在该无线信道上接入网络。
+
+## 5323 网间协调
+
+当多个集中器距离较近时，很有可能形成多网络共存的环境。
+
+在多网络环境中，CCO之间需要首先完成网络标识符协调，确定各自网络的NID，避免形成多个网络使用同一个NID的情况发生，保证各个高速载波和无线双模通信网络能够独立稳定的组网。其次CCO之间需要完成无线信道的协商，确定各自网络无线信道，避免多个网络使用同一个无线信道，导致冲突干扰严重的现象发生，保证各个高速载波和无线双模通信网络的无线信道带宽不受影响。
+
+同时，由于信标帧是维护一个高速载波和无线双模通信网络的关键报文，所有类型的信标帧发送时，不同的高速载波通信网络需要各自占用不同的信标时隙×CCO之间需要进行信标时隙协商，以便各自网络在发送信标帧时，能够避免其他网络的信标帧冲突。
+
+## 5324 基本机制
+
+CCO启动后，首先进行一段时间的网络监听（时间可为10秒），判断周围是否存在已处于工作的高速载波和无线双模通信网络。对于已处于工作的高速载波和无线双模通信网络，应周期性的发送网间协调帧，以便其他后上电的CCO进行监听。
+
+如果CCO在监听的时间段内，接收到邻居网络的网间协调帧，则需要根据网间协调帧中携带的NID和时隙等信息，按照一定的优先原则，进行协商。
+
+如果CCO在监听的时间段内，没有监听到网间协调帧，则该CCO可以独立组网工作，在工作过程中，需要周期性发送网间协调帧，同时，如果在工作过程中，收到其他网络CCO发送的网间协调帧，也需要按照一定的优先原则，参与协商。
+
+## 5325 NID 协调过程
+
+当CCO监听到的其他网络的网间协调帧中，显示该网络的NID，与本网络选定的NID一致时，则表明网络NID存在冲突，必须进行协商。
+
+协商时，CCO会首先设定一个协商缓冲期，可以是10毫秒10秒的范围内的一个随机值。CCO在这个协商缓冲期内，继续监听邻居网络的网间协调帧。如果在协商缓冲期内，发现邻居网络的NID已经与本网络的NID不同，则本网络的原NID保持不变。如果直到协商缓冲期到期，发现邻居网络的NID与本网络的NID继续冲突，则协商缓冲期到期后，本网络CCO获取一个新的空闲的NID作为本网络的标识。
+
+当CCO确定启用新的NID后，必须启动本网络的重新组网。
+
+当CCO通过网络冲突上报报文，获知存在多网络冲突时，可首先比较CCO的MAC地址，如果本网络的MAC地址较大时，可继续保持现有的NID不变，如果冲突状态持续超过30分钟，可变更本网络的NID；当本网络的MAC地址较小时，可及时变更本网络的NID，选择一个新的空闲的NID作为本网络的NID。
+
+<!-- ===== Page 99 ===== -->
+
+当CCO完成一轮NID的协商后，后来再次出现NID冲突的情形，则需要按照同样的过程，再次协商，直到NID不同为止。
+
+## 5326 带宽协调过程
+
+带宽协调是指信标时隙的协调，不同的网络，需要占用的信标时隙不同，所以意味着带宽也不同。协调的目的，是将不同的网络的信标时隙尽量的有序的错开，既保证信标时隙的不冲突，也要保证信标发送的周期性。
+
+带宽协调时，CCO需要发送网间协调报文，设置为网间协调标志，通过报文中的带宽保留时长，以及带宽的开始时刻偏移等参数，声明本网络的带宽占用。其他CCO解析到该网络的带宽占用后，在声明本网络的带宽占用时，需要避开已经被占用的带宽范围。
+
+网间协调帧的发送，在本网络的CSMA时隙中发送。
+
+两个CCO之间的带宽协调示意图如图33所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_171_576_1063_841.jpg" alt="Image" width="74%" /></div>
+
+
+<div style="text-align: center;">图 33 多网络带宽协商示意图</div>
+
+
+## 5327 带宽协调原则
+
+## 53271 退避原则
+
+如果两个CCO，A和B，当A能接收到B的网间协调帧，但是B接收不到A的网间协调帧。如果A发现要占用的带宽，B也声明要占用时，则A需要退避B，B的带宽占用生效，A需要避开B的带宽，占用其他时隙带宽。
+
+时隙占用的声明示意图如图34所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_204_1160_1010_1327.jpg" alt="Image" width="67%" /></div>
+
+
+<div style="text-align: center;">图 34 带宽协商申请</div>
+
+
+单通退避原则的示意图如图35所示。
+
+<!-- ===== Page 100 ===== -->
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_208_192_1010_525.jpg" alt="Image" width="67%" /></div>
+
+
+<div style="text-align: center;">图 35 带宽协商原则一</div>
+
+
+## 53272 先结束优先原则
+
+如果两个CCO，A和B，A网络的整个带宽时隙先于B网络结束时，则A可以优先占用较近的时段。先结束优先原则的示意图如图36所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_201_740_1012_1120.jpg" alt="Image" width="68%" /></div>
+
+
+<div style="text-align: center;">图 36 带宽协商原则二</div>
+
+
+## 53273 小 NID 优先原则
+
+当网络A和网络B的信标周期同时结束时，如果同时申请较近的同一段时隙，则NID较小的网络的带宽占用生效，NID较大的网络，需要退避NID较小网络的申请带宽。
+
+NID小优先原则的示意图如图37所示.
+
+<!-- ===== Page 101 ===== -->
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_175_197_1044_605.jpg" alt="Image" width="72%" /></div>
+
+
+<div style="text-align: center;">图 37 带宽协商原则三</div>
+
+
+## 5328 无线信道协调过程
+
+CCO初次上电时，随机选择一个无线信道，作为本网络的无线信道。CCO监听到其他网络采用的无线信道与本网络相同，则必须进行协商。
+
+协商时，CCO会首先设定一个协商缓冲期，可以是1s 60s的范围内一个随机值× CCO在这个协商缓冲期内，继续监听邻居网络的无线帧（无线信标帧。无线SOF帧等）× 如果在协商缓冲期内，发现邻居网络的无线信道已经与本网络的无线信道不同，则本网络保持原无线信道不变。如果协商缓冲期到期，发现本网络的无线信道与邻居网络的无线信道继续冲突，则本网络CCO在空闲的无线信道中随机选择一个无线信道作为本网络的无线信道。
+
+当CCO确定启用新的无线信道时，则启动全网无线信道变更，在信标帧中携带无线信道变更条目，通知全网进行无线信道切换，切换倒计时默认采用300s。
+
+当CCO通过无线信道冲突上报报文，获知存在邻居网络的无线信道与本网络相同，首先比较CCO的MAC地址，如果本网络的MAC地址大，则保持现有的无线信道不变，如果冲突状态持续30分钟，则变更本网络的无线信道；当本网络的CCO MAC地址小时，则立即变更本网络的无线信道，选择新的无线信道作为本网络的无线信道。
+
+## 5329 白名单
+
+## 53291 CCO认证 STA 入网
+
+白名单是允许入网站点的MAC地址的表项集合。CCO可以通过白名单，对请求入网的站点，进行管理认证。不同的高速载波通信网络可以有不同的白名单。
+
+CCO收到站点的关联请求报文后，将请求入网站点的MAC地址与CCO本地存储的白名单表项进行比对，当请求入网的站点的MAC地址在CCO白名单内时，CCO允许该站点加入网络；当请求入网的站点的MAC地址不在白名单内时，CCO拒绝该站点加入，并且通知该站点在一段时间内（默认150s）不可以再次请求加入本网络。
+
+CCO默认需要启动白名单功能，并且需要配置白名单表项。白名单功能默认启动时，如果未配置白名单具体的表项，则STA站点将不能通过白名单认证，导致无法入网。
+
+## 53292 STA 选择网络加入
+
+<!-- ===== Page 102 ===== -->
+
+在多网络环境中，STA可以选择某一个网络加入，即选定该网络的NID，然后向CCO发起关联请求。
+
+当STA接收到关联确认报文后，如果CCO拒绝该STA加入网络，STA可以选择其他网络，切换到对应网络的NID，向该网络的CCO发起关联请求，STA也可以根据“重新关联时间”，等待一段时间间隔后，再次尝试加入。
+
+当只有一个单网络的时候，如果被CCO拒绝加入后，STA必须按照CCO指示，进行一段时间的等待，不能在该时间段内再次发起关联请求。
+
+## 533 单网络组网
+
+## 5331 单网络组网基本流程
+
+无论是处于多网络环境还是单网络环境，每个网络的组网过程是一致的，都是一个单独网络的组网过程。
+
+单独组网的过程，主要是CCO通过发送中央信标和安排发现信标发送，以及代理信标的发送，触发逐层级的STA的网络接入请求，来完成整个组网过程，CCO需要给已经入网的STA站点分配TEI，CCO的TEI固定为1，广播报文TEI为0xFFFF，本标准CCO分配TEI范围为1~1015，其它地址作为保留，后续扩展使用
+
+## 5332 CCO 的组网行为
+
+CCO上电后，首先启动邻居网络监听定时器，进行一段时间的网间协调帧的监听，以便发现是否存在邻居网络。
+
+如果CCO在监听的时间段内，收到邻居网络的网间协调帧，则与邻居网络进行协调，协调成功后开始发送中央信标，启动组网。
+
+如果CCO在监听的时间段内，没有接收到任何网间协调帧，则监听结束后，开始发送中央信标。
+
+CCO在中央信标中，需要安排信标TDMA时隙和CSMA时隙×信标TDMA时隙，是用来指示CCO，PCO，或者STA发送信标×CSMA时隙，用于让CCO周围的一级站点，向CCO发起关联请求报文，请求接入网络；或者在CSMA时隙中，CCO等发送关联确认，关联汇总指示等报文。
+
+如果有一级站点请求接入网络，CCO需要对请求接入网络的站点，通过白名单进行身份认证。之后，CCO可以将关联请求的处理结果，通过发送关联确认报文或者关联汇总指示报文告知给STA。
+
+当一级站点接入网络后，CCO可以安排信标时隙，让新入网的一级站点发送发现信标，发现信标的发送，可以触发新入网站点周围的二级站点发起关联入网的请求，当二级站点入网后，CCO可以安排信标时隙，让新入网二级站点发送发现信标，触发该二级站点周围的三级站点发起关联入网请求，如此循环，以便距离CCO最远的最高层级的STA站点加入网络，CCO为0级，STA最大层级应支持到15级。
+
+在组网过程中，每个信标周期内，CCO针对每个代理站点，都要安排信标时隙，让所有代理站点都发送代理信标。代理信标会将中央信标中的时隙安排等内容，逐层通知到各级代理站点和STA站点。
+
+组网中，CCO对于一级站点的入网结果，可以通过关联确认报文，或者关联汇总指示报文进行通知。对于非一级STA站点的入网，CCO在处理该STA的关联请求后，将处理结果携带在生成的关联确认报文里，发送给该STA的代理站点，由该代理站点，通知给入网请求的STA站点。
+
+关联确认报文，以及关联汇总指示报文，都只能在CSMA时隙中进行发送。
+
+## 5333 STA 的组网行为
+
+STA上电后，可能会收到多个网络（NID不同）的报文，STA站点可以根据多网络优选标志，在多个网络中，选定一个信号更好的网络，作为本站点的接入目标网络，也可以选择初次发现的网络作为接入目标网络。
+
+<!-- ===== Page 103 ===== -->
+
+STA在接入网络时，首先需要通过网络报文的接收和评估，选定其代理站点，这个代理站点可以是CCO，也可以是其他STA站点，选择代理站点的原则一般是信道质量较好，到达CCO的路径较短，选定代理站点后，需要按照信标中的指示发起关联请求报文，在信标的“开始关联标志位”为1的情况下（见5.1.2.3），才可以发起关联请求，站点无TEI时，报文中的对应源TEI填0。STA的入网，是通过发送关联请求报文来通知CCO的，CCO根据关联请求报文，知道该STA的入网请求，并且进行确认回复。
+
+STA在发送关联请求后，需要等待CCO处理关联请求报文后，CCO发送的关联确认报文或者关联汇总指示报文，或者代理站点发送的关联确认报文。STA根据报文中的“结果”判断是否入网成功。如果未收到关联确认或者关联汇总指示报文，可以重新发起关联请求；如果入网请求被拒绝，则STA可以根据重新关联时间，等待一段时间间隔后，再次请求入网，也可以选择另外一个网络（切换NID），请求加入网络。
+
+STA收到关联汇总指示报文或者关联确认报文后，如果确认加入网络成功，则需要将CCO分配的TEI设置为自己的终端标识。
+
+在组网过程中，入网成功的STA，CCO会在信标中安排该站点的信标时隙，STA站点如果解析到该时隙，则必须发送发现信标，以便触发下一级站点的组网。
+
+关联请求报文，只能在CSMA时隙中发送。
+
+## 5 3 3 4 PCO 的组网行为
+
+STA在入网成功后，如果被CCO安排发送发现信标之后，该STA可能被下一级站点选择成为下一级站点的代理站点×
+
+当一个STA被CCO确认成为代理站点后，CCO会分配该STA站点的信标时隙，指示该STA站点发送代理信标× CCO的安排通过信标帧来通知代理站点，当一个STA站点，解析信标时隙时，发现CCO安排了信标时隙，指示其发送代理信标，则该STA站点，需要设置自己的角色为PCO，并且需要按照CCO的安排时隙，进行代理信标发送× 当一个站点成为PCO后，每个信标周期中，CCO都会安排其发送代理信标×
+
+当一个STA站点通过代理站点入网时，CCO会将关联请求的处理结果，携带在关联确认报文中发送给STA的代理站点。该代理站点在处理完成后，需要将关联确认报文转发给STA站点。
+
+关联确认报文的转发等，只能在CSMA时隙中发送。
+
+## 5335 管理消息报文交互
+
+关联入网管理报文的交互过程如图38所示。
+
+<!-- ===== Page 104 ===== -->
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_204_239_1019_726.jpg" alt="Image" width="68%" /></div>
+
+
+<div style="text-align: center;">图 38 关联入网管理报文交互流程图</div>
+
+
+未入网的STA站点，接收到发现信标后，根据信标中的“开始关联标志位”指示（见第5.1.2.4.2节），产生关联请求报文，将该关联请求报文发送给候选代理站点。
+
+已经入网的站点，在接收到关联请求报文后，可以直接将该报文转发给CCO，也可以将该报文重新生成，转发给自己的代理站点。
+
+CCO收到关联请求报文后，对该站点的关联请求进行处理，用处理结果，生成关联确认报文，并且可以将新加入站点的层级，代理，路由信息等信息填充到报文中去× CCO将关联确认报文，发送给请求入网站点的最低层级的代理，最低层级的代理处理完成后，重新生成关联确认报文，携带CCO填充的内容，发送给下一个层级的代理站点×如此，从CCO到请求入网的STA站点，沿路的所有代理站点，都需要处理关联确认报文，并且生成关联确认报文×该阶段的关联确认报文发送类型为单播，报文中ODTEI字段是下一层级代理的TEI，ODA字段是下一层级代理的MAC地址×最后一级的代理站点，处理关联确认报文后，同样生成关联确认报文，携带CCO填充的内容，发送给请求入网的STA站点，报文发送类型为本地广播，广播方向为双向广播×
+
+一级站点申请入网时，CCO可以将所有的关联请求报文处理后，将处理结果汇总，生成关联汇总指示报文，广播发送给一级站点。CCO也可以对请求入网的一级站点，一个一个的回复关联确认报文。
+
+关联汇总指示报文的用法如图39所示。
+
+<!-- ===== Page 105 ===== -->
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_306_203_922_744.jpg" alt="Image" width="51%" /></div>
+
+
+<div style="text-align: center;">图 39 关联汇总指示报文用法</div>
+
+
+## 534 网络维护
+
+## 53411 无线信标标志
+
+## 5341 时隙调度
+
+无线信标标志为0时，仅安排节点在当前信标时隙开始时在载波信标上发送信标帧，不在无线上送信标帧。比如节点为单模载波通信模块时，则不需要安排节点在无线信道上发送信标帧。
+
+无线信标标志为1时，仅安排节点在当前信标时隙开始时，在无线信道上发送信标帧。比如节点仅为单模无线通信模块或者无线信标帧占用时隙比较长，无法和其他节点的载波信标时隙复用时，则分配信标时隙仅用于在无线信道上发送信标帧。
+
+无线信标标志为2时，当前信标时隙开始时在载波信道上发送信标帧，并且在下一个时隙开始时，在无线信道上发送标准信标帧×当无线信标帧可以和其他节点的载波信标时隙复用时，则指定当前信标时隙条目的无线信标标志为2，节点在当前信标时隙开始时，在载波上发送信标帧，并且复用下一个或者后面多个信标时隙在无线信道上发送标准信标帧×
+
+无线信标标志为3时，在当前信标时隙开始时，在载波信道上发送信标帧，并且在下一个信标时隙开始时，在无线信道上发送精简信标帧。节点在无线信道上无子节点，或者未安排节点无线信道上的子节点发送信标帧，则可以安排节点在下一个信标时隙开始时，在无线信道上发送精简信标帧。
+
+无线信标标志为4时，在当前信标时隙开始时，在载波信道上发送信标帧，在CSMA时隙时，在无线信道上发送精简信标帧。当需要安排节点在无线上发送精简信标，并且节点无法复用下一个信标时隙在无线信道上发送精简信标帧，则在CSMA时隙中安排节点发送精简信标帧。
+
+## 53412 时隙调度规则
+
+<!-- ===== Page 106 ===== -->
+
+规则1：无线信标帧优先复用高速载波信标时隙×即在同一个时隙上，存在一个节点在高速载波上发送信标，一个节点在无线上发送信标。
+
+规则2：发现节点在无线信道上发送无线精简信标帧。
+
+规则3：代理节点的直连子节点都可以通过高速载波通信，则该代理节点在无线上发送无线精简信标帧×
+
+规则4：节点A为节点B的代理，节点A和B之间仅能通过无线进行通信，并且在一个信标周期内，安排节点B在高速载波上发送信标帧x，则在排布A和B的时隙时，尽量在A和B之间安排多个仅需要在CSMA时隙发送无线精简信标的时隙，A和B之间的时隙组成一个在无线信道上发送标准信标帧的时隙，从而满足规则1。
+
+规则5：节点A为节点B的代理，节点A和B之间仅能通过无线进行通信，并且在一个信标周期内，安排节点B在高速载波上发送信标帧 $ _{x} $。若排布A和B的时隙时，无法满足规则4，则可以在A和B之间安排多个仅在无线上发送标准信标的时隙，用来满足节点A在无线上发送标准信标 $ _{x} $。
+
+规则6：CCO存在直连无线子节点，并且在一个信标周期内安排其直连无线子节点形成的子树上节点发送信标帧，则CCO需要在无线上发送标准信标帧，其他情况，CCO发送精简信标。
+
+规则7：无线上不分相线，CCO只需要发送一个无线信标帧。
+
+规则8：若3个CCO时隙和1个非CCO时隙满足在无线信道上发送标准信标，则直接复用3个CCO时隙在无线信道上发送标准信标。若无法满足无线信道上一个标准信标帧的时长，存在可以复用的非CCO时隙，则复用3个CCO时隙和多个非CCO时隙，组成一个在无线信道上发送标准信标帧的时隙。若没有可复用的非CCO时隙，则给CCO安排多个时隙（最多可安排15个），用来组成一个在无线信道上发送标准信标帧的时隙。
+
+规则9：无特殊要求，比如为了满足上述规则4或者8，信标时隙排布按网络的层级，先按照低层级的代理站点发送信标帧，然后再安排高层级的节点发送信标帧。
+
+## 53413 时隙调度示例
+
+示例1：无线信标帧帧长小于一个信标时隙长度，同一个节点无线信标和载波信标错位发送。网络拓扑和信标时隙排布如图40所示，信标条目如表142所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_144_1007_1063_1260.jpg" alt="Image" width="77%" /></div>
+
+
+<div style="text-align: center;">图 40 示例 1 时隙调度示意图</div>
+
+
+<div style="text-align: center;">表 142 示例 1 信标条目值</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>TEI</td><td style='text-align: center; word-wrap: break-word;'>信标类型</td><td style='text-align: center; word-wrap: break-word;'>无线信标标志</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr></table>
+
+<!-- ===== Page 107 ===== -->
+
+<div style="text-align: center;">表142（续）</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>TEI</td><td style='text-align: center; word-wrap: break-word;'>信标类型</td><td style='text-align: center; word-wrap: break-word;'>无线信标标志</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr></table>
+
+示例2：无线时隙复用多个载波时隙。无线上标准信标帧的帧长大于1个信标时隙，则复用2个信标时隙在无线信道上发送1个标准信标帧。网络拓扑和信标时隙排布如图41所示，信标条目值如表143所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_139_436_1073_863.jpg" alt="Image" width="78%" /></div>
+
+
+<div style="text-align: center;">图 41 示例 2 时隙调度示意图</div>
+
+
+<div style="text-align: center;">表 143 示例 2 信标条目值</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>TEI</td><td style='text-align: center; word-wrap: break-word;'>信标类型</td><td style='text-align: center; word-wrap: break-word;'>无线信标标志</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>9</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr></table>
+
+示例3：无法与载波复用时隙，分配多个无线信标时隙仅用于在无线上发送信标帧。网络拓扑和信标时隙排布如图42所示，信标条目值如表144所示。
+
+<!-- ===== Page 108 ===== -->
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_138_194_1065_565.jpg" alt="Image" width="77%" /></div>
+
+
+<div style="text-align: center;">图 42 示例 3 时隙调度示意图</div>
+
+
+<div style="text-align: center;">表 144 示例 3 信标条目值</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>TEI</td><td style='text-align: center; word-wrap: break-word;'>信标类型</td><td style='text-align: center; word-wrap: break-word;'>无线信标标志</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>0</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr></table>
+
+示例4：1个无线标准信标帧使用多个载波信标时隙和一个无线时隙发送。网络拓扑和时隙排布如图43所示，信标时隙条目值如表145所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_137_1007_1065_1304.jpg" alt="Image" width="77%" /></div>
+
+
+<div style="text-align: center;">图 43 示例 4 时隙调度示意图</div>
+
+
+<div style="text-align: center;">表 145 示例 4 信标时隙条目值</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>TEI</td><td style='text-align: center; word-wrap: break-word;'>信标类型</td><td style='text-align: center; word-wrap: break-word;'>无线信标标志</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr></table>
+
+<!-- ===== Page 109 ===== -->
+
+<div style="text-align: center;">表145（续）</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>TEI</td><td style='text-align: center; word-wrap: break-word;'>信标类型</td><td style='text-align: center; word-wrap: break-word;'>无线信标标志</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>8</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr></table>
+
+示例5：CCO使用3个CCO信标时隙和1个非CCO信标时隙在无线信道上发送1个标准信标帧。网络拓扑和时隙排布如图44所示，信标时隙条目如表146所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_144_572_1063_802.jpg" alt="Image" width="77%" /></div>
+
+
+<div style="text-align: center;">图 44 示例 5 时隙调度示意图</div>
+
+
+<div style="text-align: center;">表 146 示例 5 信标时隙条目值</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>TEI</td><td style='text-align: center; word-wrap: break-word;'>信标类型</td><td style='text-align: center; word-wrap: break-word;'>无线信标标志</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr></table>
+
+示例6：CCO使用3个CCO信标时隙和2个非CCO信标时隙在无线信道上发送1个标准信标帧。网络拓扑和时隙排布如图45所示，信标时隙条目如表147所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_143_1216_1064_1454.jpg" alt="Image" width="77%" /></div>
+
+
+<div style="text-align: center;">图 45 示例 6 时隙调度示意图</div>
+
+
+<!-- ===== Page 110 ===== -->
+
+<div style="text-align: center;">表 147 示例 6 信标时隙条目值</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>TEI</td><td style='text-align: center; word-wrap: break-word;'>信标类型</td><td style='text-align: center; word-wrap: break-word;'>无线信标标志</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>7</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr></table>
+
+示例7：CCO使用6个CCO信标时隙和1个非CCO信标时隙在无线信道上发送1个标准信标帧。网络拓扑和时隙排布如图46所示，信标时隙条目如表148所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_145_577_1064_796.jpg" alt="Image" width="77%" /></div>
+
+
+<div style="text-align: center;">图 46 示例 7 时隙调度示意图</div>
+
+
+<div style="text-align: center;">表 148 示例 7 信标时隙条目值</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>TEI</td><td style='text-align: center; word-wrap: break-word;'>信标类型</td><td style='text-align: center; word-wrap: break-word;'>无线信标标志</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>6</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr></table>
+
+## 5342 高速载波发现列表报文
+
+大规模的高速载波通信网络中，每个入网的站点，包括CCO，都存在载波的邻居站点，邻居站点或者是CCO，或者是代理站点，或者是其他的STA站点。某个站点的邻居站点，即是与该站点能够进行载波通信的站点。
+
+组网过程中，每个站点可以根据接收的载波发现信标，感知自己的邻居站点，并记录下来，形成一个发现列表。站点的中继路由，就可以在自己的发现列表中进行选择。
+
+如果每个站点将本站点的发现列表广播发布，则有利于形成更全面的网络拓扑信息，有利于站点寻找更合适的路由。发现列表报文主要用于路由评估，发现列表报文的发送周期，需要根据路由周期确定。路由周期，根据网络规模的增大，可在20 420秒内，逐渐增大，一个路由周期中，必须至少发送10次发现列表。
+
+<!-- ===== Page 111 ===== -->
+
+所以，组网完成后，包括CCO和所有入网的STA站点，都需要定周期的发送发现列表报文，发现列表报文中携带了本站点的发现列表等信息。
+
+站点通过发现列表报文的接收，获得更全面的邻居站点信息，形成更详细的发现列表，以便选择更好的站点作为自己的代理站点，或者备份路由站点。
+
+CCO对于发现列表的发送，可以通过信标的路由参数通知条目，进行周期等参数的管理，STA站点或者PCO站点需要根据CCO在信标中的路由参数通知条目，判断自己的角色，按照相应的参数进行发现列表报文的发送。
+
+## 5343 无线发现列表报文
+
+同载波发现列表，每一个入网的站点，包括CCO，都可能存在无线的邻居节点，邻居节点或者是CCO，或者是代理站点，或者是其他的STA站点。某个站点的无线邻居节点，即是与该站点能够进行无线通信的站点。
+
+组网阶段，每个节点可以根据接收到的无线信标帧。无线发现列表，感知自己的邻居站点，并记录下来，形成一个发现列表。站点的中继路由，就可以在自己的发现列表中进行选择。
+
+每一个节点通过无线发现列表报文的广播，将本地统计的下行接收率发布出去，有利于站点形成双向的无线通信率，用于站点评估中继路由或者多路径路由。无线发现列表的发送周期由CCO根据网络规模和无线信道带宽决定，可在10 255秒内选择。
+
+组网完成后，包括CCO和所有入网的STA站点，都需要根据无线发现列表周期参数定周期发送无线发现列表报文，发现列表中携带本站点的网络属性。接收邻居节点的下行接收率。信号强度。信噪比等信息。站点通过接收无线发现列表报文，获取与邻居节点的双向通信率。信号强度。信噪比等信息，以便站点选择更合适的中继代理。或者备份多路径。
+
+CCO通过信标帧中的无线路由参数条目，进行无线路由参数管理，STA接收到信标帧时，按照无线路由参数条目中的参数配置本地无线路由参数。
+
+## 5344 心跳检测报文
+
+CCO需要及时感知网络中站点的在网状态，以便进行网络管理。站点是否在线的基础，是每个站点定周期的发现列表报文的发送。
+
+每个站点需要定周期的发送发现列表报文，用于代理站点判断站点是否活跃在线。代理站点将本地维护的发现列表中的站点活跃信息，通过定周期的心跳检测报文，发送给CCO，以便CCO汇总全网的站点是否在线的信息。在周期内至少发送一次心跳检测报文。
+
+在心跳检测报文的发送过程中，低层级的代理站点，可以通过高层级代理站点的心跳检测报文触发，产生心跳检测报文。低层级代理站点由高层级代理站点触发，而产生的心跳检测报文中，可以汇总高层级代理站点的心跳检测报文的内容，将所有能感知的活跃站点信息，汇总在一个报文里，从而节省网络维护报文的开销。
+
+心跳检测报文的产生周期宜为路由周期的1/8，路由评估的周期由CCO根据网络的状态，可动态调整。
+
+## 5345 通信成功率上报报文
+
+网络中代理站点需要定周期（4个路由周期）的上报自身与其子站点之间的通信成功率 $ x $
+
+代理站点可通过统计接收子站点的发现列表报文，计算子站点到自己的上行通信成功率。代理站点可以通过解析子站点的发现列表报文，获知对于自身发送的发现列表报文，子站点统计的接收成功率，即为下行通信成功率。
+
+<!-- ===== Page 112 ===== -->
+
+代理站点需要将与子站点之间的上行通信成功率和下行通信成功率，全部汇总，形成通信成功率上报报文，发送给CCO，由CCO维护全网拓扑的通信成功率数据。
+
+站点计算与其他站点的通信成功率（或者上下行通信成功率）时，可以由上行通信成功率乘以下行通信成功率计算得到。
+
+成功率都以二进制数据来表示，最大值不超过100。
+
+## 5346 网络状态维护
+
+## 53461 网络状态分类
+
+CCO需要实时的维护网络的状态，以便回收TEI资源，根据网络规模调整信标发送等×CCO判断STA的状态有三种，已入网。离线未入网。
+
+## 53462 CCO 判断 STA 离线
+
+代理站点周期性的发送心跳检测报文，心跳检测报文中携带该代理站点的发现站点列表信息，心跳检测报文最终被发送给CCO，由CCO进行汇总记录。
+
+如果发送给CCO的心跳检测报文中，指示某个STA活跃，CCO则认为该STA活跃。CCO周期性的检测STA的活跃次数，如果在一个完整的心跳周期（两个路由周期）时间内，CCO发现某个STA站点的活跃次数为0，则CCO判断该STA站点离线。CCO如果接收到来自判断为离线的STA站点的报文，可重新判定该STA站点在线。
+
+CCO的白名单如果有刷新，发现网络中的站点不在最新的白名单中，则可以创建离线指示报文，通过广播报文，发送给不在白名单中的站点。这些站点收到离线指示报文后，在设定的延迟离线时间到期后，执行离线动作。
+
+如果STA站点被CCO通知离线，则STA在离线后，可以重新申请加入网络。
+
+## 53463 CCO 判断 STA 未入网
+
+如果STA站点被判断处于离线状态，并且在离线状态下，连续四个完整的心跳周期（8个路由周期）时间内，CCO接收到该STA站点的报文个数为0，则CCO判断STA处于未入网状态。
+
+CCO如果接收到来自已经判定为未入网的STA站点的报文，需要主动指示该STA站点离线，可以创建离线指示报文，将离线STA站点的信息填充到报文中，进行广播发送，通知网络中的所有站点该STA站点离线。该STA站点执行离线动作后，可再次申请入网。
+
+## 53464 CCO 判断 STA 离线与未入网区别
+
+STA处于离线状态时，如果CCO收到该STA站点任何一个SOF帧，或其他站点携带上来的该STA的心跳报文，则CCO立即将该站点置为已入网状态（不在白名单内的站点除外）。
+
+STA处于未入网状态时，CCO会将该STA站点的TEI等资源回收，该STA站点必须重新进行关联请求才能再次入网。
+
+## 53465 STA 判断自己离线
+
+STA站点自己也需要判断自己是否离线。如果STA判断自己离线后，则必须重新申请加入网络。在以下情形中，STA站点可判断自己离线：
+
+a) STA 站点在加入网络后，如果在一个完整的心跳周期（2 个路由周期）内，收不到任何信标帧；
+
+b) STA 站点在连续 4 个路由周期内，如果与代理站点的通信成功率为 0;
+
+c) STA 站点收到 CCO 的“组网序列号”与自身记录的“组网序列号”不同；
+
+<!-- ===== Page 113 ===== -->
+
+d) STA 站点接收到离线指示报文，指示自己离线；
+
+e) 一级 STA 站点，如果检测到 CCO 的 MAC 地址发生变化，且已经连续一个周期；
+
+f) STA 站点发现本站点的代理站点角色变为了发现站点已经连续一个路由周期；
+
+g）本站点的层级超过最大层级限制（15级），站点需要离线。
+
+## 5347 路由表维护
+
+在组网过程中以及网络维护的过程中，全网站点最关键的目标就是维护实时的路由表项，路由表项包括STA站点到达CCO的路由，也包括从CCO或者低层级站点到达最大层级的STA站点的路由。
+
+当各级站点中的路由表项是实时可靠时，才能有效的支撑业务数据的转发。
+
+网络拓扑图示例如图47所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_529_534_715_908.jpg" alt="Image" width="15%" /></div>
+
+
+<div style="text-align: center;">图 47 网络拓扑图</div>
+
+
+CCO站点的路由表项如表149所示。
+
+<div style="text-align: center;">表 149 CCO 路由表项</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>原始目的 TEI</td><td style='text-align: center; word-wrap: break-word;'>目的 TEI</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>3</td><td style='text-align: center; word-wrap: break-word;'>3</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr></table>
+
+STA1站点的路由表项如表150所示。
+
+<div style="text-align: center;">表 150 STA1 路由表项</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>原始目的 TEI</td><td style='text-align: center; word-wrap: break-word;'>目的 TEI</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>1</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>4</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>4</td></tr></table>
+
+<!-- ===== Page 114 ===== -->
+
+STA2站点的路由表项如表151所示。
+
+<div style="text-align: center;">表 151 STA2 路由表项</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>原始目的 TEI</td><td style='text-align: center; word-wrap: break-word;'>目的 TEI</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>2</td><td style='text-align: center; word-wrap: break-word;'>2</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>5</td><td style='text-align: center; word-wrap: break-word;'>5</td></tr></table>
+
+在上面的几个路由表项中，当原始目的TEI与目的TEI值相等时，该条路由一般叫做直连路由；当原始目的TEI与目的TEI不等时，该条路由一般叫做间接路由。
+
+## 5348 路由表项形成
+
+路由的创建，主要依靠发现列表报文，关联请求报文，关联确认报文，代理变更请求报文，代理变更请求确认等报文中携带的信息进行创建。
+
+通过发现列表报文，既可以形成直连路由表项，因为能够接收到某站点的发现列表报文，意味着该站点就可能是本站点的直接邻居；也可以形成间接路由表项，因为发现列表报文中，携带着发送发现列表报文站点的所有邻居站点，这些站点未必是本站点的邻居。
+
+通过关联请求报文，CCO可以形成到达请求入网站点的间接路由。
+
+通过关联确认报文，各级代理站点可以形成或者刷新到达请求入网站点的间接路由，同时，也可以形成到达请求入网站点的所有子站点的间接路由，因为关联确认报文中，“路由表信息”携带了请求入网站点的所有直连站点和直连站点的子站点。关联确认报文需要逐级代理进行转发。
+
+通过关联确认报文，新入网站点，根据CCO告知的“路由表信息”表项，可以形成所有子站点的直连路由，以及到达直连子站点的子站点的所有间接路由。
+
+通过代理变更请求报文，代理站点可以形成到达请求变更站点的直连路由；上级代理在处理转发代理变更请求报文的过程中，也可以形成到达请求变更站点的间接路由。同理，CCO和各级代理都能形成到达请求变更站点的间接路由。
+
+代理变更确认报文和关联确认报文的原理一样，可以使得各级代理站点形成到达其所有子站点的路由
+
+各级站点到达CCO的路由表项形成原理相对简单，当选定一个代理时，那么到达CCO的路由下一跳就可以缺省是代理站点，代理站点会把子站点的报文尽力的转发到CCO，通过代理站点的代理。
+
+## 5349 载波路由机制
+
+## 53491 载波通信率统计
+
+载波通信率通过统计接收载波发现列表报文和载波信标帧的个数计算载波的通信率 $ x $节点为每一个邻居节点建立一个邻居节点信息表项，邻居节点载波信息表项如表152所示
+
+<div style="text-align: center;">表 152 载波邻居节点表项字段</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段名称</td><td style='text-align: center; word-wrap: break-word;'>说明</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>CurrDownRcvCnt</td><td style='text-align: center; word-wrap: break-word;'>当前路由周期下行接收发现列表和信标帧个数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>LastDownRcvCnt</td><td style='text-align: center; word-wrap: break-word;'>上一个路由周期下行接收发现列表和信标帧个数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>LastDownSndCnt</td><td style='text-align: center; word-wrap: break-word;'>上一个路由周期下行发送发现列表和信标帧个数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>LastUpRcvCnt</td><td style='text-align: center; word-wrap: break-word;'>上个路由周期上行接收发现列表和信标帧个数</td></tr></table>
+
+<!-- ===== Page 115 ===== -->
+
+每一个节点维护当前路由周期窗口发送发现列表和信标帧个数CurrUpSndCnt和上一个路由窗口发送发现列表和信标帧个数LastUpSndCnt。
+
+载波通信率统计示例如图48所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_178_336_1062_542.jpg" alt="Image" width="74%" /></div>
+
+
+<div style="text-align: center;">图 48 载波通信率统计示意图</div>
+
+
+节点A在路由周期K接收到节点B的发现列表和信标帧个数为6，节点A发送发现列表和信标帧个数为10个。节点B在路由周期K接收节点A的发现列表和信标帧个数为7，节点B发送发现列表和信标帧个数为10个。
+
+## 53492 载波通信率交换
+
+每个节点在一个路由周期发送的发现列表报文中，携带上一个路由周期内节点发送发现列表和信标帧个数，以及接收邻居节点发现信标和信标帧的个数。节点通过一个路由周期的交互，形成双向的通信率。如图48所示，节点A在路由周期K+1的发现列表报文中携带路由周期K发送发现列表和信标帧个数为10，接收节点B的发现列表和信标帧个数为6。节点B在路由周期K+1的发现列表报文中携带路由周期K发送发现列表和信标帧个数为10，接收节点A的发现列表和信标帧个数为7。
+
+## 53493 载波通信率的计算
+
+邻居节点下行通信率 = LastDownRcvCnt / LastDownSndCnt.
+
+邻居节点上行通信率 = LastUpRcvCnt / LastUpSndCnt.
+
+## 53494 载波代理变更
+
+在每一个路由周期结束，或者进入新的一个路由周期，根据已经交换形成的双向通信率，若当前代理的通信率不满足通信需求，或者存在更优的代理，则启动代理变更。路由变更示意图如图49所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_276_1195_940_1372.jpg" alt="Image" width="55%" /></div>
+
+
+<div style="text-align: center;">图 49 路由变更示意图</div>
+
+
+## 53410 无线路由机制
+
+## 534101 无线接收率统计
+
+<!-- ===== Page 116 ===== -->
+
+无线发现列表中报文增加 “统计序号”，统计序号定义为 “Seq”，该序号用于对无线发现列表报文的统计。
+
+节点为每一个邻居节点建立一个无线邻居节点信息表项，表项中包含发现列表报文接收位图，位图大小定义为K，位图更新索引为UpdateIndex。无线邻居节点信息表项如表153所示。
+
+<div style="text-align: center;">表 153 无线邻居节点信息表项</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>字段名称</td><td style='text-align: center; word-wrap: break-word;'>说明</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>UpdateIndex</td><td style='text-align: center; word-wrap: break-word;'>RcvMap更新的索引</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>RcvMap</td><td style='text-align: center; word-wrap: break-word;'>无线发现列表报文接收位图</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>UpRcvRate</td><td style='text-align: center; word-wrap: break-word;'>上行通信率采样报文接收率，通过发现列表交换获取</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>NotUpdateCnt</td><td style='text-align: center; word-wrap: break-word;'>上行接收率未更新的周期数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>DownRssi</td><td style='text-align: center; word-wrap: break-word;'>下行信号强度，通过接收邻居节点的报文获取。</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>DownSnr</td><td style='text-align: center; word-wrap: break-word;'>下行平均信噪比，通过接收邻居节点的报文获取。</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>UpRssi</td><td style='text-align: center; word-wrap: break-word;'>上行信道强度，通过发现列表报文交换获取。</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>UpSnr</td><td style='text-align: center; word-wrap: break-word;'>上行平均信噪比，通过发现列表报文交换获取。</td></tr></table>
+
+通信率统计采样报文的统计序号为8比特，表示范围为0到255，因此建议位图大小K的大小可以选择8e 16e 32e
+
+接收到一个无线发现列表报文，其中统计序号为Seq，那么对应的UpdateIndex（rcv）=Seq%K∗ 将 Rcvmap中对应UpdateIndex（rcv）比特位置为1✗
+
+更新场景1：连续接收到无线发现列表报文，更新如图50所示。
+
+条件：UpdateIndex（rcv）=（UpdateIndex+1）%K。
+
+更新动作：UpdateIndex更新为UpdateIndex（rcv）%K。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_351_919_868_1090.jpg" alt="Image" width="43%" /></div>
+
+
+<div style="text-align: center;">图 50 连续接收更新示意图</div>
+
+
+更新场景2：无线发现列表报文出现丢失，更新如图51所示。
+
+条件：UpdateIndex（rcv）>UpdateIndex+1。
+
+更新动作：将UpdateIndex+1到UpdateIndex（rcv）1之间的位图更新为0，并且将UpdateIndex更新为UpdateIndex（rcv）%K∗
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_352_1293_869_1466.jpg" alt="Image" width="43%" /></div>
+
+
+<div style="text-align: center;">图 51 丢失更新示意图</div>
+
+
+<!-- ===== Page 117 ===== -->
+
+更新场景3：无线发送列表报文发送延迟，更新如图52所示。
+
+条件：UpdateIndex（rcv） <= UpdateIndex，并且RcvMap[UpdateIndex] = 0。
+
+更新动作：将UpdateIndex = UpdateIndex（Rcv）。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_351_285_868_455.jpg" alt="Image" width="43%" /></div>
+
+
+<div style="text-align: center;">图 52 发送延迟更新示意图</div>
+
+
+更新场景4：无线发现列表报文乱序1，更新如图53所示。
+
+条件：UpdateIndex（rcv）<UpdateIndex，并且RcvMap[UpdateIndex]=1。
+
+更新动作：不更新UpdateIndex。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_350_628_869_796.jpg" alt="Image" width="43%" /></div>
+
+
+<div style="text-align: center;">图 53 无线发现列表乱序 1 更新示意图</div>
+
+
+更新场景5：无线发现列表报文乱序2，更新如图54所示。
+
+条件：UpdateIndex（rcv）<UpdateIndex，并且RcvMap[UpdateIndex]=0。
+
+更新动作：将UpdateIndex更新到最近一个RcvMap[i]等于1的值。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_350_971_869_1137.jpg" alt="Image" width="43%" /></div>
+
+
+<div style="text-align: center;">图54 无线发现列表乱序2更新示意图</div>
+
+
+## 534102 无线接收率的计算
+
+无权重接收率 = 接收无线发现列表报文个数/窗口大小。接收率计算示例如图55。图56所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_178_1270_1033_1353.jpg" alt="Image" width="71%" /></div>
+
+
+<div style="text-align: center;">图 55 无权重接收率窗口示意图</div>
+
+
+窗口大小为8，有5个窗口接收到无线发现列表报文，则接收率 =5/8 =62.5%
+
+有权重接收率计算：以 UpdateIndex 为基准点，将接收位图划分为 N 个段，分别计算每段的接收率，然后各段的接收率加权求和，距离 UpdateIndex 最近的段的权重最大，距离 UpdateIndex 最远的段的权重
+
+<!-- ===== Page 118 ===== -->
+
+最小
+
+加权接收率 =  $ \Sigma W_i \times RcV_i \times $
+
+Wᵢ表示窗口段 i 的权重，Rcvᵢ表示窗口段 i 的接收率。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_182_284_1037_449.jpg" alt="Image" width="71%" /></div>
+
+
+<div style="text-align: center;">图 56 有权重接收率窗口示意图</div>
+
+
+假设窗口大小为 15，每 5 个窗口划分为 1 组， $ w_1=0.5 $， $ w_2=0.3 $， $ w_3=0.2 $。
+
+ $$  加权接收率 =(4/5*0.5+3/5*0.3+1/5*0.2)*100=62。 $$ 
+
+ $$  无权重接收率 =8\text{/}15\text{*}100=53\text{。} $$ 
+
+## 534103 下行接收率老化机制
+
+接收位图通过接收通信率采样报文进行滑动更新，当两个节点通信中断时，接收位图无法通过接收通信率采样报文进行更新，因此需要通过滑窗的老化机制，驱动接收位图的更新。或者两个节点信道变差，仅依靠接收通信率采样报文来更新接收位图，则会导致接收率反映信道的时间滞后，通过老化机制提升反应信道的实时性。
+
+老化机制为：每隔一个发现列表发送周期，更新接收位图中第 UpdateIndex+1 位为 0，将 UpdateIndex 递增 1。
+
+假设接收位图的大小为4，信道中断前，接收率为100。经过4个周期的老化，下行接收率降低为0。老化示例如图57所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_375_955_857_1376.jpg" alt="Image" width="40%" /></div>
+
+
+<div style="text-align: center;">图 57 下行接收率老化示例</div>
+
+
+## 534104 上行接收率老化机制
+
+<!-- ===== Page 119 ===== -->
+
+对于上行通信变差时，接收不到邻居节点报文。或者邻居节点已经判定本节点的接收率为0，不在发布本节点的接收率，则无法通过邻居节点发现列表消息更新上行接收率，因此需要一种老化机制，保证在这种场景下，能够将上行接收率的更新。
+
+上行接收率老化机制：N个发现列表周期未对上行接收率进行更新，则将上行接收率更新为0。（上行接收率老化周期个数N由CCO选择，通过无线路由参数条目通知到网络中每一个节点）。上行接收率老化示例1如图58所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_240_390_1004_645.jpg" alt="Image" width="64%" /></div>
+
+
+<div style="text-align: center;">图 58 上行接收率老化示例 1</div>
+
+
+窗口大小为4，上行接收率老化周期数为4。从周期K+1开始，节点A到节点B可以通信，节点B到节点A通信中断。节点A和B接收率变化如表154所示。
+
+<div style="text-align: center;">表 154 示例 1 上行接收率交换老化表</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td rowspan="2">周期</td><td colspan="2">A节点（统计与B节点通信率）</td><td colspan="2">B节点（统计与A节点通信率）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>下行</td><td style='text-align: center; word-wrap: break-word;'>上行</td><td style='text-align: center; word-wrap: break-word;'>下行</td><td style='text-align: center; word-wrap: break-word;'>上行</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>K+1</td><td style='text-align: center; word-wrap: break-word;'>100</td><td style='text-align: center; word-wrap: break-word;'>100</td><td style='text-align: center; word-wrap: break-word;'>100</td><td style='text-align: center; word-wrap: break-word;'>100</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>K+2</td><td style='text-align: center; word-wrap: break-word;'>75</td><td style='text-align: center; word-wrap: break-word;'>100</td><td style='text-align: center; word-wrap: break-word;'>100</td><td style='text-align: center; word-wrap: break-word;'>75</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>K+3</td><td style='text-align: center; word-wrap: break-word;'>50</td><td style='text-align: center; word-wrap: break-word;'>100</td><td style='text-align: center; word-wrap: break-word;'>100</td><td style='text-align: center; word-wrap: break-word;'>50</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>K+4</td><td style='text-align: center; word-wrap: break-word;'>25</td><td style='text-align: center; word-wrap: break-word;'>100</td><td style='text-align: center; word-wrap: break-word;'>100</td><td style='text-align: center; word-wrap: break-word;'>25</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>K+5</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>100</td><td style='text-align: center; word-wrap: break-word;'>0</td></tr></table>
+
+节点A：
+
+从K+1周期开始，与节点B的下行接收率每个周期下降25，到K+5周期下行接收率降低为0。由于无法接收到B的无线发现列表报文，因此无法更新上行接收率，根据上行接收率的老化机制，到K+5周期时，节点已经连续4个周期未更新上行接收率，因此老化为0。
+
+节点B：
+
+与节点A的下行通信良好，因此保持不变。
+
+上行接收率通过节点A的无线发现列表，每个周期更新一次，则到K+5周期时，更新为0x
+
+上行接收率老化示例2如图59所示。
+
+<!-- ===== Page 120 ===== -->
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_183_200_1032_464.jpg" alt="Image" width="71%" /></div>
+
+
+<div style="text-align: center;">图 59 上行接收率老化示例 2</div>
+
+
+接收率窗口为4，K+1周期到K+5周期，节点A和B通信中断，K+6周期开始节点A到B单向通信。接收率变化如表155所示。
+
+<div style="text-align: center;">表 155 示例 2 上行接收率老化表</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td rowspan="2">周期</td><td colspan="2">A节点（统计与B节点通信率）</td><td colspan="3">B节点（统计与A节点通信率）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>下行</td><td style='text-align: center; word-wrap: break-word;'>上行</td><td style='text-align: center; word-wrap: break-word;'>下行</td><td style='text-align: center; word-wrap: break-word;'>上行</td><td style='text-align: center; word-wrap: break-word;'>上行（无老化）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>K+1</td><td style='text-align: center; word-wrap: break-word;'>100</td><td style='text-align: center; word-wrap: break-word;'>100</td><td style='text-align: center; word-wrap: break-word;'>75</td><td style='text-align: center; word-wrap: break-word;'>100</td><td style='text-align: center; word-wrap: break-word;'>100</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>K+2</td><td style='text-align: center; word-wrap: break-word;'>75</td><td style='text-align: center; word-wrap: break-word;'>100</td><td style='text-align: center; word-wrap: break-word;'>50</td><td style='text-align: center; word-wrap: break-word;'>100</td><td style='text-align: center; word-wrap: break-word;'>100</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>K+3</td><td style='text-align: center; word-wrap: break-word;'>50</td><td style='text-align: center; word-wrap: break-word;'>100</td><td style='text-align: center; word-wrap: break-word;'>25</td><td style='text-align: center; word-wrap: break-word;'>100</td><td style='text-align: center; word-wrap: break-word;'>100</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>K+4</td><td style='text-align: center; word-wrap: break-word;'>25</td><td style='text-align: center; word-wrap: break-word;'>100</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>100</td><td style='text-align: center; word-wrap: break-word;'>100</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>K+5</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>100</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>K+6</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>25</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>100</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>K+7</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>50</td><td style='text-align: center; word-wrap: break-word;'>0</td><td style='text-align: center; word-wrap: break-word;'>100</td></tr></table>
+
+对于节点A，从K+5周期，统计与邻居节点B的通信率为0，则不在发现列表中携带节点的上行接收率。当K+6周期，节点A和B之间单向通信时，节点B无法通过节点发送的无线发现列表报文更新与节点A的上行接收率。
+
+## 534105 无线接收率交换
+
+节点创建无线发现列表报文时，根据最近接收到的无线发现列表报文计算与邻居节点的下行接收率。因此节点在无线发现列表报文中携带与邻居节点的接收率都是最近统计到的信息。交换的示意图如图60所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_257_1240_959_1355.jpg" alt="Image" width="58%" /></div>
+
+
+<div style="text-align: center;">图 60 无线接收率交换内容示意图</div>
+
+
+假设接收位图大小为8，与节点i的接收率在周期K时，统计到接收到8个节点i的通信率采样报文，则在发现列表报文中携带与节点i的接收率为100；若在周期K+1时，统计接收到7个节点i的通
+
+<!-- ===== Page 121 ===== -->
+
+信率采样报文，在周期 K+1 发送的发现列表报文中携带与节点 i 的接收率为 87。发布示例如图 61 所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_320_226_917_468.jpg" alt="Image" width="50%" /></div>
+
+
+<div style="text-align: center;">图 61 无线发现列表接收率交换示意图</div>
+
+
+## 534106 邻居节点发布频度
+
+规则1：若与邻居节点的通信率变化在一定幅度内，则可以降低对该邻居节点通信率发布的频率。
+
+规则2：若与邻居节点的通信率低于一定门限，也可以降低对该邻居节点通信率发布的频率。比如接收率低于10%，则以低频率发布与该节点的通信率。
+
+规则3：若与邻居节点的下行接收率为0，则不在发布该邻居节点的通信率x
+
+## 534107 无线发现列表报文
+
+发现列表消息采用 TLV 格式，可以根据策略发布不同组合的信息。
+
+站点属性信息单元：主要包括节点与代理的通信率信息、节点网络属性；
+
+站点路由信息单元：主要承载节点多路径的信息：
+
+邻居节点信道信息单元：主要承载邻居节点信道信息，比如接收率、信号强度、平均信噪比。
+
+在一个发现列表消息中，可以携带任意组合的信息单元×比如节点信息单元和路由信息单元中内容可能长时间不会发生变化，可以以低频率的方式发送×邻居节点信道信息单元中也可以动态选择携带的信道信息，比如以接收率信息为主，可以高频率携带接收率信息，信号强度和平均信噪比可以低频度发送×
+
+## 534108 无线代理变更
+
+触发代理变更的有两个因素：路径变差和路径优选。
+
+路径变差：每个发现列表周期更新一次，接收率或者信道质量低于门限值时，启动代理变更。为了抑制频繁的代理变更，可要求两次代理变更间隔大于一定的间隔。
+
+正常代理变更示例如图62所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_229_1205_997_1385.jpg" alt="Image" width="64%" /></div>
+
+
+<div style="text-align: center;">图 62 无线正常代理变更示意图</div>
+
+
+周期1到4：路径质量良好，不启动代理变更；
+
+周期5：检测到路径质量变差，不满足通信要求，启动代理变更；
+
+<!-- ===== Page 122 ===== -->
+
+周期6到7：代理变更中；
+
+周期8：接收到代理变更回复报文，代理变更成功。
+
+代理评估失败示例如图63所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_229_290_997_462.jpg" alt="Image" width="64%" /></div>
+
+
+<div style="text-align: center;">图 63 代理评估失败示意图</div>
+
+
+周期1到4：路径质量良好，不启动代理变更；
+
+周期5：检测到路径质量变差，不满足通信要求，代理评估失败，不启动代理变更；
+
+周期6：检测到路径质量变差，不满足通信要求，代理评估成功，启动代理变更；
+
+周期7.8：代理变更中：
+
+周期9：代理变更成功。
+
+代理变更失败示例如图64所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_228_721_995_901.jpg" alt="Image" width="64%" /></div>
+
+
+<div style="text-align: center;">图 64 代理变更失败示意图</div>
+
+
+周期1：路径变差，启动代理变更；
+
+周期2.3：代理变更中：
+
+周期4：代理变更超时，导致变更失败；
+
+周期5到7：不满足变更间隔：
+
+周期8：路径变差，启动代理变更；
+
+周期8.9：代理变更中：
+
+周期10：代理变更成功。
+
+不满足变更间隔示例如图65所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_230_1224_995_1402.jpg" alt="Image" width="64%" /></div>
+
+
+<div style="text-align: center;">图 65 不满足变更间隔示意图</div>
+
+
+周期1：路径变差，启动代理变更；
+
+周期2.3：代理变更中；
+
+<!-- ===== Page 123 ===== -->
+
+周期4：代理变更成功；
+
+周期5到7：路径差，不满足变更间隔；
+
+周期8：路径变差，启动代理变更；
+
+周期8.9：代理变更中；
+
+周期10：代理变更成功。
+
+路径优选：周期性触发节点进行路径优选评估，若发现更好的路径，则选择更好的代理，启动代理变更，若没有更好的路径，则维持当前路径不变。
+
+优选周期：可以跟高速载波路由周期同步，也可以自行决定路由评估周期，自行决定路由优选周期，建议以10个RF发现列表周期为一个无线优选周期。
+
+路径优先示例如图66所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_260_506_965_679.jpg" alt="Image" width="59%" /></div>
+
+
+<div style="text-align: center;">图 66 路由优选变更示意图</div>
+
+
+周期1：是上次变更成功的点；
+
+周期2到6：不满足变更间隔要求，即使发现存在更有的路径，也不允许启动代理变更；
+
+周期7：满足代理变更间隔要求，并且发现更优的路径，则启动代理变更；
+
+周期8.9：代理变更中；
+
+周期10：变更成功。
+
+## 534109 信号强度和信噪比
+
+RSSI（Received Signal Strength Indication）接收的信号强度指示，整个频带内所有子载波的功率总和，包括干扰和噪声，可以用来判定链路的质量×信噪比是信号强度与噪声的比例，信噪比是度量通信系统通信质量可靠性的一个主要指标，信噪比越大，说明信号中携带的噪声信号越小，对信号传输的影响越小×
+
+本标准协议中建议采用一阶滞后滤波统计信号强度和信噪比，滤波系数为 $ \alpha_{x} $
+
+信号强度统计： $ RSSI = RSSI_{old} \times (1\ \alpha) + RSSI_{new} \times \alpha $
+
+信噪比统计： $ SNR = SNR_{old} \times (1\alpha) + SNR_{new} \times \alpha $
+
+信号强度和信噪比可用于辅助路径的评估，主要可以使用在以下场景：
+
+当前节点通信率统计时长不足时，可以根据信号强度和信噪比估计通信率，比如在节点加入网络时；
+
+由于短帧评估的通信率与长帧评估的通信率在通信临界点上存在较大的差异，在路径评估时可以参考节点间的信号强度和信噪比；
+
+在信道发生突变时，通信率反馈链路质量较慢时，可以通过信号强度和信噪比来感知信道的变化。
+
+## 53411 动态路由维护
+
+动态路由维护，主要是指网络中的站点，需要实时的判断周边邻居站点的信道情况，选择更好的代理站点。
+
+<!-- ===== Page 124 ===== -->
+
+在网络组网的过程中，站点可以通过判断接收信标帧的情况，来判断周围站点的信道质量；在组网完成后，网络中主要的维护报文就是发现列表报文和信标帧，各级站点可以通过判断接收邻居站点的发现列表报文和信标帧的情况，以及邻居站点的变化情况选择更好的代理。
+
+当STA站点评估出一个新的代理站点时，可以通过代理变更请求报文，向CCO发起代理变更请求。CCO根据网络拓扑的组成，可以在STA站点申请的备选代理中指定一个站点，作为STA站点的新代理。当CCO判断变更后的网络拓扑层级会超过层级上限（最大支持15个层级）时，不会响应代理变更请求，并且不会发送代理变更请求确认报文。
+
+当一个新代理PCO被确认后，CCO需要发送代理变更确认报文等，将STA站点以及新代理PCO的情况，通过逐级代理转发给请求代理变更的站点。逐级代理在转发代理变更确认等报文的过程中，可以通过该报文中的“子站点条目”等信息（见第5.1.3.6.1节），实时的刷新到达“子站点条目”中站点的间接路由。STA站点最终也可以根据“子站点条目”信息，刷新本地的直接路由和间接路由。
+
+所以，在组网完成后，网络维护的过程中，全网站点的路由表项，主要通过代理变更的过程来完成实时刷新 $ ^{*} $
+
+## 53412 周期参数
+
+在整个网络维护的机制中，存在一些周期性的参数设计，具体内容整理如表156所示。
+
+<div style="text-align: center;">表 156 周期参数</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>名称</td><td style='text-align: center; word-wrap: break-word;'>参数约束</td><td style='text-align: center; word-wrap: break-word;'>动作约定</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>邻居网络监听周期</td><td style='text-align: center; word-wrap: break-word;'>一次性周期，设置范围：小于10秒</td><td style='text-align: center; word-wrap: break-word;'>CCO上电后，在该周期内，监听邻居网络的网间协调帧，进行网络标识的协商</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>网间协调报文发送周期</td><td style='text-align: center; word-wrap: break-word;'>连续性周期，设置范围：小于1秒</td><td style='text-align: center; word-wrap: break-word;'>CCO确定网络标识，开始组网后，在网络维护期间，需要每个周期内发送1个网间协调帧</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信标周期</td><td style='text-align: center; word-wrap: break-word;'>连续性周期，CCO根据本网络的规模，可设置本网络的信标周期，设置范围：1 15秒</td><td style='text-align: center; word-wrap: break-word;'>CCO在每个信标周期中，须要发送中央信标；每个代理站点在每个信标周期中，都要发送代理信标，发送时间根据中央信标的安排；每个信标周期中，部分STA站点会被CCO安排发送发现信标</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>载波路由周期</td><td style='text-align: center; word-wrap: break-word;'>连续性周期，CCO根据本网络的规模，可设置本网络的路由周期，设置范围：20 420秒</td><td style='text-align: center; word-wrap: break-word;'>STA站点，在路由周期内，评估自己的代理站点，可发起代理变更请求</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>载波发现列表报文发送周期</td><td style='text-align: center; word-wrap: break-word;'>连续性周期，根据路由周期来设置，设置范围：1个路由周期</td><td style='text-align: center; word-wrap: break-word;'>网络中所有站点，在该周期内，至少发送10个发现列表报文</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>心跳检测报文产生周期</td><td style='text-align: center; word-wrap: break-word;'>连续性周期，根据路由周期来设置，设置范围：1/8个路由周期</td><td style='text-align: center; word-wrap: break-word;'>高层级代理站点，在该周期内，产生1个心跳检测报文</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>通信成功率上报周期</td><td style='text-align: center; word-wrap: break-word;'>连续性周期，根据路由周期来设置，设置范围：4个路由周期</td><td style='text-align: center; word-wrap: break-word;'>代理站点，在该周期内，需要产生1个通信成功率上报报文，发送给CCO</td></tr></table>
+
+<!-- ===== Page 125 ===== -->
+
+<div style="text-align: center;">表156（续）</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>名称</td><td style='text-align: center; word-wrap: break-word;'>参数约束</td><td style='text-align: center; word-wrap: break-word;'>动作约定</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>心跳周期</td><td style='text-align: center; word-wrap: break-word;'>一次性周期：根据路由周期来设置。\n设置范围：2个路由周期</td><td style='text-align: center; word-wrap: break-word;'>CCO判断某个站点：在连续的1个心跳周期内，都不活跃。可判定其离线。CCO判断某个站点：在连续的4个心跳周期内，都不活跃。可判定其未入网</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>无线发现列表周期</td><td style='text-align: center; word-wrap: break-word;'>CCO根据本网络的规模。可设置本网络无线发现列表周期。设置范围：10 255</td><td style='text-align: center; word-wrap: break-word;'>网络中节点保证每1个无线发现列表周期发送1个无线发现列表报文</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>无线接收率老化周期</td><td style='text-align: center; word-wrap: break-word;'>CCO根据本网络的规模。可配置无线接收率老化周期。设置范围为：4 16个无线发现列表周期</td><td style='text-align: center; word-wrap: break-word;'>若超过无线接收率老化周期没有更新无线上行接收率，则老化为0</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>无线接收统计窗口</td><td style='text-align: center; word-wrap: break-word;'>最小值为8</td><td style='text-align: center; word-wrap: break-word;'>节点本地统计接收无线发现列表接收个数位图大小</td></tr></table>
+
+## 53413 实时路由修复
+
+站点在转发业务数据时，如果周期性评估的路由无效或者无路由时，可根据业务报文的触发，发起实时的路由修复，以便发现到达业务报文的最终目的地址的实时路由。
+
+当站点确认需要发起路由修复时，以广播的形式发送路由请求报文（MMeRouteRequest），对最终目的节点进行搜索。宜通过对路由请求报文的传输跳数进行限制，减小由于通信报文数量较多导致的冲突。通信延时的影响。路由请求报文传输流程如图67所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_292_884_953_1196.jpg" alt="Image" width="55%" /></div>
+
+
+<div style="text-align: center;">图 67 路由修复请求报文传输流程</div>
+
+
+被路由请求报文所搜索的最终站点，在接收到路由请求报文后，需要组织路由回复报文（MMeRouteReply），并将路由回复报文，以单播报文的形式发送至路由请求报文的发起站点。参与路由修复任务的站点应记录接收到的至少一条路由请求报文的信息，对于处理。转发路由回复报文的站点，应根据上述记录的信息确定发路由回复报文的下一跳站点。路由回复报文传输流程如图68所示。
+
+<!-- ===== Page 126 ===== -->
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_292_198_954_551.jpg" alt="Image" width="55%" /></div>
+
+
+<div style="text-align: center;">图 68 路由修复回复报文传输流程</div>
+
+
+发起路由请求的站点在预定时间内收到了相应的路由回复报文，则该站点将向被搜索的最终目的站点发送路由应答报文（MMeRouteAck），通知该最终目的节点。路由应答过程如图69所示。
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_289_699_957_1026.jpg" alt="Image" width="56%" /></div>
+
+
+<div style="text-align: center;">图 69 路由修复路由回应报文</div>
+
+
+发起路由请求报文的站点，如果在预定时间内未收到相应的路由回复报文，该站点将向触发本次路由请求任务的原始站点发送路由错误报文（MMeRouteError），以单播报文的形式通知任务的原始站点业务报文转发失败。
+
+站点在转发路由回复报文时，可以使用链路确认请求报文（MMeLinkConfirmRequest），发起链路评估，以便确定路由回复报文的下一个目的站点。
+
+站点在收到链路确认请求报文后，在评估本地的相关路由数据后，确定是否发送链路确认回应报文（MMeLinkConfirmResponse）。通过链路回应报文，携带相关的链路信息，回应给链路确认报文的发起站点。链路确认过程如图70所示。
+
+<!-- ===== Page 127 ===== -->
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_291_198_955_555.jpg" alt="Image" width="55%" /></div>
+
+
+<div style="text-align: center;">图 70 路由修复链路确认流程</div>
+
+
+链路确认请求报文的发起站点，在接收到链路确认回复报文后，可进行路由下一跳目的站点的选择，确定下一跳后，需要转发出路由回复报文。
+
+## 53414 相线识别
+
+一般的电力线网络中，存在A/B/C三个相线的物理线路分支。
+
+CCO一般会同时工作在A/B/C三个相线上，与A/B/C三个相线上的终端设备进行通信。而终端设备STA，一般情况下，只会工作在A/B/C三个相线的其中一个分支上。
+
+相线识别的目的，主要是确认一个电力线网络中，A/B/C三个相线上，各自有多少个终端设备，以及具体是哪些终端设备。
+
+一般的，属于同一个相线的终端设备，具有相同的电力线工频周期，具有相同的过零点时刻；而不同相线的终端设备，虽然具有相同的电力线工频周期，但是过零点时刻却不相同。
+
+采用过零点时刻比对的方法，可以识别出终端设备的所属相线×即：STA采集本站点的相线过零点NTB，上报给CCO；CCO采集本站点A/B/C三个相线的过零点NTB（也可以采集A相线的过零点，计算出B/C相的过零点）；CCO将STA上报的过零点NTB，与自己采集的过零点NTB进行比对计算，根据差值，即可判断该STA的所属相线。
+
+本协议中，相线识别的过程是：CCO向STA站点下发“过零NTB采集指示报文”，指示STA进行过零NTB采集，与此同时，CCO开始采集本站点上A/B/C三个相线的过零点NTB；STA根据CCO的指示报文，完成过零点NTB采集后，通过“过零NTB告知报文”上报本站点采集的过零点NTB信息；CCO根据STA站点上报的过零点NTB信息，与自己的过零点NTB比对计算后，获得该STA站点的所属相线。
+
+CCO站点也可以创建“过零NTB告知报文”，STA站点可根据CCO告知的过零NTB差值，与本站点的过零NTB比较，判断本站点所处的相线，判断方法与CCO一致。
+
+## 54 数据链路层服务
+
+## 541 概述
+
+如图71所示，数据链路层为应用层提供了两个服务：数据传输和数据管理 $ ^{x} $。其中数据传输服务主要用来完成CCO和STA之间的应用层数据的传输，数据管理服务主要用来供应用层查询或者设置CCO本地的数据信息或者配置本地数据 $ ^{x} $。
+
+<!-- ===== Page 128 ===== -->
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_282_197_937_864.jpg" alt="Image" width="54%" /></div>
+
+
+<div style="text-align: center;">图 71 数据链路层服务图</div>
+
+
+## 542 数据链路层数据传输服务
+
+## 5421 数据传输原语分类
+
+数据链路层的数据传输服务原语，如表157所示。
+
+<div style="text-align: center;">表 157 数据链路层数据传输服务原语</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>原语名称</td><td style='text-align: center; word-wrap: break-word;'>功能</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>MSDU 发送原语</td><td style='text-align: center; word-wrap: break-word;'>发送 MSDU 帧</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>MSDU 接收原语</td><td style='text-align: center; word-wrap: break-word;'>接收 MSDU 帧</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>业务注册请求原语</td><td style='text-align: center; word-wrap: break-word;'>申请注册业务应用类型</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>业务注册确认原语</td><td style='text-align: center; word-wrap: break-word;'>确认业务应用类型注册</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>业务 LID 申请原语</td><td style='text-align: center; word-wrap: break-word;'>申请业务 LID 分配</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>业务 LID 确认原语</td><td style='text-align: center; word-wrap: break-word;'>确认业务 LID 分配</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>业务 LID 释放原语</td><td style='text-align: center; word-wrap: break-word;'>释放已分配的业务 LID</td></tr></table>
+
+## 5422 MSDU 发送原语
+
+## 54221 原语语义
+
+<!-- ===== Page 129 ===== -->
+
+通过MSDU发送原语，应用层可以将APDU等MSDU帧形式的数据，交由数据链路层进行发送。MSDU发送原语的语义如表158所示。
+
+<div style="text-align: center;">表 158 MSDU 发送原语</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>名称</td><td style='text-align: center; word-wrap: break-word;'>类型</td><td style='text-align: center; word-wrap: break-word;'>有效范围</td><td style='text-align: center; word-wrap: break-word;'>描述</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>MSDU</td><td style='text-align: center; word-wrap: break-word;'>字节流</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>组成MSDU的字节流</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>MSDU长度</td><td style='text-align: center; word-wrap: break-word;'>整型</td><td style='text-align: center; word-wrap: break-word;'>2 2012</td><td style='text-align: center; word-wrap: break-word;'>MSDU的长度、总字节数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>原始目的地址</td><td style='text-align: center; word-wrap: break-word;'>6字节 MAC地址</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>MSDU帧的最终接收站点的MAC地址</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>原始源地址</td><td style='text-align: center; word-wrap: break-word;'>6字节 MAC地址</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>MSDU帧的初始创建站点的MAC地址</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>MSDU类型</td><td style='text-align: center; word-wrap: break-word;'>1字节</td><td style='text-align: center; word-wrap: break-word;'>0 255</td><td style='text-align: center; word-wrap: break-word;'>表示业务报文类型</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>链路标识符（LID）</td><td style='text-align: center; word-wrap: break-word;'>1字节</td><td style='text-align: center; word-wrap: break-word;'>0 254</td><td style='text-align: center; word-wrap: break-word;'>0 3。表示优先级；\n4 254。表示业务分类；\n255。表示无效值</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>链路类型</td><td style='text-align: center; word-wrap: break-word;'>1字节</td><td style='text-align: center; word-wrap: break-word;'>0 2</td><td style='text-align: center; word-wrap: break-word;'>0。表示自动选择链路；\n1。电力线载波链路；\n2。无线链路</td></tr></table>
+
+## 54222 数据链路层处理
+
+数据链路层将MSDU报文封装为MAC帧。
+
+数据链路层发送MSDU报文时，根据发送原语中的原始目的地址，原始源地址，MSDU类型等，生成MAC帧头。
+
+数据链路层对MSDU报文内容不做修改。
+
+数据链路层根据链路标识符，对报文进行调度发送，当链路标识符为无效值时，按照缺省优先级调度发送。
+
+数据链路层根据链路类型选择在电力线载波还是无线空口上发送，当链路类型为无效值时，数据链路层自动选择链路进行发送。
+
+## 5423 MSDU接收原语
+
+## 54231 原语定义
+
+数据链路层通过MSDU接收原语，通知应用层接收MSDU报文。MSDU接收原语的语义如表159所示。
+
+<div style="text-align: center;">表 159 MSDU 接收原语</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>名称</td><td style='text-align: center; word-wrap: break-word;'>类型</td><td style='text-align: center; word-wrap: break-word;'>有效范围</td><td style='text-align: center; word-wrap: break-word;'>描述</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>MSDU</td><td style='text-align: center; word-wrap: break-word;'>字节流</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>组成MSDU的字节流</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>MSDU长度</td><td style='text-align: center; word-wrap: break-word;'>整型</td><td style='text-align: center; word-wrap: break-word;'>2 2012</td><td style='text-align: center; word-wrap: break-word;'>MSDU的长度、总字节数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>原始目的地址</td><td style='text-align: center; word-wrap: break-word;'>6字节MAC地址</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>MSDU报文的最终接收站点的MAC地址</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>原始源地址</td><td style='text-align: center; word-wrap: break-word;'>6字节MAC地址</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>MSDU报文的初始创建站点的MAC地址</td></tr></table>
+
+<!-- ===== Page 130 ===== -->
+
+## 54232 数据链路层处理
+
+数据链路层在接收到的MAC帧后，对于MAC帧进行校验解析后，根据解析到的MSDU类型，可以将解析出来的MSDU帧，通过MSDU接收原语，交由相应的业务应用处理。
+
+## 5424 业务注册请求原语
+
+## 54241 原语定义
+
+应用层业务，通过业务注册请求原语，完成对数据链路层数据传输服务的注册使用。业务注册请求原语的语义如表160所示。
+
+<div style="text-align: center;">表 160 业务注册请求原语</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>名称</td><td style='text-align: center; word-wrap: break-word;'>类型</td><td style='text-align: center; word-wrap: break-word;'>有效范围</td><td style='text-align: center; word-wrap: break-word;'>描述</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>MSDU 类型</td><td style='text-align: center; word-wrap: break-word;'>1 字节</td><td style='text-align: center; word-wrap: break-word;'>48 255</td><td style='text-align: center; word-wrap: break-word;'>业务申请的 MSDU 类型</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>缺省优先级</td><td style='text-align: center; word-wrap: break-word;'>1 字节</td><td style='text-align: center; word-wrap: break-word;'>0 3</td><td style='text-align: center; word-wrap: break-word;'>业务报文的缺省优先级</td></tr></table>
+
+## 54242 数据链路层处理
+
+数据链路层根据既定的业务类型规划，以及已完成确认的业务注册情况，处理业务注册请求原语。
+
+数据链路层对于业务注册请求中的需求，存在批准和不批准两种可能。
+
+数据链路层对于业务注册请求原语，通过业务注册确认原语进行确认。
+
+## 5425 业务注册确认原语
+
+## 54251 原语定义
+
+数据链路层，通过业务注册确认原语，完成对应用层业务的注册请求的确认。业务注册确认原语的语义如表161所示。
+
+<div style="text-align: center;">表 161 业务注册确认原语</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>名称</td><td style='text-align: center; word-wrap: break-word;'>类型</td><td style='text-align: center; word-wrap: break-word;'>有效范围</td><td style='text-align: center; word-wrap: break-word;'>描述</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>确认结果</td><td style='text-align: center; word-wrap: break-word;'>1 字节</td><td style='text-align: center; word-wrap: break-word;'>0 2</td><td style='text-align: center; word-wrap: break-word;'>0。表示按注册请求批准；\n1。表示按实际分配批准；\n2。表示未批准。注册失败</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>MSDU 类型</td><td style='text-align: center; word-wrap: break-word;'>1 字节</td><td style='text-align: center; word-wrap: break-word;'>48 255</td><td style='text-align: center; word-wrap: break-word;'>批准的 MSDU 类型</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>缺省优先级</td><td style='text-align: center; word-wrap: break-word;'>1 字节</td><td style='text-align: center; word-wrap: break-word;'>0 3</td><td style='text-align: center; word-wrap: break-word;'>批准的报文缺省优先级</td></tr></table>
+
+## 54252 数据链路层处理
+
+数据链路层通过业务注册确认原语，对业务注册请求原语进行确认。
+
+## 5426 业务LID申请原语
+
+## 54261 原语定义
+
+<!-- ===== Page 131 ===== -->
+
+应用层业务，通过业务LID申请原语，进行业务分类LID的申请。业务LID申请原语的语义如表162所示。
+
+<div style="text-align: center;">表 162 业务 LID 申请原语</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>名称</td><td style='text-align: center; word-wrap: break-word;'>类型</td><td style='text-align: center; word-wrap: break-word;'>有效范围</td><td style='text-align: center; word-wrap: break-word;'>描述</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>业务 LID</td><td style='text-align: center; word-wrap: break-word;'>1 字节</td><td style='text-align: center; word-wrap: break-word;'>4 254</td><td style='text-align: center; word-wrap: break-word;'>应用层业务申请的业务LID</td></tr></table>
+
+## 54262 数据链路层处理
+
+数据链路层根据既定的LID规划，以及已完成的LID批准情况，完成对业务LID申请原语的处理。
+
+数据链路层对业务LID申请，存在批准和不批准两种情况。
+
+数据链路层对已经分配的LID，不会进行二次分配，除非该LID被释放。
+
+数据链路层对业务LID申请原语，使用业务LID确认原语完成确认。
+
+## 5427 业务LID确认原语
+
+## 54271 原语定义
+
+数据链路层，通过业务注册确认原语，完成对应用层业务的注册请求的确认。业务LID确认原语的语义如表163所示。
+
+<div style="text-align: center;">表 163 业务 LID 确认原语</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>名称</td><td style='text-align: center; word-wrap: break-word;'>类型</td><td style='text-align: center; word-wrap: break-word;'>有效范围</td><td style='text-align: center; word-wrap: break-word;'>描述</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>确认结果</td><td style='text-align: center; word-wrap: break-word;'>1 字节</td><td style='text-align: center; word-wrap: break-word;'>0 2</td><td style='text-align: center; word-wrap: break-word;'>0。表示申请需求批准；\n1。表示按实际分配批准；\n2。表示未批准。申请失败</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>业务 LID</td><td style='text-align: center; word-wrap: break-word;'>1 字节</td><td style='text-align: center; word-wrap: break-word;'>4 254</td><td style='text-align: center; word-wrap: break-word;'>批准的业务 LID</td></tr></table>
+
+## 54272 数据链路层处理
+
+数据链路层通过业务LID确认原语，对业务LID申请原语进行确认。
+
+## 5428 业务LID释放原语
+
+## 54281 原语定义
+
+应用层业务通过业务LID释放原语完成对业务LID的释放。业务LID释放原语的语义如表164所示。
+
+<div style="text-align: center;">表 164 业务 LID 释放原语</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>名称</td><td style='text-align: center; word-wrap: break-word;'>类型</td><td style='text-align: center; word-wrap: break-word;'>有效范围</td><td style='text-align: center; word-wrap: break-word;'>描述</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>业务 LID</td><td style='text-align: center; word-wrap: break-word;'>1 字节</td><td style='text-align: center; word-wrap: break-word;'>4 254</td><td style='text-align: center; word-wrap: break-word;'>表示要释放的业务LID</td></tr></table>
+
+## 54282 数据链路层处理
+
+数据链路层根据业务LID释放原语，完成LID资源的回收后，可将该LID再次分配。
+
+<!-- ===== Page 132 ===== -->
+
+## 543 数据链路层数据管理服务
+
+## 5431 数据管理原语分类
+
+数据链路层的数据管理服务原语一共有10个，如表165所示。
+
+<div style="text-align: center;">表165 数据链路层数据管理服务原语</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>原语名称</td><td style='text-align: center; word-wrap: break-word;'>功能</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>网络拓扑查询原语</td><td style='text-align: center; word-wrap: break-word;'>查询 CCO 的网络拓扑信息</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>网络拓扑上报原语</td><td style='text-align: center; word-wrap: break-word;'>上报 CCO 的网络拓扑信息</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>网络 NID 查询原语</td><td style='text-align: center; word-wrap: break-word;'>查询 CCO 的 NID 信息</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>网络 NID 上报原语</td><td style='text-align: center; word-wrap: break-word;'>上报 CCO 的 NID 信息</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>网络 NID 设置原语</td><td style='text-align: center; word-wrap: break-word;'>设置 CCO 的 NID 信息</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>邻居网络查询原语</td><td style='text-align: center; word-wrap: break-word;'>查询 CCO 的邻居网络信息</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>邻居网络上报原语</td><td style='text-align: center; word-wrap: break-word;'>上报 CCO 的邻居网络信息</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>白名单查询原语</td><td style='text-align: center; word-wrap: break-word;'>查询 CCO 的白名单信息</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>白名单上报原语</td><td style='text-align: center; word-wrap: break-word;'>上报 CCO 的白名单信息</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>白名单设置原语</td><td style='text-align: center; word-wrap: break-word;'>设置 CCO 的白名单信息</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>无线信道组查询原语</td><td style='text-align: center; word-wrap: break-word;'>查询 CCO 的无线信道组信息</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>无线信道组上报原语</td><td style='text-align: center; word-wrap: break-word;'>上报 CCO 的无线信道组信息</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>无线信道组设置原语</td><td style='text-align: center; word-wrap: break-word;'>设置 CCO 的无线信道组信息</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>无线信道查询原语</td><td style='text-align: center; word-wrap: break-word;'>查询 CCO 的无线信道编号信息</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>无线信道上报原语</td><td style='text-align: center; word-wrap: break-word;'>上报 CCO 的无线信道编号信息</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>无线信道设置原语</td><td style='text-align: center; word-wrap: break-word;'>设置 CCO 的无线信道编号信息</td></tr></table>
+
+## 5432 网络拓扑查询原语
+
+## 54321 原语定义
+
+应用层可通过网络拓扑查询原语获取当前网络中入网站点的拓扑信息，网络拓扑查询原语的语义如表166所示。
+
+<div style="text-align: center;">表 166 网络拓扑查询原语</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>名称</td><td style='text-align: center; word-wrap: break-word;'>类型</td><td style='text-align: center; word-wrap: break-word;'>有效范围</td><td style='text-align: center; word-wrap: break-word;'>描述</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>起始序列号</td><td style='text-align: center; word-wrap: break-word;'>2 字节序号</td><td style='text-align: center; word-wrap: break-word;'>1 1024</td><td style='text-align: center; word-wrap: break-word;'>请求有效拓扑表项的起始序列号</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>请求表项数量</td><td style='text-align: center; word-wrap: break-word;'>2 字节数量</td><td style='text-align: center; word-wrap: break-word;'>1 1024</td><td style='text-align: center; word-wrap: break-word;'>本次请求的有效表项数量</td></tr></table>
+
+## 54322 数据链路层处理
+
+数据链路层对于当前网络拓扑中的有效表项信息，根据网络查询原语的要求，使用网络拓扑上报顺序上报。
+
+## 5433 网络拓扑上报原语
+
+## 54331 原语定义
+
+<!-- ===== Page 133 ===== -->
+
+应用层通过网络拓扑查询原语查询网络拓扑信息时，数据链路层通过网络拓扑上报原语上报网络拓扑信息。网络拓扑上报原语的语义如表167所示。
+
+<div style="text-align: center;">表 167 网络拓扑上报原语</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>名称</td><td style='text-align: center; word-wrap: break-word;'>类型</td><td style='text-align: center; word-wrap: break-word;'>有效范围</td><td style='text-align: center; word-wrap: break-word;'>描述</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>有效表项总数</td><td style='text-align: center; word-wrap: break-word;'>2 字节数量</td><td style='text-align: center; word-wrap: break-word;'>1 1024</td><td style='text-align: center; word-wrap: break-word;'>网络拓扑中有效的站点表项总数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>本次上报总数</td><td style='text-align: center; word-wrap: break-word;'>2 字节数量</td><td style='text-align: center; word-wrap: break-word;'>1 1024</td><td style='text-align: center; word-wrap: break-word;'>本次上报的有效表项数量</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>上报结束标志</td><td style='text-align: center; word-wrap: break-word;'>布尔</td><td style='text-align: center; word-wrap: break-word;'>0 或者 1</td><td style='text-align: center; word-wrap: break-word;'>全部有效表项是否上报结束。\n1 表示上报结束；\n0 表示上报未结束</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>拓扑节点信息</td><td style='text-align: center; word-wrap: break-word;'>可变长字节流</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>网络拓扑单个表项的信息。\n数据总大小等于本次上报总数 * 单个表项大小。\n单个表项的数据大小请参照表 168</td></tr></table>
+
+<div style="text-align: center;">表 168 网络拓扑上报单个表项信息原语</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>名称</td><td style='text-align: center; word-wrap: break-word;'>类型</td><td style='text-align: center; word-wrap: break-word;'>有效范围</td><td style='text-align: center; word-wrap: break-word;'>描述</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>TEI</td><td style='text-align: center; word-wrap: break-word;'>2字节地址</td><td style='text-align: center; word-wrap: break-word;'>1 1024</td><td style='text-align: center; word-wrap: break-word;'>站点的 TEI</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>代理 TEI</td><td style='text-align: center; word-wrap: break-word;'>2字节地址</td><td style='text-align: center; word-wrap: break-word;'>1 1024</td><td style='text-align: center; word-wrap: break-word;'>站点的代理站点的 TEI</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>层级</td><td style='text-align: center; word-wrap: break-word;'>1字节</td><td style='text-align: center; word-wrap: break-word;'>0 15</td><td style='text-align: center; word-wrap: break-word;'>站点的所在网络层级</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>角色</td><td style='text-align: center; word-wrap: break-word;'>1字节</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>站点的角色：\n0x0:未知；\n0x1:STA；\n0x2:PCO；\n0x3:保留；\n0x4:CCO</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>上行通信成功率</td><td style='text-align: center; word-wrap: break-word;'>1字节</td><td style='text-align: center; word-wrap: break-word;'>0 100</td><td style='text-align: center; word-wrap: break-word;'>站点的上行通信成功率</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>下行通信成功率</td><td style='text-align: center; word-wrap: break-word;'>1字节</td><td style='text-align: center; word-wrap: break-word;'>0 100</td><td style='text-align: center; word-wrap: break-word;'>站点的下行通信成功率</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>MAC 地址</td><td style='text-align: center; word-wrap: break-word;'>6字节 MAC</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>站点的 MAC 地址</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>模块类型</td><td style='text-align: center; word-wrap: break-word;'>1字节</td><td style='text-align: center; word-wrap: break-word;'>0 2</td><td style='text-align: center; word-wrap: break-word;'>0：单模高速载波通信单元；\n1：双模（高速载波和无线）通信单元；\n2：单模无线通信单元</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>链路类型</td><td style='text-align: center; word-wrap: break-word;'>1字节</td><td style='text-align: center; word-wrap: break-word;'>0 1</td><td style='text-align: center; word-wrap: break-word;'>0：高速载波链路；\n1：无线空口链路</td></tr></table>
+
+## 54332 数据链路层处理
+
+数据链路层在接收到应用层的网络拓扑查询原语后，通过网络拓扑上报原语上报网络拓扑信息。每个查询原语，发送一个上报原语。
+
+## 5434 网络 NID 查询原语
+
+<!-- ===== Page 134 ===== -->
+
+## 54341 原语定义
+
+应用层通过网络NID查询原语，查询CCO的网络NID。网络NID查询原语的语义如表169所示。
+
+<div style="text-align: center;">表 169 网络 NID 查询原语</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>名称</td><td style='text-align: center; word-wrap: break-word;'>类型</td><td style='text-align: center; word-wrap: break-word;'>有效范围</td><td style='text-align: center; word-wrap: break-word;'>描述</td></tr><tr><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'></td></tr></table>
+
+## 54342 数据链路层处理
+
+数据链路层在接收到网络NID查询原语后，需要通过网络NID上报原语，向应用层提交本网络的NID信息。
+
+## 5435 网络 NID 上报原语
+
+## 54351 原语定义
+
+数据链路层通过网络NID上报原语，向应用层上报本网络的NID信息。网络NID上报原语的语义如表170所示。
+
+<div style="text-align: center;">表 170 网络 NID 上报原语</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>名称</td><td style='text-align: center; word-wrap: break-word;'>类型</td><td style='text-align: center; word-wrap: break-word;'>有效范围</td><td style='text-align: center; word-wrap: break-word;'>描述</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>网络 NID</td><td style='text-align: center; word-wrap: break-word;'>3 字节</td><td style='text-align: center; word-wrap: break-word;'>1 16777215</td><td style='text-align: center; word-wrap: break-word;'>本网络的 NID</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>无线信道编号</td><td style='text-align: center; word-wrap: break-word;'>1 字节</td><td style='text-align: center; word-wrap: break-word;'>0 255</td><td style='text-align: center; word-wrap: break-word;'>无线信道编号</td></tr></table>
+
+## 54352 数据链路层处理
+
+数据链路层在接收到网络NID查询原语后，必须通过网络NID上报原语，向应用层提交本网络的NID信息。
+
+## 5436 网络 NID 设置原语
+
+## 54361 原语定义
+
+应用层可以通过网络NID设置原语，要求数据链路层修改本网络的NID。网络NID设置原语的语义如表171所示。
+
+<div style="text-align: center;">表 171 网络 NID 设置原语</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>名称</td><td style='text-align: center; word-wrap: break-word;'>类型</td><td style='text-align: center; word-wrap: break-word;'>有效范围</td><td style='text-align: center; word-wrap: break-word;'>描述</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>网络 NID</td><td style='text-align: center; word-wrap: break-word;'>3 字节</td><td style='text-align: center; word-wrap: break-word;'>1 16777215</td><td style='text-align: center; word-wrap: break-word;'>本网络的新的 NID</td></tr></table>
+
+## 54362 数据链路层处理
+
+数据链路层在接收网络NID设置原语后，需要将本网络的NID设置为网络NID设置原语中的网络NID。
+
+<!-- ===== Page 135 ===== -->
+
+## 5437 邻居网络查询原语
+
+## 54371 原语定义
+
+应用层通过邻居网络查询原语，查询CCO的邻居网络信息。邻居网络查询原语的语义如表172所示。
+
+<div style="text-align: center;">表 172 邻居网络信息查询原语</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>名称</td><td style='text-align: center; word-wrap: break-word;'>类型</td><td style='text-align: center; word-wrap: break-word;'>有效范围</td><td style='text-align: center; word-wrap: break-word;'>描述</td></tr><tr><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'></td></tr></table>
+
+## 54372 数据链路层处理
+
+数据链路层在接收到邻居网络查询原语后，需要通过邻居网络信息上报原语，给应用层提交本网络的邻居网络信息。
+
+## 5438 邻居网络上报原语
+
+## 54381 原语定义
+
+应用层通过邻居网络查询原语查询邻居网络信息时，数据链路层通过邻居网络上报原语上报邻居网络信息 $ ^{x} $。邻居网络上报原语的语义如表173所示。
+
+<div style="text-align: center;">表 173 邻居网络上报原语</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>名称</td><td style='text-align: center; word-wrap: break-word;'>类型</td><td style='text-align: center; word-wrap: break-word;'>有效范围</td><td style='text-align: center; word-wrap: break-word;'>描述</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>表项总数</td><td style='text-align: center; word-wrap: break-word;'>1 字节数量</td><td style='text-align: center; word-wrap: break-word;'>1 31</td><td style='text-align: center; word-wrap: break-word;'>邻居网络信息表项总数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>邻居网络信息</td><td style='text-align: center; word-wrap: break-word;'>可变长字节流</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>邻居网络单个表项的信息:\n数据总大小。由表项总数 * 单个表项大小。\n单个表项的数据大小请参照表174</td></tr></table>
+
+<div style="text-align: center;">表 174 网络拓扑上报单个表项信息原语</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>名称</td><td style='text-align: center; word-wrap: break-word;'>类型</td><td style='text-align: center; word-wrap: break-word;'>有效范围</td><td style='text-align: center; word-wrap: break-word;'>描述</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>NID</td><td style='text-align: center; word-wrap: break-word;'>3 字节</td><td style='text-align: center; word-wrap: break-word;'>1 16777215</td><td style='text-align: center; word-wrap: break-word;'>邻居网络的网络标识</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>单通标志</td><td style='text-align: center; word-wrap: break-word;'>布尔</td><td style='text-align: center; word-wrap: break-word;'>0 或者 1</td><td style='text-align: center; word-wrap: break-word;'>与本网络是否为单通：\n1 为单通；\n0 为双通</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>占用带宽</td><td style='text-align: center; word-wrap: break-word;'>4 字节</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>邻居网络占用的带宽。单位毫秒</td></tr></table>
+
+## 54382 数据链路层处理
+
+数据链路层对于当前CCO中多网络有效表项，根据邻居网络查询原语的要求，使用邻居网络上报原语顺序上报。
+
+<!-- ===== Page 136 ===== -->
+
+## 5439 白名单查询原语
+
+## 54391 原语定义
+
+应用层可以通过白名单查询原语，获取当前CCO中的白名单信息。白名单查询原语的语义如表175所示。
+
+<div style="text-align: center;">表 175 白名单查询原语</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>名称</td><td style='text-align: center; word-wrap: break-word;'>类型</td><td style='text-align: center; word-wrap: break-word;'>有效范围</td><td style='text-align: center; word-wrap: break-word;'>描述</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>起始序列号</td><td style='text-align: center; word-wrap: break-word;'>2 字节序号</td><td style='text-align: center; word-wrap: break-word;'>1 1024</td><td style='text-align: center; word-wrap: break-word;'>请求有效白名单表项的起始序列号</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>请求表项数量</td><td style='text-align: center; word-wrap: break-word;'>2 字节数量</td><td style='text-align: center; word-wrap: break-word;'>1 1024</td><td style='text-align: center; word-wrap: break-word;'>本次请求的有效表项数量</td></tr></table>
+
+## 54392 数据链路层处理
+
+数据链路层对于当前CCO中有效的白名单表项，根据白名单查询原语的要求，使用白名单上报原语顺序上报。
+
+## 54310 白名单上报原语
+
+## 543101 原语定义
+
+应用层通过白名单查询原语CCO的白名单信息时，数据链路层通过白名单上报原语上报CCO的白名单信息。白名单上报原语的语义如表176所示。
+
+<div style="text-align: center;">表176 白名单上报原语</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>名称</td><td style='text-align: center; word-wrap: break-word;'>类型</td><td style='text-align: center; word-wrap: break-word;'>有效范围</td><td style='text-align: center; word-wrap: break-word;'>描述</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>有效表项总数</td><td style='text-align: center; word-wrap: break-word;'>2 字节数量</td><td style='text-align: center; word-wrap: break-word;'>1 1024</td><td style='text-align: center; word-wrap: break-word;'>有效的白名单表项总数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>本次上报总数</td><td style='text-align: center; word-wrap: break-word;'>2 字节数量</td><td style='text-align: center; word-wrap: break-word;'>1 1024</td><td style='text-align: center; word-wrap: break-word;'>本次上报的有效表项数量</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>上报结束标志</td><td style='text-align: center; word-wrap: break-word;'>布尔</td><td style='text-align: center; word-wrap: break-word;'>0 或者 1</td><td style='text-align: center; word-wrap: break-word;'>全部有效表项是否上报结束。\n1 表示上报结束；\n0 表示上报未结束。</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>MAC 地址 1</td><td style='text-align: center; word-wrap: break-word;'>6 字节 MAC</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>白名单中有效 MAC 地址</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>MAC 地址 2</td><td style='text-align: center; word-wrap: break-word;'>6 字节 MAC</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>白名单中有效 MAC 地址</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>6 字节 MAC</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>白名单中有效 MAC 地址</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>MAC 地址 n</td><td style='text-align: center; word-wrap: break-word;'>6 字节 MAC</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>白名单中有效 MAC 地址\n其中 n 为本次上报总数</td></tr></table>
+
+## 543102 数据链路层处理
+
+数据链路层在接收到应用层的白名单查询原语后，通过白名单上报原语上报白名单信息 $ ^{x} $每个查询原语，发送一个上报原语 $ ^{x} $
+
+## 54311 白名单设置原语
+
+## 543111 原语定义
+
+<!-- ===== Page 137 ===== -->
+
+应用层可以通过白名单设置原语，要求CCO的数据链路层更新本地的白名单表项。白名单上报原语的语义如表177所示。
+
+<div style="text-align: center;">表177 白名单上报原语</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>名称</td><td style='text-align: center; word-wrap: break-word;'>类型</td><td style='text-align: center; word-wrap: break-word;'>有效范围</td><td style='text-align: center; word-wrap: break-word;'>描述</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>操作标志</td><td style='text-align: center; word-wrap: break-word;'>1 字节</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>本次白名单设置的动作：\n0x00 $ _{i} $ 关闭白名单；\n0x01 $ _{i} $ 添加白名单；\n0x02 $ _{i} $ 删除白名单</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>本次设置总数</td><td style='text-align: center; word-wrap: break-word;'>2 字节数量</td><td style='text-align: center; word-wrap: break-word;'>1 1024</td><td style='text-align: center; word-wrap: break-word;'>本次设置的白名单表项数量</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>MAC 地址 1</td><td style='text-align: center; word-wrap: break-word;'>6 字节 MAC</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>白名单 MAC 地址</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>MAC 地址 2</td><td style='text-align: center; word-wrap: break-word;'>6 字节 MAC</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>白名单 MAC 地址</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>6 字节 MAC</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>白名单 MAC 地址</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>MAC 地址 n</td><td style='text-align: center; word-wrap: break-word;'>6 字节 MAC</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>白名单 MAC 地址 $ _{i} $\n其中 n 为本次设置总数</td></tr></table>
+
+## 543112 数据链路层处理
+
+数据链路层根据白名单设置原语中的操作标志，将白名单MAC地址添加进白名单表项，或者将白名单中已经存在的表项删除。
+
+## 54312 无线信道组查询原语
+
+## 543121 原语定义
+
+应用层可以通过无线信道组查询原语，获取当前CCO中的无线信道组。无线信道查询原语的定义如表178所示。
+
+<div style="text-align: center;">表 178 无线信道组查询原语</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>名称</td><td style='text-align: center; word-wrap: break-word;'>类型</td><td style='text-align: center; word-wrap: break-word;'>有效范围</td><td style='text-align: center; word-wrap: break-word;'>描述</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>起始序列号</td><td style='text-align: center; word-wrap: break-word;'>2 字节序号</td><td style='text-align: center; word-wrap: break-word;'>1 255</td><td style='text-align: center; word-wrap: break-word;'>请求有效无线信道组表项的起始序列号</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>请求表项数量</td><td style='text-align: center; word-wrap: break-word;'>2 字节数量</td><td style='text-align: center; word-wrap: break-word;'>1 255</td><td style='text-align: center; word-wrap: break-word;'>本次请求的有效表项数量</td></tr></table>
+
+## 543122 数据链路层处理
+
+数据链路层接收到无线信道组查询原语，根据原语要求，使用无线信道组查询原语上报无线信道组表中的无线信道编号。
+
+## 54313 无线信道组上报原语
+
+## 543131 原语定义
+
+应用层通过无线信道组查询原语查询CCO中可用的无线信道信息时，数据链路层通过无线信道组上报原语上报CCO中的可用无线信道组信息。无线信道组上报原语定义如表179所示。
+
+<!-- ===== Page 138 ===== -->
+
+<div style="text-align: center;">表 179 无线信道组上报原语</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>名称</td><td style='text-align: center; word-wrap: break-word;'>类型</td><td style='text-align: center; word-wrap: break-word;'>有效范围</td><td style='text-align: center; word-wrap: break-word;'>描述</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>有效表项总数</td><td style='text-align: center; word-wrap: break-word;'>1 字节数量</td><td style='text-align: center; word-wrap: break-word;'>1 1024</td><td style='text-align: center; word-wrap: break-word;'>有效的无线信道表项总数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>本次上报总数</td><td style='text-align: center; word-wrap: break-word;'>1 字节数量</td><td style='text-align: center; word-wrap: break-word;'>1 1024</td><td style='text-align: center; word-wrap: break-word;'>本次上报的有效表项数量</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>上报结束标志</td><td style='text-align: center; word-wrap: break-word;'>布尔</td><td style='text-align: center; word-wrap: break-word;'>0 或者 1</td><td style='text-align: center; word-wrap: break-word;'>全部有效表项是否上报结束。\n1 表示上报结束；\n0 表示上报未结束</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>无线信道编号 1</td><td style='text-align: center; word-wrap: break-word;'>1 字节</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>无线信道组中有效信道编号</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>无线信道编号 2</td><td style='text-align: center; word-wrap: break-word;'>1 字节</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>无线信道组中有效信道编号</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>--</td><td style='text-align: center; word-wrap: break-word;'>1 字节</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>无线信道组中有效信道编号</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>无线信道编号 n</td><td style='text-align: center; word-wrap: break-word;'>1 字节</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>无线信道组中有效信道编号。\n其中 n 为本次上报总数</td></tr></table>
+
+## 543132 数据链路层处理
+
+数据链路层接收到应用层无线信道组查询原语后，通过无线信道组上报原语上报无线信道组信息。每个查询原语，发送一个上报原语。
+
+## 54314 无线信道组设置原语
+
+## 543141 原语定义
+
+应用层可以通过无线信道设置原语，要求数据链路层配置网络可使用的无线信道组。无线信道组设置原语如表180所示。
+
+<div style="text-align: center;">表 180 无线信道组设置原语</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>名称</td><td style='text-align: center; word-wrap: break-word;'>类型</td><td style='text-align: center; word-wrap: break-word;'>有效范围</td><td style='text-align: center; word-wrap: break-word;'>描述</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>操作标志</td><td style='text-align: center; word-wrap: break-word;'>1 字节</td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'>本次无线信道组设置动作：\n0 表示添加无线信道；\n1 表示删除无线信道</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>无线信道组个数</td><td style='text-align: center; word-wrap: break-word;'>1 字节</td><td style='text-align: center; word-wrap: break-word;'>1 255</td><td style='text-align: center; word-wrap: break-word;'>本次配置无线信道的个数</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>无线信道编号 1</td><td style='text-align: center; word-wrap: break-word;'>1 字节</td><td style='text-align: center; word-wrap: break-word;'>0 255</td><td style='text-align: center; word-wrap: break-word;'>无线信道编号</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>1 字节</td><td style='text-align: center; word-wrap: break-word;'>0 255</td><td style='text-align: center; word-wrap: break-word;'>无线信道编号</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>无线信道编号 n</td><td style='text-align: center; word-wrap: break-word;'>1 字节</td><td style='text-align: center; word-wrap: break-word;'>0 255</td><td style='text-align: center; word-wrap: break-word;'>无线信道编号。\n其中 n 为本次设置总数</td></tr></table>
+
+## 543142 数据链路层处理
+
+数据链路层根据无线信道组设置原语的操作标志，将无线信道编号添加到无线信道表项，或者将无线信道表中已经存在的表项删掉。
+
+## 54315 无线信道查询原语
+
+## 543151 原语定义
+
+<!-- ===== Page 139 ===== -->
+
+应用层可以通过无线信道查询原语，获得当前CCO的无线信道编号x，无线信道编号查询原语的语义定义如表181所示。
+
+<div style="text-align: center;">表 181 无线信道查询原语</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>名称</td><td style='text-align: center; word-wrap: break-word;'>类型</td><td style='text-align: center; word-wrap: break-word;'>有效范围</td><td style='text-align: center; word-wrap: break-word;'>描述</td></tr><tr><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'></td></tr></table>
+
+## 543152 数据链路层处理
+
+数据链路层在接收到无线信道查询原语后，需要通过无线信道上报原语，向应用层提交本网络的无线信道编号信息。
+
+## 54316 无线信道上报原语
+
+## 543161 原语定义
+
+数据链路层通过无线信道上报原语，向应用层上报本网络的无线信道信息。无线信道上报原语的语义如表182所示。
+
+<div style="text-align: center;">表 182 无线信道上报原语</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>名称</td><td style='text-align: center; word-wrap: break-word;'>类型</td><td style='text-align: center; word-wrap: break-word;'>有效范围</td><td style='text-align: center; word-wrap: break-word;'>描述</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>无线信道编号</td><td style='text-align: center; word-wrap: break-word;'>1字节</td><td style='text-align: center; word-wrap: break-word;'>0 255</td><td style='text-align: center; word-wrap: break-word;'>本网络的无线信道编号</td></tr></table>
+
+## 543162 数据链路层处理
+
+数据链路层接收到无线信道查询原语后，必须通过无线信道上报原语，向应用层提交本网络的无线信道编号信息。
+
+## 54317 无线信道设置原语
+
+## 543171 原语定义
+
+应用层可以通过无线信道设置原语，要求数据链路层修改本网络的无线信道编号。无线信道设置原语的定义如表183所示。
+
+<div style="text-align: center;">表 183 无线信道设置原语</div>
+
+
+
+<table border=1 style='margin: auto; word-wrap: break-word;'><tr><td style='text-align: center; word-wrap: break-word;'>名称</td><td style='text-align: center; word-wrap: break-word;'>类型</td><td style='text-align: center; word-wrap: break-word;'>有效范围</td><td style='text-align: center; word-wrap: break-word;'>描述</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>无线信道编号</td><td style='text-align: center; word-wrap: break-word;'>1字节</td><td style='text-align: center; word-wrap: break-word;'>0 255</td><td style='text-align: center; word-wrap: break-word;'>本网络的无线信道编号</td></tr></table>
+
+## 543172 数据链路层处理
+
+数据链路层接收到无线信道设置原语后，需要将本网络的无线信道编号设置为无线信道设置原语中的无线信道编号。
+
+<!-- ===== Page 140 ===== -->
+
+## 附录 A
+
+## （规范性附录）
+
+## 白名单管理说明
+
+STA通过搜索电表地址，作为自身MAC地址申请入网。当使用电表地址作为设备的MAC地址时，需要转换为网络字节序。由于采集终端可以获取电表（设备）地址，从而由CCO判断允许或拒绝节点是否入网，可以自动完成组网，即白名单认证管理。
+
+具体节点搜表策略：
+
+a） 电能表，模块上电后，执行读取电表地址后，以该地址申请入网；
+
+b） 采集器，上电后，启动采集器搜表，以第一块电表地址申请入网。
+
+<!-- ===== Page 141 ===== -->
+
+## 附录 B
+
+（资料性附录）
+
+CSMA 退避流程
+
+<div style="text-align: center;"><img src="imgs/img_in_image_box_234_301_1052_1444.jpg" alt="Image" width="68%" /></div>
+
+
+<div style="text-align: center;">图 B 1 CSMA 退避流程</div>
+
+
+<!-- ===== Page 142 ===== -->
+
+CSMA/CA退避算法由以下步骤组成：
+
+a) 初始化 NB 为 0，BE 为 minBE，PE 根据报文优先级初始化，进入步骤 b)。
+
+b) 通过公式计算退避时间: BackOffTime=(Rand(2BE 1)+PE)*SLOT TIME, 并设置 BackOffTimer, 进入步骤 c)。
+
+c) 若 BackOffTimer 溢出前未接收到来自物理层“接收机信号接收开始状态原语”，切换物理层为发射机，启动 MPDU 帧的发送发送，进入步骤 e)，否则进入步骤 d)。
+
+d) 若 BackOffTimer 溢出前收到来自物理层的“接收机信号接收开始状态原语”，暂停 BackOffTimer 定时器，直到报文接收结束，然后继续 BackOffTimer 运行，并进入步骤 c)。
+
+e) 若该 MPDU 帧发送成功，则本次数据发送结束。若该 MPDU 帧发送失败，则 NB 加 1，若 NB > maxNB，则发送失败；否则，BE = min(BE++, MaxBE)，进入步骤 b)。
+
+<!-- ===== Page 143 ===== -->
+
+# 双模通信互联互通技术规范 第4—2部分：数据链路层通信协议
+
+编 制 说明
+
+<!-- ===== Page 144 ===== -->
+
+## 目次
+
+1 编制背景 ..... 141  
+2 编制主要原则 ..... 141  
+3 与其他标准文件的关系 ..... 141  
+4 主要工作过程 ..... 141  
+5 标准结构和内容 ..... 142  
+6 条文说明 ..... 142
+
+<!-- ===== Page 145 ===== -->
+
+## 1 编制背景
+
+本部分依据《国家电网有限公司关于下达2019年第一批技术标准制修订计划的通知》（国家电网科〔2019〕191号）文的要求编写。
+
+通过制定《双模通信互联互通技术规范》系列标准，目的是提升用电信息采集系统管理的规范化、标准化水平，统一双模通信的技术要求和通信规约，实现双模通信模块之间的互联互通。
+
+《双模通信互联互通技术规范》系列标准的制定，有利于提升用电信息采集系统本地信道的有效性及可靠性，满足日益增长的新型电力业务需求，体现智能电网“信息化、自动化、互动化”的建设要求，提高双模通信模块的使用寿命，促进双模通信模块质量提升，推动用电信息采集工作健康有序地发展。
+
+## 2 编制主要原则
+
+本部分根据以下原则编制：
+
+a） 坚持先进性与实用性相结合。统一性与灵活性相结合。可靠性与经济性相结合的原则，以标准化为引领，服务国民经济科学发展。
+
+b）采用分散与集中讨论的形式，充分了解双模通信建设现状，明确系统及终端功能需求，建立采集系统功能模型和数据模型，研究新的需求形势下不同应用场景和配电网环境对双模通信模块的使用要求，体现研究的实用性和先进性。
+
+c) 认真研究国内外现行相关的国际标准。国家标准、行业标准、企业标准，达到相关技术标准的协调统一，并考虑系统和设备的扩展性、兼容性。
+
+d) 坚持集中人才资源优势，吸收双模通信先进的发展理念。创新技术和成果，协调双模通信芯片设计商。方案设计商。系统集成商等各方技术资源，促进利益相关方意见的统一。
+
+## 3 与其他标准文件的关系
+
+本部分与相关技术领域的国家现行法律、法规和政策保持一致
+
+本部分不涉及专利。软件著作权等知识产权问题。
+
+## 4 主要工作过程
+
+2019 年 2 月，成立标准起草工作组，召开工作组第一次会议，启动标准制定工作，并撰写标准大纲。
+
+2019年4月，完成双模通信互联互通技术可行性分析。
+
+2019年6月，工作组内部循环征求意见，讨论通信协议设计方案，分组开展物理层。数据链路层及应用层等技术标准编制工作，形成物理层完整技术方案。
+
+2019 年 8 月，工作组完成物理层讨论稿，开展双模互联互通 FPGA 仿真工作，验证物理层协议互联互通性能。
+
+2019年12月，召开工作组第二次会议，讨论双模组网机制。信道划分。发送机制。信标机制。路由机制等内容，初步确定双模通信链路层技术方案。
+
+2020 年 3 月，工作组完成数据链路层讨论稿，并对混合路由机制进行仿真，验证数据链路层协议互联互通性能。
+
+2020年5月，召开工作组第三次会议，讨论双模通信应用层技术方案，形成应用层讨论稿。
+
+<!-- ===== Page 146 ===== -->
+
+2020年7月，工作组完成总则部分讨论稿。
+
+2020年8月，工作组完成征求意见稿和条文说明，向公司系统及社会广泛征求意见。
+
+2020年10月，完成送审稿。
+
+2020年11月，完成报批稿。
+
+## 5 标准结构和内容
+
+Q/GDW 12087 2020《双模通信互联互通技术规范》分为下列6个部分：
+
+第1部分：总则；
+
+第2部分：技术要求；
+
+第3部分：检验方法：
+
+第41部分：物理层通信协议；
+
+第42部分：数据链路层通信协议；
+
+第43部分：应用层通信协议
+
+Q/GDW 12087 2020 的第 1 部分规定了双模通信的网络拓扑和基本功能；第 2 部分规定了双模通信的结构。技术要求及检验规则；第 3 部分规定了双模通信的检验方法；第 4、1 部分给出了双模通信的物理层一般要求。物理层操作范围及服务；第 4、2 部分给出了双模通信的数据链路层的帧格式。MAC 子层。网络管理子层及服务；第 4、3 部分给出了双模通信的应用层的报文结构。第 1 部分。第 2 部分。第 3 部分侧重于双模通信的功能要求，第 4、1 部分。第 4、2 部分。第 4、3 部分是双模通信互联互通的支撑。这 6 个部分标准可分别独立使用。
+
+本部分是 Q/GDW 12087 2020 的第 42 部分。
+
+本部分按照《国家电网公司技术标准管理办法》（国家电网企管（2018）222号文）的要求编写。
+
+本部分的主要结构和内容如下：
+
+本部分王题章有1章×本部分兼顾现有用电信息采集系统的实际状况，本着先进性和实用性，操作性和可扩展性等原则，给出了双模通信的数据链路层帧格式，同时按照分层的思想分别提出了负责接入功能的MAC子层功能要求和负责组网功能的网络管理子层功能要求，最后提出了数据链路层的传输服务和管理服务，可指导双模通信产品的研发。
+
+## 6 条文说明
+
+无
