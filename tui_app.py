@@ -95,7 +95,7 @@ PROTOCOL_SHORT = [
 ]
 
 # 新一代载波协议监控日志前缀
-CSG_MONITOR_PREFIX = "-> 接收机 Has Get"
+CSG_MONITOR_PREFIX = "> 接收机 Has Get"
 CSG_MONITOR_HEADER_BYTES = 15
 
 
@@ -111,22 +111,25 @@ def clean_hex_input(text: str, keep_newlines: bool = False) -> str:
 
 
 def strip_csg_monitor_prefix(text: str) -> str:
-    """剥离新一代载波协议监控日志前缀"""
+    """剥离新一代载波协议监控日志前缀
+
+    仅保留含 "> 接收机 Has Get" 标记的行，其余行（时间戳/测试标记/纯文本日志等）
+    全部丢弃；对保留行剥离标记后 15 字节监控头，取第 16 字节起的协议报文。
+    """
     prefix = CSG_MONITOR_PREFIX
     prefix_len = len(prefix)
-    hex_only_line_re = re.compile(r'^[0-9A-Fa-f\s,\-]*$')
 
     out_lines = []
     for line in text.splitlines():
         pos = line.find(prefix)
         if pos == -1:
-            if hex_only_line_re.match(line):
-                out_lines.append(line)
+            # 不含监控标记的行：直接丢弃
             continue
         after = line[pos + prefix_len:]
         tokens = re.findall(r'[0-9A-Fa-f]{1,2}', after)
         payload_tokens = tokens[CSG_MONITOR_HEADER_BYTES:]
-        out_lines.append(' '.join(payload_tokens))
+        if payload_tokens:
+            out_lines.append(' '.join(payload_tokens))
     return '\n'.join(out_lines)
 
 

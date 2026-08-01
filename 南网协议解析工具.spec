@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 # 南网协议解析工具 - 单文件 EXE 构建配置
-# 包含所有依赖：pandas, openpyxl, enhanced_export 等
+# 包含所有依赖：openpyxl, enhanced_export 等（pandas 已改为可选依赖）
 
 a = Analysis(
     ['main_gui.py'],
@@ -20,15 +20,14 @@ a = Analysis(
         'PySide6.QtWidgets',
         'PySide6.QtNetwork',
         # 数据处理依赖
-        'pandas',
-        'pandas._libs.tslibs.nattype',
-        'pandas._libs.tslibs.np_datetime',
         'openpyxl',
         'openpyxl.cell',
         'openpyxl.styles',
         'openpyxl.utils',
         'openpyxl.workbook',
         'openpyxl.writer.excel',
+        'pandas',
+        'pandas.core',
         # 项目内部模块
         'enhanced_export',
         'protocol_parser',
@@ -38,6 +37,9 @@ a = Analysis(
         'gdw10376_parser',
         'dl_t698_45_parser',
         'csg_new_gen_parser',
+        'gw_new_gen_parser',
+        'gw_new_gen_cmd_payloads',
+        'gw_new_gen_mme_parser',
         'obis_lookup',
         'command_lookup',
         'dlt645_di_lookup',
@@ -74,6 +76,16 @@ a = Analysis(
         'jupyter',
         'pytest',
         'unittest',
+        # 以下为未使用的库，排除以减小体积
+        'sympy',
+        'pygments',
+        'xlsxwriter',
+        'jinja2',
+        'cryptography',
+        'chardet',
+        'mpmath',
+        '_pytest',
+        # 注意：pandas/numpy 不能被排除，否则批量解析的 Excel/CSV 导出功能会失效
     ],
     noarchive=False,
     optimize=0,
@@ -95,7 +107,6 @@ exe = EXE(
     upx_exclude=[
         'vcruntime140.dll',
         'python313.dll',
-        'pandas',
         'openpyxl',
     ],
     runtime_tmpdir=None,

@@ -1,8 +1,8 @@
 {
   "serial": {
-    "port": "COM4",
-    "baudrate": "115200",
-    "parity": "偶"
+    "port": "COM68",
+    "baudrate": "9600",
+    "parity": "无"
   },
   "file_paths": {
     "nw_command": "NW_command.json",
@@ -12,5 +12,10 @@
     "dlt645_di": "dlt645_di.json",
     "gdw_custom_afn": "gdw_custom_afn.json",
     "command": "command.json"
+  },
+  "ui": {
+    "theme": "default",
+    "font_family": "Maple Mono NF CN",
+    "font_size": 10
   }
 }
