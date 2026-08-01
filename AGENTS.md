@@ -9,7 +9,7 @@
 
 ## 1. 项目概览
 
-多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.10.0`）。
+多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.11.0`）。
 
 **支持的协议（共 11 种，对应 GUI 协议下拉框 `current_protocol` 索引）：**
 
@@ -465,6 +465,11 @@ python test_plan_widget.py     # 测试计划组件（需 GUI 环境）
 ## 10. 变更日志（与 `main_gui.py:CHANGELOG` 保持同步）
 
 > 本节按版本倒序记录。详细 commit 见 `git log`。每发新版本必须更新此处。
+
+### 1.11.0 — 2026-08-01
+- **新一代载波协议(通感一体化,索引9)网间协调帧(NET,定界符类型=3)可变区域解析**：邻居网络比特图1~4 / 本网络无线信道编号 / 持续时间(40ms) / 带宽结束标志位 / 本网络无线option / 带宽结束偏移(4ms) / 带宽开始偏移(4ms)，字节12短网络标识高位组合完整SNID（表41）
+- **新一代载波协议聚合帧级联块应用层解析**：抽取 `_parse_msdu_payload` 共享方法，级联块内 MAC 帧解析 MSDU 头并分派应用层报文（端口/控制域/业务标识/转发DLT645），消除伪 MSDU 残留行
+- 新增 `test_net_frame_real` / `test_net_frame_nonzero_fields` / `test_aggregated_frame_app_layer` 回归用例
 
 ### 1.10.0 — 2026-07-31
 - **新增「主题与字体设置」**（菜单 配置→主题与字体）：5 套主题（默认浅色 / Fusion经典 / Fusion暗色 / Windows原生 / WindowsVista原生），切换即时预览
