@@ -109,7 +109,8 @@ def parse_management_message(data: bytes, offset: int) -> List[Tuple]:
                            offset, end, True))
         return result
 
-    mmtype = data[offset] | (data[offset + 1] << 8)
+    # MMTYPE 按文档表42/表43 大端存储（如 0x0080 对应字节 00 80）
+    mmtype = (data[offset] << 8) | data[offset + 1]
     name = MMETYPE_NAMES.get(mmtype)
     if name is None:
         name = f"保留/未知(0x{mmtype:04X})"

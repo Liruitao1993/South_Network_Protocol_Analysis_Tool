@@ -272,6 +272,39 @@ def test_singlehop_header_versioning():
     check("HDC1.0: D7标为保留", "保留(D7)" in names1)
 
 
+def test_direct_mgmt_after_fc():
+    """FC后直接网络管理消息: 无线信道冲突上报(MMTYPE=0x0080大端)
+
+    帧结构: FC(16B) + 管理消息头(MMTYPE 2B + 保留 2B) + 内容
+    MMTYPE 按文档表43大端存储(0x0080 -> 字节 00 80)
+    """
+    print("\nTest: FC后直接管理消息(无线信道冲突上报)")
+    parser = GWNewGenParser()
+    frame = bytes.fromhex(
+        "C0 20 00 01 00 01 B2 B7 00 0F 80 FF 00 00 01 00 "
+        "00 80 00 00 00 01 00 90 98 01 63 02 29 05 03 03 "
+        "E0 C4 28 55 00 04 65 ED".replace(" ", ""))
+    table = parser.parse_to_table(frame)
+    # MMTYPE 大端 = 0x0080 无线信道冲突上报
+    mm = find_row(table, "管理消息类型(MMTYPE)")
+    check("MMTYPE=0x0080", mm and mm[2] == "0x0080")
+    check("冲突上报名称", mm and "无线信道冲突上报" in mm[3])
+    # 邻居网络条目: 先信道号后option (表90)
+    n0 = find_row(table, "邻居网络[0]")
+    check("邻居网络[0]信道号+option", n0 and n0[2] == "信道号=2 option=0x29")
+    n1 = find_row(table, "邻居网络[1]")
+    check("邻居网络[1]信道号+option", n1 and n1[2] == "信道号=5 option=0x03")
+    n2 = find_row(table, "邻居网络[2]")
+    check("邻居网络[2]信道号+option", n2 and n2[2] == "信道号=3 option=0xE0")
+
+
+def find_row(table, name_contains):
+    for row in table:
+        if name_contains in row[0]:
+            return row
+    return None
+
+
 if __name__ == "__main__":
     test_app_after_fc()
     test_false_positive_rejection()
@@ -284,6 +317,7 @@ if __name__ == "__main__":
     test_version_detection_row()
     test_std_mac_header_versioning()
     test_singlehop_header_versioning()
+    test_direct_mgmt_after_fc()
     print(f"\n═══ 结果: {passed} 通过, {failed} 失败 ═══")
     if failed > 0:
         sys.exit(1)
