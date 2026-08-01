@@ -47,10 +47,15 @@ from enhanced_export import EnhancedBatchResultExporter
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
 
-APP_VERSION = "1.10.0"
-BUILD_DATE = "2026-07-31"  # 编译日期，每次打包前更新
+APP_VERSION = "1.11.0"
+BUILD_DATE = "2026-08-01"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    ("1.11.0", "2026-08-01", [
+        "新一代载波协议(通感一体化,索引9)网间协调帧(NET,定界符类型=3)可变区域解析：邻居网络比特图1~4 / 本网络无线信道编号 / 持续时间(40ms) / 带宽结束标志位 / 本网络无线option / 带宽结束偏移(4ms) / 带宽开始偏移(4ms)，字节12短网络标识高位组合完整SNID",
+        "新一代载波协议聚合帧(物理块聚合标志=1)级联块应用层解析：抽取 _parse_msdu_payload 共享方法，级联块内 MAC 帧解析 MSDU 头(VLAN/MSDU类型)并按类型分派应用层报文(端口/控制域/业务标识/转发DLT645)，消除伪 MSDU 残留行",
+        "新增 test_net_frame_real / test_net_frame_nonzero_fields / test_aggregated_frame_app_layer 回归用例",
+    ]),
     ("1.10.0", "2026-07-31", [
         "新增「主题与字体设置」（菜单 配置→主题与字体）：5 套主题（默认浅色 / Fusion 经典 / Fusion 暗色 / Windows 原生 / Windows Vista 原生），切换即时预览",
         "全局样式表升级为应用级：QMessageBox / 文件对话框等所有弹窗统一跟随主题",

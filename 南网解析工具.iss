@@ -3,7 +3,7 @@
 ; 仅供非商业使用
 
 #define MyAppName "南网协议解析工具"
-#define MyAppVersion "1.7.2"
+#define MyAppVersion "1.11.0"
 #define MyAppPublisher "Liruitao"
 #define MyAppURL "https://www.leaguerme.com/"
 #define MyAppExeName "协议解析工具.exe"
