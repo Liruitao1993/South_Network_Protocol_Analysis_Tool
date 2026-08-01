@@ -2742,8 +2742,9 @@ class MainWindow(QMainWindow):
                             break
                         i += 2
                     if not found:
-                        # 未扫描到 FC 起始特征，可能是 ED 包装帧，直接保留给后续 ED 提取处理
-                        pass
+                        # 未扫描到 FC 起始特征：时间戳/测试标记等噪声行直接丢弃；
+                        # ED 包装帧已在上方分支保留，交给后续 ED 提取处理
+                        continue
             out_lines.append(hex_clean)
         return '\n'.join(out_lines)
 
