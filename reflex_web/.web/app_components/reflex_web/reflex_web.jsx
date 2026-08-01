@@ -3,8 +3,9 @@ import {ReflexEvent,applyEventActions,isNotNullOrUndefined,isTrue,pyOr} from "$/
 import {StateContexts,addEvents} from "$/utils/context"
 import {Fragment,memo,useCallback,useContext,useEffect} from "react"
 import {jsx} from "@emotion/react"
-import {Badge as RadixThemesBadge,Button as RadixThemesButton,Callout as RadixThemesCallout,Card as RadixThemesCard,Code as RadixThemesCode,Flex as RadixThemesFlex,Table as RadixThemesTable,Text as RadixThemesText,TextArea as RadixThemesTextArea,TextField as RadixThemesTextField} from "@radix-ui/themes"
+import {Badge as RadixThemesBadge,Button as RadixThemesButton,Callout as RadixThemesCallout,Card as RadixThemesCard,Checkbox as RadixThemesCheckbox,Code as RadixThemesCode,Flex as RadixThemesFlex,Table as RadixThemesTable,Text as RadixThemesText,TextArea as RadixThemesTextArea,TextField as RadixThemesTextField} from "@radix-ui/themes"
 import {DynamicIcon} from "lucide-react/dynamic.mjs"
+import LucideInfo from "lucide-react/dist/esm/icons/info.mjs"
 import DebounceInput from "react-debounce-input"
 
 
@@ -34,6 +35,36 @@ export const Select_select_fc154dae8e3241bdf69051761f8cf5be_ed2d5185 = memo(({ch
     )
 });
 
+export const Cond_comp_b84525437a6536fe93fc22f52d282ca8_ed2d5185 = memo(({children}) => {
+    const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
+
+
+
+    return(
+        ((reflex___state____state__reflex_web___reflex_web____state.current_protocol_rx_state_?.valueOf?.() === 9?.valueOf?.())?(children?.at?.(0)):(children?.at?.(1)))
+    )
+});
+
+export const Select_select_cef81ec3a02b6540bdb5300f4d776351_ed2d5185 = memo(({children}) => {
+    const on_change_caac2b12db7591abcfbed7536a8828cb = useCallback(((_e) => (addEvents([(ReflexEvent("reflex___state____state.reflex_web___reflex_web____state.set_gw_level", ({ ["value"] : _e?.["target"]?.["value"] }), ({  })))], [_e], ({  })))), [addEvents, ReflexEvent])
+
+
+
+    return(
+        jsx("select",{className:"rounded border border-gray-300 px-2 py-1 text-sm",defaultValue:"auto",onChange:on_change_caac2b12db7591abcfbed7536a8828cb},children)
+    )
+});
+
+export const Cond_comp_9a5e7d3de201160b1532285a4d4ea087_ed2d5185 = memo(({children}) => {
+    const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
+
+
+
+    return(
+        ((reflex___state____state__reflex_web___reflex_web____state.current_protocol_rx_state_?.valueOf?.() === 10?.valueOf?.())?(children?.at?.(0)):(children?.at?.(1)))
+    )
+});
+
 export const Textfieldroot_textfield__root_59a847579f7b93d434d7fa66c4832091_ed2d5185 = memo(({children}) => {
     const on_change_365e50a21ce17cb56e763f2018776b36 = useCallback(((_e) => (addEvents([(ReflexEvent("reflex___state____state.reflex_web___reflex_web____state.set_strip_head", ({ ["value"] : _e?.["target"]?.["value"] }), ({  })))], [_e], ({  })))), [addEvents, ReflexEvent])
 
@@ -54,13 +85,13 @@ export const Textfieldroot_textfield__root_c620f203b3ff27e1c0bb97103f3c9643_ed2d
     )
 });
 
-export const Cond_comp_b84525437a6536fe93fc22f52d282ca8_ed2d5185 = memo(({children}) => {
+export const Cond_comp_96627b3fd23f87a4d8d4f9ce40174445_ed2d5185 = memo(({children}) => {
     const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
 
 
 
     return(
-        ((reflex___state____state__reflex_web___reflex_web____state.current_protocol_rx_state_?.valueOf?.() === 9?.valueOf?.())?(children?.at?.(0)):(children?.at?.(1)))
+        (pyOr((reflex___state____state__reflex_web___reflex_web____state.current_protocol_rx_state_?.valueOf?.() === 9?.valueOf?.()), () => ((reflex___state____state__reflex_web___reflex_web____state.current_protocol_rx_state_?.valueOf?.() === 10?.valueOf?.())))?(children?.at?.(0)):(children?.at?.(1)))
     )
 });
 
@@ -363,6 +394,16 @@ export const Cond_comp_bf63dbcc8715775d6765d1f8c1ab8427_ed2d5185 = memo(({childr
     )
 });
 
+export const Cond_comp_1b40066bd807f4bf697de19cf8a8e3e5_ed2d5185 = memo(({children}) => {
+    const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
+
+
+
+    return(
+        (pyOr(pyOr((reflex___state____state__reflex_web___reflex_web____state.current_protocol_rx_state_?.valueOf?.() === 0?.valueOf?.()), () => ((reflex___state____state__reflex_web___reflex_web____state.current_protocol_rx_state_?.valueOf?.() === 7?.valueOf?.()))), () => ((reflex___state____state__reflex_web___reflex_web____state.current_protocol_rx_state_?.valueOf?.() === 8?.valueOf?.())))?(children?.at?.(0)):(children?.at?.(1)))
+    )
+});
+
 export const Foreach_comp_78ab9ce21c6181431923cff648565e7f_ed2d5185 = memo(({children}) => {
     const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
 
@@ -383,13 +424,13 @@ export const Select_select_a1b273f233f66469fa25f4fec184fa20_ed2d5185 = memo(({ch
     )
 });
 
-export const Cond_comp_f6d2fc4c7a57e27f3e6366bc92c657bc_ed2d5185 = memo(({children}) => {
+export const Cond_comp_28f7fb89e3b852e35b6ead063a5dceb6_ed2d5185 = memo(({children}) => {
     const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
 
 
 
     return(
-        (pyOr((reflex___state____state__reflex_web___reflex_web____state.current_protocol_rx_state_?.valueOf?.() === 0?.valueOf?.()), () => ((reflex___state____state__reflex_web___reflex_web____state.current_protocol_rx_state_?.valueOf?.() === 6?.valueOf?.())))?(children?.at?.(0)):(children?.at?.(1)))
+        ((reflex___state____state__reflex_web___reflex_web____state.current_protocol_rx_state_?.valueOf?.() === 0?.valueOf?.())?(children?.at?.(0)):(children?.at?.(1)))
     )
 });
 
@@ -536,13 +577,165 @@ export const Select_select_6949ee9673aeb375bb0ef42a9d72462a_ed2d5185 = memo(({ch
     )
 });
 
-export const Textarea_textarea_68cf146049eb2be99d454557393d861e_ed2d5185 = memo(({children}) => {
+export const Debounceinput_debounceinput_4d340e70fe46f3816f9e5762e1289213_ed2d5185 = memo(({children}) => {
+    const on_change_0daea2ce74df5127b145e8f11c46ae6e = useCallback(((_e) => (addEvents([(ReflexEvent("reflex___state____state.reflex_web___reflex_web____state.set_gen_gdw_info", ({ ["key"] : "\u901a\u4fe1\u65b9\u5f0f", ["value"] : _e?.["target"]?.["value"] }), ({  })))], [_e], ({  })))), [addEvents, ReflexEvent])
+const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
+
+
+
+    return(
+        jsx(DebounceInput,{debounceTimeout:300,defaultValue:"3",element:RadixThemesTextField.Root,onChange:on_change_0daea2ce74df5127b145e8f11c46ae6e,size:"1",type:"number",value:(isNotNullOrUndefined(reflex___state____state__reflex_web___reflex_web____state.gen_gdw_info_rx_state_?.["\u901a\u4fe1\u65b9\u5f0f"]) ? reflex___state____state__reflex_web___reflex_web____state.gen_gdw_info_rx_state_?.["\u901a\u4fe1\u65b9\u5f0f"] : "")},)
+    )
+});
+
+export const Debounceinput_debounceinput_466fd8fa9661a5670fd3f4efba2ee54c_ed2d5185 = memo(({children}) => {
+    const on_change_ffb6ad0b2e1f91a0e698d694c32b8c95 = useCallback(((_e) => (addEvents([(ReflexEvent("reflex___state____state.reflex_web___reflex_web____state.set_gen_gdw_info", ({ ["key"] : "\u8def\u7531\u6807\u8bc6", ["value"] : _e?.["target"]?.["value"] }), ({  })))], [_e], ({  })))), [addEvents, ReflexEvent])
+const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
+
+
+
+    return(
+        jsx(DebounceInput,{debounceTimeout:300,defaultValue:"0",element:RadixThemesTextField.Root,onChange:on_change_ffb6ad0b2e1f91a0e698d694c32b8c95,size:"1",type:"number",value:(isNotNullOrUndefined(reflex___state____state__reflex_web___reflex_web____state.gen_gdw_info_rx_state_?.["\u8def\u7531\u6807\u8bc6"]) ? reflex___state____state__reflex_web___reflex_web____state.gen_gdw_info_rx_state_?.["\u8def\u7531\u6807\u8bc6"] : "")},)
+    )
+});
+
+export const Debounceinput_debounceinput_092adf587429155ee4ab8eca59868e13_ed2d5185 = memo(({children}) => {
+    const on_change_1efc4eafc925ef211d32e968d7fa0a1e = useCallback(((_e) => (addEvents([(ReflexEvent("reflex___state____state.reflex_web___reflex_web____state.set_gen_gdw_info", ({ ["key"] : "\u9644\u5c5e\u8282\u70b9\u6807\u8bc6", ["value"] : _e?.["target"]?.["value"] }), ({  })))], [_e], ({  })))), [addEvents, ReflexEvent])
+const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
+
+
+
+    return(
+        jsx(DebounceInput,{debounceTimeout:300,defaultValue:"0",element:RadixThemesTextField.Root,onChange:on_change_1efc4eafc925ef211d32e968d7fa0a1e,size:"1",type:"number",value:(isNotNullOrUndefined(reflex___state____state__reflex_web___reflex_web____state.gen_gdw_info_rx_state_?.["\u9644\u5c5e\u8282\u70b9\u6807\u8bc6"]) ? reflex___state____state__reflex_web___reflex_web____state.gen_gdw_info_rx_state_?.["\u9644\u5c5e\u8282\u70b9\u6807\u8bc6"] : "")},)
+    )
+});
+
+export const Debounceinput_debounceinput_cb93dfc48df6ee9d595fef78820c4a91_ed2d5185 = memo(({children}) => {
+    const on_change_865530fe889ae5e2841fc8d4603eb48b = useCallback(((_e) => (addEvents([(ReflexEvent("reflex___state____state.reflex_web___reflex_web____state.set_gen_gdw_info", ({ ["key"] : "\u901a\u4fe1\u6a21\u5757\u6807\u8bc6", ["value"] : _e?.["target"]?.["value"] }), ({  })))], [_e], ({  })))), [addEvents, ReflexEvent])
+const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
+
+
+
+    return(
+        jsx(DebounceInput,{debounceTimeout:300,defaultValue:"1",element:RadixThemesTextField.Root,onChange:on_change_865530fe889ae5e2841fc8d4603eb48b,size:"1",type:"number",value:(isNotNullOrUndefined(reflex___state____state__reflex_web___reflex_web____state.gen_gdw_info_rx_state_?.["\u901a\u4fe1\u6a21\u5757\u6807\u8bc6"]) ? reflex___state____state__reflex_web___reflex_web____state.gen_gdw_info_rx_state_?.["\u901a\u4fe1\u6a21\u5757\u6807\u8bc6"] : "")},)
+    )
+});
+
+export const Debounceinput_debounceinput_05dd0435b477690d267b3634bf3b0ec9_ed2d5185 = memo(({children}) => {
+    const on_change_ca21d187b056ca04bacb36b53f891724 = useCallback(((_e) => (addEvents([(ReflexEvent("reflex___state____state.reflex_web___reflex_web____state.set_gen_gdw_info", ({ ["key"] : "\u51b2\u7a81\u68c0\u6d4b", ["value"] : _e?.["target"]?.["value"] }), ({  })))], [_e], ({  })))), [addEvents, ReflexEvent])
+const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
+
+
+
+    return(
+        jsx(DebounceInput,{debounceTimeout:300,defaultValue:"0",element:RadixThemesTextField.Root,onChange:on_change_ca21d187b056ca04bacb36b53f891724,size:"1",type:"number",value:(isNotNullOrUndefined(reflex___state____state__reflex_web___reflex_web____state.gen_gdw_info_rx_state_?.["\u51b2\u7a81\u68c0\u6d4b"]) ? reflex___state____state__reflex_web___reflex_web____state.gen_gdw_info_rx_state_?.["\u51b2\u7a81\u68c0\u6d4b"] : "")},)
+    )
+});
+
+export const Debounceinput_debounceinput_21dd95d01d8062d8db5b31d063b99b67_ed2d5185 = memo(({children}) => {
+    const on_change_c9da53cd92b7b97ba4527b494ba4cb0a = useCallback(((_e) => (addEvents([(ReflexEvent("reflex___state____state.reflex_web___reflex_web____state.set_gen_gdw_info", ({ ["key"] : "\u4e2d\u7ee7\u7ea7\u522b", ["value"] : _e?.["target"]?.["value"] }), ({  })))], [_e], ({  })))), [addEvents, ReflexEvent])
+const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
+
+
+
+    return(
+        jsx(DebounceInput,{debounceTimeout:300,defaultValue:"0",element:RadixThemesTextField.Root,onChange:on_change_c9da53cd92b7b97ba4527b494ba4cb0a,size:"1",type:"number",value:(isNotNullOrUndefined(reflex___state____state__reflex_web___reflex_web____state.gen_gdw_info_rx_state_?.["\u4e2d\u7ee7\u7ea7\u522b"]) ? reflex___state____state__reflex_web___reflex_web____state.gen_gdw_info_rx_state_?.["\u4e2d\u7ee7\u7ea7\u522b"] : "")},)
+    )
+});
+
+export const Debounceinput_debounceinput_d81c71b1ab9d1644545d75b22420131f_ed2d5185 = memo(({children}) => {
+    const on_change_d7411be9acba4ad55ccc0dd0bf7a253d = useCallback(((_e) => (addEvents([(ReflexEvent("reflex___state____state.reflex_web___reflex_web____state.set_gen_gdw_info", ({ ["key"] : "\u7ea0\u9519\u7f16\u7801\u6807\u8bc6", ["value"] : _e?.["target"]?.["value"] }), ({  })))], [_e], ({  })))), [addEvents, ReflexEvent])
+const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
+
+
+
+    return(
+        jsx(DebounceInput,{debounceTimeout:300,defaultValue:"0",element:RadixThemesTextField.Root,onChange:on_change_d7411be9acba4ad55ccc0dd0bf7a253d,size:"1",type:"number",value:(isNotNullOrUndefined(reflex___state____state__reflex_web___reflex_web____state.gen_gdw_info_rx_state_?.["\u7ea0\u9519\u7f16\u7801\u6807\u8bc6"]) ? reflex___state____state__reflex_web___reflex_web____state.gen_gdw_info_rx_state_?.["\u7ea0\u9519\u7f16\u7801\u6807\u8bc6"] : "")},)
+    )
+});
+
+export const Debounceinput_debounceinput_f547402e4bf4c90cc6ce7c6e94d406bc_ed2d5185 = memo(({children}) => {
+    const on_change_9bc2a5e35e4f4d530a0fad8e5d4d48c0 = useCallback(((_e) => (addEvents([(ReflexEvent("reflex___state____state.reflex_web___reflex_web____state.set_gen_gdw_info", ({ ["key"] : "\u4fe1\u9053\u6807\u8bc6", ["value"] : _e?.["target"]?.["value"] }), ({  })))], [_e], ({  })))), [addEvents, ReflexEvent])
+const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
+
+
+
+    return(
+        jsx(DebounceInput,{debounceTimeout:300,defaultValue:"0",element:RadixThemesTextField.Root,onChange:on_change_9bc2a5e35e4f4d530a0fad8e5d4d48c0,size:"1",type:"number",value:(isNotNullOrUndefined(reflex___state____state__reflex_web___reflex_web____state.gen_gdw_info_rx_state_?.["\u4fe1\u9053\u6807\u8bc6"]) ? reflex___state____state__reflex_web___reflex_web____state.gen_gdw_info_rx_state_?.["\u4fe1\u9053\u6807\u8bc6"] : "")},)
+    )
+});
+
+export const Debounceinput_debounceinput_d0ba794e76ab260907253e66f1831b0f_ed2d5185 = memo(({children}) => {
+    const on_change_125157eb270126686c192d9772fe2370 = useCallback(((_e) => (addEvents([(ReflexEvent("reflex___state____state.reflex_web___reflex_web____state.set_gen_gdw_info", ({ ["key"] : "\u9884\u8ba1\u5e94\u7b54\u5b57\u8282\u6570", ["value"] : _e?.["target"]?.["value"] }), ({  })))], [_e], ({  })))), [addEvents, ReflexEvent])
+const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
+
+
+
+    return(
+        jsx(DebounceInput,{debounceTimeout:300,defaultValue:"0",element:RadixThemesTextField.Root,onChange:on_change_125157eb270126686c192d9772fe2370,size:"1",type:"number",value:(isNotNullOrUndefined(reflex___state____state__reflex_web___reflex_web____state.gen_gdw_info_rx_state_?.["\u9884\u8ba1\u5e94\u7b54\u5b57\u8282\u6570"]) ? reflex___state____state__reflex_web___reflex_web____state.gen_gdw_info_rx_state_?.["\u9884\u8ba1\u5e94\u7b54\u5b57\u8282\u6570"] : "")},)
+    )
+});
+
+export const Debounceinput_debounceinput_8ae633ad8a3467c3ac5c2fd5f12dc9b5_ed2d5185 = memo(({children}) => {
+    const on_change_b40dcb3abd4c652178760c631c932c91 = useCallback(((_e) => (addEvents([(ReflexEvent("reflex___state____state.reflex_web___reflex_web____state.set_gen_gdw_info", ({ ["key"] : "\u901a\u4fe1\u901f\u7387", ["value"] : _e?.["target"]?.["value"] }), ({  })))], [_e], ({  })))), [addEvents, ReflexEvent])
+const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
+
+
+
+    return(
+        jsx(DebounceInput,{debounceTimeout:300,defaultValue:"0",element:RadixThemesTextField.Root,onChange:on_change_b40dcb3abd4c652178760c631c932c91,size:"1",type:"number",value:(isNotNullOrUndefined(reflex___state____state__reflex_web___reflex_web____state.gen_gdw_info_rx_state_?.["\u901a\u4fe1\u901f\u7387"]) ? reflex___state____state__reflex_web___reflex_web____state.gen_gdw_info_rx_state_?.["\u901a\u4fe1\u901f\u7387"] : "")},)
+    )
+});
+
+export const Debounceinput_debounceinput_5d4e7b8d5703ce03403a5fa6b84608f3_ed2d5185 = memo(({children}) => {
+    const on_change_1fe347d3bd1ad06d3b25482b6380d2f2 = useCallback(((_e) => (addEvents([(ReflexEvent("reflex___state____state.reflex_web___reflex_web____state.set_gen_gdw_info", ({ ["key"] : "\u901f\u7387\u5355\u4f4d\u6807\u8bc6", ["value"] : _e?.["target"]?.["value"] }), ({  })))], [_e], ({  })))), [addEvents, ReflexEvent])
+const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
+
+
+
+    return(
+        jsx(DebounceInput,{debounceTimeout:300,defaultValue:"0",element:RadixThemesTextField.Root,onChange:on_change_1fe347d3bd1ad06d3b25482b6380d2f2,size:"1",type:"number",value:(isNotNullOrUndefined(reflex___state____state__reflex_web___reflex_web____state.gen_gdw_info_rx_state_?.["\u901f\u7387\u5355\u4f4d\u6807\u8bc6"]) ? reflex___state____state__reflex_web___reflex_web____state.gen_gdw_info_rx_state_?.["\u901f\u7387\u5355\u4f4d\u6807\u8bc6"] : "")},)
+    )
+});
+
+export const Debounceinput_debounceinput_748de507d312e3d236cbb4a4b491934b_ed2d5185 = memo(({children}) => {
+    const on_change_4a729260ce6c794f6737620f6d41f6d2 = useCallback(((_e) => (addEvents([(ReflexEvent("reflex___state____state.reflex_web___reflex_web____state.set_gen_gdw_info", ({ ["key"] : "\u62a5\u6587\u5e8f\u5217\u53f7", ["value"] : _e?.["target"]?.["value"] }), ({  })))], [_e], ({  })))), [addEvents, ReflexEvent])
+const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
+
+
+
+    return(
+        jsx(DebounceInput,{debounceTimeout:300,defaultValue:"0",element:RadixThemesTextField.Root,onChange:on_change_4a729260ce6c794f6737620f6d41f6d2,size:"1",type:"number",value:(isNotNullOrUndefined(reflex___state____state__reflex_web___reflex_web____state.gen_gdw_info_rx_state_?.["\u62a5\u6587\u5e8f\u5217\u53f7"]) ? reflex___state____state__reflex_web___reflex_web____state.gen_gdw_info_rx_state_?.["\u62a5\u6587\u5e8f\u5217\u53f7"] : "")},)
+    )
+});
+
+export const Foreach_comp_8319e64941c97bb19d8818fb0f7180ed_ed2d5185 = memo(({children}) => {
     const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
 
 
 
     return(
-        jsx(RadixThemesTextArea,{css:({ ["& textarea"] : null, ["height"] : "150px", ["width"] : "100%", ["fontFamily"] : "monospace", ["--default-font-family"] : "monospace", ["fontSize"] : "12px", ["readonly"] : true }),placeholder:"\u914d\u7f6e\u53c2\u6570\u540e\u81ea\u52a8\u663e\u793a\u9884\u89c8...",value:reflex___state____state__reflex_web___reflex_web____state.gen_preview_rx_state_},)
+        Array.prototype.map.call(reflex___state____state__reflex_web___reflex_web____state.gen_field_schema_rx_state_ ?? [],((f_rx_state_,index_c66399894e577f389c8f45baaba19b1c)=>(jsx(RadixThemesFlex,{align:"start",className:"rx-Stack",direction:"column",key:index_c66399894e577f389c8f45baaba19b1c,gap:"1"},jsx(RadixThemesFlex,{align:"start",className:"rx-Stack",direction:"row",gap:"1"},jsx(RadixThemesText,{as:"p",css:({ ["fontWeight"] : "medium" }),size:"1"},f_rx_state_?.["name"]),jsx(RadixThemesBadge,{color:"gray",size:"1",variant:"soft"},f_rx_state_?.["type"])),jsx(DebounceInput,{css:({ ["fontFamily"] : "monospace", ["--default-font-family"] : "monospace" }),debounceTimeout:300,element:RadixThemesTextField.Root,onChange:((_e) => (addEvents([(ReflexEvent("reflex___state____state.reflex_web___reflex_web____state.set_gen_field", ({ ["key"] : f_rx_state_?.["name"], ["value"] : _e?.["target"]?.["value"] }), ({  })))], [_e], ({  })))),placeholder:f_rx_state_?.["default"],size:"1",value:(isNotNullOrUndefined(reflex___state____state__reflex_web___reflex_web____state.gen_fields_rx_state_?.[f_rx_state_?.["name"]]) ? reflex___state____state__reflex_web___reflex_web____state.gen_fields_rx_state_?.[f_rx_state_?.["name"]] : "")},),jsx(RadixThemesText,{as:"p",css:({ ["color"] : "gray" }),size:"1"},f_rx_state_?.["desc"])))))
+    )
+});
+
+export const Cond_comp_fe097cbb3b98cf36101d6b8c798c1989_ed2d5185 = memo(({children}) => {
+    const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
+
+
+
+    return(
+        ((reflex___state____state__reflex_web___reflex_web____state.gen_field_schema_rx_state_.length > 0)?(children?.at?.(0)):(children?.at?.(1)))
+    )
+});
+
+export const Bare_comp_98cfaad4390638ae37e884fa283bd1a4_ed2d5185 = memo(({children}) => {
+    const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
+
+
+
+    return(
+        reflex___state____state__reflex_web___reflex_web____state.gen_preview_rx_state_
     )
 });
 
@@ -577,14 +770,14 @@ const reflex___state____state__reflex_web___reflex_web____state = useContext(Sta
     )
 });
 
-export const Button_button_db83d85adfafd623b32b75da6499a989_ed2d5185 = memo(({children}) => {
+export const Button_button_af545c6220e27af60ae44ecd934047dc_ed2d5185 = memo(({children}) => {
     const on_click_275e3d44b522961b4c388c93da47d34d = useCallback(((_e) => (addEvents([(ReflexEvent("reflex___state____state.reflex_web___reflex_web____state.copy_gen_result", ({  }), ({  })))], [_e], ({  })))), [addEvents, ReflexEvent])
 const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
 
 
 
     return(
-        jsx(RadixThemesButton,{color:"gray",disabled:(reflex___state____state__reflex_web___reflex_web____state.gen_result_rx_state_?.valueOf?.() === ""?.valueOf?.()),onClick:on_click_275e3d44b522961b4c388c93da47d34d,size:"2",variant:"outline"},children)
+        jsx(RadixThemesButton,{color:"gray",disabled:(reflex___state____state__reflex_web___reflex_web____state.gen_result_hex_rx_state_?.valueOf?.() === ""?.valueOf?.()),onClick:on_click_275e3d44b522961b4c388c93da47d34d,size:"2",variant:"outline"},children)
     )
 });
 
@@ -631,54 +824,147 @@ export const Button_button_fe6a08c6a4a1c63ce788c1a14eec07de_ed2d5185 = memo(({ch
     )
 });
 
-export const Bare_comp_40a280a2ea5b649a40696cd42e5caae5_ed2d5185 = memo(({children}) => {
+export const Checkbox_checkbox_e1e2eeb68c9f6dd86b9c771590489e17_ed2d5185 = memo(({children}) => {
+    const on_change_22bc2801aa56c4cf7cfc1fe945bef27b = useCallback(((_ev_0) => (addEvents([(ReflexEvent("reflex___state____state.reflex_web___reflex_web____state.toggle_diff_ignore_checksum", ({ ["value"] : _ev_0 }), ({  })))], [_ev_0], ({  })))), [addEvents, ReflexEvent])
+const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
+
+
+
+    return(
+        jsx(RadixThemesCheckbox,{checked:reflex___state____state__reflex_web___reflex_web____state.diff_ignore_checksum_rx_state_,onCheckedChange:on_change_22bc2801aa56c4cf7cfc1fe945bef27b,size:"2"},)
+    )
+});
+
+export const Checkbox_checkbox_1cb4387dc8a5127ca533d0c1c72bf736_ed2d5185 = memo(({children}) => {
+    const on_change_236de0a611658f151b130be65bcdcb05 = useCallback(((_ev_0) => (addEvents([(ReflexEvent("reflex___state____state.reflex_web___reflex_web____state.toggle_diff_ignore_sequence", ({ ["value"] : _ev_0 }), ({  })))], [_ev_0], ({  })))), [addEvents, ReflexEvent])
+const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
+
+
+
+    return(
+        jsx(RadixThemesCheckbox,{checked:reflex___state____state__reflex_web___reflex_web____state.diff_ignore_sequence_rx_state_,onCheckedChange:on_change_236de0a611658f151b130be65bcdcb05,size:"2"},)
+    )
+});
+
+export const Checkbox_checkbox_cd18b5210035635c4455e0f9fb112bc2_ed2d5185 = memo(({children}) => {
+    const on_change_60916d8e2f2eafd4f34217af020c1988 = useCallback(((_ev_0) => (addEvents([(ReflexEvent("reflex___state____state.reflex_web___reflex_web____state.toggle_diff_only_diff", ({ ["value"] : _ev_0 }), ({  })))], [_ev_0], ({  })))), [addEvents, ReflexEvent])
+const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
+
+
+
+    return(
+        jsx(RadixThemesCheckbox,{checked:reflex___state____state__reflex_web___reflex_web____state.diff_only_diff_rx_state_,onCheckedChange:on_change_60916d8e2f2eafd4f34217af020c1988,size:"2"},)
+    )
+});
+
+export const Foreach_comp_a1f113fa5514ce7903959bf65315dd80_ed2d5185 = memo(({children}) => {
     const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
 
 
 
     return(
-        (reflex___state____state__reflex_web___reflex_web____state.diff_result_rx_state_.length+" \u884c")
+        Array.prototype.map.call(reflex___state____state__reflex_web___reflex_web____state.diff_explanations_rx_state_ ?? [],((exp_rx_state_,index_8c469fdef9a93721a7836e8f8e71bedd)=>(jsx(RadixThemesFlex,{align:"start",className:"rx-Stack",css:({ ["paddingInlineStart"] : "2", ["paddingInlineEnd"] : "2", ["paddingTop"] : "1", ["paddingBottom"] : "1", ["width"] : "100%", ["background"] : "rgba(245, 158, 11, 0.05)", ["borderLeft"] : "3px solid #f59e0b", ["borderRadius"] : "4px" }),direction:"row",key:index_8c469fdef9a93721a7836e8f8e71bedd,gap:"2"},jsx(LucideInfo,{css:({ ["color"] : "#f59e0b", ["flexShrink"] : "0" }),size:14},),jsx(RadixThemesText,{as:"p",size:"2"},exp_rx_state_)))))
     )
 });
 
-export const Foreach_comp_d1beaa6543df5ee4a985f215d8c07203_ed2d5185 = memo(({children}) => {
+export const Cond_comp_fd8b2289bfd2e425690bc588ec1b399e_ed2d5185 = memo(({children}) => {
     const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
 
 
 
     return(
-        Array.prototype.map.call(reflex___state____state__reflex_web___reflex_web____state.diff_result_rx_state_ ?? [],((row_rx_state_,index_afeb8dd3503e143d0c23a9388cd1843d)=>(jsx(RadixThemesTable.Row,{css:({ ["&"] : (isTrue(row_rx_state_?.["diff"]) ? ({ ["background"] : "rgba(220, 38, 38, 0.05)" }) : ({  })) }),key:index_afeb8dd3503e143d0c23a9388cd1843d},jsx(RadixThemesTable.Cell,{},jsx(RadixThemesCode,{variant:"soft"},row_rx_state_?.["offset"])),jsx(RadixThemesTable.Cell,{css:({ ["fontFamily"] : "monospace", ["--default-font-family"] : "monospace" })},jsx(RadixThemesCode,{variant:"soft"},row_rx_state_?.["left"])),jsx(RadixThemesTable.Cell,{css:({ ["fontFamily"] : "monospace", ["--default-font-family"] : "monospace" })},jsx(RadixThemesCode,{variant:"soft"},row_rx_state_?.["right"])),jsx(RadixThemesTable.Cell,{},jsx(Fragment,{},(isTrue(row_rx_state_?.["diff"])?(jsx(Fragment,{},jsx(RadixThemesBadge,{color:"red",variant:"soft"},"\u2260"))):(jsx(Fragment,{},jsx(RadixThemesBadge,{color:"green",variant:"soft"},"="))))))))))
+        ((reflex___state____state__reflex_web___reflex_web____state.diff_explanations_rx_state_.length > 0)?(children?.at?.(0)):(children?.at?.(1)))
     )
 });
 
-export const Cond_comp_0be55226f76327a45381e0911e6399b5_ed2d5185 = memo(({children}) => {
+export const Bare_comp_00fab867f5c6bc7411657e398d6bd479_ed2d5185 = memo(({children}) => {
     const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
 
 
 
     return(
-        ((reflex___state____state__reflex_web___reflex_web____state.diff_result_rx_state_.length > 0)?(children?.at?.(0)):(children?.at?.(1)))
+        (reflex___state____state__reflex_web___reflex_web____state.diff_field_rows_rx_state_.length+" \u4e2a\u5b57\u6bb5")
     )
 });
 
-export const Select_select_33ee04581291402858076565bd4ac0b5_ed2d5185 = memo(({children}) => {
-    const on_change_b0305f1338e8b132dba35bf743e6924a = useCallback(((_e) => (addEvents([(ReflexEvent("reflex___state____state.reflex_web___reflex_web____state.set_lookup_type", ({ ["value"] : _e?.["target"]?.["value"] }), ({  })))], [_e], ({  })))), [addEvents, ReflexEvent])
+export const Foreach_comp_c11f894fbe655102504b7228dbf35c99_ed2d5185 = memo(({children}) => {
+    const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
 
 
 
     return(
-        jsx("select",{className:"rounded border border-gray-300 px-3 py-2",css:({ ["width"] : "200px" }),defaultValue:"di",onChange:on_change_b0305f1338e8b132dba35bf743e6924a},children)
+        Array.prototype.map.call(reflex___state____state__reflex_web___reflex_web____state.diff_field_rows_rx_state_ ?? [],((row_rx_state_,index_6a7f7f00416a8246c86edc929b26f561)=>(jsx(RadixThemesTable.Row,{css:({ ["&"] : (!((row_rx_state_?.["diff_type"]?.valueOf?.() === "\u76f8\u540c"?.valueOf?.())) ? ({ ["background"] : "rgba(220, 38, 38, 0.03)" }) : ({  })) }),key:index_6a7f7f00416a8246c86edc929b26f561},jsx(RadixThemesTable.Cell,{css:({ ["fontWeight"] : "medium" })},row_rx_state_?.["field_name"]),jsx(RadixThemesTable.Cell,{},jsx(RadixThemesCode,{variant:"soft"},row_rx_state_?.["offset_display"])),jsx(RadixThemesTable.Cell,{},jsx(RadixThemesCode,{variant:"soft"},row_rx_state_?.["length_display"])),jsx(RadixThemesTable.Cell,{css:({ ["fontSize"] : "11px" })},jsx(RadixThemesCode,{variant:"soft"},row_rx_state_?.["value_a"])),jsx(RadixThemesTable.Cell,{css:({ ["fontSize"] : "11px" })},jsx(RadixThemesCode,{variant:"soft"},row_rx_state_?.["value_b"])),jsx(RadixThemesTable.Cell,{},jsx(RadixThemesBadge,{color:((row_rx_state_?.["diff_type"]?.valueOf?.() === "\u76f8\u540c"?.valueOf?.()) ? "green" : ((row_rx_state_?.["diff_type"]?.valueOf?.() === "\u4fee\u6539"?.valueOf?.()) ? "red" : ((row_rx_state_?.["diff_type"]?.valueOf?.() === "A\u72ec\u6709"?.valueOf?.()) ? "gray" : "amber"))),size:"1",variant:"soft"},row_rx_state_?.["diff_type"]))))))
     )
 });
 
-export const Debounceinput_debounceinput_ab4243712103e993335954b7b392c705_ed2d5185 = memo(({children}) => {
+export const Cond_comp_89cd3b518a1d5810df8a507055fd719d_ed2d5185 = memo(({children}) => {
+    const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
+
+
+
+    return(
+        ((reflex___state____state__reflex_web___reflex_web____state.diff_field_rows_rx_state_.length > 0)?(children?.at?.(0)):(children?.at?.(1)))
+    )
+});
+
+export const Bare_comp_3f15e1b0783b7fa4c1d5da158f610b79_ed2d5185 = memo(({children}) => {
+    const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
+
+
+
+    return(
+        (reflex___state____state__reflex_web___reflex_web____state.diff_byte_rows_rx_state_.length+" \u884c")
+    )
+});
+
+export const Foreach_comp_3ad9251b3d63f349720268bc84ba136d_ed2d5185 = memo(({children}) => {
+    const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
+
+
+
+    return(
+        Array.prototype.map.call(reflex___state____state__reflex_web___reflex_web____state.diff_byte_rows_rx_state_ ?? [],((row_rx_state_,index_2f1fc611e8fe86918f7d28083b23e8a8)=>(jsx(Fragment,{key:index_2f1fc611e8fe86918f7d28083b23e8a8},(isTrue(row_rx_state_?.["is_field_header"])?(jsx(Fragment,{},jsx(RadixThemesTable.Row,{},jsx(RadixThemesTable.Cell,{colSpan:4,css:({ ["background"] : ((row_rx_state_?.["status"]?.valueOf?.() === "same"?.valueOf?.()) ? "rgba(156, 163, 175, 0.1)" : ((row_rx_state_?.["status"]?.valueOf?.() === "modified"?.valueOf?.()) ? "rgba(220, 38, 38, 0.1)" : ((row_rx_state_?.["status"]?.valueOf?.() === "added"?.valueOf?.()) ? "rgba(217, 119, 6, 0.1)" : "rgba(229, 231, 235, 0.2)"))) })},jsx(RadixThemesText,{as:"p",css:({ ["fontWeight"] : "bold" }),size:"1"},row_rx_state_?.["field_name"]))))):(jsx(Fragment,{},jsx(RadixThemesTable.Row,{css:({ ["&"] : (!((row_rx_state_?.["status"]?.valueOf?.() === "same"?.valueOf?.())) ? ({ ["background"] : "rgba(220, 38, 38, 0.03)" }) : ({  })) })},jsx(RadixThemesTable.Cell,{css:({ ["fontSize"] : "11px" })},jsx(RadixThemesCode,{variant:"soft"},row_rx_state_?.["offset"])),jsx(RadixThemesTable.Cell,{css:({ ["fontFamily"] : "monospace", ["--default-font-family"] : "monospace", ["fontSize"] : "11px" })},jsx(RadixThemesCode,{variant:"soft"},row_rx_state_?.["left"])),jsx(RadixThemesTable.Cell,{css:({ ["fontFamily"] : "monospace", ["--default-font-family"] : "monospace", ["fontSize"] : "11px" })},jsx(RadixThemesCode,{variant:"soft"},row_rx_state_?.["right"])),jsx(RadixThemesTable.Cell,{},jsx(RadixThemesBadge,{color:((row_rx_state_?.["status"]?.valueOf?.() === "same"?.valueOf?.()) ? "green" : ((row_rx_state_?.["status"]?.valueOf?.() === "modified"?.valueOf?.()) ? "red" : ((row_rx_state_?.["status"]?.valueOf?.() === "added"?.valueOf?.()) ? "amber" : "gray"))),size:"1",variant:"soft"},((row_rx_state_?.["status"]?.valueOf?.() === "same"?.valueOf?.()) ? "=" : ((row_rx_state_?.["status"]?.valueOf?.() === "modified"?.valueOf?.()) ? "\u2260" : ((row_rx_state_?.["status"]?.valueOf?.() === "added"?.valueOf?.()) ? "+" : "-")))))))))))))
+    )
+});
+
+export const Cond_comp_5b599722ac9e35174ae954bdf92dde38_ed2d5185 = memo(({children}) => {
+    const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
+
+
+
+    return(
+        ((reflex___state____state__reflex_web___reflex_web____state.diff_byte_rows_rx_state_.length > 0)?(children?.at?.(0)):(children?.at?.(1)))
+    )
+});
+
+export const Bare_comp_23613b11dd0eddcbb56bc2ece7d40939_ed2d5185 = memo(({children}) => {
+    const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
+
+
+
+    return(
+        reflex___state____state__reflex_web___reflex_web____state.lookup_title_rx_state_
+    )
+});
+
+export const Bare_comp_c03f7539610792929c93ec2a0435a562_ed2d5185 = memo(({children}) => {
+    const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
+
+
+
+    return(
+        (reflex___state____state__reflex_web___reflex_web____state.lookup_results_rx_state_.length+" \u6761")
+    )
+});
+
+export const Debounceinput_debounceinput_a8476189b5a9153ce58a748937b105e4_ed2d5185 = memo(({children}) => {
     const on_change_48936455dd3797485a9ae17a73742b9f = useCallback(((_e) => (addEvents([(ReflexEvent("reflex___state____state.reflex_web___reflex_web____state.set_lookup_query", ({ ["value"] : _e?.["target"]?.["value"] }), ({  })))], [_e], ({  })))), [addEvents, ReflexEvent])
 const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
 
 
 
     return(
-        jsx(DebounceInput,{css:({ ["width"] : "300px" }),debounceTimeout:300,element:RadixThemesTextField.Root,onChange:on_change_48936455dd3797485a9ae17a73742b9f,placeholder:"\u8f93\u5165\u67e5\u8be2\u7801...",size:"2",value:(isNotNullOrUndefined(reflex___state____state__reflex_web___reflex_web____state.lookup_query_rx_state_) ? reflex___state____state__reflex_web___reflex_web____state.lookup_query_rx_state_ : "")},)
+        jsx(DebounceInput,{css:({ ["width"] : "400px" }),debounceTimeout:300,element:RadixThemesTextField.Root,onChange:on_change_48936455dd3797485a9ae17a73742b9f,placeholder:"\u8f93\u5165\u5173\u952e\u8bcd\u8fc7\u6ee4\uff08DI\u7801/\u540d\u79f0/\u8bf4\u660e\u7b49\uff09...",size:"2",value:(isNotNullOrUndefined(reflex___state____state__reflex_web___reflex_web____state.lookup_query_rx_state_) ? reflex___state____state__reflex_web___reflex_web____state.lookup_query_rx_state_ : "")},)
     )
 });
 
@@ -693,23 +979,23 @@ const reflex___state____state__reflex_web___reflex_web____state = useContext(Sta
     )
 });
 
-export const Bare_comp_c03f7539610792929c93ec2a0435a562_ed2d5185 = memo(({children}) => {
+export const Foreach_comp_9db661801aa2aedb77d8ede54606117c_ed2d5185 = memo(({children}) => {
     const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
 
 
 
     return(
-        (reflex___state____state__reflex_web___reflex_web____state.lookup_results_rx_state_.length+" \u6761")
+        Array.prototype.map.call(reflex___state____state__reflex_web___reflex_web____state.lookup_columns_rx_state_ ?? [],((col_rx_state_,index_6b9c8c6486aa763660a257bb1d920398)=>(jsx(RadixThemesTable.ColumnHeaderCell,{key:index_6b9c8c6486aa763660a257bb1d920398},col_rx_state_))))
     )
 });
 
-export const Foreach_comp_5af7774eb576a2558b6ca6d02601ac21_ed2d5185 = memo(({children}) => {
+export const Foreach_comp_31ea56be89c9a38c27860aaa87e754e9_ed2d5185 = memo(({children}) => {
     const reflex___state____state__reflex_web___reflex_web____state = useContext(StateContexts.reflex___state____state__reflex_web___reflex_web____state)
 
 
 
     return(
-        Array.prototype.map.call(reflex___state____state__reflex_web___reflex_web____state.lookup_results_rx_state_ ?? [],((row_rx_state_,index_65caf505e782197f02a8e662c177432b)=>(jsx(RadixThemesTable.Row,{key:index_65caf505e782197f02a8e662c177432b},jsx(RadixThemesTable.Cell,{},jsx(RadixThemesCode,{variant:"soft"},row_rx_state_?.["code"])),jsx(RadixThemesTable.Cell,{},row_rx_state_?.["name"]),jsx(RadixThemesTable.Cell,{},jsx(RadixThemesText,{as:"p",css:({ ["color"] : "gray" }),size:"1"},row_rx_state_?.["desc"]))))))
+        Array.prototype.map.call(reflex___state____state__reflex_web___reflex_web____state.lookup_results_rx_state_ ?? [],((row_rx_state_,index_8e91129061da00c08f197a6a0c4a3b27)=>(jsx(RadixThemesTable.Row,{key:index_8e91129061da00c08f197a6a0c4a3b27},Array.prototype.map.call(reflex___state____state__reflex_web___reflex_web____state.lookup_columns_rx_state_ ?? [],((col_rx_state_,index_46dff711bf8e3ab6253b6e156e6b90e2)=>(jsx(RadixThemesTable.Cell,{css:({ ["fontSize"] : "12px" }),key:index_46dff711bf8e3ab6253b6e156e6b90e2},jsx(RadixThemesCode,{variant:"soft"},row_rx_state_?.[col_rx_state_])))))))))
     )
 });
 
