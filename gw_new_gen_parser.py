@@ -615,6 +615,15 @@ class GWNewGenParser:
         else:
             # 未找到应用层(如网管消息): 完整帧 FC + PB(PBH 1B + MAC + MSDU)
             # FC 末3字节为FCCS(FC自身校验), 其后直接为 PBH+MAC, 无独立HCS
+            # ── FC后直接为网络管理消息(表42: MMTYPE 2B大端 + 保留2B) ──
+            # 部分帧 FC 后无 PBH/MAC 头，直接承载管理消息(如无线信道冲突上报)
+            from gw_new_gen_mme_parser import MMETYPE_NAMES
+            if fc_end + 4 <= data_end:
+                direct_mmtype = (data[fc_end] << 8) | data[fc_end + 1]
+                if direct_mmtype in MMETYPE_NAMES:
+                    result.extend(parse_management_message(
+                        data[:data_end], fc_end))
+                    return result
             pbh_len, mac_off, _strong = self._locate_pbh_mac(
                 data, fc_end, fc_src, fc_dst)
             if mac_off < 0:
