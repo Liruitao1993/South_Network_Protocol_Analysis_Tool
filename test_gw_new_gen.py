@@ -289,13 +289,14 @@ def test_direct_mgmt_after_fc():
     mm = find_row(table, "管理消息类型(MMTYPE)")
     check("MMTYPE=0x0080", mm and mm[2] == "0x0080")
     check("冲突上报名称", mm and "无线信道冲突上报" in mm[3])
-    # 邻居网络条目: 先信道号后option (表90)
+    # 邻居网络个数=2 (分组布局: 先信道号后option)
+    cnt = find_row(table, "邻居网络个数")
+    check("邻居网络个数=2", cnt and cnt[2] == "2")
+    # 分组布局: 先所有信道号(29,05) 再所有option(03,03)
     n0 = find_row(table, "邻居网络[0]")
-    check("邻居网络[0]信道号+option", n0 and n0[2] == "信道号=2 option=0x29")
+    check("邻居网络[0]信道号+option", n0 and n0[2] == "信道号=41 option=0x03")
     n1 = find_row(table, "邻居网络[1]")
     check("邻居网络[1]信道号+option", n1 and n1[2] == "信道号=5 option=0x03")
-    n2 = find_row(table, "邻居网络[2]")
-    check("邻居网络[2]信道号+option", n2 and n2[2] == "信道号=3 option=0xE0")
 
 
 def find_row(table, name_contains):
