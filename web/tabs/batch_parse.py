@@ -12,7 +12,7 @@ from web.frame_extractor import extract_frames_for_protocol
 
 class BatchParseTab:
 
-    CSG_MONITOR_PREFIX = "-> 接收机 Has Get"
+    CSG_MONITOR_PREFIX = "> 接收机 Has Get"
     CSG_MONITOR_HEADER_BYTES = 15
 
     def __init__(self, protocol_selector):
@@ -324,18 +324,17 @@ class BatchParseTab:
     def _strip_csg_monitor_prefix(self, text: str) -> str:
         prefix = self.CSG_MONITOR_PREFIX
         prefix_len = len(prefix)
-        hex_only_line_re = re.compile(r'^[0-9A-Fa-f\s,\-]*$')
         out_lines = []
         for line in text.splitlines():
             pos = line.find(prefix)
             if pos == -1:
-                if hex_only_line_re.match(line):
-                    out_lines.append(line)
+                # 不含监控标记的行：直接丢弃
                 continue
             after = line[pos + prefix_len:]
             tokens = re.findall(r'[0-9A-Fa-f]{1,2}', after)
             payload_tokens = tokens[self.CSG_MONITOR_HEADER_BYTES:]
-            out_lines.append(' '.join(payload_tokens))
+            if payload_tokens:
+                out_lines.append(' '.join(payload_tokens))
         return '\n'.join(out_lines)
 
     def _get_frame_summary(self, result: List) -> str:

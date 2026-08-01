@@ -48,8 +48,10 @@ class SerialPanel:
                 )
                 ui.label("波特率:").classes("text-sm")
                 self._baud_select = ui.select(
-                    options=["1200", "2400", "4800", "9600", "19200", "38400", "57600", "115200"],
+                    options=["1200", "2400", "4800", "9600", "19200", "38400", "57600", "115200",
+                             "230400", "460800", "921600", "1000000", "2000000", "3000000"],
                     value="9600",
+                    new_value_mode="add-unique",
                 ).classes("w-28").props("dense outlined")
 
                 ui.label("校验:").classes("text-sm")

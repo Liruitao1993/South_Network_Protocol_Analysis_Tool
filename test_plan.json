@@ -94,7 +94,7 @@
     "name": "查询台区组网成功率",
     "frame_hex": "680C00000300970300E88516",
     "match_rule": "680E00880300970300E8XXXXXX16",
-    "match_mode": "HEX",
+    "match_mode": "ASCII",
     "timeout_ms": 2000,
     "send_enabled": true,
     "match_enabled": true,
