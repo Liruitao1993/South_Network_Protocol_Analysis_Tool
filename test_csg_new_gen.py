@@ -96,28 +96,85 @@ def test_data_transparent_to_module_uplink():
 
 
 def test_concurrent_meter_read_downlink():
-    """测试并发抄读端设备下行业务"""
+    """测试并发抄读端设备下行业务 (表22/表23)"""
     parser = CSGNewGenParser()
-    # 控制域 0x0011(LE: 11 00, 下行/数据传输) + 业务标识 0x02 + 版本 0x01 + 帧序号 0x0003
+    # 应用层头: 端口0x11 + 标识0x0101 + 保留0x00 + 控制域0x0011(LE,下行/数据传输)
     header = bytes.fromhex("11 01 01 00 11 00 02 01 00 03".replace(" ", ""))
-    # payload: 源地址 6B + 目的地址 6B + 保留 1B + 配置字 0x07 + 间隔 0x05 + 超时 0x0A
-    # + 报文列表长度 2B LE (后续列表长度)
-    # 列表: 报文0长度 0x0002 + 内容 AA BB + 报文1长度 0x0003 + 内容 CC DD EE
-    payload_prefix = bytes.fromhex("00 00 00 00 00 00 11 22 33 44 55 66 00 07 05 0A".replace(" ", ""))
-    msg_list = bytes.fromhex("02 00 AA BB 03 00 CC DD EE".replace(" ", ""))
+    # 表22: 源地址6 + 目的地址6 + 配置字 + 报文间间隔 + 设备超时时间 + 保留 + 列表长度2(LE)
+    # 配置字 0x70 = D4未应答重试1 / D5否认重试1 / D6~D7最大重试1
+    payload_prefix = bytes.fromhex("00 00 00 00 00 00 11 22 33 44 55 66 70 05 0A 00".replace(" ", ""))
+    # 表23: 报文条数1 + {长度2(保留4位+长度12位) + 内容Ln}
+    msg_list = bytes.fromhex("02 02 00 AA BB 03 00 CC DD EE".replace(" ", ""))
     list_len = len(msg_list)
     payload = payload_prefix + bytes([list_len & 0xFF, (list_len >> 8) & 0xFF]) + msg_list
     frame_len = len(payload)
     frame = header + bytes([frame_len & 0xFF, (frame_len >> 8) & 0xFF]) + payload
     table = parser.parse_to_table(frame)
 
-    assert find_field(table, "配置字"), "缺少配置字字段"
+    cfg = find_field(table, "配置字")
+    assert cfg, "缺少配置字字段"
+    assert "未应答重试=1" in cfg[3] and "否认重试=1" in cfg[3] and "最大重试=1" in cfg[3], f"配置字位定义错误: {cfg}"
     assert find_field(table, "报文间间隔"), "缺少报文间间隔字段"
+    assert find_field(table, "设备超时时间"), "缺少设备超时时间字段"
     assert find_field(table, "报文列表对象长度"), "缺少报文列表对象长度字段"
-
+    cnt = find_field(table, "报文条数")
+    assert cnt and cnt[2] == "2", f"报文条数应为2, 实际: {cnt}"
     msgs = find_all_fields(table, "内容")
     assert len(msgs) == 2, f"应解析出2条报文内容，实际: {len(msgs)}"
+    # 不应有剩余未解析数据
+    assert not find_field(table, "剩余数据"), f"存在未解析剩余数据: {find_field(table, '剩余数据')}"
     print("[OK] 并发抄读端设备下行测试通过")
+
+
+def test_concurrent_meter_read_uplink():
+    """测试并发抄读端设备上行业务 (表24/表23)"""
+    parser = CSGNewGenParser()
+    header = bytes.fromhex("11 01 01 00 11 80 02 01 00 07".replace(" ", ""))
+    # 表24: 源地址6 + 目的地址6 + 应答状态(保留4位+状态4位) + 保留2 + 列表长度2(LE)
+    # 应答状态=0(正常)
+    payload_prefix = bytes.fromhex("11 22 33 44 55 66 00 00 00 00 00 00 00 00 00".replace(" ", ""))
+    # 表23: 报文条数1 + 报文0(长度2 + 内容2)
+    msg_list = bytes.fromhex("01 02 00 AA BB".replace(" ", ""))
+    list_len = len(msg_list)
+    payload = payload_prefix + bytes([list_len & 0xFF, (list_len >> 8) & 0xFF]) + msg_list
+    frame_len = len(payload)
+    frame = header + bytes([frame_len & 0xFF, (frame_len >> 8) & 0xFF]) + payload
+    table = parser.parse_to_table(frame)
+
+    st = find_field(table, "应答状态")
+    assert st, "缺少应答状态字段"
+    assert "正常应答" in st[3], f"应答状态说明错误: {st}"
+    cnt = find_field(table, "报文条数")
+    assert cnt and cnt[2] == "1", f"报文条数应为1, 实际: {cnt}"
+    msgs = find_all_fields(table, "内容")
+    assert len(msgs) == 1, f"上行应解析出1条报文内容，实际: {len(msgs)}"
+    assert not find_field(table, "剩余数据"), "存在未解析剩余数据"
+    print("[OK] 并发抄读端设备上行测试通过")
+
+
+def test_concurrent_meter_read_real_frame():
+    """真实报文回归: 含2条DLT645读数据请求的并发抄读帧"""
+    parser = CSGNewGenParser()
+    frame = bytes.fromhex(
+        "19012000030000417804005B1000000000000000030045000210004111"
+        "0805000301110101000160020109003700640198900000011100682119"
+        "70051E0025000210006801110068211968110433333433661610006801"
+        "1100682119681104343433376B16A89D0543"
+        + "00" * 44 + "0B8F8D"
+    )
+    table = parser.parse_to_table(frame, parse_level="auto")
+    sid = find_field(table, "业务标识")
+    assert sid and sid[2] == "2", f"业务标识应为2, 实际: {sid}"
+    cnt = find_field(table, "报文条数")
+    assert cnt and cnt[2] == "2", f"报文条数应为2, 实际: {cnt}"
+    msgs = find_all_fields(table, "内容")
+    assert len(msgs) == 2, f"应解析出2条抄读报文，实际: {len(msgs)}"
+    msg0 = msgs[0][1]
+    assert msg0 == "68 01 11 00 68 21 19 68 11 04 33 33 34 33 66 16", f"报文0内容错误: {msg0}"
+    msg1 = msgs[1][1]
+    assert msg1 == "68 01 11 00 68 21 19 68 11 04 34 34 33 37 6B 16", f"报文1内容错误: {msg1}"
+    assert not find_field(table, "剩余数据"), "存在未解析剩余数据"
+    print("[OK] 并发抄读端设备真实报文回归测试通过")
 
 
 def test_node_restart_downlink():
@@ -350,6 +407,8 @@ def main():
     test_data_transparent_to_device_downlink()
     test_data_transparent_to_module_uplink()
     test_concurrent_meter_read_downlink()
+    test_concurrent_meter_read_uplink()
+    test_concurrent_meter_read_real_frame()
     test_node_restart_downlink()
     test_node_info_query_downlink()
     test_test_frame_loopback()

@@ -120,5 +120,80 @@ def test_sack_parsing():
     print("[OK] SACK frame parsing test PASSED")
 
 
+def test_bitloading_extension_frame():
+    """测试 Bitloading 扩展帧（SACK 扩展帧类型=3）按 Bitloading 格式解析可变区域。
+
+    帧结构：
+    - Byte 0: 0x1A = delim=2(SACK), access=1, SNID_low=1
+    - Byte 1-2: 源TEI=0x002
+    - Byte 2-3: 目的TEI=0x001
+    - Byte 4: 0x06 = snid_high=0, Bitloading帧类型=3(训练请求拒绝), 拒绝原因=0
+    - Byte 5-11: 保留
+    - Byte 12: 0x23 = 扩展帧类型=3(Bitloading), 版本=2(ISAC)
+    - Byte 13-15: FCS
+    """
+    frame_hex = "1A02100006000000000000002367F263"
+    frame_bytes = bytes.fromhex(frame_hex)
+
+    parser = CSGNewGenParser()
+    table = parser.parse_to_table(frame_bytes, parse_level="auto")
+    field_names = [row[0] for row in table]
+
+    print(f"\nFrame hex: {frame_hex}")
+    print(f"Frame length: {len(frame_bytes)} bytes")
+    print("Parsed fields:")
+    for row in table:
+        if len(row) >= 4:
+            print(f"  {row[0]}: raw={row[1]}, val={row[2]}, desc={row[3]}")
+
+    assert "源TEI" in field_names, "Bitloading扩展帧应解析源TEI"
+    assert "目的TEI" in field_names, "Bitloading扩展帧应解析目的TEI"
+    assert "Bitloading帧类型" in field_names, "应解析Bitloading帧类型"
+    assert "拒绝原因" in field_names, "训练请求拒绝帧应解析拒绝原因"
+
+    # 验证字段值
+    ext_type_row = next((r for r in table if r[0] == "扩展帧类型"), None)
+    assert ext_type_row is not None and ext_type_row[2] == "3", "扩展帧类型应为3"
+
+    bl_type_row = next((r for r in table if r[0] == "Bitloading帧类型"), None)
+    assert bl_type_row is not None and bl_type_row[2] == "3", "Bitloading帧类型应为3(训练请求拒绝)"
+
+    reason_row = next((r for r in table if r[0] == "拒绝原因"), None)
+    assert reason_row is not None and reason_row[2] == "0", "拒绝原因应为0(站点正在训练)"
+
+    # 不应出现标准SACK的"接收结果"字段
+    assert "接收结果" not in field_names, "Bitloading扩展帧不应按标准SACK解析可变区域"
+
+    print("[OK] Bitloading extension frame parsing test PASSED")
+
+
+def test_controller_extension_frames():
+    """测试扩展帧类型 1/2/保留值按原始字节展示，不崩溃。"""
+    parser = CSGNewGenParser()
+    for ext_type, expected_name in [(1, "网络搜索帧"), (2, "同步帧"), (6, "保留")]:
+        # 构造 16 字节 SACK 帧，字节 12 扩展帧类型 = ext_type
+        frame = bytearray(16)
+        frame[0] = 0x1A  # delim=2, access=1, SNID_low=1
+        frame[1] = 0x02  # 源TEI低8位
+        frame[2] = 0x10
+        frame[3] = 0x00
+        frame[4] = 0x06  # Bitloading帧类型字段(对非Bitloading无意义)
+        frame[5:12] = bytes([0] * 7)
+        frame[12] = (0x02 << 4) | (ext_type & 0x0F)  # version=2, ext_type
+        frame[13:16] = bytes([0, 0, 0])
+        frame_hex = frame.hex().upper()
+        table = parser.parse_to_table(bytes(frame), parse_level="auto")
+        field_names = [row[0] for row in table]
+        print(f"\nExt type {ext_type}: {frame_hex}")
+        assert "扩展帧类型" in field_names
+        assert "标准版本号" in field_names
+        # 不应出现标准 SACK 的"接收结果"字段
+        assert "接收结果" not in field_names, f"扩展帧类型{ext_type}不应按标准SACK解析"
+        print(f"[OK] 扩展帧类型 {ext_type} ({expected_name}) 处理正常")
+    print("[OK] Controller/reserved extension frame tests PASSED")
+
+
 if __name__ == "__main__":
     test_sack_parsing()
+    test_bitloading_extension_frame()
+    test_controller_extension_frames()

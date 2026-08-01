@@ -270,11 +270,26 @@ class CSGNewGenParser:
 
         # ── 步骤0: 检测 MPDU 帧（FC帧控制，16字节头）──
         # MPDU特征：bit3=1（接入指示）+ bits0-2=定界符类型(0~3)
+        # 注意：SACK帧(定界符类型=2)应只有16字节，超过16字节则不是MPDU
         delimiter_type = first_byte & 0x07       # bits 0-2
         access_indicator = (first_byte >> 3) & 0x01  # bit 3
-        is_mpdu = (access_indicator == 1 and delimiter_type <= 3 and frame_len >= 16)
+        # SACK帧(类型2)必须恰好16字节，其他类型至少16字节
+        if delimiter_type == 2:
+            is_mpdu = (access_indicator == 1 and frame_len == 16)
+        else:
+            is_mpdu = (access_indicator == 1 and delimiter_type <= 3 and frame_len >= 16)
 
-        if is_mpdu:
+        is_pb_only = (parse_level == "pb_only")
+        if is_pb_only:
+            # 仅物理块输入（无FC帧控制域）：PB头(4B) + MAC帧 + 保留 + PBCS(3B)
+            # 无FC无法从定界符得知帧类型，由 pb_frame_type 参数显式指定
+            self._delimiter_type = {"sof": 1, "beacon": 0, "sack": 2, "net": 3}.get(pb_frame_type, 1)
+            self._cmt_index = 4      # 默认载波映射表索引(PB 136字节)
+            self._std_version = 1    # 默认BPLC版本
+            self._pb_count = 1       # pb_only 默认单PB
+            offset, mac_data, msdu_payload = self._parse_pb_block(
+                frame_bytes, 0, table_data, frame_len)
+        elif is_mpdu:
             self._delimiter_type = delimiter_type
             offset, mpdu_table = self._parse_mpdu_frame(frame_bytes, offset)
             table_data.extend(mpdu_table)
@@ -320,154 +335,8 @@ class CSGNewGenParser:
             elif delimiter_type == 2:
                 return table_data
             else:
-                # MPDU payload = physical blocks (SOF等)
-                pb_data = frame_bytes[offset:]
-                pb_hdr_len = 4  # 默认PB头大小
-                pb_agg_flag = 0  # 默认无聚合标志
-                pb_body = b''    # 默认空PB体
-                pb_body_offset = offset
-                if pb_data and len(pb_data) >= pb_hdr_len:
-                    pb_seq = int.from_bytes(pb_data[0:2], 'little')
-                    pb_agg_flag = pb_data[2] & 0x01
-                    pb_agg_desc = "物理块中有多个MAC帧，物理块体中有级联头" if pb_agg_flag else "物理块中只有一个MAC帧，物理块体中没有级联头"
-                    table_data.append((
-                        "物理块头",
-                        ' '.join(f'{b:02X}' for b in pb_data[0:pb_hdr_len]),
-                        f"序列号:{pb_seq}, 聚合标志:{pb_agg_flag}",
-                        f"物理块头: {pb_agg_desc}",
-                        offset, offset + pb_hdr_len - 1
-                    ))
-                    table_data.append((
-                        "  序列号",
-                        ' '.join(f'{b:02X}' for b in pb_data[0:2]),
-                        str(pb_seq),
-                        "MPDU载荷中物理块的序号",
-                        offset, offset + 1
-                    ))
-                    table_data.append((
-                        "  聚合标志",
-                        f"0b{pb_agg_flag}",
-                        str(pb_agg_flag),
-                        pb_agg_desc,
-                        offset + 2, offset + 2
-                    ))
-                    # 保留字段
-                    pb_reserved = ((pb_data[2] >> 1) & 0x7F) | (pb_data[3] << 7)
-                    table_data.append((
-                        "  保留",
-                        f"0x{pb_reserved:04X}",
-                        str(pb_reserved),
-                        "保留",
-                        offset + 2, offset + 3
-                    ))
-
-                    # 物理块体（PB Body）— 根据载波映射表索引计算物理块大小
-                    pb_total_size = self._get_pb_size(
-                        getattr(self, '_cmt_index', 4),
-                        getattr(self, '_std_version', 1))
-                    pb_body_size = self._get_pb_body_size(pb_total_size)
-                    pb_body = pb_data[pb_hdr_len:pb_hdr_len + pb_body_size] if len(pb_data) > pb_hdr_len + pb_body_size else pb_data[pb_hdr_len:]
-                    pb_body_offset = offset + pb_hdr_len
-                else:
-                    pb_body = pb_data
-                    pb_body_offset = offset
-
-                # 显示并解析物理块体
-                if pb_body:
-                    table_data.append((
-                        "物理块体",
-                        ' '.join(f'{b:02X}' for b in pb_body[:30]) + ("..." if len(pb_body) > 30 else ""),
-                        f"{len(pb_body)}字节",
-                        "PB中承载MAC帧数据",
-                        pb_body_offset, frame_len - 1
-                    ))
-
-                    # 如果聚合标志=1，先解析级联头，再解析MAC帧
-                    if pb_agg_flag:
-                        # 聚合帧：级联头 + MAC帧
-                        # 级联头格式（表48）: 级联数据块长度(12bit) + 级联块起始标识(1bit) + 级联块结束标识(1bit) + 保留(2bit)
-                        cascade_offset = 0
-                        cascade_idx = 0
-                        while cascade_offset + 2 <= len(pb_body):
-                            cascade_hdr = pb_body[cascade_offset:cascade_offset + 2]
-                            cascade_len = int.from_bytes(cascade_hdr, 'little') & 0x0FFF
-                            start_flag = (cascade_hdr[1] >> 4) & 0x01
-                            end_flag = (cascade_hdr[1] >> 5) & 0x01
-                            table_data.append((
-                                f"  级联头({cascade_idx})",
-                                ' '.join(f'{b:02X}' for b in cascade_hdr),
-                                f"长度:{cascade_len}, 起始:{start_flag}, 结束:{end_flag}",
-                                f"级联数据块长度:{cascade_len}字节",
-                                pb_body_offset + cascade_offset, pb_body_offset + cascade_offset + 1
-                            ))
-                            cascade_offset += 2
-                            if cascade_offset + cascade_len <= len(pb_body):
-                                mac_data = pb_body[cascade_offset:cascade_offset + cascade_len]
-                                _, mac_table = self._parse_mac_frame(mac_data, base_offset=pb_body_offset + cascade_offset)
-                                table_data.extend(mac_table)
-                                cascade_offset += cascade_len
-                                cascade_idx += 1
-                                if end_flag:
-                                    break
-                            else:
-                                break
-                        # 更新剩余数据
-                        if cascade_offset < len(pb_body):
-                            remaining = pb_body[cascade_offset:]
-                            table_data.append((
-                                "  级联后剩余数据",
-                                ' '.join(f'{b:02X}' for b in remaining[:30]) + ("..." if len(remaining) > 30 else ""),
-                                f"{len(remaining)}字节",
-                                "级联帧解析后的剩余数据",
-                                pb_body_offset + cascade_offset, pb_body_offset + len(pb_body) - 1
-                            ))
-                    else:
-                        # SOF帧：解析 MAC 帧 → MSDU
-                        mac_data = pb_body
-                        mac_end, mac_table = self._parse_mac_frame(mac_data, base_offset=pb_body_offset)
-                        table_data.extend(mac_table)
-                        # ── 物理块检查和填充 ──
-                        pb_check_start = pb_body_offset + len(pb_body)
-                        pb_check_end = pb_check_start + 1
-                        if pb_check_end + 3 <= frame_len:
-                            pb_check_data = frame_bytes[pb_check_end:pb_check_end + 3]
-                            table_data.append((
-                                "物理块检查序列",
-                                ' '.join(f'{b:02X}' for b in pb_check_data),
-                                "3字节",
-                                "物理块CRC校验（保留1字节+检查序列3字节）",
-                                pb_check_end, pb_check_end + 2
-                            ))
-                        padding_start = mac_end - pb_body_offset
-                        if padding_start < len(pb_body):
-                            padding = pb_body[padding_start:]
-                            desc = f"物理块填充({len(padding)}字节，{'全0x00' if all(b==0 for b in padding) else '含非零值'})"
-                            table_data.append((
-                                "物理块填充",
-                                ' '.join(f'{b:02X}' for b in padding[:20]) + ("..." if len(padding) > 20 else ""),
-                                f"{len(padding)}字节",
-                                desc,
-                                pb_body_offset + padding_start, pb_body_offset + len(pb_body) - 1
-                            ))
-                        actual_mac_len = mac_end - pb_body_offset
-                        mac_data = pb_body[:actual_mac_len]
-    
-                # 提取MSDU
-                mac_hdr_len = 12
-                if mac_data and (mac_data[0] & 0x01) == 0:
-                    mac_hdr_len = 32
-                if getattr(self, '_delimiter_type', 1) == 0:
-                    msdu_payload = pb_body  # 信标帧直接用PB体
-                elif mac_data is not None and len(mac_data) >= 4:
-                    msdu_len = int.from_bytes(mac_data[2:4], 'little')
-                    msdu_payload = mac_data[mac_hdr_len:mac_hdr_len + msdu_len]
-                elif mac_data is not None:
-                    msdu_payload = mac_data[mac_hdr_len:]
-                else:
-                    # MPDU误检回落：FC后无有效PB数据，当作原始数据继续解析
-                    msdu_payload = frame_bytes
-                # 更新 offset 到 MSDU 起始位置（FC + PB头 + MAC头）
-                offset += pb_hdr_len + mac_hdr_len
+                offset, mac_data, msdu_payload = self._parse_pb_block(
+                    frame_bytes, offset, table_data, frame_len)
         else:
             # ── 步骤1: 先检测直接应用层报文（优先于MAC帧检测）──
             # 端口号(0x11/0x13) + 标识符(0x0101) 的组合足够特异，可避免与MAC帧误判
@@ -729,6 +598,166 @@ class CSGNewGenParser:
         """物理块体大小 = 物理块总大小 - PB头(4) - 保留(1) - PB检查序列(3)"""
         return pb_total - 4 - 1 - 3
 
+    def _parse_pb_block(self, frame_bytes: bytes, offset: int,
+                        table_data: list, frame_len: int):
+        """解析物理块(PB)：PB头(4B) + PB体(MAC帧) + 保留 + PBCS(3B)
+
+        供 fc_pb 模式(完整MPDU，offset=FC末尾16) 与 pb_only 模式(仅PB，offset=0) 复用。
+        物理块头为 4 字节（第4部分表47）：序号(16b)+聚合标志(1b)+保留(15b)。
+        支持多物理块重组：MAC帧可跨多个PB，需拼接所有PB体为完整MAC帧后再解析MSDU。
+        返回 (new_offset, mac_data, msdu_payload)。
+        """
+        pb_hdr_len = 4
+        pb_count = getattr(self, '_pb_count', 1)
+        if pb_count < 1:
+            pb_count = 1
+        pb_total_size = self._get_pb_size(
+            getattr(self, '_cmt_index', 4),
+            getattr(self, '_std_version', 1))
+        pb_body_size = self._get_pb_body_size(pb_total_size)
+
+        # 遍历所有PB，输出PB头/PBCS行，拼接所有PB体为 mac_concat
+        mac_concat = b''
+        pb_body_offset = offset + pb_hdr_len  # 第一个PB体起始（MAC帧头所在）
+        pb_agg_flag = 0
+        multi = pb_count > 1
+        for i in range(pb_count):
+            pb_off = offset + i * pb_total_size
+            pb_data = frame_bytes[pb_off:pb_off + pb_total_size]
+            if len(pb_data) < pb_hdr_len:
+                break
+            pb_seq = int.from_bytes(pb_data[0:2], 'little')
+            if i == 0:
+                pb_agg_flag = pb_data[2] & 0x01
+            pb_agg_desc = "物理块中有多个MAC帧，物理块体中有级联头" if pb_agg_flag else "物理块中只有一个MAC帧，物理块体中没有级联头"
+            tag = f"[{i}]" if multi else ""
+            table_data.append((
+                f"物理块头{tag}",
+                ' '.join(f'{b:02X}' for b in pb_data[0:pb_hdr_len]),
+                f"序列号:{pb_seq}, 聚合标志:{pb_agg_flag}",
+                f"物理块头{tag}: {pb_agg_desc}",
+                pb_off, pb_off + pb_hdr_len - 1
+            ))
+            table_data.append((
+                f"  序列号{tag}",
+                ' '.join(f'{b:02X}' for b in pb_data[0:2]),
+                str(pb_seq),
+                f"MPDU载荷中物理块{tag}的序号",
+                pb_off, pb_off + 1
+            ))
+            table_data.append((
+                f"  聚合标志{tag}",
+                f"0b{pb_agg_flag}",
+                str(pb_agg_flag),
+                pb_agg_desc,
+                pb_off + 2, pb_off + 2
+            ))
+            pb_reserved = ((pb_data[2] >> 1) & 0x7F) | (pb_data[3] << 7)
+            table_data.append((
+                f"  保留{tag}",
+                f"0x{pb_reserved:04X}",
+                str(pb_reserved),
+                "保留",
+                pb_off + 2, pb_off + 3
+            ))
+            # PB体（不足补0）
+            body = pb_data[pb_hdr_len:pb_hdr_len + pb_body_size]
+            if len(body) < pb_body_size:
+                body = body + b'\x00' * (pb_body_size - len(body))
+            mac_concat += body
+            # PBCS: 保留1字节 + 检查序列3字节
+            pbcs_off = pb_off + pb_hdr_len + pb_body_size
+            if pbcs_off + 4 <= frame_len:
+                pbcs_data = frame_bytes[pbcs_off + 1:pbcs_off + 4]
+                table_data.append((
+                    f"物理块检查序列{tag}",
+                    ' '.join(f'{b:02X}' for b in pbcs_data),
+                    "3字节",
+                    f"物理块{tag}CRC校验（保留1字节+检查序列3字节）",
+                    pbcs_off + 1, pbcs_off + 3
+                ))
+
+        mac_data = None
+        if mac_concat:
+            table_data.append((
+                "物理块体",
+                ' '.join(f'{b:02X}' for b in mac_concat[:30]) + ("..." if len(mac_concat) > 30 else ""),
+                f"{len(mac_concat)}字节",
+                f"PB体承载MAC帧数据{'(多PB重组)' if multi else ''}",
+                pb_body_offset, pb_body_offset + len(mac_concat) - 1
+            ))
+            if pb_agg_flag:
+                # 聚合帧：级联头 + MAC帧
+                cascade_offset = 0
+                cascade_idx = 0
+                while cascade_offset + 2 <= len(mac_concat):
+                    cascade_hdr = mac_concat[cascade_offset:cascade_offset + 2]
+                    cascade_len = int.from_bytes(cascade_hdr, 'little') & 0x0FFF
+                    start_flag = (cascade_hdr[1] >> 4) & 0x01
+                    end_flag = (cascade_hdr[1] >> 5) & 0x01
+                    table_data.append((
+                        f"  级联头({cascade_idx})",
+                        ' '.join(f'{b:02X}' for b in cascade_hdr),
+                        f"长度:{cascade_len}, 起始:{start_flag}, 结束:{end_flag}",
+                        f"级联数据块长度:{cascade_len}字节",
+                        pb_body_offset + cascade_offset, pb_body_offset + cascade_offset + 1
+                    ))
+                    cascade_offset += 2
+                    if cascade_offset + cascade_len <= len(mac_concat):
+                        mac_seg = mac_concat[cascade_offset:cascade_offset + cascade_len]
+                        _, mac_table = self._parse_mac_frame(mac_seg, base_offset=pb_body_offset + cascade_offset)
+                        table_data.extend(mac_table)
+                        cascade_offset += cascade_len
+                        cascade_idx += 1
+                        if end_flag:
+                            break
+                    else:
+                        break
+                if cascade_offset < len(mac_concat):
+                    remaining = mac_concat[cascade_offset:]
+                    table_data.append((
+                        "  级联后剩余数据",
+                        ' '.join(f'{b:02X}' for b in remaining[:30]) + ("..." if len(remaining) > 30 else ""),
+                        f"{len(remaining)}字节",
+                        "级联帧解析后的剩余数据",
+                        pb_body_offset + cascade_offset, pb_body_offset + len(mac_concat) - 1
+                    ))
+            else:
+                # 单MAC帧（可能跨多PB）
+                mac_data = mac_concat
+                mac_end, mac_table = self._parse_mac_frame(mac_data, base_offset=pb_body_offset)
+                table_data.extend(mac_table)
+                # 填充（MAC帧末尾在最后一个PB体内的位置）
+                padding_start = mac_end - pb_body_offset
+                if padding_start < len(mac_concat):
+                    padding = mac_concat[padding_start:]
+                    desc = f"物理块填充({len(padding)}字节，{'全0x00' if all(b==0 for b in padding) else '含非零值'})"
+                    table_data.append((
+                        "物理块填充",
+                        ' '.join(f'{b:02X}' for b in padding[:20]) + ("..." if len(padding) > 20 else ""),
+                        f"{len(padding)}字节",
+                        desc,
+                        pb_body_offset + padding_start, pb_body_offset + len(mac_concat) - 1
+                    ))
+                actual_mac_len = mac_end - pb_body_offset
+                mac_data = mac_concat[:actual_mac_len]
+
+        mac_hdr_len = 12
+        if mac_data and (mac_data[0] & 0x01) == 0:
+            mac_hdr_len = 32
+        if getattr(self, '_delimiter_type', 1) == 0:
+            msdu_payload = mac_concat
+        elif mac_data is not None and len(mac_data) >= 4:
+            msdu_len = int.from_bytes(mac_data[2:4], 'little')
+            msdu_payload = mac_data[mac_hdr_len:mac_hdr_len + msdu_len]
+        elif mac_data is not None:
+            msdu_payload = mac_data[mac_hdr_len:]
+        else:
+            msdu_payload = frame_bytes
+        offset += pb_hdr_len + mac_hdr_len
+        return offset, mac_data, msdu_payload
+
+
     def _parse_mpdu_frame(self, frame_bytes: bytes, base_offset: int = 0) -> Tuple[int, list]:
         """解析 MPDU 帧控制（FC）头部，16字节"""
         table = []
@@ -770,6 +799,10 @@ class CSGNewGenParser:
         # 提前读取标准版本号，供可变区域解析载波映射表索引时使用
         self._std_version = (frame_bytes[base_offset + 12] >> 4) & 0x0F
 
+        # 对于SACK帧，提前读取扩展帧类型以确定可变区域格式
+        sack_ext_type = None
+        if delimiter_type == 2:
+            sack_ext_type = frame_bytes[base_offset + 12] & 0x0F
 
         # ── 字节1-11: 可变区域（取决于定界符类型）──
         var_start = offset
@@ -794,7 +827,37 @@ class CSGNewGenParser:
         elif delimiter_type == 0:  # 信标帧
             offset = self._parse_mpdu_beacon(frame_bytes, offset, table)
         elif delimiter_type == 2:  # 选择确认帧(SACK)
-            offset = self._parse_mpdu_sack(frame_bytes, offset, table)
+            # 根据扩展帧类型选择可变区域解析方式
+            # 表 33: 0=标准SACK, 1=网络搜索帧(抄控器), 2=同步帧(抄控器), 3=Bitloading扩展帧
+            if sack_ext_type == 0:
+                # 标准选择确认帧
+                offset = self._parse_mpdu_sack(frame_bytes, offset, table)
+            elif sack_ext_type == 3:
+                # Bitloading扩展帧: 可变区域按Bitloading扩展帧格式解析
+                offset = self._parse_mpdu_sack_bitloading(frame_bytes, offset, table)
+            elif sack_ext_type in (1, 2):
+                # 抄控器帧(网络搜索帧/同步帧): 协议文档未提供可变区域详细字段表，按原始字节展示
+                raw_var = ' '.join(f'{b:02X}' for b in frame_bytes[offset:offset + 11])
+                ext_name = self.SACK_EXT_TYPE_MAP.get(sack_ext_type, f"保留({sack_ext_type})")
+                table.append((
+                    f"可变区域({ext_name})",
+                    raw_var,
+                    "11字节",
+                    f"抄控器帧可变区域，协议未提供详细字段定义(扩展帧类型={sack_ext_type})",
+                    offset, offset + 10
+                ))
+                offset = base_offset + 12
+            else:
+                # 保留值: 协议未定义，按原始字节展示，避免误解析为标准SACK
+                raw_var = ' '.join(f'{b:02X}' for b in frame_bytes[offset:offset + 11])
+                table.append((
+                    f"可变区域(保留={sack_ext_type})",
+                    raw_var,
+                    "11字节",
+                    f"扩展帧类型为保留值({sack_ext_type})，按原始字节展示",
+                    offset, offset + 10
+                ))
+                offset = base_offset + 12
         else:  # 网间协调帧(0b011)等保留
             raw_var = ' '.join(f'{b:02X}' for b in frame_bytes[offset:offset+12])
             table.append(("可变区域", raw_var[:80] + "..." if len(raw_var) > 80 else raw_var, "12字节",
@@ -905,6 +968,7 @@ class CSGNewGenParser:
         cmt_index = (b7 >> 4) & 0x0F
         table.append(("物理块个数", f"0x{pb_count:X}", str(pb_count),
                      f"{pb_count}个物理块", offset + 6, offset + 6))
+        self._pb_count = pb_count
         pb_size = self._get_pb_size(cmt_index, self._std_version)
         table.append(("载波映射表索引", f"0x{cmt_index:X}", str(cmt_index),
                      f"载波映射表索引: {cmt_index}, PB大小: {pb_size}字节", offset + 6, offset + 6))
@@ -951,16 +1015,30 @@ class CSGNewGenParser:
             # OFDMA帧时 byte4 bit1-7 为 OFDMA专用字段（在下方OFDMA块解析）
             pass
         else:
-            # 非OFDMA: bit1=训练帧标识, bit2-5=PB数, bit6-7=流数
+            # 非OFDMA: bit1=训练帧标识
             training = (b4 >> 1) & 0x01
-            pb_count = (b4 >> 2) & 0x0F
-            streams = (b4 >> 6) & 0x03
             table.append(("训练帧标识", f"0b{training}", str(training),
                          "训练帧" if training else "数据帧", offset + 3, offset + 3))
-            table.append(("物理块个数", f"0x{pb_count:X}", str(pb_count),
-                         f"{pb_count}个PB", offset + 3, offset + 3))
-            table.append(("流数", f"0x{streams:X}", str(streams),
-                         f"{streams + 1}流", offset + 3, offset + 3))
+            if training:
+                # 训练帧(表24/25): byte4 bit2-7 = PL符号数(6b)
+                pl_sym_cfg = (b4 >> 2) & 0x3F
+                train_type_peek = frame_bytes[offset + 4] & 0x01
+                if train_type_peek:
+                    pl_desc = f"Bitloading训练帧, 实际PL符号数: {2 * pl_sym_cfg + 1}"
+                else:
+                    pl_desc = "MIMO训练帧固定填0"
+                table.append(("PL符号数", f"0x{pl_sym_cfg:02X}", str(pl_sym_cfg),
+                             pl_desc, offset + 3, offset + 3))
+                self._pb_count = 0  # 训练帧不携带物理块
+            else:
+                # 数据帧(表23): bit2-5=PB数, bit6-7=流数
+                pb_count = (b4 >> 2) & 0x0F
+                streams = (b4 >> 6) & 0x03
+                table.append(("物理块个数", f"0x{pb_count:X}", str(pb_count),
+                             f"{pb_count}个PB", offset + 3, offset + 3))
+                self._pb_count = pb_count
+                table.append(("流数", f"0x{streams:X}", str(streams),
+                             f"{streams + 1}流", offset + 3, offset + 3))
 
         # 存储OFDMA相关状态供后续eFC解析使用
         self._ofdma_frame_type = -1  # -1=非OFDMA
@@ -1035,7 +1113,47 @@ class CSGNewGenParser:
             frame_len_pb = b8 | ((b9 & 0x0F) << 8)
             table.append(("帧长", f"0x{frame_len_pb:03X}", f"{frame_len_pb * 10}μs",
                          f"占用信道时长", offset + 7, offset + 8))
-        # 训练帧(multi_site==0 && training==1)的byte4-8已在前面解析
+        else:
+            # ── 训练帧(表24 MIMO训练帧 / 表25 Bitloading训练帧)：byte5-9 ──
+            b5 = frame_bytes[offset + 4]
+            train_type = b5 & 0x01
+            tf_sym_cfg = (b5 >> 1) & 0x07
+            tf_symbols = (tf_sym_cfg + 1) * 2
+            subc_group_cfg = (b5 >> 4) & 0x03
+            streams = (b5 >> 6) & 0x03
+            table.append(("训练帧类型", f"0b{train_type}", str(train_type),
+                         "Bitloading训练帧" if train_type else "MIMO训练帧",
+                         offset + 4, offset + 4))
+            table.append(("TF符号数", f"0x{tf_sym_cfg:X}", str(tf_symbols),
+                         f"实际TF符号数: {tf_symbols}", offset + 4, offset + 4))
+            if train_type:
+                table.append(("子载波分组大小", f"0b{subc_group_cfg:02b}", str(subc_group_cfg),
+                             f"{1 << subc_group_cfg}个子载波为一组", offset + 4, offset + 4))
+            else:
+                table.append(("子载波分组大小", f"0b{subc_group_cfg:02b}", str(subc_group_cfg),
+                             "MIMO训练帧该字段无效(默认填0)", offset + 4, offset + 4))
+            table.append(("流数", f"0x{streams:X}", str(streams),
+                         f"{streams + 1}流", offset + 4, offset + 4))
+
+            # byte6: bit0-2=频段标识, bit3=RU信噪比估计标识, bit4-7保留
+            b6 = frame_bytes[offset + 5]
+            band = b6 & 0x07
+            ru_snr = (b6 >> 3) & 0x01
+            band_name = "PL频段标识" if train_type else "TF频段标识"
+            table.append((band_name, f"0x{band:X}", str(band),
+                         f"频段{band}", offset + 5, offset + 5))
+            ru_desc = "接收端估计频段内各RU平均信噪比" if ru_snr else "不估计RU信噪比"
+            if not train_type:
+                ru_desc += "（MIMO训练帧固定为1）"
+            table.append(("RU信噪比估计标识", f"0b{ru_snr}", str(ru_snr),
+                         ru_desc, offset + 5, offset + 5))
+
+            # 帧长(12b): byte8[0:7] + byte9[0:3]
+            b8 = frame_bytes[offset + 7]
+            b9 = frame_bytes[offset + 8]
+            frame_len_pb = b8 | ((b9 & 0x0F) << 8)
+            table.append(("帧长", f"0x{frame_len_pb:03X}", f"{frame_len_pb * 10}μs",
+                         f"占用信道时长", offset + 7, offset + 8))
 
         return offset + 11
 
@@ -1553,6 +1671,119 @@ class CSGNewGenParser:
 
 
         return offset + 11  # 字节1-11共11字节(字节12由公共代码处理)
+
+    def _parse_mpdu_sack_bitloading(self, frame_bytes: bytes, offset: int, table: list) -> int:
+        """解析 Bitloading 扩展帧可变区域 (SACK 定界符类型，扩展帧类型=3)
+
+        帧结构: 字节1-11 为可变区域，定义见《数据链路层通信协议》表34。
+        字节12=扩展帧类型(3)+标准版本号，由公共代码处理。
+        """
+        base = offset  # 字节1起始偏移
+
+        # 字节1-2: 源TEI (12bit: 字节1全部 + 字节2低4bit)
+        # 字节2-3: 目的TEI (12bit: 字节2高4bit + 字节3全部)
+        src_tei = frame_bytes[offset] | ((frame_bytes[offset + 1] & 0x0F) << 8)
+        dst_tei = ((frame_bytes[offset + 1] >> 4) & 0x0F) | (frame_bytes[offset + 2] << 4)
+        table.append(("源TEI",
+                      ' '.join(f'{b:02X}' for b in frame_bytes[offset:offset + 2]),
+                      f"0x{src_tei:03X}",
+                      f"Bitloading扩展帧源终端TEI: {src_tei}",
+                      offset, offset + 1))
+        table.append(("目的TEI",
+                      ' '.join(f'{b:02X}' for b in frame_bytes[offset + 1:offset + 3]),
+                      f"0x{dst_tei:03X}",
+                      f"Bitloading扩展帧目的终端TEI: {dst_tei}",
+                      offset + 1, offset + 2))
+        offset += 3
+
+        # 字节4: 短网络标识高位(1bit) + Bitloading帧类型(3bit) + 可变区域高4bit
+        b4 = frame_bytes[offset]
+        snid_high = b4 & 0x01
+        bl_frame_type = (b4 >> 1) & 0x07
+        bl_type_names = {
+            0: "训练指示",
+            1: "训练指示拒绝",
+            2: "训练请求",
+            3: "训练请求拒绝",
+            4: "训练取消请求",
+            5: "训练取消确认",
+        }
+        bl_type_name = bl_type_names.get(bl_frame_type, f"保留({bl_frame_type})")
+        table.append(("短网络标识高位",
+                      f"0b{snid_high}",
+                      str(snid_high),
+                      "与MPDU帧控制固定字段的短网络标识低位共同构成5bit SNID",
+                      offset, offset))
+        table.append(("Bitloading帧类型",
+                      f"0x{bl_frame_type:X}",
+                      str(bl_frame_type),
+                      f"Bitloading帧类型: {bl_type_name}",
+                      offset, offset))
+        offset += 1
+
+        # 字节4高4bit + 字节5-11: 60bit 可变区域，根据Bitloading帧类型解析
+        var_data = frame_bytes[offset - 1:offset + 7]  # 字节4-11 (8字节)
+        # 取60bit有效数据: 字节4高4bit + 字节5-11
+        var_60 = ((var_data[0] >> 4) & 0x0F) | (int.from_bytes(var_data[1:8], 'big') << 4)
+        table.append(("Bitloading可变区域",
+                      ' '.join(f'{b:02X}' for b in var_data),
+                      f"0x{var_60:015X}",
+                      f"{bl_type_name}可变区域(60bit)",
+                      offset - 1, offset + 6))
+
+        # 根据Bitloading帧类型解析子字段
+        if bl_frame_type == 0:
+            # 训练指示: 训练控制帧类型固定填0，其余保留
+            ctrl_type = (b4 >> 1) & 0x07
+            table.append(("训练控制帧类型",
+                          f"0x{ctrl_type:X}",
+                          str(ctrl_type),
+                          "0: 发端站点主动启动训练",
+                          offset - 1, offset - 1))
+        elif bl_frame_type == 1:
+            # 训练指示拒绝: 拒绝原因
+            reject_reason = (b4 >> 4) & 0x0F
+            reason_names = {1: "站点正在训练", 2: "训练站点已满"}
+            reason_name = reason_names.get(reject_reason, f"保留({reject_reason})")
+            table.append(("拒绝原因",
+                          f"0x{reject_reason:X}",
+                          str(reject_reason),
+                          f"训练指示拒绝原因: {reason_name}",
+                          offset - 1, offset - 1))
+        elif bl_frame_type == 2:
+            # 训练请求: 流数 + 子载波分组大小
+            stream_count = (b4 >> 4) & 0x01
+            group_size = (b4 >> 5) & 0x03
+            group_names = {0: "1个子载波一组", 1: "2个子载波一组", 2: "4个子载波一组", 3: "8个子载波一组"}
+            table.append(("流数",
+                          f"0x{stream_count:X}",
+                          str(stream_count),
+                          f"训练流数: {'双流' if stream_count else '单流'}",
+                          offset - 1, offset - 1))
+            table.append(("子载波分组大小",
+                          f"0x{group_size:X}",
+                          str(group_size),
+                          f"子载波分组: {group_names.get(group_size, f'保留({group_size})')}",
+                          offset - 1, offset - 1))
+        elif bl_frame_type == 3:
+            # 训练请求拒绝: 拒绝原因
+            reject_reason = (b4 >> 4) & 0x0F
+            reason_names = {0: "站点正在训练", 1: "训练站点已满"}
+            reason_name = reason_names.get(reject_reason, f"保留({reject_reason})")
+            table.append(("拒绝原因",
+                          f"0x{reject_reason:X}",
+                          str(reject_reason),
+                          f"训练请求拒绝原因: {reason_name}",
+                          offset - 1, offset - 1))
+        elif bl_frame_type == 4:
+            # 训练取消请求: 无附加字段
+            pass
+        elif bl_frame_type == 5:
+            # 训练取消确认: 无附加字段
+            pass
+
+        offset += 7  # 字节5-11共7字节
+        return offset  # 返回字节12起始位置
 
     def _parse_mac_frame(self, frame_bytes: bytes, base_offset: int = 0) -> Tuple[int, list]:
         """解析 MAC 帧头
@@ -4070,17 +4301,17 @@ class CSGNewGenParser:
                     base_offset + offset, base_offset + offset
                 ))
                 offset += 1
-        else:  # 上行
-            if offset < len(payload):
-                reserved = payload[offset]
+        else:  # 上行 - 保留2字节(表26: 站点间通信/数据透传 上行报文)
+            if offset + 2 <= len(payload):
+                reserved = self._uint16_le(payload, offset)
                 table.append((
                     "保留",
-                    f"0x{reserved:02X}",
-                    str(reserved),
-                    "保留位默认填0",
-                    base_offset + offset, base_offset + offset
+                    ' '.join(f'{b:02X}' for b in payload[offset:offset + 2]),
+                    f"0x{reserved:04X}",
+                    "保留位默认填0（2字节）",
+                    base_offset + offset, base_offset + offset + 1
                 ))
-                offset += 1
+                offset += 2
 
         if offset + 2 <= len(payload):
             data_len = self._uint16_le(payload, offset)
@@ -4393,23 +4624,12 @@ class CSGNewGenParser:
             ))
             offset += 6
 
-        if offset < len(payload):
-            reserved = payload[offset]
-            table.append((
-                "保留",
-                f"0x{reserved:02X}",
-                str(reserved),
-                "保留位默认填0",
-                base_offset + offset, base_offset + offset
-            ))
-            offset += 1
-
-        if direction == 0:  # 下行
+        if direction == 0:  # 下行 (表22: 源/目的地址后直接为配置字)
             if offset < len(payload):
                 cfg = payload[offset]
-                no_ack_retry = cfg & 0x01
-                nak_retry = (cfg >> 1) & 0x01
-                max_retry = (cfg >> 2) & 0x03
+                no_ack_retry = (cfg >> 4) & 0x01
+                nak_retry = (cfg >> 5) & 0x01
+                max_retry = (cfg >> 6) & 0x03
                 table.append((
                     "配置字",
                     f"0x{cfg:02X}",
@@ -4438,7 +4658,17 @@ class CSGNewGenParser:
                     base_offset + offset, base_offset + offset
                 ))
                 offset += 1
-        else:  # 上行
+            if offset < len(payload):
+                reserved = payload[offset]
+                table.append((
+                    "保留",
+                    f"0x{reserved:02X}",
+                    str(reserved),
+                    "保留位默认填0",
+                    base_offset + offset, base_offset + offset
+                ))
+                offset += 1
+        else:  # 上行 (表24: 源/目的地址后为应答状态+保留2字节)
             if offset < len(payload):
                 status = payload[offset] & 0x0F
                 table.append((
@@ -4449,6 +4679,16 @@ class CSGNewGenParser:
                     base_offset + offset, base_offset + offset
                 ))
                 offset += 1
+            if offset + 2 <= len(payload):
+                reserved = self._uint16_le(payload, offset)
+                table.append((
+                    "保留",
+                    ' '.join(f'{b:02X}' for b in payload[offset:offset + 2]),
+                    f"0x{reserved:04X}",
+                    "保留位默认填0（2字节）",
+                    base_offset + offset, base_offset + offset + 1
+                ))
+                offset += 2
 
         if offset + 2 <= len(payload):
             list_len = self._uint16_le(payload, offset)
@@ -4464,30 +4704,40 @@ class CSGNewGenParser:
             list_end = offset + list_len
             if list_end > len(payload):
                 list_end = len(payload)
-            msg_idx = 0
-            while offset + 2 <= list_end:
-                item_len = self._uint16_le(payload, offset)
+            # 报文条数 (表23第一字节)
+            if offset < list_end:
+                msg_count = payload[offset]
                 table.append((
-                    f"  报文{msg_idx}长度",
-                    ' '.join(f'{b:02X}' for b in payload[offset:offset + 2]),
-                    str(item_len),
-                    f"第{msg_idx}条报文长度",
-                    base_offset + offset, base_offset + offset + 1
+                    "报文条数",
+                    f"0x{msg_count:02X}",
+                    str(msg_count),
+                    f"共{msg_count}条抄读报文",
+                    base_offset + offset, base_offset + offset
                 ))
-                offset += 2
-                if item_len > 0 and offset + item_len <= list_end:
-                    item_data = payload[offset:offset + item_len]
+                offset += 1
+                for msg_idx in range(min(msg_count, 32)):  # 安全上限32
+                    if offset + 2 > list_end:
+                        break
+                    raw_len = self._uint16_le(payload, offset)
+                    item_len = raw_len & 0x0FFF  # D15~D12保留, D11~D0长度
                     table.append((
-                        f"  报文{msg_idx}内容",
-                        ' '.join(f'{b:02X}' for b in item_data[:30]) + ("..." if item_len > 30 else ""),
-                        f"{item_len}字节",
-                        f"第{msg_idx}条抄读报文",
-                        base_offset + offset, base_offset + offset + item_len - 1
+                        f"  报文{msg_idx}长度",
+                        ' '.join(f'{b:02X}' for b in payload[offset:offset + 2]),
+                        str(item_len),
+                        f"第{msg_idx}条报文长度(保留4位+长度12位)",
+                        base_offset + offset, base_offset + offset + 1
                     ))
-                    offset += item_len
-                msg_idx += 1
-                if msg_idx > 20:  # 安全上限
-                    break
+                    offset += 2
+                    if item_len > 0 and offset + item_len <= list_end:
+                        item_data = payload[offset:offset + item_len]
+                        table.append((
+                            f"  报文{msg_idx}内容",
+                            ' '.join(f'{b:02X}' for b in item_data[:30]) + ("..." if item_len > 30 else ""),
+                            f"{item_len}字节",
+                            f"第{msg_idx}条抄读报文",
+                            base_offset + offset, base_offset + offset + item_len - 1
+                        ))
+                        offset += item_len
 
         if offset < len(payload):
             remaining = payload[offset:]
@@ -4517,27 +4767,41 @@ class CSGNewGenParser:
             ))
             offset += 6
 
-        if offset < len(payload):
-            timeout = payload[offset]
-            table.append((
-                "设备超时时间",
-                f"0x{timeout:02X}",
-                str(timeout),
-                f"{timeout * 100}毫秒" if timeout else "使用默认超时时间",
-                base_offset + offset, base_offset + offset
-            ))
-            offset += 1
+        # offset 12-13：上行(表26)为 保留(2)；下行含 设备超时时间(1)+保留(1)
+        # 传输方向位 direction 来自应用层控制域 D15（0=下行, 1=上行）
+        if direction == 1:  # 上行(STA->CCO) - 表26 站点间通信业务上行报文
+            if offset + 2 <= len(payload):
+                reserved = self._uint16_le(payload, offset)
+                table.append((
+                    "保留",
+                    ' '.join(f'{b:02X}' for b in payload[offset:offset + 2]),
+                    f"0x{reserved:04X}",
+                    "保留位默认填0（2字节）",
+                    base_offset + offset, base_offset + offset + 1
+                ))
+                offset += 2
+        else:  # 下行(CCO->STA) - 含设备超时时间
+            if offset < len(payload):
+                timeout = payload[offset]
+                table.append((
+                    "设备超时时间",
+                    f"0x{timeout:02X}",
+                    str(timeout),
+                    f"{timeout * 100}毫秒" if timeout else "使用默认超时时间",
+                    base_offset + offset, base_offset + offset
+                ))
+                offset += 1
 
-        if offset < len(payload):
-            reserved = payload[offset]
-            table.append((
-                "保留",
-                f"0x{reserved:02X}",
-                str(reserved),
-                "保留位默认填0",
-                base_offset + offset, base_offset + offset
-            ))
-            offset += 1
+            if offset < len(payload):
+                reserved = payload[offset]
+                table.append((
+                    "保留",
+                    f"0x{reserved:02X}",
+                    str(reserved),
+                    "保留位默认填0",
+                    base_offset + offset, base_offset + offset
+                ))
+                offset += 1
 
         if offset + 2 <= len(payload):
             data_len = self._uint16_le(payload, offset)

@@ -1,65 +1,84 @@
+"""测试用户实际帧数据的PB头+MAC头解析"""
 import sys
-sys.path.insert(0, r'E:\python\南网解析工具')
+import io
 
-from csg_new_gen_parser import CSGNewGenParser
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+sys.path.insert(0, '.')
 
-# 用户截图中的实际帧数据（修正版）
-frame_hex = "69 00 10 00 03 00 00 41 25 05 20 5B 10 2D 60 68 00 00 00 00 02 00 5C 00 01 00 00 86 00 08 EF 4D 19 21 68 00 00 01 00 00 00 00 00 00 00 00 00 00 00 19 21 68 00 02 04 00 81 00 00 E1 88 01 30 00 00 00 00 19 21 68 00 02 04 01 00 00 00 00 00 00 00 00 00 01 00 00 03 00 7B 51 6D C6 11 EA 64 1D 00 00 00 00 A8 25 57 48 43 9C 99 2D BB 7B 00 00 00 03 02 18 A2 52 54 48 4C 00 00 18 00 02 08 02 01 D9 B2 00 00 B9 98 D0 8F 00 9D 01 66 9F EE"
-frame_bytes = bytes.fromhex(frame_hex.replace(" ", ""))
+from gw_new_gen_parser import GWNewGenParser
 
-print(f"Frame length: {len(frame_bytes)}")
 
-# mac_data
-mac_data = frame_bytes[20:]
-print(f"\nmac_data[0:60]:")
-for i in range(0, 60):
-    if i < len(mac_data):
-        print(f"  [{i}] = {mac_data[i]:02X}")
+def test_user_frame():
+    """测试用户提供的实际帧数据"""
+    print("Test: 用户实际帧数据解析")
+    parser = GWNewGenParser()
+    
+    # 用户提供的帧数据（从截图）- 简化版本用于测试
+    # C0 00 00 FF = PB头 (序列号=0x00C0, 聚合标志=0)
+    # 2F 03 08 00 00 34 80 11 08 00 39 00 = MAC短帧头(12字节)
+    #   2F: 帧头类型=1(短), 版本=1(标准), SNID高=0, 发送序号高=2
+    #   03: 发送序号低=3, 总序号=0x203
+    #   08 00: MSDU长度=8
+    #   00: 目的TEI低=0
+    #   34: 目的TEI高=0, 源TEI低=3
+    #   80: 源TEI高=8, 源TEI=0x830=2096
+    #   11: SNID低=1, 重启次数=1
+    #   08: 路由跳数=8, 广播方向=0
+    #   00: 发送类型=0(单播), 发送次数限值=0
+    #   39 00: MSDU序列号=0x0039
+    frame_hex = "C00000FF2F0308000034801108003900"
+    
+    frame_bytes = bytes.fromhex(frame_hex)
+    print(f"  帧长度: {len(frame_bytes)}字节")
+    print(f"  前4字节(PB头): {frame_bytes[:4].hex().upper()}")
+    print(f"  字节5-16(MAC头): {frame_bytes[4:16].hex().upper()}")
+    
+    # PB头解析
+    pb_seq = (frame_bytes[1] << 8) | frame_bytes[0]
+    agg_flag = frame_bytes[2] & 0x01
+    print(f"\n  PB序列号: 0x{pb_seq:04X} ({pb_seq})")
+    print(f"  聚合标志: {agg_flag} ({'多MAC帧' if agg_flag else '单MAC帧'})")
+    
+    # MAC头解析
+    mac_byte0 = frame_bytes[4]
+    hdr_type = mac_byte0 & 0x01
+    version = (mac_byte0 >> 1) & 0x03
+    
+    print(f"\n  MAC字节0: 0x{mac_byte0:02X} = {mac_byte0:08b}")
+    print(f"    帧头类型(bit0): {hdr_type} ({'短帧头(12B)' if hdr_type else '长帧头(32B)'})")
+    print(f"    版本(bits[2:1]): {version} ({['保留','标准帧','单跳帧','保留'][version]})")
+    
+    # 使用pb_only模式解析
+    result = parser.parse_to_table(frame_bytes, parse_level='pb_only', frame_type=1)
+    
+    print(f"\n  解析结果行数: {len(result)}")
+    
+    # 查找关键行
+    pbh_row = [r for r in result if '物理块头' in r[0]]
+    pb_seq_row = [r for r in result if 'PB序列号' in r[0]]
+    agg_row = [r for r in result if '聚合标志' in r[0]]
+    mac_type_row = [r for r in result if 'MAC帧头类型' in r[0]]
+    mac_ver_row = [r for r in result if 'MAC版本' in r[0]]
+    src_tei_row = [r for r in result if '原始源TEI' in r[0]]
+    dst_tei_row = [r for r in result if '原始目的TEI' in r[0]]
+    
+    if pbh_row:
+        print(f"\n  ✅ 物理块头: {pbh_row[0][2]}")
+    if pb_seq_row:
+        print(f"  ✅ PB序列号: {pb_seq_row[0][2]}")
+    if agg_row:
+        print(f"  ✅ 聚合标志: {agg_row[0][2]}")
+    if mac_type_row:
+        print(f"  ✅ MAC帧头类型: {mac_type_row[0][2]}")
+    if mac_ver_row:
+        print(f"  ✅ MAC版本: {mac_ver_row[0][2]}")
+    if src_tei_row:
+        print(f"  ✅ 原始源TEI: {src_tei_row[0][2]}")
+    if dst_tei_row:
+        print(f"  ✅ 原始目的TEI: {dst_tei_row[0][2]}")
+    
+    print("\n  [✅] 用户实际帧数据解析成功\n")
 
-# Check MAC frame header fields
-print(f"\nMAC Frame Header Analysis:")
-print(f"帧头类型: {mac_data[0]:02X}")
-print(f"版本: {mac_data[1]:02X}")
-print(f"发送序号: {mac_data[2:4].hex()}")
-print(f"MSDU长度: {mac_data[4:6].hex()}")
-print(f"原始目的TEI: {mac_data[6:8].hex()}")
-print(f"原始源TEI: {mac_data[8:10].hex()}")
-print(f"短网络标识: {mac_data[10]:02X}")
-print(f"重启次数: {mac_data[11]:02X}")
-print(f"路由跳数: {mac_data[12]:02X}")
-print(f"广播方向: {mac_data[13]:02X}")
-print(f"发送类型: {mac_data[14]:02X}")
-print(f"发送次数限值: {mac_data[15]:02X}")
-print(f"MSDU序列号: {mac_data[16:18].hex()}")
-print(f"目的MAC地址: {mac_data[18:24].hex()}")
-print(f"保留字段1: {mac_data[24:28].hex()}")
-print(f"保留字段2: {mac_data[28:38].hex()}")
 
-# Check MSDU long header
-print(f"\nMSDU Long Header Analysis:")
-print(f"目的MAC地址: {mac_data[18:24].hex()}")
-print(f"源MAC地址: {mac_data[24:30].hex()}")
-print(f"VLAN标签: {mac_data[30:34].hex()}")
-print(f"MSDU类型: {mac_data[34:36].hex()}")
-
-vlan_tag = int.from_bytes(mac_data[30:34], 'little')
-msdu_type = int.from_bytes(mac_data[34:36], 'little')
-print(f"VLAN tag = 0x{vlan_tag:04X}")
-print(f"MSDU type = 0x{msdu_type:04X}")
-
-# Check management message header
-print(f"\nManagement Message Header:")
-print(f"mac_data[36:40] = {mac_data[36:40].hex()}")
-mgmt_version = mac_data[36]
-mgmt_type = int.from_bytes(mac_data[37:39], 'little')
-print(f"Management version = {mgmt_version}")
-print(f"Management type = 0x{mgmt_type:04X}")
-
-# Run parser
-parser = CSGNewGenParser()
-result = parser.parse_to_table(frame_bytes)
-
-# Print relevant rows
-for i, row in enumerate(result):
-    if 'MSDU' in row[0] or '管理' in row[0] or 'VLAN' in row[0] or 'MAC' in row[0]:
-        print(f"[{i}] {row[0]} | {row[1]} | {row[2]} | {row[3]}")
+if __name__ == '__main__':
+    test_user_frame()

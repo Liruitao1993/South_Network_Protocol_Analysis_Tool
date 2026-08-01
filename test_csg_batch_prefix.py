@@ -3,6 +3,9 @@
 验证批量解析在协议8下能正确剥离监控日志前缀：
   "<时间> <序号> -> 接收机 Has Get <15字节监控头> <协议报文>"
 
+核心规则：仅保留含 "> 接收机 Has Get" 标记的行，其余行（时间戳/测试标记/纯文本/纯hex）
+全部丢弃，避免时间戳等被 _clean_hex_input 误清洗成伪帧。
+
 直接运行: python test_csg_batch_prefix.py
 """
 import re
@@ -11,25 +14,27 @@ import sys
 
 # ── 复刻 main_gui.py 中的预处理逻辑（避免启动 GUI）──
 
-CSG_MONITOR_PREFIX = "-> 接收机 Has Get"
+CSG_MONITOR_PREFIX = "> 接收机 Has Get"
 CSG_MONITOR_HEADER_BYTES = 15
 
 
 def strip_csg_monitor_prefix(text: str) -> str:
-    """剥离监控前缀（逐行），与 MainWindow._strip_csg_monitor_prefix 一致"""
+    """剥离监控前缀（逐行），与 MainWindow._strip_csg_monitor_prefix 一致
+
+    仅保留含标记的行，其余丢弃；对保留行剥离 15 字节监控头。
+    """
     prefix_len = len(CSG_MONITOR_PREFIX)
-    hex_only_line_re = re.compile(r'^[0-9A-Fa-f\s,\-]*$')
     out_lines = []
     for line in text.splitlines():
         pos = line.find(CSG_MONITOR_PREFIX)
         if pos == -1:
-            if hex_only_line_re.match(line):
-                out_lines.append(line)
+            # 不含监控标记的行：直接丢弃
             continue
         after = line[pos + prefix_len:]
         tokens = re.findall(r'[0-9A-Fa-f]{1,2}', after)
         payload_tokens = tokens[CSG_MONITOR_HEADER_BYTES:]
-        out_lines.append(' '.join(payload_tokens))
+        if payload_tokens:
+            out_lines.append(' '.join(payload_tokens))
     return '\n'.join(out_lines)
 
 
@@ -101,29 +106,44 @@ def test_strip_multi_monitor_lines():
 
 
 def test_mixed_monitor_and_plain():
-    """混合输入：监控行 + 纯hex行"""
+    """混合输入：监控行 + 纯hex行 -> 仅保留监控行，纯hex行丢弃"""
     raw = "\n".join([
         ("15:49:51 254  -> 接收机 Has Get "
          "ED A5 00 00 02 EF 01 7E 4E 97 86 01 00 88 00 "
          "68 11 01 01 00 00 00 00 01 00 01 00 00"),
-        "1101 0100 0000 0001 0001 0019",  # 纯 hex 应用层报文
+        "1101 0100 0000 0001 0001 0019",  # 纯 hex 行（无监控标记）-> 应被丢弃
     ])
     frames = parse_batch_pipeline(raw, current_protocol=8)
-    assert len(frames) == 2, f"应提取2帧，实际{len(frames)}: {frames}"
-    # 第一帧来自监控行，以68开头
-    assert frames[0].startswith("6811"), f"第一帧应以6811开头: {frames[0]}"
-    # 第二帧来自纯hex行，以1101开头（报文端口号0x11 + 标识符0x0101小端）
-    assert frames[1].startswith("1101"), f"第二帧应以1101开头: {frames[1]}"
-    print("[OK] 混合输入处理通过 ->", frames)
+    assert len(frames) == 1, f"纯hex行应被丢弃，仅保留监控行1帧，实际{len(frames)}: {frames}"
+    assert frames[0].startswith("6811"), f"帧应以6811开头: {frames[0]}"
+    print("[OK] 混合输入处理通过（纯hex行已丢弃）->", frames)
 
 
 def test_plain_hex_unchanged():
-    """纯 hex 报文（无监控前缀）应原样保留"""
+    """纯 hex 报文（无监控前缀）应被丢弃（不当作报文解析）"""
     raw = "11 01 01 00 00 00 00 01 00 01 00 00"
     frames = parse_batch_pipeline(raw, current_protocol=8)
-    assert len(frames) == 1
-    assert frames[0] == "1101010000000001000100".upper() or frames[0].startswith("1101")
-    print("[OK] 纯hex报文原样保留通过 ->", frames[0])
+    assert len(frames) == 0, f"无监控标记的纯hex行应被丢弃，实际{len(frames)}: {frames}"
+    print("[OK] 纯hex报文（无标记）已丢弃通过")
+
+
+def test_timestamp_lines_dropped():
+    """时间戳/测试标记/纯文本日志行应全部丢弃，不解析为伪帧"""
+    raw = "\n".join([
+        "15:50:23 186 -> 方法: HPLC_STA_长MPDU帧载荷长度136长MAC帧头的SOF帧是否能够被正确处理测试",
+        "15:50:24 187 # 测试标记行",
+        "==================== 分隔线 ====================",
+        "收发统计: 发送 100 帧, 接收 98 帧, 丢失 2 帧",
+        "",  # 空行
+        ("15:49:51 254  -> 接收机 Has Get "
+         "ED A5 00 00 02 EF 01 7E 4E 97 86 01 00 88 00 "
+         "69 19 09 00 00 00 00 01 00 01 00 00"),
+    ])
+    frames = parse_batch_pipeline(raw, current_protocol=8)
+    # 只有最后一行（监控行）应被解析，其余全部丢弃
+    assert len(frames) == 1, f"应仅解析1个监控行，实际{len(frames)}: {frames}"
+    assert frames[0].startswith("691909"), f"应剥离出69开头的报文: {frames[0]}"
+    print("[OK] 时间戳/测试标记行丢弃通过 ->", frames[0])
 
 
 def test_short_line_filtered():
@@ -154,14 +174,14 @@ def test_header_byte_count():
 
 
 def test_no_prefix_other_protocol():
-    """非监控前缀行：纯 hex 保留，含中文/时间戳/标记文本的日志行丢弃"""
-    # 纯 hex 行应保留
+    """无监控标记的行一律丢弃（无论纯hex还是文本）"""
+    # 纯 hex 行（无标记）也应丢弃
     result = strip_csg_monitor_prefix("68110101")
-    assert result == "68110101", "纯 hex 无标记行应保留"
-    # 含中文文本的行应丢弃（不再原样保留）
+    assert result == "", "纯 hex 无标记行应被丢弃"
+    # 含中文文本的行应丢弃
     result = strip_csg_monitor_prefix("纯hex无标记行")
-    assert result == "", "含中文的非 hex 行应被过滤"
-    print("[OK] 无标记行过滤/保留行为通过")
+    assert result == "", "含中文的非 hex 行应被丢弃"
+    print("[OK] 无标记行一律丢弃通过")
 
 
 def test_timestamp_marker_line_filtered():
