@@ -459,6 +459,42 @@ def test_net_frame_nonzero_fields():
     print("[OK] 网间协调帧(NET)非零字段位解析通过")
 
 
+def test_aggregated_frame_app_layer():
+    """聚合帧(级联块)应用层解析: 2个级联块各含1条应用层报文(转发DLT645)"""
+    parser = CSGNewGenParser()
+    frame = bytes.fromhex(
+        "19 02 30 00 03 00 00 41 25 05 20 5B 10 AD 49 E7 00 00 01 00 "
+        "3E 10 03 00 2E 00 03 10 00 41 11 08 24 00 03 01 11 01 01 00 "
+        "01 60 00 01 09 00 20 00 64 01 98 90 00 00 02 11 00 68 21 19 "
+        "12 00 10 00 68 02 11 00 68 21 19 68 11 04 33 33 34 33 67 16 "
+        "16 F7 9F 47 3E 20 03 00 2E 00 03 10 00 41 11 08 25 00 03 01 "
+        "11 01 01 00 01 60 00 01 09 00 20 00 64 01 98 90 00 00 02 11 "
+        "00 68 21 19 12 00 10 00 68 02 11 00 68 21 19 68 11 04 33 33 "
+        "34 33 67 16 16 F7 9F 47 00 36 91 E5".replace(" ", ""))
+    table = parser.parse_to_table(frame, parse_level="auto")
+    # 聚合标志=1
+    agg = find_field(table, "聚合标志")
+    assert agg and agg[2] == "1", f"应为聚合帧, 实际: {agg}"
+    # 2个级联头
+    cascade = find_all_fields(table, "级联头")
+    assert len(cascade) == 2, f"应有2个级联头, 实际: {len(cascade)}"
+    # 每个级联块解出1条应用层报文（端口0x11 + 业务标识0 + 转发DLT645）
+    ports = find_all_fields(table, "报文端口号")
+    assert len(ports) == 2, f"应有2条应用层报文, 实际: {len(ports)}"
+    for port in ports:
+        assert port[2] == "17", f"端口应为0x11, 实际: {port}"
+    sids = find_all_fields(table, "业务标识")
+    assert len(sids) == 2 and all(s[2] == "0" for s in sids)
+    # 转发数据内容 = DLT645 抄表帧
+    fwd = find_all_fields(table, "转发数据内容")
+    assert len(fwd) == 2, f"应有2条转发数据, 实际: {len(fwd)}"
+    assert fwd[0][1].startswith("68 02 11 00 68 21 19 68 11 04 33 33 34 33 67 16"), f"转发数据错误: {fwd[0][1]}"
+    # 无残留伪MSDU负载(整帧误判)
+    msdu_rows = [r for r in table if r[0] == "MSDU负载" and "未识别" in r[3]]
+    assert not msdu_rows, f"不应有未识别MSDU负载残留: {msdu_rows}"
+    print("[OK] 聚合帧级联块应用层解析通过")
+
+
 def main():
     print("=" * 50)
     print("新一代载波协议解析器测试")
@@ -485,6 +521,7 @@ def main():
     test_station_to_station()
     test_net_frame_real()
     test_net_frame_nonzero_fields()
+    test_aggregated_frame_app_layer()
     print("=" * 50)
     print("[OK] 全部测试通过")
 

@@ -256,6 +256,7 @@ class CSGNewGenParser:
         """
         table_data = []
         frame_len = len(frame_bytes)
+        self._aggregated = False
 
         if frame_len < 2:
             table_data.append(("❌ 解析失败", "", "", "帧长度不足（<2字节）", None, None))
@@ -372,8 +373,24 @@ class CSGNewGenParser:
                 else:
                     msdu_payload = frame_bytes
 
-        # ── 判断数据层次：MSDU头 还是 直接应用层 ──
-        # 注意：is_direct_app 可能在早期检测中已设为True，此处仅对未确定的情况再检测
+        # ── 解析 MSDU 负载（MSDU头判定 + 应用层分派），主流程与聚合帧级联块共用 ──
+        # 聚合帧的级联块已在 _parse_pb_block 内各自解析应用层，跳过整帧兜底
+        if not getattr(self, '_aggregated', False):
+            table_data = self._parse_msdu_payload(msdu_payload, offset, mac_data,
+                                                  table_data, is_direct_app)
+
+        return table_data
+
+    def _parse_msdu_payload(self, msdu_payload: bytes, offset: int,
+                            mac_data: Optional[bytes], table_data: list,
+                            is_direct_app: bool = False) -> list:
+        """解析 MSDU 负载：判定 MSDU 头（长/短/非标准）并按类型分派应用层解析
+
+        主流程（单MAC帧/直接应用层）与聚合帧级联块解析共用。
+        - 短MSDU头(2B): VLAN标签(1B) + MSDU类型(1B)
+        - 长MSDU头(18B): 目的MAC 6B + 源MAC 6B + VLAN 4B + 类型 2B
+        - 非标准头: 扫描管理消息特征定位
+        """
         if not is_direct_app and len(msdu_payload) >= 3:
             # 检测应用层报文特征：端口号(0x11或0x13) + 标识符(0x0101)
             port_byte = msdu_payload[0]
@@ -691,6 +708,8 @@ class CSGNewGenParser:
             ))
             if pb_agg_flag:
                 # 聚合帧：级联头 + MAC帧
+                # 聚合帧的级联块各自解析应用层，主流程不应再对整帧做MSDU兜底
+                self._aggregated = True
                 cascade_offset = 0
                 cascade_idx = 0
                 while cascade_offset + 2 <= len(mac_concat):
@@ -708,7 +727,9 @@ class CSGNewGenParser:
                     cascade_offset += 2
                     if cascade_offset + cascade_len <= len(mac_concat):
                         mac_seg = mac_concat[cascade_offset:cascade_offset + cascade_len]
-                        _, mac_table = self._parse_mac_frame(mac_seg, base_offset=pb_body_offset + cascade_offset)
+                        _, mac_table = self._parse_mac_frame(
+                            mac_seg, base_offset=pb_body_offset + cascade_offset,
+                            parse_msdu_app=True)
                         table_data.extend(mac_table)
                         cascade_offset += cascade_len
                         cascade_idx += 1
@@ -727,6 +748,8 @@ class CSGNewGenParser:
                     ))
             else:
                 # 单MAC帧（可能跨多PB）
+                # 应用层由主流程兜底解析（MSDU头展示 + 分派），此处仅解析MAC头
+                self._aggregated = False
                 mac_data = mac_concat
                 mac_end, mac_table = self._parse_mac_frame(mac_data, base_offset=pb_body_offset)
                 table_data.extend(mac_table)
@@ -1881,7 +1904,8 @@ class CSGNewGenParser:
         offset += 7  # 字节5-11共7字节
         return offset  # 返回字节12起始位置
 
-    def _parse_mac_frame(self, frame_bytes: bytes, base_offset: int = 0) -> Tuple[int, list]:
+    def _parse_mac_frame(self, frame_bytes: bytes, base_offset: int = 0,
+                        parse_msdu_app: bool = False) -> Tuple[int, list]:
         """解析 MAC 帧头
         
         注意：frame_bytes 是切片后的数据，内部解析使用相对偏移(offset=0)，
@@ -2064,16 +2088,23 @@ class CSGNewGenParser:
         else:
             msdu_end = frame_len
 
-        # MSDU 负载
+        # MSDU 负载（含 MSDU头判定 + 应用层解析）
+        # 聚合帧级联块(parse_msdu_app=True)在此解析应用层；
+        # 单MAC帧路径由调用方(parse_to_table主流程)兜底解析，避免重复
         msdu_bytes = frame_bytes[new_offset:msdu_end]
         if msdu_bytes:
-            table.append((
-                "MSDU负载",
-                ' '.join(f'{b:02X}' for b in msdu_bytes[:20]) + ("..." if len(msdu_bytes) > 20 else ""),
-                f"{len(msdu_bytes)}字节",
-                f"MAC业务数据单元",
-                *_g(new_offset, msdu_end - 1)
-            ))
+            if parse_msdu_app:
+                self._parse_msdu_payload(msdu_bytes, base_offset + new_offset,
+                                         frame_bytes[offset:new_offset], table,
+                                         False)
+            else:
+                table.append((
+                    "MSDU负载",
+                    ' '.join(f'{b:02X}' for b in msdu_bytes[:20]) + ("..." if len(msdu_bytes) > 20 else ""),
+                    f"{len(msdu_bytes)}字节",
+                    f"MAC业务数据单元",
+                    *_g(new_offset, msdu_end - 1)
+                ))
 
         # 完整性校验 (CRC-32, 4字节, 最后4字节)
         if frame_len >= new_offset + 4:
