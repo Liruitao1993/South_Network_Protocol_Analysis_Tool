@@ -398,6 +398,67 @@ def test_district_phase_downlink():
     print("[OK] 台区户变关系/相位识别测试通过")
 
 
+def test_net_frame_real():
+    """真实网间协调帧(NET, 定界符类型=3): 可变区域按表41解析"""
+    parser = CSGNewGenParser()
+    frame = bytes.fromhex("7B 00 00 00 00 00 00 00 00 00 81 01 10 B6 51 55".replace(" ", ""))
+    table = parser.parse_to_table(frame)
+    # 定界符类型=3 网间协调帧
+    dt_row = find_field(table, "定界符类型")
+    assert dt_row and dt_row[2] == "3", f"定界符类型错误: {dt_row}"
+    assert "网间协调帧" in dt_row[3]
+    # 可变区域字段（表41）
+    assert find_field(table, "邻居网络比特图1")
+    assert find_field(table, "本网络无线信道编号")
+    assert find_field(table, "邻居网络比特图2")
+    assert find_field(table, "持续时间")
+    assert find_field(table, "邻居网络比特图3")
+    assert find_field(table, "带宽结束标志位")
+    assert find_field(table, "本网络无线option")
+    assert find_field(table, "邻居网络比特图4")
+    assert find_field(table, "带宽结束偏移")
+    assert find_field(table, "带宽开始偏移")
+    # 带宽开始偏移 = 0x0181(小端) = 385 * 4ms = 1540ms
+    bw_start = find_field(table, "带宽开始偏移")
+    assert "1540ms" in bw_start[2], f"带宽开始偏移错误: {bw_start[2]}"
+    # 短网络标识高位 + 完整SNID=0x07
+    snid_high = find_field(table, "短网络标识高位")
+    assert snid_high and "0x07" in snid_high[3], f"SNID高位错误: {snid_high}"
+    # 网间协调帧无物理块/MSDU
+    assert not find_field(table, "MSDU负载"), "网间协调帧不应有MSDU负载"
+    print("[OK] 网间协调帧(NET)表41可变区域解析通过")
+
+
+def test_net_frame_nonzero_fields():
+    """构造非零字段网间协调帧: 验证比特图/信道/偏移位解析"""
+    parser = CSGNewGenParser()
+    # byte0=0x7B(dt=3, SNID低位=7)
+    # 比特图1=0x1234 -> 34 12
+    # 信道编号=0x2A -> byte3
+    # 比特图2=10bit=0x1F4 -> byte4=0xF4 byte5低2位=0x01
+    # 持续时间=0x1234: 低6位=0x34(byte5 bit2-7), bit6-13=0x48(byte6) -> byte5=0x34<<2|0x01=0xD1
+    # byte7: 比特图3=1, 带宽结束=0, option=1, 比特图4=0xA -> 0b1010_01_0_1=0xA5
+    # 带宽结束偏移=0x0050 -> 50 00; 带宽开始偏移=0x0200 -> 00 02
+    # byte12: SNID高位=1 | 版本=1 -> 0x11
+    body = bytes.fromhex("7B 34 12 2A F4 D1 48 A5 50 00 00 02 11".replace(" ", ""))
+    fcs = parser._crc24(body)
+    frame = body + fcs.to_bytes(3, "little")
+    table = parser.parse_to_table(frame)
+    assert find_field(table, "邻居网络比特图1")[2] == "0x1234"
+    assert find_field(table, "本网络无线信道编号")[2] == "42"
+    assert find_field(table, "邻居网络比特图2")[2] == "0x1F4"
+    assert find_field(table, "持续时间")[2] == "4660 × 40ms (186400ms)"
+    assert find_field(table, "邻居网络比特图3")[2] == "1"
+    assert find_field(table, "带宽结束标志位")[2] == "0"
+    assert find_field(table, "本网络无线option")[2] == "1"
+    assert find_field(table, "邻居网络比特图4")[2] == "0b1010"
+    assert "320ms" in find_field(table, "带宽结束偏移")[2]
+    assert "2048ms" in find_field(table, "带宽开始偏移")[2]
+    snid_high = find_field(table, "短网络标识高位")
+    assert "0x17" in snid_high[3], f"完整SNID应=0x17(高1+低7), 实际: {snid_high}"
+    print("[OK] 网间协调帧(NET)非零字段位解析通过")
+
+
 def main():
     print("=" * 50)
     print("新一代载波协议解析器测试")
@@ -422,6 +483,8 @@ def main():
     test_module_run_params_downlink()
     test_district_phase_downlink()
     test_station_to_station()
+    test_net_frame_real()
+    test_net_frame_nonzero_fields()
     print("=" * 50)
     print("[OK] 全部测试通过")
 
