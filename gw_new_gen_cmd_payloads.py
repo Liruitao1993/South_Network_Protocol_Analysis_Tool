@@ -69,7 +69,7 @@ def _f(table: list, name: str, raw: str, parsed: str, desc: str, start: int, end
 def _remaining(table: list, data: bytes, offset: int, base_offset: int):
     if offset < len(data):
         rem = data[offset:]
-        _f(table, "剩余数据", _hex(rem)[:80], f"{len(rem)}字节", "未解析数据",
+        _f(table, "剩余数据", _hex(rem), f"{len(rem)}字节", "未解析数据",
            base_offset + offset, base_offset + len(data) - 1)
 
 
@@ -117,11 +117,13 @@ def _parse_header_meter_down(payload: bytes, base_offset: int) -> Tuple[int, lis
     """抄表下行报文头(表3): 8字节
     字节0: 协议版本(6b) + 报文头长度高2位(2b)
     字节1: 报文头长度低4位(4b) + 未应答重试(1b) + 否认重试(1b) + 最大重试次数(2b)
-    字节2: 规约类型(4b) + 转发数据长度高4位(4b)
-    字节3: 转发数据长度低8位(8b)
-    字节4-5: 报文序号(16b)
+    字节2: 规约类型(低4b) + 转发数据长度低4位(高4b)
+    字节3: 转发数据长度高4位(低4b) + 保留(高4b)
+    字节4-5: 报文序号(16b, 小端序)
     字节6: 设备超时时间(8b)
     字节7: 选项字(8b)
+
+    转发数据长度(8bit) = payload[3]低4位(高位) << 4 | payload[2]高4位(低位)
     """
     table = []
     if len(payload) < 8:
@@ -137,9 +139,9 @@ def _parse_header_meter_down(payload: bytes, base_offset: int) -> Tuple[int, lis
     max_retry = (b1 >> 6) & 0x03
     b2 = payload[2]
     proto_type = b2 & 0x0F
-    data_len_high = (b2 >> 4) & 0x0F
     b3 = payload[3]
-    data_len = (data_len_high << 8) | b3
+    # 转发数据长度: payload[3]低4位为高位, payload[2]高4位为低位 → 组合成8位
+    data_len = ((b3 & 0x0F) << 4) | ((b2 >> 4) & 0x0F)
     seq = _uint16_le(payload, 4)
     timeout = payload[6]
     option = payload[7]
@@ -155,7 +157,7 @@ def _parse_header_meter_down(payload: bytes, base_offset: int) -> Tuple[int, lis
     proto_name = _PROTOCOL_TYPE_MAP.get(proto_type, f"保留({proto_type})")
     _f(table, "规约类型", f"{proto_type}", proto_name, "转发数据的规约类型",
        base_offset + 2, base_offset + 2)
-    _f(table, "转发数据长度", f"0x{data_len:03X}", f"{data_len}字节", "实际数据域长度",
+    _f(table, "转发数据长度", f"0x{data_len:02X}", f"{data_len}字节", "实际数据域长度",
        base_offset + 2, base_offset + 3)
     _f(table, "报文序号", f"0x{seq:04X}", str(seq), "STA应答时使用该序号返回",
        base_offset + 4, base_offset + 5)
@@ -171,10 +173,12 @@ def _parse_header_meter_up(payload: bytes, base_offset: int) -> Tuple[int, list]
     """抄表上行报文头(表4): 8字节
     字节0: 协议版本(6b) + 报文头长度高2位(2b)
     字节1: 报文头长度低4位(4b) + 应答状态(4b)
-    字节2: 规约类型(4b) + 转发数据长度高4位(4b)
-    字节3: 转发数据长度低8位(8b)
-    字节4-5: 报文序号(16b)
-    字节6-7: 选项字(16b)
+    字节2: 规约类型(低4b) + 转发数据长度低4位(高4b)
+    字节3: 转发数据长度高4位(低4b) + 保留(高4b)
+    字节4-5: 报文序号(16b, 小端序)
+    字节6-7: 选项字(16b, 小端序)
+
+    转发数据长度(8bit) = payload[3]低4位(高位) << 4 | payload[2]高4位(低位)
     """
     table = []
     if len(payload) < 8:
@@ -188,9 +192,9 @@ def _parse_header_meter_up(payload: bytes, base_offset: int) -> Tuple[int, list]
     resp_status = (b1 >> 4) & 0x0F
     b2 = payload[2]
     proto_type = b2 & 0x0F
-    data_len_high = (b2 >> 4) & 0x0F
     b3 = payload[3]
-    data_len = (data_len_high << 8) | b3
+    # 转发数据长度: payload[3]低4位为高位, payload[2]高4位为低位 → 组合成8位
+    data_len = ((b3 & 0x0F) << 4) | ((b2 >> 4) & 0x0F)
     seq = _uint16_le(payload, 4)
     option = _uint16_le(payload, 6)
 
@@ -201,7 +205,7 @@ def _parse_header_meter_up(payload: bytes, base_offset: int) -> Tuple[int, list]
     proto_name = _PROTOCOL_TYPE_MAP.get(proto_type, f"保留({proto_type})")
     _f(table, "规约类型", f"{proto_type}", proto_name, "转发数据的规约类型",
        base_offset + 2, base_offset + 2)
-    _f(table, "转发数据长度", f"0x{data_len:03X}", f"{data_len}字节", "抄表结果数据长度",
+    _f(table, "转发数据长度", f"0x{data_len:02X}", f"{data_len}字节", "抄表结果数据长度",
        base_offset + 2, base_offset + 3)
     _f(table, "报文序号", f"0x{seq:04X}", str(seq), "应与下行报文一致",
        base_offset + 4, base_offset + 5)
@@ -214,7 +218,10 @@ def _parse_header_generic(payload: bytes, base_offset: int, direction: int) -> T
     """通用报文头(校时/通信测试/升级等): 4字节
     字节0: 协议版本(6b) + 报文头长度高2位(2b)
     字节1: 报文头长度低4位(4b) + 保留/控制(4b)
-    字节2-3: 保留(4b或12b) + 数据长度(12b) 或 保留(16b)
+    字节2: 保留(低4b) + 数据长度低4位(高4b)
+    字节3: 数据长度高4位(低4b) + 保留(高4b)
+
+    数据长度(8bit) = payload[3]低4位(高位) << 4 | payload[2]高4位(低位)
     """
     table = []
     if len(payload) < 4:
@@ -228,15 +235,15 @@ def _parse_header_generic(payload: bytes, base_offset: int, direction: int) -> T
     ctrl = (b1 >> 4) & 0x0F
     b2 = payload[2]
     b3 = payload[3]
-    data_len = ((b2 & 0x0F) << 8) | b3
-    reserved_high = (b2 >> 4) & 0x0F
+    # 数据长度: payload[3]低4位为高位, payload[2]高4位为低位 → 组合成8位
+    data_len = ((b3 & 0x0F) << 4) | ((b2 >> 4) & 0x0F)
 
     _f(table, "协议版本号", f"{version}", str(version), "固定为1", base_offset, base_offset)
     _f(table, "报文头长度", f"{hdr_len}", str(hdr_len), "报文头(除数据域外)的长度",
        base_offset, base_offset + 1)
     _f(table, "控制/保留", f"0x{ctrl:X}", f"0x{ctrl:X}", "保留或控制字段",
        base_offset + 1, base_offset + 1)
-    _f(table, "数据长度", f"0x{data_len:03X}", f"{data_len}字节", "数据域长度",
+    _f(table, "数据长度", f"0x{data_len:02X}", f"{data_len}字节", "数据域长度",
        base_offset + 2, base_offset + 3)
     return 4, table
 
@@ -257,7 +264,7 @@ def _parse_meter_reading_downlink(payload: bytes, base_offset: int) -> list:
     # 数据域
     if offset < len(payload):
         fwd_data = payload[offset:]
-        _f(table, "转发数据(抄表报文)", _hex(fwd_data)[:80], f"{len(fwd_data)}字节",
+        _f(table, "转发数据(抄表报文)", _hex(fwd_data), f"{len(fwd_data)}字节",
            "终端下发给STA的抄表报文数据", base_offset + offset, base_offset + len(payload) - 1)
     return table
 
@@ -274,7 +281,7 @@ def _parse_meter_reading_uplink(payload: bytes, base_offset: int) -> list:
     # 数据域
     if offset < len(payload):
         fwd_data = payload[offset:]
-        _f(table, "转发数据(抄表结果)", _hex(fwd_data)[:80], f"{len(fwd_data)}字节",
+        _f(table, "转发数据(抄表结果)", _hex(fwd_data), f"{len(fwd_data)}字节",
            "STA应答的抄表结果数据", base_offset + offset, base_offset + len(payload) - 1)
     return table
 
@@ -325,7 +332,7 @@ def _parse_time_sync(payload: bytes, direction: int, base_offset: int) -> list:
             _f(table, "校时数据", time_raw, time_parsed, "BCD时间(秒在低位)",
                base_offset + offset, base_offset + len(payload) - 1)
         else:
-            _f(table, "校时数据", _hex(time_data)[:80], f"{len(time_data)}字节", "校时时间数据",
+            _f(table, "校时数据", _hex(time_data), f"{len(time_data)}字节", "校时时间数据",
                base_offset + offset, base_offset + len(payload) - 1)
     return table
 
@@ -349,7 +356,7 @@ def _parse_single_phase(payload: bytes, direction: int, base_offset: int) -> lis
         offset += 2
     if offset < len(payload):
         data = payload[offset:]
-        _f(table, "业务数据", _hex(data)[:80], f"{len(data)}字节", "单相业务下发数据",
+        _f(table, "业务数据", _hex(data), f"{len(data)}字节", "单相业务下发数据",
            base_offset + offset, base_offset + len(payload) - 1)
     return table
 
@@ -358,40 +365,439 @@ def _parse_single_phase(payload: bytes, direction: int, base_offset: int) -> lis
 # 0x0006: 通信测试
 # ═══════════════════════════════════════════════════════════
 
+# ── 检测扩展命令映射（《1.2 检测扩展命令》，复用通信测试命令下行报文） ──
+_EXT_TEST_MODES = {
+    1: "转发应用层报文至应用层串口信道测试模式(暂未使用)",
+    2: "转发应用层报文至载波信道测试模式(暂未使用)",
+    3: "HPLC物理层透传测试模式",
+    4: "HPLC物理层回传测试模式",
+    5: "MAC层透传测试模式",
+    6: "频段切换操作",
+    7: "ToneMask配置操作",
+    8: "无线信道切换操作",
+    9: "RF物理层回传测试模式",
+    10: "RF物理层透传测试模式",
+    11: "RF/PLC物理层回传测试模式",
+    12: "PLC到RF物理层回传测试模式",
+    13: "安全测试模式",
+    15: "新一代扩展测试模式",
+}
+
+_EXT_FREQ_BANDS = {
+    0: "通信频段0 (1.953~11.96MHz)",
+    1: "通信频段1 (2.441~5.615MHz)",
+    2: "通信频段2 (0.781~2.930MHz)",
+    3: "通信频段3 (1.758~2.930MHz)",
+    4: "通信频段4 (0.781~5.615MHz, FCH)",
+    5: "通信频段5 (0.781~11.96MHz, FCH)",
+    6: "通信频段6 (6.08~11.962MHz, FCH)",
+}
+
+_EXT_SEC_MODES = {
+    1: "SHA256算法测试", 2: "SM3算法测试",
+    3: "ECC签名测试", 4: "ECC验签测试",
+    5: "SM2签名测试", 6: "SM2验签测试",
+    7: "AES-CBC加密测试", 8: "AES-CBC解密测试",
+    9: "AES-GCM加密测试", 10: "AES-GCM解密测试",
+    11: "SM4-CBC加密测试", 12: "SM4-CBC解密测试",
+}
+
+_EXT_NEWGEN_MODES = {
+    1: "信道探测帧发送模式",
+    2: "被动信道探测帧发送模式",
+    3: "动态加载发送模式(比特加载)",
+    4: "动态加载发送模式(子载波选择)",
+    5: "动态加载参数配置操作",
+    6: "CCO信标机制切换",
+    7: "DUT发送模式切换",
+    8: "指定DUT TEI(OFDMA/TDA接收)",
+    9: "指定DUT TEI(OFDMA/TDA接收)",
+}
+
+_EXT_BEACON_MECHS = {
+    0: "固定信标机制",
+    1: "组网完成后立即切换到竞争机制",
+    2: "组网完成后自主决定何时切换到竞争机制",
+}
+
+_EXT_SEND_MODES = {0: "不强制(DUT自适应选择)", 1: "强制OFDMA机制发送", 2: "强制TDA机制发送"}
+_EXT_TF_POSITIONS = {0: "不携带TF", 1: "数据载荷之前", 2: "数据载荷之后"}
+_EXT_PARAM_TABLE_TYPES = {1: "比特加载表", 2: "子载波选择表"}
+_EXT_MODULATIONS = {0: "不使用", 1: "BPSK", 2: "QPSK", 3: "16QAM"}
+
+
 def _parse_comm_test(payload: bytes, direction: int, base_offset: int) -> list:
-    """通信测试(表16): 协议版本+头长度+保留(4b)+规约类型(4b)+数据长度(12b)+数据"""
+    """通信测试(表16) + 检测扩展命令(1.2 检测扩展命令)
+
+    字节1高4位=0: 普通通信测试(规约类型+转发数据长度8bit+测试数据)
+    字节1高4位≠0: 检测扩展命令(测试模式/配置操作 + 12bit配置值 + 数据域)
+    """
     table = []
     if len(payload) < 4:
         _f(table, "❌ 数据不足", "", "", "数据域不足", base_offset, base_offset + max(len(payload) - 1, 0))
         return table
     b0 = payload[0]
     version = b0 & 0x3F
-    hdr_len_high = (b0 >> 6) & 0x03
     b1 = payload[1]
-    hdr_len_low = b1 & 0x0F
-    hdr_len = (hdr_len_high << 4) | hdr_len_low
-    reserved = (b1 >> 4) & 0x0F
+    # 报文头长度(6bit, 小端组合): 字节0的6-7位=低2位, 字节1的0-3位=高4位
+    # (高字节在后, 低字节在前)
+    hdr_len = ((b0 >> 6) & 0x03) | ((b1 & 0x0F) << 2)
+    test_mode = (b1 >> 4) & 0x0F
     b2 = payload[2]
     proto_type = b2 & 0x0F
-    data_len_high = (b2 >> 4) & 0x0F
     b3 = payload[3]
-    data_len = (data_len_high << 8) | b3
 
     _f(table, "协议版本号", f"{version}", str(version), "固定为1", base_offset, base_offset)
     _f(table, "报文头长度", f"{hdr_len}", str(hdr_len), "报文头(除数据域外)的长度",
        base_offset, base_offset + 1)
-    _f(table, "保留", f"0x{reserved:X}", "", "保留", base_offset + 1, base_offset + 1)
+
+    if test_mode != 0:
+        _parse_comm_test_ext(table, payload, base_offset, test_mode, proto_type, b2, b3)
+        return table
+
+    # ── 普通通信测试 ──
+    # 数据长度: payload[3]低4位为高位, payload[2]高4位为低位 → 组合成8位
+    data_len = ((b3 & 0x0F) << 4) | ((b2 >> 4) & 0x0F)
+    _f(table, "保留", "0", "", "保留(=0为普通通信测试)", base_offset + 1, base_offset + 1)
     proto_name = _PROTOCOL_TYPE_MAP.get(proto_type, f"保留({proto_type})")
     _f(table, "规约类型", f"{proto_type}", proto_name, "转发数据的规约类型",
        base_offset + 2, base_offset + 2)
-    _f(table, "转发数据长度", f"0x{data_len:03X}", f"{data_len}字节", "实际数据域长度",
+    _f(table, "转发数据长度", f"0x{data_len:02X}", f"{data_len}字节", "实际数据域长度",
        base_offset + 2, base_offset + 3)
     offset = 4
     if offset < len(payload):
         data = payload[offset:]
-        _f(table, "测试数据", _hex(data)[:80], f"{len(data)}字节", "通信测试数据内容",
+        _f(table, "测试数据", _hex(data), f"{len(data)}字节", "通信测试数据内容",
            base_offset + offset, base_offset + len(payload) - 1)
     return table
+
+
+def _parse_comm_test_ext(table: list, payload: bytes, base_offset: int,
+                         test_mode: int, proto_type: int, b2: int, b3: int) -> None:
+    """检测扩展命令解析（表2 扩展命令）
+
+    字节1高4位: 测试模式/配置操作
+    字节2高4位+字节3: 12bit 模式持续时间/配置值(模式8除外: Option+信道号)
+    字节4低4位: 安全测试模式(模式=13时有效); 字节4高4位: PHR_MCS(模式=12)
+    字节5低4位: PSDU_MCS(模式=12); 字节5高4位: PbSIZE(模式=12)
+    数据域: 偏移6起
+    """
+    b4 = payload[4] if len(payload) > 4 else 0
+    b5 = payload[5] if len(payload) > 5 else 0
+    end = base_offset + len(payload) - 1
+
+    mode_name = _EXT_TEST_MODES.get(test_mode, f"保留({test_mode})")
+    _f(table, "测试模式/配置操作", f"{test_mode}", mode_name,
+       "检测扩展命令: 扩展的测试模式/配置操作", base_offset + 1, base_offset + 1)
+
+    # 配置值(12bit, 小端nibble组合) = 字节2高4位(低4位) | 字节3(高8位)
+    config_val = ((b2 >> 4) & 0x0F) | (b3 << 4)
+
+    if test_mode == 15:
+        # 字节2低4位=新一代测试模式, 12bit=数据转发长度
+        ng_name = _EXT_NEWGEN_MODES.get(proto_type, f"保留({proto_type})")
+        _f(table, "新一代测试模式", f"{proto_type}", ng_name,
+           "转发数据规约类型字段扩展为新一代测试模式", base_offset + 2, base_offset + 2)
+        _f(table, "数据转发长度", f"{config_val}", f"{config_val}字节", "数据域内容长度(12bit)",
+           base_offset + 2, base_offset + 3)
+    elif test_mode == 8:
+        # Option值(字节2高4位) + 无线信道号(字节3)
+        option = (b2 >> 4) & 0x0F
+        _f(table, "Option值", f"{option}", f"Option {option}", "无线Option值",
+           base_offset + 2, base_offset + 2)
+        _f(table, "无线信道号", f"{b3}", f"信道 {b3}", "目标无线信道号",
+           base_offset + 3, base_offset + 3)
+    elif test_mode == 6:
+        band = _EXT_FREQ_BANDS.get(config_val, f"保留({config_val})")
+        _f(table, "目标频段", f"{config_val}", band, "需要切换到的目标频段",
+           base_offset + 2, base_offset + 3)
+    elif test_mode == 7:
+        _f(table, "目标ToneMask", f"{config_val}",
+           f"频段{config_val}对应ToneMask配置" if config_val <= 3 else f"保留({config_val})",
+           "需要配置的目标ToneMask", base_offset + 2, base_offset + 3)
+    else:
+        # 持续时间类模式(含暂未使用的1/2, 填0)
+        note = "测试模式持续时间(单位:分钟,最大120)"
+        parsed = f"{config_val}分钟"
+        if config_val > 120:
+            parsed += "(超限,限定120分钟)"
+        _f(table, "模式持续时间/配置值", f"{config_val}", parsed, note,
+           base_offset + 2, base_offset + 3)
+
+    # 字节4/5: 安全测试模式 / PHR_MCS / PSDU_MCS / PbSIZE
+    sec_mode = b4 & 0x0F
+    if test_mode == 13:
+        sec_name = _EXT_SEC_MODES.get(sec_mode, f"保留({sec_mode})")
+        _f(table, "安全测试模式", f"{sec_mode}", sec_name,
+           "标识不同的安全测试模式", base_offset + 4, base_offset + 4)
+    elif test_mode == 12:
+        phr_mcs = (b4 >> 4) & 0x0F
+        psdu_mcs = b5 & 0x0F
+        pbsize = (b5 >> 4) & 0x0F
+        _f(table, "PHR_MCS", f"{phr_mcs}", f"MCS {phr_mcs}", "RF打包PHR的MCS(仅模式12生效)",
+           base_offset + 4, base_offset + 4)
+        _f(table, "PSDU_MCS", f"{psdu_mcs}", f"MCS {psdu_mcs}", "RF打包PSDU的MCS(仅模式12生效)",
+           base_offset + 5, base_offset + 5)
+        _f(table, "PbSIZE", f"{pbsize}", str(pbsize), "RF打包物理块大小(仅模式12生效)",
+           base_offset + 5, base_offset + 5)
+    elif sec_mode != 0:
+        _f(table, "安全测试模式字段", f"{sec_mode}", "应为0",
+           "测试模式≠13时该字段应为0", base_offset + 4, base_offset + 4)
+
+    # 数据域(偏移6起, 仅模式13/15有数据域定义, 其余模式无数据域)
+    data = payload[6:]
+    data_off = base_offset + 6
+    if test_mode == 13 and data:
+        _parse_sec_test_data(table, data, data_off)
+    elif test_mode == 15:
+        _parse_newgen_test_data(table, data, data_off, proto_type)
+    elif data:
+        _f(table, "尾部数据", _hex(data), f"{len(data)}字节",
+           f"模式{test_mode}无数据域定义(可能为ICV/填充/PBCS等链路层字节)", data_off, end)
+
+
+# ═══════════════════════════════════════════════════════════
+# 检测扩展命令 - 安全测试模式(13) 数据域（表4）
+# ═══════════════════════════════════════════════════════════
+_SEC_DATA_SEGS = [
+    ("密钥/MAC(TAG)/哈希结果/验签结果", 1),
+    ("IV/公钥x", 1),
+    ("公钥y", 1),
+    ("签名r", 1),
+    ("签名s", 1),
+    ("随机数/明文/密文", 2),
+]
+
+
+def _parse_sec_test_data(table: list, data: bytes, base_offset: int) -> None:
+    """安全测试模式数据域（表4）: 各段=长度(1B,末段2B)+内容，不涉及字段长度填0
+
+    SHA256/SM3及签名测试平台只下发随机数: 仅填充随机数长度+随机数
+    """
+    n = len(data)
+    # 先尝试完整6段序列(长度可=0)，若恰好耗尽则按段标注
+    pos = 0
+    segs = []
+    ok = True
+    for idx, (name, len_size) in enumerate(_SEC_DATA_SEGS):
+        if pos + len_size > n:
+            ok = False
+            break
+        if len_size == 1:
+            seg_len = data[pos]
+        else:
+            seg_len = data[pos] | (data[pos + 1] << 8)
+        seg_start = pos
+        pos += len_size
+        if pos + seg_len > n:
+            ok = False
+            break
+        segs.append((name, seg_start, seg_len, pos))
+        pos += seg_len
+    if ok and pos == n:
+        for i, (name, seg_start, seg_len, val_start) in enumerate(segs):
+            if seg_len == 0 and i < len(segs) - 1:
+                continue  # 未涉及字段不显示
+            raw = _hex(data[seg_start:val_start + seg_len])
+            _f(table, f"  {name}", raw, f"{seg_len}字节",
+               f"长度{seg_len}", base_offset + seg_start, base_offset + val_start + seg_len - 1)
+        return
+    # 回退: 仅随机数(长度2B+内容)
+    if n >= 2:
+        rnd_len = data[0] | (data[1] << 8)
+        rnd = data[2:2 + rnd_len]
+        _f(table, "  随机数/明文/密文", _hex(rnd), f"{len(rnd)}字节",
+           f"长度字段={rnd_len}", base_offset, base_offset + 1 + len(rnd))
+        tail = data[2 + rnd_len:]
+        if tail:
+            _f(table, "  剩余数据", _hex(tail), f"{len(tail)}字节", "",
+               base_offset + 2 + rnd_len, base_offset + n - 1)
+    else:
+        _f(table, "  数据域", _hex(data), f"{n}字节", "安全测试数据域", base_offset, base_offset + n - 1)
+
+
+# ═══════════════════════════════════════════════════════════
+# 检测扩展命令 - 新一代扩展测试模式(15) 数据域
+# ═══════════════════════════════════════════════════════════
+def _parse_newgen_test_data(table: list, data: bytes, base_offset: int, ng_mode: int) -> None:
+    """新一代测试模式数据域（子模式1/2/5/6/7/8）"""
+    n = len(data)
+    if n == 0:
+        return
+    end = base_offset + n - 1
+
+    # ── 模式1: 信道探测帧发送模式 (4B固定) ──
+    if ng_mode == 1 and n >= 4:
+        _f(table, "  子载波组", f"0x{data[0]:02X}", str(data[0]),
+           "动态加载子载波选择表模式数据载荷增益幅度配置值", base_offset, base_offset)
+        _f(table, "  TF符号数", f"{data[1]}", str(data[1]), "当前帧TF部分的符号个数",
+           base_offset + 1, base_offset + 1)
+        _f(table, "  FCH符号数", f"{data[2]}", str(data[2]), "帧控制的符号长度",
+           base_offset + 2, base_offset + 2)
+        _f(table, "  训练序列频段", f"{data[3]}", str(data[3]),
+           "TF与数据载荷可采用的通信频段", base_offset + 3, base_offset + 3)
+        if n > 4:
+            _f(table, "  剩余数据", _hex(data[4:]), f"{n - 4}字节", "", base_offset + 4, end)
+        return
+
+    # ── 模式2: 被动信道探测帧发送模式 ──
+    if ng_mode == 2 and n >= 5:
+        tf_pos = _EXT_TF_POSITIONS.get(data[0], f"保留({data[0]})")
+        _f(table, "  TF位置", f"{data[0]}", tf_pos, "0=不携带TF 1=数据载荷之前 2=数据载荷之后",
+           base_offset, base_offset)
+        _f(table, "  TF符号数", f"{data[1]}", str(data[1]), "当前帧TF部分的符号个数",
+           base_offset + 1, base_offset + 1)
+        _f(table, "  FCH符号数", f"{data[2]}", str(data[2]), "帧控制的符号长度",
+           base_offset + 2, base_offset + 2)
+        _f(table, "  训练序列频段", f"{data[3]}", str(data[3]),
+           "TF与数据载荷可采用的通信频段", base_offset + 3, base_offset + 3)
+        plen = data[4]
+        _f(table, "  Payload长度", f"{plen}", f"{plen}字节", "DUT需按指定参数回传的payload长度",
+           base_offset + 4, base_offset + 4)
+        pdata = data[5:5 + plen]
+        if pdata:
+            _f(table, "  Payload数据", _hex(pdata), f"{len(pdata)}字节",
+               "DUT需按指定参数回传的payload内容", base_offset + 5, base_offset + 4 + len(pdata))
+        tail = data[5 + plen:]
+        if tail:
+            _f(table, "  剩余数据", _hex(tail), f"{len(tail)}字节", "",
+               base_offset + 5 + plen, end)
+        return
+
+    # ── 模式5: 动态加载参数配置操作 ──
+    if ng_mode == 5 and n >= 2:
+        tbl_type = data[0]
+        tbl_len = data[1]
+        type_name = _EXT_PARAM_TABLE_TYPES.get(tbl_type, f"保留({tbl_type})")
+        _f(table, "  参数表类型", f"{tbl_type}", type_name, "1=比特加载表 2=子载波选择表",
+           base_offset, base_offset)
+        _f(table, "  参数表长度", f"{tbl_len}", f"{tbl_len}字节", "表格参数实际占用字节长度",
+           base_offset + 1, base_offset + 1)
+        tbl = data[2:2 + tbl_len]
+        if tbl_type == 1:
+            _parse_bitloading_table(table, tbl, base_offset + 2)
+        elif tbl_type == 2:
+            _parse_subcarrier_table(table, tbl, base_offset + 2)
+        elif tbl:
+            _f(table, "  参数表内容", _hex(tbl), f"{len(tbl)}字节", "未知参数表类型,原始显示",
+               base_offset + 2, base_offset + 1 + len(tbl))
+        tail = data[2 + tbl_len:]
+        if tail:
+            _f(table, "  剩余数据", _hex(tail), f"{len(tail)}字节", "",
+               base_offset + 2 + tbl_len, end)
+        return
+
+    # ── 模式6: CCO信标机制切换 (1B) ──
+    if ng_mode == 6 and n >= 1:
+        mech = _EXT_BEACON_MECHS.get(data[0], f"保留({data[0]})")
+        _f(table, "  信标机制", f"{data[0]}", mech,
+           "0=固定 1=组网后立即切竞争 2=组网后自主决定", base_offset, base_offset)
+        if n > 1:
+            _f(table, "  剩余数据", _hex(data[1:]), f"{n - 1}字节", "", base_offset + 1, end)
+        return
+
+    # ── 模式7: DUT发送模式切换 ──
+    if ng_mode == 7 and n >= 3:
+        send_mode = _EXT_SEND_MODES.get(data[0], f"保留({data[0]})")
+        _f(table, "  发送模式", f"{data[0]}", send_mode,
+           "0=自适应 1=强制OFDMA 2=强制TDA", base_offset, base_offset)
+        _f(table, "  FCH符号数", f"{data[1]}", str(data[1]), "回传帧控制的符号数",
+           base_offset + 1, base_offset + 1)
+        efch = data[2] & 0x3F
+        nuser = ((data[2] >> 6) & 0x03) + 1
+        _f(table, "  eFCH符号数", f"{efch}", str(efch), "eFCH符号数(6bit)",
+           base_offset + 2, base_offset + 2)
+        _f(table, "  用户数", f"{nuser}", f"{nuser}个站点", "取值0-3表示站点个数1到4个",
+           base_offset + 2, base_offset + 2)
+        # 每用户5字节参数 + payload(剩余均分)
+        pos = 3
+        remain = n - pos - 5 * nuser
+        plen = remain // nuser if nuser > 0 and remain >= 0 else 0
+        for u in range(nuser):
+            if pos + 5 > n:
+                _f(table, f"  用户{u}参数(数据不足)", _hex(data[pos:]), "", "",
+                   base_offset + pos, end)
+                return
+            blk = data[pos:pos + 5]
+            tei = blk[1] | ((blk[2] & 0x0F) << 8)
+            tmi = (blk[2] >> 4) | ((blk[3] & 0x0F) << 4)
+            ru = (blk[3] >> 4) | ((blk[4] & 0x0F) << 4)
+            _f(table, f"  用户{u} TF符号数", f"{blk[0]}", str(blk[0]),
+               "OFDMA机制下每用户相同且>0;TDA可为0", base_offset + pos, base_offset + pos)
+            _f(table, f"  用户{u} TEI", f"{tei}", f"TEI={tei}", "回传用户TEI(12bit)",
+               base_offset + pos + 1, base_offset + pos + 2)
+            _f(table, f"  用户{u} TMI", f"{tmi}", f"TMI={tmi}", "回传用户使用的TMI",
+               base_offset + pos + 2, base_offset + pos + 3)
+            _f(table, f"  用户{u} 频段(RU)", f"{ru}", f"RU={ru}",
+               "OFDMA为RU索引,TDA为频段索引", base_offset + pos + 3, base_offset + pos + 4)
+            pos += 5
+            pdata = data[pos:pos + plen]
+            if pdata:
+                _f(table, f"  用户{u} Payload", _hex(pdata), f"{len(pdata)}字节",
+                   "回传用户的payload数据", base_offset + pos, base_offset + pos + len(pdata) - 1)
+            pos += plen
+        if pos < n:
+            _f(table, "  剩余数据", _hex(data[pos:]), f"{n - pos}字节", "",
+               base_offset + pos, end)
+        return
+
+    # ── 模式8/9: 指定DUT TEI (6B, 12bit×4) ──
+    if ng_mode in (8, 9) and n >= 6:
+        teis = [
+            data[0] | ((data[1] & 0x0F) << 8),
+            (data[1] >> 4) | (data[2] << 4),
+            data[3] | ((data[4] & 0x0F) << 8),
+            (data[4] >> 4) | (data[5] << 4),
+        ]
+        for i, tei in enumerate(teis):
+            _f(table, f"  TEI{i + 1}", f"{tei}", f"TEI={tei}",
+               "指定用户的站点TEI(12bit)", base_offset, base_offset + 5)
+        if n > 6:
+            _f(table, "  剩余数据", _hex(data[6:]), f"{n - 6}字节", "", base_offset + 6, end)
+        return
+
+    # ── 其他/数据不足: 原始显示 ──
+    _f(table, "  数据域", _hex(data), f"{n}字节",
+       f"新一代测试模式{ng_mode}数据域", base_offset, end)
+
+
+def _parse_bitloading_table(table: list, tbl: bytes, base_offset: int) -> None:
+    """比特加载表: 子载波段个数(5bit)+保留(3bit), 每段1B=4组×2bit调制方式"""
+    if not tbl:
+        return
+    seg_cnt = (tbl[0] & 0x1F) + 1
+    _f(table, "    子载波段个数", f"{seg_cnt}", f"{seg_cnt}段", "(N+1)个连续子载波段,最多32段",
+       base_offset, base_offset)
+    pos = 1
+    for seg in range(seg_cnt):
+        if pos >= len(tbl):
+            break
+        b = tbl[pos]
+        mods = [_EXT_MODULATIONS[(b >> s) & 0x03] for s in (0, 2, 4, 6)]
+        _f(table, f"    子载波段{seg}", f"0x{b:02X}", " | ".join(mods),
+           "每2bit对应一个子载波组: 0=不使用 1=BPSK 2=QPSK 3=16QAM",
+           base_offset + pos, base_offset + pos)
+        pos += 1
+
+
+def _parse_subcarrier_table(table: list, tbl: bytes, base_offset: int) -> None:
+    """子载波选择表: 子载波段个数(4bit)+保留(4bit), 每段1B=8bit各对应1个子载波组"""
+    if not tbl:
+        return
+    seg_cnt = (tbl[0] & 0x0F) + 1
+    _f(table, "    子载波段个数", f"{seg_cnt}", f"{seg_cnt}段", "(N+1)个连续子载波段,最多16段",
+       base_offset, base_offset)
+    pos = 1
+    for seg in range(seg_cnt):
+        if pos >= len(tbl):
+            break
+        b = tbl[pos]
+        used = [str(seg * 8 + i) for i in range(8) if (b >> i) & 0x01]
+        _f(table, f"    子载波段{seg}", f"0x{b:02X} ({b:08b})",
+           f"使用子载波组: {','.join(used)}" if used else "全部不使用",
+           "每bit对应1个子载波组: 0=不使用 1=使用",
+           base_offset + pos, base_offset + pos)
+        pos += 1
 
 
 # ═══════════════════════════════════════════════════════════
@@ -423,9 +829,9 @@ def _parse_event_report(payload: bytes, direction: int, base_offset: int) -> lis
     # 功能码实际是6bit: b1[7:6] + b2[3:0]
     b2 = payload[2]
     func_code_full = (func_code << 4) | (b2 & 0x0F)
-    data_len_high = (b2 >> 4) & 0x0F
     b3 = payload[3]
-    data_len = (data_len_high << 8) | b3
+    # 数据长度: payload[3]低4位为高位, payload[2]高4位为低位 → 组合成8位
+    data_len = ((b3 & 0x0F) << 4) | ((b2 >> 4) & 0x0F)
     seq = _uint16_le(payload, 4)
 
     _f(table, "协议版本号", f"{version}", str(version), "固定为1", base_offset, base_offset)
@@ -559,7 +965,7 @@ def _parse_event_data(table: list, evt_data: bytes, evt_type: int, base_offset: 
                    base_offset + off - addr_len - dev_desc_len - 3, base_offset + off - 1)
     else:
         # 电能表事件或其他
-        _f(table, "事件数据", _hex(evt_data)[:80], f"{len(evt_data)}字节",
+        _f(table, "事件数据", _hex(evt_data), f"{len(evt_data)}字节",
            f"事件类型=0x{evt_type:02X}", base_offset, base_offset + len(evt_data) - 1)
 
 
@@ -886,7 +1292,7 @@ def _parse_file_transfer(payload: bytes, direction: int, base_offset: int) -> li
         offset += 4
     if offset < len(payload):
         file_data = payload[offset:]
-        _f(table, "数据块", _hex(file_data)[:80], f"{len(file_data)}字节", "升级文件数据",
+        _f(table, "数据块", _hex(file_data), f"{len(file_data)}字节", "升级文件数据",
            base_offset + offset, base_offset + len(payload) - 1)
     return table
 
@@ -1308,12 +1714,12 @@ def _parse_precise_time_sync(payload: bytes, base_offset: int, direction: int) -
     hdr_len_low = b1 & 0x0F
     hdr_len = (hdr_len_high << 4) | hdr_len_low
     b2 = payload[2]
-    data_len_high = b2 & 0x0F
     b3 = payload[3]
-    data_len = (data_len_high << 8) | b3
+    # 数据长度: payload[3]低4位为高位, payload[2]高4位为低位 → 组合成8位
+    data_len = ((b3 & 0x0F) << 4) | ((b2 >> 4) & 0x0F)
     _f(table, "协议版本号", f"{version}", str(version), "固定为1", base_offset, base_offset)
     _f(table, "报文头长度", f"{hdr_len}", str(hdr_len), "", base_offset, base_offset + 1)
-    _f(table, "转发数据长度", f"0x{data_len:03X}", f"{data_len}字节", "DATA长度",
+    _f(table, "转发数据长度", f"0x{data_len:02X}", f"{data_len}字节", "DATA长度",
        base_offset + 2, base_offset + 3)
     seq = payload[3] if len(payload) > 3 else 0
     # 表37: 字节3=报文序号(8b), 字节4-7=NTB(32b)
@@ -1351,6 +1757,323 @@ def _parse_power_distribution_report(payload: bytes, base_offset: int, direction
     return table
 
 
+# ── 分钟采集协议常量 ──
+_COLLECT_PROTOCOL_MAP = {
+    0: "透明传输",
+    1: "DL/T 645-1997",
+    2: "DL/T 645-2007",
+    3: "DL/T 698.45",
+}
+
+_COLLECT_TASK_TYPE_MAP = {
+    0: "实时采集",
+    1: "定时采集",
+    2: "补采",
+}
+
+
+def _parse_minute_collect_config(payload: bytes, direction: int, base_offset: int) -> list:
+    """0x00E2 分钟采集任务配置 (协议文档 表42/43/44)"""
+    table = []
+    plen = len(payload)
+    if plen < 2:
+        _f(table, "业务数据", _hex(payload)[:60], f"{plen}字节(过短)", "数据不足",
+           base_offset, base_offset + max(plen - 1, 0))
+        return table
+    offset = 0
+    b0 = payload[0]
+    proto_ver = b0 & 0x3F
+    b1 = payload[1]
+    head_len = ((b0 >> 6) << 4) | (b1 & 0x0F)
+    _f(table, "协议版本", f"{proto_ver:02X}", str(proto_ver),
+       "协议版本号", base_offset, base_offset)
+    if direction == 0:
+        # 下行业务报文 (表42)
+        _f(table, "报文头长度", f"{head_len:02X}", str(head_len),
+           "报文头长度(字节)", base_offset, base_offset + 1)
+        offset = 2
+        if plen > 2:
+            reserved = (payload[2] >> 4) & 0x0F
+            _f(table, "保留", f"{reserved:01X}", str(reserved),
+               "保留字段", base_offset + 2, base_offset + 2)
+        if plen >= 7:
+            seq_raw = payload[2:7]
+            seq_val = ((payload[2] & 0x0F) | (payload[3] << 4) | (payload[4] << 12) |
+                       (payload[5] << 20) | (payload[6] << 28))
+            _f(table, "报文序号", _hex(seq_raw), str(seq_val & 0xFFFFFFFF),
+               "报文序列号", base_offset + 2, base_offset + 6)
+            offset = 7
+        if plen >= offset + 6:
+            raw_mac, mac_str = _mac_addr(payload, offset)
+            _f(table, "目的MAC地址", raw_mac, mac_str,
+               "目的MAC地址", base_offset + offset, base_offset + offset + 5)
+            offset += 6
+        if plen > offset:
+            task_id = payload[offset]
+            _f(table, "任务号", f"{task_id:02X}", str(task_id),
+               "采集任务号", base_offset + offset, base_offset + offset)
+            offset += 1
+        if plen > offset:
+            flags = payload[offset]
+            add_del = flags & 0x01
+            proto_type = (flags >> 1) & 0x07
+            task_type = (flags >> 4) & 0x03
+            _f(table, "添加/删除标志", f"{add_del:01X}",
+               "添加" if add_del == 1 else "删除",
+               "1=添加,0=删除", base_offset + offset, base_offset + offset)
+            _f(table, "协议类型", f"{proto_type:01X}",
+               _COLLECT_PROTOCOL_MAP.get(proto_type, f"未知({proto_type})"),
+               "转发数据规约类型", base_offset + offset, base_offset + offset)
+            _f(table, "任务类型", f"{task_type:01X}",
+               _COLLECT_TASK_TYPE_MAP.get(task_type, f"未知({task_type})"),
+               "采集任务类型", base_offset + offset, base_offset + offset)
+            offset += 1
+        if plen > offset:
+            period = payload[offset]
+            _f(table, "采集周期", f"{period:02X}", f"{period}分钟",
+               "数据采集周期", base_offset + offset, base_offset + offset)
+            offset += 1
+        if plen > offset:
+            n = payload[offset]
+            _f(table, "数据项个数", f"{n:02X}", str(n),
+               "数据项标识个数", base_offset + offset, base_offset + offset)
+            offset += 1
+            for i in range(n):
+                if offset + 5 > plen:
+                    break
+                item_id = _uint32_le(payload, offset)
+                item_cnt = payload[offset + 4]
+                _f(table, f"数据项{i+1}标识", f"{item_id:08X}", f"0x{item_id:08X}",
+                   f"第{i+1}个数据项标识", base_offset + offset, base_offset + offset + 3)
+                _f(table, f"数据项{i+1}回复个数", f"{item_cnt:02X}", str(item_cnt),
+                   f"第{i+1}个数据项回复个数", base_offset + offset + 4, base_offset + offset + 4)
+                offset += 5
+    else:
+        # 上行业务报文 (表44)
+        _f(table, "报文头长度", f"{head_len:02X}", str(head_len),
+           "报文头长度(字节)", base_offset, base_offset + 1)
+        offset = 2
+        if plen > 2:
+            reserved = (payload[2] >> 4) & 0x0F
+            _f(table, "保留", f"{reserved:01X}", str(reserved),
+               "保留字段", base_offset + 2, base_offset + 2)
+        if plen >= 7:
+            seq_raw = payload[2:7]
+            seq_val = ((payload[2] & 0x0F) | (payload[3] << 4) | (payload[4] << 12) |
+                       (payload[5] << 20) | (payload[6] << 28))
+            _f(table, "报文序号", _hex(seq_raw), str(seq_val & 0xFFFFFFFF),
+               "报文序列号", base_offset + 2, base_offset + 6)
+            offset = 7
+        if plen >= offset + 6:
+            raw_mac, mac_str = _mac_addr(payload, offset)
+            _f(table, "源MAC地址", raw_mac, mac_str,
+               "源MAC地址", base_offset + offset, base_offset + offset + 5)
+            offset += 6
+        if plen > offset:
+            task_id = payload[offset]
+            _f(table, "任务号", f"{task_id:02X}", str(task_id),
+               "采集任务号", base_offset + offset, base_offset + offset)
+            offset += 1
+        if plen > offset:
+            flags = payload[offset]
+            add_del = flags & 0x01
+            result = (flags >> 1) & 0x01
+            _f(table, "添加/删除标志", f"{add_del:01X}",
+               "添加" if add_del == 1 else "删除",
+               "1=添加,0=删除", base_offset + offset, base_offset + offset)
+            _f(table, "结果", f"{result:01X}",
+               "成功" if result == 0 else "失败",
+               "配置结果", base_offset + offset, base_offset + offset)
+            offset += 1
+        if plen > offset:
+            period = payload[offset]
+            _f(table, "采集周期", f"{period:02X}", f"{period}分钟",
+               "数据采集周期", base_offset + offset, base_offset + offset)
+            offset += 1
+    _remaining(table, payload, offset, base_offset)
+    return table
+
+
+def _parse_minute_collect_read(payload: bytes, direction: int, base_offset: int) -> list:
+    """0x00E3 分钟采集任务数据读取 (协议文档 表45/46)"""
+    table = []
+    plen = len(payload)
+    if plen < 2:
+        _f(table, "业务数据", _hex(payload)[:60], f"{plen}字节(过短)", "数据不足",
+           base_offset, base_offset + max(plen - 1, 0))
+        return table
+    offset = 0
+    b0 = payload[0]
+    proto_ver = b0 & 0x3F
+    b1 = payload[1]
+    head_len = ((b0 >> 6) << 4) | (b1 & 0x0F)
+    _f(table, "协议版本", f"{proto_ver:02X}", str(proto_ver),
+       "协议版本号", base_offset, base_offset)
+    if direction == 0:
+        # 下行业务报文 (表45)
+        _f(table, "报文头长度", f"{head_len:02X}", str(head_len),
+           "报文头长度(字节)", base_offset, base_offset + 1)
+        offset = 2
+        if plen > 2:
+            dir_bit = (payload[2] >> 7) & 0x01
+            _f(table, "方向位", f"{dir_bit:01X}",
+               "下行" if dir_bit == 0 else "上行",
+               "传输方向", base_offset + 2, base_offset + 2)
+        if plen >= 7:
+            seq_raw = payload[2:7]
+            seq_val = ((payload[2] & 0x0F) | (payload[3] << 4) | (payload[4] << 12) |
+                       (payload[5] << 20) | (payload[6] << 28))
+            _f(table, "报文序号", _hex(seq_raw), str(seq_val & 0xFFFFFFFF),
+               "报文序列号", base_offset + 2, base_offset + 6)
+            offset = 7
+        if plen > offset:
+            ctrl = payload[offset]
+            proto_type = ctrl & 0x07
+            task_type = (ctrl >> 3) & 0x03
+            _f(table, "协议类型", f"{proto_type:01X}",
+               _COLLECT_PROTOCOL_MAP.get(proto_type, f"未知({proto_type})"),
+               "转发数据规约类型", base_offset + offset, base_offset + offset)
+            _f(table, "任务类型", f"{task_type:01X}",
+               _COLLECT_TASK_TYPE_MAP.get(task_type, f"未知({task_type})"),
+               "采集任务类型", base_offset + offset, base_offset + offset)
+            offset += 1
+        if plen >= offset + 6:
+            raw_mac, mac_str = _mac_addr(payload, offset)
+            _f(table, "目的MAC地址", raw_mac, mac_str,
+               "目的MAC地址", base_offset + offset, base_offset + offset + 5)
+            offset += 6
+        if plen > offset:
+            task_id = payload[offset]
+            _f(table, "任务号", f"{task_id:02X}", str(task_id),
+               "采集任务号", base_offset + offset, base_offset + offset)
+            offset += 1
+        if plen >= offset + 6:
+            raw_time, time_str = _bcd_time(payload, offset)
+            _f(table, "采集时刻", raw_time, time_str,
+               "采集时刻(BCD)", base_offset + offset, base_offset + offset + 5)
+            offset += 6
+    else:
+        # 上行业务报文 (表46)
+        _f(table, "报文头长度", f"{head_len:02X}", str(head_len),
+           "报文头长度(字节)", base_offset, base_offset + 1)
+        offset = 2
+        if plen > 2:
+            dir_bit = (payload[2] >> 7) & 0x01
+            _f(table, "方向位", f"{dir_bit:01X}",
+               "下行" if dir_bit == 0 else "上行",
+               "传输方向", base_offset + 2, base_offset + 2)
+        if plen >= 7:
+            seq_raw = payload[2:7]
+            seq_val = ((payload[2] & 0x0F) | (payload[3] << 4) | (payload[4] << 12) |
+                       (payload[5] << 20) | (payload[6] << 28))
+            _f(table, "报文序号", _hex(seq_raw), str(seq_val & 0xFFFFFFFF),
+               "报文序列号", base_offset + 2, base_offset + 6)
+            offset = 7
+        if plen > offset:
+            ctrl = payload[offset]
+            proto_type = ctrl & 0x07
+            task_type = (ctrl >> 3) & 0x03
+            ack_result = (ctrl >> 5) & 0x07
+            _f(table, "协议类型", f"{proto_type:01X}",
+               _COLLECT_PROTOCOL_MAP.get(proto_type, f"未知({proto_type})"),
+               "转发数据规约类型", base_offset + offset, base_offset + offset)
+            _f(table, "任务类型", f"{task_type:01X}",
+               _COLLECT_TASK_TYPE_MAP.get(task_type, f"未知({task_type})"),
+               "采集任务类型", base_offset + offset, base_offset + offset)
+            _f(table, "应答结果", f"{ack_result:01X}",
+               "成功" if ack_result == 0 else f"失败({ack_result})",
+               "应答结果码", base_offset + offset, base_offset + offset)
+            offset += 1
+        if plen >= offset + 6:
+            raw_mac, mac_str = _mac_addr(payload, offset)
+            _f(table, "源MAC地址", raw_mac, mac_str,
+               "源MAC地址", base_offset + offset, base_offset + offset + 5)
+            offset += 6
+        if plen > offset:
+            task_id = payload[offset]
+            _f(table, "任务号", f"{task_id:02X}", str(task_id),
+               "采集任务号", base_offset + offset, base_offset + offset)
+            offset += 1
+        if plen >= offset + 6:
+            raw_time, time_str = _bcd_time(payload, offset)
+            _f(table, "采集时刻", raw_time, time_str,
+               "采集时刻(BCD)", base_offset + offset, base_offset + offset + 5)
+            offset += 6
+        if plen > offset:
+            n = payload[offset]
+            _f(table, "数据项个数", f"{n:02X}", str(n),
+               "数据项个数", base_offset + offset, base_offset + offset)
+            offset += 1
+        if plen >= offset + 2:
+            data_len = _uint16_le(payload, offset)
+            _f(table, "数据长度", f"{data_len:04X}", f"{data_len}字节",
+               "数据内容长度", base_offset + offset, base_offset + offset + 1)
+            offset += 2
+        if plen > offset:
+            data_content = payload[offset:]
+            _f(table, "数据内容", _hex(data_content)[:80], f"{len(data_content)}字节",
+               "采集数据内容", base_offset + offset, base_offset + plen - 1)
+            offset = plen
+    _remaining(table, payload, offset, base_offset)
+    return table
+
+
+def _parse_multi_user_agg_frame(payload: bytes, direction: int, base_offset: int) -> list:
+    """0x00E5 多用户应用聚合帧 (协议文档 表51/52)"""
+    table = []
+    plen = len(payload)
+    if plen < 2:
+        _f(table, "业务数据", _hex(payload)[:60], f"{plen}字节(过短)", "数据不足",
+           base_offset, base_offset + max(plen - 1, 0))
+        return table
+    offset = 0
+    b0 = payload[0]
+    proto_ver = b0 & 0x3F
+    b1 = payload[1]
+    head_len = ((b0 >> 6) << 4) | (b1 & 0x0F)
+    _f(table, "协议版本", f"{proto_ver:02X}", str(proto_ver),
+       "协议版本号", base_offset, base_offset)
+    _f(table, "报文头长度", f"{head_len:02X}", str(head_len),
+       "报文头长度(字节)", base_offset, base_offset + 1)
+    offset = 2
+    if plen > offset:
+        reserved = payload[offset]
+        _f(table, "保留", f"{reserved:02X}", str(reserved),
+           "保留字段", base_offset + offset, base_offset + offset)
+        offset += 1
+    agg_count = 0
+    if plen > offset:
+        agg_count = payload[offset]
+        _f(table, "聚合帧个数", f"{agg_count:02X}", str(agg_count),
+           "聚合帧数量", base_offset + offset, base_offset + offset)
+        offset += 1
+    for i in range(agg_count):
+        if offset + 8 > plen:
+            break
+        raw_mac, mac_str = _mac_addr(payload, offset)
+        _f(table, f"聚合帧{i+1}目的地址", raw_mac, mac_str,
+           f"第{i+1}个聚合帧目的地址", base_offset + offset, base_offset + offset + 5)
+        offset += 6
+        frame_len = _uint16_le(payload, offset)
+        _f(table, f"聚合帧{i+1}长度", f"{frame_len:04X}", f"{frame_len}字节",
+           f"第{i+1}个聚合帧数据长度", base_offset + offset, base_offset + offset + 1)
+        offset += 2
+        if offset + frame_len <= plen:
+            frame_data = payload[offset:offset + frame_len]
+            _f(table, f"聚合帧{i+1}数据", _hex(frame_data)[:80], f"{frame_len}字节",
+               f"第{i+1}个聚合帧数据内容", base_offset + offset, base_offset + offset + frame_len - 1)
+            offset += frame_len
+        else:
+            frame_data = payload[offset:]
+            _f(table, f"聚合帧{i+1}数据", _hex(frame_data)[:80],
+               f"{len(frame_data)}字节(截断)",
+               f"第{i+1}个聚合帧数据(不完整)", base_offset + offset, base_offset + plen - 1)
+            offset = plen
+            break
+    _remaining(table, payload, offset, base_offset)
+    return table
+
+
 # ═══════════════════════════════════════════════════════════
 # 公共入口：按 msg_id 分派到各子解析器
 # ═══════════════════════════════════════════════════════════
@@ -1362,10 +2085,10 @@ _COMMAND_PARSERS = {
     0x0005: _parse_single_phase,
     0x0006: _parse_comm_test,
     0x0008: _parse_event_report,
-    0x0009: _parse_query_node_registration,
-    0x000A: _parse_start_node_registration,
-    0x000B: _parse_stop_node_registration,
-    0x000C: _parse_confirm_deny,
+    0x0011: _parse_query_node_registration,
+    0x0012: _parse_start_node_registration,
+    0x0013: _parse_stop_node_registration,
+    0x0020: _parse_confirm_deny,
     0x0030: _parse_start_upgrade,
     0x0031: _parse_stop_upgrade,
     0x0032: _parse_file_transfer,
@@ -1380,6 +2103,9 @@ _COMMAND_PARSERS = {
     0x00A2: _parse_query_id_info,
     0x00A3: _parse_precise_time_sync,
     0x00A4: _parse_power_distribution_report,
+    0x00E2: _parse_minute_collect_config,
+    0x00E3: _parse_minute_collect_read,
+    0x00E5: _parse_multi_user_agg_frame,
 }
 
 
