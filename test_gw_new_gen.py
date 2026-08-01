@@ -297,11 +297,17 @@ def test_direct_mgmt_after_fc():
     check("邻居网络[0]信道号+option", n0 and n0[2] == "信道号=41 option=0x03")
     n1 = find_row(table, "邻居网络[1]")
     check("邻居网络[1]信道号+option", n1 and n1[2] == "信道号=5 option=0x03")
-    # 所有解析级别均应正确识别 MMTYPE=0x0080 (含16字节前缀剥离)
-    for lvl in ("mac_only", "pb_only", "app"):
-        t2 = parser.parse_to_table(frame, parse_level=lvl)
+    # 纯PB输入(剥离FC后): mac_only/pb_only 应正确识别管理消息
+    # 用户勾选仅PB时输入的是无FC的纯数据
+    pure_pb = frame[16:]
+    for lvl in ("mac_only", "pb_only"):
+        t2 = parser.parse_to_table(pure_pb, parse_level=lvl)
         mm2 = find_row(t2, "管理消息类型(MMTYPE)")
-        check(f"{lvl}级别 MMTYPE=0x0080", mm2 and mm2[2] == "0x0080")
+        check(f"纯PB输入 {lvl}级别 MMTYPE=0x0080", mm2 and mm2[2] == "0x0080")
+    # app 级别: 完整帧或纯管理消息均可
+    t3 = parser.parse_to_table(frame, parse_level="app")
+    mm3 = find_row(t3, "管理消息类型(MMTYPE)")
+    check("app级别 MMTYPE=0x0080", mm3 and mm3[2] == "0x0080")
 
 
 def find_row(table, name_contains):
