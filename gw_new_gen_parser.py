@@ -191,45 +191,30 @@ class GWNewGenParser:
             # 回退：强制从偏移0解析
             return self._parse_application_layer(data, 0)
 
-        # ── 仅MAC帧模式：输入包含PB头+MAC帧头 ──
+        # ── 仅MAC帧模式：输入包含PB头+MAC帧头（输入即PB/MAC数据, 不剥离FC）──
         if parse_level == "mac_only":
             result = []
             # 添加帧类型说明（默认SOF帧）
             result.append(("解析模式", "", "仅MAC帧", "默认按SOF帧结构解析", None, None, False))
-            # 若输入以FC帧头开头(FCCS校验通过)或16字节前缀后为管理消息, 剥离FC
-            data, fc_offset = self._strip_fc_prefix_if_present(data, result)
-            # 剥离后若直接是网络管理消息(MMTYPE大端且保留字段为0), 直接按管理消息解析
-            mm_result = self._parse_mgmt_if_direct(data, fc_offset)
-            if mm_result is not None:
-                result.extend(mm_result)
-                return result
-            # 先解析PB头，再解析MAC头
+            # 输入即PBH+MAC数据, 直接从offset 0解析
             pb_result = self._parse_pb_by_frame_type(data, 0, 1, std_version)  # 1=SOF帧
             if pb_result:
-                # 剥离FC后行坐标整体偏移
-                result.extend(self._shift_rows(pb_result, fc_offset))
+                result.extend(pb_result)
             else:
                 result.append(("❌ 解析失败", "", "", "MAC帧头解析失败，数据可能不完整", None, None, False))
             return result
 
-        # ── 仅PB模式：输入即为物理块数据 ──
+        # ── 仅PB模式：输入即为物理块数据（PBH+MAC+MSDU, 不剥离FC）──
         if parse_level == "pb_only":
             result = []
             # 帧类型名称
             dt_names = {0: "信标帧", 1: "SOF帧", 2: "ACK帧(SACK)", 3: "NET帧"}
             dt_name = dt_names.get(frame_type, f"未知({frame_type})")
             result.append(("解析模式", "", f"仅PB - {dt_name}", f"帧类型={frame_type}", None, None, False))
-            # 若输入以FC帧头开头(FCCS校验通过)或16字节前缀后为管理消息, 剥离FC
-            data, fc_offset = self._strip_fc_prefix_if_present(data, result)
-            # 剥离后若直接是网络管理消息(MMTYPE大端且保留字段为0), 直接按管理消息解析
-            mm_result = self._parse_mgmt_if_direct(data, fc_offset)
-            if mm_result is not None:
-                result.extend(mm_result)
-                return result
-            # PB解析根据帧类型有所不同
+            # 输入即PB数据, 直接从offset 0解析（用户已自行剥离FC）
             pb_result = self._parse_pb_by_frame_type(data, 0, frame_type, std_version)
             if pb_result:
-                result.extend(self._shift_rows(pb_result, fc_offset))
+                result.extend(pb_result)
             return result
 
         result = []
