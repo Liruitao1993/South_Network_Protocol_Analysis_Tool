@@ -297,6 +297,11 @@ def test_direct_mgmt_after_fc():
     check("邻居网络[0]信道号+option", n0 and n0[2] == "信道号=41 option=0x03")
     n1 = find_row(table, "邻居网络[1]")
     check("邻居网络[1]信道号+option", n1 and n1[2] == "信道号=5 option=0x03")
+    # 所有解析级别均应正确识别 MMTYPE=0x0080 (含16字节前缀剥离)
+    for lvl in ("mac_only", "pb_only", "app"):
+        t2 = parser.parse_to_table(frame, parse_level=lvl)
+        mm2 = find_row(t2, "管理消息类型(MMTYPE)")
+        check(f"{lvl}级别 MMTYPE=0x0080", mm2 and mm2[2] == "0x0080")
 
 
 def find_row(table, name_contains):
