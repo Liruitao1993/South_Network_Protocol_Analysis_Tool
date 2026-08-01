@@ -962,8 +962,10 @@ def _parse_diagnose(data: bytes, off: int, result: List[Tuple]) -> None:
 # ═════════════════════════════════════════════════════════════
 def _parse_rf_channel_conflict(data: bytes, off: int, result: List[Tuple]) -> None:
     end = len(data)
-    if end < off + 7:
-        result.append(("  报文内容(数据不足)", _raw(data, off, end), "", "",
+    # 需要 CCO MAC(6) + 保留(1) + 邻居网络个数(1) = 8 字节
+    if end < off + 8:
+        result.append(("  报文内容(数据不足)", _raw(data, off, end), "",
+                       f"需至少8字节(CCO MAC 6B+保留 1B+个数 1B), 实际{end - off}字节",
                        off, end, True))
         return
     result.append(("  CCO MAC地址", _raw(data, off, off + 6), "",
