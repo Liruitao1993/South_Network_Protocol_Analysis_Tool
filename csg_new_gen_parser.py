@@ -334,6 +334,9 @@ class CSGNewGenParser:
             # 选择确认帧(定界符类型=2)：仅FC头16字节，无物理块/MSDU
             elif delimiter_type == 2:
                 return table_data
+            # 网间协调帧(定界符类型=3)：仅FC头16字节，无物理块/MSDU（表41）
+            elif delimiter_type == 3:
+                return table_data
             else:
                 offset, mac_data, msdu_payload = self._parse_pb_block(
                     frame_bytes, offset, table_data, frame_len)
@@ -858,7 +861,9 @@ class CSGNewGenParser:
                     offset, offset + 10
                 ))
                 offset = base_offset + 12
-        else:  # 网间协调帧(0b011)等保留
+        elif delimiter_type == 3:  # 网间协调帧(表41)
+            offset = self._parse_mpdu_net(frame_bytes, offset, table)
+        else:  # 保留类型
             raw_var = ' '.join(f'{b:02X}' for b in frame_bytes[offset:offset+12])
             table.append(("可变区域", raw_var[:80] + "..." if len(raw_var) > 80 else raw_var, "12字节",
                          f"定界符类型{delimiter_type}的可变数据(未解析)", offset, offset + 11))
@@ -894,6 +899,17 @@ class CSGNewGenParser:
             ))
         elif delimiter_type == 1 and std_version == 2:
             # ISAC-PLC SOF帧: 字节12 bit 0 = 短网络标识高位（表23/24/25/26）
+            short_nid_high = b12 & 0x01
+            full_snid = (short_nid_high << 4) | short_nid_low
+            table.append((
+                "短网络标识高位",
+                f"0b{short_nid_high}",
+                str(short_nid_high),
+                f"完整SNID=0x{full_snid:02X}({full_snid})",
+                offset, offset
+            ))
+        elif delimiter_type == 3:
+            # 网间协调帧: 字节12 bit 0 = 短网络标识高位（表41）
             short_nid_high = b12 & 0x01
             full_snid = (short_nid_high << 4) | short_nid_low
             table.append((
@@ -1154,6 +1170,86 @@ class CSGNewGenParser:
             frame_len_pb = b8 | ((b9 & 0x0F) << 8)
             table.append(("帧长", f"0x{frame_len_pb:03X}", f"{frame_len_pb * 10}μs",
                          f"占用信道时长", offset + 7, offset + 8))
+
+        return offset + 11
+
+    # ── 网间协调帧(NET)可变区域 (表41) ──
+
+    def _parse_mpdu_net(self, frame_bytes: bytes, offset: int, table: list) -> int:
+        """解析网间协调帧可变区域 (字节1-11, 共11字节; 字节12由公共代码处理)
+
+        依据《第4部分 数据链路层通信协议》表41 网间协调的可变区域:
+          邻居网络比特图1(16b) + 本网络无线信道编号(8b) + 邻居网络比特图2(10b)
+          + 持续时间(14b) + 邻居网络比特图3(1b) + 带宽结束标志位(1b)
+          + 本网络无线option(2b) + 邻居网络比特图4(4b)
+          + 带宽结束偏移(16b) + 带宽开始偏移(16b)
+        网间协调帧用于 CCO 间带宽协商（多网络共存场景）。
+        多字节字段小端序。
+        """
+        base = offset  # 字节1起始偏移
+
+        # 邻居网络比特图1 (16b: byte1[0:7] + byte2[0:7], 小端)
+        nid_map1 = int.from_bytes(frame_bytes[offset:offset + 2], 'little')
+        table.append(("邻居网络比特图1",
+                      ' '.join(f'{b:02X}' for b in frame_bytes[offset:offset + 2]),
+                      f"0x{nid_map1:04X}",
+                      "bit0=SNID1 ... bit15=SNID16 (小端)",
+                      offset, offset + 1))
+
+        # 本网络无线信道编号 (8b: byte3)
+        wchan = frame_bytes[offset + 2]
+        table.append(("本网络无线信道编号", f"0x{wchan:02X}", str(wchan),
+                      "告知邻居本网络使用的无线信道编号", offset + 2, offset + 2))
+
+        # 邻居网络比特图2 (10b: byte4[0:7] + byte5[0:1])
+        nid_map2 = frame_bytes[offset + 3] | ((frame_bytes[offset + 4] & 0x03) << 8)
+        table.append(("邻居网络比特图2",
+                      f"{frame_bytes[offset + 3]:02X} {frame_bytes[offset + 4] & 0x03:01X}",
+                      f"0x{nid_map2:03X}",
+                      "bit0=SNID17 ... bit9=SNID26",
+                      offset + 3, offset + 4))
+
+        # 持续时间 (14b: byte5[2:7] + byte6[0:7], 小端组合)
+        duration = ((frame_bytes[offset + 4] >> 2) & 0x3F) | (frame_bytes[offset + 5] << 6)
+        table.append(("持续时间",
+                      f"0x{duration:04X}",
+                      f"{duration} × 40ms ({duration * 40}ms)",
+                      "本网络需申请占用的时隙长度, 单位40ms",
+                      offset + 4, offset + 5))
+
+        # 字节7: 邻居网络比特图3(1b) + 带宽结束标志位(1b) + 无线option(2b) + 邻居网络比特图4(4b)
+        b7 = frame_bytes[offset + 6]
+        nid_map3 = b7 & 0x01
+        bw_end_flag = (b7 >> 1) & 0x01
+        wireless_option = (b7 >> 2) & 0x03
+        nid_map4 = (b7 >> 4) & 0x0F
+        table.append(("邻居网络比特图3", f"0b{nid_map3:01b}", str(nid_map3),
+                      "bit0=SNID27", offset + 6, offset + 6))
+        table.append(("带宽结束标志位", f"0b{bw_end_flag:01b}", str(bw_end_flag),
+                      "1=上个带宽时隙已结束 0=未结束", offset + 6, offset + 6))
+        table.append(("本网络无线option", f"0b{wireless_option:02b}", str(wireless_option),
+                      "告知邻居本网络使用的无线信道option", offset + 6, offset + 6))
+        table.append(("邻居网络比特图4", f"0x{nid_map4:X}", f"0b{nid_map4:04b}",
+                      "bit0=SNID28 ... bit3=SNID31", offset + 6, offset + 6))
+
+        # 带宽结束偏移 (16b: byte8[0:7] + byte9[0:7], 小端, 单位4ms)
+        bw_end_offset = int.from_bytes(frame_bytes[offset + 7:offset + 9], 'little')
+        end_desc = "从上个带宽时隙结束到当前时刻" if bw_end_flag else "从当前时刻到当前带宽时隙结束"
+        table.append(("带宽结束偏移",
+                      f"0x{bw_end_offset:04X}",
+                      f"{bw_end_offset} × 4ms ({bw_end_offset * 4}ms)",
+                      f"{end_desc}的时间偏移, 单位4ms",
+                      offset + 7, offset + 8))
+
+        # 带宽开始偏移 (16b: byte10[0:7] + byte11[0:7], 小端, 单位4ms)
+        bw_start_offset = int.from_bytes(frame_bytes[offset + 9:offset + 11], 'little')
+        start_desc = ("下个带宽时隙未开始, 从当前时刻到下个时隙开始"
+                      if bw_start_offset else "下个带宽时隙已开始")
+        table.append(("带宽开始偏移",
+                      f"0x{bw_start_offset:04X}",
+                      f"{bw_start_offset} × 4ms ({bw_start_offset * 4}ms)",
+                      f"{start_desc}的时间偏移, 单位4ms",
+                      offset + 9, offset + 10))
 
         return offset + 11
 
