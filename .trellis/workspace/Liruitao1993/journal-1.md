@@ -26,3 +26,32 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 2: 系统集成全流程完成:剪贴板检测/托盘/热键/右键菜单/单实例+exe编译
+
+**Date**: 2026-08-02
+**Task**: 系统集成全流程完成:剪贴板检测/托盘/热键/右键菜单/单实例+exe编译
+**Branch**: `main`
+
+### Summary
+
+完成系统集成全链路: 剪贴板检测(默认关+严格hex校验,测试通过), 解析不弹主窗口, 解析级别下拉+ED剥离, pb_only信标帧修复, 单实例ACK修复, NPP/文件右键/自启指向exe, exe编译+验证主窗口与剪贴板提示框。用户测试3/4通过(纯hex弹窗/非hex不弹)。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `580d929` | (see git log) |
+| `2d2744a` | (see git log) |
+| `2d315d8` | (see git log) |
+| `3d94e59` | (see git log) |
+| `5dc4dea` | (see git log) |
+| `4231bd1` | (see git log) |
+| `9e79a87` | (see git log) |
+| `3265531` | (see git log) |
+| `c42e4bb` | (see git log) |
+
+### Status
+
+[OK] **Completed**
