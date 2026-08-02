@@ -30,7 +30,7 @@ DEFAULT_SYSTEM_SETTINGS = {
     "hotkey": "Ctrl+Alt+X",  # 默认热键（Ctrl+Alt+P 常被输入法/其它软件占用）
     "context_menu": False,
     "npp_integrated": False,
-    "clipboard_monitor": True,  # 剪贴板报文自动检测
+    "clipboard_monitor": False,  # 剪贴板报文自动检测（默认关，避免干扰日常复制粘贴）
 }
 
 
