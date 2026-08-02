@@ -3683,7 +3683,7 @@ class MainWindow(QMainWindow):
         hex_text.setText(f"报文: {hex_str}")
         layout.addWidget(hex_text)
 
-        # 解析结果表格
+        # 解析结果表格（紧凑排版，与主窗口解析表一致：小字号 + 贴合行高）
         table = QTableWidget()
         table.setColumnCount(4)
         table.setHorizontalHeaderLabels(["字段", "原始值", "解析值", "说明"])
@@ -3693,8 +3693,9 @@ class MainWindow(QMainWindow):
         table.setSelectionBehavior(QTableWidget.SelectRows)
         table.setAlternatingRowColors(True)
         table.verticalHeader().hide()
+        table.verticalHeader().setDefaultSectionSize(13)
         table_font = QFont()
-        table_font.setPointSize(9)
+        table_font.setPointSize(7)
         table.setFont(table_font)
         self._setup_table_copy_menu(table)
         layout.addWidget(table)
@@ -3786,6 +3787,8 @@ class MainWindow(QMainWindow):
                 table.setItem(r, 1, QTableWidgetItem(str(item[1])))
                 table.setItem(r, 2, QTableWidgetItem(str(item[2])))
                 table.setItem(r, 3, QTableWidgetItem(str(item[3])))
+            # 行高自适应文字内容（紧凑贴合）
+            table.resizeRowsToContents()
 
         def _on_level_changed(_idx):
             is_pb = level_combo.currentData() == "pb_only"
