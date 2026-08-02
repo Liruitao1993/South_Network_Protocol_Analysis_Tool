@@ -3484,13 +3484,27 @@ class MainWindow(QMainWindow):
         self._clipboard_monitor.start()
 
     def _on_clipboard_hex(self, frame_bytes: bytes, hex_str: str, detected_protocol):
-        """剪贴板检测到 hex 报文 → 弹提示框"""
+        """剪贴板检测到 hex 报文 → 弹提示框（单实例复用，避免堆积）"""
         # 去重：主窗口自身解析填入剪贴板时不弹
         if hasattr(self, '_last_parsed_hex') and self._last_parsed_hex:
             own = self._last_parsed_hex.replace(' ', '').lower()
             if own == hex_str.lower():
                 return
+
+        # 复用已存在的提示框：更新内容而非新建（防止多次复制后窗口堆叠）
+        if hasattr(self, '_prompt_dialog') and self._prompt_dialog is not None:
+            try:
+                if self._prompt_dialog.isVisible():
+                    self._prompt_dialog.update_content(
+                        frame_bytes, hex_str, detected_protocol)
+                    return
+            except RuntimeError:
+                pass  # C++ 对象已删除，重新创建
+
         dialog = ParsePromptDialog(frame_bytes, hex_str, detected_protocol, self)
+        self._prompt_dialog = dialog
+        # 关闭后清理引用，避免悬空
+        dialog.destroyed.connect(lambda *_: self._clear_prompt_ref(dialog))
         # 填充协议下拉（11 协议）
         items = []
         for i in range(self.protocol_combo.count()):
@@ -3504,6 +3518,11 @@ class MainWindow(QMainWindow):
         dialog.accepted.connect(
             lambda d=dialog: self._open_prompt_parse(d.get_selection())
         )
+
+    def _clear_prompt_ref(self, dialog):
+        """提示框销毁时清引用"""
+        if getattr(self, '_prompt_dialog', None) is dialog:
+            self._prompt_dialog = None
 
     def _open_prompt_parse(self, selection):
         """提示框确认解析：按所选协议打开解析窗口（不弹主窗口）"""
