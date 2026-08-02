@@ -3506,11 +3506,11 @@ class MainWindow(QMainWindow):
         )
 
     def _open_prompt_parse(self, selection):
-        """提示框确认解析：按所选协议打开解析窗口"""
+        """提示框确认解析：按所选协议打开解析窗口（不弹主窗口）"""
         frame_bytes, proto_idx = selection
         if proto_idx is None:
             proto_idx = self.current_protocol
-        self._tray_show_window()
+        # 不显示主窗口，直接弹解析结果窗口（避免窗口太多）
         self._parse_and_show_dialog(frame_bytes, initial_protocol=proto_idx)
 
     def _restart_hotkey(self):
@@ -3796,10 +3796,16 @@ class MainWindow(QMainWindow):
         dialog.show()
 
     def _on_second_instance_args(self, args: list):
-        """第二个实例发来的命令行参数：激活窗口 + 执行"""
-        self._tray_show_window()
-        if args:
-            self._handle_cli_args(args)
+        """第二个实例发来的命令行参数：执行 + 按需激活窗口"""
+        # 无参数：仅激活已有主窗口
+        if not args:
+            self._tray_show_window()
+            return
+        # 有解析动作（--parse/--file/--clipboard）：直接弹解析结果，不弹主窗口
+        has_action = any(a in ("--parse", "--file", "--clipboard") for a in args)
+        if not has_action:
+            self._tray_show_window()
+        self._handle_cli_args(args)
 
     def _handle_cli_args(self, args: list):
         """处理命令行参数（--parse / --protocol / --file / --minimized / --clipboard）"""
@@ -3881,7 +3887,7 @@ class MainWindow(QMainWindow):
         except Exception:
             QMessageBox.information(self, "解析", "剪贴板内容不是有效的十六进制报文。")
             return
-        self._tray_show_window()
+        # 不弹主窗口，直接显示解析结果（避免窗口太多）
         self._parse_and_show_dialog(frame_bytes)
 
     def _protocol_name_to_index(self, name: str) -> int:
