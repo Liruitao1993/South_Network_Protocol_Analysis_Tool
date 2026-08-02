@@ -2451,15 +2451,16 @@ class MainWindow(QMainWindow):
             self.obis_table.setItem(row, 3, QTableWidgetItem("Read/Write" if is_custom else "Read"))
         self.obis_stats_label.setText(f"匹配 {len(results)} / {len(self.obis_lookup._data)} 条记录")
 
-    def _get_current_parser(self):
-        """获取当前选中的解析器"""
-        if self.current_protocol == 0:
+    def _get_current_parser(self, protocol_index=None):
+        """获取当前选中的解析器（可指定协议索引，用于热键弹窗切换协议）"""
+        protocol_index = self.current_protocol if protocol_index is None else protocol_index
+        if protocol_index == 0:
             return self.parser
-        elif self.current_protocol == 1:
+        elif protocol_index == 1:
             return self.plc_rf_parser
-        elif self.current_protocol == 2:  # HDLC/国网DLMS (完整HDLC帧)
+        elif protocol_index == 2:  # HDLC/国网DLMS (完整HDLC帧)
             return self.hdlc_parser
-        elif self.current_protocol == 3:  # DLMS-APDU(国网) (直接解析APDU)
+        elif protocol_index == 3:  # DLMS-APDU(国网) (直接解析APDU)
             # 返回一个匿名对象，调用parse_apdu_to_table
             class APDUParserGuowang:
                 def __init__(self, hdlc_parser):
@@ -2467,7 +2468,7 @@ class MainWindow(QMainWindow):
                 def parse_to_table(self, data):
                     return self.hdlc_parser.parse_apdu_to_table(data)
             return APDUParserGuowang(self.hdlc_parser)
-        elif self.current_protocol == 4:  # DLMS Wrapper裸报文 (直接解析Wrapper+APDU)
+        elif protocol_index == 4:  # DLMS Wrapper裸报文 (直接解析Wrapper+APDU)
             # 返回一个匿名对象，调用parse_wrapper_to_table
             class WrapperParser:
                 def __init__(self, hdlc_parser):
@@ -2475,7 +2476,7 @@ class MainWindow(QMainWindow):
                 def parse_to_table(self, data):
                     return self.hdlc_parser.parse_wrapper_to_table(data)
             return WrapperParser(self.hdlc_parser)
-        elif self.current_protocol == 5:  # DLMS-APDU裸报文 (直接解析APDU)
+        elif protocol_index == 5:  # DLMS-APDU裸报文 (直接解析APDU)
             # 返回一个匿名对象，调用parse_apdu_to_table
             class APDUParser:
                 def __init__(self, hdlc_parser):
@@ -2483,7 +2484,7 @@ class MainWindow(QMainWindow):
                 def parse_to_table(self, data):
                     return self.hdlc_parser.parse_apdu_to_table(data)
             return APDUParser(self.hdlc_parser)
-        elif self.current_protocol == 6:  # DLT645-2007
+        elif protocol_index == 6:  # DLT645-2007
             class DLT645GuiParser:
                 def __init__(self, parser):
                     self.parser = parser
@@ -2528,11 +2529,11 @@ class MainWindow(QMainWindow):
 
                     return table
             return DLT645GuiParser(self.dlt645_parser)
-        elif self.current_protocol == 7:  # 国网协议
+        elif protocol_index == 7:  # 国网协议
             return self.gdw_parser
-        elif self.current_protocol == 8:  # 698.45
+        elif protocol_index == 8:  # 698.45
             return self.dl_t698_45_parser
-        elif self.current_protocol == 9:  # 新一代载波协议(通感一体化)
+        elif protocol_index == 9:  # 新一代载波协议(通感一体化)
             # 包装解析器以传递解析级别参数
             csg_parser = self.csg_new_gen_parser
             parse_level = getattr(self, '_csg_parse_level', 'auto')
@@ -2551,7 +2552,7 @@ class MainWindow(QMainWindow):
                         kwargs['pb_frame_type'] = self.frame_type
                     return self.parser.parse_to_table(data, **kwargs)
             return CSGGenGuiParser(csg_parser, parse_level, frame_type)
-        elif self.current_protocol == 10:  # 国网新一代双模通信互联互通
+        elif protocol_index == 10:  # 国网新一代双模通信互联互通
             # 包装解析器以传递解析级别参数
             gw_parser = self.gw_new_gen_parser
             parse_level = getattr(self, '_gw_parse_level', 'auto')
@@ -3547,26 +3548,40 @@ class MainWindow(QMainWindow):
             return
         self._parse_and_show_dialog(frame_bytes)
 
-    def _parse_and_show_dialog(self, frame_bytes: bytes):
-        """解析字节并弹出结果对话框（热键/命令行/文件右键共用）"""
-        try:
-            current_parser = self._get_current_parser()
-            table_data = current_parser.parse_to_table(frame_bytes)
-        except Exception as e:
-            QMessageBox.critical(self, "解析错误", f"解析失败：{str(e)}")
-            return
+    def _parse_and_show_dialog(self, frame_bytes: bytes, initial_protocol: int = None):
+        """解析字节并弹出结果对话框（热键/命令行/文件右键共用）
+
+        顶部提供协议选择下拉，切换时用所选协议重新解析。
+        initial_protocol: 初始协议索引，None 用当前主窗口协议。
+        """
+        if initial_protocol is None:
+            initial_protocol = self.current_protocol
 
         dialog = QDialog(self)
-        dialog.setWindowTitle(f"解析结果 - {self.protocol_combo.currentText()}")
-        dialog.resize(900, 600)
+        dialog.setWindowTitle("解析结果")
+        dialog.resize(900, 620)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         layout = QVBoxLayout(dialog)
 
-        # 顶部 hex 显示
+        # 顶部：协议选择 + hex 显示
+        proto_row = QHBoxLayout()
+        proto_row.addWidget(QLabel("协议:"))
+        proto_combo = QComboBox()
+        for i in range(self.protocol_combo.count()):
+            proto_combo.addItem(self.protocol_combo.itemText(i), i)
+        proto_combo.setCurrentIndex(
+            proto_combo.findData(initial_protocol)
+            if proto_combo.findData(initial_protocol) >= 0 else 0
+        )
+        proto_combo.setMinimumWidth(300)
+        proto_row.addWidget(proto_combo)
+        proto_row.addStretch()
+        layout.addLayout(proto_row)
+
         hex_text = QTextEdit()
         hex_text.setReadOnly(True)
         hex_text.setFont(QFont("Consolas", 10))
-        hex_text.setMaximumHeight(80)
+        hex_text.setMaximumHeight(70)
         hex_str = ' '.join(f'{b:02X}' for b in frame_bytes)
         hex_text.setText(f"报文: {hex_str}")
         layout.addWidget(hex_text)
@@ -3587,16 +3602,35 @@ class MainWindow(QMainWindow):
         self._setup_table_copy_menu(table)
         layout.addWidget(table)
 
-        for r, item in enumerate(table_data):
-            field_name = str(item[0])
-            raw_val = str(item[1])
-            parsed_val = str(item[2])
-            comment = str(item[3])
-            table.insertRow(r)
-            table.setItem(r, 0, QTableWidgetItem(field_name))
-            table.setItem(r, 1, QTableWidgetItem(raw_val))
-            table.setItem(r, 2, QTableWidgetItem(parsed_val))
-            table.setItem(r, 3, QTableWidgetItem(comment))
+        error_label = QLabel()
+        error_label.setWordWrap(True)
+        error_label.setStyleSheet("color: #d32f2f;")
+        error_label.hide()
+        layout.addWidget(error_label)
+
+        def do_parse(idx=None):
+            """用当前所选协议重新解析并填充表格"""
+            if idx is None:
+                idx = proto_combo.currentData()
+            dialog.setWindowTitle(f"解析结果 - {proto_combo.currentText()}")
+            table.setRowCount(0)
+            error_label.hide()
+            try:
+                parser = self._get_current_parser(idx)
+                data = parser.parse_to_table(frame_bytes)
+            except Exception as e:
+                error_label.setText(f"解析失败（{proto_combo.currentText()}）：{str(e)}")
+                error_label.show()
+                return
+            for r, item in enumerate(data):
+                table.insertRow(r)
+                table.setItem(r, 0, QTableWidgetItem(str(item[0])))
+                table.setItem(r, 1, QTableWidgetItem(str(item[1])))
+                table.setItem(r, 2, QTableWidgetItem(str(item[2])))
+                table.setItem(r, 3, QTableWidgetItem(str(item[3])))
+
+        proto_combo.currentIndexChanged.connect(do_parse)
+        do_parse(proto_combo.currentData())
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
