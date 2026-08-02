@@ -30,6 +30,12 @@ a = Analysis(
         'pandas.core',
         # 项目内部模块
         'enhanced_export',
+        'system_integration',
+        'system_integration.sys_tray',
+        'system_integration.global_hotkey',
+        'system_integration.registry_menu',
+        'system_integration.single_instance',
+        'system_integration.system_settings',
         'protocol_parser',
         'plc_rf_parser',
         'hdlc_parser',
@@ -117,4 +123,5 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon='app_icon.ico',
+    version='version_info_nw.txt',
 )

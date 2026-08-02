@@ -5,6 +5,10 @@ import pathlib
 """
 
 import sys
+import os
+
+# 在导入 PySide6 之前屏蔽 Qt DirectWrite 字体回退警告（无害噪音）
+os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.fonts=false")
 import json
 import subprocess
 from pathlib import Path
@@ -15,11 +19,11 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QTextEdit,
     QTableWidget, QTableWidgetItem, QFileDialog, QMessageBox,
     QHeaderView, QSplitter, QGroupBox, QDialog, QTabWidget, QComboBox,
-    QListView, QFrame, QMenuBar, QSpinBox, QCheckBox
+    QListView, QFrame, QMenuBar, QSpinBox, QCheckBox, QMenu
 )
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QStyle
-from PySide6.QtGui import QFont, QTextCursor, QTextCharFormat, QColor, QIcon
+from PySide6.QtGui import QFont, QTextCursor, QTextCharFormat, QColor, QIcon, QKeySequence, QShortcut, QGuiApplication
 
 from protocol_parser import ProtocolFrameParser
 from plc_rf_parser import PLCRFProtocolParser
@@ -40,6 +44,11 @@ from preset_buttons import PresetButtonWidget
 from test_plan_widget import TestPlanWidget
 from diff_widget import DiffWidget
 from monitor_widget import RealtimeMonitorWidget
+from monitor.tcp_monitor import TCPMonitorWidget
+from system_integration.sys_tray import SystemTrayManager
+from system_integration.global_hotkey import GlobalHotkeyManager
+from system_integration.single_instance import SingleInstanceServer
+from system_integration.registry_menu import get_exe_path
 from message_tool_widget import MessageToolWidget
 from serial_worker import SerialWorker
 from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu
@@ -378,7 +387,7 @@ class ConfigDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"协议解析工具 v{APP_VERSION} ({BUILD_DATE})")
+        self.setWindowTitle(f"协议解析工具 v{APP_VERSION} ({BUILD_DATE}) - 作者: liruitao")
         self.setMinimumSize(1000, 700)
 
         # 协议选择：0=南网协议，1=PLC RF协议，2=HDLC/国网DLMS，3=DLMS-APDU(国网)，4=Wrapper，5=APDU，6=DLT645，7=国网协议，8=698.45，9=新一代载波协议(通感一体化)
@@ -424,12 +433,18 @@ class MainWindow(QMainWindow):
 
         # 主题与字体配置（应用级样式由 main() 在 QApplication 上应用，此处仅保存配置供动态控件适配）
         self._theme_id, self._font_family, self._font_size = ThemeManager.load_from_config(self._app_config)
+        # 系统集成配置（config.json "system" 段）
+        self._system_settings: Dict[str, Any] = {}
+        self._load_system_settings()
         self._stats_labels: List[tuple] = []      # (QLabel, 字号) 列表，主题切换时统一重设
         self._serial_status_color = "#999"       # 串口状态标签当前颜色（主题切换时重设）
         self._serial_status_bold = False       # 串口状态标签当前是否粗体（主题切换时重设）
 
         self.setup_ui()
         self._setup_menu_bar()
+
+        # 系统集成管理器（托盘 / 全局热键 / 单实例）
+        self._setup_system_integration()
 
     def setup_ui(self):
         """设置UI布局"""
@@ -690,6 +705,15 @@ class MainWindow(QMainWindow):
         self.message_tool_tab = MessageToolWidget()
         self.tab_widget.addTab(self.message_tool_tab, "报文工具")
 
+        # TCP 流量监控器页面（始终可见）
+        self.tcp_monitor_tab = TCPMonitorWidget()
+        self.tcp_monitor_tab.set_parsers(
+            self.gw_new_gen_parser, self.csg_new_gen_parser,
+            gw_summary_fn=self._get_gw_new_gen_summary,
+            csg_summary_fn=self._get_csg_new_gen_summary,
+        )
+        self.tab_widget.addTab(self.tcp_monitor_tab, "TCP监控")
+
         # 实时监控器页面（南网新一代(9)/国网新一代(10) 专用，默认隐藏）
         self.monitor_tab = RealtimeMonitorWidget()
         self.monitor_tab.set_serial_worker(self.serial_worker)
@@ -802,6 +826,8 @@ class MainWindow(QMainWindow):
         # 行高更紧凑
         self.result_table_widget.verticalHeader().setDefaultSectionSize(10)
         self.result_table_widget.verticalHeader().hide()
+        # 右键复制菜单 + Ctrl+C
+        self._setup_table_copy_menu(self.result_table_widget)
 
         # 选中行时高亮报文字节
         self.result_table_widget.currentCellChanged.connect(self._highlight_bytes)
@@ -1251,6 +1277,8 @@ class MainWindow(QMainWindow):
         table_font.setPointSize(8)
         self.batch_summary_table.setFont(table_font)
         self.batch_summary_table.verticalHeader().setDefaultSectionSize(22)
+        # 右键复制菜单 + Ctrl+C
+        self._setup_table_copy_menu(self.batch_summary_table)
         # 选中行/项变化时更新详情
         self.batch_summary_table.cellClicked.connect(self._on_batch_row_selected)
         self.batch_summary_table.itemSelectionChanged.connect(self._on_batch_row_selected)
@@ -1304,6 +1332,8 @@ class MainWindow(QMainWindow):
         detail_font.setPointSize(8)
         self.batch_detail_table.setFont(detail_font)
         self.batch_detail_table.verticalHeader().setDefaultSectionSize(20)
+        # 右键复制菜单 + Ctrl+C
+        self._setup_table_copy_menu(self.batch_detail_table)
         detail_layout.addWidget(self.batch_detail_table)
 
         self.result_splitter.addWidget(detail_group)
@@ -3247,6 +3277,70 @@ class MainWindow(QMainWindow):
             elif child.layout():
                 MainWindow._clear_layout(child.layout())
 
+    def _setup_table_copy_menu(self, table: QTableWidget):
+        """为解析结果表格设置右键复制菜单和 Ctrl+C 快捷键"""
+        table.setContextMenuPolicy(Qt.CustomContextMenu)
+        table.customContextMenuRequested.connect(
+            lambda pos, t=table: self._show_table_copy_menu(t, pos)
+        )
+        # Ctrl+C 快捷键
+        shortcut = QShortcut(QKeySequence.Copy, table)
+        shortcut.setContext(Qt.WidgetShortcut)
+        shortcut.activated.connect(lambda t=table: self._copy_table_rows(t, all_rows=False))
+
+    def _show_table_copy_menu(self, table: QTableWidget, pos):
+        """显示表格右键复制菜单"""
+        menu = QMenu(table)
+        has_selection = len(table.selectedItems()) > 0
+
+        copy_sel = menu.addAction("复制选中行")
+        copy_sel.setEnabled(has_selection)
+        copy_sel.triggered.connect(lambda: self._copy_table_rows(table, all_rows=False))
+
+        copy_all = menu.addAction("复制全部")
+        copy_all.triggered.connect(lambda: self._copy_table_rows(table, all_rows=True))
+
+        menu.exec(table.mapToGlobal(pos))
+
+    def _copy_table_rows(self, table: QTableWidget, all_rows: bool = False):
+        """将表格行复制到剪贴板（制表符分隔，含表头）"""
+        col_count = table.columnCount()
+        row_count = table.rowCount()
+
+        # 收集需要复制的行号
+        if all_rows:
+            rows = list(range(row_count))
+        else:
+            selected = table.selectedIndexes()
+            if not selected:
+                # 无选中时退化为全部
+                rows = list(range(row_count))
+            else:
+                row_set = sorted({idx.row() for idx in selected})
+                rows = row_set
+
+        if not rows:
+            return
+
+        # 表头
+        headers = []
+        for c in range(col_count):
+            item = table.horizontalHeaderItem(c)
+            headers.append(item.text() if item else "")
+        lines = ["\t".join(headers)]
+
+        # 数据行
+        for r in rows:
+            cells = []
+            for c in range(col_count):
+                item = table.item(r, c)
+                cells.append(item.text() if item else "")
+            lines.append("\t".join(cells))
+
+        text = "\n".join(lines)
+        clipboard = QGuiApplication.clipboard()
+        clipboard.setText(text)
+
     def _apply_chinese_menus_to_all_tabs(self):
         """为所有标签页中的文本输入控件设置中文右键菜单"""
         # 应用到主窗口及其所有子控件
@@ -3304,6 +3398,12 @@ class MainWindow(QMainWindow):
         desc_label.setWordWrap(True)
         layout.addWidget(desc_label)
 
+        author_label = QLabel("作者: liruitao")
+        author_label.setFont(QFont("Microsoft YaHei", 10))
+        author_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        author_label.setStyleSheet("color: #888;")
+        layout.addWidget(author_label)
+
         changelog_label = QLabel("版本更新记录")
         changelog_label.setFont(QFont("Microsoft YaHei", 10, QFont.Bold))
         layout.addWidget(changelog_label)
@@ -3337,6 +3437,285 @@ class MainWindow(QMainWindow):
         layout.addLayout(btn_layout)
 
         dialog.exec()
+
+    # ==================== 系统集成（托盘 / 热键 / 单实例 / 命令行） ====================
+
+    def _setup_system_integration(self):
+        """初始化系统托盘、全局热键、单实例监听（在 setup_ui 之后调用）"""
+        # 系统托盘
+        self._tray_manager = None
+        self._hotkey_manager = None
+        self._single_instance = None
+        self._tray_exit = False  # 托盘"退出"标志：true 时 closeEvent 真正退出
+
+        icon_path = str(Path(__file__).parent / "app_icon.ico")
+        tray = SystemTrayManager(self)
+        if tray.create(icon_path):
+            self._tray_manager = tray
+            tray.show_requested.connect(self._tray_show_window)
+            tray.exit_requested.connect(self._tray_exit_app)
+            tray.autostart_toggled.connect(self._on_tray_autostart_toggled)
+            tray.update_autostart_state()
+
+        # 全局热键
+        self._hotkey_manager = GlobalHotkeyManager(
+            self._system_settings.get("hotkey", "Ctrl+Alt+X")
+        )
+        self._hotkey_manager.set_callback(self._on_global_hotkey)
+        self._restart_hotkey()
+
+        # 单实例监听
+        self._single_instance = SingleInstanceServer(self)
+        self._single_instance.args_received.connect(self._on_second_instance_args)
+
+    def _restart_hotkey(self):
+        """按当前设置启动/停止全局热键监听"""
+        if not hasattr(self, "_hotkey_manager") or self._hotkey_manager is None:
+            return
+        enabled = bool(self._system_settings.get("hotkey_enabled", True))
+        if enabled:
+            hotkey = self._system_settings.get("hotkey", "Ctrl+Alt+X")
+            self._hotkey_manager.set_hotkey(hotkey)
+            ok = self._hotkey_manager.start()
+            if not ok:
+                print(f"[全局热键] 注册失败，请检查热键格式或是否被占用: {hotkey}")
+        else:
+            self._hotkey_manager.stop()
+
+    def _on_tray_autostart_toggled(self, enabled: bool):
+        """托盘菜单中"开机自启"开关被切换"""
+        self._system_settings["auto_start"] = bool(enabled)
+        try:
+            from system_integration.registry_menu import set_autostart
+            set_autostart(bool(enabled))
+            # 同步写回 config.json
+            try:
+                config = {}
+                if self._config_path.exists():
+                    with open(self._config_path, "r", encoding="utf-8") as f:
+                        config = json.load(f)
+                config["system"] = self._system_settings
+                with open(self._config_path, "w", encoding="utf-8") as f:
+                    json.dump(config, f, ensure_ascii=False, indent=2)
+            except Exception as e:
+                print(f"[系统设置保存失败] {e}")
+        except Exception as e:
+            print(f"[开机自启设置失败] {e}")
+
+    def _tray_show_window(self):
+        """托盘"显示主窗口"：显示并置顶"""
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def _tray_exit_app(self):
+        """托盘"退出"：真正退出程序"""
+        self._tray_exit = True
+        self.close()
+
+    def closeEvent(self, event):
+        """关闭窗口：若启用托盘且非主动退出，最小化到托盘"""
+        if (self._tray_manager is not None and not self._tray_exit
+                and self._system_settings.get("close_to_tray", True)):
+            event.ignore()
+            self.hide()
+            self._tray_manager.show_hint_once()
+            return
+        # 清理托盘与热键
+        if self._tray_manager is not None:
+            self._tray_manager.hide_tray()
+        if self._hotkey_manager is not None:
+            self._hotkey_manager.stop()
+        event.accept()
+
+    def _on_global_hotkey(self):
+        """全局热键触发：读取剪贴板 hex → 按当前协议解析 → 弹窗"""
+        clipboard = QGuiApplication.clipboard()
+        text = clipboard.text()
+        if not text or not text.strip():
+            QMessageBox.information(self, "全局热键", "剪贴板为空，请先复制报文。")
+            return
+        clean = self._clean_hex_input(text)
+        clean = clean.strip()
+        if len(clean) % 2 != 0 or not all(c in '0123456789abcdefABCDEF' for c in clean):
+            QMessageBox.information(self, "全局热键", "剪贴板内容不是有效的十六进制报文。")
+            return
+        try:
+            frame_bytes = bytes.fromhex(clean)
+        except Exception:
+            QMessageBox.information(self, "全局热键", "剪贴板内容不是有效的十六进制报文。")
+            return
+        self._parse_and_show_dialog(frame_bytes)
+
+    def _parse_and_show_dialog(self, frame_bytes: bytes):
+        """解析字节并弹出结果对话框（热键/命令行/文件右键共用）"""
+        try:
+            current_parser = self._get_current_parser()
+            table_data = current_parser.parse_to_table(frame_bytes)
+        except Exception as e:
+            QMessageBox.critical(self, "解析错误", f"解析失败：{str(e)}")
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"解析结果 - {self.protocol_combo.currentText()}")
+        dialog.resize(900, 600)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        layout = QVBoxLayout(dialog)
+
+        # 顶部 hex 显示
+        hex_text = QTextEdit()
+        hex_text.setReadOnly(True)
+        hex_text.setFont(QFont("Consolas", 10))
+        hex_text.setMaximumHeight(80)
+        hex_str = ' '.join(f'{b:02X}' for b in frame_bytes)
+        hex_text.setText(f"报文: {hex_str}")
+        layout.addWidget(hex_text)
+
+        # 解析结果表格
+        table = QTableWidget()
+        table.setColumnCount(4)
+        table.setHorizontalHeaderLabels(["字段", "原始值", "解析值", "说明"])
+        header = table.horizontalHeader()
+        header.setStretchLastSection(True)
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        table.setSelectionBehavior(QTableWidget.SelectRows)
+        table.setAlternatingRowColors(True)
+        table.verticalHeader().hide()
+        table_font = QFont()
+        table_font.setPointSize(9)
+        table.setFont(table_font)
+        self._setup_table_copy_menu(table)
+        layout.addWidget(table)
+
+        for r, item in enumerate(table_data):
+            field_name = str(item[0])
+            raw_val = str(item[1])
+            parsed_val = str(item[2])
+            comment = str(item[3])
+            table.insertRow(r)
+            table.setItem(r, 0, QTableWidgetItem(field_name))
+            table.setItem(r, 1, QTableWidgetItem(raw_val))
+            table.setItem(r, 2, QTableWidgetItem(parsed_val))
+            table.setItem(r, 3, QTableWidgetItem(comment))
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        copy_btn = QPushButton("复制全部")
+        copy_btn.clicked.connect(lambda: self._copy_table_rows(table, True))
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(dialog.accept)
+        btn_row.addWidget(copy_btn)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
+        # 显示（非模态，不阻塞）
+        dialog.show()
+
+    def _on_second_instance_args(self, args: list):
+        """第二个实例发来的命令行参数：激活窗口 + 执行"""
+        self._tray_show_window()
+        if args:
+            self._handle_cli_args(args)
+
+    def _handle_cli_args(self, args: list):
+        """处理命令行参数（--parse / --protocol / --file / --minimized）"""
+        # 解析参数
+        protocol_index = None
+        parse_hex = None
+        file_path = None
+        minimized = False
+        i = 0
+        while i < len(args):
+            arg = args[i]
+            if arg == "--parse" and i + 1 < len(args):
+                parse_hex = args[i + 1]
+                i += 2
+            elif arg == "--protocol" and i + 1 < len(args):
+                protocol_index = self._protocol_name_to_index(args[i + 1])
+                i += 2
+            elif arg == "--file" and i + 1 < len(args):
+                file_path = args[i + 1]
+                i += 2
+            elif arg == "--minimized":
+                minimized = True
+                i += 1
+            else:
+                i += 1
+
+        # 切换协议
+        if protocol_index is not None and 0 <= protocol_index < self.protocol_combo.count():
+            self.protocol_combo.setCurrentIndex(protocol_index)
+
+        # 最小化到托盘
+        if minimized and self._tray_manager is not None:
+            self.hide()
+            return
+
+        # 文件解析
+        if file_path:
+            try:
+                with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                    content = f.read()
+            except Exception as e:
+                QMessageBox.critical(self, "文件读取失败", f"无法读取文件：{str(e)}")
+                return
+            self._parse_text_content(content)
+            return
+
+        # 直接 hex 解析
+        if parse_hex:
+            clean = self._clean_hex_input(parse_hex)
+            if len(clean) % 2 == 0 and all(c in '0123456789abcdefABCDEF' for c in clean):
+                try:
+                    self._parse_and_show_dialog(bytes.fromhex(clean))
+                except Exception as e:
+                    QMessageBox.critical(self, "解析错误", f"解析失败：{str(e)}")
+
+    def _protocol_name_to_index(self, name: str) -> int:
+        """协议名 → protocol_combo 索引（支持中文名 / 数字索引）"""
+        name = str(name).strip()
+        if name.isdigit():
+            return int(name)
+        names = {
+            "南网协议": 0, "南网": 0,
+            "PLC RF协议": 1, "PLC RF": 1, "PLC": 1,
+            "HDLC": 2, "HDLC/DLMS": 2,
+            "DLMS-APDU国网": 3, "APDU国网": 3,
+            "DLMS Wrapper": 4, "Wrapper": 4,
+            "DLMS-APDU裸": 5, "APDU": 5,
+            "DLT645": 6, "DLT645-2007": 6, "645": 6,
+            "国网协议": 7, "国网": 7,
+            "698.45": 8, "698": 8,
+            "新一代载波": 9, "载波": 9,
+            "国网新一代": 10, "双模": 10,
+        }
+        if name in names:
+            return names[name]
+        # 模糊匹配
+        for key, idx in names.items():
+            if key in name or name in key:
+                return idx
+        return None
+
+    def _parse_text_content(self, content: str):
+        """从文本内容提取帧并按当前协议解析，弹出结果（文件右键 / --file 共用）"""
+        try:
+            frames = self._extract_frames_for_protocol(content, self.current_protocol)
+        except Exception:
+            frames = [f.strip() for f in content.splitlines() if f.strip()]
+        if not frames:
+            QMessageBox.information(self, "提示", "文件中未找到可解析的报文。")
+            return
+        # 取第一帧解析
+        first = frames[0]
+        clean = self._clean_hex_input(first)
+        if len(clean) % 2 != 0 or not all(c in '0123456789abcdefABCDEF' for c in clean):
+            QMessageBox.information(self, "提示", "文件中未找到有效的十六进制报文。")
+            return
+        try:
+            self._parse_and_show_dialog(bytes.fromhex(clean))
+        except Exception as e:
+            QMessageBox.critical(self, "解析错误", f"解析失败：{str(e)}")
 
     # ==================== 批量解析功能 ====================
 
@@ -4949,6 +5328,8 @@ class MainWindow(QMainWindow):
         table_font = QFont()
         table_font.setPointSize(8)
         table.setFont(table_font)
+        # 右键复制菜单 + Ctrl+C
+        self._setup_table_copy_menu(table)
 
         for r, item in enumerate(parsed_data):
             field_name = item[0]
@@ -5028,6 +5409,47 @@ class MainWindow(QMainWindow):
         for key, val in paths.items():
             if val:
                 self._file_paths[key] = self._resolve_config_path(val)
+
+    def _load_system_settings(self):
+        """加载系统集成设置（config.json "system" 段）"""
+        from system_integration.system_settings import DEFAULT_SYSTEM_SETTINGS
+        settings = dict(DEFAULT_SYSTEM_SETTINGS)
+        sys_cfg = self._app_config.get("system", {})
+        if isinstance(sys_cfg, dict):
+            for k in settings:
+                if k in sys_cfg:
+                    settings[k] = sys_cfg[k]
+        self._system_settings = settings
+
+    def _apply_system_settings(self, settings: dict):
+        """应用系统集成设置（对话框确定 / 托盘自启开关时调用）"""
+        self._system_settings = dict(settings)
+        # 写入 config.json
+        try:
+            config = {}
+            if self._config_path.exists():
+                with open(self._config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+            config["system"] = self._system_settings
+            with open(self._config_path, "w", encoding="utf-8") as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[系统设置保存失败] {e}")
+
+        # 开机自启
+        from system_integration.registry_menu import set_autostart
+        try:
+            set_autostart(bool(self._system_settings.get("auto_start")))
+        except Exception as e:
+            print(f"[开机自启设置失败] {e}")
+
+        # 托盘自启开关状态同步
+        if hasattr(self, "_tray_manager") and self._tray_manager is not None:
+            self._tray_manager.update_autostart_state()
+
+        # 全局热键：设置变更后重启热键监听
+        if hasattr(self, "_hotkey_manager") and self._hotkey_manager is not None:
+            self._restart_hotkey()
 
     def _save_app_config(self):
         """保存应用配置到 config.json"""
@@ -5158,23 +5580,41 @@ class MainWindow(QMainWindow):
     def _restyle_for_theme(self):
         """主题切换后重设动态控件样式（统计标签/串口状态/批量状态等）"""
         for lbl, size in self._stats_labels:
-            lbl.setStyleSheet(self._stats_style(size))
+            try:
+                lbl.setStyleSheet(self._stats_style(size))
+            except RuntimeError:
+                pass  # 退出时 C++ 对象已析构，忽略
         if hasattr(self, "serial_status_label"):
-            self.serial_status_label.setStyleSheet(
-                self._serial_status_style(self._serial_status_color, self._serial_status_bold))
+            try:
+                self.serial_status_label.setStyleSheet(
+                    self._serial_status_style(self._serial_status_color, self._serial_status_bold))
+            except RuntimeError:
+                pass
         if hasattr(self, "serial_refresh_btn"):
-            self.serial_refresh_btn.setStyleSheet(self._serial_refresh_style())
+            try:
+                self.serial_refresh_btn.setStyleSheet(self._serial_refresh_style())
+            except RuntimeError:
+                pass
         if hasattr(self, "batch_frame_count_label"):
-            self.batch_frame_count_label.setStyleSheet(self._batch_count_style())
+            try:
+                self.batch_frame_count_label.setStyleSheet(self._batch_count_style())
+            except RuntimeError:
+                pass
         if hasattr(self, "batch_status_bar"):
-            self.batch_status_bar.setStyleSheet(self._batch_status_style())
+            try:
+                self.batch_status_bar.setStyleSheet(self._batch_status_style())
+            except RuntimeError:
+                pass
 
     def _show_theme_settings_dialog(self):
-        """显示主题与字体设置对话框"""
+        """显示主题与字体设置对话框（含系统集成设置）"""
         dialog = ThemeSettingsDialog(self._theme_id, self._font_family, self._font_size, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._theme_id, self._font_family, self._font_size = dialog.get_settings()
             self._save_app_config()
+            # 应用系统集成设置（自启 / 热键 / 关闭行为）
+            sys_settings = dialog.get_system_settings()
+            self._apply_system_settings(sys_settings)
         # 无论确定/取消（取消时对话框已还原主题），同步动态控件样式
         self._restyle_for_theme()
 
@@ -5261,13 +5701,26 @@ def main():
         if sys.stderr is not None:
             sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
+    # 单实例：已有实例在运行则传参并退出
+    from system_integration.single_instance import try_connect_existing
+    if try_connect_existing(sys.argv[1:]):
+        return 0
+
     app = QApplication(sys.argv)
+
+    # 提前设全局默认字体，避免 Qt 回退到 MS Sans Serif 触发 DirectWrite 警告
+    app.setFont(QFont("Microsoft YaHei UI", 9))
 
     # 应用主题与字体设置（从 config.json 读取，未配置时使用默认浅色主题 + 微软雅黑 10pt）
     ThemeManager.apply_from_file(app)
 
     window = MainWindow()
     window.show()
+
+    # 处理命令行参数（--parse / --protocol / --file / --minimized）
+    cli_args = [a for a in sys.argv[1:] if a]
+    if cli_args:
+        window._handle_cli_args(cli_args)
 
     sys.exit(app.exec())
 
