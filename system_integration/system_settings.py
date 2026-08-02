@@ -29,6 +29,7 @@ DEFAULT_SYSTEM_SETTINGS = {
     "hotkey_enabled": True,
     "hotkey": "Ctrl+Alt+X",  # 默认热键（Ctrl+Alt+P 常被输入法/其它软件占用）
     "context_menu": False,
+    "npp_integrated": False,
 }
 
 
@@ -127,11 +128,29 @@ class SystemIntegrationSettings(QWidget):
         menu_hint.setStyleSheet("color: gray;")
         box_layout.addWidget(menu_hint)
 
+        # Notepad++ 集成
+        npp_row = QHBoxLayout()
+        self.npp_status_label = QLabel("未注册")
+        self.register_npp_btn = QPushButton("注册 Notepad++ 集成")
+        self.unregister_npp_btn = QPushButton("取消注册")
+        npp_row.addWidget(self.npp_status_label)
+        npp_row.addStretch()
+        npp_row.addWidget(self.register_npp_btn)
+        npp_row.addWidget(self.unregister_npp_btn)
+        box_layout.addLayout(npp_row)
+
+        npp_hint = QLabel("注册后：在 Notepad++ 中选中报文按 Ctrl+C 复制，右键「用协议解析工具解析」或按快捷键直接弹出解析窗口")
+        npp_hint.setWordWrap(True)
+        npp_hint.setStyleSheet("color: gray;")
+        box_layout.addWidget(npp_hint)
+
         layout.addWidget(box)
 
         # 信号
         self.register_menu_btn.clicked.connect(self._register_menu)
         self.unregister_menu_btn.clicked.connect(self._unregister_menu)
+        self.register_npp_btn.clicked.connect(self._register_npp)
+        self.unregister_npp_btn.clicked.connect(self._unregister_npp)
 
     def _load_ui(self):
         s = self._settings
@@ -145,6 +164,7 @@ class SystemIntegrationSettings(QWidget):
         self.hotkey_edit.setEnabled(bool(s.get("hotkey_enabled")))
         self.hotkey_enabled_chk.toggled.connect(self.hotkey_edit.setEnabled)
         self._refresh_menu_status()
+        self._refresh_npp_status()
 
     # ---- 右键菜单 ----
     def _refresh_menu_status(self):
@@ -170,6 +190,47 @@ class SystemIntegrationSettings(QWidget):
         else:
             QMessageBox.critical(self, "取消失败", "取消注册右键菜单失败，请查看控制台日志。")
 
+    # ---- Notepad++ 集成 ----
+    def _refresh_npp_status(self):
+        try:
+            from system_integration import npp_integration
+            registered = npp_integration.is_npp_registered()
+        except Exception:
+            registered = False
+        self.npp_status_label.setText("已注册" if registered else "未注册")
+        self.npp_status_label.setStyleSheet(
+            "color: #2e7d32;" if registered else "color: gray;"
+        )
+
+    def _register_npp(self):
+        try:
+            from system_integration import npp_integration
+            if npp_integration.register_npp():
+                self._settings["npp_integrated"] = True
+                QMessageBox.information(
+                    self, "注册成功",
+                    "Notepad++ 集成已注册。\n\n使用方式：在 NPP 中选中报文 → Ctrl+C 复制 → "
+                    "右键「用协议解析工具解析」或按快捷键（F5 运行菜单中可见）。\n\n"
+                    "提示：NPP 需重启或重开文档后生效。"
+                )
+                self._refresh_npp_status()
+            else:
+                QMessageBox.critical(self, "注册失败", "注册失败，请确认已安装 Notepad++。")
+        except Exception as e:
+            QMessageBox.critical(self, "注册失败", f"注册失败：{str(e)}")
+
+    def _unregister_npp(self):
+        try:
+            from system_integration import npp_integration
+            if npp_integration.unregister_npp():
+                self._settings["npp_integrated"] = False
+                QMessageBox.information(self, "取消成功", "Notepad++ 集成已取消。")
+                self._refresh_npp_status()
+            else:
+                QMessageBox.critical(self, "取消失败", "取消失败，请查看控制台日志。")
+        except Exception as e:
+            QMessageBox.critical(self, "取消失败", f"取消失败：{str(e)}")
+
     # ---- 对外接口 ----
     def get_settings(self) -> dict:
         """收集当前设置（对话框确定时调用）"""
@@ -179,6 +240,7 @@ class SystemIntegrationSettings(QWidget):
             "hotkey_enabled": self.hotkey_enabled_chk.isChecked(),
             "hotkey": self.hotkey_edit.text().strip() or "Ctrl+Alt+P",
             "context_menu": self._settings.get("context_menu", False),
+            "npp_integrated": self._settings.get("npp_integrated", False),
         }
 
     def save_settings(self) -> dict:
