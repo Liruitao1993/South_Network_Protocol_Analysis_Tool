@@ -26,6 +26,8 @@ from PySide6.QtWidgets import (
     QPushButton, QSpinBox, QStyleFactory, QVBoxLayout,
 )
 
+from system_integration.system_settings import SystemIntegrationSettings
+
 # ---------------------------------------------------------------------------
 # 浅色主题样式表（原 MainWindow.apply_styles 内容，迁移至应用级）
 # ---------------------------------------------------------------------------
@@ -895,6 +897,10 @@ class ThemeSettingsDialog(QDialog):
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
+        # ---- 系统集成（开机自启 / 托盘 / 热键 / 右键菜单）----
+        self.system_panel = SystemIntegrationSettings(self)
+        layout.addWidget(self.system_panel)
+
         # ---- 按钮 ----
         btn_row = QHBoxLayout()
         self.reset_btn = QPushButton("恢复默认")
@@ -944,6 +950,10 @@ class ThemeSettingsDialog(QDialog):
             self.font_combo.currentFont().family(),
             self.size_spin.value(),
         )
+
+    def get_system_settings(self) -> dict:
+        """返回系统集成设置（对话框接受时调用，不主动保存）"""
+        return self.system_panel.get_settings()
 
     def reject(self) -> None:
         """取消：还原进入对话框前的主题与字体"""
