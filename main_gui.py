@@ -2451,8 +2451,12 @@ class MainWindow(QMainWindow):
             self.obis_table.setItem(row, 3, QTableWidgetItem("Read/Write" if is_custom else "Read"))
         self.obis_stats_label.setText(f"匹配 {len(results)} / {len(self.obis_lookup._data)} 条记录")
 
-    def _get_current_parser(self, protocol_index=None):
-        """获取当前选中的解析器（可指定协议索引，用于热键弹窗切换协议）"""
+    def _get_current_parser(self, protocol_index=None, parse_level=None, frame_type=None):
+        """获取当前选中的解析器
+
+        可指定协议索引（用于热键弹窗切换协议）与解析级别覆盖
+        （用于弹窗内选择解析级别，None 用主窗口当前设置）。
+        """
         protocol_index = self.current_protocol if protocol_index is None else protocol_index
         if protocol_index == 0:
             return self.parser
@@ -2534,12 +2538,12 @@ class MainWindow(QMainWindow):
         elif protocol_index == 8:  # 698.45
             return self.dl_t698_45_parser
         elif protocol_index == 9:  # 新一代载波协议(通感一体化)
-            # 包装解析器以传递解析级别参数
+            # 包装解析器以传递解析级别参数（弹窗覆盖优先，否则用主窗口设置）
             csg_parser = self.csg_new_gen_parser
-            parse_level = getattr(self, '_csg_parse_level', 'auto')
-            # pb_only模式下获取帧类型
-            frame_type = None
-            if parse_level == 'pb_only':
+            if parse_level is None:
+                parse_level = getattr(self, '_csg_parse_level', 'auto')
+            # pb_only模式下获取帧类型（未指定时用主窗口 combo）
+            if frame_type is None and parse_level == 'pb_only':
                 frame_type = self.csg_pb_frame_type_combo.currentData()
             class CSGGenGuiParser:
                 def __init__(self, parser, level, ftype=None):
@@ -2553,12 +2557,12 @@ class MainWindow(QMainWindow):
                     return self.parser.parse_to_table(data, **kwargs)
             return CSGGenGuiParser(csg_parser, parse_level, frame_type)
         elif protocol_index == 10:  # 国网新一代双模通信互联互通
-            # 包装解析器以传递解析级别参数
+            # 包装解析器以传递解析级别参数（弹窗覆盖优先，否则用主窗口设置）
             gw_parser = self.gw_new_gen_parser
-            parse_level = getattr(self, '_gw_parse_level', 'auto')
-            # pb_only模式下获取帧类型
-            frame_type = None
-            if parse_level == 'pb_only':
+            if parse_level is None:
+                parse_level = getattr(self, '_gw_parse_level', 'auto')
+            # pb_only模式下获取帧类型（未指定时用主窗口 combo）
+            if frame_type is None and parse_level == 'pb_only':
                 frame_type = self.gw_pb_frame_type_combo.currentData()
             class GWGenGuiParser:
                 def __init__(self, parser, level, ftype=None):
@@ -3552,6 +3556,7 @@ class MainWindow(QMainWindow):
         """解析字节并弹出结果对话框（热键/命令行/文件右键共用）
 
         顶部提供协议选择下拉，切换时用所选协议重新解析。
+        新一代载波(9)/国网新一代(10)额外提供解析级别下拉 + ED 监控头自动剥离。
         initial_protocol: 初始协议索引，None 用当前主窗口协议。
         """
         if initial_protocol is None:
@@ -3559,11 +3564,11 @@ class MainWindow(QMainWindow):
 
         dialog = QDialog(self)
         dialog.setWindowTitle("解析结果")
-        dialog.resize(900, 620)
+        dialog.resize(960, 640)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         layout = QVBoxLayout(dialog)
 
-        # 顶部：协议选择 + hex 显示
+        # 顶部：协议选择 + 解析级别 + hex 显示
         proto_row = QHBoxLayout()
         proto_row.addWidget(QLabel("协议:"))
         proto_combo = QComboBox()
@@ -3573,10 +3578,43 @@ class MainWindow(QMainWindow):
             proto_combo.findData(initial_protocol)
             if proto_combo.findData(initial_protocol) >= 0 else 0
         )
-        proto_combo.setMinimumWidth(300)
+        proto_combo.setMinimumWidth(280)
         proto_row.addWidget(proto_combo)
+
+        # 解析级别下拉（仅 9/10 可见）：自动识别 + 各级别
+        level_label = QLabel("解析级别:")
+        proto_row.addWidget(level_label)
+        level_combo = QComboBox()
+        CSG_LEVELS = [
+            ("自动识别", "auto"), ("FC+PB解析(完整MPDU)", "fc_pb"),
+            ("FC+eFC解析", "fc_efc"), ("仅FC解析", "fc_only"),
+            ("应用层报文", "app"), ("仅PB解析(完整物理块)", "pb_only"),
+        ]
+        GW_LEVELS = [
+            ("自动识别", "auto"), ("仅FC解析", "fc_only"),
+            ("仅MAC帧", "mac_only"), ("仅PB", "pb_only"),
+            ("FC+MAC解析", "fc_mac"), ("应用层报文", "app"),
+        ]
+        level_combo.setVisible(False)
+        level_label.setVisible(False)
+        proto_row.addWidget(level_combo)
+
+        # PB帧类型下拉（仅 pb_only 可见）
+        frame_type_label = QLabel("帧类型:")
+        frame_type_combo = QComboBox()
+        frame_type_label.setVisible(False)
+        frame_type_combo.setVisible(False)
+        proto_row.addWidget(frame_type_label)
+        proto_row.addWidget(frame_type_combo)
         proto_row.addStretch()
         layout.addLayout(proto_row)
+
+        # ED 监控头剥离开关（仅 9/10 可见，默认勾选）
+        ed_chk = QCheckBox("剥离ED监控头")
+        ed_chk.setChecked(True)
+        ed_chk.setVisible(False)
+        ed_chk.setToolTip("勾选后自动识别并剥离 ED..EF..EE 监控包装头，前置显示监控信息再解析业务帧")
+        layout.addWidget(ed_chk)
 
         hex_text = QTextEdit()
         hex_text.setReadOnly(True)
@@ -3608,6 +3646,57 @@ class MainWindow(QMainWindow):
         error_label.hide()
         layout.addWidget(error_label)
 
+        def _is_new_gen(idx):
+            return idx in (9, 10)
+
+        def _update_extras_visibility(idx):
+            """按协议索引显示/隐藏解析级别、帧类型、ED监控头控件"""
+            show = _is_new_gen(idx)
+            level_label.setVisible(show)
+            level_combo.setVisible(show)
+            ed_chk.setVisible(show)
+            if not show:
+                frame_type_label.setVisible(False)
+                frame_type_combo.setVisible(False)
+                return
+            # 填解析级别选项（9/10 不同）
+            level_combo.blockSignals(True)
+            level_combo.clear()
+            levels = CSG_LEVELS if idx == 9 else GW_LEVELS
+            for text, val in levels:
+                level_combo.addItem(text, val)
+            # 默认自动识别
+            level_combo.setCurrentIndex(level_combo.findData("auto"))
+            # 填帧类型选项
+            frame_type_combo.blockSignals(True)
+            frame_type_combo.clear()
+            if idx == 9:
+                for text, val in [("SOF帧", "sof"), ("信标帧", "beacon"),
+                                  ("ACK帧(SACK)", "sack"), ("NET帧", "net")]:
+                    frame_type_combo.addItem(text, val)
+            else:
+                for text, val in [("SOF帧", 1), ("信标帧", 0),
+                                  ("ACK帧(SACK)", 2), ("NET帧", 3)]:
+                    frame_type_combo.addItem(text, val)
+            level_combo.blockSignals(False)
+            frame_type_combo.blockSignals(False)
+            # pb_only 时显示帧类型
+            is_pb = level_combo.currentData() == "pb_only"
+            frame_type_label.setVisible(show and is_pb)
+            frame_type_combo.setVisible(show and is_pb)
+
+        def _preprocess(idx, raw):
+            """协议预处理：ED 监控头剥离 + 前置行。返回 (bytes, extra_rows)"""
+            if idx not in (9, 10) or not ed_chk.isChecked() or len(raw) < 8 or raw[0] != 0xED:
+                return raw, None
+            try:
+                rows, business, offset = self._parse_ed_monitor_header(raw)
+            except Exception:
+                return raw, None
+            if rows is None or business is None:
+                return raw, None
+            return business, rows
+
         def do_parse(idx=None):
             """用当前所选协议重新解析并填充表格"""
             if idx is None:
@@ -3615,13 +3704,23 @@ class MainWindow(QMainWindow):
             dialog.setWindowTitle(f"解析结果 - {proto_combo.currentText()}")
             table.setRowCount(0)
             error_label.hide()
+            # 预处理：ED 头剥离
+            parse_bytes, ed_rows = _preprocess(idx, frame_bytes)
             try:
-                parser = self._get_current_parser(idx)
-                data = parser.parse_to_table(frame_bytes)
+                kwargs = {}
+                if _is_new_gen(idx):
+                    kwargs["parse_level"] = level_combo.currentData()
+                    if level_combo.currentData() == "pb_only":
+                        kwargs["frame_type"] = frame_type_combo.currentData()
+                parser = self._get_current_parser(idx, **kwargs)
+                data = parser.parse_to_table(parse_bytes)
             except Exception as e:
                 error_label.setText(f"解析失败（{proto_combo.currentText()}）：{str(e)}")
                 error_label.show()
                 return
+            # ED 监控头前置行
+            if ed_rows:
+                data = ed_rows + list(data)
             for r, item in enumerate(data):
                 table.insertRow(r)
                 table.setItem(r, 0, QTableWidgetItem(str(item[0])))
@@ -3629,7 +3728,18 @@ class MainWindow(QMainWindow):
                 table.setItem(r, 2, QTableWidgetItem(str(item[2])))
                 table.setItem(r, 3, QTableWidgetItem(str(item[3])))
 
-        proto_combo.currentIndexChanged.connect(do_parse)
+        def _on_level_changed(_idx):
+            is_pb = level_combo.currentData() == "pb_only"
+            frame_type_label.setVisible(is_pb)
+            frame_type_combo.setVisible(is_pb)
+            do_parse()
+
+        level_combo.currentIndexChanged.connect(_on_level_changed)
+        frame_type_combo.currentIndexChanged.connect(lambda _: do_parse())
+        proto_combo.currentIndexChanged.connect(
+            lambda _: (_update_extras_visibility(proto_combo.currentData()), do_parse())
+        )
+        _update_extras_visibility(initial_protocol)
         do_parse(proto_combo.currentData())
 
         btn_row = QHBoxLayout()
