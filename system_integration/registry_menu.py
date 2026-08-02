@@ -43,11 +43,17 @@ def get_exe_path() -> str:
 def get_launch_command() -> str:
     """返回带引号的完整启动命令（无控制台窗口）
 
-    开发模式：pythonw.exe "main_gui.py"（避免黑框）
-    打包后：  "exe路径"（GUI 模式，本身无控制台）
+    优先顺序：
+    1. 打包运行（frozen）：直接 exe 路径
+    2. 开发模式：dist/南网协议解析工具.exe 存在 → 用 exe（部署/推广场景）
+    3. 开发模式：pythonw.exe "main_gui.py"（源码调试，避免黑框）
     """
     if getattr(sys, "frozen", False):
         return f'"{sys.executable}"'
+    # 开发模式优先用编译产物 exe（若已编译）
+    exe = Path(__file__).resolve().parent.parent / "dist" / "南网协议解析工具.exe"
+    if exe.exists():
+        return f'"{exe}"'
     # 找 pythonw.exe（与当前 python.exe 同目录）
     python_dir = Path(sys.executable).parent
     pythonw = python_dir / "pythonw.exe"
