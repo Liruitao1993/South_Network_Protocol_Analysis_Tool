@@ -40,6 +40,23 @@ def get_exe_path() -> str:
     return str(Path(__file__).resolve().parent.parent / "main_gui.py")
 
 
+def get_launch_command() -> str:
+    """返回带引号的完整启动命令（无控制台窗口）
+
+    开发模式：pythonw.exe "main_gui.py"（避免黑框）
+    打包后：  "exe路径"（GUI 模式，本身无控制台）
+    """
+    if getattr(sys, "frozen", False):
+        return f'"{sys.executable}"'
+    # 找 pythonw.exe（与当前 python.exe 同目录）
+    python_dir = Path(sys.executable).parent
+    pythonw = python_dir / "pythonw.exe"
+    if pythonw.exists():
+        return f'"{pythonw}" "{get_exe_path()}"'
+    # 找不到 pythonw 时退化为 python.exe（开发环境异常情况）
+    return f'"{sys.executable}" "{get_exe_path()}"'
+
+
 def _open_key(root, path, access):
     import winreg
     return winreg.OpenKey(root, path, 0, access)
@@ -90,7 +107,7 @@ def set_autostart(enabled: bool) -> None:
     )
     try:
         if enabled:
-            winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, f'"{get_exe_path()}"')
+            winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, get_launch_command())
         else:
             try:
                 winreg.DeleteValue(key, APP_NAME)
@@ -103,8 +120,8 @@ def set_autostart(enabled: bool) -> None:
 # ==================== 文件右键菜单 ====================
 
 def _menu_command(protocol_index: int) -> str:
-    """生成右键菜单项命令：exe --file "%1" --protocol <index>"""
-    return f'"{get_exe_path()}" --file "%1" --protocol {protocol_index}'
+    """生成右键菜单项命令：<launch> --file "%1" --protocol <index>"""
+    return f'{get_launch_command()} --file "%1" --protocol {protocol_index}'
 
 
 def register_context_menu() -> bool:

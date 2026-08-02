@@ -18,7 +18,7 @@ import os
 import shutil
 from pathlib import Path
 
-from system_integration.registry_menu import get_exe_path
+from system_integration.registry_menu import get_launch_command
 
 NPP_CMD_NAME = "用协议解析工具解析"
 BACKUP_SUFFIX = ".parser_backup"
@@ -36,8 +36,8 @@ def _backup(file: Path) -> None:
 
 
 def _exe_cmd() -> str:
-    """生成解析器命令行：exe --clipboard（含引号，exe 路径带空格）"""
-    return f'"{get_exe_path()}" --clipboard'
+    """生成解析器命令行：<launch> --clipboard（pythonw 启动避免黑框）"""
+    return f'{get_launch_command()} --clipboard'
 
 
 def _inject_shortcuts_xml() -> bool:
