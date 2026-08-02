@@ -14,8 +14,17 @@
     "command": "command.json"
   },
   "ui": {
-    "theme": "default",
-    "font_family": "Maple Mono NF CN",
+    "theme": "fusion",
+    "font_family": "Microsoft YaHei",
     "font_size": 10
+  },
+  "system": {
+    "auto_start": false,
+    "close_to_tray": true,
+    "hotkey_enabled": true,
+    "hotkey": "Ctrl+Alt+X",
+    "context_menu": false,
+    "npp_integrated": false,
+    "clipboard_monitor": true
   }
 }
