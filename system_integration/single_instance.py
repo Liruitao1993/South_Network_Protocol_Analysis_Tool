@@ -13,7 +13,11 @@ SERVER_NAME = "协议解析工具_singleton"
 
 
 def _send_args_to_existing(args) -> bool:
-    """尝试连接已有实例，发送参数，成功返回 True"""
+    """尝试连接已有实例，发送参数并等待 ACK，确认是活实例才返回 True
+
+    关键：仅 connectToServer 成功不足以证明有活实例——僵尸进程残留的
+    命名管道也能连接成功。必须等到服务器 ACK 才算真的连上主实例。
+    """
     socket = QLocalSocket()
     socket.connectToServer(SERVER_NAME)
     if not socket.waitForConnected(1000):
@@ -22,10 +26,14 @@ def _send_args_to_existing(args) -> bool:
     socket.write(payload.encode("utf-8"))
     socket.flush()
     socket.waitForBytesWritten(1000)
-    # 等服务器 ACK，确保数据送达后再断开（避免连接被提前销毁导致丢数据）
-    socket.waitForReadyRead(2000)
+    # 等待服务器 ACK（收到即确认主实例存活）
+    if socket.waitForReadyRead(2000):
+        bytes(socket.readAll())  # 读取 ACK
+        socket.disconnectFromServer()
+        return True
+    # 无 ACK：可能是僵尸进程残留管道，非活实例，本进程应成为主实例
     socket.disconnectFromServer()
-    return True
+    return False
 
 
 class SingleInstanceServer(QObject):

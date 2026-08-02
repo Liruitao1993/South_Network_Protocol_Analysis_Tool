@@ -5962,12 +5962,19 @@ def main():
     ThemeManager.apply_from_file(app)
 
     window = MainWindow()
-    window.show()
 
-    # 处理命令行参数（--parse / --protocol / --file / --minimized）
+    # 处理命令行参数（--parse / --protocol / --file / --minimized / --clipboard）
     cli_args = [a for a in sys.argv[1:] if a]
-    if cli_args:
+    has_parse_action = any(a in ("--parse", "--file", "--clipboard") for a in cli_args)
+
+    if cli_args and not has_parse_action:
+        window.show()
         window._handle_cli_args(cli_args)
+    elif has_parse_action:
+        # 解析动作：不显示主窗口，直接弹解析结果（避免窗口太多）
+        window._handle_cli_args(cli_args)
+    else:
+        window.show()
 
     sys.exit(app.exec())
 
