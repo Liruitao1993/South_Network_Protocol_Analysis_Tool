@@ -1314,15 +1314,134 @@ def _parse_cmd_test_frame(payload: bytes, direction: int, base_offset: int) -> l
             if test_id in (0x00, 0x01, 0x02) and data_len == 1:
                 band = data[0]
                 desc = f"通信频段: 0x{band:02X}"
+                _f(table, "测试数据区", _hex(data),
+                   f"{data_len}字节", desc,
+                   base_offset + offset, base_offset + offset + data_len - 1)
             elif test_id == 0x03:
-                desc = "1.0测试数据区（原有扩展命令格式）"
+                # 1.0测试数据区（原有扩展命令格式，表61）
+                table.extend(_parse_legacy_ext_cmd(data, base_offset + offset))
             else:
                 desc = "测试数据区"
-            _f(table, "测试数据区", _hex(data)[:80] + ("..." if data_len > 40 else ""),
-               f"{data_len}字节", desc,
-               base_offset + offset, base_offset + offset + data_len - 1)
+                _f(table, "测试数据区", _hex(data)[:80] + ("..." if data_len > 40 else ""),
+                   f"{data_len}字节", desc,
+                   base_offset + offset, base_offset + offset + data_len - 1)
             offset += data_len
     _remaining(table, payload, offset, base_offset)
+    return table
+
+
+# ── 原有扩展命令格式（表61）：1.0测试数据区 ──
+
+_LEGACY_TEST_MODE_MAP = {
+    1: "转发应用层报文至应用层串口信道测试模式",
+    2: "转发应用层报文至载波信道测试模式",
+    3: "PLC物理层透传测试模式",
+    4: "PLC物理层回传测试模式",
+    5: "MAC层透传测试模式",
+    6: "频段切换操作",
+    7: "ToneMask配置操作",
+    8: "无线信道切换操作",
+    9: "RF物理层回传测试模式",
+    10: "RF物理层透传测试模式",
+    11: "RF/PLC物理层回传测试模式",
+    12: "PLC到RF物理层回传测试模式",
+    13: "安全测试模式",
+    15: "新一代扩展测试模式",
+}
+
+
+def _parse_legacy_ext_cmd(data: bytes, base: int) -> list:
+    """解析原有扩展命令格式数据区（表61，8字节结构）
+
+    域                字节  比特位  大小
+    协议版本号        0     0-5     6
+    报文头长度        0     6-7     2
+    测试模式/配置操作 1     4-7     4
+    转发数据规约类型  2     0-3     4
+    转发数据长度/持续时间/配置值  2-3  4-7+0-7  12
+    安全测试模式      4     0-3     4
+    保留/PHR_MCS      4     4-7     4
+    保留/PSDU_MCS     5     0-3     4
+    保留/PbSIZE       5     4-7     4
+    """
+    table = []
+    if len(data) < 2:
+        _f(table, "❌ 解析失败", "", "", "原有扩展命令数据不足（<2字节）", base, base + len(data) - 1)
+        return table
+
+    # 字节0: 协议版本号(bit0-5) + 报文头长度(bit6-7)
+    ver = data[0] & 0x3F
+    hdr_len = (data[0] >> 6) & 0x03
+    _f(table, "协议版本号", f"0x{ver:02X}", str(ver), "原有扩展命令协议版本号", base, base)
+    _f(table, "报文头长度", f"0x{hdr_len:02X}", str(hdr_len), "报文头长度(2bit)", base, base)
+
+    if len(data) < 6:
+        # 数据不足时只解析已存在字段
+        _f(table, "剩余数据", _hex(data[1:]), f"{len(data)-1}字节",
+           "原有扩展命令数据不足（需6字节），仅显示原始数据", base + 1, base + len(data) - 1)
+        return table
+
+    # 字节1: 测试模式/配置操作(bit4-7)，低4位保留
+    b1 = data[1]
+    test_mode = (b1 >> 4) & 0x0F
+    reserved1 = b1 & 0x0F
+    mode_name = _LEGACY_TEST_MODE_MAP.get(test_mode, f"保留({test_mode})")
+    _f(table, "测试模式/配置操作", f"0x{test_mode:02X}", str(test_mode),
+       f"{mode_name}（高4位）", base + 1, base + 1)
+    _f(table, "  保留", f"0x{reserved1:01X}", str(reserved1), "字节1低4位保留", base + 1, base + 1)
+
+    # 字节2: 转发数据规约类型(bit0-3) + 数据长度12bit高4位(bit4-7)
+    b2 = data[2]
+    proto_type = b2 & 0x0F
+    _f(table, "转发数据规约类型", f"0x{proto_type:01X}", str(proto_type),
+       "转发数据的规约类型（低4位）", base + 2, base + 2)
+
+    # 数据长度 12bit: (字节2 bit4-7)<<8 | 字节3
+    b3 = data[3]
+    data_len12 = ((b2 >> 4) & 0x0F) << 8 | b3
+    # 依据测试模式区分字段含义：3/4/5/9/10/11/12=持续时间(分)，6=频段，7=ToneMask，8=Option+信道号
+    len_desc = "转发数据长度/模式持续时间"
+    if test_mode in (3, 4, 5, 9, 10, 11, 12):
+        len_desc = f"测试模式持续时间: {data_len12} 分钟"
+    elif test_mode == 6:
+        len_desc = f"目标频段: {data_len12}"
+    elif test_mode == 7:
+        len_desc = f"目标ToneMask: {data_len12}"
+    elif test_mode == 8:
+        # Option(字节2 bit4-7) + 信道号(字节3)
+        opt = (b2 >> 4) & 0x0F
+        ch = b3
+        len_desc = f"无线信道切换: Option={opt}, 信道号={ch}"
+        _f(table, "  Option值", f"0x{opt:02X}", str(opt), "无线信道切换Option值", base + 2, base + 2)
+        _f(table, "  无线信道号", f"0x{ch:02X}", str(ch), "无线信道切换信道号", base + 3, base + 3)
+    else:
+        len_desc = f"转发数据长度/模式持续时间: {data_len12}"
+    _f(table, "转发数据长度/模式持续时间", f"{b2:02X} {b3:02X}", str(data_len12),
+       len_desc, base + 2, base + 3)
+
+    # 字节4: 安全测试模式(bit0-3) + PHR_MCS(bit4-7)
+    b4 = data[4]
+    sec_mode = b4 & 0x0F
+    phr_mcs = (b4 >> 4) & 0x0F
+    _f(table, "安全测试模式", f"0x{sec_mode:01X}", str(sec_mode),
+       "安全测试模式（仅测试模式13生效）", base + 4, base + 4)
+    _f(table, "  PHR_MCS", f"0x{phr_mcs:01X}", str(phr_mcs),
+       "PHR_MCS（仅测试模式12生效）", base + 4, base + 4)
+
+    # 字节5: PSDU_MCS(bit0-3) + PbSIZE(bit4-7)
+    if len(data) >= 6:
+        b5 = data[5]
+        psdu_mcs = b5 & 0x0F
+        pb_size = (b5 >> 4) & 0x0F
+        _f(table, "  PSDU_MCS", f"0x{psdu_mcs:01X}", str(psdu_mcs),
+           "PSDU_MCS（仅测试模式12生效）", base + 5, base + 5)
+        _f(table, "  PbSIZE", f"0x{pb_size:01X}", str(pb_size),
+           "PbSIZE（仅测试模式12生效）", base + 5, base + 5)
+
+    # 超过6字节的剩余数据
+    if len(data) > 6:
+        _f(table, "剩余数据", _hex(data[6:]), f"{len(data)-6}字节",
+           "原有扩展命令超出6字节的剩余数据", base + 6, base + len(data) - 1)
     return table
 
 
