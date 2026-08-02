@@ -30,6 +30,7 @@ DEFAULT_SYSTEM_SETTINGS = {
     "hotkey": "Ctrl+Alt+X",  # 默认热键（Ctrl+Alt+P 常被输入法/其它软件占用）
     "context_menu": False,
     "npp_integrated": False,
+    "clipboard_monitor": True,  # 剪贴板报文自动检测
 }
 
 
@@ -113,6 +114,19 @@ class SystemIntegrationSettings(QWidget):
         hotkey_hint.setStyleSheet("color: gray;")
         box_layout.addWidget(hotkey_hint)
 
+        # 剪贴板报文自动检测
+        self.clipboard_monitor_chk = QCheckBox("剪贴板报文自动检测")
+        self.clipboard_monitor_chk.setToolTip(
+            "在任何软件中选中报文并按 Ctrl+C 复制，自动弹出提示框，"
+            "点击「解析」即转入解析器。全局生效，无需在解析器中操作。"
+        )
+        box_layout.addWidget(self.clipboard_monitor_chk)
+
+        clip_hint = QLabel("推荐：在任意软件（记事本/NPP/UE/浏览器/PDF）选中报文 → Ctrl+C → 自动弹提示框")
+        clip_hint.setWordWrap(True)
+        clip_hint.setStyleSheet("color: gray;")
+        box_layout.addWidget(clip_hint)
+
         # 文件右键菜单
         menu_row = QHBoxLayout()
         self.menu_status_label = QLabel("未注册")
@@ -163,6 +177,7 @@ class SystemIntegrationSettings(QWidget):
         self.hotkey_edit.setText(s.get("hotkey", "Ctrl+Alt+P"))
         self.hotkey_edit.setEnabled(bool(s.get("hotkey_enabled")))
         self.hotkey_enabled_chk.toggled.connect(self.hotkey_edit.setEnabled)
+        self.clipboard_monitor_chk.setChecked(bool(s.get("clipboard_monitor", True)))
         self._refresh_menu_status()
         self._refresh_npp_status()
 
@@ -241,6 +256,7 @@ class SystemIntegrationSettings(QWidget):
             "hotkey": self.hotkey_edit.text().strip() or "Ctrl+Alt+P",
             "context_menu": self._settings.get("context_menu", False),
             "npp_integrated": self._settings.get("npp_integrated", False),
+            "clipboard_monitor": self.clipboard_monitor_chk.isChecked(),
         }
 
     def save_settings(self) -> dict:

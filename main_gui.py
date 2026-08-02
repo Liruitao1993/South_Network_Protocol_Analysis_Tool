@@ -49,6 +49,8 @@ from system_integration.sys_tray import SystemTrayManager
 from system_integration.global_hotkey import GlobalHotkeyManager
 from system_integration.single_instance import SingleInstanceServer
 from system_integration.registry_menu import get_exe_path
+from system_integration.clipboard_monitor import ClipboardMonitor, detect_protocol
+from system_integration.parse_prompt_dialog import ParsePromptDialog
 from message_tool_widget import MessageToolWidget
 from serial_worker import SerialWorker
 from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu
@@ -3473,6 +3475,44 @@ class MainWindow(QMainWindow):
         self._single_instance = SingleInstanceServer(self)
         self._single_instance.args_received.connect(self._on_second_instance_args)
 
+        # 剪贴板监听（检测其他软件复制的 hex 报文 → 弹提示框）
+        self._clipboard_monitor = ClipboardMonitor(self)
+        self._clipboard_monitor.hex_ready.connect(self._on_clipboard_hex)
+        self._clipboard_monitor.set_enabled(
+            bool(self._system_settings.get("clipboard_monitor", True))
+        )
+        self._clipboard_monitor.start()
+
+    def _on_clipboard_hex(self, frame_bytes: bytes, hex_str: str, detected_protocol):
+        """剪贴板检测到 hex 报文 → 弹提示框"""
+        # 去重：主窗口自身解析填入剪贴板时不弹
+        if hasattr(self, '_last_parsed_hex') and self._last_parsed_hex:
+            own = self._last_parsed_hex.replace(' ', '').lower()
+            if own == hex_str.lower():
+                return
+        dialog = ParsePromptDialog(frame_bytes, hex_str, detected_protocol, self)
+        # 填充协议下拉（11 协议）
+        items = []
+        for i in range(self.protocol_combo.count()):
+            items.append((self.protocol_combo.itemText(i), i))
+        dialog.add_protocols(items)
+        # 显示（非模态 + 置顶，不阻塞主窗口）
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+        # 解析确认后打开解析窗口
+        dialog.accepted.connect(
+            lambda d=dialog: self._open_prompt_parse(d.get_selection())
+        )
+
+    def _open_prompt_parse(self, selection):
+        """提示框确认解析：按所选协议打开解析窗口"""
+        frame_bytes, proto_idx = selection
+        if proto_idx is None:
+            proto_idx = self.current_protocol
+        self._tray_show_window()
+        self._parse_and_show_dialog(frame_bytes, initial_protocol=proto_idx)
+
     def _restart_hotkey(self):
         """按当前设置启动/停止全局热键监听"""
         if not hasattr(self, "_hotkey_manager") or self._hotkey_manager is None:
@@ -5623,6 +5663,12 @@ class MainWindow(QMainWindow):
         # 全局热键：设置变更后重启热键监听
         if hasattr(self, "_hotkey_manager") and self._hotkey_manager is not None:
             self._restart_hotkey()
+
+        # 剪贴板监听开关
+        if hasattr(self, "_clipboard_monitor") and self._clipboard_monitor is not None:
+            self._clipboard_monitor.set_enabled(
+                bool(self._system_settings.get("clipboard_monitor", True))
+            )
 
     def _save_app_config(self):
         """保存应用配置到 config.json"""

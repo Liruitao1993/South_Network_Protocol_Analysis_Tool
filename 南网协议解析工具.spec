@@ -37,6 +37,8 @@ a = Analysis(
         'system_integration.single_instance',
         'system_integration.system_settings',
         'system_integration.npp_integration',
+        'system_integration.clipboard_monitor',
+        'system_integration.parse_prompt_dialog',
         'protocol_parser',
         'plc_rf_parser',
         'hdlc_parser',
