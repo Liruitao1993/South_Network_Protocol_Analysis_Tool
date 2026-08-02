@@ -3762,12 +3762,13 @@ class MainWindow(QMainWindow):
             self._handle_cli_args(args)
 
     def _handle_cli_args(self, args: list):
-        """处理命令行参数（--parse / --protocol / --file / --minimized）"""
+        """处理命令行参数（--parse / --protocol / --file / --minimized / --clipboard）"""
         # 解析参数
         protocol_index = None
         parse_hex = None
         file_path = None
         minimized = False
+        clipboard = False
         i = 0
         while i < len(args):
             arg = args[i]
@@ -3780,6 +3781,9 @@ class MainWindow(QMainWindow):
             elif arg == "--file" and i + 1 < len(args):
                 file_path = args[i + 1]
                 i += 2
+            elif arg == "--clipboard":
+                clipboard = True
+                i += 1
             elif arg == "--minimized":
                 minimized = True
                 i += 1
@@ -3793,6 +3797,11 @@ class MainWindow(QMainWindow):
         # 最小化到托盘
         if minimized and self._tray_manager is not None:
             self.hide()
+            return
+
+        # 读剪贴板解析（NPP/UE 右键菜单、外部调用用）
+        if clipboard:
+            QTimer.singleShot(200, self._parse_clipboard_and_show)
             return
 
         # 文件解析
@@ -3814,6 +3823,26 @@ class MainWindow(QMainWindow):
                     self._parse_and_show_dialog(bytes.fromhex(clean))
                 except Exception as e:
                     QMessageBox.critical(self, "解析错误", f"解析失败：{str(e)}")
+
+    def _parse_clipboard_and_show(self):
+        """读取剪贴板 hex 并弹出解析对话框（--clipboard 参数用）"""
+        clipboard = QGuiApplication.clipboard()
+        text = clipboard.text() or ""
+        if not text.strip():
+            QMessageBox.information(self, "解析", "剪贴板为空，请先在编辑器中复制报文。")
+            return
+        clean = self._clean_hex_input(text)
+        clean = clean.strip()
+        if len(clean) % 2 != 0 or not all(c in '0123456789abcdefABCDEF' for c in clean):
+            QMessageBox.information(self, "解析", "剪贴板内容不是有效的十六进制报文。")
+            return
+        try:
+            frame_bytes = bytes.fromhex(clean)
+        except Exception:
+            QMessageBox.information(self, "解析", "剪贴板内容不是有效的十六进制报文。")
+            return
+        self._tray_show_window()
+        self._parse_and_show_dialog(frame_bytes)
 
     def _protocol_name_to_index(self, name: str) -> int:
         """协议名 → protocol_combo 索引（支持中文名 / 数字索引）"""
