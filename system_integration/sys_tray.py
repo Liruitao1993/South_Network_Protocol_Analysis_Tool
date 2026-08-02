@@ -20,6 +20,7 @@ class SystemTrayManager(QObject):
     exit_requested = Signal()          # 托盘菜单"退出"触发
     show_requested = Signal()          # 托盘"显示主窗口"触发
     autostart_toggled = Signal(bool)   # 托盘内自启开关切换
+    message_clicked = Signal()         # 气泡通知被点击（用于剪贴板解析确认）
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -69,9 +70,16 @@ class SystemTrayManager(QObject):
 
         # 左键单击：显示/隐藏
         self._tray.activated.connect(self._on_activated)
+        # 气泡通知点击（Windows 托盘消息点击触发 MessageClicked）
+        self._tray.messageClicked.connect(self.message_clicked.emit)
 
         self._tray.show()
         return True
+
+    def show_message(self, title: str, body: str, timeout_ms: int = 5000):
+        """显示气泡通知（用于剪贴板检测提示）"""
+        if self._tray is not None:
+            self._tray.showMessage(title, body, QSystemTrayIcon.MessageIcon.Information, timeout_ms)
 
     def _on_activated(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:  # 左键单击
