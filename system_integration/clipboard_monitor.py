@@ -104,32 +104,45 @@ class ClipboardMonitor(QObject):
         if text == self._last_content and (now - self._last_time) < DEDUP_MS:
             return
 
-        # 提取 hex
-        clean = _clean_hex(text)
-        if len(clean) % 2 != 0 or not all(c in '0123456789abcdefABCDEF' for c in clean):
-            self._last_content = text
-            self._last_time = now
+        self._last_content = text
+        self._last_time = now
+
+        # 严格校验：除 16 进制字符 + 分隔符外，出现任何其他字符则不触发
+        clean = strict_hex(text)
+        if clean is None:
             return
 
         nbytes = len(clean) // 2
         if nbytes < MIN_BYTES:
-            self._last_content = text
-            self._last_time = now
             return
 
         try:
             frame = bytes.fromhex(clean)
         except Exception:
             return
-
-        self._last_content = text
-        self._last_time = now
         proto = detect_protocol(frame)
         self.hex_ready.emit(frame, clean, proto)
 
 
-def _clean_hex(text: str) -> str:
-    """提取 hex 字符（去空格/逗号/0x 前缀等）"""
+def strict_hex(text: str):
+    """严格校验：内容必须纯 16 进制字符 + 分隔符（空格/逗号/0x前缀/换行）
+
+    出现任何非 16 进制字符（如字母 G、中文、标点）→ 返回 None 不触发。
+    有效则返回清洗后的 hex 字符串（仅 16 进制字符）。
+    """
     import re
-    text = re.sub(r'0[xX]([0-9A-Fa-f])', r'\1', text)
-    return re.sub(r'[^0-9A-Fa-f]', '', text)
+    # 允许的分隔符：空格、逗号、句点、连字符、换行、制表符、0x/0X 前缀
+    # 先移除 0x/0X 前缀
+    work = re.sub(r'0[xX]([0-9A-Fa-f])', r'\1', text)
+    # 剩余字符必须是 16 进制字符 或 分隔符
+    sep = set(' ,.-_\t\n\r;:')
+    for ch in work:
+        if ch in '0123456789abcdefABCDEF':
+            continue
+        if ch in sep:
+            continue
+        return None  # 出现非 hex 非分隔符 → 不触发
+    clean = re.sub(r'[^0-9A-Fa-f]', '', work)
+    if not clean or len(clean) % 2 != 0:
+        return None
+    return clean

@@ -3373,6 +3373,8 @@ class MainWindow(QMainWindow):
         config_action.triggered.connect(self._show_config_dialog)
         theme_action = config_menu.addAction("主题与字体(&T)...")
         theme_action.triggered.connect(self._show_theme_settings_dialog)
+        sys_action = config_menu.addAction("系统集成设置(&S)...")
+        sys_action.triggered.connect(self._show_system_settings_dialog)
 
         help_menu = menubar.addMenu("帮助(&H)")
 
@@ -5864,6 +5866,28 @@ class MainWindow(QMainWindow):
             self._apply_system_settings(sys_settings)
         # 无论确定/取消（取消时对话框已还原主题），同步动态控件样式
         self._restyle_for_theme()
+
+    def _show_system_settings_dialog(self):
+        """显示系统集成设置对话框（配置菜单→系统集成设置）"""
+        from system_integration.system_settings import SystemIntegrationSettings
+        dialog = QDialog(self)
+        dialog.setWindowTitle("系统集成设置")
+        dialog.setMinimumWidth(560)
+        dialog.setWindowFlags(dialog.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+        layout = QVBoxLayout(dialog)
+        panel = SystemIntegrationSettings(dialog)
+        layout.addWidget(panel)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        ok_btn = QPushButton("确定")
+        ok_btn.clicked.connect(dialog.accept)
+        cancel_btn = QPushButton("取消")
+        cancel_btn.clicked.connect(dialog.reject)
+        btn_row.addWidget(ok_btn)
+        btn_row.addWidget(cancel_btn)
+        layout.addLayout(btn_row)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._apply_system_settings(panel.save_settings())
 
     def _refresh_serial_ports(self):
         """刷新可用串口列表"""
