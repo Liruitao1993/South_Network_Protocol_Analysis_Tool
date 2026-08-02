@@ -15,8 +15,9 @@
 from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtGui import QGuiApplication
 
-# 连续两次相同内容的最小间隔（毫秒），防止重复弹窗
-DEDUP_MS = 800
+# 连续两次相同内容的最小间隔（毫秒）。仅防单次复制的重复 dataChanged 事件，
+# 不能太长，否则用户关闭提示框后再次复制同一报文会被吞掉
+DEDUP_MS = 250
 # 复制后延迟校验，等待剪贴板完全写入
 READ_DELAY_MS = 120
 # 报文最小字节数（过短不弹）

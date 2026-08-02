@@ -95,6 +95,28 @@ class ParsePromptDialog(QDialog):
         self.proto_combo.blockSignals(False)
         self._update_hint()
 
+    def update_content(self, frame_bytes: bytes, hex_str: str, detected_protocol):
+        """复用对话框：更新报文内容与识别协议（新复制时调用）"""
+        self.frame_bytes = frame_bytes
+        self.hex_str = hex_str
+        self.selected_protocol = detected_protocol
+        # 更新 hex 显示（第一个 QTextEdit 是报文显示区）
+        for widget in self.findChildren(QTextEdit):
+            widget.setPlainText(' '.join(f'{b:02X}' for b in frame_bytes))
+            break
+        # 更新协议下拉选中
+        if detected_protocol is not None:
+            fi = self.proto_combo.findData(detected_protocol)
+            if fi >= 0:
+                self.proto_combo.blockSignals(True)
+                self.proto_combo.setCurrentIndex(fi)
+                self.proto_combo.blockSignals(False)
+        self._update_hint()
+        # 置顶唤醒
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
     def _on_proto_changed(self, _):
         self.selected_protocol = self.proto_combo.currentData()
         self._update_hint()
