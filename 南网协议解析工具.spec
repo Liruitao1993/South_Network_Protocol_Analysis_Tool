@@ -36,6 +36,7 @@ a = Analysis(
         'system_integration.registry_menu',
         'system_integration.single_instance',
         'system_integration.system_settings',
+        'system_integration.npp_integration',
         'protocol_parser',
         'plc_rf_parser',
         'hdlc_parser',
