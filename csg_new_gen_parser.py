@@ -288,6 +288,21 @@ class CSGNewGenParser:
             self._cmt_index = 4      # 默认载波映射表索引(PB 136字节)
             self._std_version = 1    # 默认BPLC版本
             self._pb_count = 1       # pb_only 默认单PB
+
+            # 信标帧(定界符类型=0)：无物理块头，FC后直接为信标载荷。
+            # pb_only 输入即裸信标载荷，直接按信标载荷解析（表51）
+            if self._delimiter_type == 0:
+                table_data.append(("── 信标帧载荷（PB-only，无物理块头）──", "", "",
+                                   "信标帧无PB块头，输入即信标载荷，直接按表51解析",
+                                   0, frame_len - 1))
+                table_data.extend(self._parse_beacon_payload(frame_bytes, 0))
+                return table_data
+            # 选择确认帧(类型2)/网间协调帧(类型3)：仅FC头，无物理块/MSDU
+            if self._delimiter_type in (2, 3):
+                table_data.append(("❌ 解析失败", "", "",
+                                   "选择确认帧(SACK)/网间协调帧无物理块，不适合PB-only解析",
+                                   None, None))
+                return table_data
             offset, mac_data, msdu_payload = self._parse_pb_block(
                 frame_bytes, 0, table_data, frame_len)
         elif is_mpdu:
