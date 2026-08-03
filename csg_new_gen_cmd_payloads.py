@@ -1148,45 +1148,44 @@ def _parse_test_ext_0004(data: bytes, base_offset: int) -> list:
 
 
 def _parse_test_ext_0005(data: bytes, base_offset: int) -> list:
-    """0x0005: OFDMA多用户下发"""
+    """0x0005: OFDMA多用户下发（通感一体物联版）
+
+    数据域格式（对应文档字节3起）:
+      字节0: OFDMA配置 — bit0=OFDMA类型(0:DL 1:UL), bit1-3=调度节点数, bit4-7=保留
+      每站点(2字节): TEI(12bit, 小端 — 低8位在第1字节, 高4位在第2字节低4位)
+                      + 保留(4bit, 第2字节高4位)
+    """
     table = []
-    if len(data) < 6:
-        _f(table, "❌ 解析失败", "", "", "OFDMA多用户下发数据不足", None, None)
+    if len(data) < 1:
+        _f(table, "❌ 解析失败", "", "", "OFDMA多用户下发数据不足1字节", None, None)
         return table
-    # 表8字段从数据域字节3开始（字节0~2保留/未定义）
-    frame_type = _bits(data, 3, 0, 1)
-    band = _bits(data, 3, 1, 3)
-    efc_sym = _bits(data, 3, 4, 4)
-    tf_sym = _bits(data, 4, 0, 4)
-    station_count = _bits(data, 4, 4, 4)
-    _f(table, "帧类型", f"0x{frame_type:01X}", str(frame_type),
-       "0:DL_OFDMA 1:UL_OFDMA", base_offset + 3, base_offset + 3)
-    _f(table, "频段", f"0x{band:01X}", str(band), "通信频段",
-       base_offset + 3, base_offset + 3)
-    _f(table, "eFC符号数", f"0x{efc_sym:01X}", str(efc_sym), "eFC符号数",
-       base_offset + 3, base_offset + 3)
-    _f(table, "TF符号数", f"0x{tf_sym:01X}", str(tf_sym), "TF符号数",
-       base_offset + 4, base_offset + 4)
-    _f(table, "站点个数", f"0x{station_count:01X}", str(station_count), "站点个数",
-       base_offset + 4, base_offset + 4)
-    offset = 5
+    # ── OFDMA配置字节（Table 7，文档字节3） ──
+    ofdma_type = _bits(data, 0, 0, 1)
+    station_count = _bits(data, 0, 1, 3)
+    reserved = _bits(data, 0, 4, 4)
+    type_name = "DL_OFDMA" if ofdma_type == 0 else "UL_OFDMA"
+    _f(table, "OFDMA类型", f"0x{ofdma_type:01X}", str(ofdma_type),
+       f"{type_name}", base_offset, base_offset)
+    _f(table, "调度节点数", f"0x{station_count:01X}", str(station_count),
+       "OFDMA调度站点个数", base_offset, base_offset)
+    _f(table, "保留", f"0x{reserved:01X}", str(reserved),
+       "保留字段", base_offset, base_offset)
+    # ── 每站点 TEI（Table 8） ──
+    offset = 1
     for i in range(station_count):
-        if offset + 3 > len(data):
-            _f(table, f"站点{i}", "", "", "数据不足", base_offset + offset, base_offset + len(data) - 1)
+        if offset + 2 > len(data):
+            _f(table, f"站点{i} TEI", "", "", "数据不足",
+               base_offset + offset, base_offset + len(data) - 1)
             break
-        tei = _bits(data, offset, 0, 12)
-        ru = _bits(data, offset + 1, 4, 4)
-        tmi = _bits(data, offset + 2, 0, 5)
-        pb_count = _bits(data, offset + 2, 5, 3)
-        _f(table, f"站点{i} TEI", _hex(data[offset:offset + 2]), str(tei), "站点TEI",
-           base_offset + offset, base_offset + offset + 1)
-        _f(table, f"站点{i} RU", f"0x{ru:01X}", str(ru), "RU编号",
-           base_offset + offset + 1, base_offset + offset + 1)
-        _f(table, f"站点{i} TMI", f"0x{tmi:02X}", str(tmi), "TMI",
-           base_offset + offset + 2, base_offset + offset + 2)
-        _f(table, f"站点{i} 物理块数", f"0x{pb_count:01X}", str(pb_count), "物理块数",
-           base_offset + offset + 2, base_offset + offset + 2)
-        offset += 3
+        tei_lo = data[offset]
+        tei_hi = data[offset + 1] & 0x0F
+        tei = (tei_hi << 8) | tei_lo
+        rsv = (data[offset + 1] >> 4) & 0x0F
+        _f(table, f"站点{i} TEI", _hex(data[offset:offset + 2]), f"0x{tei:03X}",
+           f"站点TEI = {tei}", base_offset + offset, base_offset + offset + 1)
+        _f(table, f"站点{i} 保留", f"0x{rsv:01X}", str(rsv),
+           "保留字段", base_offset + offset + 1, base_offset + offset + 1)
+        offset += 2
     _remaining(table, data, offset, base_offset)
     return table
 
