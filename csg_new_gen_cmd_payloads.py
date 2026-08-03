@@ -1405,54 +1405,68 @@ def _parse_efc_sack(table: list, efc: bytes, station_count: int, base: int):
 
 
 def _parse_test_ext_0006(data: bytes, base_offset: int) -> list:
-    """0x0006: MAC层OFDMA配置"""
+    """0x0006: MAC层OFDMA配置（通感一体版）
+
+    字节3 (data[0]): bit0=OFDMA类型(0:DL 1:UL), bit1-3=调度节点数, bit4-7=保留
+    """
     table = []
-    if len(data) < 4:
+    if len(data) < 1:
         _f(table, "❌ 解析失败", "", "", "MAC层OFDMA配置数据不足", None, None)
         return table
-    ofdma_type = _bits(data, 3, 0, 1)
-    node_count = _bits(data, 3, 1, 3)
-    reserved = _bits(data, 3, 4, 4)
+    ofdma_type = _bits(data, 0, 0, 1)
+    node_count = _bits(data, 0, 1, 3)
+    reserved = _bits(data, 0, 4, 4)
+    type_name = "DL_OFDMA" if ofdma_type == 0 else "UL_OFDMA"
     _f(table, "OFDMA类型", f"0x{ofdma_type:01X}", str(ofdma_type),
-       "0:DL_OFDMA 1:UL_OFDMA", base_offset + 3, base_offset + 3)
-    _f(table, "OFDMA调度节点数", f"0x{node_count:01X}", str(node_count), "调度节点数",
-       base_offset + 3, base_offset + 3)
+       type_name, base_offset, base_offset)
+    _f(table, "OFDMA调度节点数", f"0x{node_count:01X}", str(node_count),
+       "调度节点数", base_offset, base_offset)
     _f(table, "保留", f"0x{reserved:01X}", str(reserved), "保留",
-       base_offset + 3, base_offset + 3)
-    _remaining(table, data, 4, base_offset)
+       base_offset, base_offset)
+    _remaining(table, data, 1, base_offset)
     return table
 
 
 def _parse_test_ext_0007(data: bytes, base_offset: int) -> list:
-    """0x0007: 非组网场景TEI配置"""
+    """0x0007: 非组网场景TEI配置（通感一体版）
+
+    字节3 (data[0]): TEI低8位
+    字节4 (data[1]): TEI高4位(bit0-3) + 保留(bit4-7)
+    TEI共12位，小端：低8位在前，高4位在后一字节低4位。
+    """
     table = []
-    if len(data) < 5:
-        _f(table, "❌ 解析失败", "", "", "非组网场景TEI配置数据不足", None, None)
+    if len(data) < 2:
+        _f(table, "❌ 解析失败", "", "", "非组网场景TEI配置数据不足2字节", None, None)
         return table
-    tei = _bits(data, 3, 0, 12)
-    reserved = _bits(data, 4, 4, 4)
-    _f(table, "TEI", _hex(data[3:5]), str(tei), "配置的TEI",
-       base_offset + 3, base_offset + 4)
+    tei_lo = data[0]
+    tei_hi = data[1] & 0x0F
+    tei = (tei_hi << 8) | tei_lo
+    reserved = (data[1] >> 4) & 0x0F
+    _f(table, "TEI", _hex(data[0:2]), f"0x{tei:03X}",
+       f"配置的TEI = {tei}", base_offset, base_offset + 1)
     _f(table, "保留", f"0x{reserved:01X}", str(reserved), "保留",
-       base_offset + 4, base_offset + 4)
-    _remaining(table, data, 5, base_offset)
+       base_offset + 1, base_offset + 1)
+    _remaining(table, data, 2, base_offset)
     return table
 
 
 def _parse_test_ext_0008(data: bytes, base_offset: int) -> list:
-    """0x0008: 业务报文Bitloading收发开关"""
+    """0x0008: 业务报文Bitloading收发开关（通感一体版）
+
+    字节3 (data[0]): bit0=开关, bit1-7=保留
+    """
     table = []
-    if len(data) < 4:
+    if len(data) < 1:
         _f(table, "❌ 解析失败", "", "", "Bitloading收发开关数据不足", None, None)
         return table
-    enable = _bits(data, 3, 0, 1)
-    reserved = _bits(data, 3, 1, 7)
+    enable = _bits(data, 0, 0, 1)
+    reserved = _bits(data, 0, 1, 7)
     _f(table, "采用Bitloading传输数据", f"0x{enable:01X}", str(enable),
        "0:退出Bitloading模式 1:使用Bitloading模式",
-       base_offset + 3, base_offset + 3)
+       base_offset, base_offset)
     _f(table, "保留", f"0x{reserved:02X}", str(reserved), "保留",
-       base_offset + 3, base_offset + 3)
-    _remaining(table, data, 4, base_offset)
+       base_offset, base_offset)
+    _remaining(table, data, 1, base_offset)
     return table
 
 
