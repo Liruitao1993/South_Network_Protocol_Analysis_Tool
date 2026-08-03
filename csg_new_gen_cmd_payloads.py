@@ -1147,47 +1147,261 @@ def _parse_test_ext_0004(data: bytes, base_offset: int) -> list:
     return table
 
 
+_OFDMA_FRAME_TYPE_MAP = {
+    0: "DL_OFDMA（立即发送）",
+    1: "UL_OFDMA（等待触发发送）",
+    2: "UL_OFDMA的trigger（立即发送）",
+    3: "保留",
+}
+
+_EFC_SYM_COUNT_MAP = {
+    0: "2个符号",
+    1: "4个符号",
+    2: "8个符号",
+    3: "12个符号",
+}
+
+_TX_POWER_BACKOFF_MAP = {
+    0: "回退0dB",
+    1: "回退4dB",
+    2: "回退8dB",
+    3: "回退12dB",
+    4: "回退16dB",
+    5: "回退20dB",
+    6: "回退24dB",
+    7: "回退28dB",
+}
+
+
 def _parse_test_ext_0005(data: bytes, base_offset: int) -> list:
     """0x0005: OFDMA多用户下发（通感一体物联版）
 
-    数据域格式（对应文档字节3起）:
-      字节0: OFDMA配置 — bit0=OFDMA类型(0:DL 1:UL), bit1-3=调度节点数, bit4-7=保留
-      每站点(2字节): TEI(12bit, 小端 — 低8位在第1字节, 高4位在第2字节低4位)
-                      + 保留(4bit, 第2字节高4位)
+    数据域结构（data[x] = 文档字节 x+3）:
+      字节3 (data[0]): 帧类型(2bit, bit0-1) + 保留(6bit, bit2-7)
+      字节4-19 (data[1..16]): FC域 16字节
+        - 字节4 (data[1]): 定界符(3bit) + 接入指示(1bit) + SNID低4bit(4bit)
+        - 字节5-16 (data[2..13]): FC可变域 12字节（表26, OFDMA帧）
+        - 字节17-19 (data[14..16]): FC FCS（24bit CRC）
+      字节20-35 (data[17..32]): eFC域 16字节（类型0/2/3才有，类型1无）
+        - 字节20-32 (data[17..29]): eFC内容 13字节
+        - 字节33-35 (data[30..32]): eFC CRC 24bit
+
+    帧类型: 0=DL_OFDMA(立即发送), 1=UL_OFDMA(等待触发), 2=UL_OFDMA trigger(立即发送), 3=保留
     """
     table = []
     if len(data) < 1:
         _f(table, "❌ 解析失败", "", "", "OFDMA多用户下发数据不足1字节", None, None)
         return table
-    # ── OFDMA配置字节（Table 7，文档字节3） ──
-    ofdma_type = _bits(data, 0, 0, 1)
-    station_count = _bits(data, 0, 1, 3)
-    reserved = _bits(data, 0, 4, 4)
-    type_name = "DL_OFDMA" if ofdma_type == 0 else "UL_OFDMA"
-    _f(table, "OFDMA类型", f"0x{ofdma_type:01X}", str(ofdma_type),
-       f"{type_name}", base_offset, base_offset)
-    _f(table, "调度节点数", f"0x{station_count:01X}", str(station_count),
-       "OFDMA调度站点个数", base_offset, base_offset)
-    _f(table, "保留", f"0x{reserved:01X}", str(reserved),
+    # ── 字节3：帧类型 + 保留 ──
+    frame_type = _bits(data, 0, 0, 2)
+    reserved = _bits(data, 0, 2, 6)
+    _f(table, "帧类型", f"0x{frame_type:01X}", str(frame_type),
+       _OFDMA_FRAME_TYPE_MAP.get(frame_type, f"保留({frame_type})"),
+       base_offset, base_offset)
+    _f(table, "保留", f"0x{reserved:02X}", str(reserved),
        "保留字段", base_offset, base_offset)
-    # ── 每站点 TEI（Table 8） ──
-    offset = 1
-    for i in range(station_count):
-        if offset + 2 > len(data):
-            _f(table, f"站点{i} TEI", "", "", "数据不足",
-               base_offset + offset, base_offset + len(data) - 1)
-            break
-        tei_lo = data[offset]
-        tei_hi = data[offset + 1] & 0x0F
-        tei = (tei_hi << 8) | tei_lo
-        rsv = (data[offset + 1] >> 4) & 0x0F
-        _f(table, f"站点{i} TEI", _hex(data[offset:offset + 2]), f"0x{tei:03X}",
-           f"站点TEI = {tei}", base_offset + offset, base_offset + offset + 1)
-        _f(table, f"站点{i} 保留", f"0x{rsv:01X}", str(rsv),
-           "保留字段", base_offset + offset + 1, base_offset + offset + 1)
-        offset += 2
-    _remaining(table, data, offset, base_offset)
+    # ── FC域（16字节） ──
+    fc_start = 1  # data[1] = 字节4 = FC起始
+    fc_abs = base_offset + fc_start
+    if len(data) < fc_start + 16:
+        avail = max(0, len(data) - fc_start)
+        if avail > 0:
+            _f(table, "FC域（部分）", _hex(data[fc_start:fc_start + avail]),
+               f"{avail}字节", "数据不足，FC不完整",
+               fc_abs, base_offset + len(data) - 1)
+        return table
+    fc_data = data[fc_start:fc_start + 16]
+    # FC字节0: 定界符 + 接入指示 + SNID低4bit
+    delim = _bits(fc_data, 0, 0, 3)
+    access = _bits(fc_data, 0, 3, 1)
+    snid_lo = _bits(fc_data, 0, 4, 4)
+    _DELIM_MAP = {1: "SOF帧", 2: "ACK帧", 3: "NACK帧"}
+    _f(table, "FC - 定界符类型", f"0b{delim:03b}", str(delim),
+       _DELIM_MAP.get(delim, f"保留({delim})"), fc_abs, fc_abs)
+    _f(table, "FC - 接入指示", f"0b{access:01b}", str(access),
+       "宽带载波通信接入网络" if access else "窄带", fc_abs, fc_abs)
+    _f(table, "FC - SNID低位", f"0x{snid_lo:01X}", str(snid_lo),
+       f"SNID低4位: {snid_lo}", fc_abs, fc_abs)
+    # FC可变域（表26, 字节1-12 = fc_data[1..12]）
+    fcv = fc_data[1:13]
+    fcv_abs = fc_abs + 1
+    # 源TEI: 字节1(8) + 字节2低4(4) = 12bit
+    src_tei = _bits(fcv, 0, 0, 8) | (_bits(fcv, 1, 0, 4) << 8)
+    # 目的TEI: 字节2高4(4) + 字节3(8) = 12bit
+    dst_tei = _bits(fcv, 1, 4, 4) | (_bits(fcv, 2, 0, 8) << 4)
+    # 字节4: 多站点(1) + OFDMA帧类型(2) + 频段(3) + 站点数(2)
+    multi_site = _bits(fcv, 3, 0, 1)
+    fc_frame_type = _bits(fcv, 3, 1, 2)
+    band = _bits(fcv, 3, 3, 3)
+    stn_raw = _bits(fcv, 3, 6, 2)
+    station_count = stn_raw + 1
+    # 字节5: eFC符号数(2) + 保留(6)
+    efc_sym = _bits(fcv, 4, 0, 2)
+    # 字节6-7bit0: PL符号数(9)
+    pl_sym = _bits(fcv, 5, 0, 8) | (_bits(fcv, 6, 0, 1) << 8)
+    # 字节8-9低4: 帧长(12)
+    frame_len = _bits(fcv, 7, 0, 8) | (_bits(fcv, 8, 0, 4) << 8)
+    # 字节12bit0: SNID高位
+    snid_hi = _bits(fcv, 11, 0, 1)
+    snid = (snid_hi << 4) | snid_lo
+
+    _f(table, "  源TEI", _hex(fcv[0:2]), f"0x{src_tei:03X}",
+       f"源站点TEI = {src_tei}", fcv_abs, fcv_abs + 1)
+    _f(table, "  目的TEI", _hex(fcv[1:3]), f"0x{dst_tei:03X}",
+       f"目的站点TEI = {dst_tei}", fcv_abs + 1, fcv_abs + 2)
+    _f(table, "  多站点帧标识", f"0x{multi_site:01X}", str(multi_site),
+       "1:多站点(OFDMA帧)", fcv_abs + 3, fcv_abs + 3)
+    _f(table, "  OFDMA帧类型", f"0x{fc_frame_type:01X}", str(fc_frame_type),
+       _OFDMA_FRAME_TYPE_MAP.get(fc_frame_type, f"保留({fc_frame_type})"),
+       fcv_abs + 3, fcv_abs + 3)
+    _f(table, "  频段标识", f"0x{band:01X}", str(band),
+       f"PL频段 {band}", fcv_abs + 3, fcv_abs + 3)
+    _f(table, "  站点数", f"0x{stn_raw:01X}", str(station_count),
+       f"{station_count}个站点", fcv_abs + 3, fcv_abs + 3)
+    _f(table, "  eFC符号个数", f"0x{efc_sym:01X}", str(efc_sym),
+       _EFC_SYM_COUNT_MAP.get(efc_sym, f"保留({efc_sym})"),
+       fcv_abs + 4, fcv_abs + 4)
+    _f(table, "  PL符号数", f"0x{pl_sym:03X}", str(pl_sym),
+       "PL符号数（取多站点最大值）", fcv_abs + 5, fcv_abs + 6)
+    _f(table, "  帧长", f"0x{frame_len:03X}", str(frame_len),
+       f"占用信道时长: {frame_len * 10}μs", fcv_abs + 7, fcv_abs + 8)
+    _f(table, "  SNID", f"0x{snid:02X}", str(snid),
+       f"完整SNID = 0x{snid:02X} ({snid})", fcv_abs + 11, fcv_abs + 11)
+    # FCS
+    fcs_abs = fc_abs + 14
+    _f(table, "FC FCS校验", _hex(fc_data[13:16]),
+       f"0x{int.from_bytes(fc_data[13:16], 'little'):06X}",
+       "FC 24位CRC校验", fcs_abs, fc_abs + 15)
+    # ── eFC域（16字节） ──
+    efc_start = fc_start + 16  # data[17]
+    efc_abs = base_offset + efc_start
+    # 帧类型1 (UL_OFDMA / DL_SACK): 无eFC
+    if fc_frame_type == 1:
+        _f(table, "eFC", "", "",
+           "UL_OFDMA帧 / DL-OFDMA SACK帧 不携带eFC",
+           efc_abs, efc_abs - 1)
+        _remaining(table, data, efc_start, base_offset)
+        return table
+    # 其他类型: 有eFC
+    if len(data) < efc_start + 16:
+        avail = max(0, len(data) - efc_start)
+        if avail > 0:
+            _f(table, "eFC（部分）", _hex(data[efc_start:]), f"{avail}字节",
+               "数据不足，eFC不完整", efc_abs, base_offset + len(data) - 1)
+        else:
+            _f(table, "eFC", "", "", "无eFC数据", efc_abs, efc_abs - 1)
+        return table
+    efc = data[efc_start:efc_start + 16]
+    if fc_frame_type == 0:
+        _parse_efc_dl(table, efc, station_count, efc_abs)
+    elif fc_frame_type == 2:
+        _parse_efc_trigger(table, efc, station_count, efc_abs)
+    elif fc_frame_type == 3:
+        _parse_efc_sack(table, efc, station_count, efc_abs)
+    else:
+        _f(table, "eFC", _hex(efc[:13]), "13字节(不含CRC)",
+           f"保留帧类型({fc_frame_type})，不解析eFC内容",
+           efc_abs, efc_abs + 12)
+    # eFC CRC
+    _f(table, "eFC CRC校验", _hex(efc[13:16]),
+       f"0x{int.from_bytes(efc[13:16], 'little'):06X}",
+       "eFC 24位CRC校验", efc_abs + 13, efc_abs + 15)
+    _remaining(table, data, efc_start + 16, base_offset)
     return table
+
+
+def _parse_efc_dl(table: list, efc: bytes, station_count: int, base: int):
+    """DL-OFDMA eFC (表27). 每站: PB数(1bit) + TEI(12bit) + TMI(5bit) + RU(4bit) + SACK_RU(3bit)"""
+    _f(table, "eFC(DL-OFDMA)", _hex(efc[:13]), "13字节(不含CRC)",
+       "DL-OFDMA帧eFC", base, base + 12)
+    # TF个数: 字节0 bit0-1
+    tf_count = _bits(efc, 0, 0, 2)
+    _f(table, "  TF个数", f"0x{tf_count:01X}", str((tf_count + 1) * 2),
+       f"实际TF个数 = ({tf_count}+1)*2 = {(tf_count+1)*2}", base, base)
+    # 站点信息位偏移表（每站起始bit位置）
+    # 站0: bit3开始(PB数1bit+TEI12bit+TMI5bit+RU4bit+SACK_RU3bit = 25bit = 3.125B)
+    # 手动按文档表27解析
+    stations_bits = [
+        # (pb_bit, tei_start_bit, tmi_start_bit, ru_start_bit, sack_ru_start_bit)
+        (2, 3, 15, 20, 24),    # 站0: byte0.2 ... byte3.0
+        (27, 28, 40, 45, 49),  # 站1: byte3.3 ... byte6.0
+        (52, 53, 65, 70, 74),  # 站2: byte6.4 ... byte9.2
+        (77, 78, 90, 95, 99),  # 站3: byte9.5 ... byte12.3
+    ]
+    for i in range(station_count):
+        if i >= len(stations_bits):
+            break
+        pb_bit, tei_s, tmi_s, ru_s, sack_s = stations_bits[i]
+        pb = _bits(efc, pb_bit // 8, pb_bit % 8, 1)
+        tei = _bits(efc, tei_s // 8, tei_s % 8, 12)
+        tmi = _bits(efc, tmi_s // 8, tmi_s % 8, 5)
+        ru = _bits(efc, ru_s // 8, ru_s % 8, 4)
+        sack_ru = _bits(efc, sack_s // 8, sack_s % 8, 3)
+        _f(table, f"  站点{i} PB个数", f"0x{pb:01X}", str(pb + 1),
+           f"{pb+1}个PB块", base + pb_bit // 8, base + (pb_bit + 1 - 1) // 8)
+        _f(table, f"  站点{i} TEI", "", f"0x{tei:03X}",
+           f"站点TEI = {tei}", base + tei_s // 8, base + (tei_s + 12 - 1) // 8)
+        _f(table, f"  站点{i} TMI", f"0x{tmi:02X}", str(tmi),
+           "TMI调制编码方案", base + tmi_s // 8, base + (tmi_s + 5 - 1) // 8)
+        _f(table, f"  站点{i} RU", f"0x{ru:01X}", str(ru),
+           f"RU编号{ru}", base + ru_s // 8, base + (ru_s + 4 - 1) // 8)
+        _f(table, f"  站点{i} SACK RU", f"0x{sack_ru:01X}", str(sack_ru),
+           f"回复SACK使用的RU{sack_ru}", base + sack_s // 8, base + (sack_s + 3 - 1) // 8)
+
+
+def _parse_efc_trigger(table: list, efc: bytes, station_count: int, base: int):
+    """UL-OFDMA trigger eFC (表28). 每站: PB数(1) + TEI(12) + TMI(5) + RU(4) + Tx功率回退(3)"""
+    _f(table, "eFC(UL-OFDMA trigger)", _hex(efc[:13]), "13字节(不含CRC)",
+       "UL-OFDMA trigger帧eFC", base, base + 12)
+    tf_count = _bits(efc, 0, 0, 2)
+    _f(table, "  TF个数", f"0x{tf_count:01X}", str((tf_count + 1) * 2),
+       f"实际TF个数 = ({tf_count}+1)*2 = {(tf_count+1)*2}", base, base)
+    stations_bits = [
+        (2, 3, 15, 20, 24),
+        (27, 28, 40, 45, 49),
+        (52, 53, 65, 70, 74),
+        (77, 78, 90, 95, 99),
+    ]
+    for i in range(station_count):
+        if i >= len(stations_bits):
+            break
+        pb_bit, tei_s, tmi_s, ru_s, pw_s = stations_bits[i]
+        pb = _bits(efc, pb_bit // 8, pb_bit % 8, 1)
+        tei = _bits(efc, tei_s // 8, tei_s % 8, 12)
+        tmi = _bits(efc, tmi_s // 8, tmi_s % 8, 5)
+        ru = _bits(efc, ru_s // 8, ru_s % 8, 4)
+        pw = _bits(efc, pw_s // 8, pw_s % 8, 3)
+        _f(table, f"  站点{i} PB个数", f"0x{pb:01X}", str(pb + 1),
+           f"{pb+1}个PB块", base + pb_bit // 8, base + (pb_bit + 1 - 1) // 8)
+        _f(table, f"  站点{i} TEI", "", f"0x{tei:03X}",
+           f"站点TEI = {tei}", base + tei_s // 8, base + (tei_s + 12 - 1) // 8)
+        _f(table, f"  站点{i} TMI", f"0x{tmi:02X}", str(tmi),
+           "TMI调制编码方案", base + tmi_s // 8, base + (tmi_s + 5 - 1) // 8)
+        _f(table, f"  站点{i} RU", f"0x{ru:01X}", str(ru),
+           f"RU编号{ru}", base + ru_s // 8, base + (ru_s + 4 - 1) // 8)
+        _f(table, f"  站点{i} Tx功率回退", f"0x{pw:01X}", str(pw),
+           _TX_POWER_BACKOFF_MAP.get(pw, f"保留({pw})"),
+           base + pw_s // 8, base + (pw_s + 3 - 1) // 8)
+
+
+def _parse_efc_sack(table: list, efc: bytes, station_count: int, base: int):
+    """UL-OFDMA SACK eFC (表29). 每站: TEI(12bit) + 接收状态(4bit) + 保留(8bit)
+    每站24bit = 3字节，4站刚好12字节，最后1字节保留 + CRC从13开始。"""
+    _f(table, "eFC(UL-OFDMA SACK)", _hex(efc[:13]), "13字节(不含CRC)",
+       "UL-OFDMA SACK帧eFC", base, base + 12)
+    for i in range(station_count):
+        off = i * 3  # 每站3字节
+        if off + 2 >= 13:
+            break
+        tei = _bits(efc, off, 0, 8) | (_bits(efc, off + 1, 0, 4) << 8)
+        rx_status = _bits(efc, off + 1, 4, 4)
+        pb0_ok = (rx_status >> 0) & 1
+        pb1_ok = (rx_status >> 1) & 1
+        _f(table, f"  站点{i} TEI", _hex(efc[off:off+2]), f"0x{tei:03X}",
+           f"站点TEI = {tei}", base + off, base + off + 1)
+        _f(table, f"  站点{i} 接收状态", f"0x{rx_status:01X}",
+           f"PB0={'OK' if pb0_ok else 'FAIL'}, PB1={'OK' if pb1_ok else 'FAIL'}",
+           "每bit对应一个PB的接收结果", base + off + 1, base + off + 1)
 
 
 def _parse_test_ext_0006(data: bytes, base_offset: int) -> list:
