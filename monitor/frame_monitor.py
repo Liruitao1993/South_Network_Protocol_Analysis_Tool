@@ -10,10 +10,10 @@ from collections import deque
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox,
-    QComboBox, QSplitter, QMessageBox, QFileDialog, QGroupBox
+    QComboBox, QSplitter, QMessageBox, QFileDialog, QGroupBox, QMenu
 )
 from PySide6.QtCore import Qt, Signal, QTimer
-from PySide6.QtGui import QFont, QColor
+from PySide6.QtGui import QFont, QColor, QKeySequence, QShortcut, QGuiApplication
 
 
 class FrameMonitorWidget(QWidget):
@@ -122,6 +122,8 @@ class FrameMonitorWidget(QWidget):
         table_font = QFont()
         table_font.setPointSize(8)
         self._history_table.setFont(table_font)
+        # 右键复制菜单 + Ctrl+C
+        self._setup_table_copy_menu(self._history_table)
         left_layout.addWidget(self._history_table)
 
         splitter.addWidget(left_group)
@@ -145,6 +147,8 @@ class FrameMonitorWidget(QWidget):
         self._parse_result_table.verticalHeader().hide()
         self._parse_result_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self._parse_result_table.setFont(table_font)
+        # 右键复制菜单 + Ctrl+C
+        self._setup_table_copy_menu(self._parse_result_table)
         right_layout.addWidget(self._parse_result_table)
 
         # 校验结果区域
@@ -513,3 +517,65 @@ class FrameMonitorWidget(QWidget):
             self._verify_group.setStyleSheet("QGroupBox { border: 2px solid #4CAF50; }")
         else:
             self._verify_group.setStyleSheet("QGroupBox { border: 2px solid #f44336; }")
+
+    # ── 表格复制功能 ──────────────────────────────────────
+
+    def _setup_table_copy_menu(self, table: QTableWidget):
+        """为表格设置右键复制菜单和 Ctrl+C 快捷键"""
+        table.setContextMenuPolicy(Qt.CustomContextMenu)
+        table.customContextMenuRequested.connect(
+            lambda pos, t=table: self._show_table_copy_menu(t, pos)
+        )
+        shortcut = QShortcut(QKeySequence.Copy, table)
+        shortcut.setContext(Qt.WidgetShortcut)
+        shortcut.activated.connect(lambda t=table: self._copy_table_rows(t, all_rows=False))
+
+    def _show_table_copy_menu(self, table: QTableWidget, pos):
+        """显示表格右键复制菜单"""
+        menu = QMenu(table)
+        has_selection = len(table.selectedItems()) > 0
+
+        copy_sel = menu.addAction("复制选中行")
+        copy_sel.setEnabled(has_selection)
+        copy_sel.triggered.connect(lambda: self._copy_table_rows(table, all_rows=False))
+
+        copy_all = menu.addAction("复制全部")
+        copy_all.triggered.connect(lambda: self._copy_table_rows(table, all_rows=True))
+
+        menu.exec(table.mapToGlobal(pos))
+
+    def _copy_table_rows(self, table: QTableWidget, all_rows: bool = False):
+        """将表格行复制到剪贴板（制表符分隔，含表头）"""
+        col_count = table.columnCount()
+        row_count = table.rowCount()
+
+        if all_rows:
+            rows = list(range(row_count))
+        else:
+            selected = table.selectedIndexes()
+            if not selected:
+                rows = list(range(row_count))
+            else:
+                rows = sorted({idx.row() for idx in selected})
+
+        if not rows:
+            return
+
+        # 表头
+        headers = []
+        for c in range(col_count):
+            item = table.horizontalHeaderItem(c)
+            headers.append(item.text() if item else "")
+        lines = ["\t".join(headers)]
+
+        # 数据行
+        for r in rows:
+            cells = []
+            for c in range(col_count):
+                item = table.item(r, c)
+                cells.append(item.text() if item else "")
+            lines.append("\t".join(cells))
+
+        text = "\n".join(lines)
+        clipboard = QGuiApplication.clipboard()
+        clipboard.setText(text)
