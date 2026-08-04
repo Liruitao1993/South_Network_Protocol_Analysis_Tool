@@ -14,7 +14,7 @@
     "command": "command.json"
   },
   "ui": {
-    "theme": "windowsvista",
+    "theme": "fusion",
     "font_family": "Microsoft YaHei",
     "font_size": 9
   },
@@ -23,8 +23,14 @@
     "close_to_tray": true,
     "hotkey_enabled": true,
     "hotkey": "Ctrl+Alt+X",
-    "context_menu": false,
-    "npp_integrated": false,
-    "clipboard_monitor": false
+    "context_menu": true,
+    "npp_integrated": true,
+    "clipboard_monitor": true
+  },
+  "llm": {
+    "endpoint": "https://opencode.ai/zen/v1",
+    "api_key": "sk-prg0QeIhunXVoOBr1gyYkDQCp7EfuH6xwqKgzPBrM9uttIkCsQlKPH5cyCYvohYu",
+    "model": "mimo-v2.5-free",
+    "chunk_lines": 200
   }
 }
