@@ -1,30 +1,77 @@
 {
-  "permissions": {
-    "allow": [
-      "Bash(python -c \"import main_gui; print\\('语法检查通过'\\)\")",
-      "Bash(python -c \"from dlt645_di_lookup import DLT645DILookup, get_dlt645_di_lookup; print\\('DLT645 DI模块加载成功'\\)\")",
-      "Bash(python -c \"import ast; tree = ast.parse\\(open\\('main_gui.py', 'r', encoding='utf-8'\\).read\\(\\)\\); methods = [n.name for n in ast.walk\\(tree\\) if isinstance\\(n, ast.FunctionDef\\)]; print\\('Methods found:', len\\(methods\\)\\); print\\('_clear_layout' in methods\\)\")",
-      "Bash(python generate_dlt645_di.py)",
-      "Bash(awk \"/def.*parse.*data|def.*_parse|class.*Parser/{print NR\\\\\":\\\\\"\\\\$0}\" e:/python/南网解析工具/protocol_parser.py)",
-      "Bash(awk '/di_str|di_key|DI/ && /in|get/ {print NR\": \"$0}' e:/python/南网解析工具/protocol_parser.py)",
-      "Bash(awk '/E8|7403|0xE8|0x74/{print NR\": \"$0}' e:/python/南网解析工具/protocol_parser.py)",
-      "Bash(awk 'NR>=7600 && NR<=7750 && /^def /{print NR\": \"$0}' e:/python/南网解析工具/protocol_parser.py)",
-      "Bash(awk 'NR>=7720 && NR<=7800 && /^def /{print NR\": \"$0}' e:/python/南网解析工具/protocol_parser.py)",
-      "Bash(awk 'NR>=7700 && NR<=7800 && /^def /{print NR\": \"$0}' e:/python/南网解析工具/protocol_parser.py)",
-      "Bash(git -C \"e:/python/南网解析工具\" log --oneline -15)",
-      "Bash(npm cache *)",
-      "Bash(npm install *)",
-      "mcp__gitnexus__list_repos",
-      "mcp__open-websearch__search",
-      "mcp__exa__web_search_exa",
-      "mcp__fetch__fetch",
-      "mcp__exa__get_code_context_exa",
-      "Bash(python test_verify_fixes.py)",
-      "Bash(python test_e8030308.py)",
-      "Bash(python test_6c.py)",
-      "Bash(python test_97.py)",
-      "Bash(python -c ' *)",
-      "Bash(python3 -c ' *)"
+  "env": {
+    "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR": "1"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/session-start.py",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/session-start.py",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/session-start.py",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/inject-subagent-context.py",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/inject-subagent-context.py",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/inject-workflow-state.py",
+            "timeout": 15
+          }
+        ]
+      }
     ]
+  },
+  "enabledPlugins": {},
+  "statusLine": {
+    "type": "command",
+    "command": "python .claude/hooks/statusline.py"
   }
 }

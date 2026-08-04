@@ -63,23 +63,23 @@
    'D:\\Program '
    'Files\\Python313\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_multiprocessing.py',
    'PYSOURCE'),
-  ('pyi_rth_pkgres',
+  ('pyi_rth_pyside6',
    'D:\\Program '
-   'Files\\Python313\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_pkgres.py',
+   'Files\\Python313\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_pyside6.py',
    'PYSOURCE'),
   ('pyi_rth_setuptools',
    'D:\\Program '
    'Files\\Python313\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_setuptools.py',
    'PYSOURCE'),
-  ('pyi_rth_pyside6',
+  ('pyi_rth_pkgres',
    'D:\\Program '
-   'Files\\Python313\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_pyside6.py',
+   'Files\\Python313\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_pkgres.py',
    'PYSOURCE'),
   ('main_gui', 'E:\\python\\南网解析工具\\main_gui.py', 'PYSOURCE')],
  [],
  False,
- True,
- 1782636968,
+ False,
+ 1785415922,
  [('runw.exe',
    'D:\\Program '
    'Files\\Python313\\Lib\\site-packages\\PyInstaller\\bootloader\\Windows-64bit-intel\\runw.exe',
