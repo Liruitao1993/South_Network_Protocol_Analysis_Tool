@@ -166,28 +166,55 @@ class LLMAPIClient:
             raise ValueError(f"API 响应结构异常: {json.dumps(body, ensure_ascii=False)[:200]}")
 
     def test_connection(self) -> str:
-        """测试 API 连接，返回模型信息
+        """测试 API 连接，发送一条轻量级请求验证连通性
 
         Returns:
-            成功时返回模型名称
+            成功时返回确认信息
 
         Raises:
             连接/认证失败时抛出异常
         """
-        url = f"{self.endpoint}/models"
-        headers = {"Authorization": f"Bearer {self.api_key}"}
-        req = urllib.request.Request(url, headers=headers)
+        # 用一条最小的 chat 请求测试（比 /models 端点兼容性更好）
+        url = f"{self.endpoint}/chat/completions"
+        payload = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 1,
+        }
+        data = json.dumps(payload).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+        }
+        req = urllib.request.Request(url, data=data, headers=headers, method="POST")
 
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with urllib.request.urlopen(req, timeout=15) as resp:
                 body = json.loads(resp.read().decode("utf-8"))
-                models = body.get("data", [])
-                names = [m.get("id", "?") for m in models[:5]]
-                return f"连接成功，可用模型: {', '.join(names)}"
+                model_used = body.get("model", self.model)
+                return f"连接成功，模型: {model_used}"
         except urllib.error.HTTPError as e:
-            if e.code == 401:
-                raise ValueError("API key 无效")
-            raise ConnectionError(f"HTTP {e.code}: {e.reason}")
+            code = e.code
+            try:
+                err_body = e.read().decode("utf-8", errors="replace")[:300]
+            except Exception:
+                err_body = ""
+            if code == 401:
+                raise ValueError("API key 无效（401 Unauthorized）")
+            elif code == 403:
+                raise ValueError(
+                    f"API 返回 403 Forbidden：权限不足或模型不可用\n"
+                    f"请检查：1) API key 是否正确  2) 模型名称 '{self.model}' 是否存在  "
+                    f"3) 账户是否有该模型的访问权限\n"
+                    f"详情: {err_body}"
+                )
+            elif code == 404:
+                raise ValueError(
+                    f"API 返回 404：端点不存在，请检查 URL '{self.endpoint}'\n"
+                    f"详情: {err_body}"
+                )
+            else:
+                raise ConnectionError(f"HTTP {code}: {e.reason}\n{err_body}")
         except urllib.error.URLError as e:
             raise ConnectionError(f"连接失败: {e}")
 
