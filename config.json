@@ -14,9 +14,9 @@
     "command": "command.json"
   },
   "ui": {
-    "theme": "fusion",
+    "theme": "windowsvista",
     "font_family": "Microsoft YaHei",
-    "font_size": 10
+    "font_size": 9
   },
   "system": {
     "auto_start": false,
@@ -25,6 +25,6 @@
     "hotkey": "Ctrl+Alt+X",
     "context_menu": false,
     "npp_integrated": false,
-    "clipboard_monitor": true
+    "clipboard_monitor": false
   }
 }
