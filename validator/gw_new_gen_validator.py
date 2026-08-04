@@ -13,7 +13,7 @@ class GWNewGenValidator(BaseValidator):
 
         if len(frame_bytes) < 2:
             errors.append("帧数据过短")
-            return ValidationResult(valid=False, checks=checks, errors=errors, warnings=warnings)
+            return ValidationResult(protocol="国网新一代双模", valid=False, checks=checks, errors=errors, warnings=warnings)
 
         # 检查FC长度
         if len(frame_bytes) >= 16:
@@ -62,6 +62,7 @@ class GWNewGenValidator(BaseValidator):
         summary = f"帧长{len(frame_bytes)}字节，{'校验通过' if valid else '校验失败'}"
 
         return ValidationResult(
+            protocol="国网新一代双模",
             valid=valid,
             checks=checks,
             errors=errors,

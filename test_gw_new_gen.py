@@ -282,7 +282,7 @@ def test_direct_mgmt_after_fc():
     parser = GWNewGenParser()
     frame = bytes.fromhex(
         "C0 20 00 01 00 01 B2 B7 00 0F 80 FF 00 00 01 00 "
-        "00 80 00 00 00 01 00 90 98 01 63 02 29 05 03 03 "
+        "80 00 00 00 00 01 00 90 98 01 02 29 05 03 03 "
         "E0 C4 28 55 00 04 65 ED".replace(" ", ""))
     table = parser.parse_to_table(frame)
     # MMTYPE 大端 = 0x0080 无线信道冲突上报
