@@ -145,6 +145,7 @@ class LLMAPIClient:
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",
+            "User-Agent": "LLMPreprocess/1.0",
         }
 
         req = urllib.request.Request(url, data=data, headers=headers, method="POST")
@@ -192,6 +193,7 @@ class LLMAPIClient:
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",
+            "User-Agent": "LLMPreprocess/1.0",
         }
         req = urllib.request.Request(url, data=data, headers=headers, method="POST")
 
