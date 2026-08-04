@@ -60,13 +60,15 @@ class LLMPreprocessWidget(QWidget):
         api_layout.setSpacing(6)
 
         api_layout.addWidget(QLabel("Endpoint:"))
-        self.endpoint_edit = QLineEdit("https://api.openai.com/v1")
-        self.endpoint_edit.setPlaceholderText("https://api.openai.com/v1  (不含 /chat/completions)")
+        self.endpoint_edit = QLineEdit("https://api.opencode.ai/v1")
+        self.endpoint_edit.setPlaceholderText("https://api.opencode.ai/v1  (不含 /chat/completions)")
         self.endpoint_edit.setToolTip(
             "API 基础 URL，只需填到 /v1\n"
-            "正确示例: https://api.openai.com/v1\n"
-            "正确示例: http://localhost:11434/v1\n"
-            "错误示例: https://api.openai.com/v1/chat/completions"
+            "OpenCode Zen: https://api.opencode.ai/v1\n"
+            "OpenAI: https://api.openai.com/v1\n"
+            "DeepSeek: https://api.deepseek.com/v1\n"
+            "本地 Ollama: http://localhost:11434/v1\n"
+            "错误示例: .../v1/chat/completions（不要带这个后缀）"
         )
         self.endpoint_edit.setMaximumWidth(280)
         api_layout.addWidget(self.endpoint_edit)
@@ -403,7 +405,7 @@ class LLMPreprocessWidget(QWidget):
             config_path = os.path.join(os.path.dirname(__file__), "config.json")
             with open(config_path, encoding="utf-8") as f:
                 cfg = json.load(f).get("llm", {})
-            self.endpoint_edit.setText(cfg.get("endpoint", "https://api.openai.com/v1"))
+            self.endpoint_edit.setText(cfg.get("endpoint", "https://api.opencode.ai/v1"))
             self.api_key_edit.setText(cfg.get("api_key", ""))
             self.model_edit.setText(cfg.get("model", "gpt-4o"))
             self.chunk_spin.setText(str(cfg.get("chunk_lines", 200)))
