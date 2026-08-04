@@ -130,7 +130,7 @@ class LLMAPIClient:
             TimeoutError: 请求超时
             ValueError: API 返回错误或格式异常
         """
-        url = f"{self.endpoint}/chat/completions"
+        url = self._chat_url()
 
         payload = {
             "model": self.model,
@@ -165,6 +165,14 @@ class LLMAPIClient:
         except (KeyError, IndexError):
             raise ValueError(f"API 响应结构异常: {json.dumps(body, ensure_ascii=False)[:200]}")
 
+    def _chat_url(self) -> str:
+        """拼接 chat completions URL，自动处理 endpoint 尾部重复路径"""
+        base = self.endpoint.rstrip("/")
+        # 如果用户把 /chat/completions 也填进了 endpoint，不要再拼一次
+        if base.endswith("/chat/completions"):
+            return base
+        return f"{base}/chat/completions"
+
     def test_connection(self) -> str:
         """测试 API 连接，发送一条轻量级请求验证连通性
 
@@ -174,8 +182,7 @@ class LLMAPIClient:
         Raises:
             连接/认证失败时抛出异常
         """
-        # 用一条最小的 chat 请求测试（比 /models 端点兼容性更好）
-        url = f"{self.endpoint}/chat/completions"
+        url = self._chat_url()
         payload = {
             "model": self.model,
             "messages": [{"role": "user", "content": "hi"}],
@@ -202,11 +209,21 @@ class LLMAPIClient:
             if code == 401:
                 raise ValueError("API key 无效（401 Unauthorized）")
             elif code == 403:
+                # 检测 Cloudflare 1010 错误（域名被拦截）
+                hint = ""
+                if "1010" in err_body:
+                    hint = (
+                        "\n\nCloudflare error 1010: 域名所有者禁止了浏览器访问。\n"
+                        "如果你用的是 opencode.ai 等服务，请确认：\n"
+                        "1) API 地址是否正确（通常应填 https://xxx.xxx.com/v1）\n"
+                        "2) 该服务是否支持直接 API 调用（而非仅限浏览器/客户端）"
+                    )
                 raise ValueError(
                     f"API 返回 403 Forbidden：权限不足或模型不可用\n"
                     f"请检查：1) API key 是否正确  2) 模型名称 '{self.model}' 是否存在  "
                     f"3) 账户是否有该模型的访问权限\n"
-                    f"详情: {err_body}"
+                    f"4) Endpoint URL 是否正确（当前: {self.endpoint}）\n"
+                    f"详情: {err_body}{hint}"
                 )
             elif code == 404:
                 raise ValueError(
