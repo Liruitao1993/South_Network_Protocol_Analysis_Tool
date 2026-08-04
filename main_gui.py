@@ -56,12 +56,20 @@ from serial_worker import SerialWorker
 from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu
 from enhanced_export import EnhancedBatchResultExporter
 from theme_settings import ThemeManager, ThemeSettingsDialog
+from llm_preprocess_widget import LLMPreprocessWidget
 
 
-APP_VERSION = "1.11.1"
-BUILD_DATE = "2026-08-01"  # 编译日期，每次打包前更新
+APP_VERSION = "1.12.0"
+BUILD_DATE = "2026-08-04"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    ("1.12.0", "2026-08-04", [
+        "新增 LLM 智能预处理功能：批量解析标签页新增可折叠 LLM 预处理面板，支持通过 OpenAI 兼容 API 对原始日志进行多轮智能清洗后再解析",
+        "内置 5 个 prompt 模板：提取 hex 帧、清理前缀、提取 TCP 报文、按协议分类、修复 hex 格式",
+        "大文件自动分块（默认 200 行/块），异步调用不阻塞 GUI",
+        "API 配置持久化到 config.json 的 llm 段，支持测试连接",
+        "新增 llm_preprocess.py（API 客户端 + 分块器 + 异步 Worker）和 llm_preprocess_widget.py（预处理面板 UI）",
+    ]),
     ("1.11.1", "2026-08-04", [
         "修复勾选「ED监控协议」后不完整/非法 ED..EE 帧被静默回退为 FC 起始解析的 bug：单帧解析、解析弹窗、批量解析三处路径在 ED 头剥离失败时均明确报错（报文不完整/缺 EF 或 EE），首字节 ED 不再被当作南网新一代 FC 起始符",
         "新增 test_ed_fallback_fix.py（14 用例，覆盖单帧/弹窗/批量三条路径的失败报错与完整 ED 帧回归）",
@@ -1251,6 +1259,20 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(input_group)
 
+        # ── LLM 预处理面板（可折叠） ──────────────────────────────
+        self.llm_toggle_btn = QPushButton("▶ LLM 智能预处理")
+        self.llm_toggle_btn.setCheckable(True)
+        self.llm_toggle_btn.setStyleSheet(
+            "QPushButton { text-align: left; padding: 4px 8px; font-weight: bold; }"
+            "QPushButton:checked { background-color: #e8f4fd; }"
+        )
+        self.llm_toggle_btn.clicked.connect(self._toggle_llm_panel)
+        layout.addWidget(self.llm_toggle_btn)
+
+        self.llm_preprocess_widget = LLMPreprocessWidget()
+        self.llm_preprocess_widget.hide()  # 默认折叠
+        layout.addWidget(self.llm_preprocess_widget)
+
         # ── 结果区分栏（左侧摘要 + 右侧详情） ───────────────────
         self.result_splitter = QSplitter(Qt.Horizontal)
 
@@ -1634,6 +1656,19 @@ class MainWindow(QMainWindow):
         show_frame_type = (self._gw_parse_level == "pb_only")
         self.gw_pb_frame_type_label.setVisible(show_frame_type)
         self.gw_pb_frame_type_combo.setVisible(show_frame_type)
+
+    def _toggle_llm_panel(self):
+        """切换 LLM 预处理面板的显示/隐藏"""
+        widget = self.llm_preprocess_widget
+        btn = self.llm_toggle_btn
+        if widget.isVisible():
+            widget.hide()
+            btn.setText("▶ LLM 智能预处理")
+            btn.setChecked(False)
+        else:
+            widget.show()
+            btn.setText("▼ LLM 智能预处理")
+            btn.setChecked(True)
 
     def _update_protocol_lookup_tab(self):
         """根据当前协议更新查询页面内容"""
@@ -5960,6 +5995,10 @@ class MainWindow(QMainWindow):
 
         # 更新主题与字体配置
         config["ui"] = ThemeManager.to_config(self._theme_id, self._font_family, self._font_size)
+
+        # 更新 LLM 预处理配置
+        if hasattr(self, "llm_preprocess_widget"):
+            self.llm_preprocess_widget.save_config()
 
         try:
             with open(self._config_path, "w", encoding="utf-8") as f:
