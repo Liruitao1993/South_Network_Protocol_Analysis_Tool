@@ -2,7 +2,7 @@
 """国网新一代双模协议 — 网络管理消息(MME)解析模块
 
 依据《双模通信互联互通技术规范 第4-2部分：数据链路层通信协议》:
-  表42  管理消息报文头格式: MMTYPE(2B小端) + 保留(2B)
+  表42  管理消息报文头格式: MMTYPE(2B小端) + 保留(1B)（实测验证，非文档标注的2B）
   表43  管理消息类型
   表44  关联请求报文(MMeAssocReq)
   表47  关联确认报文(MMeAssocCnf)
@@ -94,7 +94,10 @@ def _raw(data: bytes, start: int, end: int) -> str:
 #  入口：标准帧 MSDU类型=0 网络管理消息
 # ═════════════════════════════════════════════════════════════
 def parse_management_message(data: bytes, offset: int) -> List[Tuple]:
-    """解析网络管理消息（表42: MMTYPE(2B) + 保留(2B) + 报文内容）
+    """解析网络管理消息（表42: MMTYPE(2B小端) + 保留(1B) + 报文内容）
+
+    实测验证：保留字段实际为1字节（非文档标注的2字节），
+    content_off = offset + 3。
 
     Args:
         data: 包含 MSDU 的完整帧数据（MSDU 结尾即为 data 结尾）
@@ -102,15 +105,15 @@ def parse_management_message(data: bytes, offset: int) -> List[Tuple]:
     """
     result: List[Tuple] = []
     end = len(data)
-    if end < offset + 4:
+    if end < offset + 3:
         if end > offset:
             result.append(("  管理消息(数据不足)", _raw(data, offset, end),
-                           f"{end - offset}字节", "管理消息头至少需4字节",
+                           f"{end - offset}字节", "管理消息头至少需3字节",
                            offset, end, True))
         return result
 
-    # MMTYPE 按文档表42/表43 大端存储（如 0x0080 对应字节 00 80）
-    mmtype = (data[offset] << 8) | data[offset + 1]
+    # MMTYPE 按文档表42/表43 小端存储（如 0x0080 对应字节 80 00）
+    mmtype = data[offset] | (data[offset + 1] << 8)
     name = MMETYPE_NAMES.get(mmtype)
     if name is None:
         name = f"保留/未知(0x{mmtype:04X})"
@@ -962,24 +965,21 @@ def _parse_diagnose(data: bytes, off: int, result: List[Tuple]) -> None:
 # ═════════════════════════════════════════════════════════════
 def _parse_rf_channel_conflict(data: bytes, off: int, result: List[Tuple]) -> None:
     end = len(data)
-    # 需要 CCO MAC(6) + 保留(1) + 邻居网络个数(1) = 8 字节
-    if end < off + 8:
+    # 表89: CCO MAC(6B) + 邻居网络个数(1B) = 7 字节
+    if end < off + 7:
         result.append(("  报文内容(数据不足)", _raw(data, off, end), "",
-                       f"需至少8字节(CCO MAC 6B+保留 1B+个数 1B), 实际{end - off}字节",
+                       f"需至少7字节(CCO MAC 6B+个数 1B), 实际{end - off}字节",
                        off, end, True))
         return
     result.append(("  CCO MAC地址", _raw(data, off, off + 6), "",
                    "与本网络发生冲突的邻居网络CCO MAC", off, off + 6, True))
-    # 表89: CCO MAC(6B) + 保留(1B) + 邻居网络个数(1B) + 条目
-    reserved = data[off + 6]
-    result.append(("  保留", f"0x{reserved:02X}", str(reserved),
-                   "保留字段(语义未定义,疑似网络号字节宽度)", off + 6, off + 7, True))
-    count = data[off + 7]
+    # 表89: CCO MAC(6B) + 邻居网络个数(1B) + 条目(表90)
+    count = data[off + 6]
     result.append(("  邻居网络个数", f"0x{count:02X}", str(count),
-                   "周边可见邻居网络个数", off + 7, off + 8, True))
+                   "周边可见邻居网络个数", off + 6, off + 7, True))
     # 邻居网络条目(表90): 分组布局, 先N个无线信道号再N个option
     #   邻居网络(0)信道号 ... 邻居网络(N-1)信道号 | 邻居网络(0)option ... 邻居网络(N-1)option
-    pos = off + 8
+    pos = off + 7
     channels = []
     for i in range(count):
         if pos >= end:
@@ -996,7 +996,7 @@ def _parse_rf_channel_conflict(data: bytes, off: int, result: List[Tuple]) -> No
         opt = data[pos]
         result.append((f"  邻居网络[{i}]", f"信道号=0x{channels[i]:02X} option=0x{opt:02X}",
                        f"信道号={channels[i]} option=0x{opt:02X}",
-                       "先信道号后option(表90)", off + 8 + i, pos, True))
+                       "先信道号后option(表90)", off + 7 + i, pos, True))
         pos += 1
     if pos < end:
         result.append(("  剩余数据", _raw(data, pos, end), f"{end - pos}字节",

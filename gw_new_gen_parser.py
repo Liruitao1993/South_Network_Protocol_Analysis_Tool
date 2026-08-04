@@ -167,7 +167,7 @@ class GWNewGenParser:
         # ── 直接网络管理消息：首字节即MMTYPE(2B大端) ──
         # 管理消息报文头(表42): MMTYPE(2B) + 保留(2B)。部分帧直接以管理消息输入。
         from gw_new_gen_mme_parser import MMETYPE_NAMES
-        if len(data) >= 4 and ((data[0] << 8) | data[1]) in MMETYPE_NAMES:
+        if len(data) >= 4 and (data[0] | (data[1] << 8)) in MMETYPE_NAMES:
             return self._parse_mgmt_if_direct(data, 0)
 
         # ── 应用层模式：输入即为应用层报文 ──
@@ -304,7 +304,7 @@ class GWNewGenParser:
                 from gw_new_gen_mme_parser import MMETYPE_NAMES
                 looks_like_mgmt = (
                     len(after) >= 4
-                    and ((after[0] << 8) | after[1]) in MMETYPE_NAMES
+                    and (after[0] | (after[1] << 8)) in MMETYPE_NAMES
                     and after[2] == 0 and after[3] == 0  # 保留字段必须为0
                 )
                 if fcs_valid or looks_like_mgmt:
@@ -316,14 +316,14 @@ class GWNewGenParser:
         return data, 0
 
     def _parse_mgmt_if_direct(self, data: bytes, fc_offset: int):
-        """若 data 以网络管理消息头(MMTYPE 2B大端)开头, 返回管理消息解析结果
+        """若 data 以网络管理消息头(MMTYPE 2B小端)开头, 返回管理消息解析结果
 
         fc_offset: 已剥离的FC头字节数(0=未剥离), 用于行坐标对齐。
         返回解析行列表; 非管理消息返回 None。
         """
         from gw_new_gen_mme_parser import MMETYPE_NAMES
         if len(data) >= 4:
-            mmtype = (data[0] << 8) | data[1]
+            mmtype = data[0] | (data[1] << 8)
             if mmtype in MMETYPE_NAMES:
                 rows = parse_management_message(data, 0)
                 if fc_offset:
@@ -720,11 +720,12 @@ class GWNewGenParser:
         else:
             # 未找到应用层(如网管消息): 完整帧 FC + PB(PBH 1B + MAC + MSDU)
             # FC 末3字节为FCCS(FC自身校验), 其后直接为 PBH+MAC, 无独立HCS
-            # ── FC后直接为网络管理消息(表42: MMTYPE 2B大端 + 保留2B) ──
-            # 部分帧 FC 后无 PBH/MAC 头，直接承载管理消息(如无线信道冲突上报)
+            # ── 先定位 PBH + MAC帧头 ──
             from gw_new_gen_mme_parser import MMETYPE_NAMES
-            if fc_end + 4 <= data_end:
-                direct_mmtype = (data[fc_end] << 8) | data[fc_end + 1]
+            # 优先检查: FC后直接为管理消息(无PBH/MAC头, 无HCS)
+            # 表43: MMTYPE 2B + 保留1B + 内容
+            if fc_end + 2 <= data_end:
+                direct_mmtype = data[fc_end] | (data[fc_end + 1] << 8)  # little-endian
                 if direct_mmtype in MMETYPE_NAMES:
                     result.extend(parse_management_message(
                         data[:data_end], fc_end))
@@ -758,7 +759,8 @@ class GWNewGenParser:
                             if mme_result:
                                 result.extend(mme_result)
                         else:
-                            m_msdu_type = data[msdu_start + 7] if msdu_start + 7 < data_end else -1
+                            # HDC 1.0: MSDU类型在MAC帧头字节6的低4位
+                            m_msdu_type = (data[msdu_start + 6] & 0x0F) if msdu_start + 6 < data_end else -1
                             if m_msdu_type == 0:
                                 mme_result = parse_management_message(
                                     data[:max(app_start, data_end - 4)], app_start)
