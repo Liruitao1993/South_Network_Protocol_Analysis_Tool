@@ -58,10 +58,14 @@ from enhanced_export import EnhancedBatchResultExporter
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
 
-APP_VERSION = "1.11.0"
+APP_VERSION = "1.11.1"
 BUILD_DATE = "2026-08-01"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    ("1.11.1", "2026-08-04", [
+        "修复勾选「ED监控协议」后不完整/非法 ED..EE 帧被静默回退为 FC 起始解析的 bug：单帧解析、解析弹窗、批量解析三处路径在 ED 头剥离失败时均明确报错（报文不完整/缺 EF 或 EE），首字节 ED 不再被当作南网新一代 FC 起始符",
+        "新增 test_ed_fallback_fix.py（14 用例，覆盖单帧/弹窗/批量三条路径的失败报错与完整 ED 帧回归）",
+    ]),
     ("1.11.0", "2026-08-01", [
         "新一代载波协议(通感一体化,索引9)网间协调帧(NET,定界符类型=3)可变区域解析：邻居网络比特图1~4 / 本网络无线信道编号 / 持续时间(40ms) / 带宽结束标志位 / 本网络无线option / 带宽结束偏移(4ms) / 带宽开始偏移(4ms)，字节12短网络标识高位组合完整SNID",
         "新一代载波协议聚合帧(物理块聚合标志=1)级联块应用层解析：抽取 _parse_msdu_payload 共享方法，级联块内 MAC 帧解析 MSDU 头(VLAN/MSDU类型)并按类型分派应用层报文(端口/控制域/业务标识/转发DLT645)，消除伪 MSDU 残留行",
@@ -1254,6 +1258,42 @@ class MainWindow(QMainWindow):
         summary_group = QGroupBox("解析结果摘要")
         summary_layout = QVBoxLayout(summary_group)
         summary_layout.setContentsMargins(8, 10, 8, 8)
+        summary_layout.setSpacing(6)
+
+        # 搜索过滤栏
+        filter_bar = QHBoxLayout()
+        filter_bar.setSpacing(6)
+
+        search_label = QLabel("搜索：")
+        search_label.setFont(QFont("Microsoft YaHei", 9))
+        filter_bar.addWidget(search_label)
+
+        self.batch_search_edit = QLineEdit()
+        self.batch_search_edit.setPlaceholderText("输入关键词过滤（摘要/类型/TEI…）")
+        self.batch_search_edit.setFont(QFont("Microsoft YaHei", 9))
+        self.batch_search_edit.setClearButtonEnabled(True)
+        self.batch_search_edit.textChanged.connect(self._on_batch_filter_changed)
+        filter_bar.addWidget(self.batch_search_edit, 1)
+
+        status_label = QLabel("状态：")
+        status_label.setFont(QFont("Microsoft YaHei", 9))
+        filter_bar.addWidget(status_label)
+
+        self.batch_status_filter = QComboBox()
+        self.batch_status_filter.addItem("全部", "all")
+        self.batch_status_filter.addItem("成功", "success")
+        self.batch_status_filter.addItem("失败", "fail")
+        self.batch_status_filter.addItem("异常", "error")
+        self.batch_status_filter.setFont(QFont("Microsoft YaHei", 9))
+        self.batch_status_filter.currentIndexChanged.connect(self._on_batch_filter_changed)
+        filter_bar.addWidget(self.batch_status_filter)
+
+        self.batch_filter_count = QLabel("")
+        self.batch_filter_count.setFont(QFont("Microsoft YaHei", 9))
+        self.batch_filter_count.setStyleSheet("color: #666;")
+        filter_bar.addWidget(self.batch_filter_count)
+
+        summary_layout.addLayout(filter_bar)
 
         self.batch_summary_table = QTableWidget()
         self.batch_summary_table.setColumnCount(5)
@@ -2954,15 +2994,23 @@ class MainWindow(QMainWindow):
             full_frame_bytes = frame_bytes  # 保存完整帧（用于高亮定位和 current_result）
             ed_meta_rows = None
             ed_business_offset = 0
-            if (self.current_protocol == 9
-                    and self.ed_monitor_chk.isChecked()
-                    and len(frame_bytes) >= 8
-                    and frame_bytes[0] == 0xED):
+            ed_mode = (self.current_protocol == 9
+                       and self.ed_monitor_chk.isChecked()
+                       and len(frame_bytes) >= 1
+                       and frame_bytes[0] == 0xED)
+            if ed_mode:
                 ed_rows, business, ed_business_offset = self._parse_ed_monitor_header(frame_bytes)
-                if ed_rows is not None and business is not None:
-                    ed_meta_rows = ed_rows
-                    frame_bytes = business  # 后续解析使用业务载荷
-                    # 不替换 hex_display，保持输入框显示完整帧
+                if ed_rows is None or business is None:
+                    declared = (frame_bytes[1] | (frame_bytes[2] << 8)) + 4 if len(frame_bytes) >= 3 else 0
+                    msg = ("ED 监控帧解析失败：报文不完整或格式错误。\n"
+                           "已勾选「ED监控协议」，首字节 ED 不能作为业务帧起始符解析。\n"
+                           "请检查报文是否被截断（帧长字段声明整包应为 %d 字节，实际 %d 字节），"
+                           "或缺少 EF 数据域起始符 / EE 结束符。" % (declared, len(frame_bytes)))
+                    QMessageBox.critical(self, "ED 监控帧错误", msg)
+                    return
+                ed_meta_rows = ed_rows
+                frame_bytes = business  # 后续解析使用业务载荷
+                # 不替换 hex_display，保持输入框显示完整帧
 
             # 使用当前选中的解析器
             current_parser = self._get_current_parser()
@@ -3748,16 +3796,21 @@ class MainWindow(QMainWindow):
             frame_type_combo.setVisible(show and is_pb)
 
         def _preprocess(idx, raw):
-            """协议预处理：ED 监控头剥离 + 前置行。返回 (bytes, extra_rows)"""
-            if idx not in (9, 10) or not ed_chk.isChecked() or len(raw) < 8 or raw[0] != 0xED:
-                return raw, None
+            """协议预处理：ED 监控头剥离 + 前置行。返回 (bytes, extra_rows, err)"""
+            if idx not in (9, 10) or not ed_chk.isChecked() or not raw or raw[0] != 0xED:
+                return raw, None, None
+            declared = (raw[1] | (raw[2] << 8)) + 4 if len(raw) >= 3 else 0
+            err = ("ED 监控帧解析失败：报文不完整或格式错误，"
+                   "首字节 ED 不能作为业务帧起始符解析。\n"
+                   "请检查报文是否被截断（帧长字段声明整包应为 %d 字节，实际 %d 字节），"
+                   "或缺少 EF 数据域起始符 / EE 结束符。" % (declared, len(raw)))
             try:
                 rows, business, offset = self._parse_ed_monitor_header(raw)
             except Exception:
-                return raw, None
+                return None, None, err
             if rows is None or business is None:
-                return raw, None
-            return business, rows
+                return None, None, err
+            return business, rows, None
 
         def do_parse(idx=None):
             """用当前所选协议重新解析并填充表格"""
@@ -3767,7 +3820,11 @@ class MainWindow(QMainWindow):
             table.setRowCount(0)
             error_label.hide()
             # 预处理：ED 头剥离
-            parse_bytes, ed_rows = _preprocess(idx, frame_bytes)
+            parse_bytes, ed_rows, ed_err = _preprocess(idx, frame_bytes)
+            if ed_err is not None:
+                error_label.setText(ed_err)
+                error_label.show()
+                return
             try:
                 kwargs = {}
                 if _is_new_gen(idx):
@@ -4105,30 +4162,65 @@ class MainWindow(QMainWindow):
             table_data = []
             try:
                 frame_bytes = bytes.fromhex(frame_hex)
-                # 使用当前协议对应的解析器
-                current_parser = self._get_current_parser()
-                # 调用parse_to_table生成表格数据
-                table_data = current_parser.parse_to_table(frame_bytes)
-
-                # 从表格数据生成摘要
-                summary = self._get_summary_from_table_data(table_data)
-                # ED 监控帧数据来源标记
-                if ed_data_type:
-                    summary = f"[ED:{ed_data_type}] {summary}"
-
-                # 检查解析是否失败（校验错误、长度不匹配等）
-                is_parse_failed = any(item[0] == "❌ 解析失败" for item in table_data)
-                if is_parse_failed:
+                # 协议9：ED 开头但提取失败（报文不完整/格式错误）→ 明确报错，
+                # 绝不把 ED 首字节当 FC 起始符送解析器
+                if (self.current_protocol == 9 and frame_hex.startswith("ED")
+                        and not ed_data_type):
+                    table_data = [("❌ 解析失败", "", "",
+                                   "ED 监控帧解析失败：报文不完整或格式错误，"
+                                   "首字节 ED 不能作为业务帧起始符解析", None, None)]
+                    summary = "ED 帧解析失败（报文不完整或格式错误）"
                     status = "失败"
                     fail_count += 1
-                    # 提取失败原因作为摘要
-                    for item in table_data:
-                        if item[0] == "❌ 解析失败":
-                            summary = item[3] if item[3] else "解析失败"
-                            break
+                # 协议9：合法 ED 帧但无业务数据（控制报文、空数据报文等）
+                # 直接解析监控头，不送 CSGNewGenParser
+                elif (self.current_protocol == 9 and ed_data_type
+                        and ed_data_type.startswith("ED:")
+                        and frame_hex.startswith("ED")):
+                    meta_rows, business_bytes, business_offset = (
+                        self._parse_ed_monitor_header(frame_bytes))
+                    if meta_rows is not None:
+                        # 去掉最后一行"── 业务帧 ──"，因为没有业务数据
+                        if meta_rows and meta_rows[-1][0].startswith("── 业务帧"):
+                            meta_rows = meta_rows[:-1]
+                        meta_rows.append((
+                            "── 业务帧 ──", "", "",
+                            f"无业务数据（{ed_data_type[3:]}）",
+                            business_offset, business_offset))
+                        table_data = meta_rows
+                        summary = f"[ED:{ed_data_type[3:]}] PLC2.0监控包装帧"
+                        status = "成功"
+                        success_count += 1
+                    else:
+                        table_data = [("❌ 解析失败", "", "", "ED 监控帧格式错误", None, None)]
+                        summary = "ED 帧格式错误"
+                        status = "失败"
+                        fail_count += 1
                 else:
-                    status = "成功"
-                    success_count += 1
+                    # 使用当前协议对应的解析器
+                    current_parser = self._get_current_parser()
+                    # 调用parse_to_table生成表格数据
+                    table_data = current_parser.parse_to_table(frame_bytes)
+
+                    # 从表格数据生成摘要
+                    summary = self._get_summary_from_table_data(table_data)
+                    # ED 监控帧数据来源标记
+                    if ed_data_type:
+                        summary = f"[ED:{ed_data_type}] {summary}"
+
+                    # 检查解析是否失败（校验错误、长度不匹配等）
+                    is_parse_failed = any(item[0] == "❌ 解析失败" for item in table_data)
+                    if is_parse_failed:
+                        status = "失败"
+                        fail_count += 1
+                        # 提取失败原因作为摘要
+                        for item in table_data:
+                            if item[0] == "❌ 解析失败":
+                                summary = item[3] if item[3] else "解析失败"
+                                break
+                    else:
+                        status = "成功"
+                        success_count += 1
 
                 # 保存结果（表格数据可以在详情查看时使用）
                 self.batch_results.append({
@@ -4156,6 +4248,7 @@ class MainWindow(QMainWindow):
             # 序号
             num_item = QTableWidgetItem(str(i + 1))
             num_item.setTextAlignment(Qt.AlignCenter)
+            num_item.setData(Qt.UserRole, i)  # 存储原始 batch_results 索引
             self.batch_summary_table.setItem(row, 0, num_item)
 
             # 状态（emoji）
@@ -4329,6 +4422,33 @@ class MainWindow(QMainWindow):
         # ── 字段索引：快速定位关键字段 ──
         fields = {item[0]: item for item in table_data}
 
+        # ── ED 监控包装帧（PLC2.0收发机接口格式）──
+        if "── PLC2.0 监控包装头 ──" in fields:
+            parts = ["PLC2.0监控包装帧"]
+            ctrl1 = fields.get("控制域1")
+            ctrl2 = fields.get("控制域2")
+            if ctrl1:
+                parts.append(str(ctrl1[2]))
+            if ctrl2:
+                parts.append(str(ctrl2[2]))
+            data_len = fields.get("数据域长度")
+            if data_len:
+                dlen_val = data_len[2]
+                if isinstance(dlen_val, int):
+                    parts.append(f"数据:{dlen_val}字节")
+                else:
+                    parts.append(f"数据:{dlen_val}")
+            # 有业务帧时提取业务帧类型（在"── 业务帧 ──"之后）
+            business_found = False
+            for item in table_data:
+                if item[0].startswith("── 业务帧"):
+                    business_found = True
+                    continue
+                if business_found and item[0] and not item[0].startswith(" ") and "校验" not in item[0] and "结束符" not in item[0]:
+                    parts.append(str(item[3] or item[2] or item[0]))
+                    break
+            return " | ".join(parts)
+
         # ── 公共：MSDU 类型作为顶层分类（若存在）──
         msdu_type_prefix = ""
         if "MSDU类型" in fields:
@@ -4336,64 +4456,96 @@ class MainWindow(QMainWindow):
             if msdu_type_name:
                 msdu_type_prefix = msdu_type_name
 
-        # ── 网络层：含 MMTYPE 字段（管理消息）──
-        if "管理消息类型(MMTYPE)" in fields:
-            mmtype_item = fields["管理消息类型(MMTYPE)"]
-            mmtype_comment = mmtype_item[3]  # "管理消息: 关联请求(MMeAssocReq)"
-            # 提取冒号后的消息名称
-            mmtype_name = mmtype_comment.split(":", 1)[1].strip() if ":" in mmtype_comment else mmtype_comment
-            prefix = msdu_type_prefix if msdu_type_prefix else "网络层"
-            summary_parts = [f"{prefix} | MMTYPE:{mmtype_name}"]
-            # 附带管理消息版本
-            if "管理消息版本" in fields:
-                ver = fields["管理消息版本"][2]
-                summary_parts.append(f"版本{ver}")
-            return " | ".join(summary_parts)
-
-        # ── 网络层：MPDU/MAC 物理层帧（定界符类型字段）──
-        if "定界符类型" in fields:
-            delim_item = fields["定界符类型"]
-            delim_desc = delim_item[3]  # "SOF帧" / "信标帧" / "选择确认帧(SACK)"
-            prefix = msdu_type_prefix if msdu_type_prefix else "网络层"
-            summary_parts = [f"{prefix} | {delim_desc}"]
-            # 信标帧：额外显示信标类型（发现/代理/中央）
-            if delim_desc == "信标帧" and "信标载荷头" in fields:
-                beacon_head_item = fields["信标载荷头"]
-                beacon_parsed = beacon_head_item[2]  # "类型:发现信标"
-                if isinstance(beacon_parsed, str) and beacon_parsed.startswith("类型:"):
-                    beacon_type = beacon_parsed[3:]
-                    summary_parts.append(f"信标类型:{beacon_type}")
-            # 附带源/目的TEI（若有）
-            if "源TEI" in fields:
-                summary_parts.append(f"源TEI:{fields['源TEI'][2]}")
-            if "目的TEI" in fields:
-                summary_parts.append(f"目的TEI:{fields['目的TEI'][2]}")
-            return " | ".join(summary_parts)
-
-        # ── 应用层报文：含业务标识字段 ──
+        # ── 应用层报文：含业务标识字段（优先于定界符类型展示）──
         if "业务标识" in fields:
             summary_parts = [msdu_type_prefix if msdu_type_prefix else "应用层"]
+            # 0. 附带上层定界符类型（如果有）
+            if "定界符类型" in fields:
+                delim_desc = fields["定界符类型"][3]
+                summary_parts.append(delim_desc)
             # 1. 帧类型域（业务大类）
             frame_type_item = fields.get("  帧类型域(D3~D0)")
             if frame_type_item:
                 ft_comment = frame_type_item[3]  # "0 - 确认/否认"
                 ft_name = ft_comment.split(" - ", 1)[1] if " - " in ft_comment else ft_comment
                 summary_parts.append(ft_name)
-            # 2. 业务标识（含描述）
+            # 2. 业务标识（名称 + 编号）
             svc_item = fields["业务标识"]
+            svc_val = svc_item[2]
             svc_comment = svc_item[3]  # "业务标识 0 - 确认"
             svc_desc = svc_comment.split(" - ", 1)[1] if " - " in svc_comment else svc_comment
-            summary_parts.append(f"业务标识:{svc_desc}")
+            try:
+                summary_parts.append(f"业务标识:{svc_desc}(0x{int(svc_val):02X})")
+            except (ValueError, TypeError):
+                summary_parts.append(f"业务标识:{svc_desc}")
             # 3. 传输方向
             dir_item = fields.get("  传输方向位(D15)")
             if dir_item:
                 dir_comment = dir_item[3]  # "0 - 下行(CCO→STA)"
                 dir_name = dir_comment.split(" - ", 1)[1] if " - " in dir_comment else dir_comment
                 summary_parts.append(dir_name)
-            # 4. 核心内容：从业务数据单元子字段提取关键信息
+            # 4. 源/目的TEI
+            if "源TEI" in fields:
+                summary_parts.append(f"源TEI:{fields['源TEI'][2]}")
+            if "目的TEI" in fields:
+                summary_parts.append(f"目的TEI:{fields['目的TEI'][2]}")
+            # 5. 核心内容：从业务数据单元子字段提取关键信息
             core = self._extract_csg_core_content(table_data)
             if core:
                 summary_parts.append(core)
+            return " | ".join(summary_parts)
+
+        # ── 网络层：含 MMTYPE 字段（管理消息）──
+        if "管理消息类型(MMTYPE)" in fields:
+            mmtype_item = fields["管理消息类型(MMTYPE)"]
+            mmtype_comment = mmtype_item[3]  # "管理消息: 关联请求(MMeAssocReq)"
+            mmtype_val = mmtype_item[2]
+            # 提取冒号后的消息名称
+            mmtype_name = mmtype_comment.split(":", 1)[1].strip() if ":" in mmtype_comment else mmtype_comment
+            prefix = msdu_type_prefix if msdu_type_prefix else "网络管理消息"
+            summary_parts = [f"{prefix} | MMTYPE:{mmtype_name}(0x{int(mmtype_val):04X})"]
+            # 附带管理消息版本
+            if "管理消息版本" in fields:
+                ver = fields["管理消息版本"][2]
+                summary_parts.append(f"版本{ver}")
+            # 附带源/目的TEI
+            if "源TEI" in fields:
+                summary_parts.append(f"源TEI:{fields['源TEI'][2]}")
+            if "目的TEI" in fields:
+                summary_parts.append(f"目的TEI:{fields['目的TEI'][2]}")
+            return " | ".join(summary_parts)
+
+        # ── 网络层：MPDU/MAC 物理层帧（定界符类型字段）──
+        if "定界符类型" in fields:
+            delim_item = fields["定界符类型"]
+            delim_desc = delim_item[3]  # "SOF帧" / "信标帧" / "选择确认帧(SACK)"
+            delim_val = delim_item[2]
+            prefix = msdu_type_prefix if msdu_type_prefix else "网络层"
+            summary_parts = [f"{prefix} | {delim_desc}"]
+            # 信标帧：额外显示信标类型（发现/代理/中央）
+            if delim_desc == "信标帧":
+                beacon_type = ""
+                if "信标载荷头" in fields:
+                    beacon_head_item = fields["信标载荷头"]
+                    beacon_parsed = beacon_head_item[2]
+                    if isinstance(beacon_parsed, str) and "类型:" in beacon_parsed:
+                        idx = beacon_parsed.index("类型:") + 3
+                        beacon_type = beacon_parsed[idx:].split(",")[0].split(" ")[0]
+                if not beacon_type and "信标类型" in fields:
+                    beacon_type = str(fields["信标类型"][3] or fields["信标类型"][2])
+                if beacon_type:
+                    summary_parts.append(f"信标类型:{beacon_type}")
+                # 信标帧附带网络标识
+                if "网络标识(SNID)" in fields:
+                    summary_parts.append(f"SNID:{fields['网络标识(SNID)'][2]}")
+            # SOF/SACK 帧附带源/目的TEI和帧序号
+            if delim_desc in ("SOF帧", "选择确认帧(SACK)"):
+                if "源TEI" in fields:
+                    summary_parts.append(f"源TEI:{fields['源TEI'][2]}")
+                if "目的TEI" in fields:
+                    summary_parts.append(f"目的TEI:{fields['目的TEI'][2]}")
+                if "发送序号" in fields:
+                    summary_parts.append(f"序号:{fields['发送序号'][2]}")
             return " | ".join(summary_parts)
 
         # ── 兜底：MSDU 负载等未分类报文，取前几个有效字段 ──
@@ -4873,7 +5025,11 @@ class MainWindow(QMainWindow):
                 if business_hex:
                     clean_line = business_hex
                     ed_data_type = data_type
-                # 如果 ED 解析失败，保留原始帧
+                elif data_type.startswith("ED:"):
+                    # 合法 ED 帧但无业务数据（控制报文、空数据报文等）
+                    # 保留原始 ED hex，标记类型供后续解析识别
+                    ed_data_type = data_type
+                # 其余情况（ED 解析失败）保留原始帧，ed_data_type 为空
 
             frames.append((clean_line, ed_data_type))
         return frames
@@ -4931,23 +5087,34 @@ class MainWindow(QMainWindow):
         data_start = 6
         data_end = ee_pos - 1  # 排除 CS(ee_pos-1) 和 EE(ee_pos)
 
+        ctrl1 = frame_bytes[3]
+        ctrl2 = frame_bytes[4]
+
+        # 数据域为空：合法 ED 帧但没有业务数据（控制报文、空数据报文等）
         if data_end <= data_start:
-            return "", ""
+            if ctrl1 == 0x01:
+                return "", f"ED:控制报文(0x{ctrl2:02X})"
+            elif ctrl1 == 0x00:
+                return "", f"ED:数据报文(空,0x{ctrl2:02X})"
+            else:
+                return "", f"ED:空数据(0x{ctrl1:02X}/0x{ctrl2:02X})"
 
         data = frame_bytes[data_start:data_end]
         data_len = len(data)
 
-        ctrl1 = frame_bytes[3]
-        ctrl2 = frame_bytes[4]
-
         # 非数据报文或数据域不足，返回空
         if ctrl1 != 0x00 or ctrl2 not in (0x01, 0x02, 0x03) or data_len < 9:
-            return "", ""
+            # 控制报文或非标准数据子类型但有数据域：仍然视为合法 ED 帧，无业务数据
+            if ctrl1 == 0x01:
+                return "", f"ED:控制报文(0x{ctrl2:02X})"
+            else:
+                return "", f"ED:非业务帧(0x{ctrl1:02X}/0x{ctrl2:02X})"
 
         # 跳过 9 字节公共头，提取业务数据
         business = data[9:]
         if len(business) < 4:
-            return "", ""
+            # 公共头完整但业务数据不足：仍按合法 ED 数据帧处理
+            return "", f"ED:数据报文(业务不足,0x{ctrl2:02X})"
 
         # 根据 ctrl2 确定数据类型描述
         ctrl2_desc = {
@@ -4968,6 +5135,13 @@ class MainWindow(QMainWindow):
         self.batch_status_bar.setText("就绪")
         self.batch_frame_count_label.setText("共 0 帧")
         self.update_stats("待解析")
+        # 重置搜索过滤
+        if hasattr(self, 'batch_search_edit'):
+            self.batch_search_edit.clear()
+        if hasattr(self, 'batch_status_filter'):
+            self.batch_status_filter.setCurrentIndex(0)
+        if hasattr(self, 'batch_filter_count'):
+            self.batch_filter_count.setText("")
 
     def export_batch(self, fmt=None):
         """增强版批量解析结果导出 - 支持 JSON/Excel 多格式，Excel 含 Sheet2 详细解析
@@ -5303,21 +5477,77 @@ class MainWindow(QMainWindow):
         else:
             return self.protocol_combo.currentText().split(" ")[0]
 
+    def _on_batch_filter_changed(self):
+        """批量解析结果搜索过滤（关键词 + 状态）"""
+        if not hasattr(self, 'batch_results') or not self.batch_results:
+            return
+        keyword = self.batch_search_edit.text().strip().lower()
+        status_filter = self.batch_status_filter.currentData()
+        visible_count = 0
+        total = self.batch_summary_table.rowCount()
+        for row in range(total):
+            item = self.batch_summary_table.item(row, 0)
+            if item is None:
+                continue
+            orig_idx = item.data(Qt.UserRole)
+            if orig_idx is None or orig_idx >= len(self.batch_results):
+                continue
+            result = self.batch_results[orig_idx]
+            status = result.get("_status", "")
+            # 状态过滤
+            if status_filter == "success" and status != "成功":
+                self.batch_summary_table.setRowHidden(row, True)
+                continue
+            if status_filter == "fail" and status != "失败":
+                self.batch_summary_table.setRowHidden(row, True)
+                continue
+            if status_filter == "error" and status != "异常":
+                self.batch_summary_table.setRowHidden(row, True)
+                continue
+            # 关键词过滤（匹配摘要 + 协议类型 + 原始HEX）
+            if keyword:
+                summary = str(result.get("摘要", "")).lower()
+                proto_item = self.batch_summary_table.item(row, 3)
+                proto = proto_item.text().lower() if proto_item else ""
+                raw_hex = str(result.get("_input", "")).lower()
+                if keyword not in summary and keyword not in proto and keyword not in raw_hex:
+                    self.batch_summary_table.setRowHidden(row, True)
+                    continue
+            self.batch_summary_table.setRowHidden(row, False)
+            visible_count += 1
+        # 更新计数
+        if keyword or status_filter != "all":
+            self.batch_filter_count.setText(f"显示 {visible_count} / {total}")
+        else:
+            self.batch_filter_count.setText("")
+        # 如果当前选中行被隐藏，选中第一条可见行
+        current = self.batch_summary_table.currentRow()
+        if current < 0 or self.batch_summary_table.isRowHidden(current):
+            for r in range(total):
+                if not self.batch_summary_table.isRowHidden(r):
+                    self.batch_summary_table.selectRow(r)
+                    break
+
     def _on_batch_row_selected(self, row=None, col=None):
         """批量解析摘要表行选中时的处理（填充右侧详情面板）"""
-        # 获取当前选中行
+        # 获取当前选中行的原始 batch_results 索引
         if row is not None:
-            index = row
+            table_row = row
         else:
-            current_row = self.batch_summary_table.currentRow()
-            if current_row < 0:
+            table_row = self.batch_summary_table.currentRow()
+            if table_row < 0:
                 return
-            index = current_row
-
-        if index < 0 or index >= len(self.batch_results):
+        # 从序号列 item 中读取原始索引（过滤后行号≠原始索引）
+        item = self.batch_summary_table.item(table_row, 0)
+        if item is None:
             return
-
-        self._populate_batch_detail(index)
+        orig_idx = item.data(Qt.UserRole)
+        if orig_idx is None:
+            # 兼容旧逻辑：直接用行号当索引
+            orig_idx = table_row
+        if orig_idx < 0 or orig_idx >= len(self.batch_results):
+            return
+        self._populate_batch_detail(orig_idx)
 
     def _populate_batch_detail(self, index: int):
         """填充批量解析详情面板（右侧表格 + 原始报文）"""
