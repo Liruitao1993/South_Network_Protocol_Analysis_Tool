@@ -57,6 +57,7 @@ from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu
 from enhanced_export import EnhancedBatchResultExporter
 from theme_settings import ThemeManager, ThemeSettingsDialog
 from llm_preprocess_widget import LLMPreprocessWidget
+from llm_api_manager import LLMApiManagerDialog
 from preprocessors import list_scripts as _list_pp_scripts, get_script as _get_pp_script
 
 
@@ -1784,6 +1785,8 @@ class MainWindow(QMainWindow):
             widget.show()
             btn.setText("▼ LLM 智能预处理")
             btn.setChecked(True)
+            # 刷新模型列表（可能刚在 API 管理中添加了新配置）
+            widget._refresh_profiles()
 
     def _update_protocol_lookup_tab(self):
         """根据当前协议更新查询页面内容"""
@@ -3573,6 +3576,8 @@ class MainWindow(QMainWindow):
         theme_action.triggered.connect(self._show_theme_settings_dialog)
         sys_action = config_menu.addAction("系统集成设置(&S)...")
         sys_action.triggered.connect(self._show_system_settings_dialog)
+        llm_api_action = config_menu.addAction("模型API管理(&M)...")
+        llm_api_action.triggered.connect(self._show_llm_api_manager)
 
         help_menu = menubar.addMenu("帮助(&H)")
 
@@ -6403,6 +6408,14 @@ class MainWindow(QMainWindow):
         layout.addLayout(btn_row)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._apply_system_settings(panel.save_settings())
+
+    def _show_llm_api_manager(self):
+        """显示 LLM 模型 API 管理对话框"""
+        dlg = LLMApiManagerDialog(self)
+        dlg.exec()
+        # 关闭后刷新 LLM 预处理面板的模型列表
+        if hasattr(self, "llm_preprocess_widget"):
+            self.llm_preprocess_widget._refresh_profiles()
 
     def _refresh_serial_ports(self):
         """刷新可用串口列表"""
