@@ -3,10 +3,11 @@
 
 提供日志预处理工作台的完整 UI：输入/输出、prompt 编辑、模板选择、
 异步 LLM 调用。集成到 MainWindow 的批量解析标签页。
+API 配置通过菜单栏「模型API管理」统一管理。
 """
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QLabel,
-    QPushButton, QComboBox, QGroupBox, QLineEdit, QFileDialog,
+    QPushButton, QComboBox, QGroupBox, QFileDialog,
     QMessageBox, QSplitter, QProgressBar, QFrame,
 )
 from PySide6.QtCore import Qt
@@ -18,20 +19,18 @@ from llm_preprocess import (
     LLMAPIClient, LLMChunker, LLMWorker,
     DEFAULT_PROMPT_TEMPLATES,
 )
+from llm_api_manager import get_active_profile, load_profiles
 
 
 class LLMPreprocessWidget(QWidget):
     """LLM 日志预处理面板
 
-    布局:
+    布局（简化后）:
     ┌─────────────────────────────────────────────┐
-    │ API 配置 [endpoint] [key] [model] [测试]    │
-    ├─────────────────────────────────────────────┤
-    │ 模板选择 [下拉]  分块大小 [输入]  行/块     │
+    │ 模型选择 [下拉]  模板 [下拉]  分块 [输入]    │
     ├─────────────────────────────────────────────┤
     │ 原始日志输入                    预处理输出   │
     │ ┌──────────────────────┐ ┌──────────────┐  │
-    │ │                      │ │              │  │
     │ │                      │ │              │  │
     │ └──────────────────────┘ └──────────────┘  │
     ├─────────────────────────────────────────────┤
@@ -54,66 +53,51 @@ class LLMPreprocessWidget(QWidget):
         root.setSpacing(6)
         root.setContentsMargins(4, 4, 4, 4)
 
-        # ─ API 配置栏 ─
-        api_group = QGroupBox("LLM API 配置")
-        api_layout = QHBoxLayout(api_group)
-        api_layout.setSpacing(6)
+        # ─ 模型选择 / 模板 / 分块 ─
+        tool_bar = QHBoxLayout()
+        tool_bar.setSpacing(6)
 
-        api_layout.addWidget(QLabel("Endpoint:"))
-        self.endpoint_edit = QLineEdit("https://api.opencode.ai/v1")
-        self.endpoint_edit.setPlaceholderText("https://api.opencode.ai/v1  (不含 /chat/completions)")
-        self.endpoint_edit.setToolTip(
-            "API 基础 URL，只需填到 /v1\n"
-            "OpenCode Zen: https://api.opencode.ai/v1\n"
-            "OpenAI: https://api.openai.com/v1\n"
-            "DeepSeek: https://api.deepseek.com/v1\n"
-            "本地 Ollama: http://localhost:11434/v1\n"
-            "错误示例: .../v1/chat/completions（不要带这个后缀）"
-        )
-        self.endpoint_edit.setMaximumWidth(280)
-        api_layout.addWidget(self.endpoint_edit)
+        tool_bar.addWidget(QLabel("模型:"))
+        self.profile_combo = QComboBox()
+        self.profile_combo.setMinimumWidth(180)
+        self.profile_combo.setToolTip("选择已配置的 API 模型（通过菜单「配置→模型API管理」添加）")
+        self.profile_combo.currentIndexChanged.connect(self._on_profile_changed)
+        tool_bar.addWidget(self.profile_combo)
 
-        api_layout.addWidget(QLabel("Key:"))
-        self.api_key_edit = QLineEdit()
-        self.api_key_edit.setPlaceholderText("sk-...")
-        self.api_key_edit.setEchoMode(QLineEdit.Password)
-        self.api_key_edit.setMaximumWidth(220)
-        api_layout.addWidget(self.api_key_edit)
+        self.refresh_profiles_btn = QPushButton("🔄")
+        self.refresh_profiles_btn.setMaximumWidth(28)
+        self.refresh_profiles_btn.setToolTip("刷新模型列表")
+        self.refresh_profiles_btn.clicked.connect(self._refresh_profiles)
+        tool_bar.addWidget(self.refresh_profiles_btn)
 
-        api_layout.addWidget(QLabel("模型:"))
-        self.model_edit = QLineEdit("gpt-4o")
-        self.model_edit.setMaximumWidth(140)
-        api_layout.addWidget(self.model_edit)
+        tool_bar.addSpacing(12)
 
-        self.test_btn = QPushButton("测试连接")
-        self.test_btn.setMaximumWidth(80)
-        self.test_btn.clicked.connect(self._test_connection)
-        api_layout.addWidget(self.test_btn)
-
-        api_layout.addStretch()
-        root.addWidget(api_group)
-
-        # ─ Prompt / 模板 / 分块 ─
-        prompt_bar = QHBoxLayout()
-        prompt_bar.setSpacing(6)
-
-        prompt_bar.addWidget(QLabel("模板:"))
+        tool_bar.addWidget(QLabel("模板:"))
         self.template_combo = QComboBox()
         self.template_combo.setMinimumWidth(160)
         for t in DEFAULT_PROMPT_TEMPLATES:
             self.template_combo.addItem(t["name"], t["prompt"])
         self.template_combo.currentIndexChanged.connect(self._on_template_changed)
-        prompt_bar.addWidget(self.template_combo)
+        tool_bar.addWidget(self.template_combo)
 
-        prompt_bar.addWidget(QLabel("分块:"))
-        self.chunk_spin = QLineEdit("200")
-        self.chunk_spin.setMaximumWidth(50)
-        self.chunk_spin.setAlignment(Qt.AlignCenter)
-        prompt_bar.addWidget(self.chunk_spin)
-        prompt_bar.addWidget(QLabel("行/块"))
+        tool_bar.addWidget(QLabel("分块:"))
+        self.chunk_spin = QComboBox()
+        self.chunk_spin.setEditable(True)
+        self.chunk_spin.addItems(["50", "100", "200", "500", "1000"])
+        self.chunk_spin.setCurrentText("200")
+        self.chunk_spin.setMaximumWidth(60)
+        self.chunk_spin.setToolTip("每块行数，大文件自动分块处理")
+        tool_bar.addWidget(self.chunk_spin)
+        tool_bar.addWidget(QLabel("行/块"))
 
-        prompt_bar.addStretch()
-        root.addLayout(prompt_bar)
+        tool_bar.addStretch()
+
+        # 模型信息标签
+        self.model_info_label = QLabel("")
+        self.model_info_label.setStyleSheet("color: #888; font-size: 10px;")
+        tool_bar.addWidget(self.model_info_label)
+
+        root.addLayout(tool_bar)
 
         # ─ 输入 / 输出分栏 ─
         splitter = QSplitter(Qt.Horizontal)
@@ -225,6 +209,55 @@ class LLMPreprocessWidget(QWidget):
         # ─ 进度条引用 ─
         self._last_result = ""
 
+    # ── 模型配置管理 ─────────────────────────────────────
+
+    def _refresh_profiles(self):
+        """刷新模型下拉列表"""
+        data = load_profiles()
+        profiles = data.get("profiles", [])
+        active = data.get("active", "")
+
+        self.profile_combo.blockSignals(True)
+        self.profile_combo.clear()
+        self.profile_combo.addItem("（未配置 — 点击🔄刷新）")
+        for p in profiles:
+            self.profile_combo.addItem(f"{p['name']} [{p.get('model', '?')}]", p.get("name"))
+        # 选中活跃配置
+        if active:
+            for i in range(self.profile_combo.count()):
+                if self.profile_combo.itemData(i) == active:
+                    self.profile_combo.setCurrentIndex(i)
+                    break
+        self.profile_combo.blockSignals(False)
+        self._update_model_info()
+
+    def _on_profile_changed(self, index):
+        self._update_model_info()
+
+    def _update_model_info(self):
+        """更新模型信息标签"""
+        profile = self._get_selected_profile()
+        if profile:
+            self.model_info_label.setText(
+                f"{profile.get('endpoint', '')} / {profile.get('model', '')}"
+            )
+        else:
+            self.model_info_label.setText("请通过「配置→模型API管理」添加 API 配置")
+
+    def _get_selected_profile(self):
+        """获取当前选中的 API 配置"""
+        idx = self.profile_combo.currentIndex()
+        if idx <= 0:
+            return get_active_profile()  # fallback to active
+        name = self.profile_combo.itemData(idx)
+        if not name:
+            return get_active_profile()
+        data = load_profiles()
+        for p in data.get("profiles", []):
+            if p.get("name") == name:
+                return p
+        return get_active_profile()
+
     # ── 槽函数 ─────────────────────────────────────────
 
     def _update_line_count(self):
@@ -289,34 +322,22 @@ class LLMPreprocessWidget(QWidget):
         except Exception as e:
             QMessageBox.warning(self, "保存失败", str(e))
 
-    def _test_connection(self):
-        endpoint = self.endpoint_edit.text().strip()
-        api_key = self.api_key_edit.text().strip()
-        if not endpoint or not api_key:
-            QMessageBox.warning(self, "配置不完整", "请填写 Endpoint 和 API Key")
-            return
-        self.test_btn.setEnabled(False)
-        self.test_btn.setText("测试中...")
-        try:
-            client = LLMAPIClient(endpoint, api_key, "gpt-4o", timeout=10)
-            result = client.test_connection()
-            QMessageBox.information(self, "连接成功", result)
-            self.status_label.setText("API 连接正常")
-        except Exception as e:
-            QMessageBox.warning(self, "连接失败", str(e))
-            self.status_label.setText("连接失败")
-        finally:
-            self.test_btn.setEnabled(True)
-            self.test_btn.setText("测试连接")
-
     def _run_preprocess(self):
-        endpoint = self.endpoint_edit.text().strip()
-        api_key = self.api_key_edit.text().strip()
-        model = self.model_edit.text().strip()
+        profile = self._get_selected_profile()
+        if not profile:
+            QMessageBox.warning(
+                self, "未配置模型",
+                "请通过菜单「配置→模型API管理」添加至少一个 API 配置"
+            )
+            return
+
+        endpoint = profile.get("endpoint", "")
+        api_key = profile.get("api_key", "")
+        model = profile.get("model", "")
         prompt = self.prompt_edit.toPlainText().strip()
 
         if not endpoint or not api_key:
-            QMessageBox.warning(self, "配置不完整", "请填写 API Endpoint 和 Key")
+            QMessageBox.warning(self, "配置不完整", "当前选中的模型配置缺少 Endpoint 或 API Key")
             return
         if not prompt:
             QMessageBox.warning(self, "Prompt 为空", "请输入预处理指令")
@@ -332,7 +353,7 @@ class LLMPreprocessWidget(QWidget):
 
         # 分块大小
         try:
-            chunk_lines = int(self.chunk_spin.text())
+            chunk_lines = int(self.chunk_spin.currentText())
         except ValueError:
             chunk_lines = 200
 
@@ -348,7 +369,7 @@ class LLMPreprocessWidget(QWidget):
         self.cancel_btn.setEnabled(True)
         self.progress_bar.show()
         self.progress_bar.setRange(0, 0)  # indeterminate
-        self.status_label.setText("LLM 预处理中...")
+        self.status_label.setText(f"LLM 预处理中... ({model})")
 
         self._worker.start()
 
@@ -399,25 +420,23 @@ class LLMPreprocessWidget(QWidget):
     # ── 配置持久化 ─────────────────────────────────────
 
     def _load_config(self):
-        """从 config.json 加载 LLM 配置"""
+        """从 config.json 加载配置 + 刷新模型列表"""
         try:
             import json
             config_path = os.path.join(os.path.dirname(__file__), "config.json")
             with open(config_path, encoding="utf-8") as f:
                 cfg = json.load(f).get("llm", {})
-            self.endpoint_edit.setText(cfg.get("endpoint", "https://api.opencode.ai/v1"))
-            self.api_key_edit.setText(cfg.get("api_key", ""))
-            self.model_edit.setText(cfg.get("model", "gpt-4o"))
-            self.chunk_spin.setText(str(cfg.get("chunk_lines", 200)))
+            self.chunk_spin.setCurrentText(str(cfg.get("chunk_lines", 200)))
             # 加载自定义 prompt（如果保存过）
             saved_prompt = cfg.get("prompt", "")
             if saved_prompt:
                 self.prompt_edit.setPlainText(saved_prompt)
         except Exception:
             pass
+        self._refresh_profiles()
 
     def save_config(self):
-        """保存 LLM 配置到 config.json"""
+        """保存 LLM 配置到 config.json（仅 prompt 和 chunk_lines）"""
         import json
         config_path = os.path.join(os.path.dirname(__file__), "config.json")
         try:
@@ -425,12 +444,10 @@ class LLMPreprocessWidget(QWidget):
                 cfg = json.load(f)
         except Exception:
             cfg = {}
-        cfg["llm"] = {
-            "endpoint": self.endpoint_edit.text().strip(),
-            "api_key": self.api_key_edit.text().strip(),
-            "model": self.model_edit.text().strip(),
-            "chunk_lines": int(self.chunk_spin.text() or 200),
-            "prompt": self.prompt_edit.toPlainText().strip(),
-        }
+        # 保留旧的 llm 段中的 prompt 和 chunk_lines
+        old_llm = cfg.get("llm", {})
+        old_llm["chunk_lines"] = int(self.chunk_spin.currentText() or 200)
+        old_llm["prompt"] = self.prompt_edit.toPlainText().strip()
+        cfg["llm"] = old_llm
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=2, ensure_ascii=False)
