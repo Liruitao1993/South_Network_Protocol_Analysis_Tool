@@ -409,6 +409,10 @@ class LLMPreprocessWidget(QWidget):
             self.api_key_edit.setText(cfg.get("api_key", ""))
             self.model_edit.setText(cfg.get("model", "gpt-4o"))
             self.chunk_spin.setText(str(cfg.get("chunk_lines", 200)))
+            # 加载自定义 prompt（如果保存过）
+            saved_prompt = cfg.get("prompt", "")
+            if saved_prompt:
+                self.prompt_edit.setPlainText(saved_prompt)
         except Exception:
             pass
 
@@ -426,6 +430,7 @@ class LLMPreprocessWidget(QWidget):
             "api_key": self.api_key_edit.text().strip(),
             "model": self.model_edit.text().strip(),
             "chunk_lines": int(self.chunk_spin.text() or 200),
+            "prompt": self.prompt_edit.toPlainText().strip(),
         }
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=2, ensure_ascii=False)
