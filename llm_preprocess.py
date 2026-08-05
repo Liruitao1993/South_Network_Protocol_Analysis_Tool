@@ -139,6 +139,7 @@ class LLMAPIClient:
                 {"role": "user", "content": user_content},
             ],
             "temperature": temperature,
+            "reasoning_effort": "none",  # 关闭大模型思考，直接输出结果
         }
 
         data = json.dumps(payload).encode("utf-8")

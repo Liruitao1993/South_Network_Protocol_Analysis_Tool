@@ -401,6 +401,58 @@ class ConfigDialog(QDialog):
         return self._file_paths
 
 
+class DragDropTextEdit(QTextEdit):
+    """支持拖拽文件加载的 QTextEdit"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        if event.mimeData().hasUrls():
+            for url in event.mimeData().urls():
+                file_path = url.toLocalFile()
+                if file_path and os.path.isfile(file_path):
+                    try:
+                        encodings = ['utf-8', 'gbk', 'gb2312', 'latin-1']
+                        content = None
+                        for enc in encodings:
+                            try:
+                                with open(file_path, 'r', encoding=enc) as f:
+                                    content = f.read()
+                                break
+                            except (UnicodeDecodeError, UnicodeError):
+                                continue
+                        if content is None:
+                            with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                                content = f.read()
+                        self.setPlainText(content)
+                        # 通知父窗口文件已加载
+                        main_win = self.window()
+                        if hasattr(main_win, 'update_stats'):
+                            import os as _os
+                            fname = _os.path.basename(file_path)
+                            lines = content.splitlines()
+                            main_win.update_stats(f"已拖入文件 {fname}（{len(lines)} 行）")
+                    except Exception as e:
+                        from PySide6.QtWidgets import QMessageBox
+                        QMessageBox.critical(self, "错误", f"读取文件失败：{e}")
+            event.acceptProposedAction()
+        else:
+            super().dropEvent(event)
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -1228,16 +1280,42 @@ class MainWindow(QMainWindow):
         pp_label.setFont(QFont("Microsoft YaHei", 9))
         toolbar.addWidget(pp_label)
 
-        self._pp_cmd_edit = QLineEdit()
-        self._pp_cmd_edit.setFont(QFont("Consolas", 9))
-        self._pp_cmd_edit.setMinimumWidth(220)
-        self._pp_cmd_edit.setPlaceholderText('如: find "tcp data:" excluding "len:\\d+: "')
-        self._pp_cmd_edit.setToolTip(
+        self._pp_cmd_combo = QComboBox()
+        self._pp_cmd_combo.setEditable(True)
+        self._pp_cmd_combo.setFont(QFont("Consolas", 9))
+        self._pp_cmd_combo.setMinimumWidth(260)
+        self._pp_cmd_combo.setPlaceholderText('如: find "tcp data:" excluding "len:\\d+: "')
+        self._pp_cmd_combo.setToolTip(
             "通用文本预处理命令链（支持正则）\n"
             "可用命令: find <pat> | excluding <pat> | replace <pat> <repl>\n"
             "          head <n> | tail <n> | skip <n> | hex_extract | dedup\n"
-            "示例: find \"60F0\" excluding \"mrd:\" dedup")
-        toolbar.addWidget(self._pp_cmd_edit)
+            "可输入新命令或从下拉列表选择常用命令\n"
+            "点「★」保存当前命令到列表，点「×」删除选中命令")
+        # 加载预设命令
+        self._pp_preset_commands = [
+            'find "tcp data:"',
+            'find "fc_payload_data"',
+            'find "60F0" excluding "mrd:" dedup',
+            'find "nwk:" replace ".*nwk:" "NWK:" head 20',
+            'hex_extract dedup',
+            'excluding "len:" head 50',
+        ]
+        self._load_pp_commands()
+        toolbar.addWidget(self._pp_cmd_combo)
+
+        self._pp_save_btn = QPushButton("★")
+        self._pp_save_btn.setFont(QFont("Microsoft YaHei", 9))
+        self._pp_save_btn.setMaximumWidth(24)
+        self._pp_save_btn.setToolTip("保存当前命令到常用列表")
+        self._pp_save_btn.clicked.connect(self._save_pp_command)
+        toolbar.addWidget(self._pp_save_btn)
+
+        self._pp_del_btn = QPushButton("×")
+        self._pp_del_btn.setFont(QFont("Microsoft YaHei", 9))
+        self._pp_del_btn.setMaximumWidth(24)
+        self._pp_del_btn.setToolTip("删除下拉列表中选中的命令")
+        self._pp_del_btn.clicked.connect(self._delete_pp_command)
+        toolbar.addWidget(self._pp_del_btn)
 
         self._pp_run_btn = QPushButton("执行")
         self._pp_run_btn.setFont(QFont("Microsoft YaHei", 9))
@@ -1277,7 +1355,7 @@ class MainWindow(QMainWindow):
         input_layout.addLayout(toolbar)
 
         # 输入文本框
-        self.batch_input = QTextEdit()
+        self.batch_input = DragDropTextEdit()
         self.batch_input.setPlaceholderText(
             "粘贴或输入报文数据，支持多种协议：\n"
             "南网/国网协议：68开头，16结束\n"
@@ -5199,7 +5277,7 @@ class MainWindow(QMainWindow):
 
     def _run_cli_preprocessor(self):
         """执行通用预处理命令链：读取 batch_input → 解析命令 → 结果回填"""
-        cmd_text = self._pp_cmd_edit.text().strip()
+        cmd_text = self._pp_cmd_combo.currentText().strip()
         if not cmd_text:
             QMessageBox.warning(self, "警告", "请输入预处理命令！\n"
                                 "示例: find \"tcp data:\" excluding \"len:\\d+: \"\n"
@@ -5239,6 +5317,77 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "预处理失败",
                                  f"执行预处理命令失败：\n{e}")
 
+    def _load_pp_commands(self):
+        """从 config.json 加载预处理命令列表"""
+        commands = list(self._pp_preset_commands)
+        if self._config_path.exists():
+            try:
+                with open(self._config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+                saved = config.get("pp_commands", [])
+                # 合并：预设命令在前，用户保存的在后，去重
+                seen = set()
+                merged = []
+                for c in commands + saved:
+                    if c not in seen:
+                        seen.add(c)
+                        merged.append(c)
+                commands = merged
+            except Exception:
+                pass
+        self._pp_cmd_combo.clear()
+        self._pp_cmd_combo.addItems(commands)
+
+    def _save_pp_command(self):
+        """保存当前输入框中的命令到常用列表"""
+        cmd = self._pp_cmd_combo.currentText().strip()
+        if not cmd:
+            QMessageBox.warning(self, "警告", "命令为空，无法保存")
+            return
+        # 检查是否已存在
+        idx = self._pp_cmd_combo.findText(cmd)
+        if idx >= 0:
+            self._pp_cmd_combo.setCurrentIndex(idx)
+            return  # 已存在，直接选中
+
+        self._pp_cmd_combo.addItem(cmd)
+        self._pp_cmd_combo.setEditText(cmd)
+        self._persist_pp_commands()
+        self.update_stats(f"已保存预处理命令: {cmd}")
+
+    def _delete_pp_command(self):
+        """删除下拉列表中选中的命令"""
+        cmd = self._pp_cmd_combo.currentText().strip()
+        if not cmd:
+            return
+        idx = self._pp_cmd_combo.findText(cmd)
+        if idx < 0:
+            return
+        reply = QMessageBox.question(
+            self, "确认删除", f"确定要从常用列表中删除以下命令吗？\n\n{cmd}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            self._pp_cmd_combo.removeItem(idx)
+            self._persist_pp_commands()
+
+    def _persist_pp_commands(self):
+        """将当前命令列表持久化到 config.json 的 pp_commands 段"""
+        config: Dict[str, Any] = {}
+        if self._config_path.exists():
+            try:
+                with open(self._config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+            except Exception:
+                config = {}
+        commands = [self._pp_cmd_combo.itemText(i)
+                    for i in range(self._pp_cmd_combo.count())]
+        config["pp_commands"] = commands
+        try:
+            with open(self._config_path, "w", encoding="utf-8") as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[预处理命令保存失败] {e}")
+
     def _show_pp_help(self):
         """显示预处理命令帮助"""
         from pp_cli import COMMANDS
@@ -5251,6 +5400,10 @@ class MainWindow(QMainWindow):
         lines.append('  find "60F0" excluding "mrd:" dedup')
         lines.append('  find "nwk:" replace ".*nwk:" "NWK:" head 10')
         lines.append('  hex_extract')
+        lines.append("\n常用命令管理:")
+        lines.append("  ★  保存当前命令到下拉列表（持久化到 config.json）")
+        lines.append("  ×  删除下拉列表中选中的命令")
+        lines.append("  下拉列表可直接选择已保存的命令，也可手动输入新命令")
         QMessageBox.information(self, "预处理命令帮助", "\n".join(lines))
 
     def clear_batch(self):
