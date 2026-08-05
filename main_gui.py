@@ -70,8 +70,8 @@ CHANGELOG = [
         "大文件自动分块（默认 200 行/块），异步调用不阻塞 GUI",
         "API 配置持久化到 config.json 的 llm 段，支持测试连接",
         "新增 llm_preprocess.py（API 客户端 + 分块器 + 异步 Worker）和 llm_preprocess_widget.py（预处理面板 UI）",
-        "新增 CLI 预处理脚本框架（preprocessors/ 包）：5 个可独立运行的 Python 脚本（提取 hex 帧/清理南网新一代前缀/清理国网新一代前缀/提取 TCP 载荷/按协议分类），注册机制自动发现",
-        "批量解析标签页工具栏新增「预处理」下拉框 +「执行预处理」按钮，选择脚本后对输入框内容执行预处理并回填结果",
+        "新增通用文本预处理工具 pp_cli.py：管道式命令链（find/excluding/replace/head/tail/skip/hex_extract/dedup），支持正则，可独立 CLI 或 GUI 内嵌使用",
+        "批量解析标签页工具栏新增「预处理」命令输入框 +「执行」按钮 +「?」帮助按钮，输入命令链后对输入框内容执行预处理并回填结果",
     ]),
     ("1.11.1", "2026-08-04", [
         "修复勾选「ED监控协议」后不完整/非法 ED..EE 帧被静默回退为 FC 起始解析的 bug：单帧解析、解析弹窗、批量解析三处路径在 ED 头剥离失败时均明确报错（报文不完整/缺 EF 或 EE），首字节 ED 不再被当作南网新一代 FC 起始符",
@@ -1228,19 +1228,29 @@ class MainWindow(QMainWindow):
         pp_label.setFont(QFont("Microsoft YaHei", 9))
         toolbar.addWidget(pp_label)
 
-        self._pp_combo = QComboBox()
-        self._pp_combo.setFont(QFont("Microsoft YaHei", 9))
-        self._pp_combo.setMinimumWidth(130)
-        self._pp_combo.addItem("无", "")
-        for _pp in _list_pp_scripts():
-            self._pp_combo.addItem(_pp["name"], _pp["id"])
-        toolbar.addWidget(self._pp_combo)
+        self._pp_cmd_edit = QLineEdit()
+        self._pp_cmd_edit.setFont(QFont("Consolas", 9))
+        self._pp_cmd_edit.setMinimumWidth(220)
+        self._pp_cmd_edit.setPlaceholderText('如: find "tcp data:" excluding "len:\\d+: "')
+        self._pp_cmd_edit.setToolTip(
+            "通用文本预处理命令链（支持正则）\n"
+            "可用命令: find <pat> | excluding <pat> | replace <pat> <repl>\n"
+            "          head <n> | tail <n> | skip <n> | hex_extract | dedup\n"
+            "示例: find \"60F0\" excluding \"mrd:\" dedup")
+        toolbar.addWidget(self._pp_cmd_edit)
 
-        self._pp_run_btn = QPushButton("执行预处理")
+        self._pp_run_btn = QPushButton("执行")
         self._pp_run_btn.setFont(QFont("Microsoft YaHei", 9))
-        self._pp_run_btn.setToolTip("对输入框内容执行选中的预处理脚本，结果回填到输入框")
+        self._pp_run_btn.setToolTip("对输入框内容执行预处理命令链，结果回填到输入框")
         self._pp_run_btn.clicked.connect(self._run_cli_preprocessor)
         toolbar.addWidget(self._pp_run_btn)
+
+        self._pp_help_btn = QPushButton("?")
+        self._pp_help_btn.setFont(QFont("Microsoft YaHei", 9))
+        self._pp_help_btn.setMaximumWidth(24)
+        self._pp_help_btn.setToolTip("显示预处理命令帮助")
+        self._pp_help_btn.clicked.connect(self._show_pp_help)
+        toolbar.addWidget(self._pp_help_btn)
 
         # 分隔线
         sep = QFrame()
@@ -5188,14 +5198,12 @@ class MainWindow(QMainWindow):
         return business.hex().upper(), ctrl2_desc
 
     def _run_cli_preprocessor(self):
-        """执行 CLI 预处理脚本：读取 batch_input → 调用脚本 → 结果回填"""
-        script_id = self._pp_combo.currentData()
-        if not script_id:
-            return  # "无"
-
-        script_info = _get_pp_script(script_id)
-        if not script_info:
-            QMessageBox.warning(self, "错误", f"未找到预处理脚本: {script_id}")
+        """执行通用预处理命令链：读取 batch_input → 解析命令 → 结果回填"""
+        cmd_text = self._pp_cmd_edit.text().strip()
+        if not cmd_text:
+            QMessageBox.warning(self, "警告", "请输入预处理命令！\n"
+                                "示例: find \"tcp data:\" excluding \"len:\\d+: \"\n"
+                                "输入 ? 查看所有可用命令。")
             return
 
         input_text = self.batch_input.toPlainText().strip()
@@ -5203,26 +5211,18 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "警告", "输入框为空，请先粘贴或加载报文！")
             return
 
-        # 调用脚本的 run() 函数（直接 import，不走 subprocess）
         try:
-            import importlib
-            module_name = script_info["module"]
-            if module_name in sys.modules:
-                mod = sys.modules[module_name]
-            else:
-                spec = importlib.util.spec_from_file_location(
-                    module_name, script_info["script"])
-                mod = importlib.util.module_from_spec(spec)
-                sys.modules[module_name] = mod
-                spec.loader.exec_module(mod)
+            # 用 shlex 正确解析带引号的参数
+            import shlex
+            commands = shlex.split(cmd_text)
+        except ValueError as e:
+            QMessageBox.warning(self, "命令解析错误",
+                                f"命令格式错误: {e}\n请检查引号是否匹配。")
+            return
 
-            run_fn = getattr(mod, "run", None)
-            if not run_fn:
-                QMessageBox.warning(self, "错误",
-                                    f"脚本 {script_info['name']} 缺少 run() 函数")
-                return
-
-            result = run_fn(input_text)
+        try:
+            from pp_cli import parse_and_run
+            result = parse_and_run(input_text, commands)
 
             if not result.strip():
                 QMessageBox.information(self, "预处理结果",
@@ -5233,11 +5233,25 @@ class MainWindow(QMainWindow):
             self.batch_input.setPlainText(result)
             frame_count = len([l for l in result.splitlines() if l.strip()])
             self.update_stats(
-                f"预处理完成（{script_info['name']}）：{frame_count} 行")
+                f"预处理完成（{cmd_text}）：{frame_count} 行")
 
         except Exception as e:
             QMessageBox.critical(self, "预处理失败",
-                                 f"执行 {script_info.get('name', script_id)} 失败：\n{e}")
+                                 f"执行预处理命令失败：\n{e}")
+
+    def _show_pp_help(self):
+        """显示预处理命令帮助"""
+        from pp_cli import COMMANDS
+        lines = ["通用文本预处理命令（支持正则）:\n"]
+        for name, info in COMMANDS.items():
+            lines.append(f"  {name:15s} {info['help']}")
+        lines.append("\n命令链示例:")
+        lines.append('  find "tcp data:"')
+        lines.append('  find "tcp data:" excluding "len:\\d+: "')
+        lines.append('  find "60F0" excluding "mrd:" dedup')
+        lines.append('  find "nwk:" replace ".*nwk:" "NWK:" head 10')
+        lines.append('  hex_extract')
+        QMessageBox.information(self, "预处理命令帮助", "\n".join(lines))
 
     def clear_batch(self):
         """清空批量解析内容"""

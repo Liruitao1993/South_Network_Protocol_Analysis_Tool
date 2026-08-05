@@ -1,55 +1,31 @@
 # -*- coding: utf-8 -*-
-"""CLI 预处理脚本注册表
+"""CLI 预处理工具注册表
 
-自动发现 preprocessors/ 目录下的所有预处理脚本。
-每个脚本需定义 META dict 提供名称/描述/参数信息。
+通用文本预处理工具 pp_cli.py 提供管道式命令链：
+    find <pat> | excluding <pat> | replace <pat> <repl>
+    head <n> | tail <n> | skip <n> | hex_extract | dedup
+
+GUI 集成通过 main_gui.py 的 _pp_cmd_edit 输入命令，
+调用 pp_cli.parse_and_run() 执行管线。
 """
-import os
-import json
-import importlib.util
 from typing import Dict, List, Any
 
 
-def _discover_scripts() -> Dict[str, Dict[str, Any]]:
-    """扫描 preprocessors/ 目录，加载每个脚本的 META 定义"""
-    pkg_dir = os.path.dirname(__file__)
-    scripts = {}
-    for fname in os.listdir(pkg_dir):
-        if fname.startswith("pp_") and fname.endswith(".py"):
-            script_path = os.path.join(pkg_dir, fname)
-            try:
-                spec = importlib.util.spec_from_file_location(fname[:-3], script_path)
-                mod = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(mod)
-                meta = getattr(mod, "META", None)
-                if meta and isinstance(meta, dict):
-                    meta["script"] = script_path
-                    meta["module"] = fname[:-3]
-                    scripts[meta.get("id", fname)] = meta
-            except Exception as e:
-                print(f"[preprocessors] 加载 {fname} 失败: {e}")
-    return scripts
-
-
-# 全局注册表（惰性加载）
-_registry = None
-
-
-def get_registry() -> Dict[str, Dict[str, Any]]:
-    """获取预处理脚本注册表（单例）"""
-    global _registry
-    if _registry is None:
-        _registry = _discover_scripts()
-    return _registry
-
-
 def list_scripts() -> List[Dict[str, Any]]:
-    """返回所有可用预处理脚本的列表（按 order 排序）"""
-    reg = get_registry()
-    items = sorted(reg.values(), key=lambda m: m.get("order", 99))
-    return items
+    """返回预处理工具列表（兼容旧接口）"""
+    return [
+        {
+            "id": "pp_cli",
+            "name": "通用预处理",
+            "description": "管道式命令链（find/excluding/replace/head/tail/skip/hex_extract/dedup）",
+            "order": 10,
+        },
+    ]
 
 
 def get_script(script_id: str) -> Dict[str, Any]:
-    """按 ID 获取脚本元信息"""
-    return get_registry().get(script_id, {})
+    """按 ID 获取工具元信息（兼容旧接口）"""
+    for s in list_scripts():
+        if s["id"] == script_id:
+            return s
+    return {}
