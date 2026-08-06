@@ -8,11 +8,13 @@
 命令:
     find <pattern>              保留匹配 pattern 的行（正则）
     excluding <pattern>         从每行中删除 pattern 及其之前的所有内容
-    replace <pattern> < repl>   将 pattern 替换为 replacement（正则）
+    replace <pattern> <repl>    将 pattern 替换为 replacement（正则）
     head <n>                    保留前 n 行
     tail <n>                    保留后 n 行
     skip <n>                    跳过前 n 行
     hex_extract                 从每行提取最长 hex 序列
+    merge_payloads            合并跨行的 fc_payload_data 帧为单行
+    tcp_extract               提取日志中单引号包裹的 hex 帧（如 tcp data:'...'O）
     dedup                       去除连续重复行
 
 示例:
@@ -103,6 +105,22 @@ def cmd_hex_extract(lines: List[str]) -> List[str]:
     return results
 
 
+def cmd_tcp_extract(lines: List[str]) -> List[str]:
+    """提取 tcp 日志中单引号包裹的 hex 帧。
+
+    格式: ...tcp data:'ED04000100EFFFEE'O 或 ...data := 'ED04000100EFFFEE'O
+    提取引号内的 hex，去除尾部 'O/'0 标记。
+    """
+    QHEX = re.compile(r"'([0-9a-fA-F]{4,})'")  # 至少 2 字节
+    results = []
+    for line in lines:
+        for m in QHEX.finditer(line):
+            hex_str = m.group(1).upper()
+            if len(hex_str) >= 4:
+                results.append(hex_str)
+    return results
+
+
 def cmd_dedup(lines: List[str]) -> List[str]:
     """去除连续重复行"""
     results = []
@@ -111,6 +129,82 @@ def cmd_dedup(lines: List[str]) -> List[str]:
         if line != prev:
             results.append(line)
             prev = line
+    return results
+
+
+# fc_payload_data 跨行合并的正则
+_PAYLOAD_START_RE = re.compile(r"fc_payload_data\s*:=\s*'")  # fc_payload_data := '...'
+_PAYLOAD_CLOSE_RE = re.compile(r"'\s*[}]?")  # ' 后跟空白或 } = 闭合标记 (如 '0 3", 'O }")
+
+
+def _flush_pending(pending_hex: str, results: list) -> None:
+    """输出累积的 hex 片段（≥4字符）。"""
+    if len(pending_hex) >= 4:
+        results.append(pending_hex)
+
+
+def cmd_merge_payloads(lines: List[str]) -> List[str]:
+    """合并跨行的 fc_payload_data 帧为单行。
+
+    检测 'fc_payload_data := ' 开头的行，累积 hex 直到遇到闭合标记
+    （' 后跟非 hex 字符，如 '0 3" 或 'O }"）。
+    跨多行的帧会被拼接成一行，后续 hex_extract/parse 可正确处理。
+    """
+    results = []
+    pending_hex = ""   # 待合并的 hex 片段
+    in_payload = False
+
+    for line in lines:
+        line_s = line.strip()
+        if not line_s:
+            if in_payload:
+                continue  # payload 内的空行跳过
+            results.append("")
+            continue
+
+        # ── 检测 payload 起始（payload 内外都要检测，遇到新帧先输出旧的）──
+        start_m = _PAYLOAD_START_RE.search(line_s)
+        if start_m:
+            # 如果正在累积旧 payload，先输出
+            if in_payload:
+                _flush_pending(pending_hex, results)
+                pending_hex = ""
+                in_payload = False
+
+            after_open = line_s[start_m.end():]
+            # 检查同行内是否有闭合
+            close_m = _PAYLOAD_CLOSE_RE.search(after_open)
+            if close_m:
+                before = after_open[:close_m.start()]
+                hex_clean = re.sub(r"[^0-9A-Fa-f]", "", before).upper()
+                if len(hex_clean) >= 4:
+                    results.append(hex_clean)
+            else:
+                # 跨行：开始累积
+                pending_hex = re.sub(r"[^0-9A-Fa-f]", "", after_open).upper()
+                in_payload = True
+            continue
+
+        if in_payload:
+            # ── 在 payload 内：累积 hex 直到闭合 ──
+            close_m = _PAYLOAD_CLOSE_RE.search(line_s)
+            if close_m:
+                before = line_s[:close_m.start()]
+                pending_hex += re.sub(r"[^0-9A-Fa-f]", "", before).upper()
+                _flush_pending(pending_hex, results)
+                in_payload = False
+                pending_hex = ""
+            else:
+                pending_hex += re.sub(r"[^0-9A-Fa-f]", "", line_s).upper()
+            continue
+
+        # ── 普通行：保留 ──
+        results.append(line)
+
+    # 处理尾部未闭合的 payload
+    if in_payload:
+        _flush_pending(pending_hex, results)
+
     return results
 
 
@@ -124,7 +218,9 @@ COMMANDS = {
     "tail": {"fn": cmd_tail, "args": 1, "help": "保留后 n 行"},
     "skip": {"fn": cmd_skip, "args": 1, "help": "跳过前 n 行"},
     "hex_extract": {"fn": cmd_hex_extract, "args": 0, "help": "从每行提取最长 hex 序列"},
+    "tcp_extract": {"fn": cmd_tcp_extract, "args": 0, "help": "提取日志中单引号包裹的 hex 帧（如 tcp data:'...'O）"},
     "dedup": {"fn": cmd_dedup, "args": 0, "help": "去除连续重复行"},
+    "merge_payloads": {"fn": cmd_merge_payloads, "args": 0, "help": "合并跨行的 fc_payload_data 帧为单行"},
 }
 
 
@@ -193,6 +289,8 @@ def main():
   skip <n>                 跳过前 n 行
   hex_extract              从每行提取最长 hex 序列
   dedup                    去除连续重复行
+  tcp_extract              提取日志中单引号包裹的 hex 帧（如 tcp data:'...'O）
+  merge_payloads           合并跨行的 fc_payload_data 帧为单行
 """,
     )
     parser.add_argument("input_file", nargs="?", help="输入文件（省略则读 stdin）")
