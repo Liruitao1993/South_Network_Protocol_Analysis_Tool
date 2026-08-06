@@ -1290,10 +1290,12 @@ class MainWindow(QMainWindow):
             "通用文本预处理命令链（支持正则）\n"
             "可用命令: find <pat> | excluding <pat> | replace <pat> <repl>\n"
             "          head <n> | tail <n> | skip <n> | hex_extract | dedup\n"
-            "可输入新命令或从下拉列表选择常用命令\n"
+            "          tcp_extract | merge_payloads\n"
             "点「★」保存当前命令到列表，点「×」删除选中命令")
         # 加载预设命令
         self._pp_preset_commands = [
+            'find "tcp data:" tcp_extract',
+            'find "fc_payload_data" merge_payloads',
             'find "tcp data:"',
             'find "fc_payload_data"',
             'find "60F0" excluding "mrd:" dedup',
