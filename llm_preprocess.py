@@ -199,7 +199,7 @@ class LLMAPIClient:
         req = urllib.request.Request(url, data=data, headers=headers, method="POST")
 
         try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
+            with urllib.request.urlopen(req, timeout=30) as resp:
                 body = json.loads(resp.read().decode("utf-8"))
                 model_used = body.get("model", self.model)
                 return f"连接成功，模型: {model_used}"
@@ -211,6 +211,12 @@ class LLMAPIClient:
                 err_body = ""
             if code == 401:
                 raise ValueError("API key 无效（401 Unauthorized）")
+            elif code == 429:
+                raise ValueError(
+                    f"API 速率限制（429 Too Many Requests）\n"
+                    f"免费模型通常限制 5 RPM / 50K TPM\n"
+                    f"请稍后重试或升级账户"
+                )
             elif code == 403:
                 # 检测 Cloudflare 1010 错误（域名被拦截）
                 hint = ""
@@ -236,6 +242,13 @@ class LLMAPIClient:
             else:
                 raise ConnectionError(f"HTTP {code}: {e.reason}\n{err_body}")
         except urllib.error.URLError as e:
+            # 区分超时和其他连接错误
+            if isinstance(e.reason, TimeoutError):
+                raise TimeoutError(
+                    f"API 请求超时（30s）\n"
+                    f"Endpoint: {self.endpoint}\n"
+                    f"可能原因：网络慢、服务器无响应、或 API 地址不正确"
+                )
             raise ConnectionError(f"连接失败: {e}")
 
 
