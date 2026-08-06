@@ -1624,6 +1624,10 @@ class MainWindow(QMainWindow):
 
     # ==================== 单帧解析功能 ====================
 
+    def _debug_log(self, msg: str):
+        """输出调试日志到终端（黑窗口），GUI 模式下从终端启动可见"""
+        print(f"[DEBUG] {msg}", flush=True)
+
     def _on_protocol_changed(self, index: int):
         """协议选择改变时的回调"""
         self.current_protocol = index
@@ -2842,32 +2846,83 @@ class MainWindow(QMainWindow):
         日志格式示例:
             Line 339: 260718-111145-349: B1D[3] mrd:ar[75]:110300000132F303420D2305683D0043...
 
-        处理规则（逐行）:
-          1. 找到最后一个冒号 ':'，其后为 hex 报文数据
-          2. 清理非 hex 字符，仅保留十六进制
-          3. 若解析级别为 app，扫描 '11' 定位应用层报文起始位置
-          4. 过短的行（<4 hex字符）直接丢弃
+        处理规则:
+          1. 以 fc_payload_data := ' 开头，' 后跟空白或 } 结尾为一个完整帧
+          2. 帧可能跨多行，中间所有 hex 拼接为一个完整帧
+          3. 无引号包裹的行：取最后一个冒号后的 hex
+          4. 清理非 hex 字符，若解析级别为 app 则扫描 '11' 定位应用层起始
+          5. 过短（<4 hex字符）的帧丢弃
 
         注意：必须在 _clean_hex_input 之前调用，否则前缀中的数字会被误当作 hex 数据。
         """
         import re
         parse_level = getattr(self, '_gw_parse_level', 'auto')
         out_lines = []
+
+        # ── 状态机：提取所有完整 hex 帧 ──
+        hex_frames = []
+        in_payload = False    # 是否在引号包裹的 payload 内
+        payload_hex = ""      # 当前 payload 累积的 hex
+
         for line in text.splitlines():
-            line = line.strip()
-            if not line:
+            line_s = line.strip()
+            if not line_s:
                 continue
-            # 找到最后一个冒号，其后为报文数据
-            last_colon = line.rfind(':')
-            if last_colon >= 0:
-                hex_part = line[last_colon + 1:].strip()
+
+            # ── 在 payload 引号内：收集 hex 直到闭合引号 ──
+            if in_payload:
+                # 查找闭合引号: ' 后跟空白或 } (如 '0 3", 'O }", 'O}")
+                close_match = re.search(r"'\s*[}]?", line_s)
+                if close_match:
+                    before_close = line_s[:close_match.start()]
+                    payload_hex += re.sub(r'[^0-9A-Fa-f]', '', before_close).upper()
+                    in_payload = False
+                    if len(payload_hex) >= 4:
+                        hex_frames.append(payload_hex)
+                    payload_hex = ""
+                else:
+                    # 无闭合引号：整行都是 hex 数据（可能还有下一行）
+                    payload_hex += re.sub(r'[^0-9A-Fa-f]', '', line_s).upper()
+                continue
+
+            # ── 检测 payload 起始：fc_payload_data := ' 或类似的引号开启 ──
+            payload_start = re.search(r"fc_payload_data\s*:=\s*['\"]", line_s)
+            if payload_start:
+                after_quote = line_s[payload_start.end():]
+                # 同行内是否有闭合引号？
+                close_match = re.search(r"'\s*[}]?", after_quote)
+                if close_match:
+                    hex_clean = re.sub(r'[^0-9A-Fa-f]', '', after_quote[:close_match.start()]).upper()
+                    if len(hex_clean) >= 4:
+                        hex_frames.append(hex_clean)
+                else:
+                    # 引号跨行
+                    payload_hex = re.sub(r'[^0-9A-Fa-f]', '', after_quote).upper()
+                    in_payload = True
+                continue
+
+            # ── 普通行：取最后一个冒号后的 hex ──
+            last_colon = line_s.rfind(':')
+            hex_part = line_s[last_colon + 1:].strip() if last_colon >= 0 else line_s
+            # 若行内含引号（闭合引号残留），只取引号前
+            quote_pos = -1
+            for q in ("'", '"'):
+                p = hex_part.find(q)
+                if p >= 0 and (quote_pos < 0 or p < quote_pos):
+                    quote_pos = p
+            if quote_pos >= 0:
+                hex_clean = re.sub(r'[^0-9A-Fa-f]', '', hex_part[:quote_pos]).upper()
             else:
-                hex_part = line
-            # 清理非 hex 字符
-            hex_clean = re.sub(r'[^0-9A-Fa-f]', '', hex_part).upper()
-            if len(hex_clean) < 4:
-                continue
-            # app 级别：扫描 '11' 定位应用层报文起始
+                hex_clean = re.sub(r'[^0-9A-Fa-f]', '', hex_part).upper()
+            if len(hex_clean) >= 4:
+                hex_frames.append(hex_clean)
+
+        # 处理尾部残留（引号未闭合的不完整帧）
+        if payload_hex and len(payload_hex) >= 4:
+            hex_frames.append(payload_hex)
+
+        # ── 按解析级别定位帧起始 ──
+        for hex_clean in hex_frames:
             if parse_level == 'app':
                 found = False
                 i = 0
@@ -2878,8 +2933,9 @@ class MainWindow(QMainWindow):
                         break
                     i += 2
                 if not found:
-                    continue  # 未找到应用层起始，跳过该行
+                    continue
             out_lines.append(hex_clean)
+
         return '\n'.join(out_lines)
 
     def _strip_csg_new_gen_frame_prefix(self, text: str, parse_level: str = "auto") -> str:
@@ -2907,48 +2963,78 @@ class MainWindow(QMainWindow):
             return self._strip_csg_monitor_prefix(text)
 
         out_lines = []
+
+        # ── 状态机：提取所有完整 hex 帧（支持跨行引号包裹） ──
+        hex_frames = []
+        in_payload = False    # 是否在引号包裹的 payload 内
+        payload_hex = ""      # 当前 payload 累积的 hex
+
         for line in text.splitlines():
-            line = line.strip()
-            if not line:
+            line_s = line.strip()
+            if not line_s:
                 continue
 
-            # 兼容格式: --USER--port_sta receive tcp data:len:33: 'ED...'
-            # 取单引号/双引号内的 hex 数据，若无引号则取最后一个冒号后的内容
-            hex_part = ""
-            # 优先匹配第一个引号内的纯 hex 字符串
-            quote_match = re.search(r"['\"]([0-9A-Fa-f\s]+)['\"]", line)
-            if quote_match:
-                hex_part = quote_match.group(1)
-            else:
-                # 取最后一个冒号后的 hex 数据（兼容日志前缀）
-                last_colon = line.rfind(':')
-                if last_colon >= 0:
-                    hex_part = line[last_colon + 1:].strip()
+            # ── 在 payload 引号内：收集 hex 直到闭合引号 ──
+            if in_payload:
+                close_match = re.search(r"'\s*[}]?", line_s)
+                if close_match:
+                    before_close = line_s[:close_match.start()]
+                    payload_hex += re.sub(r'[^0-9A-Fa-f]', '', before_close).upper()
+                    in_payload = False
+                    if len(payload_hex) >= 4:
+                        hex_frames.append(payload_hex)
+                    payload_hex = ""
                 else:
-                    hex_part = line
-            hex_clean = re.sub(r'[^0-9A-Fa-f]', '', hex_part).upper()
-            if len(hex_clean) < 4:
+                    payload_hex += re.sub(r'[^0-9A-Fa-f]', '', line_s).upper()
                 continue
-            # 奇偶对齐需在 EDA5 检测前完成（保证按字节偏移剥离）
-            if len(hex_clean) % 2 != 0:
-                hex_clean = hex_clean[:-1]
+
+            # ── 检测 payload 起始：fc_payload_data := ' ──
+            payload_start = re.search(r"fc_payload_data\s*:=\s*['\"]", line_s)
+            if payload_start:
+                after_quote = line_s[payload_start.end():]
+                close_match = re.search(r"'\s*[}]?", after_quote)
+                if close_match:
+                    hex_clean = re.sub(r'[^0-9A-Fa-f]', '', after_quote[:close_match.start()]).upper()
+                    if len(hex_clean) >= 4:
+                        hex_frames.append(hex_clean)
+                else:
+                    payload_hex = re.sub(r'[^0-9A-Fa-f]', '', after_quote).upper()
+                    in_payload = True
+                continue
+
+            # ── 普通行：取最后一个冒号后的 hex ──
+            last_colon = line_s.rfind(':')
+            hex_part = line_s[last_colon + 1:].strip() if last_colon >= 0 else line_s
+            quote_pos = -1
+            for q in ("'", '"'):
+                p = hex_part.find(q)
+                if p >= 0 and (quote_pos < 0 or p < quote_pos):
+                    quote_pos = p
+            if quote_pos >= 0:
+                hex_clean = re.sub(r'[^0-9A-Fa-f]', '', hex_part[:quote_pos]).upper()
+            else:
+                hex_clean = re.sub(r'[^0-9A-Fa-f]', '', hex_part).upper()
+            if len(hex_clean) >= 4:
+                hex_frames.append(hex_clean)
+
+        if payload_hex and len(payload_hex) >= 4:
+            hex_frames.append(payload_hex)
+
+        # ── 按解析级别定位帧起始 ──
+        for hex_clean in hex_frames:
             # 检测 TCP 包装前缀 EDA5：从 ED 偏移 15 字节(30 hex)定位 FC 起始
-            # 适用于除 pb_only 外所有级别（pb_only 输入应为裸PB，无TCP包装）
             if parse_level != "pb_only" and hex_clean.startswith("EDA5"):
-                # 需至少 15字节TCP头 + 16字节FC = 62 hex字符
                 if len(hex_clean) >= 62:
                     hex_clean = hex_clean[30:]
                     out_lines.append(hex_clean)
                 continue
 
             if parse_level == "pb_only":
-                # 仅物理块输入：直接保留（无 FC 签名可扫描）
-                pass
+                pass  # 直接保留
             elif parse_level == "app":
-                # 扫描端口 0x11 定位应用层报文起始
                 found = False
                 i = 0
-                while i < len(hex_clean) - 1:
+                while i + 32 <= len(hex_clean):
                     if hex_clean[i:i+2] == '11' and len(hex_clean) - i >= 8:
                         hex_clean = hex_clean[i:]
                         found = True
@@ -2957,17 +3043,11 @@ class MainWindow(QMainWindow):
                 if not found:
                     continue
             else:
-                # fc_pb / fc_only / fc_efc / auto：扫描 FC 起始特征字节
-                # 首字节低4位 ∈ {0x8,0x9,0xA,0xB}（bit3=接入指示1, bits0-2=定界符类型0~3）
-                # 注意：ED 包装帧（以 ED 开头）由后续 _extract_csg_new_gen_frames 处理，
-                # 此处不应扫描 FC 起始，否则会把 ED 数据域内部的 0x3A/0x1A 误判为 FC 头。
                 if hex_clean.startswith("ED"):
-                    # ED 包装帧直接保留，交给后续 ED 提取逻辑
-                    pass
+                    pass  # ED 包装帧直接保留
                 else:
                     found = False
                     i = 0
-                    # FC头最小16字节(32 hex)；不足则视为时间戳等噪声导致的误匹配
                     while i + 32 <= len(hex_clean):
                         byte_val = int(hex_clean[i:i+2], 16)
                         low = byte_val & 0x0F
@@ -2977,10 +3057,9 @@ class MainWindow(QMainWindow):
                             break
                         i += 2
                     if not found:
-                        # 未扫描到 FC 起始特征：时间戳/测试标记等噪声行直接丢弃；
-                        # ED 包装帧已在上方分支保留，交给后续 ED 提取处理
                         continue
             out_lines.append(hex_clean)
+
         return '\n'.join(out_lines)
 
 
@@ -4270,6 +4349,37 @@ class MainWindow(QMainWindow):
     def parse_batch(self):
         """批量解析 - 支持所有协议"""
         input_text = self.batch_input.toPlainText().strip()
+        self._debug_log(f"parse_batch: 输入 {len(input_text)} 字符")
+        self._debug_log(f"parse_batch: 前200字符:\n{input_text[:200]}")
+
+        # 新一代载波协议(索引9)：先剥离监控日志前缀（在 hex 清洗前处理原始文本）
+        # 监控日志格式: "<时间> <序号> -> 接收机 Has Get <15字节监控头> <协议报文>"
+        # 需要先识别 "-> 接收机 Has Get" 标记，去除其后 15 字节监控头，再提取协议报文
+        if self.current_protocol == 9:
+            before = len(input_text)
+            input_text = self._strip_csg_new_gen_frame_prefix(
+                input_text, getattr(self, '_csg_parse_level', 'auto'))
+            self._debug_log(f"_strip_csg_new_gen_frame_prefix: {before}→{len(input_text)} 字符")
+            self._debug_log(f"  前200字符:\n{input_text[:200]}")
+
+        # 国网新一代双模协议(索引10)：剥离日志前缀（在 hex 清洗前处理原始文本）
+        # 日志格式: "Line XXX: timestamp: metadata:hex_data"
+        # 取最后一个冒号后的 hex 数据，app 级别时扫描 '11' 定位应用层起始
+        if self.current_protocol == 10:
+            before = len(input_text)
+            input_text = self._strip_gw_new_gen_prefix(input_text)
+            self._debug_log(f"_strip_gw_new_gen_prefix: {before}→{len(input_text)} 字符")
+
+        # 预处理：去除空格、逗号等分隔符，保留换行以区分多帧
+        before = len(input_text)
+        input_text = self._clean_hex_input(input_text, keep_newlines=True)
+        self._debug_log(f"_clean_hex_input: {before}→{len(input_text)} 字符")
+        self._debug_log(f"  keep_newlines=True, 行数={len(input_text.splitlines())}")
+        # 显示每行的前 40 字符
+        for i, ln in enumerate(input_text.splitlines()[:5], 1):
+            self._debug_log(f"  行{i}: [{len(ln)//2:3d}B] {ln[:60]}")
+        if len(input_text.splitlines()) > 5:
+            self._debug_log(f"  ... 共 {len(input_text.splitlines())} 行")
 
         # 新一代载波协议(索引9)：先剥离监控日志前缀（在 hex 清洗前处理原始文本）
         # 监控日志格式: "<时间> <序号> -> 接收机 Has Get <15字节监控头> <协议报文>"
@@ -4288,13 +4398,38 @@ class MainWindow(QMainWindow):
         input_text = self._clean_hex_input(input_text, keep_newlines=True)
 
         if not input_text:
-            QMessageBox.warning(self, "警告", "请输入报文内容！")
+            # 区分：原始输入为空 vs 预处理/清洗后为空
+            raw = self.batch_input.toPlainText().strip()
+            if raw:
+                QMessageBox.warning(self, "警告",
+                    "预处理后未保留有效报文内容！\n\n"
+                    "可能原因：\n"
+                    "• 预处理命令（如 find）过滤后，匹配行不含十六进制数据\n"
+                    "• 日志行中的报文内容被文本描述覆盖\n\n"
+                    "建议：检查预处理命令的过滤条件，或先不执行预处理查看原始内容。")
+            else:
+                QMessageBox.warning(self, "警告", "请输入报文内容！")
             return
 
         # 根据当前协议选择帧提取方式
         frames = self._extract_frames_for_protocol(input_text, self.current_protocol)
+        self._debug_log(f"_extract_frames_for_protocol: 找到 {len(frames)} 帧")
+        for i, f in enumerate(frames[:5], 1):
+            fhex = f[0] if isinstance(f, tuple) else f
+            self._debug_log(f"  帧{i}: [{len(fhex)//2:3d}B] {fhex[:60]}")
+        if len(frames) > 5:
+            self._debug_log(f"  ... 共 {len(frames)} 帧")
+
         if not frames:
-            QMessageBox.warning(self, "警告", f"未识别到有效帧！")
+            # 给出更详细的诊断
+            sample = input_text[:200].replace('\n', '\\n')
+            QMessageBox.warning(self, "警告",
+                f"未识别到有效帧！\n\n"
+                f"清洗后内容（前200字符）：\n{sample}\n\n"
+                f"可能原因：\n"
+                f"• 当前协议（{self.protocol_combo.currentText()}）的帧起始符不匹配\n"
+                f"• 内容为日志文本而非原始报文\n"
+                f"• 报文被截断或格式异常")
             return
 
         # 清空之前的结果
@@ -4313,6 +4448,12 @@ class MainWindow(QMainWindow):
             else:
                 frame_hex = frame_item
                 ed_data_type = ""
+
+            # 前 5 帧打印 debug 日志
+            if i < 5:
+                self._debug_log(f"解析帧{i+1}: [{len(frame_hex)//2:3d}B] "
+                                f"开始={frame_hex[:4]}... "
+                                f"ed_type={ed_data_type or '无'}")
 
             table_data = []
             try:
