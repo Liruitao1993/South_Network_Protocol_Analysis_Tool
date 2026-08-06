@@ -59,6 +59,10 @@ PROVIDER_PRESETS: Dict[str, Dict[str, str]] = {
         "endpoint": "http://localhost:1234/v1",
         "models": "",
     },
+    "OpenRouter (免费)": {
+        "endpoint": "https://openrouter.ai/api/v1",
+        "models": "meta-llama/llama-3.1-8b-instruct:free,google/gemma-2-9b-it:free,qwen/qwen-2.5-7b-instruct:free,mistralai/mistral-7b-instruct:free",
+    },
     "自定义": {
         "endpoint": "",
         "models": "",
@@ -148,9 +152,11 @@ class _TestThread(QThread):
     def run(self):
         try:
             from llm_preprocess import LLMAPIClient
-            client = LLMAPIClient(self.endpoint, self.api_key, self.model, timeout=15)
+            client = LLMAPIClient(self.endpoint, self.api_key, self.model, timeout=30)
             msg = client.test_connection()
             self.result.emit(msg)
+        except TimeoutError as e:
+            self.error.emit(f"超时: {e}")
         except Exception as e:
             self.error.emit(str(e))
 

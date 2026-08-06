@@ -175,7 +175,13 @@ class GWNewGenParser:
             # 如果首字节是有效端口号，直接从偏移0解析
             known_ports = set(self.PORT_NAMES.keys())
             if len(data) >= 1 and data[0] in known_ports:
-                return self._parse_application_layer(data, 0)
+                direction = 0  # 默认下行
+                # 对抄表报文(0x0001/0x0002/0x0003): 选项字 bit0=方向位(0=下行,1=上行)
+                if len(data) >= 8 and data[0] in (0x11, 0x12, 0x13):
+                    _msg_id_val = data[1] | (data[2] << 8)
+                    if _msg_id_val in (0x0001, 0x0002, 0x0003):
+                        direction = data[7] & 0x01
+                return self._parse_application_layer(data, 0, direction)
             # 若输入以MPDU FC帧头开头(可能带管理消息), 剥离FC后检测管理消息
             stripped, fc_off = self._strip_fc_prefix_if_present(data, [])
             if fc_off > 0:
@@ -189,7 +195,12 @@ class GWNewGenParser:
             if app_result:
                 return app_result
             # 回退：强制从偏移0解析
-            return self._parse_application_layer(data, 0)
+            direction = 0
+            if len(data) >= 8 and data[0] in (0x11, 0x12, 0x13):
+                _msg_id_val = data[1] | (data[2] << 8)
+                if _msg_id_val in (0x0001, 0x0002, 0x0003):
+                    direction = data[7] & 0x01
+            return self._parse_application_layer(data, 0, direction)
 
         # ── 仅MAC帧模式：输入包含PB头+MAC帧头（输入即PB/MAC数据, 不剥离FC）──
         if parse_level == "mac_only":
@@ -708,6 +719,12 @@ class GWNewGenParser:
 
             # ── 解析应用层 ──
             direction = 0  # 默认下行
+            # 对抄表报文(0x0001/0x0002/0x0003): 选项字 bit0=方向位(0=下行,1=上行)
+            if app_offset + 8 <= data_end:
+                _msg_id_val = data[app_offset + 1] | (data[app_offset + 2] << 8)
+                if _msg_id_val in (0x0001, 0x0002, 0x0003):
+                    option_byte = data[app_offset + 7]
+                    direction = option_byte & 0x01  # bit0: 0=下行, 1=上行
             # 用ICV(CRC-32)定位MSDU结束位置，截断应用层数据，避免ICV/填充/PBCS混入业务数据
             icv_start = self._locate_msdu_icv(data, app_offset)
             if icv_start > 0:
@@ -746,7 +763,12 @@ class GWNewGenParser:
                     app_start = msdu_start + mac_header_len
                     app_port = data[app_start]
                     if app_port in known_ports:
-                        app_result = self._parse_application_layer(data, app_start, 0)
+                        _dir = 0
+                        if app_start + 8 <= data_end and app_port in (0x11, 0x12, 0x13):
+                            _mid = data[app_start + 1] | (data[app_start + 2] << 8)
+                            if _mid in (0x0001, 0x0002, 0x0003):
+                                _dir = data[app_start + 7] & 0x01
+                        app_result = self._parse_application_layer(data, app_start, _dir)
                         result.extend(app_result)
                     else:
                         # 非应用层: 检查MSDU类型, 网络管理消息按表42/43解析
@@ -769,7 +791,12 @@ class GWNewGenParser:
             else:
                 # 无MAC帧头，尝试直接解析应用层
                 if fc_end < data_end and data[fc_end] in known_ports:
-                    app_result = self._parse_application_layer(data, fc_end, 0)
+                    _dir2 = 0
+                    if fc_end + 8 <= data_end and data[fc_end] in (0x11, 0x12, 0x13):
+                        _mid2 = data[fc_end + 1] | (data[fc_end + 2] << 8)
+                        if _mid2 in (0x0001, 0x0002, 0x0003):
+                            _dir2 = data[fc_end + 7] & 0x01
+                    app_result = self._parse_application_layer(data, fc_end, _dir2)
                     result.extend(app_result)
 
         return result
@@ -1100,7 +1127,12 @@ class GWNewGenParser:
             if msdu_len > 0 and msdu_start < len(data):
                 msdu_end = min(msdu_start + msdu_len, len(data))
                 if is_app:
-                    app_result = self._parse_application_layer(data[:msdu_end], msdu_start)
+                    _dir3 = 0
+                    if msdu_start + 8 <= msdu_end and data[msdu_start] in (0x11, 0x12, 0x13):
+                        _mid3 = data[msdu_start + 1] | (data[msdu_start + 2] << 8)
+                        if _mid3 in (0x0001, 0x0002, 0x0003):
+                            _dir3 = data[msdu_start + 7] & 0x01
+                    app_result = self._parse_application_layer(data[:msdu_end], msdu_start, _dir3)
                     result.extend(app_result)
                 elif version == 1:
                     # 单跳帧(表3): 消息类型0=无线发现列表 1=信道评估 2=载波发现列表 129=IPV4
