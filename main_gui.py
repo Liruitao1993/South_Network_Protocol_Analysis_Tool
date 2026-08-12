@@ -1008,56 +1008,82 @@ class MainWindow(QMainWindow):
         result_layout.addWidget(self.verify_group)
 
         # 全屏/恢复按钮：解析结果表格撑满窗口（隐藏输入区+校验结果区）
-        verify_full_row = self._make_fullscreen_controls([input_group, self.verify_group])
-        export_row.addLayout(verify_full_row)
+        export_row.addLayout(
+            self._make_table_fullscreen_btn("解析结果 - 全屏", self.result_table_widget))
 
         layout.addWidget(result_group, 1)
 
         return tab
 
     # ------------------------------------------------------------- 视图辅助
-    def _make_fullscreen_controls(self, hide_widgets: list) -> QHBoxLayout:
-        """构建右对齐「全屏 / 恢复」按钮对。
+    def _make_table_fullscreen_btn(self, title: str, table: QTableWidget) -> QHBoxLayout:
+        """构建右对齐「全屏」按钮：点击在新窗口全屏展示解析结果表格。
 
-        全屏: 隐藏 hide_widgets 中的兄弟控件（支持零参 callable 延迟解析，
-        如 splitter 兄弟组在创建时尚不存在），让所在表格撑满窗口
-        恢复: 重新显示各控件
-        返回按钮行布局（含 addStretch），调用方 addLayout 到表格所在布局。
+        与报文对比「结果详情」交互一致：弹窗内克隆表格快照展示，
+        点「关闭」或窗口 X 关闭后主界面原样恢复。
         """
         row = QHBoxLayout()
         row.setSpacing(6)
         row.addStretch()
-
         fs_btn = QPushButton("全屏")
-        rs_btn = QPushButton("恢复")
-        for b in (fs_btn, rs_btn):
-            b.setFixedHeight(26)
-            b.setFont(self._ui_font(-1))
-        rs_btn.setEnabled(False)
-
-        def _targets():
-            out = []
-            for t in hide_widgets:
-                out.append(t() if callable(t) else t)
-            return [t for t in out if t is not None]
-
-        def _fs():
-            for t in _targets():
-                t.hide()
-            fs_btn.setEnabled(False)
-            rs_btn.setEnabled(True)
-
-        def _rs():
-            for t in _targets():
-                t.show()
-            fs_btn.setEnabled(True)
-            rs_btn.setEnabled(False)
-
-        fs_btn.clicked.connect(_fs)
-        rs_btn.clicked.connect(_rs)
+        fs_btn.setFixedHeight(26)
+        fs_btn.setFont(self._ui_font(-1))
+        fs_btn.setToolTip("在新窗口全屏展示解析结果表格，关闭窗口即恢复")
+        fs_btn.clicked.connect(lambda: self._open_table_popup(title, table))
         row.addWidget(fs_btn)
-        row.addWidget(rs_btn)
         return row
+
+    def _open_table_popup(self, title: str, source_table: QTableWidget):
+        """以独立弹窗全屏展示解析结果表格（克隆快照，关闭后主界面原样恢复）"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle(title)
+        dialog.resize(1200, 700)
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
+
+        # 克隆源表格内容为快照（读取型展示，不共享原表格）
+        clone = QTableWidget(source_table.rowCount(), source_table.columnCount())
+        headers = []
+        for c in range(source_table.columnCount()):
+            h = source_table.horizontalHeaderItem(c)
+            headers.append(h.text() if h else "")
+        clone.setHorizontalHeaderLabels(headers)
+        for r in range(source_table.rowCount()):
+            for c in range(source_table.columnCount()):
+                item = source_table.item(r, c)
+                if item:
+                    clone.setItem(r, c, QTableWidgetItem(item.text()))
+        # 外观对齐源表格
+        header = clone.horizontalHeader()
+        header.setStretchLastSection(True)
+        src_header = source_table.horizontalHeader()
+        for c in range(source_table.columnCount()):
+            if src_header.sectionSize(c) > 20:
+                clone.setColumnWidth(c, src_header.sectionSize(c))
+        clone.setEditTriggers(QTableWidget.NoEditTriggers)
+        clone.setSelectionBehavior(QTableWidget.SelectRows)
+        clone.setAlternatingRowColors(True)
+        clone.verticalHeader().hide()
+        clone.setFont(source_table.font())
+        layout.addWidget(clone, 1)
+
+        # 关闭按钮
+        btn_close = QPushButton("关闭")
+        btn_close.setFixedSize(80, 28)
+        btn_close.setStyleSheet(
+            "QPushButton { background-color: #fff; color: #666; border: 1px solid #dcdcdc; "
+            "border-radius: 3px; padding: 4px 12px; }"
+            "QPushButton:hover { background-color: #f0f0f0; }"
+        )
+        btn_close.clicked.connect(dialog.accept)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_row.addWidget(btn_close)
+        layout.addLayout(btn_row)
+
+        dialog.exec()
 
     def _on_verify_expand(self):
         """展开校验结果全文"""
@@ -1638,9 +1664,9 @@ class MainWindow(QMainWindow):
         self.batch_summary_table.itemSelectionChanged.connect(self._on_batch_row_selected)
         summary_layout.addWidget(self.batch_summary_table)
 
-        # 全屏/恢复：摘要表撑满（隐藏右侧详情组，延迟解析避免创建时尚未挂载）
+        # 全屏：弹窗展示摘要表（关闭即恢复）
         summary_layout.addLayout(
-            self._make_fullscreen_controls([lambda: self.result_splitter.widget(1)]))
+            self._make_table_fullscreen_btn("解析结果摘要 - 全屏", self.batch_summary_table))
 
         self.result_splitter.addWidget(summary_group)
 
@@ -1693,11 +1719,9 @@ class MainWindow(QMainWindow):
         self._setup_table_copy_menu(self.batch_detail_table)
         detail_layout.addWidget(self.batch_detail_table)
 
-        # 全屏/恢复：详情表撑满（隐藏左侧摘要组 + 原始报文行，摘要组延迟解析）
+        # 全屏：弹窗展示详情表（关闭即恢复）
         detail_layout.addLayout(
-            self._make_fullscreen_controls(
-                [lambda: self.result_splitter.widget(0), hex_label,
-                 self.batch_detail_hex, self.batch_copy_hex_btn]))
+            self._make_table_fullscreen_btn("选中帧详细解析 - 全屏", self.batch_detail_table))
 
         self.result_splitter.addWidget(detail_group)
 
