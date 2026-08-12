@@ -561,7 +561,8 @@ python test_theme_settings.py  # 主题与字体设置
 > 本节按版本倒序记录。详细 commit 见 `git log`。每发新版本必须更新此处。
 
 ### 后续更新（2026-08-12，未发版）
-- **新一代载波协议(通感一体化,索引9)无线信道单跳MAC帧解析**（`csg_new_gen_parser.py`）：
+- **新一代载波协议(索引9)测试帧切频操作目标按 Option+信道号解析**（`csg_new_gen_cmd_payloads.py`）：测试模式/配置操作=6（频段切换操作/切频）的目标字段不再按 12bit 目标频段值（`20 00` 误显示 512）解析，改为 **Option(字节2高4位) + 无线信道号(字节3)**（`20 00` → Option=2, 信道号=0），与模式8（无线信道切换）一致；同步修正国网新一代 `gw_new_gen_cmd_payloads.py` 模式6（删除废弃 `_EXT_FREQ_BANDS`）并更新 `test_gw_ext_cmd.py` T3/T13/T14 断言
+- **新一代载波协议无线信道单跳MAC帧解析**（`csg_new_gen_parser.py`）：
   - **版本2 单跳帧协议（表12，仅无线信道）MAC 帧头解析**：`_parse_mac_frame` 新增 `_parse_single_hop_mac` 分支——4 字节头（帧头类型1b+版本2b+保留5b / MSDU类型8b 表13 / MSDU长度16b 小端），载荷无 VLAN+类型前缀，按 MSDU 类型内联分派（1=应用层报文 / 2=无线发现列表 / 128=IPV4），尾部 CRC-32 校验
   - **无线发现列表消息（表139 MMeRF DiscoverNodeList）**：新增 `_parse_rf_discover_node_list`——站点MAC 6B + 统计序号 1B + 信息单元 TLV 链（类型7bit+长度类型1bit，长度1/2B），类型0 站点属性按表142 展开 14B（CCO MAC/代理TEI/角色/层级/RF跳数/接收率/发现列表周期/老化周期个数）
   - `parse_to_table` 步骤3 与 `_parse_pb_block` 尾段按版本2 定 4B 帧头长，`msdu_payload=b""` 防与内联解析重复
