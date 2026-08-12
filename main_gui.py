@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QTextEdit,
     QTableWidget, QTableWidgetItem, QFileDialog, QMessageBox,
     QHeaderView, QSplitter, QGroupBox, QDialog, QTabWidget, QComboBox,
-    QListView, QFrame, QMenuBar, QSpinBox, QCheckBox, QMenu
+    QListView, QFrame, QMenuBar, QSpinBox, QCheckBox, QMenu, QScrollArea
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QObject
 from PySide6.QtWidgets import QStyle
@@ -976,15 +976,104 @@ class MainWindow(QMainWindow):
         # === 校验结果区域 ===
         self.verify_group = QGroupBox("校验结果")
         verify_layout = QVBoxLayout(self.verify_group)
+        verify_layout.setContentsMargins(8, 8, 8, 8)
+        verify_layout.setSpacing(4)
+
+        # 头部按钮行：展开 / 收缩（收缩后仅保留标题+按钮行，内容进入滚动区）
+        verify_head = QHBoxLayout()
+        verify_head.addStretch()
+        self.verify_expand_btn = QPushButton("展开")
+        self.verify_collapse_btn = QPushButton("收缩")
+        for b in (self.verify_expand_btn, self.verify_collapse_btn):
+            b.setFixedHeight(24)
+            b.setFont(self._ui_font(-1))
+        self.verify_expand_btn.setEnabled(False)  # 默认展开态
+        self.verify_expand_btn.setToolTip("展开校验结果全文")
+        self.verify_collapse_btn.setToolTip("收缩校验结果，仅保留摘要入口")
+        self.verify_expand_btn.clicked.connect(self._on_verify_expand)
+        self.verify_collapse_btn.clicked.connect(self._on_verify_collapse)
+        verify_head.addWidget(self.verify_expand_btn)
+        verify_head.addWidget(self.verify_collapse_btn)
+        verify_layout.addLayout(verify_head)
+
+        # 校验结果内容（滚动区，收缩时隐藏）
+        self.verify_scroll = QScrollArea()
+        self.verify_scroll.setWidgetResizable(True)
+        self.verify_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.verify_label = QLabel("点击「校验报文」按钮进行协议一致性校验")
         self.verify_label.setWordWrap(True)
         self.verify_label.setFont(self._ui_font(-1, family="Consolas"))
-        verify_layout.addWidget(self.verify_label)
+        self.verify_scroll.setWidget(self.verify_label)
+        verify_layout.addWidget(self.verify_scroll, 1)
         result_layout.addWidget(self.verify_group)
+
+        # 全屏/恢复按钮：解析结果表格撑满窗口（隐藏输入区+校验结果区）
+        verify_full_row = self._make_fullscreen_controls([input_group, self.verify_group])
+        export_row.addLayout(verify_full_row)
 
         layout.addWidget(result_group, 1)
 
         return tab
+
+    # ------------------------------------------------------------- 视图辅助
+    def _make_fullscreen_controls(self, hide_widgets: list) -> QHBoxLayout:
+        """构建右对齐「全屏 / 恢复」按钮对。
+
+        全屏: 隐藏 hide_widgets 中的兄弟控件（支持零参 callable 延迟解析，
+        如 splitter 兄弟组在创建时尚不存在），让所在表格撑满窗口
+        恢复: 重新显示各控件
+        返回按钮行布局（含 addStretch），调用方 addLayout 到表格所在布局。
+        """
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        row.addStretch()
+
+        fs_btn = QPushButton("全屏")
+        rs_btn = QPushButton("恢复")
+        for b in (fs_btn, rs_btn):
+            b.setFixedHeight(26)
+            b.setFont(self._ui_font(-1))
+        rs_btn.setEnabled(False)
+
+        def _targets():
+            out = []
+            for t in hide_widgets:
+                out.append(t() if callable(t) else t)
+            return [t for t in out if t is not None]
+
+        def _fs():
+            for t in _targets():
+                t.hide()
+            fs_btn.setEnabled(False)
+            rs_btn.setEnabled(True)
+
+        def _rs():
+            for t in _targets():
+                t.show()
+            fs_btn.setEnabled(True)
+            rs_btn.setEnabled(False)
+
+        fs_btn.clicked.connect(_fs)
+        rs_btn.clicked.connect(_rs)
+        row.addWidget(fs_btn)
+        row.addWidget(rs_btn)
+        return row
+
+    def _on_verify_expand(self):
+        """展开校验结果全文"""
+        self.verify_scroll.show()
+        self.verify_group.setMaximumHeight(16777215)
+        self.verify_expand_btn.setEnabled(False)
+        self.verify_collapse_btn.setEnabled(True)
+
+    def _on_verify_collapse(self):
+        """收缩校验结果：隐藏内容，仅保留组标题和按钮行"""
+        self.verify_scroll.hide()
+        head_h = self.verify_collapse_btn.sizeHint().height() + 8
+        # 26 ≈ QGroupBox 标题区 + 布局边距（随主题可能有差异，预留余量）
+        self.verify_group.setMaximumHeight(head_h + 28)
+        self.verify_expand_btn.setEnabled(True)
+        self.verify_collapse_btn.setEnabled(False)
 
     def _export_result_image(self):
         """将解析结果表格导出为完整的PNG图片"""
@@ -1549,6 +1638,10 @@ class MainWindow(QMainWindow):
         self.batch_summary_table.itemSelectionChanged.connect(self._on_batch_row_selected)
         summary_layout.addWidget(self.batch_summary_table)
 
+        # 全屏/恢复：摘要表撑满（隐藏右侧详情组，延迟解析避免创建时尚未挂载）
+        summary_layout.addLayout(
+            self._make_fullscreen_controls([lambda: self.result_splitter.widget(1)]))
+
         self.result_splitter.addWidget(summary_group)
 
         # 右侧：详情面板
@@ -1599,6 +1692,12 @@ class MainWindow(QMainWindow):
         # 右键复制菜单 + Ctrl+C
         self._setup_table_copy_menu(self.batch_detail_table)
         detail_layout.addWidget(self.batch_detail_table)
+
+        # 全屏/恢复：详情表撑满（隐藏左侧摘要组 + 原始报文行，摘要组延迟解析）
+        detail_layout.addLayout(
+            self._make_fullscreen_controls(
+                [lambda: self.result_splitter.widget(0), hex_label,
+                 self.batch_detail_hex, self.batch_copy_hex_btn]))
 
         self.result_splitter.addWidget(detail_group)
 
