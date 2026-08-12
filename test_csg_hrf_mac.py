@@ -191,10 +191,105 @@ def test_plc_short_header_regression():
     print("[OK] T4 PLC短帧头回归测试通过")
 
 
+def _user_plc_mpdu() -> bytes:
+    """用户实际 PLC 帧（BPLC 1x136B PB，152 字节）"""
+    return bytes.fromhex(
+        "09 00 F0 FF 01 00 00 41 78 04 20 5B 10 FA 98 4B"
+        " 00 00 00 00 03 00 18 00 FF 0F 00 50 11 01 01 00 01 01 11 01 01 00 02 60"
+        " F0 01 00 00 0A 00 03 00 06 00 81 61 20 00 00 00 59 06 47 A7"
+        + " 00" * 88 + " 42 0D 17".replace(" ", ""))
+
+
+def test_auto_channel_plc():
+    """T5: 用户 PLC 帧 channel=auto → 通道判定=plc，可变区域按表20 解析"""
+    parser = CSGNewGenParser()
+    frame = _user_plc_mpdu()
+    table = parser.parse_to_table(frame, parse_level="fc_pb", channel="auto")
+
+    row = find_field(table, "通道判定")
+    assert row and row[2] == "PLC 载波", f"通道判定错误: {row}"
+    # 与显式 plc 解析一致（表20: 物理块个数/载波映射表索引/符号数）
+    assert find_field(table, "物理块个数"), "缺少BPLC物理块个数字段"
+    row = find_field(table, "载波映射表索引")
+    assert row and row[2] == "4", f"载波映射表索引错误: {row}"
+    assert find_field(table, "符号数"), "缺少BPLC符号数字段"
+    print("[OK] T5 自动识别PLC帧测试通过")
+
+
+def test_auto_channel_hrf():
+    """T6: 合成 HRF MPDU channel=auto → 通道判定=hrf，可变区域按表45 解析"""
+    parser = CSGNewGenParser()
+    app_payload = bytes.fromhex("11 01 01 00 00 00 00 01")
+    mac_frame = _single_hop_mac(0x01, app_payload)
+    pb = _pb136(mac_frame)
+    frame = _hrf_sof_fc() + pb
+    table = parser.parse_to_table(frame, parse_level="fc_pb", channel="auto")
+
+    row = find_field(table, "通道判定")
+    assert row and row[2] == "HRF 高速无线", f"通道判定错误: {row}"
+    # 与显式 hrf 解析一致（表45: MCS/载荷PB大小）
+    row = find_field(table, "MCS")
+    assert row and row[2] == "2", f"MCS错误: {row}"
+    row = find_field(table, "载荷PB大小")
+    assert row and "136" in row[3], f"载荷PB大小错误: {row}"
+    assert find_field(table, "报文端口号"), "缺少应用层分析字段"
+    print("[OK] T6 自动识别HRF帧测试通过")
+
+
+def _pb136(mac_frame: bytes) -> bytes:
+    """构造 136B PB：头4B + 体128B + 保留1B + PBCS 3B"""
+    pb_hdr = bytes([0x00, 0x00, 0x00, 0x00])
+    body = mac_frame + b'\x00' * (128 - len(mac_frame))
+    pbcs = _crc24(pb_hdr + body + b'\x00').to_bytes(3, 'little')
+    return pb_hdr + body + b'\x00' + pbcs
+
+
+def test_auto_channel_pb40_strong_signal():
+    """T7: 载荷PB大小=40 → HRF（表44 值1 为 HRF 独有强信号）"""
+    parser = CSGNewGenParser()
+    app_payload = bytes.fromhex("11 01 01 00 00 00 00 01")
+    mac_frame = _single_hop_mac(0x01, app_payload)
+    # 40B PB: 头4 + 体32 + 保留1 + PBCS 3
+    pb_hdr = bytes([0x00, 0x00, 0x00, 0x00])
+    body = mac_frame + b'\x00' * (32 - len(mac_frame))
+    pbcs = _crc24(pb_hdr + body + b'\x00').to_bytes(3, 'little')
+    pb = pb_hdr + body + b'\x00' + pbcs
+    frame = _hrf_sof_fc(pb_size_idx=1) + pb  # 表44 值1 = 40字节
+    table = parser.parse_to_table(frame, parse_level="fc_pb", channel="auto")
+
+    row = find_field(table, "通道判定")
+    assert row and row[2] == "HRF 高速无线", f"PB40强信号通道判定错误: {row}"
+    row = find_field(table, "载荷PB大小")
+    assert row and "40" in row[3], f"载荷PB大小错误: {row}"
+    print("[OK] T7 PB40强信号测试通过")
+
+
+def test_auto_channel_explicit_unchanged():
+    """T8: 显式 channel=plc/hrf 行为不变（无通道判定行，解析结果一致）"""
+    parser = CSGNewGenParser()
+    frame = _user_plc_mpdu()
+    table = parser.parse_to_table(frame, parse_level="fc_pb", channel="plc")
+    assert find_field(table, "通道判定") is None, "显式plc不应出现通道判定行"
+    assert find_field(table, "符号数"), "显式plc解析缺少符号数"
+
+    app_payload = bytes.fromhex("11 01 01 00 00 00 00 01")
+    mac_frame = _single_hop_mac(0x01, app_payload)
+    hrf = _hrf_sof_fc() + _pb136(mac_frame)
+    table2 = parser.parse_to_table(hrf, parse_level="fc_pb", channel="hrf")
+    assert find_field(table2, "通道判定") is None, "显式hrf不应出现通道判定行"
+    row = find_field(table2, "MCS")
+    assert row and row[2] == "2", f"显式hrf MCS错误: {row}"
+    print("[OK] T8 显式通道回归测试通过")
+
+
 if __name__ == "__main__":
     test_single_hop_mac_app()
     test_full_wireless_mpdu()
     test_rf_discover_node_list()
     test_plc_short_header_regression()
+    test_auto_channel_plc()
+    test_auto_channel_hrf()
+    test_auto_channel_pb40_strong_signal()
+    test_auto_channel_explicit_unchanged()
     print("=" * 50)
     print("[OK] 全部测试通过")

@@ -561,6 +561,7 @@ python test_theme_settings.py  # 主题与字体设置
 > 本节按版本倒序记录。详细 commit 见 `git log`。每发新版本必须更新此处。
 
 ### 后续更新（2026-08-12，未发版）
+- **新一代载波协议(索引9)通道自动识别 PLC/HRF**（`csg_new_gen_parser.py` + `main_gui.py`）：`parse_to_table` 新增 `channel="auto"`，MPDU 级输入按 FC SOF 可变区域结构判别通道——表45(HRF)/表20(BPLC)/表23(ISAC) 三假设分别预测帧长与实际帧长比对，命中者胜；强信号：载荷PB大小=40 → HRF（表44 独有）、物理块个数>1 → PLC（无线仅支持1个PB）；解析结果新增「通道判定」行。GUI 通道下拉首位新增「自动识别」(默认，配置持久化)。新增 test_csg_hrf_mac.py T5-T8（用户PLC帧/合成HRF帧/PB40强信号/显式通道回归）
 - **新一代载波协议(索引9)测试帧切频操作目标按 Option+信道号解析**（`csg_new_gen_cmd_payloads.py`）：测试模式/配置操作=6（频段切换操作/切频）的目标字段不再按 12bit 目标频段值（`20 00` 误显示 512）解析，改为 **Option(字节2高4位) + 无线信道号(字节3)**（`20 00` → Option=2, 信道号=0），与模式8（无线信道切换）一致；同步修正国网新一代 `gw_new_gen_cmd_payloads.py` 模式6（删除废弃 `_EXT_FREQ_BANDS`）并更新 `test_gw_ext_cmd.py` T3/T13/T14 断言
 - **新一代载波协议无线信道单跳MAC帧解析**（`csg_new_gen_parser.py`）：
   - **版本2 单跳帧协议（表12，仅无线信道）MAC 帧头解析**：`_parse_mac_frame` 新增 `_parse_single_hop_mac` 分支——4 字节头（帧头类型1b+版本2b+保留5b / MSDU类型8b 表13 / MSDU长度16b 小端），载荷无 VLAN+类型前缀，按 MSDU 类型内联分派（1=应用层报文 / 2=无线发现列表 / 128=IPV4），尾部 CRC-32 校验
