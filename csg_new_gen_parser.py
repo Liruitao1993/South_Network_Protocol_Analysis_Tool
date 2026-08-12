@@ -243,7 +243,7 @@ class CSGNewGenParser:
         return _crc24_func(data)
 
     def parse_to_table(self, frame_bytes: bytes, parse_level: str = "auto",
-                    pb_frame_type: str = "sof", channel: str = "plc") -> list:
+                    pb_frame_type: str = "sof", channel: str = "auto") -> list:
         """
         解析帧为表格数据格式
         返回: [(字段名, 原始值, 解析值, 说明, byte_start, byte_end), ...]
@@ -257,9 +257,10 @@ class CSGNewGenParser:
         6. pb_only 物理块输入 (PB头 + MAC帧 + PBCS)
 
         Args:
-            channel: "plc" (默认, 载波) 或 "hrf" (高速无线)
+            channel: "plc" (载波), "hrf" (高速无线) 或 "auto" (MPDU级输入自动判别)
         """
         self._channel = channel
+        self._detected_channel = None
         table_data = []
         frame_len = len(frame_bytes)
         self._aggregated = False
@@ -267,6 +268,11 @@ class CSGNewGenParser:
         if frame_len < 2:
             table_data.append(("❌ 解析失败", "", "", "帧长度不足（<2字节）", None, None))
             return table_data
+
+        # ── 通道自动识别：仅 MPDU 级输入（接入指示=1）按 FC 可变区域结构判别 PLC/HRF ──
+        if channel == "auto" and ((frame_bytes[0] >> 3) & 0x01) == 1:
+            self._channel = self._detect_channel(frame_bytes, frame_len)
+            self._detected_channel = self._channel
 
         # ── 自动识别帧的起始层次（优先级：MPDU > MAC > MSDU > APP）──
         offset = 0
@@ -894,6 +900,57 @@ class CSGNewGenParser:
         offset += pb_hdr_len + mac_hdr_len
         return offset, mac_data, msdu_payload
 
+    def _detect_channel(self, frame_bytes: bytes, frame_len: int) -> str:
+        """MPDU 通道自动识别（plc/hrf），只读 FC 前16字节，无表副作用。
+
+        协议未在 FC 中标记信道（表17 标准版本号仅区分 BPLC/ISAC-PLC），
+        但 SOF 帧可变区域在 PLC/HRF 下字段布局不同（表20 BPLC / 表23 ISAC /
+        表45 HRF）：按各假设预测的 MPDU 帧长与实际帧长比对，命中者胜。
+
+        强信号优先：
+          - 载荷PB大小=40 → HRF（表44 值1 为 HRF 独有，PLC 无 40 字节 PB）
+          - 物理块个数>1 → PLC（无线信道仅支持 1 个物理块，图6）
+        平局/都不命中 → 默认 plc（与历史行为一致）。
+        """
+        if frame_len < 16:
+            return 'plc'
+        delim = frame_bytes[0] & 0x07
+        if delim != 1:  # 仅 SOF 帧可变区域可可靠判别；信标/SACK/NET 默认 plc
+            return 'plc'
+        var = frame_bytes[1:12]
+        std_version = (frame_bytes[12] >> 4) & 0x0F
+
+        # HRF 假设（表45）: 载荷PB大小 = byte6[4-7]（表44: 0=16,1=40,2=72,3=136,4=264,5=520）
+        hrf_pb = CSGNewGenParser.HRF_PB_SIZE_TABLE.get((var[5] >> 4) & 0x0F, 136)
+        if hrf_pb == 40:  # 40 字节 PB 仅 HRF 支持（表44 值1）
+            return 'hrf'
+        hrf_len = 16 + hrf_pb
+
+        # PLC 假设
+        if std_version == 1:
+            # BPLC（表20）: 物理块个数 = byte7[0-3], 载波映射表索引 = byte7[4-7] (136/520)
+            cnt = var[6] & 0x0F
+            tmi = (var[6] >> 4) & 0x0F
+            pb = 520 if tmi in (0xD, 15) else 136
+            plc_len = 16 + cnt * pb
+        else:
+            # ISAC-PLC（表23 数据帧）: 物理块个数 = byte4[2-5], TMI = byte6[1-5]
+            # (0=136,1=520,2=72,3=264)
+            cnt = (var[3] >> 2) & 0x0F
+            tmi = (var[5] >> 1) & 0x1F
+            pb = {0: 136, 1: 520, 2: 72, 3: 264}.get(tmi, 136)
+            plc_len = 16 + cnt * pb
+
+        hr_m = (hrf_len == frame_len)
+        pl_m = (plc_len == frame_len)
+        if hr_m and not pl_m:
+            return 'hrf'
+        if pl_m and not hr_m:
+            return 'plc'
+        # 平局/都不命中: 用强信号打破; 无线仅支持1个物理块（图6）
+        if cnt > 1:
+            return 'plc'
+        return 'plc'  # 默认 plc（与历史行为一致）
 
     def _parse_mpdu_frame(self, frame_bytes: bytes, base_offset: int = 0) -> Tuple[int, list]:
         """解析 MPDU 帧控制（FC）头部，16字节"""
@@ -1093,6 +1150,18 @@ class CSGNewGenParser:
             offset, offset + 2
         ))
         offset += 3
+
+        # ── 通道自动识别结果（channel="auto" 时）──
+        if getattr(self, '_detected_channel', None) is not None:
+            ch = self._detected_channel
+            ch_name = "PLC 载波" if ch == "plc" else "HRF 高速无线"
+            table.append((
+                "通道判定",
+                ch,
+                ch_name,
+                "按FC可变区域结构自动识别（帧长一致性+PB大小/物理块个数强信号）",
+                0, 15
+            ))
 
         return offset, table
 

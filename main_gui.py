@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QHeaderView, QSplitter, QGroupBox, QDialog, QTabWidget, QComboBox,
     QListView, QFrame, QMenuBar, QSpinBox, QCheckBox, QMenu
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QThread, Signal, QObject
 from PySide6.QtWidgets import QStyle
 from PySide6.QtGui import QFont, QTextCursor, QTextCharFormat, QColor, QIcon, QKeySequence, QShortcut, QGuiApplication
 
@@ -33,6 +33,7 @@ from gdw10376_parser import GDW10376Parser
 from dl_t698_45_parser import DLT69845Parser
 from csg_new_gen_parser import CSGNewGenParser
 from gw_new_gen_parser import GWNewGenParser
+from hdc10_parser import HDC10Parser
 from obis_lookup import OBISLookup, get_obis_lookup
 from command_lookup import CommandLookup, get_command_lookup
 from dlt645_di_lookup import DLT645DILookup, get_dlt645_di_lookup
@@ -472,6 +473,7 @@ class MainWindow(QMainWindow):
         self.dl_t698_45_parser = DLT69845Parser()
         self.csg_new_gen_parser = CSGNewGenParser()
         self.gw_new_gen_parser = GWNewGenParser()
+        self.hdc10_parser = HDC10Parser()
 
         # 新一代载波协议解析级别：auto=自动, fc_pb=FC+PB, fc_only=仅FC, app=应用层
         self._csg_parse_level = "auto"
@@ -480,6 +482,9 @@ class MainWindow(QMainWindow):
 
         # 国网新一代解析级别：auto=自动, fc_pb=FC+完整PB, fc_only=仅FC, fc_mac=FC+PB头+MAC, app=应用层
         self._gw_parse_level = "auto"
+        # HDC 1.0解析级别
+        self._hdc10_parse_level = "auto"
+        self._hdc10_channel = "plc"
 
         # 初始化查询器
         self.obis_lookup = get_obis_lookup()
@@ -536,24 +541,25 @@ class MainWindow(QMainWindow):
         proto_layout.setSpacing(6)
 
         proto_label = QLabel("当前协议：")
-        proto_label.setFont(QFont("", 10, QFont.Bold))
+        proto_label.setFont(self._ui_font(0, bold=True))
         proto_label.setFixedWidth(65)
         proto_layout.addWidget(proto_label)
 
         self.protocol_combo = QComboBox()
-        self.protocol_combo.addItem("南网协议 (Q/CSG1209021-2019)")
-        self.protocol_combo.addItem("PLC RF协议 (万胜海外 V1_04)")
-        self.protocol_combo.addItem("HDLC/国网DLMS (IEC 62056-46)")
-        self.protocol_combo.addItem("DLMS-APDU(国网)")
-        self.protocol_combo.addItem("DLMS Wrapper裸报文")
-        self.protocol_combo.addItem("DLMS-APDU裸报文")
-        self.protocol_combo.addItem("DLT645-2007 电表协议")
-        self.protocol_combo.addItem("国网协议 (Q/GDW 10376.2-2024)")
-        self.protocol_combo.addItem("698.45协议 (DL/T 698.45-2017)")
-        self.protocol_combo.addItem("新一代载波协议 (通感一体化)")
-        self.protocol_combo.addItem("国网新一代双模通信互联互通")
-        self.protocol_combo.setMinimumWidth(280)
-        self.protocol_combo.setFont(QFont("Microsoft YaHei", 10))
+        self.protocol_combo.addItem("[0] 南网协议 (Q/CSG1209021-2019)")
+        self.protocol_combo.addItem("[1] PLC RF协议 (万胜海外 V1_04)")
+        self.protocol_combo.addItem("[2] HDLC/国网DLMS (IEC 62056-46)")
+        self.protocol_combo.addItem("[3] DLMS-APDU(国网)")
+        self.protocol_combo.addItem("[4] DLMS Wrapper裸报文")
+        self.protocol_combo.addItem("[5] DLMS-APDU裸报文")
+        self.protocol_combo.addItem("[6] DLT645-2007 电表协议")
+        self.protocol_combo.addItem("[7] 国网协议 (Q/GDW 10376.2-2024)")
+        self.protocol_combo.addItem("[8] 698.45协议 (DL/T 698.45-2017)")
+        self.protocol_combo.addItem("[9] 新一代载波协议 (通感一体化)")
+        self.protocol_combo.addItem("[10] 国网新一代双模通信互联互通")
+        self.protocol_combo.addItem("[11] HDC 1.0 双模互联互通")
+        self.protocol_combo.setMinimumWidth(320)
+        self.protocol_combo.setFont(self._ui_font(0))
         # 让弹出菜单宽度自动适应最宽的文字
         self.protocol_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self.protocol_combo.currentIndexChanged.connect(self._on_protocol_changed)
@@ -561,7 +567,7 @@ class MainWindow(QMainWindow):
 
         # ---- 新一代载波协议解析级别选择（仅协议索引9时可见）----
         self.csg_parse_level_label = QLabel("解析级别：")
-        self.csg_parse_level_label.setFont(QFont("Microsoft YaHei", 9))
+        self.csg_parse_level_label.setFont(self._ui_font(-1))
         proto_layout.addWidget(self.csg_parse_level_label)
 
         self.csg_parse_level_combo = QComboBox()
@@ -571,16 +577,37 @@ class MainWindow(QMainWindow):
         self.csg_parse_level_combo.addItem("仅FC解析", "fc_only")
         self.csg_parse_level_combo.addItem("应用层报文", "app")
         self.csg_parse_level_combo.addItem("仅PB解析(完整物理块)", "pb_only")
-        self.csg_parse_level_combo.setFont(QFont("Microsoft YaHei", 9))
+        self.csg_parse_level_combo.setFont(self._ui_font(-1))
         self.csg_parse_level_combo.setMinimumWidth(180)
         self.csg_parse_level_combo.currentIndexChanged.connect(self._on_csg_parse_level_changed)
         self.csg_parse_level_combo.setVisible(False)
         proto_layout.addWidget(self.csg_parse_level_combo)
         self.csg_parse_level_label.setVisible(False)
 
+        # ---- 南网新一代通道选择（仅协议索引9时可见）----
+        self.csg_channel_label = QLabel("通道：")
+        self.csg_channel_label.setFont(self._ui_font(-1))
+        self.csg_channel_label.setVisible(False)
+        proto_layout.addWidget(self.csg_channel_label)
+
+        self.csg_channel_combo = QComboBox()
+        self.csg_channel_combo.addItem("自动识别", "auto")
+        self.csg_channel_combo.addItem("PLC 载波", "plc")
+        self.csg_channel_combo.addItem("HRF 无线", "hrf")
+        self.csg_channel_combo.setFont(self._ui_font(-1))
+        self.csg_channel_combo.setMinimumWidth(100)
+        # 从配置恢复
+        csg_ch = getattr(self, '_csg_channel', 'auto')
+        idx = self.csg_channel_combo.findData(csg_ch)
+        if idx >= 0:
+            self.csg_channel_combo.setCurrentIndex(idx)
+        self.csg_channel_combo.currentIndexChanged.connect(self._on_csg_channel_changed)
+        self.csg_channel_combo.setVisible(False)
+        proto_layout.addWidget(self.csg_channel_combo)
+
         # ---- 南网新一代PB帧类型选择（仅pb_only模式可见）----
         self.csg_pb_frame_type_label = QLabel("帧类型：")
-        self.csg_pb_frame_type_label.setFont(QFont("Microsoft YaHei", 9))
+        self.csg_pb_frame_type_label.setFont(self._ui_font(-1))
         self.csg_pb_frame_type_label.setVisible(False)
         proto_layout.addWidget(self.csg_pb_frame_type_label)
 
@@ -589,14 +616,14 @@ class MainWindow(QMainWindow):
         self.csg_pb_frame_type_combo.addItem("信标帧", "beacon")
         self.csg_pb_frame_type_combo.addItem("ACK帧(SACK)", "sack")
         self.csg_pb_frame_type_combo.addItem("NET帧", "net")
-        self.csg_pb_frame_type_combo.setFont(QFont("Microsoft YaHei", 9))
+        self.csg_pb_frame_type_combo.setFont(self._ui_font(-1))
         self.csg_pb_frame_type_combo.setMinimumWidth(120)
         self.csg_pb_frame_type_combo.setVisible(False)
         proto_layout.addWidget(self.csg_pb_frame_type_combo)
 
         # ---- 新一代载波协议字节剔除（仅协议索引9时可见）----
         self.csg_strip_head_label = QLabel("剔除前:")
-        self.csg_strip_head_label.setFont(QFont("Microsoft YaHei", 9))
+        self.csg_strip_head_label.setFont(self._ui_font(-1))
         self.csg_strip_head_label.setVisible(False)
         proto_layout.addWidget(self.csg_strip_head_label)
 
@@ -604,13 +631,13 @@ class MainWindow(QMainWindow):
         self.csg_strip_head_spin.setRange(0, 999)
         self.csg_strip_head_spin.setValue(0)
         self.csg_strip_head_spin.setSuffix(" 字节")
-        self.csg_strip_head_spin.setFont(QFont("Microsoft YaHei", 9))
+        self.csg_strip_head_spin.setFont(self._ui_font(-1))
         self.csg_strip_head_spin.setVisible(False)
         self.csg_strip_head_spin.setToolTip("解析前剔除报文头部指定字节数（0=不剔除）")
         proto_layout.addWidget(self.csg_strip_head_spin)
 
         self.csg_strip_tail_label = QLabel("尾部:")
-        self.csg_strip_tail_label.setFont(QFont("Microsoft YaHei", 9))
+        self.csg_strip_tail_label.setFont(self._ui_font(-1))
         self.csg_strip_tail_label.setVisible(False)
         proto_layout.addWidget(self.csg_strip_tail_label)
 
@@ -618,14 +645,14 @@ class MainWindow(QMainWindow):
         self.csg_strip_tail_spin.setRange(0, 999)
         self.csg_strip_tail_spin.setValue(0)
         self.csg_strip_tail_spin.setSuffix(" 字节")
-        self.csg_strip_tail_spin.setFont(QFont("Microsoft YaHei", 9))
+        self.csg_strip_tail_spin.setFont(self._ui_font(-1))
         self.csg_strip_tail_spin.setVisible(False)
         self.csg_strip_tail_spin.setToolTip("解析前剔除报文尾部指定字节数（0=不剔除）")
         proto_layout.addWidget(self.csg_strip_tail_spin)
 
         # ---- 国网新一代解析级别选择（仅协议索引10时可见）----
         self.gw_parse_level_label = QLabel("解析级别：")
-        self.gw_parse_level_label.setFont(QFont("Microsoft YaHei", 9))
+        self.gw_parse_level_label.setFont(self._ui_font(-1))
         self.gw_parse_level_label.setVisible(False)
         proto_layout.addWidget(self.gw_parse_level_label)
 
@@ -637,7 +664,7 @@ class MainWindow(QMainWindow):
         self.gw_parse_level_combo.addItem("仅PB", "pb_only")
         self.gw_parse_level_combo.addItem("FC+MAC解析", "fc_mac")
         self.gw_parse_level_combo.addItem("应用层报文", "app")
-        self.gw_parse_level_combo.setFont(QFont("Microsoft YaHei", 9))
+        self.gw_parse_level_combo.setFont(self._ui_font(-1))
         self.gw_parse_level_combo.setMinimumWidth(150)
         self.gw_parse_level_combo.currentIndexChanged.connect(self._on_gw_parse_level_changed)
         self.gw_parse_level_combo.setVisible(False)
@@ -645,7 +672,7 @@ class MainWindow(QMainWindow):
 
         # ---- 国网新一代PB帧类型选择（仅pb_only模式可见）----
         self.gw_pb_frame_type_label = QLabel("帧类型：")
-        self.gw_pb_frame_type_label.setFont(QFont("Microsoft YaHei", 9))
+        self.gw_pb_frame_type_label.setFont(self._ui_font(-1))
         self.gw_pb_frame_type_label.setVisible(False)
         proto_layout.addWidget(self.gw_pb_frame_type_label)
 
@@ -654,10 +681,30 @@ class MainWindow(QMainWindow):
         self.gw_pb_frame_type_combo.addItem("信标帧", 0)
         self.gw_pb_frame_type_combo.addItem("ACK帧(SACK)", 2)
         self.gw_pb_frame_type_combo.addItem("NET帧", 3)
-        self.gw_pb_frame_type_combo.setFont(QFont("Microsoft YaHei", 9))
+        self.gw_pb_frame_type_combo.setFont(self._ui_font(-1))
         self.gw_pb_frame_type_combo.setMinimumWidth(120)
         self.gw_pb_frame_type_combo.setVisible(False)
         proto_layout.addWidget(self.gw_pb_frame_type_combo)
+
+        # ---- 国网新一代通道选择（仅协议索引10时可见）----
+        self.gw_channel_label = QLabel("通道：")
+        self.gw_channel_label.setFont(self._ui_font(-1))
+        self.gw_channel_label.setVisible(False)
+        proto_layout.addWidget(self.gw_channel_label)
+
+        self.gw_channel_combo = QComboBox()
+        self.gw_channel_combo.addItem("PLC 载波", "plc")
+        self.gw_channel_combo.addItem("HRF 无线", "hrf")
+        self.gw_channel_combo.setFont(self._ui_font(-1))
+        self.gw_channel_combo.setMinimumWidth(100)
+        # 从配置恢复
+        gw_ch = getattr(self, '_gw_channel', 'plc')
+        idx = self.gw_channel_combo.findData(gw_ch)
+        if idx >= 0:
+            self.gw_channel_combo.setCurrentIndex(idx)
+        self.gw_channel_combo.currentIndexChanged.connect(self._on_gw_channel_changed)
+        self.gw_channel_combo.setVisible(False)
+        proto_layout.addWidget(self.gw_channel_combo)
 
         proto_layout.addStretch()
 
@@ -865,6 +912,12 @@ class MainWindow(QMainWindow):
         self.ed_monitor_chk.setVisible(False)
         btn_layout.addWidget(self.ed_monitor_chk)
 
+        # 4字节反转勾选项（仅南网新一代协议显示）
+        self.csg_reverse_4byte_chk = QCheckBox("4字节反转")
+        self.csg_reverse_4byte_chk.setToolTip("勾选后对输入 hex 按 4 字节一组做端序翻转（大端↔小端），\n例如 C9D50438 → 3804D5C9），再进行解析")
+        self.csg_reverse_4byte_chk.setVisible(False)
+        btn_layout.addWidget(self.csg_reverse_4byte_chk)
+
         btn_layout.addStretch()
         input_layout.addLayout(btn_layout)
 
@@ -890,8 +943,7 @@ class MainWindow(QMainWindow):
         self.result_table_widget.setAlternatingRowColors(True)
         self.result_table_widget.verticalHeader().hide()
         self.result_table_widget.verticalHeader().setDefaultSectionSize(13)
-        table_font = QFont()
-        table_font.setPointSize(7)
+        table_font = self._ui_font(-2)
         self.result_table_widget.setFont(table_font)
         # 行高更紧凑
         self.result_table_widget.verticalHeader().setDefaultSectionSize(10)
@@ -926,7 +978,7 @@ class MainWindow(QMainWindow):
         verify_layout = QVBoxLayout(self.verify_group)
         self.verify_label = QLabel("点击「校验报文」按钮进行协议一致性校验")
         self.verify_label.setWordWrap(True)
-        self.verify_label.setFont(QFont("Consolas", 9))
+        self.verify_label.setFont(self._ui_font(-1, family="Consolas"))
         verify_layout.addWidget(self.verify_label)
         result_layout.addWidget(self.verify_group)
 
@@ -1026,8 +1078,7 @@ class MainWindow(QMainWindow):
         self.di_table.setAlternatingRowColors(True)
         self.di_table.verticalHeader().hide()
         self.di_table.verticalHeader().setDefaultSectionSize(20)
-        table_font = QFont()
-        table_font.setPointSize(8)
+        table_font = self._ui_font(-2)
         self.di_table.setFont(table_font)
         layout.addWidget(self.di_table)
 
@@ -1253,21 +1304,20 @@ class MainWindow(QMainWindow):
         toolbar = QHBoxLayout()
         toolbar.setSpacing(6)
 
-        self.load_file_btn = QPushButton("从文件加载")
+        self.load_file_btn = self._make_toolbar_btn("从文件加载")
         self.load_file_btn.setToolTip("支持每行一帧的文本文件")
         self.load_file_btn.clicked.connect(self.load_from_file)
         toolbar.addWidget(self.load_file_btn)
 
-        self.paste_btn = QPushButton("从剪贴板粘贴")
+        self.paste_btn = self._make_toolbar_btn("从剪贴板粘贴")
         self.paste_btn.clicked.connect(self.paste_from_clipboard)
         toolbar.addWidget(self.paste_btn)
 
-        self.batch_parse_btn = QPushButton("开始批量解析")
-        self.batch_parse_btn.setMinimumHeight(30)
+        self.batch_parse_btn = self._make_toolbar_btn("开始批量解析", min_width=90)
         self.batch_parse_btn.clicked.connect(self.parse_batch)
         toolbar.addWidget(self.batch_parse_btn)
 
-        self.clear_batch_btn = QPushButton("清空")
+        self.clear_batch_btn = self._make_toolbar_btn("清空")
         self.clear_batch_btn.clicked.connect(self.clear_batch)
         toolbar.addWidget(self.clear_batch_btn)
 
@@ -1278,12 +1328,12 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(sep1)
 
         pp_label = QLabel("预处理:")
-        pp_label.setFont(QFont("Microsoft YaHei", 9))
+        pp_label.setFont(self._ui_font(-1))
         toolbar.addWidget(pp_label)
 
         self._pp_cmd_combo = QComboBox()
         self._pp_cmd_combo.setEditable(True)
-        self._pp_cmd_combo.setFont(QFont("Consolas", 9))
+        self._pp_cmd_combo.setFont(self._ui_font(-1, family="Consolas"))
         self._pp_cmd_combo.setMinimumWidth(260)
         self._pp_cmd_combo.setPlaceholderText('如: find "tcp data:" excluding "len:\\d+: "')
         self._pp_cmd_combo.setToolTip(
@@ -1306,32 +1356,66 @@ class MainWindow(QMainWindow):
         self._load_pp_commands()
         toolbar.addWidget(self._pp_cmd_combo)
 
-        self._pp_save_btn = QPushButton("★")
-        self._pp_save_btn.setFont(QFont("Microsoft YaHei", 9))
-        self._pp_save_btn.setMaximumWidth(24)
+        self._pp_save_btn = self._make_toolbar_btn("★", icon_btn=True)
         self._pp_save_btn.setToolTip("保存当前命令到常用列表")
         self._pp_save_btn.clicked.connect(self._save_pp_command)
         toolbar.addWidget(self._pp_save_btn)
 
-        self._pp_del_btn = QPushButton("×")
-        self._pp_del_btn.setFont(QFont("Microsoft YaHei", 9))
-        self._pp_del_btn.setMaximumWidth(24)
+        self._pp_del_btn = self._make_toolbar_btn("×", icon_btn=True)
         self._pp_del_btn.setToolTip("删除下拉列表中选中的命令")
         self._pp_del_btn.clicked.connect(self._delete_pp_command)
         toolbar.addWidget(self._pp_del_btn)
 
-        self._pp_run_btn = QPushButton("执行")
-        self._pp_run_btn.setFont(QFont("Microsoft YaHei", 9))
+        self._pp_run_btn = self._make_toolbar_btn("执行")
         self._pp_run_btn.setToolTip("对输入框内容执行预处理命令链，结果回填到输入框")
         self._pp_run_btn.clicked.connect(self._run_cli_preprocessor)
         toolbar.addWidget(self._pp_run_btn)
 
-        self._pp_help_btn = QPushButton("?")
-        self._pp_help_btn.setFont(QFont("Microsoft YaHei", 9))
-        self._pp_help_btn.setMaximumWidth(24)
+        self._pp_help_btn = self._make_toolbar_btn("?", icon_btn=True)
         self._pp_help_btn.setToolTip("显示预处理命令帮助")
         self._pp_help_btn.clicked.connect(self._show_pp_help)
         toolbar.addWidget(self._pp_help_btn)
+
+        # ── Python 脚本预处理 ───────────────────────────────────
+        sep_py = QFrame()
+        sep_py.setFrameShape(QFrame.VLine)
+        sep_py.setFrameShadow(QFrame.Sunken)
+        toolbar.addWidget(sep_py)
+
+        py_label = QLabel("脚本:")
+        py_label.setFont(self._ui_font(-1))
+        toolbar.addWidget(py_label)
+
+        self._py_script_combo = QComboBox()
+        self._py_script_combo.setFont(self._ui_font(-1, family="Consolas"))
+        self._py_script_combo.setMinimumWidth(180)
+        self._py_script_combo.setToolTip(
+            "Python 脚本预处理\n"
+            "加载自定义 .py 脚本，对输入文本进行清洗/转换\n"
+            "脚本需定义 process(text, context) -> str\n"
+            "⚠ 直接运行本地脚本，仅加载可信脚本")
+        self._load_py_scripts()
+        toolbar.addWidget(self._py_script_combo)
+
+        self._py_load_btn = self._make_toolbar_btn("加载")
+        self._py_load_btn.setToolTip("加载 .py 脚本文件到列表")
+        self._py_load_btn.clicked.connect(self._load_py_script_file)
+        toolbar.addWidget(self._py_load_btn)
+
+        self._py_run_btn = self._make_toolbar_btn("运行")
+        self._py_run_btn.setToolTip("对输入框内容运行当前脚本，结果回填")
+        self._py_run_btn.clicked.connect(self._run_py_script)
+        toolbar.addWidget(self._py_run_btn)
+
+        self._py_del_btn = self._make_toolbar_btn("×", icon_btn=True)
+        self._py_del_btn.setToolTip("从列表中移除当前脚本（不删除磁盘文件）")
+        self._py_del_btn.clicked.connect(self._delete_py_script)
+        toolbar.addWidget(self._py_del_btn)
+
+        self._py_help_btn = self._make_toolbar_btn("?", icon_btn=True)
+        self._py_help_btn.setToolTip("显示 Python 脚本预处理帮助")
+        self._py_help_btn.clicked.connect(self._show_py_script_help)
+        toolbar.addWidget(self._py_help_btn)
 
         # 分隔线
         sep = QFrame()
@@ -1340,11 +1424,11 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(sep)
 
         # 导出按钮
-        self.batch_export_excel_btn = QPushButton("导出 Excel")
+        self.batch_export_excel_btn = self._make_toolbar_btn("导出 Excel")
         self.batch_export_excel_btn.clicked.connect(lambda: self.export_batch("excel"))
         toolbar.addWidget(self.batch_export_excel_btn)
 
-        self.batch_export_json_btn = QPushButton("导出 JSON")
+        self.batch_export_json_btn = self._make_toolbar_btn("导出 JSON")
         self.batch_export_json_btn.clicked.connect(lambda: self.export_batch("json"))
         toolbar.addWidget(self.batch_export_json_btn)
 
@@ -1405,18 +1489,18 @@ class MainWindow(QMainWindow):
         filter_bar.setSpacing(6)
 
         search_label = QLabel("搜索：")
-        search_label.setFont(QFont("Microsoft YaHei", 9))
+        search_label.setFont(self._ui_font(-1))
         filter_bar.addWidget(search_label)
 
         self.batch_search_edit = QLineEdit()
         self.batch_search_edit.setPlaceholderText("输入关键词过滤（摘要/类型/TEI…）")
-        self.batch_search_edit.setFont(QFont("Microsoft YaHei", 9))
+        self.batch_search_edit.setFont(self._ui_font(-1))
         self.batch_search_edit.setClearButtonEnabled(True)
         self.batch_search_edit.textChanged.connect(self._on_batch_filter_changed)
         filter_bar.addWidget(self.batch_search_edit, 1)
 
         status_label = QLabel("状态：")
-        status_label.setFont(QFont("Microsoft YaHei", 9))
+        status_label.setFont(self._ui_font(-1))
         filter_bar.addWidget(status_label)
 
         self.batch_status_filter = QComboBox()
@@ -1424,12 +1508,12 @@ class MainWindow(QMainWindow):
         self.batch_status_filter.addItem("成功", "success")
         self.batch_status_filter.addItem("失败", "fail")
         self.batch_status_filter.addItem("异常", "error")
-        self.batch_status_filter.setFont(QFont("Microsoft YaHei", 9))
+        self.batch_status_filter.setFont(self._ui_font(-1))
         self.batch_status_filter.currentIndexChanged.connect(self._on_batch_filter_changed)
         filter_bar.addWidget(self.batch_status_filter)
 
         self.batch_filter_count = QLabel("")
-        self.batch_filter_count.setFont(QFont("Microsoft YaHei", 9))
+        self.batch_filter_count.setFont(self._ui_font(-1))
         self.batch_filter_count.setStyleSheet("color: #666;")
         filter_bar.addWidget(self.batch_filter_count)
 
@@ -1455,8 +1539,7 @@ class MainWindow(QMainWindow):
         self.batch_summary_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.batch_summary_table.setAlternatingRowColors(True)
         self.batch_summary_table.verticalHeader().hide()
-        table_font = QFont()
-        table_font.setPointSize(8)
+        table_font = self._ui_font(-2)
         self.batch_summary_table.setFont(table_font)
         self.batch_summary_table.verticalHeader().setDefaultSectionSize(22)
         # 右键复制菜单 + Ctrl+C
@@ -1483,7 +1566,7 @@ class MainWindow(QMainWindow):
         self.batch_detail_hex = QTextEdit()
         self.batch_detail_hex.setReadOnly(True)
         self.batch_detail_hex.setMaximumHeight(60)
-        self.batch_detail_hex.setFont(QFont("Consolas", 9))
+        self.batch_detail_hex.setFont(self._ui_font(-1, family="Consolas"))
         self.batch_detail_hex.setPlaceholderText("选择左侧列表中的帧以查看详情…")
         hex_row.addWidget(self.batch_detail_hex, 1)
 
@@ -1510,8 +1593,7 @@ class MainWindow(QMainWindow):
         self.batch_detail_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.batch_detail_table.setAlternatingRowColors(True)
         self.batch_detail_table.verticalHeader().hide()
-        detail_font = QFont()
-        detail_font.setPointSize(8)
+        detail_font = self._ui_font(-2)
         self.batch_detail_table.setFont(detail_font)
         self.batch_detail_table.verticalHeader().setDefaultSectionSize(20)
         # 右键复制菜单 + Ctrl+C
@@ -1654,8 +1736,10 @@ class MainWindow(QMainWindow):
             self.single_input.setPlaceholderText("请输入698.45报文，例如：68 0E 00 41 01 07 08 09 AE C6 01 00 00 00 00 34 87 16")
         elif index == 9:  # 新一代载波协议(通感一体化)
             self.single_input.setPlaceholderText("请输入新一代载波报文，例如：11 01 01 00 00 00 00 01 00 01 00 00")
-        else:  # index == 10, 国网新一代双模通信互联互通
+        elif index == 10:  # 国网新一代双模通信互联互通
             self.single_input.setPlaceholderText("请输入国网新一代报文，例如：ED A5 00 00 02 EF 01 7E 4E 97 86 01 00 88 00")
+        elif index == 11:  # HDC 1.0 双模互联互通
+            self.single_input.setPlaceholderText("请输入HDC 1.0报文，例如：01 00 01 00 00 10 00 11 ...")
 
         # 更新查询页面
         self._update_protocol_lookup_tab()
@@ -1719,11 +1803,27 @@ class MainWindow(QMainWindow):
         self.csg_pb_frame_type_combo.setVisible(show_csg_level and self._csg_parse_level == "pb_only")
         # ED 监控协议勾选项：仅协议索引9（南网新一代）时可见
         self.ed_monitor_chk.setVisible(show_csg_level)
+        # 4字节反转勾选项：仅协议索引9（南网新一代）时可见
+        self.csg_reverse_4byte_chk.setVisible(show_csg_level)
+        # 通道下拉框：仅协议索引9（南网新一代）时可见
+        self.csg_channel_combo.setVisible(show_csg_level)
 
-        # 国网新一代解析级别选择：仅协议索引10时可见
-        show_gw_level = (index == 10)
+        # 国网新一代/HDC 1.0 解析级别选择：协议索引10和11时可见
+        show_gw_level = (index in (10, 11))
         self.gw_parse_level_label.setVisible(show_gw_level)
         self.gw_parse_level_combo.setVisible(show_gw_level)
+        # 通道下拉框：协议索引10和11时可见
+        self.gw_channel_combo.setVisible(show_gw_level)
+
+        # 同步解析级别combo到对应协议的当前值
+        if index == 10:
+            idx = self.gw_parse_level_combo.findData(self._gw_parse_level)
+            if idx >= 0:
+                self.gw_parse_level_combo.setCurrentIndex(idx)
+        elif index == 11:
+            idx = self.gw_parse_level_combo.findData(self._hdc10_parse_level)
+            if idx >= 0:
+                self.gw_parse_level_combo.setCurrentIndex(idx)
 
         # 清空当前结果
         self.clear_single()
@@ -1769,15 +1869,37 @@ class MainWindow(QMainWindow):
         self.csg_pb_frame_type_combo.setVisible(show_frame_type)
 
     def _on_gw_parse_level_changed(self, index: int):
-        """国网新一代解析级别改变时的回调"""
-        # 从combo box获取当前值
+        """国网新一代/HDC 1.0 解析级别改变时的回调"""
         level = self.gw_parse_level_combo.currentData()
-        self._gw_parse_level = level or "auto"
-        
+        if self.current_protocol == 11:
+            self._hdc10_parse_level = level or "auto"
+        else:
+            self._gw_parse_level = level or "auto"
+
         # 根据解析级别显示/隐藏帧类型选择
-        show_frame_type = (self._gw_parse_level == "pb_only")
-        self.gw_pb_frame_type_label.setVisible(show_frame_type)
-        self.gw_pb_frame_type_combo.setVisible(show_frame_type)
+        cur_level = self._hdc10_parse_level if self.current_protocol == 11 else self._gw_parse_level
+        show_frame_type = (cur_level == "pb_only")
+        self.gw_pb_frame_type_label.setVisible(show_frame_type and self.current_protocol in (10, 11))
+        self.gw_pb_frame_type_combo.setVisible(show_frame_type and self.current_protocol in (10, 11))
+
+    def _on_csg_channel_changed(self, index: int):
+        """南网新一代通道切换回调"""
+        channel = self.csg_channel_combo.currentData()
+        self._csg_channel = channel or "plc"
+        # 自动重解析
+        if self.single_input.toPlainText().strip():
+            self.parse_single()
+
+    def _on_gw_channel_changed(self, index: int):
+        """国网新一代/HDC 1.0 通道切换回调"""
+        channel = self.gw_channel_combo.currentData()
+        if self.current_protocol == 11:
+            self._hdc10_channel = channel or "plc"
+        else:
+            self._gw_channel = channel or "plc"
+        # 自动重解析
+        if self.single_input.toPlainText().strip():
+            self.parse_single()
 
     def _toggle_llm_panel(self):
         """切换 LLM 预处理面板的显示/隐藏"""
@@ -1842,6 +1964,11 @@ class MainWindow(QMainWindow):
             self.tab_widget.setTabText(lookup_tab_index, "报文ID查询")
             self._create_gw_new_gen_lookup_content(self.protocol_lookup_tab_layout)
 
+        elif self.current_protocol == 11:
+            # HDC 1.0 双模互联互通：报文ID查询
+            self.tab_widget.setTabText(lookup_tab_index, "报文ID查询")
+            self._create_hdc10_lookup_content(self.protocol_lookup_tab_layout)
+
     def _create_oad_lookup_content(self, layout):
         """创建698.45协议OAD查询页面内容"""
         from dl_t698_45_oi_lookup import OILookup
@@ -1878,8 +2005,7 @@ class MainWindow(QMainWindow):
         self.oad_table.setAlternatingRowColors(True)
         self.oad_table.verticalHeader().hide()
         self.oad_table.verticalHeader().setDefaultSectionSize(20)
-        table_font = QFont()
-        table_font.setPointSize(8)
+        table_font = self._ui_font(-2)
         self.oad_table.setFont(table_font)
         layout.addWidget(self.oad_table)
 
@@ -1898,19 +2024,19 @@ class MainWindow(QMainWindow):
         # 搜索栏
         search_layout = QHBoxLayout()
         search_label = QLabel("搜索：")
-        search_label.setFont(QFont("Microsoft YaHei", 10))
+        search_label.setFont(self._ui_font(0))
         search_layout.addWidget(search_label)
 
         self.csg_new_gen_search = QLineEdit()
         self.csg_new_gen_search.setPlaceholderText("输入关键词搜索业务标识（如：确认、数据传输、命令...）")
-        self.csg_new_gen_search.setFont(QFont("Microsoft YaHei", 10))
+        self.csg_new_gen_search.setFont(self._ui_font(0))
         self.csg_new_gen_search.textChanged.connect(self._load_csg_new_gen_map_data)
         search_layout.addWidget(self.csg_new_gen_search)
         layout.addLayout(search_layout)
 
         # 统计标签
         self.csg_new_gen_stats_label = QLabel()
-        self.csg_new_gen_stats_label.setFont(QFont("Microsoft YaHei", 9))
+        self.csg_new_gen_stats_label.setFont(self._ui_font(-1))
         layout.addWidget(self.csg_new_gen_stats_label)
 
         # 查询表格
@@ -1922,8 +2048,7 @@ class MainWindow(QMainWindow):
         self.csg_new_gen_table.setAlternatingRowColors(True)
         self.csg_new_gen_table.verticalHeader().hide()
         self.csg_new_gen_table.verticalHeader().setDefaultSectionSize(20)
-        table_font = QFont()
-        table_font.setPointSize(8)
+        table_font = self._ui_font(-2)
         self.csg_new_gen_table.setFont(table_font)
         # 表头自适应
         header = self.csg_new_gen_table.horizontalHeader()
@@ -1977,17 +2102,17 @@ class MainWindow(QMainWindow):
 
         search_layout = QHBoxLayout()
         search_label = QLabel("搜索：")
-        search_label.setFont(QFont("Microsoft YaHei", 10))
+        search_label.setFont(self._ui_font(0))
         search_layout.addWidget(search_label)
         self.gw_new_gen_search = QLineEdit()
         self.gw_new_gen_search.setPlaceholderText("输入关键词搜索报文ID/端口号/消息类型...")
-        self.gw_new_gen_search.setFont(QFont("Microsoft YaHei", 10))
+        self.gw_new_gen_search.setFont(self._ui_font(0))
         self.gw_new_gen_search.textChanged.connect(self._load_gw_new_gen_map_data)
         search_layout.addWidget(self.gw_new_gen_search)
         layout.addLayout(search_layout)
 
         self.gw_new_gen_stats_label = QLabel()
-        self.gw_new_gen_stats_label.setFont(QFont("Microsoft YaHei", 9))
+        self.gw_new_gen_stats_label.setFont(self._ui_font(-1))
         layout.addWidget(self.gw_new_gen_stats_label)
 
         self.gw_new_gen_table = QTableWidget()
@@ -2035,6 +2160,76 @@ class MainWindow(QMainWindow):
             self.gw_new_gen_table.setItem(row, 2, QTableWidgetItem(name))
             self.gw_new_gen_table.setItem(row, 3, QTableWidgetItem(note))
         self.gw_new_gen_stats_label.setText(f"匹配 {len(results)} / {len(self._gw_new_gen_entries)} 条记录")
+
+    def _create_hdc10_lookup_content(self, layout):
+        """创建HDC 1.0双模互联互通报文ID查询页面内容"""
+        from hdc10_parser import (
+            HDC10Parser, MSG_ID_NAMES, APP_PORTS, DELIMITER_TYPES,
+            MSDU_TYPES, PROTOCOL_TYPES, TX_TYPES, BROADCAST_DIRS, SECURITY_MODES
+        )
+        parser = HDC10Parser()
+
+        search_layout = QHBoxLayout()
+        search_label = QLabel("搜索：")
+        search_label.setFont(self._ui_font(0))
+        search_layout.addWidget(search_label)
+        self.hdc10_search = QLineEdit()
+        self.hdc10_search.setPlaceholderText("输入关键词搜索报文ID/端口号/消息类型...")
+        self.hdc10_search.setFont(self._ui_font(0))
+        self.hdc10_search.textChanged.connect(self._load_hdc10_map_data)
+        search_layout.addWidget(self.hdc10_search)
+        layout.addLayout(search_layout)
+
+        self.hdc10_stats_label = QLabel()
+        self.hdc10_stats_label.setFont(self._ui_font(-1))
+        layout.addWidget(self.hdc10_stats_label)
+
+        self.hdc10_table = QTableWidget()
+        self.hdc10_table.setColumnCount(4)
+        self.hdc10_table.setHorizontalHeaderLabels(["分类", "代码", "名称", "说明"])
+        self.hdc10_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.hdc10_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.hdc10_table.setAlternatingRowColors(True)
+        self.hdc10_table.verticalHeader().hide()
+        self.hdc10_table.verticalHeader().setDefaultSectionSize(20)
+        header = self.hdc10_table.horizontalHeader()
+        header.setStretchLastSection(True)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        layout.addWidget(self.hdc10_table)
+
+        self._hdc10_entries = []
+        for code, name in MSG_ID_NAMES.items():
+            self._hdc10_entries.append(("报文ID(业务)", f"0x{code:03X}", name, ""))
+        for code, name in APP_PORTS.items():
+            self._hdc10_entries.append(("报文端口号", f"0x{code:02X}", name, ""))
+        for code, name in DELIMITER_TYPES.items():
+            self._hdc10_entries.append(("定界符类型", str(code), name, ""))
+        for code, name in MSDU_TYPES.items():
+            self._hdc10_entries.append(("MSDU类型", str(code), name, ""))
+        for code, name in PROTOCOL_TYPES.items():
+            self._hdc10_entries.append(("规约类型", str(code), name, ""))
+        for code, name in TX_TYPES.items():
+            self._hdc10_entries.append(("发送类型", str(code), name, ""))
+        for code, name in BROADCAST_DIRS.items():
+            self._hdc10_entries.append(("广播方向", str(code), name, ""))
+        for code, name in SECURITY_MODES.items():
+            self._hdc10_entries.append(("安全模式", str(code), name, ""))
+        self._load_hdc10_map_data()
+
+    def _load_hdc10_map_data(self):
+        """加载/过滤HDC 1.0报文ID数据"""
+        search = self.hdc10_search.text().strip().lower() if hasattr(self, 'hdc10_search') else ""
+        results = [e for e in self._hdc10_entries
+                   if not search or search in e[0].lower() or search in e[1].lower() or search in e[2].lower()]
+        self.hdc10_table.setRowCount(len(results))
+        for row, (cat, code, name, note) in enumerate(results):
+            self.hdc10_table.setItem(row, 0, QTableWidgetItem(cat))
+            self.hdc10_table.setItem(row, 1, QTableWidgetItem(str(code)))
+            self.hdc10_table.setItem(row, 2, QTableWidgetItem(name))
+            self.hdc10_table.setItem(row, 3, QTableWidgetItem(note))
+        self.hdc10_stats_label.setText(f"匹配 {len(results)} / {len(self._hdc10_entries)} 条记录")
 
     def _load_oad_map_data(self):
         """加载698.45 OI映射数据"""
@@ -2112,8 +2307,7 @@ class MainWindow(QMainWindow):
         self.gdw_table.setAlternatingRowColors(True)
         self.gdw_table.verticalHeader().hide()
         self.gdw_table.verticalHeader().setDefaultSectionSize(20)
-        table_font = QFont()
-        table_font.setPointSize(8)
+        table_font = self._ui_font(-2)
         self.gdw_table.setFont(table_font)
         layout.addWidget(self.gdw_table)
 
@@ -2278,8 +2472,7 @@ class MainWindow(QMainWindow):
         self.di_table.setAlternatingRowColors(True)
         self.di_table.verticalHeader().hide()
         self.di_table.verticalHeader().setDefaultSectionSize(20)
-        table_font = QFont()
-        table_font.setPointSize(8)
+        table_font = self._ui_font(-2)
         self.di_table.setFont(table_font)
         layout.addWidget(self.di_table)
 
@@ -2331,8 +2524,7 @@ class MainWindow(QMainWindow):
         self.obis_table.setAlternatingRowColors(True)
         self.obis_table.verticalHeader().hide()
         self.obis_table.verticalHeader().setDefaultSectionSize(14)
-        table_font = QFont()
-        table_font.setPointSize(7)
+        table_font = self._ui_font(-2)
         self.obis_table.setFont(table_font)
 
         layout.addWidget(self.obis_table)
@@ -2378,8 +2570,7 @@ class MainWindow(QMainWindow):
         self.dlt645_di_table.setAlternatingRowColors(True)
         self.dlt645_di_table.verticalHeader().hide()
         self.dlt645_di_table.verticalHeader().setDefaultSectionSize(20)
-        table_font = QFont()
-        table_font.setPointSize(8)
+        table_font = self._ui_font(-2)
         self.dlt645_di_table.setFont(table_font)
 
         layout.addWidget(self.dlt645_di_table)
@@ -2566,8 +2757,7 @@ class MainWindow(QMainWindow):
         self.cmd_table.setAlternatingRowColors(True)
         self.cmd_table.verticalHeader().hide()
         self.cmd_table.verticalHeader().setDefaultSectionSize(14)
-        table_font = QFont()
-        table_font.setPointSize(7)
+        table_font = self._ui_font(-2)
         self.cmd_table.setFont(table_font)
 
         layout.addWidget(self.cmd_table)
@@ -2747,16 +2937,18 @@ class MainWindow(QMainWindow):
             if frame_type is None and parse_level == 'pb_only':
                 frame_type = self.csg_pb_frame_type_combo.currentData()
             class CSGGenGuiParser:
-                def __init__(self, parser, level, ftype=None):
+                def __init__(self, parser, level, ftype=None, channel='plc'):
                     self.parser = parser
                     self.level = level
                     self.frame_type = ftype
+                    self.channel = channel
                 def parse_to_table(self, data):
-                    kwargs = {'parse_level': self.level}
+                    kwargs = {'parse_level': self.level, 'channel': self.channel}
                     if self.frame_type is not None:
                         kwargs['pb_frame_type'] = self.frame_type
                     return self.parser.parse_to_table(data, **kwargs)
-            return CSGGenGuiParser(csg_parser, parse_level, frame_type)
+            csg_channel = getattr(self, '_csg_channel', 'auto')
+            return CSGGenGuiParser(csg_parser, parse_level, frame_type, csg_channel)
         elif protocol_index == 10:  # 国网新一代双模通信互联互通
             # 包装解析器以传递解析级别参数（弹窗覆盖优先，否则用主窗口设置）
             gw_parser = self.gw_new_gen_parser
@@ -2766,16 +2958,38 @@ class MainWindow(QMainWindow):
             if frame_type is None and parse_level == 'pb_only':
                 frame_type = self.gw_pb_frame_type_combo.currentData()
             class GWGenGuiParser:
-                def __init__(self, parser, level, ftype=None):
+                def __init__(self, parser, level, ftype=None, channel='plc'):
                     self.parser = parser
                     self.level = level
                     self.frame_type = ftype
+                    self.channel = channel
                 def parse_to_table(self, data):
-                    kwargs = {'parse_level': self.level}
+                    kwargs = {'parse_level': self.level, 'channel': self.channel}
                     if self.frame_type is not None:
                         kwargs['frame_type'] = self.frame_type
                     return self.parser.parse_to_table(data, **kwargs)
-            return GWGenGuiParser(gw_parser, parse_level, frame_type)
+            gw_channel = getattr(self, '_gw_channel', 'plc')
+            return GWGenGuiParser(gw_parser, parse_level, frame_type, gw_channel)
+
+        elif protocol_index == 11:  # HDC 1.0 双模互联互通
+            hdc10_parser = self.hdc10_parser
+            if parse_level is None:
+                parse_level = getattr(self, '_hdc10_parse_level', 'auto')
+            if frame_type is None and parse_level == 'pb_only':
+                frame_type = self.gw_pb_frame_type_combo.currentData()
+            class HDC10GuiParser:
+                def __init__(self, parser, level, ftype=None, channel='plc'):
+                    self.parser = parser
+                    self.level = level
+                    self.frame_type = ftype
+                    self.channel = channel
+                def parse_to_table(self, data):
+                    kwargs = {'parse_level': self.level, 'channel': self.channel}
+                    if self.frame_type is not None:
+                        kwargs['frame_type'] = self.frame_type
+                    return self.parser.parse_to_table(data, **kwargs)
+            hdc10_channel = getattr(self, '_hdc10_channel', 'plc')
+            return HDC10GuiParser(hdc10_parser, parse_level, frame_type, hdc10_channel)
 
     def load_example(self, data: str):
         """加载示例数据"""
@@ -2798,6 +3012,28 @@ class MainWindow(QMainWindow):
         text = re.sub(r'0[xX]([0-9A-Fa-f])', r'\1', text)
         pattern = r'[^0-9A-Fa-f\n]' if keep_newlines else r'[^0-9A-Fa-f]'
         return re.sub(pattern, '', text)
+
+    @staticmethod
+    def _reverse_4byte_groups(hex_str: str) -> str:
+        """4字节一组做端序翻转（大端↔小端）。
+
+        输入纯 hex 字符串，按每 8 个字符（4 字节）为一组，
+        组内字节顺序反转。不足 4 字节的尾部保持原样。
+
+        例：C9D50438 00000556 → 3804D5C9 56050000
+        """
+        result = []
+        n = len(hex_str)
+        i = 0
+        while i < n:
+            group = hex_str[i:i + 8]
+            if len(group) == 8:
+                # 字节序反转: 字节0字节1字节2字节3 → 字节3字节2字节1字节0
+                result.append(group[6:8] + group[4:6] + group[2:4] + group[0:2])
+            else:
+                result.append(group)
+            i += 8
+        return ''.join(result)
 
     # 新一代载波协议监控日志前缀标记与监控头长度
     # 监控日志格式: "<时间> <序号> -> 接收机 Has Get <N字节监控头> <协议报文>"
@@ -3187,6 +3423,13 @@ class MainWindow(QMainWindow):
         clean_input = self._clean_hex_input(input_text)
         clean_input = clean_input.strip()
 
+        # 4字节反转（仅南网新一代 + 勾选时）
+        if (self.current_protocol == 9
+                and hasattr(self, 'csg_reverse_4byte_chk')
+                and self.csg_reverse_4byte_chk.isChecked()
+                and clean_input):
+            clean_input = self._reverse_4byte_groups(clean_input)
+
         # 验证输入
         if not all(c in '0123456789abcdefABCDEF' for c in clean_input):
             QMessageBox.critical(self, "错误", "输入包含非法字符，请只输入十六进制字符（0-9, A-F）！")
@@ -3305,6 +3548,7 @@ class MainWindow(QMainWindow):
             from validator.dl_t698_45_validator import DLT69845Validator
             from validator.csg_new_gen_validator import CSGNewGenValidator
             from validator.gw_new_gen_validator import GWNewGenValidator
+            from validator.hdc10_validator import HDC10Validator
             validators = {
                 0: NWValidator(),      # 南网
                 1: PLCRFValidator(),   # PLC RF
@@ -3317,6 +3561,7 @@ class MainWindow(QMainWindow):
                 8: DLT69845Validator(), # 698.45
                 9: CSGNewGenValidator(), # 新一代载波协议(通感一体化)
                 10: GWNewGenValidator(), # 国网新一代双模通信互联互通
+                11: HDC10Validator(),   # HDC 1.0 双模互联互通
             }
 
             validator = validators.get(self.current_protocol)
@@ -3676,12 +3921,12 @@ class MainWindow(QMainWindow):
         layout.setSpacing(12)
 
         title_label = QLabel(f"协议解析工具")
-        title_label.setFont(QFont("Microsoft YaHei", 16, QFont.Bold))
+        title_label.setFont(self._ui_font(6, bold=True))
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title_label)
 
         version_label = QLabel(f"版本 2.0")
-        version_label.setFont(QFont("Microsoft YaHei", 11))
+        version_label.setFont(self._ui_font(1))
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         version_label.setStyleSheet("color: #666;")
         layout.addWidget(version_label)
@@ -3692,18 +3937,18 @@ class MainWindow(QMainWindow):
         layout.addWidget(desc_label)
 
         author_label = QLabel("作者: liruitao")
-        author_label.setFont(QFont("Microsoft YaHei", 10))
+        author_label.setFont(self._ui_font(0))
         author_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         author_label.setStyleSheet("color: #888;")
         layout.addWidget(author_label)
 
         changelog_label = QLabel("版本更新记录")
-        changelog_label.setFont(QFont("Microsoft YaHei", 10, QFont.Bold))
+        changelog_label.setFont(self._ui_font(0, bold=True))
         layout.addWidget(changelog_label)
 
         changelog_text = QTextEdit()
         changelog_text.setReadOnly(True)
-        changelog_text.setFont(QFont("Microsoft YaHei", 9))
+        changelog_text.setFont(self._ui_font(-1))
 
         from datetime import date
         today = date.today().strftime("%Y-%m-%d")
@@ -3963,7 +4208,7 @@ class MainWindow(QMainWindow):
 
         hex_text = QTextEdit()
         hex_text.setReadOnly(True)
-        hex_text.setFont(QFont("Consolas", 10))
+        hex_text.setFont(self._ui_font(0, family="Consolas"))
         hex_text.setMaximumHeight(70)
         hex_str = ' '.join(f'{b:02X}' for b in frame_bytes)
         hex_text.setText(f"报文: {hex_str}")
@@ -3980,8 +4225,7 @@ class MainWindow(QMainWindow):
         table.setAlternatingRowColors(True)
         table.verticalHeader().hide()
         table.verticalHeader().setDefaultSectionSize(13)
-        table_font = QFont()
-        table_font.setPointSize(7)
+        table_font = self._ui_font(-2)
         table.setFont(table_font)
         self._setup_table_copy_menu(table)
         layout.addWidget(table)
@@ -4224,6 +4468,7 @@ class MainWindow(QMainWindow):
             "698.45": 8, "698": 8,
             "新一代载波": 9, "载波": 9,
             "国网新一代": 10, "双模": 10,
+            "HDC1.0": 11, "HDC 1.0": 11, "hdc10": 11, "旧版双模": 11,
         }
         if name in names:
             return names[name]
@@ -4367,7 +4612,7 @@ class MainWindow(QMainWindow):
         # 国网新一代双模协议(索引10)：剥离日志前缀（在 hex 清洗前处理原始文本）
         # 日志格式: "Line XXX: timestamp: metadata:hex_data"
         # 取最后一个冒号后的 hex 数据，app 级别时扫描 '11' 定位应用层起始
-        if self.current_protocol == 10:
+        if self.current_protocol in (10, 11):
             before = len(input_text)
             input_text = self._strip_gw_new_gen_prefix(input_text)
             self._debug_log(f"_strip_gw_new_gen_prefix: {before}→{len(input_text)} 字符")
@@ -4390,10 +4635,8 @@ class MainWindow(QMainWindow):
             input_text = self._strip_csg_new_gen_frame_prefix(
                 input_text, getattr(self, '_csg_parse_level', 'auto'))
 
-        # 国网新一代双模协议(索引10)：剥离日志前缀（在 hex 清洗前处理原始文本）
-        # 日志格式: "Line XXX: timestamp: metadata:hex_data"
-        # 取最后一个冒号后的 hex 数据，app 级别时扫描 '11' 定位应用层起始
-        if self.current_protocol == 10:
+        # 国网新一代/HDC 1.0 (索引10/11)：剥离日志前缀
+        if self.current_protocol in (10, 11):
             input_text = self._strip_gw_new_gen_prefix(input_text)
 
         # 预处理：去除空格、逗号等分隔符，保留换行以区分多帧
@@ -4683,8 +4926,8 @@ class MainWindow(QMainWindow):
             # 新一代载波协议：区分网络层报文(MPDU/MAC/MMTYPE)与应用层报文(业务标识)
             return self._get_csg_new_gen_summary(table_data)
 
-        elif self.current_protocol == 10:
-            # 国网新一代：网络标识/帧类型/TEI/MSDU序列/发送类型/报文等关键信息
+        elif self.current_protocol in (10, 11):
+            # 国网新一代/HDC 1.0：网络标识/帧类型/TEI/MSDU序列/发送类型/报文等关键信息
             return self._get_gw_new_gen_summary(table_data)
 
         else:
@@ -5554,6 +5797,288 @@ class MainWindow(QMainWindow):
         lines.append("  下拉列表可直接选择已保存的命令，也可手动输入新命令")
         QMessageBox.information(self, "预处理命令帮助", "\n".join(lines))
 
+    # ==================== Python 脚本预处理 ====================
+
+    def _resolve_script_path(self, path):
+        """解析脚本路径：相对路径按项目根解析，返回绝对路径"""
+        from pathlib import Path as _P
+        p = _P(path)
+        if p.is_absolute():
+            return str(p)
+        return str((_P(__file__).parent / p).resolve())
+
+    def _load_py_scripts(self):
+        """从 config.json 加载 Python 脚本列表；首次启动注册示例脚本"""
+        from pathlib import Path as _P
+        scripts_dir = _P(__file__).parent / "scripts"
+        # 内置示例脚本（首次启动自动注册，用相对路径）
+        builtins = []
+        if scripts_dir.is_dir():
+            for name, fname in [
+                ("Hex 清洗（示例）", "hex_clean.py"),
+                ("TCP Payload 提取（示例）", "tcp_payload_extract.py"),
+                ("按解析过滤（示例）", "filter_by_parse.py"),
+            ]:
+                fpath = scripts_dir / fname
+                if fpath.is_file():
+                    # 存相对路径，便于项目迁移
+                    builtins.append({"name": name, "path": f"scripts/{fname}"})
+
+        saved = []
+        if self._config_path.exists():
+            try:
+                with open(self._config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+                saved = config.get("py_scripts", [])
+            except Exception:
+                saved = []
+
+        # 无任何记录 → 首次启动，填充内置示例
+        if not saved and builtins:
+            self._py_builtin_scripts = builtins
+            for s in builtins:
+                abs_path = self._resolve_script_path(s["path"])
+                self._py_script_combo.addItem(s["name"], abs_path)
+            # 持久化（用相对路径存内置示例）
+            self._persist_py_scripts(builtins)
+            return
+
+        # 有保存记录 → 加载
+        self._py_builtin_scripts = builtins  # 保存引用供参考
+        for s in saved:
+            if isinstance(s, dict) and "name" in s and "path" in s:
+                abs_path = self._resolve_script_path(s["path"])
+                self._py_script_combo.addItem(s["name"], abs_path)
+
+    def _persist_py_scripts(self, scripts_list=None):
+        """将脚本列表持久化到 config.json 的 py_scripts 段
+
+        Args:
+            scripts_list: 可选，指定要保存的列表（每项含 name/path）。
+                         None 则从下拉框读取，路径尽量存相对形式。
+        """
+        from pathlib import Path as _P
+        base = _P(__file__).parent
+        config: Dict[str, Any] = {}
+        if self._config_path.exists():
+            try:
+                with open(self._config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+            except Exception:
+                config = {}
+
+        if scripts_list is None:
+            scripts = []
+            for i in range(self._py_script_combo.count()):
+                name = self._py_script_combo.itemText(i)
+                path = self._py_script_combo.itemData(i)
+                if not path:
+                    continue
+                # 项目内脚本存相对路径，外部脚本存绝对路径
+                p = _P(path)
+                try:
+                    rel = p.relative_to(base)
+                    path_str = str(rel).replace('\\', '/')
+                except ValueError:
+                    path_str = str(p)
+                scripts.append({"name": name, "path": path_str})
+        else:
+            scripts = scripts_list
+
+        config["py_scripts"] = scripts
+        try:
+            with open(self._config_path, "w", encoding="utf-8") as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[Python脚本保存失败] {e}")
+
+    def _load_py_script_file(self):
+        """通过文件对话框加载 .py 脚本到下拉列表"""
+        from PySide6.QtWidgets import QFileDialog
+        from pathlib import Path as _P
+
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择 Python 脚本", "", "Python 脚本 (*.py);;所有文件 (*.*)"
+        )
+        if not path:
+            return
+
+        # 检查文件是否已在列表中
+        for i in range(self._py_script_combo.count()):
+            if self._py_script_combo.itemData(i) == path:
+                self._py_script_combo.setCurrentIndex(i)
+                self.update_stats(f"脚本已在列表中: {self._py_script_combo.itemText(i)}")
+                return
+
+        # 用文件名（去扩展）作为显示名
+        name = _P(path).stem
+        self._py_script_combo.addItem(name, path)
+        self._py_script_combo.setCurrentIndex(self._py_script_combo.count() - 1)
+        self._persist_py_scripts()
+        self.update_stats(f"已加载脚本: {name}")
+
+    def _delete_py_script(self):
+        """从下拉列表移除当前脚本（不删除磁盘文件）"""
+        idx = self._py_script_combo.currentIndex()
+        if idx < 0:
+            return
+
+        name = self._py_script_combo.itemText(idx)
+        from PySide6.QtWidgets import QMessageBox
+        ret = QMessageBox.question(
+            self, "确认移除",
+            f"确定从列表中移除脚本「{name}」吗？\n\n（不会删除磁盘上的 .py 文件）",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        if ret != QMessageBox.Yes:
+            return
+
+        self._py_script_combo.removeItem(idx)
+        self._persist_py_scripts()
+        self.update_stats(f"已移除脚本: {name}")
+
+    def _run_py_script(self):
+        """运行当前选中的 Python 脚本（后台线程，不阻塞 UI），结果回填到 batch_input"""
+        import time
+        t0 = time.time()
+
+        idx = self._py_script_combo.currentIndex()
+        if idx < 0:
+            QMessageBox.warning(self, "警告", "请先加载或选择一个 Python 脚本！")
+            return
+
+        script_path = self._py_script_combo.itemData(idx)
+        if not script_path:
+            QMessageBox.warning(self, "警告", "脚本路径无效！")
+            return
+
+        # 读取输入文本（可能是大文本，计时）
+        input_text = self.batch_input.toPlainText()
+        t1 = time.time()
+        print(f"[脚本] 读取输入: {len(input_text)} 字符, 耗时 {(t1-t0)*1000:.1f}ms")
+
+        if not input_text.strip():
+            QMessageBox.warning(self, "警告", "输入框为空，请先粘贴或加载报文！")
+            return
+
+        # 防止重复执行
+        if getattr(self, "_py_script_running", False):
+            QMessageBox.information(self, "提示", "脚本正在运行中，请稍候...")
+            return
+
+        script_name = self._py_script_combo.itemText(idx)
+        self._py_script_running = True
+        self._py_run_btn.setEnabled(False)
+        self._py_run_btn.setText("运行中...")
+        self.update_stats(f"正在运行脚本（{script_name}）...")
+
+        # 构造 context（主线程中做，只包含轻量数据；parser 懒加载）
+        from py_script_engine import build_context
+        try:
+            context = build_context(self)
+        except Exception as e:
+            self._py_script_running = False
+            self._py_run_btn.setEnabled(True)
+            self._py_run_btn.setText("运行")
+            QMessageBox.critical(self, "脚本上下文构造失败", str(e))
+            return
+
+        t2 = time.time()
+        print(f"[脚本] 准备阶段完成, 耗时 {(t2-t0)*1000:.1f}ms")
+
+        # Worker + Thread
+        self._py_script_thread = QThread(self)
+        worker = _PyScriptWorker(script_path, input_text, context)
+        worker.moveToThread(self._py_script_thread)
+        self._py_script_worker = worker
+
+        # 信号连接
+        self._py_script_thread.started.connect(worker.run)
+        worker.finished.connect(self._on_py_script_finished)
+        worker.error.connect(self._on_py_script_error)
+        worker.finished.connect(self._py_script_thread.quit)
+        worker.error.connect(self._py_script_thread.quit)
+        self._py_script_thread.finished.connect(worker.deleteLater)
+        self._py_script_thread.finished.connect(self._py_script_thread.deleteLater)
+
+        # 记录脚本名用于完成提示
+        self._py_script_running_name = script_name
+
+        self._py_script_thread.start()
+
+    def _on_py_script_finished(self, result):
+        """脚本执行成功回调"""
+        import time
+        t0 = time.time()
+        self._py_script_running = False
+        self._py_run_btn.setEnabled(True)
+        self._py_run_btn.setText("运行")
+
+        if not result.strip():
+            QMessageBox.information(self, "脚本结果",
+                                    "脚本输出为空，未修改输入内容。")
+            return
+
+        # 高效回填：用 QTextCursor 全选替换，减少重绘
+        doc = self.batch_input.document()
+        self.batch_input.setUpdatesEnabled(False)
+        cursor = self.batch_input.textCursor()
+        cursor.beginEditBlock()
+        cursor.select(QTextCursor.Document)
+        cursor.insertText(result)
+        cursor.endEditBlock()
+        # 光标移到开头
+        cursor.setPosition(0)
+        self.batch_input.setTextCursor(cursor)
+        self.batch_input.setUpdatesEnabled(True)
+        t1 = time.time()
+        print(f"[脚本回调] 回填 {len(result)} 字符, 耗时 {(t1-t0)*1000:.1f}ms")
+
+        line_count = len([l for l in result.splitlines() if l.strip()])
+        script_name = getattr(self, "_py_script_running_name", "脚本")
+        self.update_stats(f"脚本处理完成（{script_name}）：{line_count} 行")
+
+    def _on_py_script_error(self, error_msg):
+        """脚本执行失败回调"""
+        self._py_script_running = False
+        self._py_run_btn.setEnabled(True)
+        self._py_run_btn.setText("运行")
+        QMessageBox.critical(self, "脚本执行失败", error_msg)
+
+    def _show_py_script_help(self):
+        """显示 Python 脚本预处理帮助"""
+        lines = [
+            "Python 脚本预处理",
+            "────────────────────────────────",
+            "",
+            "加载自定义 .py 脚本，对输入框文本进行清洗/提取/转换。",
+            "脚本需定义入口函数：",
+            "",
+            "    def process(text, context):",
+            "        \"\"\"",
+            "        Args:",
+            "            text:    输入框原始文本（str）",
+            "            context: 上下文字典",
+            "        Returns:",
+            "            处理后的文本（str）",
+            "        \"\"\"",
+            "        return text",
+            "",
+            "context 包含字段：",
+            "  protocol_index : int      当前协议索引（0-10）",
+            "  protocol_name  : str      当前协议名称",
+            "  config_dir     : str      项目根目录",
+            "  parser         : object   当前协议解析器实例",
+            "  main_window    : object   主窗口引用（慎用）",
+            "",
+            "脚本可自由 import 项目内模块（如 protocol_parser、hdlc_parser 等）。",
+            "",
+            "⚠ 安全提示：脚本直接运行，仅加载可信的 .py 文件。",
+            "",
+            "示例脚本位于项目 scripts/ 目录下。",
+        ]
+        QMessageBox.information(self, "Python 脚本预处理帮助", "\n".join(lines))
+
     def clear_batch(self):
         """清空批量解析内容"""
         self.batch_input.clear()
@@ -5774,7 +6299,7 @@ class MainWindow(QMainWindow):
         if raw_hex:
             hex_display = ' '.join(raw_hex[j:j+2] for j in range(0, len(raw_hex), 2))
             raw_label = QLabel(f"原始报文：{hex_display}")
-            raw_label.setFont(QFont("Consolas", 10))
+            raw_label.setFont(self._ui_font(0, family="Consolas"))
             raw_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             raw_label.setWordWrap(True)
             layout.addWidget(raw_label)
@@ -5805,8 +6330,7 @@ class MainWindow(QMainWindow):
                 detail_table.setAlternatingRowColors(True)
                 detail_table.verticalHeader().hide()
                 detail_table.verticalHeader().setDefaultSectionSize(20)
-                table_font = QFont()
-                table_font.setPointSize(8)
+                table_font = self._ui_font(-2)
                 detail_table.setFont(table_font)
 
                 detail_table.setRowCount(len(table_data))
@@ -5821,7 +6345,7 @@ class MainWindow(QMainWindow):
                 # 回退到JSON显示
                 text_edit = QTextEdit()
                 text_edit.setReadOnly(True)
-                text_edit.setFont(QFont("Consolas", 10))
+                text_edit.setFont(self._ui_font(0, family="Consolas"))
                 text_edit.setText(json.dumps(result, ensure_ascii=False, indent=2))
                 layout.addWidget(text_edit)
         else:
@@ -5829,7 +6353,7 @@ class MainWindow(QMainWindow):
             error_text = result.get("错误", json.dumps(result, ensure_ascii=False, indent=2))
             text_edit = QTextEdit()
             text_edit.setReadOnly(True)
-            text_edit.setFont(QFont("Consolas", 10))
+            text_edit.setFont(self._ui_font(0, family="Consolas"))
             text_edit.setText(error_text)
             layout.addWidget(text_edit)
 
@@ -6177,6 +6701,10 @@ class MainWindow(QMainWindow):
                 # 国网新一代双模通信互联互通
                 parsed_data = self.gw_new_gen_parser.parse_to_table(extracted_bytes)
                 dialog_title = f"深度解析国网新一代 (提取 {len(extracted_bytes)} 字节)"
+            elif self.current_protocol == 11:
+                # HDC 1.0 双模互联互通
+                parsed_data = self.hdc10_parser.parse_to_table(extracted_bytes)
+                dialog_title = f"深度解析HDC 1.0 (提取 {len(extracted_bytes)} 字节)"
             elif self.current_protocol in (8, 9):
                 # 698.45 / 新一代载波
                 parsed_data = self.gw_new_gen_parser.parse_to_table(extracted_bytes)
@@ -6206,7 +6734,7 @@ class MainWindow(QMainWindow):
         # 显示提取的十六进制
         hex_text = QTextEdit()
         hex_text.setReadOnly(True)
-        hex_text.setFont(QFont("Consolas", 10))
+        hex_text.setFont(self._ui_font(0, family="Consolas"))
         hex_text.setMaximumHeight(80)
         hex_str = ' '.join(f'{b:02X}' for b in extracted_bytes)
         hex_text.setText(f"提取字节: {hex_str}")
@@ -6227,8 +6755,7 @@ class MainWindow(QMainWindow):
         table.setAlternatingRowColors(True)
         table.verticalHeader().hide()
         table.verticalHeader().setDefaultSectionSize(20)
-        table_font = QFont()
-        table_font.setPointSize(8)
+        table_font = self._ui_font(-2)
         table.setFont(table_font)
         # 右键复制菜单 + Ctrl+C
         self._setup_table_copy_menu(table)
@@ -6312,6 +6839,12 @@ class MainWindow(QMainWindow):
             if val:
                 self._file_paths[key] = self._resolve_config_path(val)
 
+        # 加载南网/国网新一代通道配置
+        parse_cfg = self._app_config.get("parse", {})
+        self._csg_channel = parse_cfg.get("csg_channel", "auto")
+        self._gw_channel = parse_cfg.get("gw_channel", "plc")
+        # 同步到 combo（combo 在 create_single_parse_tab 中创建，稍后初始化时设置）
+
     def _load_system_settings(self):
         """加载系统集成设置（config.json "system" 段）"""
         from system_integration.system_settings import DEFAULT_SYSTEM_SETTINGS
@@ -6394,6 +6927,12 @@ class MainWindow(QMainWindow):
         if hasattr(self, "llm_preprocess_widget"):
             self.llm_preprocess_widget.save_config()
 
+        # 保存通道配置
+        parse_cfg = config.get("parse", {})
+        parse_cfg["csg_channel"] = getattr(self, '_csg_channel', 'plc')
+        parse_cfg["gw_channel"] = getattr(self, '_gw_channel', 'plc')
+        config["parse"] = parse_cfg
+
         try:
             with open(self._config_path, "w", encoding="utf-8") as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)
@@ -6456,6 +6995,27 @@ class MainWindow(QMainWindow):
         color = "#aaa" if self._is_dark_theme() else "#666"
         return f"color: {color}; font-size: {size}px;"
 
+    def _make_toolbar_btn(self, text: str = "", height: int = 28,
+                           min_width: int = 0, icon_btn: bool = False) -> QPushButton:
+        """创建统一风格的工具栏按钮。
+
+        参数:
+            text: 按钮文本
+            height: 统一高度（默认 28，与工具栏其他控件对齐）
+            min_width: 最小宽度，0 表示由内容决定
+            icon_btn: 是否为图标按钮（固定接近正方形、限制最大宽度）
+        """
+        btn = QPushButton(text)
+        btn.setFont(self._ui_font(-1))
+        btn.setMinimumHeight(height)
+        if min_width:
+            btn.setMinimumWidth(min_width)
+        if icon_btn:
+            btn.setMaximumWidth(height)
+            # 保持内边距一致，避免不同主题下发散
+            btn.setStyleSheet(f"QPushButton {{ padding: 2px {height // 4}px; }}")
+        return btn
+
     def _batch_count_style(self) -> str:
         """批量解析帧计数标签样式"""
         if self._is_dark_theme():
@@ -6488,6 +7048,19 @@ class MainWindow(QMainWindow):
         return ("QPushButton { background: transparent; border: none; padding: 2px; }"
                 "QPushButton:hover { background: rgba(0,0,0,20); border-radius: 3px; }"
                 "QPushButton:pressed { background: rgba(0,0,0,40); }")
+
+    def _ui_font(self, delta: int = 0, bold: bool = False, family: str = None) -> QFont:
+        """统一字体：字号跟随配置 _font_size，字体族跟随配置 _font_family（可覆盖）。
+
+        层级约定（相对 _font_size，默认10）：
+          delta=0  正文/搜索框/编辑区/主下拉
+          delta=-1 普通标签/输入框/按钮/次要说明
+          delta=-2 表格
+          delta=+6 大标题
+        """
+        f = QFont(family or self._font_family, self._font_size + delta)
+        f.setBold(bold)
+        return f
 
     def _restyle_for_theme(self):
         """主题切换后重设动态控件样式（统计标签/串口状态/批量状态等）"""
@@ -6672,6 +7245,42 @@ def main():
         window.show()
 
     sys.exit(app.exec())
+
+
+
+
+class _PyScriptWorker(QObject):
+    """Python 脚本后台执行 Worker
+
+    在独立线程中加载并运行脚本，通过信号返回结果或错误。
+    """
+
+    finished = Signal(str)    # 成功：返回处理后文本
+    error = Signal(str)       # 失败：返回错误消息
+
+    def __init__(self, script_path, input_text, context):
+        super().__init__()
+        self._script_path = script_path
+        self._input_text = input_text
+        self._context = context
+
+    def run(self):
+        import time
+        t0 = time.time()
+        try:
+            from py_script_engine import load_script, run_script
+            t1 = time.time()
+            module = load_script(self._script_path)
+            t2 = time.time()
+            result = run_script(module, self._input_text, self._context)
+            t3 = time.time()
+            print(f"[脚本线程] import: {(t1-t0)*1000:.1f}ms, "
+                  f"load: {(t2-t1)*1000:.1f}ms, "
+                  f"run: {(t3-t2)*1000:.1f}ms, "
+                  f"total: {(t3-t0)*1000:.1f}ms")
+            self.finished.emit(result)
+        except Exception as e:
+            self.error.emit(str(e))
 
 
 if __name__ == "__main__":
