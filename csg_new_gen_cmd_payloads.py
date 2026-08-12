@@ -1626,24 +1626,24 @@ def _parse_legacy_ext_cmd(data: bytes, base: int) -> list:
     # 数据长度 12bit: (字节2 bit4-7)<<8 | 字节3
     b3 = data[3]
     data_len12 = ((b2 >> 4) & 0x0F) << 8 | b3
-    # 依据测试模式区分字段含义：3/4/5/9/10/11/12=持续时间(分)，6=频段，7=ToneMask，8=Option+信道号
+    # 依据测试模式区分字段含义：3/4/5/9/10/11/12=持续时间(分)，6/8=Option+信道号，7=ToneMask
     len_desc = "转发数据长度/模式持续时间"
+    parsed_val = str(data_len12)
     if test_mode in (3, 4, 5, 9, 10, 11, 12):
         len_desc = f"测试模式持续时间: {data_len12} 分钟"
-    elif test_mode == 6:
-        len_desc = f"目标频段: {data_len12}"
-    elif test_mode == 7:
-        len_desc = f"目标ToneMask: {data_len12}"
-    elif test_mode == 8:
-        # Option(字节2 bit4-7) + 信道号(字节3)
+    elif test_mode in (6, 8):
+        # 切频(频段切换)/无线信道切换：目标为 Option(字节2 bit4-7) + 信道号(字节3)
         opt = (b2 >> 4) & 0x0F
         ch = b3
-        len_desc = f"无线信道切换: Option={opt}, 信道号={ch}"
+        parsed_val = f"Option={opt}, 信道号={ch}"
+        len_desc = f"无线信道切换目标: Option={opt}, 信道号={ch}"
         _f(table, "  Option值", f"0x{opt:02X}", str(opt), "无线信道切换Option值", base + 2, base + 2)
         _f(table, "  无线信道号", f"0x{ch:02X}", str(ch), "无线信道切换信道号", base + 3, base + 3)
+    elif test_mode == 7:
+        len_desc = f"目标ToneMask: {data_len12}"
     else:
         len_desc = f"转发数据长度/模式持续时间: {data_len12}"
-    _f(table, "转发数据长度/模式持续时间", f"{b2:02X} {b3:02X}", str(data_len12),
+    _f(table, "转发数据长度/模式持续时间", f"{b2:02X} {b3:02X}", parsed_val,
        len_desc, base + 2, base + 3)
 
     # 字节4: 安全测试模式(bit0-3) + PHR_MCS(bit4-7)

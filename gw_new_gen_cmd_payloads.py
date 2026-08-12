@@ -383,16 +383,6 @@ _EXT_TEST_MODES = {
     15: "新一代扩展测试模式",
 }
 
-_EXT_FREQ_BANDS = {
-    0: "通信频段0 (1.953~11.96MHz)",
-    1: "通信频段1 (2.441~5.615MHz)",
-    2: "通信频段2 (0.781~2.930MHz)",
-    3: "通信频段3 (1.758~2.930MHz)",
-    4: "通信频段4 (0.781~5.615MHz, FCH)",
-    5: "通信频段5 (0.781~11.96MHz, FCH)",
-    6: "通信频段6 (6.08~11.962MHz, FCH)",
-}
-
 _EXT_SEC_MODES = {
     1: "SHA256算法测试", 2: "SM3算法测试",
     3: "ECC签名测试", 4: "ECC验签测试",
@@ -477,7 +467,7 @@ def _parse_comm_test_ext(table: list, payload: bytes, base_offset: int,
     """检测扩展命令解析（表2 扩展命令）
 
     字节1高4位: 测试模式/配置操作
-    字节2高4位+字节3: 12bit 模式持续时间/配置值(模式8除外: Option+信道号)
+    字节2高4位+字节3: 12bit 模式持续时间/配置值(模式6/8除外: Option+信道号)
     字节4低4位: 安全测试模式(模式=13时有效); 字节4高4位: PHR_MCS(模式=12)
     字节5低4位: PSDU_MCS(模式=12); 字节5高4位: PbSIZE(模式=12)
     数据域: 偏移6起
@@ -500,17 +490,13 @@ def _parse_comm_test_ext(table: list, payload: bytes, base_offset: int,
            "转发数据规约类型字段扩展为新一代测试模式", base_offset + 2, base_offset + 2)
         _f(table, "数据转发长度", f"{config_val}", f"{config_val}字节", "数据域内容长度(12bit)",
            base_offset + 2, base_offset + 3)
-    elif test_mode == 8:
-        # Option值(字节2高4位) + 无线信道号(字节3)
+    elif test_mode in (6, 8):
+        # 切频(频段切换)/无线信道切换: Option值(字节2高4位) + 无线信道号(字节3)
         option = (b2 >> 4) & 0x0F
         _f(table, "Option值", f"{option}", f"Option {option}", "无线Option值",
            base_offset + 2, base_offset + 2)
         _f(table, "无线信道号", f"{b3}", f"信道 {b3}", "目标无线信道号",
            base_offset + 3, base_offset + 3)
-    elif test_mode == 6:
-        band = _EXT_FREQ_BANDS.get(config_val, f"保留({config_val})")
-        _f(table, "目标频段", f"{config_val}", band, "需要切换到的目标频段",
-           base_offset + 2, base_offset + 3)
     elif test_mode == 7:
         _f(table, "目标ToneMask", f"{config_val}",
            f"频段{config_val}对应ToneMask配置" if config_val <= 3 else f"保留({config_val})",

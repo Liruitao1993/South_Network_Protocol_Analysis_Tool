@@ -41,11 +41,12 @@ t = _parse_comm_test(bytes.fromhex("0130E0010000"), 0, 0)
 check("T2", t, "测试模式", "HPLC物理层透传")
 check("T2", t, "持续时间", "30分钟")
 
-# 3. 模式6: 频段切换→频段2(低4=2→b2高4位, 高8=0→b3; 同用户实际帧 81 61 20 00)
+# 3. 模式6: 频段切换(切频)→Option=2 信道=0(低4=2→b2高4位, 信道号=b3; 同用户实际帧 81 61 20 00)
 print("Test 3: 频段切换")
 t = _parse_comm_test(bytes.fromhex("016020000000"), 0, 0)
 check("T3", t, "测试模式", "频段切换")
-check("T3", t, "目标频段", "0.781~2.930MHz")
+check("T3", t, "Option值", "Option 2")
+check("T3", t, "无线信道号", "信道 0")
 
 # 4. 模式8: 无线信道切换 Option=1 信道=36
 print("Test 4: 无线信道切换")
@@ -130,12 +131,13 @@ check("T12", t, "用户0 TEI", "TEI=5")
 check("T12", t, "用户0 TMI", "TMI=6")
 check("T12", t, "用户0 Payload", "2字节")
 
-# 13. 用户实际载荷 81 61 20 00 00 00: hdr_len小端组合=6, 目标频段=2, 无数据域
+# 13. 用户实际载荷 81 61 20 00 00 00: hdr_len小端组合=6, 切频 Option=2 信道=0, 无数据域
 print("Test 13: 频段切换-实际帧hdr_len小端")
 t = _parse_comm_test(bytes.fromhex("816120000000"), 0, 0)
 check("T13", t, "报文头长度", "6")
 check("T13", t, "测试模式", "频段切换")
-check("T13", t, "目标频段", "0.781~2.930MHz")
+check("T13", t, "Option值", "Option 2")
+check("T13", t, "无线信道号", "信道 0")
 # 载荷恰好6字节, 不应出现"尾部数据"或"数据域"行
 if any(("尾部数据" in str(r[0])) or ("数据域" in str(r[0])) for r in t):
     print("  [FAIL] T13 载荷6字节不应有尾部/数据域行")
@@ -152,7 +154,8 @@ _frame = bytes.fromhex(
     + '00' * 111 + '9BFA85')
 t14 = get_gw_new_gen_parser().parse_to_table(_frame)
 check("T14", t14, "报文头长度", "6")
-check("T14", t14, "目标频段", "0.781~2.930MHz")
+check("T14", t14, "Option值", "Option 2")
+check("T14", t14, "无线信道号", "信道 0")
 check("T14", t14, "完整性校验(ICV)", "校验通过")
 check("T14", t14, "物理块填充", "111字节")
 check("T14", t14, "PBCS", "0x85FA9B")
