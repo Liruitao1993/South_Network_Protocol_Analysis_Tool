@@ -987,7 +987,8 @@ class MainWindow(QMainWindow):
         for b in (self.verify_expand_btn, self.verify_collapse_btn):
             b.setFixedHeight(24)
             b.setFont(self._ui_font(-1))
-        self.verify_expand_btn.setEnabled(False)  # 默认展开态
+        self.verify_expand_btn.setEnabled(True)   # 默认收缩态
+        self.verify_collapse_btn.setEnabled(False)
         self.verify_expand_btn.setToolTip("展开校验结果全文")
         self.verify_collapse_btn.setToolTip("收缩校验结果，仅保留摘要入口")
         self.verify_expand_btn.clicked.connect(self._on_verify_expand)
@@ -1007,24 +1008,32 @@ class MainWindow(QMainWindow):
         verify_layout.addWidget(self.verify_scroll, 1)
         result_layout.addWidget(self.verify_group)
 
-        # 全屏/恢复按钮：解析结果表格撑满窗口（隐藏输入区+校验结果区）
+        # 默认收缩：布局就绪后收起校验结果区（仅标题+按钮行）
+        QTimer.singleShot(0, self._on_verify_collapse)
+
+        # 导出图片 + 全屏并排（右对齐一组）
+        export_row.addWidget(self.export_result_btn)
         export_row.addLayout(
-            self._make_table_fullscreen_btn("解析结果 - 全屏", self.result_table_widget))
+            self._make_table_fullscreen_btn("解析结果 - 全屏", self.result_table_widget,
+                                            with_stretch=False))
 
         layout.addWidget(result_group, 1)
 
         return tab
 
     # ------------------------------------------------------------- 视图辅助
-    def _make_table_fullscreen_btn(self, title: str, table: QTableWidget) -> QHBoxLayout:
+    def _make_table_fullscreen_btn(self, title: str, table: QTableWidget,
+                                   with_stretch: bool = True) -> QHBoxLayout:
         """构建右对齐「全屏」按钮：点击在新窗口全屏展示解析结果表格。
 
         与报文对比「结果详情」交互一致：弹窗内克隆表格快照展示，
         点「关闭」或窗口 X 关闭后主界面原样恢复。
+        with_stretch=False 时按钮紧跟调用方已有 stretch 之后（与其他按钮并排）。
         """
         row = QHBoxLayout()
         row.setSpacing(6)
-        row.addStretch()
+        if with_stretch:
+            row.addStretch()
         fs_btn = QPushButton("全屏")
         fs_btn.setFixedHeight(26)
         fs_btn.setFont(self._ui_font(-1))
