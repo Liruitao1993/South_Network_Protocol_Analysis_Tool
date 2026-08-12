@@ -243,17 +243,23 @@ class CSGNewGenParser:
         return _crc24_func(data)
 
     def parse_to_table(self, frame_bytes: bytes, parse_level: str = "auto",
-                    pb_frame_type: str = "sof") -> list:
+                    pb_frame_type: str = "sof", channel: str = "plc") -> list:
         """
         解析帧为表格数据格式
         返回: [(字段名, 原始值, 解析值, 说明, byte_start, byte_end), ...]
-        
-        支持四种输入模式（自动识别）:
+
+        支持六种输入模式（自动识别）:
         1. 完整 MPDU 帧 (FC帧控制16字节 + 物理块载荷)
         2. 完整 MAC 帧 (MAC头 + MSDU + 完整性校验)
         3. 仅 MSDU 负载 (VLAN标签 + MSDU类型 + 应用层数据)
         4. 仅应用层报文 (报文端口号 + 报文标识符 + ...)
+        5. 裸级联聚合帧 (无FC无PB头, 2字节级联头+MAC帧重复)
+        6. pb_only 物理块输入 (PB头 + MAC帧 + PBCS)
+
+        Args:
+            channel: "plc" (默认, 载波) 或 "hrf" (高速无线)
         """
+        self._channel = channel
         table_data = []
         frame_len = len(frame_bytes)
         self._aggregated = False
@@ -370,17 +376,77 @@ class CSGNewGenParser:
                 # 直接应用层报文，跳过MAC帧解析
                 msdu_payload = frame_bytes
             else:
-                # ── 步骤2: 检测 MAC 帧 ──
+                # ── 步骤2: 检测裸级联聚合帧（无FC无PB头，2字节级联头+MAC帧重复）──
+                # 特征：前2字节小端低12位 = 一个合理的MAC帧长度，且该长度后又出现2字节级联头
+                is_mac_concat = False
+                if parse_level == "mac_concat" or (
+                    frame_len >= 4
+                    and (int.from_bytes(frame_bytes[0:2], 'little') & 0x0FFF) >= 16
+                    and (int.from_bytes(frame_bytes[0:2], 'little') & 0x0FFF) + 2 < frame_len
+                    and (frame_bytes[2] & 0x01) in (0, 1)
+                    and ((frame_bytes[2] >> 1) & 0x03) in (1, 2)
+                ):
+                    # 再验证第二个级联头
+                    first_len = int.from_bytes(frame_bytes[0:2], 'little') & 0x0FFF
+                    if first_len + 4 <= frame_len:
+                        second_hdr = frame_bytes[first_len + 2:first_len + 4]
+                        second_len = int.from_bytes(second_hdr, 'little') & 0x0FFF
+                        if second_len >= 12 and second_len + first_len + 2 <= frame_len + 100:
+                            is_mac_concat = True
+
+                if is_mac_concat:
+                    table_data.append((
+                        "── 裸级联聚合帧（无FC无PB头）──",
+                        "", "",
+                        "2字节级联头 + MAC帧 级联排列",
+                        0, frame_len - 1
+                    ))
+                    self._aggregated = True
+                    cascade_offset = 0
+                    cascade_idx = 0
+                    while cascade_offset + 2 <= frame_len:
+                        cascade_hdr = frame_bytes[cascade_offset:cascade_offset + 2]
+                        cascade_len = int.from_bytes(cascade_hdr, 'little') & 0x0FFF
+                        start_flag = (cascade_hdr[1] >> 4) & 0x01
+                        end_flag = (cascade_hdr[1] >> 5) & 0x01
+                        table_data.append((
+                            f"  级联头({cascade_idx})",
+                            ' '.join(f'{b:02X}' for b in cascade_hdr),
+                            f"长度:{cascade_len}, 起始:{start_flag}, 结束:{end_flag}",
+                            f"级联数据块长度:{cascade_len}字节",
+                            cascade_offset, cascade_offset + 1
+                        ))
+                        cascade_offset += 2
+                        if cascade_len == 0 or cascade_offset + cascade_len > frame_len:
+                            break
+                        mac_seg = frame_bytes[cascade_offset:cascade_offset + cascade_len]
+                        _, mac_table = self._parse_mac_frame(
+                            mac_seg, base_offset=cascade_offset,
+                            parse_msdu_app=True)
+                        table_data.extend(mac_table)
+                        cascade_offset += cascade_len
+                        cascade_idx += 1
+                        if end_flag:
+                            break
+                    self._aggregated = False
+                    return table_data
+
+                # ── 步骤3: 检测 MAC 帧 ──
                 header_type = (first_byte >> 0) & 0x01
                 version = (first_byte >> 1) & 0x03
-                is_mac_frame = (header_type in (0, 1) and version in (1, 2) and frame_len >= 12)
+                # 版本2=单跳帧协议(表12, 4字节头, 仅无线) 帧长下限按头长放宽
+                is_mac_frame = (header_type in (0, 1) and version in (1, 2)
+                                and frame_len >= (4 if version == 2 else 12))
 
                 if is_mac_frame:
-                    mac_header_size = 12 if header_type == 1 else 32
+                    mac_header_size = 4 if version == 2 else (12 if header_type == 1 else 32)
                     offset, mac_table = self._parse_mac_frame(frame_bytes, offset)
                     table_data.extend(mac_table)
-                    # 读取MSDU长度（MAC帧头 bytes 2-3）
-                    if len(frame_bytes) >= 4:
+                    if version == 2:
+                        # 单跳帧: MSDU类型在MAC头内，载荷已由 _parse_mac_frame 内联解析
+                        msdu_payload = b""
+                    elif len(frame_bytes) >= 4:
+                        # 读取MSDU长度（MAC帧头 bytes 2-3）
                         msdu_len = int.from_bytes(frame_bytes[2:4], 'little')
                         msdu_payload = frame_bytes[mac_header_size:mac_header_size + msdu_len]
                     else:
@@ -616,6 +682,27 @@ class CSGNewGenParser:
         21:72,22:72,23:72,24:72,25:72,
         26:16,27:16
     }
+
+    # HRF（高速无线）MCS 表（表43）
+    HRF_MCS_TABLE = {
+        0: {"diversity": 4, "modulation": "BPSK", "code_rate": "1/2"},
+        1: {"diversity": 2, "modulation": "BPSK", "code_rate": "1/2"},
+        2: {"diversity": 2, "modulation": "QPSK", "code_rate": "1/2"},
+        3: {"diversity": 1, "modulation": "QPSK", "code_rate": "1/2"},
+        4: {"diversity": 1, "modulation": "QPSK", "code_rate": "4/5"},
+        5: {"diversity": 1, "modulation": "16QAM", "code_rate": "1/2"},
+        6: {"diversity": 1, "modulation": "16QAM", "code_rate": "4/5"},
+    }
+
+    # HRF 载荷 PB 大小表（表44），索引4bit
+    HRF_PB_SIZE_TABLE = {
+        0: 16,
+        1: 40,
+        2: 72,
+        3: 136,
+        4: 264,
+        5: 520,
+    }
     @staticmethod
     def _get_pb_size(tmi: int, version: int) -> int:
         """根据TMI/CMT和版本号获取物理块总大小(字节)"""
@@ -646,9 +733,13 @@ class CSGNewGenParser:
         pb_count = getattr(self, '_pb_count', 1)
         if pb_count < 1:
             pb_count = 1
-        pb_total_size = self._get_pb_size(
-            getattr(self, '_cmt_index', 4),
-            getattr(self, '_std_version', 1))
+        is_hrf = getattr(self, '_channel', 'plc') == 'hrf'
+        if is_hrf and hasattr(self, '_pb_size') and isinstance(self._pb_size, int):
+            pb_total_size = self._pb_size
+        else:
+            pb_total_size = self._get_pb_size(
+                getattr(self, '_cmt_index', 4),
+                getattr(self, '_std_version', 1))
         pb_body_size = self._get_pb_body_size(pb_total_size)
 
         # 遍历所有PB，输出PB头/PBCS行，拼接所有PB体为 mac_concat
@@ -784,10 +875,15 @@ class CSGNewGenParser:
                 mac_data = mac_concat[:actual_mac_len]
 
         mac_hdr_len = 12
-        if mac_data and (mac_data[0] & 0x01) == 0:
+        if mac_data and ((mac_data[0] >> 1) & 0x03) == 2:
+            mac_hdr_len = 4  # 版本2 单跳帧（仅无线，表12）：4字节头
+        elif mac_data and (mac_data[0] & 0x01) == 0:
             mac_hdr_len = 32
         if getattr(self, '_delimiter_type', 1) == 0:
             msdu_payload = mac_concat
+        elif mac_hdr_len == 4:
+            # 版本2 单跳帧：MSDU类型在MAC头内，载荷已由 _parse_mac_frame 内联解析
+            msdu_payload = b""
         elif mac_data is not None and len(mac_data) >= 4:
             msdu_len = int.from_bytes(mac_data[2:4], 'little')
             msdu_payload = mac_data[mac_hdr_len:mac_hdr_len + msdu_len]
@@ -845,60 +941,71 @@ class CSGNewGenParser:
         if delimiter_type == 2:
             sack_ext_type = frame_bytes[base_offset + 12] & 0x0F
 
-        # ── 字节1-11: 可变区域（取决于定界符类型）──
+        # ── 字节1-11: 可变区域（取决于定界符类型和通道）──
         var_start = offset
+        is_hrf = getattr(self, '_channel', 'plc') == 'hrf'
         if delimiter_type == 1:  # SOF帧
-            # 先解析字节12获取版本号以确定可变区域的格式
-            std_version = (frame_bytes[base_offset + 12] >> 4) & 0x0F
-            if std_version == 1:  # BPLC版本
-                offset = self._parse_mpdu_sof_bplc(frame_bytes, offset, table)
-            elif std_version == 2:  # ISAC-PLC版本
-                offset = self._parse_mpdu_sof_isac(frame_bytes, offset, table)
+            if is_hrf:
+                # HRF 无线 SOF 帧可变区域
+                offset = self._parse_mpdu_sof_hrf(frame_bytes, offset, table)
             else:
-                # 未知版本，跳过可变区域
-                raw_var = ' '.join(f'{b:02X}' for b in frame_bytes[offset:offset+11])
-                table.append((
-                    "可变区域(SOF)",
-                    raw_var,
-                    "11字节",
-                    f"未知版本{std_version}",
-                    offset, offset + 10
-                ))
-                offset = base_offset + 12
+                # 先解析字节12获取版本号以确定可变区域的格式
+                std_version = (frame_bytes[base_offset + 12] >> 4) & 0x0F
+                if std_version == 1:  # BPLC版本
+                    offset = self._parse_mpdu_sof_bplc(frame_bytes, offset, table)
+                elif std_version == 2:  # ISAC-PLC版本
+                    offset = self._parse_mpdu_sof_isac(frame_bytes, offset, table)
+                else:
+                    # 未知版本，跳过可变区域
+                    raw_var = ' '.join(f'{b:02X}' for b in frame_bytes[offset:offset+11])
+                    table.append((
+                        "可变区域(SOF)",
+                        raw_var,
+                        "11字节",
+                        f"未知版本{std_version}",
+                        offset, offset + 10
+                    ))
+                    offset = base_offset + 12
         elif delimiter_type == 0:  # 信标帧
-            offset = self._parse_mpdu_beacon(frame_bytes, offset, table)
-        elif delimiter_type == 2:  # 选择确认帧(SACK)
-            # 根据扩展帧类型选择可变区域解析方式
-            # 表 33: 0=标准SACK, 1=网络搜索帧(抄控器), 2=同步帧(抄控器), 3=Bitloading扩展帧
-            if sack_ext_type == 0:
-                # 标准选择确认帧
-                offset = self._parse_mpdu_sack(frame_bytes, offset, table)
-            elif sack_ext_type == 3:
-                # Bitloading扩展帧: 可变区域按Bitloading扩展帧格式解析
-                offset = self._parse_mpdu_sack_bitloading(frame_bytes, offset, table)
-            elif sack_ext_type in (1, 2):
-                # 抄控器帧(网络搜索帧/同步帧): 协议文档未提供可变区域详细字段表，按原始字节展示
-                raw_var = ' '.join(f'{b:02X}' for b in frame_bytes[offset:offset + 11])
-                ext_name = self.SACK_EXT_TYPE_MAP.get(sack_ext_type, f"保留({sack_ext_type})")
-                table.append((
-                    f"可变区域({ext_name})",
-                    raw_var,
-                    "11字节",
-                    f"抄控器帧可变区域，协议未提供详细字段定义(扩展帧类型={sack_ext_type})",
-                    offset, offset + 10
-                ))
-                offset = base_offset + 12
+            if is_hrf:
+                offset = self._parse_mpdu_beacon_hrf(frame_bytes, offset, table)
             else:
-                # 保留值: 协议未定义，按原始字节展示，避免误解析为标准SACK
-                raw_var = ' '.join(f'{b:02X}' for b in frame_bytes[offset:offset + 11])
-                table.append((
-                    f"可变区域(保留={sack_ext_type})",
-                    raw_var,
-                    "11字节",
-                    f"扩展帧类型为保留值({sack_ext_type})，按原始字节展示",
-                    offset, offset + 10
-                ))
-                offset = base_offset + 12
+                offset = self._parse_mpdu_beacon(frame_bytes, offset, table)
+        elif delimiter_type == 2:  # 选择确认帧(SACK)
+            if is_hrf:
+                offset = self._parse_mpdu_sack_hrf(frame_bytes, offset, table)
+            else:
+                # 根据扩展帧类型选择可变区域解析方式
+                # 表 33: 0=标准SACK, 1=网络搜索帧(抄控器), 2=同步帧(抄控器), 3=Bitloading扩展帧
+                if sack_ext_type == 0:
+                    # 标准选择确认帧
+                    offset = self._parse_mpdu_sack(frame_bytes, offset, table)
+                elif sack_ext_type == 3:
+                    # Bitloading扩展帧: 可变区域按Bitloading扩展帧格式解析
+                    offset = self._parse_mpdu_sack_bitloading(frame_bytes, offset, table)
+                elif sack_ext_type in (1, 2):
+                    # 抄控器帧(网络搜索帧/同步帧): 协议文档未提供可变区域详细字段表，按原始字节展示
+                    raw_var = ' '.join(f'{b:02X}' for b in frame_bytes[offset:offset + 11])
+                    ext_name = self.SACK_EXT_TYPE_MAP.get(sack_ext_type, f"保留({sack_ext_type})")
+                    table.append((
+                        f"可变区域({ext_name})",
+                        raw_var,
+                        "11字节",
+                        f"抄控器帧可变区域，协议未提供详细字段定义(扩展帧类型={sack_ext_type})",
+                        offset, offset + 10
+                    ))
+                    offset = base_offset + 12
+                else:
+                    # 保留值: 协议未定义，按原始字节展示，避免误解析为标准SACK
+                    raw_var = ' '.join(f'{b:02X}' for b in frame_bytes[offset:offset + 11])
+                    table.append((
+                        f"可变区域(保留={sack_ext_type})",
+                        raw_var,
+                        "11字节",
+                        f"扩展帧类型为保留值({sack_ext_type})，按原始字节展示",
+                        offset, offset + 10
+                    ))
+                    offset = base_offset + 12
         elif delimiter_type == 3:  # 网间协调帧(表41)
             offset = self._parse_mpdu_net(frame_bytes, offset, table)
         else:  # 保留类型
@@ -1919,6 +2026,178 @@ class CSGNewGenParser:
         offset += 7  # 字节5-11共7字节
         return offset  # 返回字节12起始位置
 
+    # ── HRF（高速无线）MPDU 可变区域解析 ──
+
+    def _parse_mpdu_sof_hrf(self, frame_bytes: bytes, offset: int, table: list) -> int:
+        """解析 HRF（高速无线）SOF 帧可变区域（92bit = 字节1~11 + 字节12低4位）
+
+        字段分配（bit 以可变区域起始为 bit0）:
+        0-11:  源TEI(12b)
+        12-23: 目的TEI(12b)
+        24-31: 链路标识符(8b)
+        32-43: 帧长(12b)，单位 100μs
+        44-47: 载荷PB大小(4b)
+        48-51: MCS(4b)
+        52:    TEI过滤标志(1b)
+        53:    重传标志(1b)
+        54-55: 保留(2b)
+        56-87: 保留(32b)  字节8~字节11
+        88:    SNID高位(1b)  字节12[0]
+        89-91: 保留(3b)    字节12[1-3]
+
+        返回字节12起始偏移。
+        """
+        base = offset  # 字节1的偏移
+        # 源 TEI (12b): 字节1[0-7] + 字节2[0-3]
+        src_tei = frame_bytes[base] | ((frame_bytes[base + 1] & 0x0F) << 8)
+        table.append(("源TEI", f"0x{src_tei:03X}", str(src_tei),
+                     "发送站点TEI", base, base + 1))
+
+        # 目的 TEI (12b): 字节2[4-7] + 字节3[0-7]
+        dst_tei = ((frame_bytes[base + 1] >> 4) & 0x0F) | (frame_bytes[base + 2] << 4)
+        table.append(("目的TEI", f"0x{dst_tei:03X}", str(dst_tei),
+                     "接收站点TEI", base + 1, base + 2))
+
+        # 链路标识符 (8b): 字节4
+        link_id = frame_bytes[base + 3]
+        table.append(("链路标识符", f"0x{link_id:02X}", str(link_id),
+                     "0-3: 优先级  4-254: 业务分类LID  255: 无效",
+                     base + 3, base + 3))
+
+        # 帧长 (12b): 字节5[0-7] + 字节6[0-3]，单位 100μs
+        frame_len = frame_bytes[base + 4] | ((frame_bytes[base + 5] & 0x0F) << 8)
+        table.append(("帧长", f"0x{frame_len:03X}", str(frame_len),
+                     f"{frame_len} × 100μs = {frame_len * 0.1:.1f}ms",
+                     base + 4, base + 5))
+
+        # 载荷PB大小 (4b): 字节6[4-7]
+        pb_size_idx = (frame_bytes[base + 5] >> 4) & 0x0F
+        pb_size = self.HRF_PB_SIZE_TABLE.get(pb_size_idx, f"保留({pb_size_idx})")
+        table.append(("载荷PB大小", f"0x{pb_size_idx:X}", str(pb_size_idx),
+                     f"{pb_size} 字节" if isinstance(pb_size, int) else pb_size,
+                     base + 5, base + 5))
+        self._pb_size = pb_size if isinstance(pb_size, int) else 136
+        self._pb_count = 1  # 无线仅支持 1 个 PB
+
+        # MCS (4b): 字节7[0-3]
+        mcs = frame_bytes[base + 6] & 0x0F
+        mcs_info = self.HRF_MCS_TABLE.get(mcs, {})
+        if mcs_info:
+            mcs_desc = (f"{mcs_info['modulation']} {mcs_info['code_rate']}，"
+                        f"{mcs_info['diversity']}分集")
+        else:
+            mcs_desc = "保留"
+        table.append(("MCS", f"0x{mcs:X}", str(mcs), mcs_desc, base + 6, base + 6))
+
+        # TEI过滤标志: 字节7[4]
+        tei_filter = (frame_bytes[base + 6] >> 4) & 0x01
+        table.append(("TEI过滤标志", f"0b{tei_filter}", str(tei_filter),
+                     "不过滤" if tei_filter else "过滤",
+                     base + 6, base + 6))
+
+        # 重传标志: 字节7[5]
+        retransmit = (frame_bytes[base + 6] >> 5) & 0x01
+        table.append(("重传标志", f"0b{retransmit}", str(retransmit),
+                     "重传报文" if retransmit else "非重传",
+                     base + 6, base + 6))
+
+        # 字节7[6-7] 保留 + 字节8~11 保留(32b) + 字节12[0] SNID高位 + 字节12[1-3]保留
+        snid_high = (frame_bytes[base + 11] >> 0) & 0x01  # 字节12 = base + 11
+        table.append(("SNID高位", f"0b{snid_high}", str(snid_high),
+                     "短网络标识最高位",
+                     base + 11, base + 11))
+
+        return base + 11  # 返回字节12起始位置（版本号+扩展帧类型等公共字段在外面解析）
+
+    def _parse_mpdu_beacon_hrf(self, frame_bytes: bytes, offset: int, table: list) -> int:
+        """解析 HRF（高速无线）信标帧可变区域（92bit = 字节1~11 + 字节12低4位）
+
+        字段:
+        0-31:  信标时间戳(32b)
+        32-63: 信标周期计数(32b)
+        64-75: 源TEI(12b)
+        76-79: MCS(4b)
+        80-83: 载荷PB大小(4b)
+        84-87: 保留(4b)
+        88:    SNID高位(1b)
+        89-91: 保留(3b)
+
+        返回字节12起始偏移。
+        """
+        base = offset
+        # 信标时间戳 (32b): 字节1~4，小端
+        ts = int.from_bytes(frame_bytes[base:base + 4], 'little')
+        table.append(("信标时间戳", f"0x{ts:08X}", str(ts),
+                     "网络基准时间", base, base + 3))
+
+        # 信标周期计数 (32b): 字节5~8，小端
+        bcn_period = int.from_bytes(frame_bytes[base + 4:base + 8], 'little')
+        table.append(("信标周期计数", f"0x{bcn_period:08X}", str(bcn_period),
+                     "信标周期序号", base + 4, base + 7))
+
+        # 源 TEI (12b): 字节9[0-7] + 字节10[0-3]
+        src_tei = frame_bytes[base + 8] | ((frame_bytes[base + 9] & 0x0F) << 8)
+        table.append(("源TEI", f"0x{src_tei:03X}", str(src_tei),
+                     "信标发送站点TEI", base + 8, base + 9))
+
+        # MCS (4b): 字节10[4-7]
+        mcs = (frame_bytes[base + 9] >> 4) & 0x0F
+        mcs_info = self.HRF_MCS_TABLE.get(mcs, {})
+        if mcs_info:
+            mcs_desc = (f"{mcs_info['modulation']} {mcs_info['code_rate']}，"
+                        f"{mcs_info['diversity']}分集")
+        else:
+            mcs_desc = "保留"
+        table.append(("MCS", f"0x{mcs:X}", str(mcs), mcs_desc, base + 9, base + 9))
+
+        # 载荷PB大小 (4b): 字节11[0-3]
+        pb_size_idx = frame_bytes[base + 10] & 0x0F
+        pb_size = self.HRF_PB_SIZE_TABLE.get(pb_size_idx, f"保留({pb_size_idx})")
+        table.append(("载荷PB大小", f"0x{pb_size_idx:X}", str(pb_size_idx),
+                     f"{pb_size} 字节" if isinstance(pb_size, int) else pb_size,
+                     base + 10, base + 10))
+        self._pb_size = pb_size if isinstance(pb_size, int) else 136
+        self._pb_count = 1
+
+        # SNID高位: 字节12[0] 即 base + 11 字节
+        snid_high = frame_bytes[base + 11] & 0x01
+        table.append(("SNID高位", f"0b{snid_high}", str(snid_high),
+                     "短网络标识最高位", base + 11, base + 11))
+
+        return base + 11  # 返回字节12起始位置
+
+    def _parse_mpdu_sack_hrf(self, frame_bytes: bytes, offset: int, table: list) -> int:
+        """解析 HRF（高速无线）SACK 帧可变区域（92bit = 字节1~11 + 字节12低4位）
+
+        字段:
+        0-3:   接收结果(4b)
+        4:     SNID高位(1b)
+        5-7:   保留(3b)
+        8-19:  目的TEI(12b)
+        20-23: 保留(4b)
+        24-87: 保留(64b)  字节4~11
+        88-91: 扩展帧类型(4b)  字节12[0-3]
+
+        返回字节12起始偏移。
+        """
+        base = offset
+        b0 = frame_bytes[base]
+        rx_result = b0 & 0x0F
+        snid_high = (b0 >> 4) & 0x01
+        result_map = {0: "接收成功", 1: "物理块CRC失败"}
+        table.append(("接收结果", f"0x{rx_result:X}", str(rx_result),
+                     result_map.get(rx_result, f"保留({rx_result})"),
+                     base, base))
+        table.append(("SNID高位", f"0b{snid_high}", str(snid_high),
+                     "短网络标识最高位", base, base))
+
+        # 目的 TEI (12b): 字节2[0-7] + 字节3[0-3]
+        dst_tei = frame_bytes[base + 1] | ((frame_bytes[base + 2] & 0x0F) << 8)
+        table.append(("目的TEI", f"0x{dst_tei:03X}", str(dst_tei),
+                     "接收SACK的站点TEI", base + 1, base + 2))
+
+        return base + 11  # 返回字节12起始位置（扩展帧类型等在外面字节12处读）
+
     def _parse_mac_frame(self, frame_bytes: bytes, base_offset: int = 0,
                         parse_msdu_app: bool = False) -> Tuple[int, list]:
         """解析 MAC 帧头
@@ -1934,13 +2213,22 @@ class CSGNewGenParser:
         header_type = (first_byte >> 0) & 0x01
         version = (first_byte >> 1) & 0x03
         short_nid_high = (first_byte >> 3) & 0x01
-        tx_seq_high = (first_byte >> 4) & 0x0F
+        tx_seq_low4 = (first_byte >> 4) & 0x0F  # 发送序号低4位(字节0 bit4-7)
 
-        header_size = 12 if header_type == 1 else 32
+        # 帧头长度：版本2=单跳帧协议(表12, 4字节，帧头类型无意义，仅无线信道使用)
+        # 版本1=标准帧协议，按帧头类型分 32B 长头 / 12B 短头
+        if version == 2:
+            header_size = 4
+        else:
+            header_size = 12 if header_type == 1 else 32
 
         if frame_len < header_size + 4:  # 至少需要头部 + 4字节CRC
             table.append(("❌ 解析失败", "", "", f"MAC帧长度不足(需要>{header_size + 4}字节)", None, None))
             return base_offset, table
+
+        # 版本2=单跳帧协议（表12，仅无线信道）：帧头4字节，MSDU类型在MAC头内，载荷内联分派
+        if version == 2:
+            return self._parse_single_hop_mac(frame_bytes, base_offset, table)
 
         # 辅助函数：记录全局偏移
         def _g(rel_start: int, rel_end: int) -> Tuple[int, int]:
@@ -1962,9 +2250,18 @@ class CSGNewGenParser:
             *_g(offset, offset)
         ))
 
-        # 发送序号 (12 bits: byte0[4:7] + byte1[0:7])
-        tx_seq_low = frame_bytes[offset + 1]
-        tx_seq = (tx_seq_high << 8) | tx_seq_low
+        # 短网络标识高位 (1 bit: byte0[3])
+        table.append((
+            "短网络标识高位",
+            f"0b{short_nid_high}",
+            str(short_nid_high),
+            "短网络标识的最高1bit",
+            *_g(offset, offset)
+        ))
+
+        # 发送序号 (12 bits, 小端: 字节0 bit4-7 为低4位, 字节1 为高8位)
+        tx_seq_high8 = frame_bytes[offset + 1]  # 高8位
+        tx_seq = (tx_seq_high8 << 4) | tx_seq_low4
         table.append((
             "发送序号",
             f"0x{tx_seq:03X}",
@@ -2141,6 +2438,83 @@ class CSGNewGenParser:
             new_offset = msdu_end + 4
 
         return base_offset + new_offset, table
+
+    def _parse_single_hop_mac(self, frame_bytes: bytes, base_offset: int,
+                              table: list) -> Tuple[int, list]:
+        """解析无线信道单跳MAC帧头（表12，4字节）+ 载荷内联分派 + CRC-32
+
+        MAC帧头固定域（表12）:
+          字节0: 帧头类型(1b) + 版本(2b) + 保留(5b)   （帧头类型在单跳帧协议下无意义）
+          字节1: MSDU类型(8b)                         （表13）
+          字节2-3: MSDU长度(16b, 小端)
+        载荷无VLAN+MSDU类型前缀，直接为业务数据，按MSDU类型分派：
+          1=应用层报文 / 2=无线发现列表消息 / 128=IPV4报文
+        尾部完整性校验 CRC-32（计算范围 MSDU 载荷，同其它MAC帧）。
+        仅无线信道使用（版本2 单跳帧协议，表5/表6）。
+        """
+        offset = 0
+
+        def _g(rel_start: int, rel_end: int) -> Tuple[int, int]:
+            return base_offset + rel_start, base_offset + rel_end
+
+        first_byte = frame_bytes[offset]
+        header_type = (first_byte >> 0) & 0x01
+        version = (first_byte >> 1) & 0x03
+        reserved5 = (first_byte >> 3) & 0x1F
+        table.append(("帧头类型", f"0x{header_type:01X}", str(header_type),
+                     "单跳帧协议下无意义", *_g(offset, offset)))
+        table.append(("版本", f"0x{version:01X}", str(version),
+                     MAC_VERSION_MAP.get(version, f"保留({version})"), *_g(offset, offset)))
+        table.append(("保留", f"0b{reserved5:05b}", str(reserved5),
+                     "保留", *_g(offset, offset)))
+
+        msdu_type = frame_bytes[offset + 1]
+        table.append(("MSDU类型", f"0x{msdu_type:02X}", str(msdu_type),
+                     MSDU_TYPE_MAP.get(msdu_type, f"保留(0x{msdu_type:02X})"),
+                     *_g(offset + 1, offset + 1)))
+
+        msdu_len = int.from_bytes(frame_bytes[offset + 2:offset + 4], 'little')
+        table.append(("MSDU长度", ' '.join(f'{b:02X}' for b in frame_bytes[offset + 2:offset + 4]),
+                     f"{msdu_len}字节", f"携带的MSDU长度 ({msdu_len}B)",
+                     *_g(offset + 2, offset + 3)))
+
+        new_offset = offset + 4
+        msdu_end = new_offset + msdu_len
+        if msdu_end > len(frame_bytes):
+            msdu_end = len(frame_bytes)
+        payload = frame_bytes[new_offset:msdu_end]
+
+        # 载荷内联分派（无线单跳帧 MSDU 类型在 MAC 头内，载荷无 VLAN/类型前缀）
+        if msdu_type == 0x01:
+            app_table = self._parse_application_message(payload, base_offset=new_offset)
+            table.extend(app_table)
+        elif msdu_type == 0x02:
+            rf_table = self._parse_rf_discover_node_list(payload, base_offset=new_offset)
+            table.extend(rf_table)
+        elif msdu_type == 0x80:
+            table.append(("IPV4数据", ' '.join(f'{b:02X}' for b in payload),
+                         f"{len(payload)}字节", "IPV4报文负载",
+                         *_g(new_offset, max(new_offset, new_offset + len(payload) - 1))))
+        else:
+            raw_hex = ' '.join(f'{b:02X}' for b in payload)
+            table.append(("MSDU负载", raw_hex[:200] + ("..." if len(raw_hex) > 200 else ""),
+                         f"{len(payload)}字节",
+                         f"MSDU类型{msdu_type}的数据",
+                         *_g(new_offset, max(new_offset, new_offset + len(payload) - 1))))
+
+        # 完整性校验 (CRC-32, 4字节)
+        if len(frame_bytes) >= msdu_end + 4:
+            crc_bytes = frame_bytes[msdu_end:msdu_end + 4]
+            crc_val = int.from_bytes(crc_bytes, 'little')
+            crc32_calc = self._crc32_ieee(payload)
+            crc32_match = (crc32_calc == crc_val)
+            crc_desc = f"32位循环冗余校验(CRC-32)，计算范围: MSDU负载，CRC32=0x{crc_val:08X}"
+            crc_desc += "，校验通过" if crc32_match else f"，校验失败(计算值=0x{crc32_calc:08X})"
+            table.append(("完整性校验(CRC-32)", ' '.join(f'{b:02X}' for b in crc_bytes),
+                         f"0x{crc_val:08X}", crc_desc, *_g(msdu_end, msdu_end + 3)))
+            msdu_end = msdu_end + 4
+
+        return base_offset + msdu_end, table
 
     # ── 关联请求报文常量映射（文档表78~表91）──
 
@@ -3715,6 +4089,128 @@ class CSGNewGenParser:
                                        ' '.join(f'{b:02X}' for b in remaining[i:i + 2]),
                                        f"信道:{ch} option:{opt}", f"无线信道号:{ch} option:{opt}",
                                        base_offset + offset + i, base_offset + offset + i + 1)
+
+        return table
+
+    def _parse_rf_discover_node_list(self, data: bytes, base_offset: int = 0) -> list:
+        """解析无线发现列表报文 MMeRF DiscoverNodeList（文档表139）
+
+        格式: 站点MAC地址(6B) + 统计序号(1B) + 信息单元 TLV 链
+        信息单元头1B: 类型(bit0-6, 表140) + 长度类型(bit7, 表141: 0=1B长度 1=2B长度)
+        长度: 1或2字节(小端); 内容: L字节
+        信息单元类型0=站点属性信息（表142，14字节）
+        """
+        table = []
+        length = len(data)
+        if length < 7:
+            table.append(("无线发现列表", ' '.join(f'{b:02X}' for b in data),
+                         f"{length}字节", "数据不足（需至少7字节：MAC 6B + 统计序号 1B）",
+                         base_offset, base_offset + max(0, length - 1)))
+            return table
+
+        mac = ':'.join(f'{b:02X}' for b in data[0:6])
+        table.append(("站点MAC地址", ' '.join(f'{b:02X}' for b in data[0:6]),
+                     mac, "发送无线发现列表报文节点的MAC地址",
+                     base_offset, base_offset + 5))
+        table.append(("统计序号", f"0x{data[6]:02X}", str(data[6]),
+                     "发送无线发现列表报文的递增序号(255后环回)",
+                     base_offset + 6, base_offset + 6))
+
+        offset = 7
+        unit_idx = 0
+        while offset + 1 <= length:
+            hdr = data[offset]
+            unit_type = hdr & 0x7F
+            len_type = (hdr >> 7) & 0x01
+            type_name = {0: "站点属性信息", 1: "站点路由信息",
+                         2: "邻居节点信道信息非位图版",
+                         3: "邻居节点信道信息位图版"}.get(unit_type, f"保留({unit_type})")
+            len_bytes = 2 if len_type else 1
+            if offset + 1 + len_bytes > length:
+                break
+            content_len = int.from_bytes(data[offset + 1:offset + 1 + len_bytes], 'little')
+            content_start = offset + 1 + len_bytes
+            content_end = content_start + content_len
+            if content_end > length:
+                content_end = length
+            content = data[content_start:content_end]
+            table.append((
+                f"信息单元{unit_idx}类型",
+                f"0x{unit_type:02X}",
+                type_name,
+                f"类型{unit_type} 长度类型:{'2字节' if len_type else '1字节'}",
+                base_offset + offset, base_offset + offset
+            ))
+            table.append((
+                f"信息单元{unit_idx}长度",
+                ' '.join(f'{b:02X}' for b in data[offset + 1:offset + 1 + len_bytes]),
+                f"{content_len}字节",
+                "内容长度（不含类型/长度字段）",
+                base_offset + offset + 1, base_offset + offset + len_bytes
+            ))
+            if unit_type == 0 and len(content) >= 14:
+                # 站点属性信息（表142）: CCO MAC 6B + 代理TEI 12b/角色4b + 层级4b/RF跳数4b
+                #                    + 代理上行/下行接收率 + 链路最小接收率 + 发现列表周期 + 老化周期个数
+                cco_mac = ':'.join(f'{b:02X}' for b in content[0:6])
+                table.append(("  CCO MAC地址", ' '.join(f'{b:02X}' for b in content[0:6]),
+                             cco_mac, "所属网络CCO的MAC地址",
+                             base_offset + content_start, base_offset + content_start + 5))
+                proxy_tei = content[6] | ((content[7] & 0x0F) << 8)
+                role = (content[7] >> 4) & 0x0F
+                role_map = {0: "CCO", 1: "PCO", 2: "STA", 3: "IoTG", 4: "IoTD"}
+                table.append(("  代理TEI", f"0x{proxy_tei:03X}", str(proxy_tei),
+                             "站点代理TEI",
+                             base_offset + content_start + 6, base_offset + content_start + 7))
+                table.append(("  角色", f"0x{role:X}", str(role),
+                             role_map.get(role, f"保留({role})"),
+                             base_offset + content_start + 7, base_offset + content_start + 7))
+                level = content[8] & 0x0F
+                rf_hop = (content[8] >> 4) & 0x0F
+                table.append(("  层级", f"0x{level:X}", str(level),
+                             "站点所处网络层级",
+                             base_offset + content_start + 8, base_offset + content_start + 8))
+                table.append(("  链路RF跳数", f"0x{rf_hop:X}", str(rf_hop),
+                             "到CCO的RF跳数",
+                             base_offset + content_start + 8, base_offset + content_start + 8))
+                up_rate, down_rate, min_rate = content[9], content[10], content[11]
+                table.append(("  代理上行接收率", f"0x{up_rate:02X}", f"{up_rate}%",
+                             "到代理站点的上行接收率",
+                             base_offset + content_start + 9, base_offset + content_start + 9))
+                table.append(("  代理下行接收率", f"0x{down_rate:02X}", f"{down_rate}%",
+                             "代理到本站点的下行接收率",
+                             base_offset + content_start + 10, base_offset + content_start + 10))
+                table.append(("  链路最小接收率", f"0x{min_rate:02X}", f"{min_rate}%",
+                             "链路最小接收率",
+                             base_offset + content_start + 11, base_offset + content_start + 11))
+                table.append(("  无线发现列表周期", f"0x{content[12]:02X}", f"{content[12]}s",
+                             "无线发现列表发送周期(秒)",
+                             base_offset + content_start + 12, base_offset + content_start + 12))
+                table.append(("  无线接收率老化周期个数", f"0x{content[13]:02X}", str(content[13]),
+                             "接收率老化周期个数(单位: 发现列表周期)",
+                             base_offset + content_start + 13, base_offset + content_start + 13))
+                if len(content) > 14:
+                    extra = content[14:]
+                    table.append(("  属性附加数据", ' '.join(f'{b:02X}' for b in extra),
+                                 f"{len(extra)}字节", "站点属性超出14B的附加内容",
+                                 base_offset + content_start + 14,
+                                 base_offset + content_start + len(content) - 1))
+            else:
+                raw_hex = ' '.join(f'{b:02X}' for b in content)
+                table.append((
+                    f"信息单元{unit_idx}内容",
+                    raw_hex[:200] + ("..." if len(raw_hex) > 200 else ""),
+                    f"{len(content)}字节",
+                    f"{type_name}内容",
+                    base_offset + content_start, base_offset + max(content_start, content_end - 1)
+                ))
+            offset = content_end
+            unit_idx += 1
+
+        if offset < length:
+            remaining = data[offset:]
+            table.append(("剩余数据", ' '.join(f'{b:02X}' for b in remaining),
+                         f"{len(remaining)}字节", "TLV链解析后的剩余数据",
+                         base_offset + offset, base_offset + length - 1))
 
         return table
 

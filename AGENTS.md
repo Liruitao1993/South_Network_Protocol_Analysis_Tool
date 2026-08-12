@@ -481,6 +481,7 @@ python test_snrm_frame.py      # SNRM 帧
 python test_dl_t698_45.py      # 698.45 协议
 python test_oad_enrichment.py  # 698.45 OAD 增强
 python test_csg_new_gen.py     # 新一代载波协议
+python test_csg_hrf_mac.py     # 新一代载波无线单跳MAC帧（表12/表139）
 python test_csg_batch_prefix.py # 新一代载波监控日志前缀剥离
 python test_csg_batch_parse_level.py # 新一代载波解析级别/完整 MPDU
 python test_csg_summary.py     # 新一代载波批量摘要
@@ -521,13 +522,15 @@ python test_theme_settings.py  # 主题与字体设置
 12. **Lua 脚本引擎依赖 `lupa`**：未安装时 `LUA_AVAILABLE=False`，测试方案中 Lua 脚本类型不可用但其余功能正常。`lua_script_engine.py` 通过 `raw_data_received` 信号直接接收串口原始字节（绕过 FT1.2 帧解析），改串口数据流时注意此旁路。
 13. **Inno Setup 版本号滞后**：`南网解析工具.iss` / `2222.iss` 中 `MyAppVersion` 为 `1.7.2`，落后于 `APP_VERSION`，发版时需手动同步。
 14. **国网新一代 HDC 1.0 / 2.0**：`gw_new_gen_parser.py` 依据 FC 字节 12 的高 4 位标准版本号自动选择 MAC 帧头规则；改 MAC 头解析时不要把 HDC 1.0 的保留字段当成 HDC 2.0 字段。
-15. **国网新一代 MME**：管理消息由 `gw_new_gen_mme_parser.py` 负责，MMTYPE 为 2 字节小端；0x0008 按发现列表报文处理（文档中该值标为保留，但报文顺序支持该解释），改解析时先查表 42~93 与实测报文。
-16. **监控器包装格式**：`monitor_widget.py` 区分 `96..16`（国网新一代/HPLC）与 `ED..EE`（南网新一代/PLC2）；协议 9 / 10 切换时 wrapper 会自动切换，不要用错格式。
-17. **TCP 监控可选依赖**：`monitor/tcp_monitor.py` 使用 scapy QThread + signal 回主线程，Windows 需 npcap；scapy 缺失时不能调用 `get_if_list`，UI 已做降级，但新增抓包逻辑要保持 try/except。
-18. **输入即 PB 契约**：`mac_only` / `pb_only` / `app` 等仅输入解析模式不再剥离 FC，输入内容按界面提示的层级直接解析；不要再次假设输入包含完整 MPDU 而剥离 16 字节。
-19. **系统集成仅限 Windows**：`system_integration/registry_menu.py` 与 `global_hotkey.py` 依赖 Windows API 与 HKCU 注册表；热键注册失败时应打印提示而不是阻塞启动。`main()` 先做单实例判断，修改启动流程时不要破坏该顺序。
-20. **剪贴板检测与 Notepad++ 集成**：`clipboard_monitor.py` 监听 `QClipboard.dataChanged`，受 `config.json` 的 `system.clipboard_monitor` 控制；`npp_integration.py` 会修改 `%APPDATA%/Notepad++` 下的 XML 并保留 `.parser_backup`。改动时保持严格 hex 校验、去抖与提示框单实例复用，避免自身复制触发弹窗。
-21. **ED..EE 监控帧剥离失败禁止回退**：协议 9 下勾选「ED监控协议」（或弹窗「剥离ED监控头」）时，首字节 0xED 的报文只能是 ED 包装帧（CSG FC 起始字节低 4 位 ∈ {8,9,A,B}，0xED 永不是合法 FC 起始）。`_parse_ed_monitor_header` / `_extract_business_from_ed_frame` 校验失败（帧不完整、缺 EF/EE）时必须明确报错，**绝不能静默把 ED 首字节当 FC 起始符送解析器**。三处路径（`parse_single` / `_parse_and_show_dialog._preprocess` / 批量解析）必须保持一致。
+15. **国网新一代信标帧无 PBH（重要）**：`_parse_beacon_frame` 中信标帧（DT=0）FC 后**直接为信标载荷，无物理块头(PBH)**，HDC 1.0 与 HDC 2.0 均如此。依据：表22/表38 字段从字节0即信标类型，无 PBH 位置；BPCS(CRC-32) 校验范围为信标载荷内容，无 PBCS(CRC-24)。文档第906行"以物理块头和物理块体为目标"是 **SOF 帧(图18)** 的 PBCS 描述，不是信标帧。若误把信标载荷首字节当 PBH，会导致信标类型错位 1 字节（如发现信标 0xC8 被误判成中央信标 0x42）。
+16. **国网新一代 MME**：管理消息由 `gw_new_gen_mme_parser.py` 负责，MMTYPE 为 2 字节小端；0x0008 按发现列表报文处理（文档中该值标为保留，但报文顺序支持该解释），改解析时先查表 42~93 与实测报文。
+17. **监控器包装格式**：`monitor_widget.py` 区分 `96..16`（国网新一代/HPLC）与 `ED..EE`（南网新一代/PLC2）；协议 9 / 10 切换时 wrapper 会自动切换，不要用错格式。
+18. **TCP 监控可选依赖**：`monitor/tcp_monitor.py` 使用 scapy QThread + signal 回主线程，Windows 需 npcap；scapy 缺失时不能调用 `get_if_list`，UI 已做降级，但新增抓包逻辑要保持 try/except。
+19. **输入即 PB 契约**：`mac_only` / `pb_only` / `app` 等仅输入解析模式不再剥离 FC，输入内容按界面提示的层级直接解析；不要再次假设输入包含完整 MPDU 而剥离 16 字节。
+20. **系统集成仅限 Windows**：`system_integration/registry_menu.py` 与 `global_hotkey.py` 依赖 Windows API 与 HKCU 注册表；热键注册失败时应打印提示而不是阻塞启动。`main()` 先做单实例判断，修改启动流程时不要破坏该顺序。
+21. **剪贴板检测与 Notepad++ 集成**：`clipboard_monitor.py` 监听 `QClipboard.dataChanged`，受 `config.json` 的 `system.clipboard_monitor` 控制；`npp_integration.py` 会修改 `%APPDATA%/Notepad++` 下的 XML 并保留 `.parser_backup`。改动时保持严格 hex 校验、去抖与提示框单实例复用，避免自身复制触发弹窗。
+22. **ED..EE 监控帧剥离失败禁止回退**：协议 9 下勾选「ED监控协议」（或弹窗「剥离ED监控头」）时，首字节 0xED 的报文只能是 ED 包装帧（CSG FC 起始字节低 4 位 ∈ {8,9,A,B}，0xED 永不是合法 FC 起始）。`_parse_ed_monitor_header` / `_extract_business_from_ed_frame` 校验失败（帧不完整、缺 EF/EE）时必须明确报错，**绝不能静默把 ED 首字节当 FC 起始符送解析器**。三处路径（`parse_single` / `_parse_and_show_dialog._preprocess` / 批量解析）必须保持一致。
+23. **字段声明与实际不一致时的容错显示原则**：当报文长度、字段声明值与实际内容不匹配时（如 DLT645 数据长度字段声明 102 字节但实际只有 15 字节），**解析器不得直接返回空白结果**（会让用户以为按钮失灵）。正确做法：尽力解析所有可解析字段，`valid` 置 `False`，并在解析结果表格中以醒目的 `⚠` 行插入错误提示。校验器对应项必须标记 FAIL。核心原则——用户点了解析按钮就必须看到内容和错误，不能什么都没有。
 
 ---
 
@@ -555,6 +558,24 @@ python test_theme_settings.py  # 主题与字体设置
 ## 10. 变更日志（与 `main_gui.py:CHANGELOG` 保持同步）
 
 > 本节按版本倒序记录。详细 commit 见 `git log`。每发新版本必须更新此处。
+
+### 后续更新（2026-08-12，未发版）
+- **新一代载波协议(通感一体化,索引9)无线信道单跳MAC帧解析**（`csg_new_gen_parser.py`）：
+  - **版本2 单跳帧协议（表12，仅无线信道）MAC 帧头解析**：`_parse_mac_frame` 新增 `_parse_single_hop_mac` 分支——4 字节头（帧头类型1b+版本2b+保留5b / MSDU类型8b 表13 / MSDU长度16b 小端），载荷无 VLAN+类型前缀，按 MSDU 类型内联分派（1=应用层报文 / 2=无线发现列表 / 128=IPV4），尾部 CRC-32 校验
+  - **无线发现列表消息（表139 MMeRF DiscoverNodeList）**：新增 `_parse_rf_discover_node_list`——站点MAC 6B + 统计序号 1B + 信息单元 TLV 链（类型7bit+长度类型1bit，长度1/2B），类型0 站点属性按表142 展开 14B（CCO MAC/代理TEI/角色/层级/RF跳数/接收率/发现列表周期/老化周期个数）
+  - `parse_to_table` 步骤3 与 `_parse_pb_block` 尾段按版本2 定 4B 帧头长，`msdu_payload=b""` 防与内联解析重复
+  - 顺带修正版本1 MAC 帧头「发送序号」字节序（`(byte1<<4)|byte0高4位` 小端，与表7/表11 及原始目的TEI/源TEI 约定一致）
+  - 新增 `test_csg_hrf_mac.py`（4 用例：单跳帧直入 / 完整无线MPDU(fc_pb,hrf) / 无线发现列表 / PLC 短帧头回归）
+- **GUI 按钮风格统一**：批量解析工具栏、LLM API 管理对话框、LLM 预处理面板按钮高度/内边距/字号统一（`main_gui.py` 新增 `_make_toolbar_btn`、`llm_api_manager.py` 新增 `_style_action_btn`、`llm_preprocess_widget.py` 新增 `_make_btn`）；修复 `_py_run_btn` 连接到不存在方法 `_run_py_script_file` 的 bug
+  - **根因**：`_parse_beacon_frame` 对 HDC 1.0 和 HDC 2.0 信标帧都误读 1 字节 PBH，导致信标载荷首字节（信标类型）被当作 PBH 吃掉，信标类型错位 1 字节（如发现信标 0xC8 被误判成中央信标 0x42）
+  - **协议依据**：HDC 1.0（5.1.2.4 节）与 HDC 2.0（表22）信标帧 PB 结构均为 FC + 信标载荷 + BPCS(4B CRC-32)，**无 PBH、无 PBCS**；表22 字段从字节0即信标类型，无 PBH 位置；文档第906行"以物理块头和物理块体为目标"是 **SOF 帧(图18)** 的 PBCS 描述，非信标帧
+  - **修复**：`_parse_beacon_frame` 对 HDC 1.0/2.0 均不再解析 PBH，FC 后直接解析信标载荷；尾部校验从 BPCS(4B)+PBCS(3B) 改为仅 BPCS(4B)；同步修正 HDC 1.0 信标固定头保留区域为字节14-19（与表38一致，管理信息从字节20开始）
+  - **验证**：用户提供的发现信标报文现正确识别为"发现信标"，4 个信标条目结构全部合法；全部 44 项回归测试通过
+- **GUI 按钮风格统一**：批量解析工具栏、LLM API 管理对话框、LLM 预处理面板按钮高度/内边距/字号统一（`main_gui.py` 新增 `_make_toolbar_btn`、`llm_api_manager.py` 新增 `_style_action_btn`、`llm_preprocess_widget.py` 新增 `_make_btn`）；修复 `_py_run_btn` 连接到不存在方法 `_run_py_script_file` 的 bug
+- **DLT645 数据域长度一致性校验增强**：
+  - 解析器（`dlt645_parser.py`）新增数据长度声明值与实际帧长一致性检查，不匹配时 `valid=False` 并在 fields 中插入 `⚠ 数据长度错误` 行，**但仍尽力解析实际存在的所有字段**（地址、控制码、DI、数据内容、校验和均正常显示），不直接 return 空白结果
+  - 校验器（`validator/dlt645_validator.py`）"数据长度"项从只检查上限 200 字节改为先校验声明长度与实际帧长一致性，不一致标记 FAIL 并置整体 `valid=False`
+  - 设计原则：**协议字段声明与实际不一致时，不得静默截断也不得直接返回空白**，必须在用户可见结果中标红提示 + 尽力解析，保证用户点"解析"按钮始终有响应、有内容、知道哪里错了
 
 ### 后续更新（2026-08-02，未发版）
 - **新增「TCP 流量监控」标签页**（`monitor/tcp_monitor.py`，TCPMonitorWidget）：基于 scapy 抓包，支持网卡选择、BPF 过滤、TCP 流列表、双向流重组、监控封装解帧、原始 TCP 报文 / 解析结果分页展示、CSV 实时记录与历史 CSV 加载；可自动识别南网新一代 / 国网新一代并调用对应解析器
@@ -729,7 +750,15 @@ python test_theme_settings.py  # 主题与字体设置
 
 ## 11. 最新变更摘要（最近一次 commit 摘要）
 
-**最近一次（2026-08-02）：README/AGENTS 文档同步 + TCP 流量监控**
+**最近一次（2026-08-11）：DLT645 数据域长度一致性校验增强**
+
+变更：
+- **DLT645 解析器新增数据长度一致性校验**（`dlt645_parser.py`）：声明值与实际帧长不匹配时，`valid=False`，fields 插入 `⚠ 数据长度错误` 行，但仍尽力解析所有可见字段（地址/控制码/DI/数据内容/校验和正常显示），不返回空白结果
+- **DLT645 校验器数据长度项改为一致性校验**（`validator/dlt645_validator.py`）：从只检查 >200 字节上限告警改为先校验声明值与实际帧长是否一致，不一致标记 FAIL
+- 确立容错显示原则：字段声明与实际不一致时，不得静默截断也不得直接返回空白，必须标红提示 + 尽力解析
+
+涉及文件：
+- 修改：`dlt645_parser.py`、`validator/dlt645_validator.py`、`README.md`、`AGENTS.md`
 
 变更：
 - **新增「TCP 流量监控」标签页**（`monitor/tcp_monitor.py`，TCPMonitorWidget）：基于 scapy 的 TCP 抓包、流列表、双向流重组与南网新一代 / 国网新一代自动解析
