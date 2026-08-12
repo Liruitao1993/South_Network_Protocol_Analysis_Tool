@@ -561,7 +561,7 @@ python test_theme_settings.py  # 主题与字体设置
 > 本节按版本倒序记录。详细 commit 见 `git log`。每发新版本必须更新此处。
 
 ### 后续更新（2026-08-12，未发版）
-- **校验结果 展开/收缩 + 解析结果表 全屏/恢复**（`main_gui.py`）：校验结果区新增「展开/收缩」按钮对（内容 `verify_label` 移入 QScrollArea，收缩后仅保留组标题+按钮行，重新展开恢复全文）；单帧解析结果表、批量摘要表、批量详情表各新增「全屏/恢复」按钮对（全屏隐藏兄弟控件（输入区/校验区/对侧面板/原始报文行）让表格撑满窗口，恢复还原；splitter 兄弟组用 callable 延迟解析避免创建时序问题）。新增通用辅助 `_make_fullscreen_controls` 与 `_on_verify_expand`/`_on_verify_collapse`
+- **校验结果 展开/收缩 + 解析结果表 全屏**（`main_gui.py`）：校验结果区新增「展开/收缩」按钮对（内容 `verify_label` 移入 QScrollArea，收缩后仅保留组标题+按钮行，重新展开恢复全文）；单帧解析结果表、批量摘要表、批量详情表各新增单个「全屏」按钮——与报文对比「结果详情」交互一致：点击在新窗口弹窗克隆展示表格快照（`_open_table_popup`），点「关闭」或窗口 X 关闭即恢复，主界面不做隐藏/重排。通用辅助 `_make_table_fullscreen_btn` 与 `_open_table_popup`
 - **新一代载波协议(索引9)批量解析管理消息摘要崩溃修复**（`main_gui.py`）：`_get_csg_new_gen_summary` 中 `int(mmtype_val)` 未处理 `0x` 前缀（MMTYPE 解析值为 `'0x0030'` 形式字符串），关联请求/关联指示/发现列表等管理消息帧批量解析报 `invalid literal for int() with base 10` 并标记 ❌ 异常；改为 `int(val, 16)` + try/except 兜底。通道自动识别本身正常（3 帧均判为 PLC 载波），崩溃仅发生在摘要生成层
 - **新一代载波协议(索引9)通道自动识别 PLC/HRF**（`csg_new_gen_parser.py` + `main_gui.py`）：`parse_to_table` 新增 `channel="auto"`，MPDU 级输入按 FC SOF 可变区域结构判别通道——表45(HRF)/表20(BPLC)/表23(ISAC) 三假设分别预测帧长与实际帧长比对，命中者胜；强信号：载荷PB大小=40 → HRF（表44 独有）、物理块个数>1 → PLC（无线仅支持1个PB）；解析结果新增「通道判定」行。GUI 通道下拉首位新增「自动识别」(默认，配置持久化)。新增 test_csg_hrf_mac.py T5-T8（用户PLC帧/合成HRF帧/PB40强信号/显式通道回归）
 - **新一代载波协议(索引9)测试帧切频操作目标按 Option+信道号解析**（`csg_new_gen_cmd_payloads.py`）：测试模式/配置操作=6（频段切换操作/切频）的目标字段不再按 12bit 目标频段值（`20 00` 误显示 512）解析，改为 **Option(字节2高4位) + 无线信道号(字节3)**（`20 00` → Option=2, 信道号=0），与模式8（无线信道切换）一致；同步修正国网新一代 `gw_new_gen_cmd_payloads.py` 模式6（删除废弃 `_EXT_FREQ_BANDS`）并更新 `test_gw_ext_cmd.py` T3/T13/T14 断言
