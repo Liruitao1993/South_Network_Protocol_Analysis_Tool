@@ -5044,7 +5044,12 @@ class MainWindow(QMainWindow):
             # 提取冒号后的消息名称
             mmtype_name = mmtype_comment.split(":", 1)[1].strip() if ":" in mmtype_comment else mmtype_comment
             prefix = msdu_type_prefix if msdu_type_prefix else "网络管理消息"
-            summary_parts = [f"{prefix} | MMTYPE:{mmtype_name}(0x{int(mmtype_val):04X})"]
+            try:
+                # MMTYPE 解析值为 '0x0030' 形式字符串，需先去 0x 前缀按 16 进制解析
+                mm_val = int(mmtype_val, 16) if str(mmtype_val).lower().startswith("0x") else int(mmtype_val)
+            except (ValueError, TypeError):
+                mm_val = 0
+            summary_parts = [f"{prefix} | MMTYPE:{mmtype_name}(0x{mm_val:04X})"]
             # 附带管理消息版本
             if "管理消息版本" in fields:
                 ver = fields["管理消息版本"][2]
