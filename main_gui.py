@@ -846,6 +846,15 @@ class MainWindow(QMainWindow):
         # 统一设置中文右键菜单（在标签页创建完成后应用）
         self._apply_chinese_menus_to_all_tabs()
 
+        # 恢复上次使用的协议（持久化：方便用户下次启动免选择）
+        self._restore_saved_protocol()
+
+    def _restore_saved_protocol(self):
+        """启动时恢复上次选择的协议索引（config parse.protocol）"""
+        saved = getattr(self, '_saved_protocol', 0)
+        if 0 <= saved < self.protocol_combo.count():
+            self.protocol_combo.setCurrentIndex(saved)
+
     def create_single_parse_tab(self) -> QWidget:
         """创建单帧解析标签页 - 上下布局"""
         tab = QWidget()
@@ -6980,6 +6989,11 @@ class MainWindow(QMainWindow):
         parse_cfg = self._app_config.get("parse", {})
         self._csg_channel = parse_cfg.get("csg_channel", "auto")
         self._gw_channel = parse_cfg.get("gw_channel", "plc")
+        # 上次使用的协议索引（启动时恢复选中，避免每次手动选择）
+        try:
+            self._saved_protocol = int(parse_cfg.get("protocol", 0))
+        except (TypeError, ValueError):
+            self._saved_protocol = 0
         # 同步到 combo（combo 在 create_single_parse_tab 中创建，稍后初始化时设置）
 
     def _load_system_settings(self):
@@ -7068,6 +7082,7 @@ class MainWindow(QMainWindow):
         parse_cfg = config.get("parse", {})
         parse_cfg["csg_channel"] = getattr(self, '_csg_channel', 'plc')
         parse_cfg["gw_channel"] = getattr(self, '_gw_channel', 'plc')
+        parse_cfg["protocol"] = getattr(self, 'current_protocol', 0)
         config["parse"] = parse_cfg
 
         try:

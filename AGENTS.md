@@ -561,6 +561,7 @@ python test_theme_settings.py  # 主题与字体设置
 > 本节按版本倒序记录。详细 commit 见 `git log`。每发新版本必须更新此处。
 
 ### 后续更新（2026-08-13，未发版）
+- **协议选择持久化**（`main_gui.py`）：上次使用的协议索引存入 `config.json` 的 `parse.protocol`，启动时 `_restore_saved_protocol` 自动恢复选中（UI 全部就绪后执行，走正常切换逻辑），用户无需每次打开软件重新选择协议
 - **所有解析/查询/监控表格支持 Ctrl+滚轮缩放（类 Excel）**：新增 `gui_utils.py::ZoomableTableWidget(QTableWidget)`——Ctrl+滚轮按 1.1/0.9 倍整体缩放（字号+行高同步，5-24pt 钳制，列宽保持避免破坏固定列布局），Ctrl+0 恢复缩放前基准；缩放为 per-table 覆盖，改全局字体设置后回到基准字号。全仓 35 处 `QTableWidget(` 实例（11 文件：main_gui 17、monitor 系列 8、diff/查询/档案/测试方案等 10）替换为该基类，原右键复制/Ctrl+C/字节高亮/双击深度解析等行为不变（子类即父类）；单元格级 `setCellWidget`/固定字体 item 不随缩放（可接受）
 - **校验结果 展开/收缩 + 解析结果表 全屏**（`main_gui.py`）：校验结果区新增「展开/收缩」按钮对（内容 `verify_label` 移入 QScrollArea，收缩后仅保留组标题+按钮行，默认收缩，重新展开恢复全文）；单帧解析结果表、批量摘要表、批量详情表各新增单个「全屏」按钮——与报文对比「结果详情」交互一致：点击在新窗口弹窗克隆展示表格快照（`_open_table_popup`），点「关闭」或窗口 X 关闭即恢复，主界面不做隐藏/重排。通用辅助 `_make_table_fullscreen_btn` 与 `_open_table_popup`
 - **新一代载波协议(索引9)批量解析管理消息摘要崩溃修复**（`main_gui.py`）：`_get_csg_new_gen_summary` 中 `int(mmtype_val)` 未处理 `0x` 前缀（MMTYPE 解析值为 `'0x0030'` 形式字符串），关联请求/关联指示/发现列表等管理消息帧批量解析报 `invalid literal for int() with base 10` 并标记 ❌ 异常；改为 `int(val, 16)` + try/except 兜底。通道自动识别本身正常（3 帧均判为 PLC 载波），崩溃仅发生在摘要生成层
