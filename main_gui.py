@@ -962,6 +962,7 @@ class MainWindow(QMainWindow):
         export_row = QHBoxLayout()
         export_row.addStretch()
         self.export_result_btn = QPushButton("导出图片")
+        self.export_result_btn.setFixedHeight(26)  # 与「全屏」按钮等高
         self.export_result_btn.setToolTip("将解析结果表格导出为完整的PNG图片")
         self.export_result_btn.setStyleSheet(
             "QPushButton { background-color: #2196F3; color: white; border-radius: 3px; padding: 3px 12px; }"
