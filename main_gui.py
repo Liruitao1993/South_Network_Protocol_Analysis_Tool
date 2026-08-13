@@ -962,10 +962,11 @@ class MainWindow(QMainWindow):
         export_row = QHBoxLayout()
         export_row.addStretch()
         self.export_result_btn = QPushButton("导出图片")
-        self.export_result_btn.setFixedHeight(26)  # 与「全屏」按钮等高
+        self.export_result_btn.setMinimumHeight(26)  # 与「全屏」同一高度策略(随字体缩放)
         self.export_result_btn.setToolTip("将解析结果表格导出为完整的PNG图片")
+        # 不覆盖全局 QSS padding(8px 16px)，保证随字体统一缩放
         self.export_result_btn.setStyleSheet(
-            "QPushButton { background-color: #2196F3; color: white; border-radius: 3px; padding: 3px 12px; }"
+            "QPushButton { background-color: #2196F3; color: white; border-radius: 3px; }"
             "QPushButton:hover { background-color: #1976D2; }"
         )
         self.export_result_btn.clicked.connect(self._export_result_image)
@@ -986,8 +987,7 @@ class MainWindow(QMainWindow):
         self.verify_expand_btn = QPushButton("展开")
         self.verify_collapse_btn = QPushButton("收缩")
         for b in (self.verify_expand_btn, self.verify_collapse_btn):
-            b.setFixedHeight(24)
-            b.setFont(self._ui_font(-1))
+            b.setMinimumHeight(24)  # 最小高度下限，随字体缩放（不设显式字体）
         self.verify_expand_btn.setEnabled(True)   # 默认收缩态
         self.verify_collapse_btn.setEnabled(False)
         self.verify_expand_btn.setToolTip("展开校验结果全文")
@@ -1036,8 +1036,7 @@ class MainWindow(QMainWindow):
         if with_stretch:
             row.addStretch()
         fs_btn = QPushButton("全屏")
-        fs_btn.setFixedHeight(26)
-        fs_btn.setFont(self._ui_font(-1))
+        fs_btn.setMinimumHeight(26)  # 最小高度下限，随字体缩放（不设显式字体）
         fs_btn.setToolTip("在新窗口全屏展示解析结果表格，关闭窗口即恢复")
         fs_btn.clicked.connect(lambda: self._open_table_popup(title, table))
         row.addWidget(fs_btn)
@@ -7137,14 +7136,16 @@ class MainWindow(QMainWindow):
                            min_width: int = 0, icon_btn: bool = False) -> QPushButton:
         """创建统一风格的工具栏按钮。
 
+        统一设计原则：按钮不设置显式字体（继承应用字体，字体设置实时统一缩放）、
+        不用 setFixedHeight（setMinimumHeight 仅为下限，内容随字体增长）。
+
         参数:
             text: 按钮文本
-            height: 统一高度（默认 28，与工具栏其他控件对齐）
+            height: 最小高度（默认 28，与工具栏其他控件对齐）
             min_width: 最小宽度，0 表示由内容决定
             icon_btn: 是否为图标按钮（固定接近正方形、限制最大宽度）
         """
         btn = QPushButton(text)
-        btn.setFont(self._ui_font(-1))
         btn.setMinimumHeight(height)
         if min_width:
             btn.setMinimumWidth(min_width)
