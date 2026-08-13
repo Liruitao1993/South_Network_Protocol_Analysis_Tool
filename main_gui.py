@@ -63,7 +63,7 @@ from preprocessors import list_scripts as _list_pp_scripts, get_script as _get_p
 
 
 APP_VERSION = "1.12.0"
-BUILD_DATE = "2026-08-12"  # 编译日期，每次打包前更新
+BUILD_DATE = "2026-08-13"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
     ("1.12.0", "2026-08-04", [
