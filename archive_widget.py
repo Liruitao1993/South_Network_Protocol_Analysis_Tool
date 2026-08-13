@@ -24,6 +24,7 @@ from protocol_parser import ProtocolFrameParser
 from gdw10376_parser import GDW10376Parser
 from dlt645_parser import DLT645Parser
 from lme_info_entry_parser import parse_lme_info_entries, format_lme_info_summary
+from gui_utils import ZoomableTableWidget
 
 ARCHIVE_FILE = "archive_data.json"
 
@@ -266,7 +267,7 @@ class ArchiveWidget(QWidget):
         table_layout.setContentsMargins(6, 4, 6, 4)
         table_layout.setSpacing(4)
 
-        self.table = QTableWidget()
+        self.table = ZoomableTableWidget()
         self.table.setColumnCount(10)
         self.table.setHorizontalHeaderLabels(["选择", "序号", "电表号/从节点地址", "电表协议", "相位/相序", "状态", "版本信息", "详细版本", "抄读结果", "其他信息"])
         header = self.table.horizontalHeader()

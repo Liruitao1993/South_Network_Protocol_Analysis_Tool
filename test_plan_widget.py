@@ -29,7 +29,7 @@ from PySide6.QtGui import (
     QSyntaxHighlighter, QTextCharFormat, QBrush
 )
 
-from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu
+from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu, ZoomableTableWidget
 
 try:
     from lua_script_engine import LuaScriptEngine, LUA_TEMPLATES
@@ -1572,7 +1572,7 @@ class TestPlanWidget(QWidget):
         main_layout.addWidget(hint_label)
 
         # ---- 测试项表格 ----
-        self.table = QTableWidget()
+        self.table = ZoomableTableWidget()
         self.table.setColumnCount(12)
         self.table.setHorizontalHeaderLabels([
             "序号", "名称", "帧内容", "操作", "发送",
