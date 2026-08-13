@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QTextEdit, QFileDialog, QMessageBox, QHeaderView, QAbstractItemView,
     QLineEdit, QMenu,
 )
+from gui_utils import ZoomableTableWidget
 
 
 class RealtimeMonitorWidget(QWidget):
@@ -288,7 +289,7 @@ class RealtimeMonitorWidget(QWidget):
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
         # 左侧：帧列表
-        self.frame_table = QTableWidget(0, 5)
+        self.frame_table = ZoomableTableWidget(0, 5)
         self.frame_table.setHorizontalHeaderLabels(["序号", "时间", "方向", "长度", "摘要"])
         self.frame_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
         self.frame_table.setColumnWidth(0, 55)
@@ -306,7 +307,7 @@ class RealtimeMonitorWidget(QWidget):
         # 右侧：解析表格 + 原始HEX（上下分割）
         right_splitter = QSplitter(Qt.Orientation.Vertical)
 
-        self.detail_table = QTableWidget(0, 4)
+        self.detail_table = ZoomableTableWidget(0, 4)
         self.detail_table.setHorizontalHeaderLabels(["字段名", "原始值", "解析值", "说明"])
         self.detail_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.detail_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)

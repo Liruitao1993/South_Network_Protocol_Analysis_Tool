@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QFont, QColor, QKeySequence, QShortcut, QGuiApplication
+from gui_utils import ZoomableTableWidget
 
 
 class FrameMonitorWidget(QWidget):
@@ -103,7 +104,7 @@ class FrameMonitorWidget(QWidget):
         left_layout = QVBoxLayout(left_group)
         left_layout.setContentsMargins(4, 4, 4, 4)
 
-        self._history_table = QTableWidget()
+        self._history_table = ZoomableTableWidget()
         self._history_table.setColumnCount(6)
         self._history_table.setHorizontalHeaderLabels(["序号", "时间", "协议", "方向", "长度", "摘要"])
         header = self._history_table.horizontalHeader()
@@ -133,7 +134,7 @@ class FrameMonitorWidget(QWidget):
         right_layout = QVBoxLayout(right_group)
         right_layout.setContentsMargins(4, 4, 4, 4)
 
-        self._parse_result_table = QTableWidget()
+        self._parse_result_table = ZoomableTableWidget()
         self._parse_result_table.setColumnCount(4)
         self._parse_result_table.setHorizontalHeaderLabels(["字段", "原始值", "解析值", "说明"])
         header = self._parse_result_table.horizontalHeader()

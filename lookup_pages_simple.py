@@ -10,12 +10,12 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QColor
-from gui_utils import setup_chinese_context_menu
+from gui_utils import setup_chinese_context_menu, ZoomableTableWidget
 
 
 def create_base_table(headers, column_widths):
     """创建基础表格"""
-    table = QTableWidget()
+    table = ZoomableTableWidget()
     table.setColumnCount(len(headers))
     table.setHorizontalHeaderLabels(headers)
 

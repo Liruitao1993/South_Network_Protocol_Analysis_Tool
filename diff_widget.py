@@ -22,6 +22,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QColor, QTextCharFormat, QBrush, QTextCursor, QIcon
 
 from frame_diff_engine import FrameDiffEngine, _format_bytes
+from gui_utils import ZoomableTableWidget
 
 
 # ---- 颜色常量 ----
@@ -378,7 +379,7 @@ class DiffWidget(QWidget):
 
     def _build_byte_diff_table(self, byte_diff: list) -> QTableWidget:
         """构建字节级对比表格（可复用）"""
-        table = QTableWidget()
+        table = ZoomableTableWidget()
         table.setColumnCount(3)
         table.setHorizontalHeaderLabels(["字段", "报文 A 字节", "报文 B 字节"])
         table.setRowCount(len(byte_diff))
@@ -487,7 +488,7 @@ class DiffWidget(QWidget):
 
     def _build_field_diff_table(self, field_diff: list) -> QTableWidget:
         """构建字段级语义对比表格（可复用）"""
-        table = QTableWidget()
+        table = ZoomableTableWidget()
         table.setColumnCount(6)
         table.setHorizontalHeaderLabels(["字段", "偏移", "长度", "报文 A", "报文 B", "差异"])
         table.setRowCount(len(field_diff))

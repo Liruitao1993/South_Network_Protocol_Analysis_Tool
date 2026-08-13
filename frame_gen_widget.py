@@ -26,7 +26,7 @@ from dl_t698_45_frame_gen import DLT69845FrameGenerator
 from dl_t698_45_frame_schema import DLT69845_FIELD_SCHEMA, APDU_TYPE_LIST, OI_PRESET_LIST
 from dl_t698_45_parser import DLT69845Parser
 from preset_buttons import PresetButtonManager, AddPresetDialog
-from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu
+from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu, ZoomableTableWidget
 
 
 # =============================================================================
@@ -503,7 +503,7 @@ class FrameGenWidget(QWidget):
         preview_layout.setContentsMargins(6, 4, 6, 4)
         preview_layout.setSpacing(4)
 
-        self.preview_table = QTableWidget()
+        self.preview_table = ZoomableTableWidget()
         self.preview_table.setColumnCount(4)
         self.preview_table.setHorizontalHeaderLabels(["字段", "原始值", "解析值", "说明"])
         header = self.preview_table.horizontalHeader()
@@ -530,7 +530,7 @@ class FrameGenWidget(QWidget):
         resp_layout.setContentsMargins(6, 4, 6, 4)
         resp_layout.setSpacing(4)
 
-        self.response_table = QTableWidget()
+        self.response_table = ZoomableTableWidget()
         self.response_table.setColumnCount(4)
         self.response_table.setHorizontalHeaderLabels(["字段", "原始值", "解析值", "说明"])
         resp_header = self.response_table.horizontalHeader()
@@ -1756,7 +1756,7 @@ class FrameGenWidget(QWidget):
         hint.setStyleSheet("color: #666; font-size: 11px;")
         table_layout.addWidget(hint)
 
-        self.template_table = QTableWidget()
+        self.template_table = ZoomableTableWidget()
         self.template_table.setColumnCount(7)
         self.template_table.setHorizontalHeaderLabels([
             "序号", "名称", "长度(字节)", "数据类型", "字节序", "显示进制", "字段值填充"

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QFont, QKeySequence, QShortcut, QGuiApplication
+from gui_utils import ZoomableTableWidget
 
 # scapy 可选依赖
 try:
@@ -426,7 +427,7 @@ class TCPMonitorWidget(QWidget):
         flow_layout = QVBoxLayout(flow_group)
         flow_layout.setContentsMargins(6, 8, 6, 6)
 
-        self.flow_table = QTableWidget()
+        self.flow_table = ZoomableTableWidget()
         self.flow_table.setColumnCount(6)
         self.flow_table.setHorizontalHeaderLabels(
             ["流ID", "源地址", "目的地址", "包数", "字节数", "最新时间"]
@@ -491,7 +492,7 @@ class TCPMonitorWidget(QWidget):
         frame_toolbar.addWidget(self.frame_autoscroll_cb)
         frame_layout.addLayout(frame_toolbar)
 
-        self.frame_table = QTableWidget()
+        self.frame_table = ZoomableTableWidget()
         self.frame_table.setColumnCount(5)
         self.frame_table.setHorizontalHeaderLabels(
             ["时间", "方向", "长度", "协议", "摘要"]
@@ -528,7 +529,7 @@ class TCPMonitorWidget(QWidget):
         raw_layout.setContentsMargins(4, 4, 4, 4)
         raw_layout.setSpacing(4)
 
-        self.segment_table = QTableWidget()
+        self.segment_table = ZoomableTableWidget()
         self.segment_table.setColumnCount(3)
         self.segment_table.setHorizontalHeaderLabels(["时间", "方向", "长度"])
         self.segment_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -570,7 +571,7 @@ class TCPMonitorWidget(QWidget):
         self.parse_hex.setPlaceholderText("选中帧以查看详情…")
         parse_layout.addWidget(self.parse_hex)
 
-        self.parse_table = QTableWidget()
+        self.parse_table = ZoomableTableWidget()
         self.parse_table.setColumnCount(4)
         self.parse_table.setHorizontalHeaderLabels(
             ["字段", "原始值", "解析值", "说明"]

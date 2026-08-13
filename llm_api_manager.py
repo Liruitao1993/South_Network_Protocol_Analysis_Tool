@@ -16,6 +16,14 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QThread, Signal as QtSignal
 from PySide6.QtGui import QFont, QColor
+from gui_utils import ZoomableTableWidget
+
+
+def _style_action_btn(btn: QPushButton, height: int = 28, min_width: int = 0):
+    """统一操作按钮尺寸。"""
+    btn.setMinimumHeight(height)
+    if min_width:
+        btn.setMinimumWidth(min_width)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -240,6 +248,7 @@ class _ProfileEditDialog(QDialog):
         # 测试连接
         test_row = QHBoxLayout()
         self.test_btn = QPushButton("🔗 测试连接")
+        _style_action_btn(self.test_btn, min_width=100)
         self.test_btn.clicked.connect(self._test_connection)
         test_row.addWidget(self.test_btn)
         self.test_status = QLabel("")
@@ -368,7 +377,7 @@ class LLMApiManagerDialog(QDialog):
         root.addWidget(title)
 
         # 配置表格
-        self.table = QTableWidget()
+        self.table = ZoomableTableWidget()
         self.table.setColumnCount(5)
         self.table.setHorizontalHeaderLabels(["名称", "供应商", "Endpoint", "模型", "状态"])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
@@ -387,15 +396,18 @@ class LLMApiManagerDialog(QDialog):
         btn_layout = QHBoxLayout()
 
         self.add_btn = QPushButton("➕ 新增")
+        _style_action_btn(self.add_btn, min_width=70)
         self.add_btn.clicked.connect(self._on_add)
         btn_layout.addWidget(self.add_btn)
 
         self.edit_btn = QPushButton("✏️ 编辑")
+        _style_action_btn(self.edit_btn, min_width=70)
         self.edit_btn.clicked.connect(self._on_edit)
         self.edit_btn.setEnabled(False)
         btn_layout.addWidget(self.edit_btn)
 
         self.delete_btn = QPushButton("🗑️ 删除")
+        _style_action_btn(self.delete_btn, min_width=70)
         self.delete_btn.clicked.connect(self._on_delete)
         self.delete_btn.setEnabled(False)
         btn_layout.addWidget(self.delete_btn)
@@ -403,6 +415,7 @@ class LLMApiManagerDialog(QDialog):
         btn_layout.addSpacing(20)
 
         self.test_btn = QPushButton("🔗 测试连接")
+        _style_action_btn(self.test_btn, min_width=100)
         self.test_btn.clicked.connect(self._on_test)
         self.test_btn.setEnabled(False)
         btn_layout.addWidget(self.test_btn)
@@ -410,6 +423,7 @@ class LLMApiManagerDialog(QDialog):
         btn_layout.addStretch()
 
         self.set_active_btn = QPushButton("⭐ 设为当前使用")
+        _style_action_btn(self.set_active_btn, min_width=110)
         self.set_active_btn.clicked.connect(self._on_set_active)
         self.set_active_btn.setEnabled(False)
         btn_layout.addWidget(self.set_active_btn)
@@ -423,6 +437,7 @@ class LLMApiManagerDialog(QDialog):
 
         # 关闭按钮
         close_btn = QPushButton("关闭")
+        _style_action_btn(close_btn, min_width=80)
         close_btn.clicked.connect(self.accept)
         root.addWidget(close_btn, 0, Qt.AlignRight)
 

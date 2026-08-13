@@ -54,7 +54,7 @@ from system_integration.clipboard_monitor import ClipboardMonitor, detect_protoc
 from system_integration.parse_prompt_dialog import ParsePromptDialog
 from message_tool_widget import MessageToolWidget
 from serial_worker import SerialWorker
-from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu
+from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu, ZoomableTableWidget
 from enhanced_export import EnhancedBatchResultExporter
 from theme_settings import ThemeManager, ThemeSettingsDialog
 from llm_preprocess_widget import LLMPreprocessWidget
@@ -927,7 +927,7 @@ class MainWindow(QMainWindow):
         result_group = QGroupBox("解析结果")
         result_layout = QVBoxLayout(result_group)
 
-        self.result_table_widget = QTableWidget()
+        self.result_table_widget = ZoomableTableWidget()
         self.result_table_widget.setColumnCount(4)
         self.result_table_widget.setHorizontalHeaderLabels(["字段", "原始值", "解析值", "说明"])
         # 允许用户拖拽调整列宽
@@ -1053,7 +1053,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(8)
 
         # 克隆源表格内容为快照（读取型展示，不共享原表格）
-        clone = QTableWidget(source_table.rowCount(), source_table.columnCount())
+        clone = ZoomableTableWidget(source_table.rowCount(), source_table.columnCount())
         headers = []
         for c in range(source_table.columnCount()):
             h = source_table.horizontalHeaderItem(c)
@@ -1186,7 +1186,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.di_stats_label)
 
         # 表格
-        self.di_table = QTableWidget()
+        self.di_table = ZoomableTableWidget()
         self.di_table.setColumnCount(6)
         self.di_table.setHorizontalHeaderLabels(["DI3", "DI2", "DI1", "DI0", "AFN", "中文含义"])
         header = self.di_table.horizontalHeader()
@@ -1643,7 +1643,7 @@ class MainWindow(QMainWindow):
 
         summary_layout.addLayout(filter_bar)
 
-        self.batch_summary_table = QTableWidget()
+        self.batch_summary_table = ZoomableTableWidget()
         self.batch_summary_table.setColumnCount(5)
         self.batch_summary_table.setHorizontalHeaderLabels([
             "#", "状态", "长度", "协议/类型", "摘要"
@@ -1706,7 +1706,7 @@ class MainWindow(QMainWindow):
         detail_layout.addLayout(hex_row)
 
         # 详情表格
-        self.batch_detail_table = QTableWidget()
+        self.batch_detail_table = ZoomableTableWidget()
         self.batch_detail_table.setColumnCount(4)
         self.batch_detail_table.setHorizontalHeaderLabels([
             "字段", "原始值", "解析值", "说明"
@@ -2122,7 +2122,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.oad_stats_label)
 
         # 表格
-        self.oad_table = QTableWidget()
+        self.oad_table = ZoomableTableWidget()
         self.oad_table.setColumnCount(5)
         self.oad_table.setHorizontalHeaderLabels(["OI", "对象名称", "属性", "方法", "说明"])
         header = self.oad_table.horizontalHeader()
@@ -2172,7 +2172,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.csg_new_gen_stats_label)
 
         # 查询表格
-        self.csg_new_gen_table = QTableWidget()
+        self.csg_new_gen_table = ZoomableTableWidget()
         self.csg_new_gen_table.setColumnCount(4)
         self.csg_new_gen_table.setHorizontalHeaderLabels(["分类", "代码", "名称", "说明"])
         self.csg_new_gen_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -2247,7 +2247,7 @@ class MainWindow(QMainWindow):
         self.gw_new_gen_stats_label.setFont(self._ui_font(-1))
         layout.addWidget(self.gw_new_gen_stats_label)
 
-        self.gw_new_gen_table = QTableWidget()
+        self.gw_new_gen_table = ZoomableTableWidget()
         self.gw_new_gen_table.setColumnCount(4)
         self.gw_new_gen_table.setHorizontalHeaderLabels(["分类", "代码", "名称", "说明"])
         self.gw_new_gen_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -2316,7 +2316,7 @@ class MainWindow(QMainWindow):
         self.hdc10_stats_label.setFont(self._ui_font(-1))
         layout.addWidget(self.hdc10_stats_label)
 
-        self.hdc10_table = QTableWidget()
+        self.hdc10_table = ZoomableTableWidget()
         self.hdc10_table.setColumnCount(4)
         self.hdc10_table.setHorizontalHeaderLabels(["分类", "代码", "名称", "说明"])
         self.hdc10_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -2425,7 +2425,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.gdw_stats_label)
 
         # 表格
-        self.gdw_table = QTableWidget()
+        self.gdw_table = ZoomableTableWidget()
         self.gdw_table.setColumnCount(4)
         self.gdw_table.setHorizontalHeaderLabels(["AFN", "AFN名称", "Fn", "功能说明"])
         header = self.gdw_table.horizontalHeader()
@@ -2588,7 +2588,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.di_stats_label)
 
         # 表格
-        self.di_table = QTableWidget()
+        self.di_table = ZoomableTableWidget()
         self.di_table.setColumnCount(6)
         self.di_table.setHorizontalHeaderLabels(["DI3", "DI2", "DI1", "DI0", "AFN", "中文含义"])
         header = self.di_table.horizontalHeader()
@@ -2643,7 +2643,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.obis_stats_label)
 
         # 表格
-        self.obis_table = QTableWidget()
+        self.obis_table = ZoomableTableWidget()
         self.obis_table.setColumnCount(4)
         self.obis_table.setHorizontalHeaderLabels(["OBIS码", "对象名称", "对象类型", "访问属性"])
         header = self.obis_table.horizontalHeader()
@@ -2687,7 +2687,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.dlt645_di_stats_label)
 
         # 表格
-        self.dlt645_di_table = QTableWidget()
+        self.dlt645_di_table = ZoomableTableWidget()
         self.dlt645_di_table.setColumnCount(5)
         self.dlt645_di_table.setHorizontalHeaderLabels(["DI编码", "名称", "单位", "数据类型", "说明"])
         header = self.dlt645_di_table.horizontalHeader()
@@ -2878,7 +2878,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.cmd_stats_label)
 
         # 表格
-        self.cmd_table = QTableWidget()
+        self.cmd_table = ZoomableTableWidget()
         self.cmd_table.setColumnCount(2)
         self.cmd_table.setHorizontalHeaderLabels(["命令字", "名称"])
         header = self.cmd_table.horizontalHeader()
@@ -4347,7 +4347,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(hex_text)
 
         # 解析结果表格（紧凑排版，与主窗口解析表一致：小字号 + 贴合行高）
-        table = QTableWidget()
+        table = ZoomableTableWidget()
         table.setColumnCount(4)
         table.setHorizontalHeaderLabels(["字段", "原始值", "解析值", "说明"])
         header = table.horizontalHeader()
@@ -6453,7 +6453,7 @@ class MainWindow(QMainWindow):
                     current_parser = self._get_current_parser()
                     table_data = current_parser.parse_to_table(frame_bytes)
 
-                detail_table = QTableWidget()
+                detail_table = ZoomableTableWidget()
                 detail_table.setColumnCount(4)
                 detail_table.setHorizontalHeaderLabels(["字段", "原始值", "解析值", "说明"])
                 header = detail_table.horizontalHeader()
@@ -6878,7 +6878,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(hex_text)
 
         # 解析结果表格
-        table = QTableWidget()
+        table = ZoomableTableWidget()
         table.setColumnCount(4)
         table.setHorizontalHeaderLabels(["字段", "十六进制", "解析值", "说明"])
         header = table.horizontalHeader()
