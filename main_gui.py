@@ -848,6 +848,7 @@ class MainWindow(QMainWindow):
 
         # 恢复上次使用的协议（持久化：方便用户下次启动免选择）
         self._restore_saved_protocol()
+        self._ui_ready = True  # UI 构造完成，此后协议切换才写盘
 
     def _restore_saved_protocol(self):
         """启动时恢复上次选择的协议索引（config parse.protocol）"""
@@ -1985,6 +1986,10 @@ class MainWindow(QMainWindow):
                 wrapper = "plc2" if index == 9 else "hplc"
                 self.monitor_tab.set_protocol(parser, self._get_monitor_summary,
                                               wrapper_format=wrapper)
+
+        # 持久化协议选择（UI 全部就绪后才写盘，避免构造期触发保存）
+        if getattr(self, '_ui_ready', False):
+            self._save_app_config()
 
     def _get_monitor_summary(self, table_data: list) -> str:
         """监控器摘要生成：按当前协议分派到对应摘要函数"""
