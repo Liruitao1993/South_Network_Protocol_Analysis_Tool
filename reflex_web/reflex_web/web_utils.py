@@ -374,6 +374,8 @@ def extract_frames_for_protocol(text: str, protocol_index: int) -> List[str]:
         return extract_csg_new_gen_frames(text)
     elif protocol_index == 10:  # 国网新一代双模：按行提取，每行一帧
         return [f.strip() for f in text.splitlines() if f.strip() and len(f.strip()) >= 4]
+    elif protocol_index == 11:  # HDC 1.0 双模互联互通：按行提取，每行一帧
+        return [f.strip() for f in text.splitlines() if f.strip() and len(f.strip()) >= 4]
     else:
         return [f.strip() for f in text.splitlines() if f.strip()]
 
@@ -513,6 +515,69 @@ def extract_csg_core_content(table_data: List) -> str:
     return ""
 
 
+def get_hdc10_summary(table_data: List) -> str:
+    """HDC 1.0 双模互联互通摘要提取"""
+    if not table_data:
+        return "空"
+
+    first_field = str(table_data[0][0]) if table_data[0] else ""
+    if "❌" in first_field or "失败" in first_field:
+        return str(table_data[0][3]) if len(table_data[0]) >= 4 else "解析失败"
+
+    parts = []
+
+    # 定界符类型（物理层帧）
+    delim_row = _find_field(table_data, "定界符类型")
+    if delim_row:
+        delim_name = str(delim_row[3]) if len(delim_row) >= 4 and delim_row[3] else str(delim_row[2])
+        parts.append(delim_name)
+
+    # 信标帧：信标类型
+    if delim_row and "信标" in (str(delim_row[3]) if len(delim_row) >= 4 else ""):
+        beacon_type = _find_field(table_data, "信标类型")
+        if beacon_type:
+            parts.append(str(beacon_type[3]) if len(beacon_type) >= 4 and beacon_type[3] else str(beacon_type[2]))
+
+    # MSDU 类型（MAC 帧）
+    msdu_row = _find_field(table_data, "MSDU类型")
+    if msdu_row:
+        msdu = str(msdu_row[3]) if len(msdu_row) >= 4 and msdu_row[3] else str(msdu_row[2])
+        parts.append(msdu)
+
+    # 网络管理消息（MME）
+    mmtype_row = _find_field(table_data, "MMTYPE")
+    if mmtype_row:
+        name = str(mmtype_row[3]) if len(mmtype_row) >= 4 and mmtype_row[3] else str(mmtype_row[2])
+        parts.append(f"MME:{name}")
+
+    # 应用层报文：端口号 + 报文ID + 业务类型ID
+    port_row = _find_field(table_data, "报文端口号")
+    if port_row:
+        port = str(port_row[3]) if len(port_row) >= 4 and port_row[3] else str(port_row[2])
+        parts.append(f"端口:{port}")
+    msg_id_row = _find_field(table_data, "报文ID")
+    if msg_id_row:
+        name = str(msg_id_row[3]) if len(msg_id_row) >= 4 and msg_id_row[3] else str(msg_id_row[2])
+        parts.append(f"报文ID:{name}")
+    biz_row = _find_field(table_data, "业务类型ID")
+    if biz_row:
+        biz = str(biz_row[3]) if len(biz_row) >= 4 and biz_row[3] else str(biz_row[2])
+        parts.append(f"业务:{biz}")
+    proto_row = _find_field(table_data, "转发数据规约类型")
+    if proto_row:
+        proto = str(proto_row[3]) if len(proto_row) >= 4 and proto_row[3] else str(proto_row[2])
+        parts.append(proto)
+
+    # 兜底：取前几个非冗余字段
+    if not parts:
+        for row in table_data[:8]:
+            if len(row) >= 4 and row[0] and row[3]:
+                field_name = str(row[0]).strip()
+                if field_name not in ("原始值", "解析值", "说明") and len(parts) < 4:
+                    parts.append(str(row[3]))
+    return " | ".join([p for p in parts if p]) if parts else (str(table_data[0][0]) if table_data[0] else "空")
+
+
 def get_frame_summary(table_data: List, protocol_index: int) -> str:
     """统一摘要提取入口"""
     if not table_data:
@@ -520,6 +585,9 @@ def get_frame_summary(table_data: List, protocol_index: int) -> str:
 
     if protocol_index in (9, 10):
         return get_csg_new_gen_summary(table_data)
+
+    if protocol_index == 11:
+        return get_hdc10_summary(table_data)
 
     # 其他协议：找 AFN/帧类型/功能码/业务标识 字段
     for row in table_data:
@@ -771,6 +839,18 @@ def tool_crc24_newgen(text: str) -> str:
         return f"错误: {e}"
 
 
+def tool_hex_to_decimal(text: str, little_endian: bool = True) -> str:
+    """HEX 转十进制（支持大端/小端）"""
+    data = _parse_hex(text)
+    if not data:
+        return "错误: 无有效 HEX 数据"
+    value = int.from_bytes(bytes(data), 'little' if little_endian else 'big')
+    return (
+        f"十进制: {value}\n"
+        f"十六进制: 0x{value:X}\n"
+        f"字节序: {'小端(低字节在前)' if little_endian else '大端(高字节在前)'}")
+
+
 # 工具定义（供 UI 层使用）
 TOOL_GROUPS = [
     {
@@ -852,3 +932,54 @@ def run_tool(tool_id: str, input_text: str) -> str:
         return func(input_text)
     except Exception as e:
         return f"执行失败: {e}"
+
+
+# ═══════════════════════════════════════════════════════════════
+# 批量结果导出
+# ═══════════════════════════════════════════════════════════════
+
+def _result_row_to_dict(item: Dict[str, Any]) -> Dict[str, Any]:
+    """将批量结果条目转换为可序列化 dict"""
+    return {
+        "序号": (item.get("id", 0) or 0) + 1,
+        "状态": item.get("status", ""),
+        "长度(字节)": item.get("len", 0),
+        "摘要": item.get("proto", ""),
+        "帧(HEX)": (item.get("frame_bytes") or b"").hex().upper() if item.get("frame_bytes") else "",
+        "字段数": len(item.get("result", []) or []),
+        "字段详情": [
+            {
+                "字段": str(r[0]) if len(r) >= 1 else "",
+                "原始值": str(r[1]) if len(r) >= 2 else "",
+                "解析值": str(r[2]) if len(r) >= 3 else "",
+                "说明": str(r[3]) if len(r) >= 4 else "",
+            }
+            for r in (item.get("result", []) or []) if r
+        ],
+    }
+
+
+def export_frames_to_json(batch_results: List[Dict[str, Any]]) -> str:
+    """批量结果 → JSON 字符串"""
+    import json
+    data = [_result_row_to_dict(item) for item in batch_results]
+    return json.dumps(data, ensure_ascii=False, indent=2)
+
+
+def export_frames_to_csv(batch_results: List[Dict[str, Any]]) -> str:
+    """批量结果 → CSV 字符串（UTF-8 BOM，Excel 可直接打开）"""
+    import csv
+    import io
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["序号", "状态", "长度(字节)", "摘要", "帧(HEX)", "字段数"])
+    for item in batch_results:
+        writer.writerow([
+            (item.get("id", 0) or 0) + 1,
+            item.get("status", ""),
+            item.get("len", 0),
+            item.get("proto", ""),
+            (item.get("frame_bytes") or b"").hex().upper() if item.get("frame_bytes") else "",
+            len(item.get("result", []) or []),
+        ])
+    return "\ufeff" + buf.getvalue()
