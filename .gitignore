@@ -26,3 +26,26 @@ Verifying
 web/main_page_new.py
 .serena/
 config.json
+# 构建产物（移出跟踪）
+reflex_web/.web/
+reflex_web/.states/
+reflex.lock/
+Output/
+# 依赖与工具目录
+node_modules/
+.zcode/
+.trae/
+.qoder/
+.reasonix/
+.omp/
+.kilocode/
+.pi/
+.codex/
+.playwright-mcp/
+_hdc_pages/
+_ocr_tmp/
+upx-5.0.0-win64/
+# 敏感文件
+.roo/
+.claude/settings.local.json
+.codegraph/config.json
