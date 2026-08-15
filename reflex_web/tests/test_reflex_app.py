@@ -79,7 +79,7 @@ def test_lookup(page, reflex_app):
     page.goto(reflex_app)
     page.wait_for_load_state("networkidle")
     switch_tab(page, "查询")
-    page.locator("input >> visible=true").first.fill("0001")
+    page.locator("input >> visible=true").first.fill("E8")
     page.locator("button:has-text('搜索') >> visible=true").first.click()
     page.wait_for_selector("table tbody tr", timeout=15000)
     assert page.locator("table tbody tr").count() > 0
