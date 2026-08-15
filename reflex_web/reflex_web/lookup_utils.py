@@ -64,6 +64,10 @@ QUERY_CONFIG = {
         "title": "报文ID查询",
         "columns": ["类别", "代码", "名称"],
     },
+    11: {  # HDC 1.0 双模互联互通
+        "title": "报文ID/端口查询",
+        "columns": ["类别", "代码", "名称"],
+    },
 }
 
 
@@ -290,6 +294,47 @@ def _search_gw_newgen(keyword: str = "") -> List[List[str]]:
     return _search_csg_service(keyword)
 
 
+def _search_hdc10(keyword: str = "") -> List[List[str]]:
+    """HDC 1.0 双模互联互通查询（定界符/端口/报文ID/MSDU类型/转发规约等）"""
+    try:
+        from hdc10_parser import (
+            DELIMITER_TYPES, APP_PORTS, MSG_ID_NAMES,
+            MSDU_TYPES, PROTOCOL_TYPES, SECURITY_MODES,
+            NETWORK_TYPES, SINGLEHOP_MSG_TYPES,
+        )
+
+        keyword_upper = keyword.upper().strip()
+        results = []
+
+        all_maps = [
+            ("定界符类型", DELIMITER_TYPES),
+            ("网络类型", NETWORK_TYPES),
+            ("报文端口号", APP_PORTS),
+            ("报文ID(业务)", MSG_ID_NAMES),
+            ("MSDU类型", MSDU_TYPES),
+            ("单跳消息类型", SINGLEHOP_MSG_TYPES),
+            ("转发数据规约", PROTOCOL_TYPES),
+            ("安全模式", SECURITY_MODES),
+        ]
+
+        for category, mapping in all_maps:
+            for code, name in mapping.items():
+                if isinstance(code, int):
+                    code_str = f"0x{code:02X}"
+                else:
+                    code_str = str(code)
+                row = [category, code_str, name]
+                if not keyword_upper:
+                    results.append(row)
+                    continue
+                match = any(keyword_upper in cell.upper() for cell in row)
+                if match:
+                    results.append(row)
+        return results
+    except Exception as e:
+        return [[f"加载失败: {e}", "", ""]]
+
+
 # 查询函数映射
 _SEARCH_FUNCTIONS = {
     0: _search_south_di,
@@ -303,6 +348,7 @@ _SEARCH_FUNCTIONS = {
     8: _search_698_oi,
     9: _search_csg_service,
     10: _search_gw_newgen,
+    11: _search_hdc10,
 }
 
 

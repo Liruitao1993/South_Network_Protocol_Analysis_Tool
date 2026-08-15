@@ -27,9 +27,11 @@ web/main_page_new.py
 .serena/
 config.json
 # 构建产物（移出跟踪）
+dist.zip
 reflex_web/.web/
 reflex_web/.states/
 reflex.lock/
+reflex_web/.tests/
 Output/
 # 依赖与工具目录
 node_modules/

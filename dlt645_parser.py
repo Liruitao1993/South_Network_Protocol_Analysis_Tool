@@ -59,8 +59,23 @@ class DLT645Parser:
         result['address'] = data[1:7][::-1].hex().upper()
         result['control'] = data[8]
         result['data_length'] = data[9]
+        # 校验数据域长度声明值与实际帧长度是否一致
+        expected_total_len = 12 + result['data_length']  # 68+addr(6)+68+ctrl+len+data(N)+cs+16
+        actual_data_len = len(data) - 12
+        result['data_length_mismatch'] = actual_data_len != result['data_length']
+        if result['data_length_mismatch']:
+            result['valid'] = False
+            result['error'] = (f"数据域长度不匹配：声明 {result['data_length']} 字节，"
+                               f"实际 {actual_data_len} 字节（帧总长 {len(data)}，期望 {expected_total_len}）")
         # 数据域解码：每个字节减 0x33，使用 & 0xFF 确保结果在有效字节范围内
-        result['data'] = bytes([(b - 0x33) & 0xFF for b in data[10:10+result['data_length']]])
+        # 即使长度不匹配也尽力解析实际存在的数据，方便用户排查
+        actual_data_bytes = data[10:10 + min(result['data_length'], actual_data_len)] if actual_data_len > 0 else b''
+        if actual_data_len < result['data_length']:
+            # 声明比实际长：用实际有的数据解析
+            result['data'] = bytes([(b - 0x33) & 0xFF for b in actual_data_bytes])
+        else:
+            # 声明比实际短：按声明长度解析（多余字节不处理）
+            result['data'] = bytes([(b - 0x33) & 0xFF for b in data[10:10+result['data_length']]])
         result['checksum'] = data[-2]
         result['checksum_valid'] = (sum(data[0:-2]) & 0xFF) == data[-2]
 
@@ -156,6 +171,14 @@ class DLT645Parser:
             ('控制码', f"{ctrl:02X}H", result['control_desc']),
             ('数据长度', f"{result['data_length']} 字节", '数据域字节数'),
         ]
+
+        if result.get('data_length_mismatch'):
+            actual_data_len_display = len(data) - 12
+            result['fields'].append((
+                '⚠ 数据长度错误',
+                f"声明{result['data_length']}B / 实际{actual_data_len_display}B",
+                '数据域长度声明值与实际帧内容不匹配，解析结果可能不准确'
+            ))
 
         if len(result['data']) >=4:
             result['fields'].append(('数据标识 DI', result['di_code'], result['di_desc']))

@@ -716,6 +716,57 @@ DARK_QSS = """
 
 
 # ---------------------------------------------------------------------------
+# VISTA 原生主题补充：仅输入类控件强制浅色
+# ---------------------------------------------------------------------------
+# windowsvista 主题 qss 原本为 None（纯原生，跟随系统配色）。
+# 系统深色模式下 QLineEdit/QTextEdit/QTableWidget 会渲染成深色背景。
+# 此处只覆盖输入/表格控件的背景与文字，其余控件（按钮/菜单/标签等）
+# 保持 windowsvista 原生风格不变。
+VISTA_INPUT_QSS = """
+    /* ===== 单行/多行输入 ===== */
+    QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox {
+        background-color: #ffffff;
+        color: #000000;
+        selection-background-color: #3399ff;
+        selection-color: #ffffff;
+    }
+    QTextEdit, QPlainTextEdit {
+        border: 1px solid #bbbbbb;
+        padding: 2px;
+    }
+    /* ===== 下拉框（含弹出的列表） ===== */
+    QComboBox {
+        background-color: #ffffff;
+        color: #000000;
+    }
+    QComboBox QAbstractItemView {
+        background-color: #ffffff;
+        color: #000000;
+        selection-background-color: #3399ff;
+        selection-color: #ffffff;
+    }
+    /* ===== 表格 / 列表 ===== */
+    QTableWidget, QTableView, QTreeView, QListWidget {
+        background-color: #ffffff;
+        color: #000000;
+        alternate-background-color: #f2f2f2;
+        gridline-color: #d0d0d0;
+        selection-background-color: #3399ff;
+        selection-color: #ffffff;
+    }
+    QTableWidget::item, QTableView::item {
+        padding: 2px;
+    }
+    QHeaderView::section {
+        background-color: #f0f0f0;
+        color: #000000;
+        border: 1px solid #d0d0d0;
+        padding: 4px;
+    }
+"""
+
+
+# ---------------------------------------------------------------------------
 # 主题注册表
 # ---------------------------------------------------------------------------
 # style: QStyleFactory 可创建的风格名；qss: 附加样式表（None = 纯原生风格）
@@ -752,8 +803,8 @@ THEMES: List[Dict] = [
         "id": "windowsvista",
         "name": "Windows Vista",
         "style": "windowsvista",
-        "qss": None,
-        "desc": "Windows Vista 原生控件风格（无自定义样式表）",
+        "qss": VISTA_INPUT_QSS,
+        "desc": "Windows Vista 原生控件风格（输入/表格控件强制浅色，避免深色系统下黑底）",
     },
 ]
 

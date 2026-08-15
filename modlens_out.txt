@@ -1,0 +1,11 @@
+oh-my-posh : 无法将“oh-my-posh”项识别为 cmdlet、函数、脚本文件或可运行程序的名称。请检查名称的拼写，如果包括路径，请确保路
+径正确，然后再试一次。
+所在位置 D:\文档\WindowsPowerShell\Microsoft.PowerShell_profile.ps1:11 字符: 1
++ oh-my-posh init pwsh --config "$env:USERPROFILE\posh-themes\monokai.o ...
++ ~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (oh-my-posh:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+(node:28360) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+Error: Every configured vision provider failed for this image. openai: OpenAI-compatible API error 404: {"error":{"message":"The model `mimo-v2.5-free` does not exist or you do not have access to it.","type":"invalid_request_error","param":null,"code":"model_not_found"},"request_id":"c7ae328f-8328-92d3-85a8-137b11d26638"} | claude-cli: Provider CLI not found: claude. Install it and sign in first.

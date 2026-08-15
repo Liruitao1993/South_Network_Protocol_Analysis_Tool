@@ -16,7 +16,7 @@ import crcmod.predefined
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTextEdit, QCheckBox, QGridLayout, QMessageBox, QGroupBox,
+    QTextEdit, QCheckBox, QGridLayout, QMessageBox, QGroupBox, QComboBox,
 )
 
 
@@ -101,6 +101,16 @@ class MessageToolWidget(QWidget):
         ext_grid.addWidget(self._btn("CRC-24 (新一代)", self._crc24_newgen), 1, 0)
         ext_grid.addWidget(self._btn("清空", self._clear_all), 1, 1)
         ext_grid.addWidget(self._btn("复制输出", self._copy_output), 1, 2)
+
+        # 第三行：HEX→十进制（字节序选择）
+        row = 2
+        self.endian_combo = QComboBox()
+        self.endian_combo.addItems(["小端(低字节在前)", "大端(高字节在前)"])
+        self.endian_combo.setCurrentIndex(0)          # 默认小端，对齐本项目 9/11 协议小端惯例
+        self.endian_combo.setFixedHeight(28)          # 与 _btn 高度一致
+        self.endian_combo.setToolTip("HEX→十进制 时按此字节序解释字节序列")
+        ext_grid.addWidget(self.endian_combo, row, 0)
+        ext_grid.addWidget(self._btn("HEX→十进制", self._hex_to_decimal), row, 1)
 
         layout.addWidget(ext_group)
 
@@ -219,6 +229,19 @@ class MessageToolWidget(QWidget):
             return
         result = " ".join(f"{b:02X}" for b in data)
         self._set_output(result)
+
+    def _hex_to_decimal(self):
+        """HEX→十进制：按大端/小端字节序将输入字节序列解释为无符号整数"""
+        data = self._parse_hex()
+        if data is None:
+            return
+        little = "小端" in self.endian_combo.currentText()
+        value = int.from_bytes(bytes(data), 'little' if little else 'big')
+        self._set_output(
+            f"十进制: {value}\n"
+            f"十六进制: 0x{value:X}\n"
+            f"字节序: {'小端(低字节在前)' if little else '大端(高字节在前)'}"
+        )
 
     def _byte_length(self):
         """字节长度：统计 HEX 字节数"""

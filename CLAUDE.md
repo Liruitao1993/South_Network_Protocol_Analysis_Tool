@@ -4,9 +4,9 @@
 
 ## 项目概述
 
-多协议电力通信报文解析工具，当前版本为 `1.11.0`（见 `main_gui.py:APP_VERSION`）。项目使用 Trellis 管理开发流程，工作流见 `.trellis/workflow.md`。
+多协议电力通信报文解析工具，当前版本为 `1.13.0`（见 `main_gui.py:APP_VERSION`）。项目使用 Trellis 管理开发流程，工作流见 `.trellis/workflow.md`。
 
-支持 11 种协议：
+支持 12 种协议：
 
 | 索引 | 协议 |
 | --- | --- |
@@ -21,6 +21,7 @@
 | 8 | 698.45 协议 |
 | 9 | 新一代载波协议（通感一体化） |
 | 10 | 国网新一代双模通信互联互通 |
+| 11 | HDC 1.0 双模互联互通（Q/GDW 12087.42-2020） |
 
 界面形态包括 PySide6 GUI、Textual TUI、NiceGUI Web 与实验性 Reflex Web，并新增实时监控器、TCP 流量监控和 Windows 系统集成。
 
@@ -73,21 +74,25 @@ python main_gui.py --clipboard
 | `csg_new_gen_parser.py` | `CSGNewGenParser` | 新一代载波 |
 | `gw_new_gen_parser.py` | `GWNewGenParser` | 国网新一代双模 |
 | `gw_new_gen_mme_parser.py` | `parse_management_message` | 国网新一代 MME 管理消息 |
+| `hdc10_parser.py` | `HDC10Parser` | HDC 1.0 双模互联互通 |
+| `hdc10_mme_parser.py` | `parse_management_message` | HDC 1.0 MME 网络管理消息 |
 
 所有 parser 均返回嵌套 dict 或解析行列表，关键中文键为 `原始值`、`解析值`、`说明`、`偏移`、`长度`。
 
 ## 关键约定
 
 - `current_protocol` 索引硬编码，新增协议必须同步修改下拉框、协议切换、帧提取、解析分派、查询页、校验器与文档
-- 南网 / 国网 / 698.45 / 新一代 / 国网新一代：多字节字段默认小端
+- 南网 / 国网 / 698.45 / 新一代 / 国网新一代 / HDC 1.0：多字节字段默认小端；HDC 1.0 的 MAC 地址为大端
 - HDLC / DLMS：网络字节序（大端）
 - DLT645：BCD 编码，地址域低字节在前
 - PLC RF：大端
 - 698.45 校验使用 `crcmod` 的 `x-25`，参与 CRC 的字段范围必须查协议文档
 - 南网新一代 / 国网新一代 MAC 帧使用 CRC-32
+- HDC 1.0：FC 的 FCCS 与 PB 尾 PBCS 为 CRC-24，MAC 帧尾 ICV 为 CRC-32
 - 组帧与预设命令标签页仅对南网（0）、国网（7）、698.45（8）显示
 - 实时监控器仅对新一代（9）与国网新一代（10）显示
 - TCP 监控与报文工具始终显示
+- HDC 1.0（11）仅在 PySide6 主程序支持（无监控器/组帧/档案）；NiceGUI Web（0-10）与 TUI（0-9）暂未包含
 
 ## 测试
 
@@ -96,6 +101,7 @@ python main_gui.py --clipboard
 ```bash
 python test_csg_new_gen.py
 python test_gw_new_gen.py
+python test_hdc10.py
 python test_dl_t698_45.py
 python test_hdlc.py
 python test_plc_rf.py
@@ -115,6 +121,7 @@ python test_theme_settings.py
 - HDLC 透明传输会把 `7E` 转义为 `7E 5D`，`7D` 转义为 `7D 5D`，组帧也必须处理
 - 国网新一代完整帧为 `FC(16B) + PB`，PB 含 `PBH(1B) + MAC帧头 + MSDU`，FC 末 3 字节为 FCCS，其后没有独立 HCS
 - 国网新一代按 FC 字节 12 高 4 位自动区分 HDC 1.0 / HDC 2.0
+- HDC 1.0（索引 11）是独立协议，用 `hdc10_parser.py` 解析；帧结构 `MPDU = FC(16B) + PB×N`，`PB = PBH(1B) + PB 体 + PBCS(3B)`，`MAC帧 = MAC头 + MSDU + ICV(4B)`；信标帧 FC 后直接为信标载荷（无 PBH）；信标管理条目（如 0xC0 时隙分配）长度字段为 2 字节，内容 = total_len - 3
 - MME 管理消息的 MMTYPE 为 2 字节小端，保留字段实测为 1 字节
 - `mac_only` / `pb_only` / `app` 等仅输入解析模式遵守“输入即 PB”契约，不要额外剥离 FC
 - TCP 监控依赖 `scapy`，Windows 需 npcap；未安装时功能降级
@@ -132,5 +139,6 @@ python test_theme_settings.py
 - 698.45：`面向对象的用电信息数据交换协议(20210910).md`
 - 新一代载波：`南网新一代20260226校对/南网新一代20260226校对/`
 - 国网新一代：`国网新一代协议/`
+- HDC 1.0：`国网新一代协议/HDC-国网双模协议/`（双模技术规范第 1/4-1/4-2/4-3 部分）
 
 遇到协议字段、字节序或校验范围不确定时，先查对应协议文档，不要凭记忆推断。
