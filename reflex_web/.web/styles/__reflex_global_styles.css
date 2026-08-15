@@ -1,4 +1,0 @@
-@layer __reflex_base;
-@import url('./__reflex_style_reset.css');
-@import url('@radix-ui/themes/styles.css');
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
