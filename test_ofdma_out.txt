@@ -1,0 +1,88 @@
+[  0] 定界符类型 | raw=0b001 | parsed=1 | SOF帧 | offset=0-0
+[  1] 接入指示 | raw=0b1 | parsed=1 | 宽带载波通信接入网络 | offset=0-0
+[  2] 短网络标识低位(SNID) | raw=0x0 | parsed=0 | SNID低4位: 0 | offset=0-0
+[  3] 源TEI | raw=0x001 | parsed=1 | 发送站点TEI: 1 | offset=1-2
+[  4] 目的TEI | raw=0xFFF | parsed=4095 | 接收站点TEI: 4095 | offset=2-3
+[  5] 链路标识符 | raw=0xFE | parsed=254 | 优先级/业务分类: 254 | offset=4-4
+[  6] 短网络标识高位 | raw=0b0 | parsed=0 | SNID高1位, 完整SNID=0x00(0) | offset=5-5
+[  7] 物理块个数 | raw=0x1 | parsed=1 | 1个物理块 | offset=7-7
+[  8] 载波映射表索引 | raw=0x4 | parsed=4 | 载波映射表索引: 4, PB大小: 136字节 | offset=7-7
+[  9] 帧长 | raw=0x478 | parsed=11440μs | 占用信道时长: 11440μs | offset=8-9
+[ 10] TEI过滤标志 | raw=0b1 | parsed=1 | 不过滤 | offset=10-10
+[ 11] 重传标志 | raw=0b0 | parsed=0 | 非重传 | offset=10-10
+[ 12] 符号数 | raw=0x0B6 | parsed=182 | OFDM符号数: 182 | offset=10-11
+[ 13] 扩展载波映射表索引 | raw=0x0 | parsed=0 | 扩展载波映射表索引: 0 | offset=12-12
+[ 14] 标准版本号 | raw=0x1 | parsed=1 | BPLC版本 | offset=12-12
+[ 15] FC校验序列(FCS) | raw=00 00 00 | parsed=0x000000 | 24位CRC校验FC前13字节，FCS=0x000000，校验失败(计算值=0x0FC81A) | offset=13-15
+[ 16] 物理块头 | raw=00 00 00 00 | parsed=序列号:0, 聚合标志:0 | 物理块头: 物理块中只有一个MAC帧，物理块体中没有级联头 | offset=16-19
+[ 17]   序列号 | raw=00 00 | parsed=0 | MPDU载荷中物理块的序号 | offset=16-17
+[ 18]   聚合标志 | raw=0b0 | parsed=0 | 物理块中只有一个MAC帧，物理块体中没有级联头 | offset=18-18
+[ 19]   保留 | raw=0x0000 | parsed=0 | 保留 | offset=18-19
+[ 20] 物理块检查序列 | raw=00 00 00 | parsed=3字节 | 物理块CRC校验（保留1字节+检查序列3字节） | offset=149-151
+[ 21] 物理块体 | raw=03 00 2B 00 FF FF FF 00 1F 01 12 00 03 01 11 01 01 00 02 60 F0 01 00 00 1D 00 04 00 19 00... | parsed=128字节 | PB体承载MAC帧数据 | offset=20-147
+[ 22] 帧头类型 | raw=0x1 | parsed=1 | 12字节短帧头 | offset=20-20
+[ 23] 版本 | raw=0x1 | parsed=1 | 标准帧协议 | offset=20-20
+[ 24] 发送序号 | raw=0x000 | parsed=0 | SOF帧发送序号(含重传) | offset=20-21
+[ 25] MSDU长度 | raw=2B 00 | parsed=43字节 | 携带的MSDU长度 (43B) | offset=22-23
+[ 26] 原始目的TEI | raw=0xFFF | parsed=4095 | MSDU目的终端设备标识 | offset=24-25
+[ 27] 原始源TEI | raw=0xFFF | parsed=4095 | 创建该报文站点的TEI | offset=25-26
+[ 28] 短网络标识(SNID) | raw=0x00 | parsed=0 | 网络标识 0 (有效1-31) | offset=27-27
+[ 29] 重启次数 | raw=0x0 | parsed=0 | 站点重启次数 0 | offset=27-27
+[ 30] 路由跳数 | raw=0xF | parsed=15 | 最大转发跳数: 15 | offset=28-28
+[ 31] 广播方向 | raw=0x1 | parsed=1 | 下行广播(CCO→STA) | offset=28-28
+[ 32] 发送类型 | raw=0x1 | parsed=1 | 全网广播(不确认) | offset=29-29
+[ 33] 发送次数限值 | raw=0x00 | parsed=0 | 最大发送次数: 0 (使用默认) | offset=29-29
+[ 34] MSDU序列号 | raw=12 00 | parsed=18 | MSDU递增序列号: 18 | offset=30-31
+[ 35] MSDU负载 | raw=03 01 11 01 01 00 02 60 F0 01 00 00 1D 00 04 00 19 00 01 04... | parsed=43字节 | MAC业务数据单元 | offset=32-74
+[ 36] 完整性校验(CRC-32) | raw=ED 53 57 00 | parsed=0x005753ED | 32位循环冗余校验(CRC-32)，计算范围: MSDU负载，CRC32=0x005753ED，校验通过 | offset=75-78
+[ 37] 物理块填充 | raw=00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00... | parsed=69字节 | 物理块填充(69字节，全0x00) | offset=79-147
+[ 38] VLAN标签 | raw=0x03 | parsed=3 | 优先级分组 3 | offset=32-32
+[ 39] MSDU类型 | raw=0x01 | parsed=1 | 应用层报文 | offset=33-33
+[ 40] 报文端口号 | raw=0x11 | parsed=17 | 业务报文(转发) | offset=34-34
+[ 41] 报文标识符 | raw=01 01 | parsed=0x0101 | CCO-STA应用层报文 | offset=35-36
+[ 42] 保留 | raw=0x00 | parsed=0 | 保留字段 | offset=37-37
+[ 43] 控制域（原值） | raw=02 60 | parsed=0x6002 | 应用层控制域 | offset=38-39
+[ 44]   传输方向位(D15) | raw=0x0 | parsed=0 | 0 - 下行(CCO→STA) | offset=38-39
+[ 45]   启动标志位(D14) | raw=0x1 | parsed=1 | 1 - 来自启动站 | offset=38-39
+[ 46]   响应标识位(D13) | raw=0x1 | parsed=1 | 1 - 需要应答 | offset=38-39
+[ 47]   业务扩展域标识位(D12) | raw=0x0 | parsed=0 | 0 - 无业务扩展域 | offset=38-39
+[ 48]   任务优先级(D11~D8) | raw=0x0 | parsed=0 | 优先级: 0 (0最高, 值越大优先级越低) | offset=38-39
+[ 49]   保留(D7~D4) | raw=0x0 | parsed=0 | 保留 | offset=38-39
+[ 50]   帧类型域(D3~D0) | raw=0x2 | parsed=2 | 2 - 命令帧 | offset=38-39
+[ 51] 业务标识 | raw=0xF0 | parsed=240 | 业务标识 240 - 测试帧 | offset=40-40
+[ 52] 应用版本号 | raw=0x01 | parsed=1 | 应用版本: 1 | offset=41-41
+[ 53] 帧序号 | raw=00 00 | parsed=0 | 帧序号: 0 | offset=42-43
+[ 54] 帧长 | raw=1D 00 | parsed=29 | 业务数据单元长度: 29字节 | offset=44-45
+[ 55] 测试ID | raw=0x04 | parsed=4 | 2.0测试 | offset=46-46
+[ 56] 保留 | raw=0x00 | parsed=0 | 保留 | offset=47-47
+[ 57] 数据区长度 | raw=19 00 | parsed=25 | 测试数据区长度 | offset=48-49
+[ 58] 协议版本号 | raw=0x01 | parsed=1 | 协商版本号 | offset=50-50
+[ 59] 文件长度 | raw=0x04 | parsed=4 | 文件长度/配置长度 | offset=51-51
+[ 60] 扩展ID | raw=05 00 | parsed=5 | OFDMA多用户下发 | offset=52-53
+[ 61] 帧类型 | raw=0x1 | parsed=1 | 0:DL_OFDMA 1:UL_OFDMA | offset=57-57
+[ 62] 频段 | raw=0x7 | parsed=7 | 通信频段 | offset=57-57
+[ 63] eFC符号数 | raw=0xF | parsed=15 | eFC符号数 | offset=57-57
+[ 64] TF符号数 | raw=0xF | parsed=15 | TF符号数 | offset=58-58
+[ 65] 站点个数 | raw=0xF | parsed=15 | 站点个数 | offset=58-58
+[ 66] 站点0 TEI | raw=1B 02 | parsed=539 | 站点TEI | offset=59-60
+[ 67] 站点0 RU | raw=0x0 | parsed=0 | RU编号 | offset=60-60
+[ 68] 站点0 TMI | raw=0x1F | parsed=31 | TMI | offset=61-61
+[ 69] 站点0 物理块数 | raw=0x7 | parsed=7 | 物理块数 | offset=61-61
+[ 70] 站点1 TEI | raw=01 FF | parsed=3841 | 站点TEI | offset=62-63
+[ 71] 站点1 RU | raw=0xF | parsed=15 | RU编号 | offset=63-63
+[ 72] 站点1 TMI | raw=0x0F | parsed=15 | TMI | offset=64-64
+[ 73] 站点1 物理块数 | raw=0x0 | parsed=0 | 物理块数 | offset=64-64
+[ 74] 站点2 TEI | raw=00 00 | parsed=0 | 站点TEI | offset=65-66
+[ 75] 站点2 RU | raw=0x0 | parsed=0 | RU编号 | offset=66-66
+[ 76] 站点2 TMI | raw=0x00 | parsed=0 | TMI | offset=67-67
+[ 77] 站点2 物理块数 | raw=0x1 | parsed=1 | 物理块数 | offset=67-67
+[ 78] 站点3 TEI | raw=CD 68 | parsed=2253 | 站点TEI | offset=68-69
+[ 79] 站点3 RU | raw=0x6 | parsed=6 | RU编号 | offset=69-69
+[ 80] 站点3 TMI | raw=0x14 | parsed=20 | TMI | offset=70-70
+[ 81] 站点3 物理块数 | raw=0x1 | parsed=1 | 物理块数 | offset=70-70
+[ 82] 站点4 TEI | raw=01 02 | parsed=513 | 站点TEI | offset=71-72
+[ 83] 站点4 RU | raw=0x0 | parsed=0 | RU编号 | offset=72-72
+[ 84] 站点4 TMI | raw=0x03 | parsed=3 | TMI | offset=73-73
+[ 85] 站点4 物理块数 | raw=0x0 | parsed=0 | 物理块数 | offset=73-73
+[ 86] 站点5 | raw= | parsed= | 数据不足 | offset=74-74
+[ 87] 剩余数据 | raw=04 | parsed=1字节 | 未解析数据 | offset=74-74

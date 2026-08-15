@@ -62,10 +62,27 @@ from llm_api_manager import LLMApiManagerDialog
 from preprocessors import list_scripts as _list_pp_scripts, get_script as _get_pp_script
 
 
-APP_VERSION = "1.12.0"
-BUILD_DATE = "2026-08-13"  # 编译日期，每次打包前更新
+APP_VERSION = "1.13.0"
+BUILD_DATE = "2026-08-14"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    ("1.13.0", "2026-08-14", [
+        "新增「HDC 1.0 双模互联互通」协议（索引11，独立协议，Q/GDW 12087.42-2020）：主程序第 12 种协议。新增 hdc10_parser.py（HDC10Parser：FC/可变区域/信标载荷/时隙分配条目/MAC帧/应用层）、hdc10_mme_parser.py（MME 管理消息）、validator/hdc10_validator.py（HDC10Validator）、test_hdc10.py",
+        "HDC 1.0 GUI 集成：协议下拉框 [11]；解析级别（auto/fc_pb/fc_only/mac_only/pb_only/fc_mac/app）与通道（PLC/HRF）下拉复用国网新一代控件；查询页新增报文ID/端口/定界符/MSDU类型映射；校验注册 11 → HDC10Validator；批量解析复用前缀剥离与摘要。仅 PySide6 主程序支持（Web 0-10 / TUI 0-9 未含）",
+        "新一代载波协议(索引9)通道自动识别 PLC/HRF：parse_to_table 新增 channel='auto'（默认），按表45(HRF)/表20(BPLC)/表23(ISAC) 预测帧长比对判别通道，GUI 通道下拉默认自动识别",
+        "新一代载波协议(索引9)无线信道单跳MAC帧解析（版本2，表12）：4字节帧头 + 无线发现列表消息（表139 TLV，站点属性按表142 展开）",
+        "新一代载波协议(索引9)测试帧切频操作目标按 Option+信道号解析（模式6），与模式8 一致；同步修正国网新一代模式6",
+        "新一代载波协议(索引9)批量解析管理消息摘要 int() 未处理 0x 前缀崩溃修复",
+        "协议选择持久化：上次协议索引存入 config.json parse.protocol，启动自动恢复选中",
+        "所有解析/查询/监控表格支持 Ctrl+滚轮缩放（gui_utils.py::ZoomableTableWidget，类 Excel）",
+        "校验结果区新增展开/收缩 + 单帧/批量解析结果表新增全屏弹窗",
+        "GUI 按钮风格统一（批量工具栏 / LLM API 对话框 / LLM 预处理面板）；修复 _py_run_btn 连接到不存在方法的 bug",
+        "DLT645 数据域长度一致性校验增强：解析器与校验器均校验声明长度与实际帧长一致性，不一致时 FAIL + ⚠ 提示但尽力解析",
+        "新增「TCP 流量监控」标签页（monitor/tcp_monitor.py）：基于 scapy 抓包，网卡选择、BPF 过滤、TCP 流列表、双向流重组、监控封装解帧、原始报文/解析结果分页、CSV 实时记录与历史加载，自动识别南网新一代 / 国网新一代",
+        "新增 Windows 系统集成（system_integration/）：系统托盘、全局热键（Ctrl+Alt+X）、单实例、命令行参数（--parse/--protocol/--file/--minimized/--clipboard）、文件右键菜单、开机自启、剪贴板 hex 报文自动检测弹窗与 Notepad++ 集成",
+        "新增表格右键复制与 Ctrl+C；解析弹窗增强：热键/命令行/文件右键共用，--parse/--file/--clipboard 不再弹出主窗口；监控器日志路径显示与浏览",
+        "国网新一代 MME 管理消息解析持续完善（gw_new_gen_mme_parser.py）：关联/代理变更/发现列表/网络冲突/无线信道冲突/过零 NTB/网络诊断等，MMTYPE 2 字节小端",
+    ]),
     ("1.12.0", "2026-08-04", [
         "新增 LLM 智能预处理功能：批量解析标签页新增可折叠 LLM 预处理面板，支持通过 OpenAI 兼容 API 对原始日志进行多轮智能清洗后再解析",
         "内置 5 个 prompt 模板：提取 hex 帧、清理前缀、提取 TCP 报文、按协议分类、修复 hex 格式",

@@ -33,9 +33,9 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 
 ## 1. 项目概览
 
-多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.11.1`）。
+多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.13.0`）。
 
-**支持的协议（共 11 种，对应 GUI 协议下拉框 `current_protocol` 索引）：**
+**支持的协议（共 12 种，对应 GUI 协议下拉框 `current_protocol` 索引）：**
 
 | 索引 | 协议名（GUI显示） | 标准号 | 字节序 | 校验算法 |
 |------|------------------|--------|--------|----------|
@@ -50,6 +50,9 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 | 8 | 698.45 协议 | DL/T 698.45-2017 | 小端 | **CRC-16（crcmod 的 `x-25`）** |
 | 9 | 新一代载波协议（通感一体化） | 通感一体化低压电力线宽带载波通信规约（2026校对版） | 小端 | CRC-32（MAC帧） |
 | 10 | 国网新一代双模通信互联互通 | 国网新一代双模通信互联互通技术规范 | 小端 | CRC-32（MAC帧） |
+| 11 | HDC 1.0 双模互联互通 | Q/GDW 12087.42-2020 | 小端（MAC 地址大端） | CRC-24（FC/PB）+ CRC-32（MAC） |
+
+> 协议覆盖差异：**HDC 1.0（索引 11）目前仅在 PySide6 主程序支持**；NiceGUI Web 版支持索引 0-10（11 种），Textual TUI 版支持索引 0-9（10 种）。修改协议相关文档/代码时注意区分。
 
 ---
 
@@ -115,8 +118,8 @@ python main_gui.py --clipboard
 
 1. **窗口标题包含编译日期**：每次打包前必须更新 `main_gui.py` 中的 `BUILD_DATE` 变量为当前日期（格式：`YYYY-MM-DD`）
    ```python
-   APP_VERSION = "1.11.1"
-   BUILD_DATE = "2026-08-01"  # 编译日期，每次打包前更新
+   APP_VERSION = "1.13.0"
+   BUILD_DATE = "2026-08-14"  # 编译日期，每次打包前更新
    ```
    窗口标题格式：`协议解析工具 v{APP_VERSION} ({BUILD_DATE})`
 
@@ -162,7 +165,9 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 ├── gw_new_gen_parser.py        # 国网新一代双模 (GWNewGenParser) — 国网新一代双模通信互联互通
 │   ├── gw_new_gen_mme_parser.py  # 国网新一代 MME 管理消息解析（关联/代理变更/发现列表/诊断等）
 │   └── gw_new_gen_cmd_payloads.py # 国网新一代应用层命令载荷解析
-└── (解析级别：新一代 auto/fc_pb/fc_efc/fc_only/app/pb_only；国网新一代 auto/fc_pb/fc_only/mac_only/pb_only/fc_mac/app)
+├── hdc10_parser.py            # HDC 1.0 双模互联互通 (HDC10Parser) — Q/GDW 12087.42-2020
+│   └── hdc10_mme_parser.py    # HDC 1.0 MME 网络管理消息解析（关联/发现列表/时隙分配等）
+└── (解析级别：新一代 auto/fc_pb/fc_efc/fc_only/app/pb_only；国网新一代&HDC 1.0 auto/fc_pb/fc_only/mac_only/pb_only/fc_mac/app；通道：PLC 载波 / HRF 无线)
 │
 ├── 查询/映射模块（lookup）── 单例 get_xxx_lookup() 提供全局实例
 │   ├── obis_lookup.py              # OBIS码 (HDLC/DLMS)
@@ -246,7 +251,8 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 │   ├── dlt645_validator.py         # DLT645 (DLT645Validator)
 │   ├── dl_t698_45_validator.py     # 698.45 (DLT69845Validator) - 使用 crcmod
 │   ├── csg_new_gen_validator.py    # 新一代载波 (CSGNewGenValidator)
-│   └── gw_new_gen_validator.py     # 国网新一代双模 (GWNewGenValidator)
+│   ├── gw_new_gen_validator.py     # 国网新一代双模 (GWNewGenValidator)
+│   └── hdc10_validator.py          # HDC 1.0 双模 (HDC10Validator) - 定界符/版本/FCCS(CRC-24)
 │
 ├── 监听/报表/模板/可视化编辑
 │   ├── monitor_widget.py           # 实时监控器（南网新一代/国网新一代，96..16 / ED..EE 解帧）
@@ -294,7 +300,8 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
   → main_gui.py 根据 current_protocol 选择 parser
     (0:ProtocolFrameParser / 1:PLCRFProtocolParser / 2~5:HDLCParser / 6:DLT645Parser
      7:GDW10376Parser / 8:DLT69845Parser(+APDUParser+AXDRCoder)
-     9:CSGNewGenParser(+CSGNewGenCmdPayloads) / 10:GWNewGenParser(+GWNewGenMMEParser+GWNewGenCmdPayloads))
+     9:CSGNewGenParser(+CSGNewGenCmdPayloads) / 10:GWNewGenParser(+GWNewGenMMEParser+GWNewGenCmdPayloads)
+     11:HDC10Parser(+HDC10MMEParser))
   → parser.parse(frame_bytes) 返回结构化嵌套 dict
   → GUI: QTableWidget 展示分层 + 字节高亮（点击行联动输入框）
   → 可选: 校验（validator.verify()）、DLMS 深度弹窗（双击 DLMS APDU 行）
@@ -318,7 +325,8 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 - `说明` / `名称` / `业务说明` — 中文描述
 - `偏移` / `长度` — 字节定位（用于高亮）
 
-- **南网(0) / 国网(7) / 698.45(8) / 新一代(9) / 国网新一代(10)**：长度域、DI、多字节字段 → **小端序 (little-endian)**
+- **南网(0) / 国网(7) / 698.45(8) / 新一代(9) / 国网新一代(10) / HDC 1.0(11)**：长度域、DI、多字节字段 → **小端序 (little-endian)**
+- **HDC 1.0(11) MAC 地址**：大端（与多字节字段小端不同）
 - **HDLC/DLMS(2,3,4,5)**：网络字节序 **big-endian**
 - **DLT645(6)**：BCD 编码，地址域低字节在前
 - **PLC RF(1)**：大端
@@ -330,6 +338,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 - DLT645(6)：所有字节累加和 `& 0xFF`
 - HDLC(2)：CRC-16/FCS（CCITT，`base.py:_calc_crc16_ccitt`）
 - 新一代(9) / 国网新一代(10)：MAC 帧 CRC-32
+- HDC 1.0(11)：FC 的 FCCS 为 **CRC-24**，PB 尾 PBCS 为 **CRC-24**，MAC 帧尾 ICV 为 **CRC-32**（见 `hdc10_parser.py` 的 `_crc24` / `_crc32`）
 
 ### 4.5 自定义数据持久化
 | 文件 | 内容 | 来源 |
@@ -440,6 +449,21 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
   - `双模通信互联互通技术规范 第3部分：检验方法-20251222.md` — 检验方法
   - 源文件（.doc/.docx）可用 markitdown 重新转换
 
+### 5.9 HDC 1.0 双模互联互通（索引 11，**独立协议**）
+> 与索引 10（国网新一代）的关系：国网新一代解析器内部按 FC 字节 12 高 4 位自动区分 HDC 1.0 / 2.0；**协议 11 是独立解析 HDC 1.0 帧的单独入口**（Q/GDW 12087.42-2020，旧版双模），帧结构与国网新一代共用同一套双模技术规范早期版本。
+- **解析器**：
+  - `hdc10_parser.py` (HDC10Parser) — 完整 MPDU（FC 16B + 物理块 PB×N）、FC 可变区域（信标/SOF/SACK/网间协调）、信标载荷与管理信息条目（含时隙分配 0xC0）、MAC 帧（标准 16B 头 / 单跳 4B 头）、MSDU 载荷与应用层业务报文
+  - `hdc10_mme_parser.py` (parse_management_message) — HDC 1.0 网络管理消息（MME）深度解析，MMTYPE 2 字节小端
+- **校验器**：`validator/hdc10_validator.py` (HDC10Validator) — 定界符类型 / 标准版本号(=0) / FCCS(CRC-24) 校验
+- **GUI 特性**：协议索引 11 时显示解析级别下拉（auto / fc_pb / fc_only / mac_only / pb_only / fc_mac / app）与通道下拉（PLC 载波 / HRF 无线），复用国网新一代控件（`gw_parse_level_combo` / `gw_channel_combo`），由 `_hdc10_parse_level` / `_hdc10_channel` 控制；查询页新增 `_create_hdc10_lookup_content`（报文 ID / 端口号 / 定界符 / MSDU 类型等映射）
+- **解析重点**：`MPDU = FC(16B) + PB×N`；`PB = PBH(1B) + PB 体 + PBCS(3B, CRC-24)`；`MAC帧 = MAC 头 + MSDU + ICV(4B, CRC-32)`；信标帧 FC 后直接为信标载荷（无 PBH）；多字节小端、MAC 地址大端；批量解析复用 `_strip_gw_new_gen_prefix` 前缀剥离与 `_get_gw_new_gen_summary` 摘要
+- **参考文档**（位于 `国网新一代协议/HDC-国网双模协议/` 目录，Q/GDW 12087 早期版本）：
+  - `双模通信互联互通技术规范 第1部分：总则.md` — 总则
+  - `双模通信互联互通技术规范 第4-1部分：物理层通信协议.md` — 物理层
+  - `双模通信互联互通技术规范 第4-2部分：数据链路层通信协议.md` — **数据链路层（MAC/MSDU 帧格式，表22/表38/表42/表50）**
+  - `双模通信互联互通技术规范 第4-3部分：应用层通信协议.md` — **应用层（业务报文结构）**
+  - 注：HDC 1.0 相关表格/字段定义（如时隙分配条目 0xC0 长度字段 2 字节、发现信标省略非中央信标信息）以实测报文 + 上述文档为准
+
 ---
 
 
@@ -450,16 +474,20 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 | 位置 | 行为 |
 |------|------|
 | `MainWindow.__init__`（~L285） | 注释列出索引含义，并初始化对应 parser 实例 |
-| `protocol_combo.addItem`（~L347-354） | 添加下拉项（顺序即索引） |
+| `protocol_combo.addItem`（~L549-560） | 添加下拉项（顺序即索引，现 0~11） |
 | `_on_protocol_changed`（~L1300+） | 协议切换：输入提示 / 查询页 / 各 Tab 可见性 |
-| `_extract_frames_for_protocol`（~L1409+） | 多帧提取逻辑（不同协议起始符不同） |
-| `_parse_single_frame`（~L2195+） | 选择 parser 调用 |
-| `_update_protocol_lookup_tab`（~L1434+） | 查询标签页内容（DI/AFN/OBIS/命令字/业务标识） |
+| `_extract_frames_for_protocol`（~L5449+） | 多帧提取逻辑（不同协议起始符不同；协议 11 走通用每行一帧） |
+| `_get_current_parser` / `_parse_single_frame`（~L3100+） | 选择 parser 调用（协议 11 → HDC10GuiParser 包装） |
+| `_update_protocol_lookup_tab`（~L2113+） | 查询标签页内容（DI/AFN/OBIS/命令字/业务标识/HDC 1.0 报文 ID） |
+| `_run_validation`（~L3698） | 校验器注册（`validators` dict，11 → HDC10Validator） |
+| `_protocol_name_to_index`（~L4600） | 协议名 ↔ 索引映射（含 "HDC1.0"→11 等） |
+| 批量解析（~L4780+） | 前缀剥离（10/11 → `_strip_gw_new_gen_prefix`）、摘要（10/11 → `_get_gw_new_gen_summary`） |
 **Tab 可见性规则：**
 - 组帧 / 预设命令：南网(0) / 国网(7) / 698.45(8)，三种模式 `south` / `gdw` / `dlt698`
 - 档案管理 / 拓扑信息：仅南网(0) / 国网(7)
-- 新一代解析级别下拉：仅索引 9（新一代载波，auto/fc_pb/fc_efc/fc_only/app/pb_only）和索引 10（国网新一代双模，auto/fc_pb/fc_only/mac_only/pb_only/fc_mac/app）
-- 实时监控器：仅索引 9 / 10 可见，南网新一代用 `ED..EE` 包装，国网新一代用 `96..16` 包装
+- 新一代解析级别下拉：仅索引 9（新一代载波，auto/fc_pb/fc_efc/fc_only/app/pb_only）
+- 国网新一代 / HDC 1.0 解析级别 + 通道下拉：索引 10 / 11（auto/fc_pb/fc_only/mac_only/pb_only/fc_mac/app），由 `_hdc10_parse_level` / `_hdc10_channel` 控制
+- 实时监控器：仅索引 9 / 10 可见，南网新一代用 `ED..EE` 包装，国网新一代用 `96..16` 包装（**索引 11 无监控器**）
 - TCP 监控：始终可见，独立于协议切换；scapy 未安装或 npcap 缺失时功能降级并提示
 - 报文对比 / 报文工具 / 测试方案：始终可见
 
@@ -486,6 +514,7 @@ python test_csg_batch_prefix.py # 新一代载波监控日志前缀剥离
 python test_csg_batch_parse_level.py # 新一代载波解析级别/完整 MPDU
 python test_csg_summary.py     # 新一代载波批量摘要
 python test_gw_new_gen.py      # 国网新一代双模协议
+python test_hdc10.py           # HDC 1.0 双模互联互通协议（时隙分配条目/信标 BPCS/PBCS）
 python test_gw_batch_parse.py  # 国网新一代批量解析
 python test_gw_ext_cmd.py      # 国网新一代扩展命令载荷
 python test_gw_parse_levels.py # 国网新一代解析级别
@@ -532,6 +561,9 @@ python test_theme_settings.py  # 主题与字体设置
 22. **ED..EE 监控帧剥离失败禁止回退**：协议 9 下勾选「ED监控协议」（或弹窗「剥离ED监控头」）时，首字节 0xED 的报文只能是 ED 包装帧（CSG FC 起始字节低 4 位 ∈ {8,9,A,B}，0xED 永不是合法 FC 起始）。`_parse_ed_monitor_header` / `_extract_business_from_ed_frame` 校验失败（帧不完整、缺 EF/EE）时必须明确报错，**绝不能静默把 ED 首字节当 FC 起始符送解析器**。三处路径（`parse_single` / `_parse_and_show_dialog._preprocess` / 批量解析）必须保持一致。
 23. **字段声明与实际不一致时的容错显示原则**：当报文长度、字段声明值与实际内容不匹配时（如 DLT645 数据长度字段声明 102 字节但实际只有 15 字节），**解析器不得直接返回空白结果**（会让用户以为按钮失灵）。正确做法：尽力解析所有可解析字段，`valid` 置 `False`，并在解析结果表格中以醒目的 `⚠` 行插入错误提示。校验器对应项必须标记 FAIL。核心原则——用户点了解析按钮就必须看到内容和错误，不能什么都没有。
 24. **新一代载波协议(索引9)无线信道单跳MAC帧头仅 4 字节**：版本2（单跳帧协议，表12，仅无线信道）MAC 帧头为 4 字节（帧头类型1b+版本2b+保留5b / MSDU类型8b 表13 / MSDU长度16b），**帧头类型位无意义**，不得按 header_type 推导 12/32 字节帧头长；MSDU 类型在 MAC 头内、载荷无 VLAN+类型前缀，须内联分派（1=应用层 / 2=无线发现列表 表139 TLV / 128=IPV4）。改 `_parse_mac_frame` / `parse_to_table` 步骤3 / `_parse_pb_block` 尾段三处时保持一致（v2 → `mac_hdr_len=4` 且 `msdu_payload=b""` 防重复解析）。版本1 帧头「发送序号」为小端（`(byte1<<4)|byte0高4位`）。
+25. **HDC 1.0(索引11)信标条目长度字段**：信标管理信息条目（如时隙分配 0xC0）长度字段为 **2 字节**，条目内容 = `total_len - 3`（头 1B + 长度 2B 开销），不要用 `total_len - 2` 多算 1 字节（详见 `test_hdc10.py::test_entry4_content_length`）。
+26. **HDC 1.0(索引11)发现信标省略非中央信标信息**：发现信标（类型 0）省略非中央信标信息字段，可变部分只有 CSMA 时隙信息（4B/条，按相线 A/B/C 展开）；不要按中央信标格式去解析 TEI 条目（`test_hdc10.py`）。
+27. **HDC 1.0(索引11)与国网新一代(索引10)并存**：协议 11 是独立解析 HDC 1.0 帧的入口（`hdc10_parser.py`），与协议 10 内部自动判定 HDC 1.0/2.0 的两条路径**不要混用解析器**；协议 11 无实时监控器、无组帧/预设命令、无档案/拓扑（仅单帧/批量/校验/查询/对比）。批量解析时协议 10/11 共用 `_strip_gw_new_gen_prefix` 与 `_get_gw_new_gen_summary`。
 
 ---
 
@@ -544,7 +576,8 @@ python test_theme_settings.py  # 主题与字体设置
    - [ ] 在 `main_gui.py` import + 初始化 parser 实例
    - [ ] 添加 `protocol_combo.addItem`（注意索引顺序）
    - [ ] 在 `_on_protocol_changed` / `_parse_single_frame` / `_extract_frames_for_protocol` / `_update_protocol_lookup_tab` 加分支
-   - [ ] 新建 `validator/xxx_validator.py` 继承 `BaseValidator`，在 `_run_validation` 注册
+   - [ ] 新建 `validator/xxx_validator.py` 继承 `BaseValidator`，在 `_run_validation` 注册（`main_gui.py` 的 `validators` dict）
+   - [ ] 如需 Web 版支持，同步更新 `web/protocol_registry.py` 与 `web/components/protocol_selector.py`
    - [ ] 同步更新本文件 §1（协议表）、§3（架构）、§5（文档映射）、§6（集成点）
    - [ ] 新建 `test_xxx.py`，含硬编码测试帧
    - [ ] 如需打包，更新 spec 的 `datas`
@@ -560,7 +593,8 @@ python test_theme_settings.py  # 主题与字体设置
 
 > 本节按版本倒序记录。详细 commit 见 `git log`。每发新版本必须更新此处。
 
-### 后续更新（2026-08-13，未发版）
+### 1.13.0 — 2026-08-14
+- **新增「HDC 1.0 双模互联互通」协议（索引 11，独立协议）**：主程序第 12 种协议（Q/GDW 12087.42-2020 旧版双模）。新增 `hdc10_parser.py`（HDC10Parser：FC/可变区域/信标载荷/时隙分配条目/MAC 帧/应用层）、`hdc10_mme_parser.py`（MME 管理消息）、`validator/hdc10_validator.py`（HDC10Validator）、`test_hdc10.py`。GUI 集成：协议下拉框、解析级别 + 通道下拉（复用国网新一代控件）、查询页（`_create_hdc10_lookup_content`）、校验注册（`_run_validation` 11 → HDC10Validator）、批量前缀剥离 + 摘要（复用 `_strip_gw_new_gen_prefix` / `_get_gw_new_gen_summary`）。仅 PySide6 主程序支持（Web 0-10 / TUI 0-9 未含）
 - **协议选择持久化**（`main_gui.py`）：上次使用的协议索引存入 `config.json` 的 `parse.protocol`，启动时 `_restore_saved_protocol` 自动恢复选中（UI 全部就绪后执行，走正常切换逻辑），用户无需每次打开软件重新选择协议
 - **所有解析/查询/监控表格支持 Ctrl+滚轮缩放（类 Excel）**：新增 `gui_utils.py::ZoomableTableWidget(QTableWidget)`——Ctrl+滚轮按 1.1/0.9 倍整体缩放（字号+行高同步，5-24pt 钳制，列宽保持避免破坏固定列布局），Ctrl+0 恢复缩放前基准；缩放为 per-table 覆盖，改全局字体设置后回到基准字号。全仓 35 处 `QTableWidget(` 实例（11 文件：main_gui 17、monitor 系列 8、diff/查询/档案/测试方案等 10）替换为该基类，原右键复制/Ctrl+C/字节高亮/双击深度解析等行为不变（子类即父类）；单元格级 `setCellWidget`/固定字体 item 不随缩放（可接受）
 - **校验结果 展开/收缩 + 解析结果表 全屏**（`main_gui.py`）：校验结果区新增「展开/收缩」按钮对（内容 `verify_label` 移入 QScrollArea，收缩后仅保留组标题+按钮行，默认收缩，重新展开恢复全文）；单帧解析结果表、批量摘要表、批量详情表各新增单个「全屏」按钮——与报文对比「结果详情」交互一致：点击在新窗口弹窗克隆展示表格快照（`_open_table_popup`），点「关闭」或窗口 X 关闭即恢复，主界面不做隐藏/重排。通用辅助 `_make_table_fullscreen_btn` 与 `_open_table_popup`
@@ -574,17 +608,15 @@ python test_theme_settings.py  # 主题与字体设置
   - 顺带修正版本1 MAC 帧头「发送序号」字节序（`(byte1<<4)|byte0高4位` 小端，与表7/表11 及原始目的TEI/源TEI 约定一致）
   - 新增 `test_csg_hrf_mac.py`（4 用例：单跳帧直入 / 完整无线MPDU(fc_pb,hrf) / 无线发现列表 / PLC 短帧头回归）
 - **GUI 按钮风格统一**：批量解析工具栏、LLM API 管理对话框、LLM 预处理面板按钮高度/内边距/字号统一（`main_gui.py` 新增 `_make_toolbar_btn`、`llm_api_manager.py` 新增 `_style_action_btn`、`llm_preprocess_widget.py` 新增 `_make_btn`）；修复 `_py_run_btn` 连接到不存在方法 `_run_py_script_file` 的 bug
+- **国网新一代信标帧无 PBH 修复**（`gw_new_gen_parser.py`）：
   - **根因**：`_parse_beacon_frame` 对 HDC 1.0 和 HDC 2.0 信标帧都误读 1 字节 PBH，导致信标载荷首字节（信标类型）被当作 PBH 吃掉，信标类型错位 1 字节（如发现信标 0xC8 被误判成中央信标 0x42）
   - **协议依据**：HDC 1.0（5.1.2.4 节）与 HDC 2.0（表22）信标帧 PB 结构均为 FC + 信标载荷 + BPCS(4B CRC-32)，**无 PBH、无 PBCS**；表22 字段从字节0即信标类型，无 PBH 位置；文档第906行"以物理块头和物理块体为目标"是 **SOF 帧(图18)** 的 PBCS 描述，非信标帧
   - **修复**：`_parse_beacon_frame` 对 HDC 1.0/2.0 均不再解析 PBH，FC 后直接解析信标载荷；尾部校验从 BPCS(4B)+PBCS(3B) 改为仅 BPCS(4B)；同步修正 HDC 1.0 信标固定头保留区域为字节14-19（与表38一致，管理信息从字节20开始）
   - **验证**：用户提供的发现信标报文现正确识别为"发现信标"，4 个信标条目结构全部合法；全部 44 项回归测试通过
-- **GUI 按钮风格统一**：批量解析工具栏、LLM API 管理对话框、LLM 预处理面板按钮高度/内边距/字号统一（`main_gui.py` 新增 `_make_toolbar_btn`、`llm_api_manager.py` 新增 `_style_action_btn`、`llm_preprocess_widget.py` 新增 `_make_btn`）；修复 `_py_run_btn` 连接到不存在方法 `_run_py_script_file` 的 bug
 - **DLT645 数据域长度一致性校验增强**：
   - 解析器（`dlt645_parser.py`）新增数据长度声明值与实际帧长一致性检查，不匹配时 `valid=False` 并在 fields 中插入 `⚠ 数据长度错误` 行，**但仍尽力解析实际存在的所有字段**（地址、控制码、DI、数据内容、校验和均正常显示），不直接 return 空白结果
   - 校验器（`validator/dlt645_validator.py`）"数据长度"项从只检查上限 200 字节改为先校验声明长度与实际帧长一致性，不一致标记 FAIL 并置整体 `valid=False`
   - 设计原则：**协议字段声明与实际不一致时，不得静默截断也不得直接返回空白**，必须在用户可见结果中标红提示 + 尽力解析，保证用户点"解析"按钮始终有响应、有内容、知道哪里错了
-
-### 后续更新（2026-08-02，未发版）
 - **新增「TCP 流量监控」标签页**（`monitor/tcp_monitor.py`，TCPMonitorWidget）：基于 scapy 抓包，支持网卡选择、BPF 过滤、TCP 流列表、双向流重组、监控封装解帧、原始 TCP 报文 / 解析结果分页展示、CSV 实时记录与历史 CSV 加载；可自动识别南网新一代 / 国网新一代并调用对应解析器
 - **新增 Windows 系统集成**（`system_integration/`）：系统托盘、全局热键（默认 `Ctrl+Alt+X`）、单实例、命令行参数（`--parse` / `--protocol` / `--file` / `--minimized` / `--clipboard`）、文件右键菜单、开机自启、剪贴板报文自动检测与 Notepad++ 集成
 - **剪贴板报文自动检测**（`clipboard_monitor.py` + `parse_prompt_dialog.py`）：任意软件复制 hex 报文即弹提示框，自动协议识别、协议切换、解析级别 / PB 帧类型选择，支持 `ED..EE` 监控头剥离
@@ -595,7 +627,6 @@ python test_theme_settings.py  # 主题与字体设置
 - **国网新一代 MME 管理消息解析持续完善**（`gw_new_gen_mme_parser.py`）：支持关联、代理变更、发现列表、网络冲突、无线信道冲突、过零 NTB、网络诊断等管理消息，MMTYPE 2 字节小端，0x0008 按发现列表处理
 - **监控器日志路径显示与浏览**（`monitor_widget.py`）：CSV 记录结束后可直接打开日志目录
 - `南网协议解析工具.spec` hidden imports 已补齐 `system_integration` 各模块
-- 同步更新 `README.md` 与 `AGENTS.md` 至当前 1.11.0 + 工作区状态
 
 ### 1.11.1 — 2026-08-04
 - **修复勾选「ED监控协议」后不完整/非法 ED..EE 帧被静默回退为 FC 起始解析的 bug**：单帧解析（`parse_single`）、解析弹窗（`_parse_and_show_dialog._preprocess`）、批量解析三处路径在 `_parse_ed_monitor_header` / `_extract_business_from_ed_frame` 校验失败时明确报错（报文不完整/缺 EF 或 EE），首字节 ED 不再被当作南网新一代 FC 起始符
@@ -755,9 +786,39 @@ python test_theme_settings.py  # 主题与字体设置
 ### 1.0.0 — 2026-04-14
 - 初始版本：南网/PLC RF/HDLC/DLMS 多协议解析；单帧/批量解析；DI/命令字/OBIS 查询
 
-## 11. 最新变更摘要（最近一次 commit 摘要）
 
-**最近一次（2026-08-11）：DLT645 数据域长度一致性校验增强**
+**最近一次（2026-08-15）：Reflex Web 版协议组帧完整复刻**
+
+变更：
+- **Reflex Web 版组帧能力与 GUI 对齐**（`reflex_web/reflex_web.py`）：南网(0)/国网(7)/698.45(8) 三种协议、三种字段录入模式全部复刻——预定字段（predefined，按字段类型分派 uint/enum/bytes/ascii/bcd/oi/oad_list/list/sub_fields）、自定义模板（custom，字节/uint8/16/32/校验和，支持推荐序与 checksum 回填）、A-XDR（698.45 专属，单层数据项编辑器，复合类型由纯函数完整支持）
+- **新增纯逻辑模块 `reflex_web/frame_gen_utils.py`**：`collect_field_values`（位置对齐数组→name-keyed dict，sub_fields 父值由生成器 Pass3 打包）、`generate_custom_data`、`build_dlt698_sa`、`build_dlt698_axdr_apdu`、`encode_axdr_items`，无 Reflex 依赖，可被独立测试断言字节与 GUI 生成器一致
+- **实时回读预览**：字段 setter 与「生成帧」后自动重新组帧并送回解析器（`_refresh_gen_preview` / `gen_preview_rows` 表格），再现 GUI 200ms 实时预览
+- **预设命令按钮**：读取 `NW_command.json`（南网）/`GW_command.json`（国网），按分组渲染按钮一键填入结果区；支持「保存为预设」
+- **698.45 SA/控制字段**：地址类型/逻辑地址/地址长度/SA hex + seg/sc/func 下拉；**国网中继地址** A2 逗号分隔输入
+- **Reflex 兼容性适配**：字段编辑器用位置索引数组（`gen_field_values/gen_list_rows/gen_sub_fields` + 渲染模型 `gen_field_meta/gen_field_enum/gen_field_items/gen_field_subs` 等全 str 平行数组）规避 Reflex `foreach` 无法遍历 Any 值 dict、Var 不能作 dict key、`rx.wrap`/`rx.textarea` 不存在的限制
+
+涉及文件：
+- 新增：`reflex_web/frame_gen_utils.py`、`test_web_frame_gen_utils.py`
+- 修改：`reflex_web/reflex_web/reflex_web.py`、`README.md`、`AGENTS.md`
+
+验证：`python test_web_frame_gen_utils.py` 18 用例全过（南网含 list/enum/sub_fields、国网从节点列表、698.45 A-XDR/SA 字节与 GUI 生成器一致）；`State` 冒烟 9 项全过；`reflex export` 后 `python reflex_web/run_app.py` 返回 HTTP 200
+
+**最近一次（2026-08-14）：发布 1.13.0**
+
+变更：
+- **新增独立协议「HDC 1.0 双模互联互通」（索引 11）**：主程序支持 12 种协议。新增 `hdc10_parser.py`（HDC10Parser，Q/GDW 12087.42-2020）、`hdc10_mme_parser.py`、`validator/hdc10_validator.py`、`test_hdc10.py`
+- **GUI 集成**（`main_gui.py`）：协议下拉框新增 `[11]`；解析级别 + 通道下拉复用国网新一代控件（`_hdc10_parse_level` / `_hdc10_channel`）；查询页新增 `_create_hdc10_lookup_content`（报文 ID/端口/消息类型映射）；校验注册 `_run_validation` 11 → HDC10Validator；批量解析复用 `_strip_gw_new_gen_prefix` 前缀剥离与 `_get_gw_new_gen_summary` 摘要
+- **新一代载波协议(索引9)增强**：通道自动识别 PLC/HRF（`channel="auto"`）、无线单跳 MAC 帧（版本2/表12）、切频操作目标按 Option+信道号解析、批量摘要 `0x` 前缀崩溃修复
+- **易用性**：协议选择持久化、全表格 Ctrl+滚轮缩放（ZoomableTableWidget）、校验结果展开/收缩 + 结果表全屏、GUI 按钮风格统一；国网新一代信标帧无 PBH 修复；DLT645 数据长度一致性校验增强
+- **版本 bump**：`APP_VERSION` → 1.13.0，`BUILD_DATE` → 2026-08-14，`CHANGELOG` 新增 1.13.0 条目；文档（README/AGENTS.md/CLAUDE.md）同步至 12 种协议
+
+涉及文件：
+- 新增：`hdc10_parser.py`、`hdc10_mme_parser.py`、`validator/hdc10_validator.py`、`test_hdc10.py`
+- 修改：`main_gui.py`、`README.md`、`AGENTS.md`、`CLAUDE.md`、`南网协议解析工具.spec`
+
+---
+
+**上一次（2026-08-11）：DLT645 数据域长度一致性校验增强**
 
 变更：
 - **DLT645 解析器新增数据长度一致性校验**（`dlt645_parser.py`）：声明值与实际帧长不匹配时，`valid=False`，fields 插入 `⚠ 数据长度错误` 行，但仍尽力解析所有可见字段（地址/控制码/DI/数据内容/校验和正常显示），不返回空白结果
@@ -766,6 +827,10 @@ python test_theme_settings.py  # 主题与字体设置
 
 涉及文件：
 - 修改：`dlt645_parser.py`、`validator/dlt645_validator.py`、`README.md`、`AGENTS.md`
+
+---
+
+**上一次（2026-08-04 前后）：TCP 流量监控 + 系统集成 + 1.11.x 功能**
 
 变更：
 - **新增「TCP 流量监控」标签页**（`monitor/tcp_monitor.py`，TCPMonitorWidget）：基于 scapy 的 TCP 抓包、流列表、双向流重组与南网新一代 / 国网新一代自动解析
@@ -913,6 +978,8 @@ python test_theme_settings.py  # 主题与字体设置
 - `.trellis/spec/` — 按包/层组织的编码规范与质量检查
 - `monitor/tcp_monitor.py` 头部说明 — TCP 监控封装解帧格式与流重组设计
 - `system_integration/` — 系统托盘、全局热键、单实例、右键菜单、剪贴板检测、Notepad++ 集成与系统设置实现
+- `国网新一代协议/HDC-国网双模协议/` — HDC 1.0（索引 11）参考文档（双模技术规范第 1/4-1/4-2/4-3 部分，.md/.pdf）
+- `hdc10_parser.py` 头部注释 — HDC 1.0 帧结构与解析约定（Q/GDW 12087.42-2020）
 
 > **冲突处理**：当 AGENTS.md 与 QWEN.md / CLAUDE.md / README.md 内容冲突时，**以 AGENTS.md 为准**。本文档随代码同步更新。
 

@@ -4379,6 +4379,7 @@ def index() -> rx.Component:
                     variant=rx.cond(State.active_tab == "single", "solid", "soft"),
                     color_scheme=rx.cond(State.active_tab == "single", "blue", "gray"),
                     size="2",
+                    data_testid="tab-single",
                 ),
                 rx.button(
                     rx.icon("list", size=16),
@@ -4387,6 +4388,7 @@ def index() -> rx.Component:
                     variant=rx.cond(State.active_tab == "batch", "solid", "soft"),
                     color_scheme=rx.cond(State.active_tab == "batch", "blue", "gray"),
                     size="2",
+                    data_testid="tab-batch",
                 ),
                 rx.button(
                     rx.icon("square_pen", size=18, color="#2563eb"),
@@ -4395,6 +4397,7 @@ def index() -> rx.Component:
                     variant=rx.cond(State.active_tab == "frame", "solid", "soft"),
                     color_scheme=rx.cond(State.active_tab == "frame", "blue", "gray"),
                     size="2",
+                    data_testid="tab-frame",
                 ),
                 rx.button(
                     rx.icon("git_compare", size=16),
@@ -4403,6 +4406,7 @@ def index() -> rx.Component:
                     variant=rx.cond(State.active_tab == "diff", "solid", "soft"),
                     color_scheme=rx.cond(State.active_tab == "diff", "blue", "gray"),
                     size="2",
+                    data_testid="tab-diff",
                 ),
                 rx.button(
                     rx.icon("search", size=16),
@@ -4411,6 +4415,7 @@ def index() -> rx.Component:
                     variant=rx.cond(State.active_tab == "lookup", "solid", "soft"),
                     color_scheme=rx.cond(State.active_tab == "lookup", "blue", "gray"),
                     size="2",
+                    data_testid="tab-lookup",
                 ),
                 rx.button(
                     rx.icon("wrench", size=16),
@@ -4419,6 +4424,7 @@ def index() -> rx.Component:
                     variant=rx.cond(State.active_tab == "tool", "solid", "soft"),
                     color_scheme=rx.cond(State.active_tab == "tool", "blue", "gray"),
                     size="2",
+                    data_testid="tab-tool",
                 ),
                 spacing="2",
                 margin_bottom="4",

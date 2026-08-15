@@ -64,10 +64,23 @@ class DLT645Validator(BaseValidator):
                 result.valid = False
             result.checks.append(check)
 
-        # 6. 数据长度字段检查
+        # 6. 数据长度字段检查（声明值与实际帧长一致性）
         if len(frame_bytes) >= 11:
             data_len = frame_bytes[9]  # 第10字节是数据长度
-            if data_len > 200:  # 合理性检查
+            expected_total = 12 + data_len  # 68+addr(6)+68+ctrl+len+data(N)+cs+16
+            actual_total = len(frame_bytes)
+            actual_data_len = actual_total - 12
+            if actual_data_len != data_len:
+                check = CheckItem(
+                    name="数据长度",
+                    level=CheckLevel.FAIL,
+                    expected=f"{data_len}字节（帧总长{expected_total}）",
+                    actual=f"{actual_data_len}字节（帧总长{actual_total}）",
+                    message=f"数据域长度不匹配：声明{data_len}字节，实际{actual_data_len}字节"
+                )
+                result.errors.append(f"数据域长度不匹配：声明{data_len}字节，实际{actual_data_len}字节")
+                result.valid = False
+            elif data_len > 200:  # 合理性检查
                 check = CheckItem(
                     name="数据长度",
                     level=CheckLevel.WARN,
@@ -80,7 +93,7 @@ class DLT645Validator(BaseValidator):
                 check = CheckItem(
                     name="数据长度",
                     level=CheckLevel.PASS,
-                    expected="合理范围",
+                    expected=f"{data_len}字节",
                     actual=f"{data_len}字节",
                     message=f"数据长度{data_len}字节"
                 )

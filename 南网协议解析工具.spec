@@ -12,6 +12,7 @@ a = Analysis(
         ('gdw_custom_afn.json', '.'),
         ('icons', 'icons'),
         ('enhanced_export.py', '.'),  # 增强导出模块
+        ('scripts', 'scripts'),  # Python 脚本预处理示例脚本
     ],
     hiddenimports=[
         # PySide6 核心模块
@@ -49,6 +50,9 @@ a = Analysis(
         'gw_new_gen_parser',
         'gw_new_gen_cmd_payloads',
         'gw_new_gen_mme_parser',
+        'hdc10_parser',
+        'hdc10_mme_parser',
+        'validator.hdc10_validator',
         'obis_lookup',
         'command_lookup',
         'dlt645_di_lookup',
@@ -63,6 +67,7 @@ a = Analysis(
         'gui_utils',
         'frame_diff_engine',
         'lua_script_engine',
+        'py_script_engine',  # Python 脚本预处理引擎
         # 可选依赖
         'crcmod',
         'serial',

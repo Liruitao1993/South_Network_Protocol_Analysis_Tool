@@ -48,6 +48,17 @@ class LLMPreprocessWidget(QWidget):
 
     # ── UI 构建 ─────────────────────────────────────────
 
+    def _make_btn(self, text: str = "", min_height: int = 28,
+                  min_width: int = 0, max_width: int = 0) -> QPushButton:
+        """创建统一风格的按钮。"""
+        btn = QPushButton(text)
+        btn.setMinimumHeight(min_height)
+        if min_width:
+            btn.setMinimumWidth(min_width)
+        if max_width:
+            btn.setMaximumWidth(max_width)
+        return btn
+
     def _build_ui(self):
         root = QVBoxLayout(self)
         root.setSpacing(6)
@@ -64,8 +75,7 @@ class LLMPreprocessWidget(QWidget):
         self.profile_combo.currentIndexChanged.connect(self._on_profile_changed)
         tool_bar.addWidget(self.profile_combo)
 
-        self.refresh_profiles_btn = QPushButton("🔄")
-        self.refresh_profiles_btn.setMaximumWidth(28)
+        self.refresh_profiles_btn = self._make_btn("🔄", min_height=26, max_width=28)
         self.refresh_profiles_btn.setToolTip("刷新模型列表")
         self.refresh_profiles_btn.clicked.connect(self._refresh_profiles)
         tool_bar.addWidget(self.refresh_profiles_btn)
@@ -106,13 +116,13 @@ class LLMPreprocessWidget(QWidget):
         in_group = QGroupBox("原始日志输入")
         in_layout = QVBoxLayout(in_group)
         in_toolbar = QHBoxLayout()
-        self.load_file_btn = QPushButton("从文件加载")
+        self.load_file_btn = self._make_btn("从文件加载")
         self.load_file_btn.clicked.connect(self._load_file)
         in_toolbar.addWidget(self.load_file_btn)
-        self.paste_btn = QPushButton("从剪贴板粘贴")
+        self.paste_btn = self._make_btn("从剪贴板粘贴")
         self.paste_btn.clicked.connect(self._paste_from_clipboard)
         in_toolbar.addWidget(self.paste_btn)
-        self.clear_input_btn = QPushButton("清空")
+        self.clear_input_btn = self._make_btn("清空")
         self.clear_input_btn.clicked.connect(lambda: self.input_edit.clear())
         in_toolbar.addWidget(self.clear_input_btn)
         in_toolbar.addStretch()
@@ -130,10 +140,10 @@ class LLMPreprocessWidget(QWidget):
         out_group = QGroupBox("预处理输出")
         out_layout = QVBoxLayout(out_group)
         out_toolbar = QHBoxLayout()
-        self.copy_output_btn = QPushButton("复制")
+        self.copy_output_btn = self._make_btn("复制")
         self.copy_output_btn.clicked.connect(self._copy_output)
         out_toolbar.addWidget(self.copy_output_btn)
-        self.clear_output_btn = QPushButton("清空")
+        self.clear_output_btn = self._make_btn("清空")
         self.clear_output_btn.clicked.connect(lambda: self.output_edit.clear())
         out_toolbar.addWidget(self.clear_output_btn)
         out_toolbar.addStretch()
@@ -167,27 +177,23 @@ class LLMPreprocessWidget(QWidget):
         action_bar = QHBoxLayout()
         action_bar.setSpacing(8)
 
-        self.run_btn = QPushButton("▶ 执行预处理")
-        self.run_btn.setMinimumHeight(32)
+        self.run_btn = self._make_btn("▶ 执行预处理", min_height=32, min_width=120)
         self.run_btn.clicked.connect(self._run_preprocess)
         action_bar.addWidget(self.run_btn)
 
-        self.cancel_btn = QPushButton("取消")
-        self.cancel_btn.setMinimumHeight(32)
+        self.cancel_btn = self._make_btn("取消", min_height=32, min_width=80)
         self.cancel_btn.setEnabled(False)
         self.cancel_btn.clicked.connect(self._cancel_preprocess)
         action_bar.addWidget(self.cancel_btn)
 
         action_bar.addSpacing(16)
 
-        self.load_to_batch_btn = QPushButton("加载到批量解析")
-        self.load_to_batch_btn.setMinimumHeight(32)
+        self.load_to_batch_btn = self._make_btn("加载到批量解析", min_height=32, min_width=120)
         self.load_to_batch_btn.setEnabled(False)
         self.load_to_batch_btn.clicked.connect(self._load_to_batch)
         action_bar.addWidget(self.load_to_batch_btn)
 
-        self.save_output_btn = QPushButton("保存结果")
-        self.save_output_btn.setMinimumHeight(32)
+        self.save_output_btn = self._make_btn("保存结果", min_height=32, min_width=100)
         self.save_output_btn.setEnabled(False)
         self.save_output_btn.clicked.connect(self._save_output)
         action_bar.addWidget(self.save_output_btn)
