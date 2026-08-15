@@ -115,8 +115,15 @@ class State(rx.State):
     gen_dlt698_func: int = 3
     # 国网中继地址（逗号分隔）与预设按钮
     gen_gdw_relay_addrs_text: str = ""
-    gen_preset_buttons: List[Dict[str, str]] = []         # [{name,group,frame_hex}]
+    gen_preset_buttons: List[Dict[str, str]] = []         # [{name,group,frame_hex,id,description}]
     gen_preset_groups: List[str] = []
+    # 预设命令管理（保存表单/搜索/编辑）
+    gen_preset_name: str = ""          # 添加到预设-名称
+    gen_preset_group: str = ""         # 添加到预设-分组
+    gen_preset_search: str = ""        # 预设搜索过滤词
+    gen_preset_edit_id: str = ""       # 正在编辑的预设按钮 id（空=未编辑）
+    gen_preset_edit_name: str = ""     # 编辑-名称
+    gen_preset_edit_group: str = ""    # 编辑-分组
     # DI/AFN 选项列表
     di_options: List[Dict[str, str]] = []
     afn_fn_options: List[Dict[str, str]] = []
@@ -194,6 +201,8 @@ class State(rx.State):
                     self.current_protocol = int(opt["value"])
                     return
             self.current_protocol = 0
+        # 预设命令跟随当前协议（协议 0 读 NW_command.json，7 读 GW_command.json）
+        self._load_preset_buttons()
 
     def set_csg_level(self, value: str):
         self.csg_parse_level = value
@@ -1663,6 +1672,8 @@ class State(rx.State):
                     "name": c.get("button_name", ""),
                     "group": c.get("group_name", "其他"),
                     "frame_hex": c.get("frame_hex", ""),
+                    "id": c.get("id", ""),
+                    "description": c.get("description", ""),
                 })
                 g = c.get("group_name", "其他")
                 if g not in groups:
@@ -1681,8 +1692,10 @@ class State(rx.State):
         self.message = "已应用预设命令"
         self.message_type = "success"
 
-    async def save_preset(self, name: str, group: str):
-        """保存当前生成结果到预设命令 JSON"""
+    async def save_preset(self):
+        """保存当前生成结果到预设命令 JSON（名称/分组取自表单字段）"""
+        name = self.gen_preset_name
+        group = self.gen_preset_group
         if not name.strip():
             self.message = "请输入预设命令名称"
             self.message_type = "warning"
@@ -1718,11 +1731,106 @@ class State(rx.State):
             commands.append(new_cmd)
             data["commands"] = commands
             path.write_text(_json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            self.gen_preset_name = ""
+            self.gen_preset_group = ""
             self._load_preset_buttons()
             self.message = "预设命令已保存"
             self.message_type = "success"
         except Exception as e:
             self.message = f"保存预设失败: {str(e)}"
+            self.message_type = "error"
+
+    def set_gen_preset_save_field(self, key: str, value: str):
+        """设置保存预设表单字段（name/group）"""
+        if key == "name":
+            self.gen_preset_name = value
+        elif key == "group":
+            self.gen_preset_group = value
+
+    def set_gen_preset_search(self, value: str):
+        """设置预设命令搜索过滤词"""
+        self.gen_preset_search = value
+
+    def start_edit_preset(self, cmd_id: str):
+        """进入预设编辑模式（回填当前名称/分组）"""
+        for b in self.gen_preset_buttons:
+            if b.get("id") == cmd_id:
+                self.gen_preset_edit_id = cmd_id
+                self.gen_preset_edit_name = b.get("name", "")
+                self.gen_preset_edit_group = b.get("group", "")
+                return
+
+    def set_gen_preset_edit_field(self, key: str, value: str):
+        """设置预设编辑表单字段（name/group）"""
+        if key == "name":
+            self.gen_preset_edit_name = value
+        elif key == "group":
+            self.gen_preset_edit_group = value
+
+    def cancel_edit_preset(self):
+        """取消预设编辑"""
+        self.gen_preset_edit_id = ""
+
+    async def save_preset_edit(self):
+        """保存预设编辑（改名/分组）"""
+        cmd_id = self.gen_preset_edit_id
+        if not cmd_id or not self.gen_preset_edit_name.strip():
+            self.message = "请输入预设命令名称"
+            self.message_type = "warning"
+            return
+        try:
+            import json as _json
+            from pathlib import Path
+            p = self.current_protocol
+            if p not in (0, 7):
+                return
+            fname = "NW_command.json" if p == 0 else "GW_command.json"
+            path = Path(ROOT) / fname
+            if not path.exists():
+                return
+            data = _json.loads(path.read_text(encoding="utf-8"))
+            commands = data.get("commands", []) if isinstance(data, dict) else []
+            for c in commands:
+                if c.get("id") == cmd_id:
+                    c["button_name"] = self.gen_preset_edit_name.strip()
+                    c["group_name"] = self.gen_preset_edit_group.strip() or "常用查询"
+                    break
+            data["commands"] = commands
+            path.write_text(_json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            self.gen_preset_edit_id = ""
+            self._load_preset_buttons()
+            self.message = "预设命令已更新"
+            self.message_type = "success"
+        except Exception as e:
+            self.message = f"更新预设失败: {str(e)}"
+            self.message_type = "error"
+
+    async def remove_preset(self, cmd_id: str):
+        """删除预设命令"""
+        if not cmd_id:
+            return
+        try:
+            import json as _json
+            from pathlib import Path
+            p = self.current_protocol
+            if p not in (0, 7):
+                return
+            fname = "NW_command.json" if p == 0 else "GW_command.json"
+            path = Path(ROOT) / fname
+            if not path.exists():
+                return
+            data = _json.loads(path.read_text(encoding="utf-8"))
+            commands = data.get("commands", []) if isinstance(data, dict) else []
+            commands = [c for c in commands if c.get("id") != cmd_id]
+            data["commands"] = commands
+            path.write_text(_json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            if self.gen_preset_edit_id == cmd_id:
+                self.gen_preset_edit_id = ""
+            self._load_preset_buttons()
+            self.message = "预设命令已删除"
+            self.message_type = "success"
+        except Exception as e:
+            self.message = f"删除预设失败: {str(e)}"
             self.message_type = "error"
 
     # ── 报文对比 ─────────────────────────────────────────────
@@ -2800,6 +2908,14 @@ def frame_gen_tab() -> rx.Component:
                     rx.hstack(
                         rx.icon("bookmark", size=18, color="#2563eb"),
                         rx.heading("预设命令", size="3", font_weight="semibold"),
+                        rx.spacer(),
+                        rx.input(
+                            value=State.gen_preset_search,
+                            on_change=State.set_gen_preset_search,
+                            placeholder="搜索命令...",
+                            size="1",
+                            width="180px",
+                        ),
                         spacing="2",
                     ),
                     rx.cond(
@@ -2812,11 +2928,59 @@ def frame_gen_tab() -> rx.Component:
                                     rx.foreach(
                                         State.gen_preset_buttons,
                                         lambda b: rx.cond(
-                                            b["group"] == g,
-                                            rx.button(
-                                                b["name"],
-                                                on_click=lambda: State.apply_preset(b["frame_hex"]),
-                                                variant="outline", size="1",
+                                            (b["group"] == g) & (
+                                                b["name"].contains(State.gen_preset_search)
+                                                | b["group"].contains(State.gen_preset_search)
+                                            ),
+                                            rx.hstack(
+                                                rx.button(
+                                                    b["name"],
+                                                    on_click=lambda: State.apply_preset(b["frame_hex"]),
+                                                    variant="outline", size="1",
+                                                ),
+                                                rx.cond(
+                                                    State.gen_preset_edit_id == b["id"],
+                                                    rx.hstack(
+                                                        rx.input(
+                                                            value=State.gen_preset_edit_name,
+                                                            on_change=lambda v: State.set_gen_preset_edit_field("name", v),
+                                                            size="1", width="120px", placeholder="名称",
+                                                        ),
+                                                        rx.input(
+                                                            value=State.gen_preset_edit_group,
+                                                            on_change=lambda v: State.set_gen_preset_edit_field("group", v),
+                                                            size="1", width="110px", placeholder="分组",
+                                                        ),
+                                                        rx.button(
+                                                            "保存",
+                                                            on_click=State.save_preset_edit,
+                                                            size="1", color_scheme="green",
+                                                        ),
+                                                        rx.button(
+                                                            "取消",
+                                                            on_click=State.cancel_edit_preset,
+                                                            size="1", variant="ghost",
+                                                        ),
+                                                        spacing="1",
+                                                        align="center",
+                                                    ),
+                                                    rx.hstack(
+                                                        rx.button(
+                                                            rx.icon("pencil", size=12),
+                                                            on_click=lambda: State.start_edit_preset(b["id"]),
+                                                            variant="ghost", size="1",
+                                                        ),
+                                                        rx.button(
+                                                            rx.icon("trash", size=12),
+                                                            on_click=lambda: State.remove_preset(b["id"]),
+                                                            variant="ghost", size="1", color_scheme="red",
+                                                        ),
+                                                        spacing="1",
+                                                        align="center",
+                                                    ),
+                                                ),
+                                                spacing="1",
+                                                align="center",
                                             ),
                                         ),
                                     ),
@@ -2826,6 +2990,33 @@ def frame_gen_tab() -> rx.Component:
                             ),
                         ),
                         rx.text("暂无预设命令", size="2", color="gray"),
+                    ),
+                    rx.divider(),
+                    rx.hstack(
+                        rx.text("添加到预设:", size="2", font_weight="medium"),
+                        rx.input(
+                            value=State.gen_preset_name,
+                            on_change=lambda v: State.set_gen_preset_save_field("name", v),
+                            placeholder="命令名称",
+                            size="1",
+                            width="150px",
+                        ),
+                        rx.input(
+                            value=State.gen_preset_group,
+                            on_change=lambda v: State.set_gen_preset_save_field("group", v),
+                            placeholder="分组(默认常用查询)",
+                            size="1",
+                            width="170px",
+                        ),
+                        rx.button(
+                            rx.icon("plus", size=14),
+                            "保存",
+                            on_click=State.save_preset,
+                            size="1",
+                            color_scheme="blue",
+                        ),
+                        spacing="2",
+                        align="center",
                     ),
                     spacing="3",
                     width="100%",
@@ -2885,7 +3076,7 @@ def frame_gen_tab() -> rx.Component:
                 rx.el.option("请选择", value=""),
                 rx.foreach(State.gen_field_enum[i], lambda o: rx.el.option(o["label"], value=o["value"])),
                 default_value=State.gen_field_meta[i]["default"],
-                on_change=lambda val, idx=str(i): State.set_gen_field(idx, val),
+                on_change=lambda val, idx=i: State.set_gen_field(idx, val),
                 class_name="w-full rounded border border-gray-300 px-3 py-1.5",
                 size="1",
             ),
@@ -2895,7 +3086,7 @@ def frame_gen_tab() -> rx.Component:
                     rx.el.option("-- 选择OI --", value=""),
                     rx.foreach(_oi_options(), lambda o: rx.el.option(o["label"], value=o["value"])),
                     default_value=State.gen_field_meta[i]["default"],
-                    on_change=lambda val, idx=str(i): State.set_gen_field(idx, val),
+                    on_change=lambda val, idx=i: State.set_gen_field(idx, val),
                     class_name="w-full rounded border border-gray-300 px-3 py-1.5",
                     size="1",
                 ),
@@ -2903,7 +3094,7 @@ def frame_gen_tab() -> rx.Component:
                     State.gen_field_meta[i]["type"] == "oad_list",
                     rx.text_area(
                         value=State.gen_field_values[i].to(str),
-                        on_change=lambda val, idx=str(i): State.set_gen_field(idx, val),
+                        on_change=lambda val, idx=i: State.set_gen_field(idx, val),
                         placeholder="每行一个 OAD，如 00000100",
                         font_family="monospace",
                         size="1",
@@ -2911,7 +3102,7 @@ def frame_gen_tab() -> rx.Component:
                     ),
                     rx.input(
                         value=State.gen_field_values[i].to(str),
-                        on_change=lambda val, idx=str(i): State.set_gen_field(idx, val),
+                        on_change=lambda val, idx=i: State.set_gen_field(idx, val),
                         placeholder=State.gen_field_meta[i]["default"],
                         font_family="monospace",
                         size="1",
@@ -2935,13 +3126,13 @@ def frame_gen_tab() -> rx.Component:
                                 rx.el.option("请选择", value=""),
                                 rx.foreach(State.gen_field_subs_enum[i][j], lambda o: rx.el.option(o["label"], value=o["value"])),
                                 default_value=s["default"],
-                                on_change=lambda val, fi=str(i), si=str(j): State.set_gen_sub_field(fi, si, val),
+                                on_change=lambda val, fi=i, si=j: State.set_gen_sub_field(fi, si, val),
                                 class_name="w-full rounded border border-gray-300 px-3 py-1.5",
                                 size="1",
                             ),
                             rx.input(
                                 value=State.gen_sub_fields[i][j].to(str),
-                                on_change=lambda val, fi=str(i), si=str(j): State.set_gen_sub_field(fi, si, val),
+                                on_change=lambda val, fi=i, si=j: State.set_gen_sub_field(fi, si, val),
                                 placeholder=s["default"],
                                 font_family="monospace",
                                 size="1",
@@ -2971,13 +3162,13 @@ def frame_gen_tab() -> rx.Component:
                                     rx.el.option("请选择", value=""),
                                     rx.foreach(State.gen_field_items_enum[i][j], lambda o: rx.el.option(o["label"], value=o["value"])),
                                     default_value=it["default"],
-                                    on_change=lambda val, fi=str(i), ri=str(r), ji=str(j): State.set_gen_list_item(fi, ri, ji, val),
+                                    on_change=lambda val, fi=i, ri=r, ji=j: State.set_gen_list_item(fi, ri, ji, val),
                                     class_name="w-full rounded border border-gray-300 px-3 py-1.5",
                                     size="1",
                                 ),
                                 rx.input(
                                     value=State.gen_list_rows[i][r][j].to(str),
-                                    on_change=lambda val, fi=str(i), ri=str(r), ji=str(j): State.set_gen_list_item(fi, ri, ji, val),
+                                    on_change=lambda val, fi=i, ri=r, ji=j: State.set_gen_list_item(fi, ri, ji, val),
                                     placeholder=it["default"],
                                     font_family="monospace",
                                     size="1",
@@ -2988,7 +3179,7 @@ def frame_gen_tab() -> rx.Component:
                     ),
                     rx.button(
                         rx.icon("trash", size=14),
-                        on_click=lambda fi=str(i), ri=str(r): State.remove_gen_list_row(fi, ri),
+                        on_click=lambda: State.remove_gen_list_row(i, r),
                         variant="ghost",
                         size="1",
                         color_scheme="red",
@@ -3002,7 +3193,7 @@ def frame_gen_tab() -> rx.Component:
                 rx.button(
                     rx.icon("plus", size=14),
                     "添加一项",
-                    on_click=lambda fi=str(i): State.add_gen_list_row(fi),
+                    on_click=lambda: State.add_gen_list_row(i),
                     variant="outline",
                     size="1",
                 ),
@@ -3080,7 +3271,7 @@ def frame_gen_tab() -> rx.Component:
                             ),
                             rx.button(
                                 rx.icon("trash", size=14),
-                                on_click=lambda idx=i: State.remove_gen_custom_template(idx),
+                                on_click=lambda: State.remove_gen_custom_template(i),
                                 variant="ghost",
                                 size="1",
                                 color_scheme="red",
@@ -3114,14 +3305,14 @@ def frame_gen_tab() -> rx.Component:
                         lambda o: rx.el.option(o["label"], value=o["value"]),
                     ),
                     default_value=item["type"],
-                    on_change=lambda val, idx=str(i): State.set_gen_axdr_item(idx, "type", val),
+                    on_change=lambda val, idx=i: State.set_gen_axdr_item(idx.to_string(), "type", val),
                     class_name="rounded border border-gray-300 px-2 py-1",
                     size="1",
                     width="180px",
                 ),
                 rx.input(
                     value=item["value"].to(str),
-                    on_change=lambda val, idx=str(i): State.set_gen_axdr_item(idx, "value", val),
+                    on_change=lambda val, idx=i: State.set_gen_axdr_item(idx.to_string(), "value", val),
                     placeholder="值",
                     font_family="monospace",
                     size="1",
@@ -3131,7 +3322,7 @@ def frame_gen_tab() -> rx.Component:
                     _is_var_len(item["type"]),
                     rx.input(
                         value=item["length"].to_string(),
-                        on_change=lambda val, idx=str(i): State.set_gen_axdr_item(idx, "length", val),
+                        on_change=lambda val, idx=i: State.set_gen_axdr_item(idx.to_string(), "length", val),
                         placeholder="长度/个数",
                         size="1",
                         width="70px",
@@ -3143,14 +3334,14 @@ def frame_gen_tab() -> rx.Component:
                     rx.button(
                         rx.icon("plus", size=14),
                         "子项",
-                        on_click=lambda idx=str(i): State.add_gen_axdr_item(idx),
+                        on_click=lambda: State.add_gen_axdr_item(i.to_string()),
                         variant="outline",
                         size="1",
                     ),
                 ),
                 rx.button(
                     rx.icon("trash", size=14),
-                    on_click=lambda idx=str(i): State.remove_gen_axdr_item(idx),
+                    on_click=lambda: State.remove_gen_axdr_item(i.to_string()),
                     variant="ghost",
                     size="1",
                     color_scheme="red",
@@ -3496,6 +3687,8 @@ def frame_gen_tab() -> rx.Component:
         )
 
     return rx.vstack(
+        # 预设命令（置顶，便于快速选择/查找历史命令）
+        preset_panel(),
         # 命令选择区
         rx.card(
             rx.vstack(
@@ -3683,8 +3876,6 @@ def frame_gen_tab() -> rx.Component:
                 dynamic_fields(),
             ),
         ),
-        # 预设命令
-        preset_panel(),
         # 预览和结果
         rx.hstack(
             # 预览
