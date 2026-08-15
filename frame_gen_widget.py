@@ -13,8 +13,8 @@ from PySide6.QtWidgets import (
     QComboBox, QGroupBox, QScrollArea, QCheckBox, QMessageBox, QTextEdit,
     QTableWidget, QTableWidgetItem, QHeaderView, QSplitter, QDialog
 )
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QFont, QKeyEvent
+from PySide6.QtCore import Qt, QTimer, Signal, QRegularExpression
+from PySide6.QtGui import QFont, QKeyEvent, QIntValidator, QRegularExpressionValidator
 
 from send_frame_lib import ProtocolFrameGenerator
 from frame_generator_schema import DI_FIELD_SCHEMA
@@ -210,6 +210,8 @@ class FrameGenWidget(QWidget):
         info_layout.addWidget(QLabel("序列号:"))
         self.gdw_seq = QLineEdit("0")
         self.gdw_seq.setFixedWidth(40)
+        self.gdw_seq.setValidator(QIntValidator(0, 255, self.gdw_seq))
+        self.gdw_seq.textChanged.connect(self._schedule_realtime_update)
         info_layout.addWidget(self.gdw_seq)
         info_layout.addStretch()
         gdw_config_layout.addLayout(info_layout)
@@ -241,11 +243,15 @@ class FrameGenWidget(QWidget):
         info_detail_layout.addWidget(QLabel("信道标识:"))
         self.gdw_channel = QLineEdit("0")
         self.gdw_channel.setFixedWidth(30)
+        self.gdw_channel.setValidator(QIntValidator(0, 15, self.gdw_channel))
+        self.gdw_channel.textChanged.connect(self._schedule_realtime_update)
         info_detail_layout.addWidget(self.gdw_channel)
 
         info_detail_layout.addWidget(QLabel("应答字节数:"))
         self.gdw_resp_bytes = QLineEdit("0")
         self.gdw_resp_bytes.setFixedWidth(40)
+        self.gdw_resp_bytes.setValidator(QIntValidator(0, 255, self.gdw_resp_bytes))
+        self.gdw_resp_bytes.textChanged.connect(self._schedule_realtime_update)
         info_detail_layout.addWidget(self.gdw_resp_bytes)
 
         info_detail_layout.addStretch()
@@ -257,11 +263,17 @@ class FrameGenWidget(QWidget):
         addr_layout.addWidget(QLabel("源地址(A1):"))
         self.gdw_src_addr = QLineEdit("000000000000")
         self.gdw_src_addr.setMaxLength(12)
+        self.gdw_src_addr.setPlaceholderText("12位十进制BCD")
+        self.gdw_src_addr.setValidator(QRegularExpressionValidator(QRegularExpression(r"\d*"), self.gdw_src_addr))
+        self.gdw_src_addr.textChanged.connect(self._schedule_realtime_update)
         addr_layout.addWidget(self.gdw_src_addr)
 
         addr_layout.addWidget(QLabel("目的地址(A3):"))
         self.gdw_dst_addr = QLineEdit("000000000000")
         self.gdw_dst_addr.setMaxLength(12)
+        self.gdw_dst_addr.setPlaceholderText("12位十进制BCD")
+        self.gdw_dst_addr.setValidator(QRegularExpressionValidator(QRegularExpression(r"\d*"), self.gdw_dst_addr))
+        self.gdw_dst_addr.textChanged.connect(self._schedule_realtime_update)
         addr_layout.addWidget(self.gdw_dst_addr)
         addr_layout.addStretch()
         gdw_config_layout.addLayout(addr_layout)
@@ -1975,6 +1987,8 @@ class FrameGenWidget(QWidget):
             edit = QLineEdit()
             if default is not None:
                 edit.setText(str(default))
+            # 限制为非负整数
+            edit.setValidator(QIntValidator(0, 2147483647, edit))
             layout.addWidget(edit)
             self._field_widgets[name]["widget"] = edit
 
@@ -1984,6 +1998,11 @@ class FrameGenWidget(QWidget):
                 edit.setText(str(default))
             if field.get("reverse"):
                 edit.setPlaceholderText("正常顺序hex，自动反转")
+            else:
+                edit.setPlaceholderText("HEX")
+            # 限制只允许十六进制字符和空格
+            regex = QRegularExpression(r"[0-9A-Fa-f ]+")
+            edit.setValidator(QRegularExpressionValidator(regex, edit))
             layout.addWidget(edit)
             self._field_widgets[name]["widget"] = edit
 
@@ -2673,12 +2692,15 @@ class FrameGenWidget(QWidget):
         dst_addr = self.gdw_dst_addr.text().strip()
         relay_addrs = [edit.text().strip() for edit in self.gdw_relay_inputs]
 
-        field_values = self._collect_values()
-
-        frame = self.gdw_generator.generate_frame(
-            afn, fn, field_values, info_config,
-            src_addr=src_addr, dst_addr=dst_addr, relay_addrs=relay_addrs
-        )
+        try:
+            field_values = self._collect_values()
+            frame = self.gdw_generator.generate_frame(
+                afn, fn, field_values, info_config,
+                src_addr=src_addr, dst_addr=dst_addr, relay_addrs=relay_addrs
+            )
+        except Exception as e:
+            QMessageBox.warning(self, "组帧失败", f"生成帧时出错:\n{e}")
+            return
 
         hex_str = frame.hex().upper()
         formatted = " ".join(hex_str[i:i+2] for i in range(0, len(hex_str), 2))
