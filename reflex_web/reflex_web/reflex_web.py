@@ -140,6 +140,10 @@ class State(rx.State):
     gen_dlt698_search: str = ""           # 698.45 APDU 搜索过滤词
     dlt698_filtered: List[Dict[str, str]] = []  # 698.45 APDU 过滤结果
     gen_dlt698_open: bool = False         # 698.45 APDU 选项列表展开
+    # 已选完整标签（代码+名称，供"已选"提示展示）
+    gen_di_selected_label: str = ""
+    gen_afn_selected_label: str = ""
+    gen_dlt698_selected_label: str = ""
     # 国网信息域配置
     gen_gdw_info: Dict[str, str] = {
         "通信方式": "3",
@@ -877,6 +881,11 @@ class State(rx.State):
     def set_gen_di_key(self, value: str):
         """设置 DI"""
         self.gen_di_key = value
+        self.gen_di_selected_label = value
+        for o in self.di_options:
+            if o["value"] == value:
+                self.gen_di_selected_label = o["label"]
+                break
         self.gen_fields = {}
         self._reset_gen_editor()
         self._load_di_field_schema()
@@ -912,6 +921,11 @@ class State(rx.State):
     def set_gen_afn_fn(self, value: str):
         """设置 AFN+Fn"""
         self.gen_afn_fn = value
+        self.gen_afn_selected_label = value
+        for o in self.afn_fn_options:
+            if o["value"] == value:
+                self.gen_afn_selected_label = o["label"]
+                break
         self.gen_fields = {}
         self._reset_gen_editor()
         self._load_gdw_field_schema()
@@ -947,6 +961,11 @@ class State(rx.State):
     def set_gen_dlt698_apdu(self, value: str):
         """设置 698.45 APDU 类型"""
         self.gen_dlt698_apdu = value
+        self.gen_dlt698_selected_label = value
+        for o in self.dlt698_all_options:
+            if o["value"] == value:
+                self.gen_dlt698_selected_label = o["label"]
+                break
         self.gen_dlt698_sub = ""
         self.gen_fields = {}
         self._reset_gen_editor()
@@ -2929,6 +2948,7 @@ def _searchable_select(
     filtered: Any,
     on_select: Any,
     selected: Any,
+    selected_label: Any,
     placeholder: str,
     open_flag: Any,
     set_open: Any,
@@ -2971,13 +2991,13 @@ def _searchable_select(
             spacing="2",
             width="100%",
         ),
-        # 已选提示
+        # 已选提示（完整标签：代码+名称）
         rx.cond(
             selected != "",
             rx.hstack(
                 rx.icon("check", size=14, color="#16a34a"),
                 rx.text("已选: ", size="1", color="#16a34a"),
-                rx.text(selected, size="1", color="#16a34a", font_family="monospace"),
+                rx.text(selected_label, size="1", color="#16a34a"),
                 spacing="1",
             ),
         ),
@@ -3902,6 +3922,7 @@ def frame_gen_tab() -> rx.Component:
                         State.di_filtered,
                         State.select_di,
                         State.gen_di_key,
+                        State.gen_di_selected_label,
                         "输入 DI 码/名称过滤，如 E8",
                         State.gen_di_open,
                         State.open_di,
@@ -3919,6 +3940,7 @@ def frame_gen_tab() -> rx.Component:
                         State.afn_filtered,
                         State.select_afn,
                         State.gen_afn_fn,
+                        State.gen_afn_selected_label,
                         "输入 AFN/Fn 码或名称过滤，如 0101",
                         State.gen_afn_open,
                         State.open_afn,
@@ -3937,6 +3959,7 @@ def frame_gen_tab() -> rx.Component:
                             State.dlt698_filtered,
                             State.select_dlt698,
                             State.gen_dlt698_apdu,
+                            State.gen_dlt698_selected_label,
                             "输入 APDU 类型过滤，如 GET",
                             State.gen_dlt698_open,
                             State.open_dlt698,
