@@ -104,6 +104,7 @@ python main_gui.py --clipboard
 - `pip install lupa`（测试方案 Lua 脚本引擎，**1.8.1 新增**，未安装时静默降级为不可用）
 - `pip install scapy`（TCP 流量监控，Windows 需另装 npcap，未就绪时标签页提示但不影响其他功能）
 - `pip install reflex`（Reflex Web 版，实验性）
+- Reflex Web 在线/离线依赖以 `reflex_web/requirements.in` + `reflex_web/requirements.lock` 为准，至少包含 `reflex`、`uvicorn`、`crcmod`、`websockets`
 
 **运行环境注意：**
 - Windows 优先；中文路径需保证 UTF-8 / GBK 编码兼容
@@ -113,6 +114,40 @@ python main_gui.py --clipboard
 - 当前主程序 spec 未显式声明 `scapy`；如需把 TCP 监控打包进 exe，需补充 `scapy` 依赖并确保目标机器安装 npcap
 - `docs/Lua脚本使用说明.md` 是 Lua 功能的用户文档
 - Inno Setup 安装脚本 `南网解析工具.iss` / `2222.iss` 中 `MyAppVersion` 仍为 `1.7.2`，发版时需手动同步
+
+### Reflex Web 离线源码部署（UV）
+
+局域网目标服务器没有外网时，使用 `reflex_web/build_offline_deploy.py` 在有网机器上生成一个可整体复制的部署目录：
+
+```bash
+python reflex_web/build_offline_deploy.py
+```
+
+该脚本会按以下顺序工作：
+
+1. 读取 `reflex_web/requirements.in`，执行 `uv pip compile` 并覆盖 `reflex_web/requirements.lock`
+2. 检查 `reflex_web/.web/build/client`；缺失时尝试执行 `reflex export --frontend-only --env prod --no-zip`
+3. 把运行所需源码、JSON 数据、`validator/`、`reflex_web/` 复制到 `dist/reflex_web_offline/`
+4. 用 `uv venv --relocatable` 创建 `.venv` 并安装锁定依赖
+5. 生成 `start_web.cmd` 和 `start_web.sh`
+
+目标服务器无网部署：
+
+```text
+复制整个 dist/reflex_web_offline/ 目录到目标服务器
+Windows: start_web.cmd
+Linux:   ./start_web.sh
+访问:    http://服务器IP:8080
+```
+
+后续维护规则：
+
+- **新增任何 Python 依赖时，先改 `reflex_web/requirements.in`，不要只改 `requirements.txt`；再重跑上面的构建脚本**
+- **修改 Reflex Web 页面/后端逻辑后，必须重跑脚本**，确保 `.venv` 与 `reflex_web/.web/build/client` 都是最新版本
+- `.venv` 只能复制到与构建机相同操作系统、相同 CPU 架构、相同 Python 大版本的目标机；目标机仍需要安装同版本 Python，`.venv` 不包含解释器本体
+- `reflex_web/.web` 是前端构建产物，默认被 `.gitignore` 排除，不能只用 git clone 代替部署目录拷贝
+- 当前脚本输出默认在 `dist/reflex_web_offline/`，该路径已被 `.gitignore` 排除，实际部署产物不进入版本库
+- 详细说明见 `reflex_web/离线部署.md`
 
 **编译原则（exe打包）：**
 
