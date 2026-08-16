@@ -128,14 +128,18 @@ class State(rx.State):
     di_options: List[Dict[str, str]] = []
     afn_fn_options: List[Dict[str, str]] = []
     dlt698_apdu_options: List[str] = []
+    dlt698_all_options: List[Dict[str, str]] = []  # dict 版本（供可搜索下拉）
     dlt698_sub_options: List[Dict[str, str]] = []
-    # 可搜索下拉：搜索词 + 过滤结果
+    # 可搜索下拉：搜索词 + 过滤结果 + 展开标志
     gen_di_search: str = ""               # DI 搜索过滤词
     di_filtered: List[Dict[str, str]] = []   # DI 过滤结果
+    gen_di_open: bool = False             # DI 选项列表展开（输入框聚焦时）
     gen_afn_search: str = ""              # AFN+Fn 搜索过滤词
     afn_filtered: List[Dict[str, str]] = []  # AFN+Fn 过滤结果
+    gen_afn_open: bool = False            # AFN+Fn 选项列表展开
     gen_dlt698_search: str = ""           # 698.45 APDU 搜索过滤词
     dlt698_filtered: List[Dict[str, str]] = []  # 698.45 APDU 过滤结果
+    gen_dlt698_open: bool = False         # 698.45 APDU 选项列表展开
     # 国网信息域配置
     gen_gdw_info: Dict[str, str] = {
         "通信方式": "3",
@@ -890,10 +894,19 @@ class State(rx.State):
             if kw in o["value"].lower() or kw in o["label"].lower()
         ]
 
+    def open_di(self):
+        """DI 选项列表展开（输入框聚焦）"""
+        self.gen_di_open = True
+
+    def close_di(self):
+        """DI 选项列表收起（输入框失焦）"""
+        self.gen_di_open = False
+
     def select_di(self, value: str):
         """选择 DI 选项（可搜索下拉）"""
         self.gen_di_search = ""
         self.di_filtered = []
+        self.gen_di_open = False
         self.set_gen_di_key(value)
 
     def set_gen_afn_fn(self, value: str):
@@ -916,10 +929,19 @@ class State(rx.State):
             if kw in o["value"].lower() or kw in o["label"].lower()
         ]
 
+    def open_afn(self):
+        """AFN+Fn 选项列表展开（输入框聚焦）"""
+        self.gen_afn_open = True
+
+    def close_afn(self):
+        """AFN+Fn 选项列表收起（输入框失焦）"""
+        self.gen_afn_open = False
+
     def select_afn(self, value: str):
         """选择 AFN+Fn 选项（可搜索下拉）"""
         self.gen_afn_search = ""
         self.afn_filtered = []
+        self.gen_afn_open = False
         self.set_gen_afn_fn(value)
 
     def set_gen_dlt698_apdu(self, value: str):
@@ -945,10 +967,19 @@ class State(rx.State):
             if kw in o.lower()
         ]
 
+    def open_dlt698(self):
+        """698.45 APDU 选项列表展开（输入框聚焦）"""
+        self.gen_dlt698_open = True
+
+    def close_dlt698(self):
+        """698.45 APDU 选项列表收起（输入框失焦）"""
+        self.gen_dlt698_open = False
+
     def select_dlt698(self, value: str):
         """选择 698.45 APDU 选项（可搜索下拉）"""
         self.gen_dlt698_search = ""
         self.dlt698_filtered = []
+        self.gen_dlt698_open = False
         self.set_gen_dlt698_apdu(value)
 
     def set_gen_dlt698_sub(self, value: str):
@@ -1218,8 +1249,12 @@ class State(rx.State):
         try:
             from dl_t698_45_frame_schema import APDU_TYPE_LIST
             self.dlt698_apdu_options = [item[1] for item in APDU_TYPE_LIST]
+            self.dlt698_all_options = [
+                {"value": item[1], "label": item[1]} for item in APDU_TYPE_LIST
+            ]
         except ImportError:
             self.dlt698_apdu_options = []
+            self.dlt698_all_options = []
 
     def _load_dlt698_sub_options(self):
         """加载 698.45 子选项"""
@@ -2890,16 +2925,35 @@ def _searchable_select(
     label: str,
     search_query: Any,
     set_search: Any,
+    options: Any,
     filtered: Any,
     on_select: Any,
     selected: Any,
     placeholder: str,
+    open_flag: Any,
+    set_open: Any,
+    close: Any,
 ) -> rx.Component:
-    """可搜索下拉：输入框实时过滤 + 点击选择（对齐 GUI QCompleter 行为）
+    """可搜索下拉：聚焦展开全部选项，输入实时过滤，点击选择（对齐 GUI QComboBox+QCompleter）
 
-    search_query / filtered / selected 为 State Var；set_search / on_select 为事件。
-    过滤结果统一为 [{"value": ..., "label": ...}]。
+    options 为全部选项 Var（未输入时展示），filtered 为过滤结果 Var，
+    两者元素统一为 {"value": ..., "label": ...}。
+    列表在搜索词非空或输入框聚焦时显示；选项按钮用 on_mouse_down 选择，
+    确保先于输入框 blur 触发（blur 会收起列表，避免点击丢失）。
     """
+
+    def _option_btn(opt: Any) -> rx.Component:
+        return rx.button(
+            opt["label"],
+            on_mouse_down=on_select(opt["value"]),
+            variant="ghost",
+            size="1",
+            width="100%",
+            text_align="left",
+            justify="start",
+            class_name="hover:bg-blue-50",
+        )
+
     return rx.vstack(
         rx.hstack(
             rx.text(label, size="2", font_weight="medium", width="60px"),
@@ -2907,6 +2961,9 @@ def _searchable_select(
                 placeholder=placeholder,
                 value=search_query,
                 on_change=set_search,
+                on_focus=set_open,
+                on_click=set_open,  # 已聚焦时再次点击无 focus 事件，用 click 兜底展开
+                on_blur=close,
                 class_name="flex-1 rounded border border-gray-300 px-3 py-2",
             ),
             spacing="2",
@@ -2922,33 +2979,32 @@ def _searchable_select(
                 spacing="1",
             ),
         ),
-        # 过滤结果列表（仅搜索时有）
+        # 选项列表（搜索词非空或输入框聚焦时显示）
         rx.cond(
-            search_query != "",
+            (search_query != "") | open_flag,
             rx.box(
                 rx.cond(
-                    filtered.length() > 0,
+                    search_query != "",
+                    rx.cond(
+                        filtered.length() > 0,
+                        rx.scroll_area(
+                            rx.vstack(
+                                rx.foreach(filtered, _option_btn),
+                                spacing="1",
+                            ),
+                            max_height="180px",
+                            class_name="w-full",
+                        ),
+                        rx.text("无匹配选项", size="1", color="gray"),
+                    ),
                     rx.scroll_area(
                         rx.vstack(
-                            rx.foreach(
-                                filtered,
-                                lambda opt: rx.button(
-                                    opt["label"],
-                                    on_click=on_select(opt["value"]),
-                                    variant="ghost",
-                                    size="1",
-                                    width="100%",
-                                    text_align="left",
-                                    justify="start",
-                                    class_name="hover:bg-blue-50",
-                                ),
-                            ),
+                            rx.foreach(options, _option_btn),
                             spacing="1",
                         ),
                         max_height="180px",
                         class_name="w-full",
                     ),
-                    rx.text("无匹配选项", size="1", color="gray"),
                 ),
                 class_name="w-full rounded border border-gray-200",
             ),
@@ -3848,10 +3904,14 @@ def frame_gen_tab() -> rx.Component:
                         "DI:",
                         State.gen_di_search,
                         State.set_gen_di_search,
+                        State.di_options,
                         State.di_filtered,
                         State.select_di,
                         State.gen_di_key,
                         "输入 DI 码/名称过滤，如 E8",
+                        State.gen_di_open,
+                        State.open_di,
+                        State.close_di,
                     ),
                 ),
                 # 国网 AFN+Fn 选择 (协议 7)
@@ -3861,10 +3921,14 @@ def frame_gen_tab() -> rx.Component:
                         "AFN+Fn:",
                         State.gen_afn_search,
                         State.set_gen_afn_search,
+                        State.afn_fn_options,
                         State.afn_filtered,
                         State.select_afn,
                         State.gen_afn_fn,
                         "输入 AFN/Fn 码或名称过滤，如 0101",
+                        State.gen_afn_open,
+                        State.open_afn,
+                        State.close_afn,
                     ),
                 ),
                 # 698.45 APDU 选择 (协议 8)
@@ -3875,10 +3939,14 @@ def frame_gen_tab() -> rx.Component:
                             "APDU:",
                             State.gen_dlt698_search,
                             State.set_gen_dlt698_search,
+                            State.dlt698_all_options,
                             State.dlt698_filtered,
                             State.select_dlt698,
                             State.gen_dlt698_apdu,
                             "输入 APDU 类型过滤，如 GET",
+                            State.gen_dlt698_open,
+                            State.open_dlt698,
+                            State.close_dlt698,
                         ),
                         rx.cond(
                             State.gen_dlt698_apdu != "",
