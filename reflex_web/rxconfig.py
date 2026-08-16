@@ -4,8 +4,8 @@ import reflex as rx
 
 config = rx.Config(
     app_name="reflex_web",
-    title="南网协议解析工具",
-    description="南方电网协议解析与调试",
+    title="多协议解析平台",
+    description="电力通信多协议解析与调试（南网/国网/DLT645/698.45/新一代载波等）",
     # 使用自定义端口避免冲突
     frontend_port=3000,
     backend_port=8000,

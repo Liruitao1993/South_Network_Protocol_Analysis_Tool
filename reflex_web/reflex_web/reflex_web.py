@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""南网协议解析工具 - Reflex Web 完整版
+"""多协议解析平台 - Reflex Web 完整版
 
 包含功能：
 - 单帧解析
@@ -129,6 +129,13 @@ class State(rx.State):
     afn_fn_options: List[Dict[str, str]] = []
     dlt698_apdu_options: List[str] = []
     dlt698_sub_options: List[Dict[str, str]] = []
+    # 可搜索下拉：搜索词 + 过滤结果
+    gen_di_search: str = ""               # DI 搜索过滤词
+    di_filtered: List[Dict[str, str]] = []   # DI 过滤结果
+    gen_afn_search: str = ""              # AFN+Fn 搜索过滤词
+    afn_filtered: List[Dict[str, str]] = []  # AFN+Fn 过滤结果
+    gen_dlt698_search: str = ""           # 698.45 APDU 搜索过滤词
+    dlt698_filtered: List[Dict[str, str]] = []  # 698.45 APDU 过滤结果
     # 国网信息域配置
     gen_gdw_info: Dict[str, str] = {
         "通信方式": "3",
@@ -174,20 +181,20 @@ class State(rx.State):
     is_loading: bool = False
     active_tab: str = "single"
 
-    # 协议列表
+    # 协议列表（label 带索引号，对齐 PySide6 版下拉）
     PROTOCOL_OPTIONS: List[Dict[str, str]] = [
-        {"label": "南网协议 (Q/CSG1209021-2019)", "value": "0"},
-        {"label": "PLC RF协议 (万胜海外 V1_04)", "value": "1"},
-        {"label": "HDLC/国网DLMS (IEC 62056-46)", "value": "2"},
-        {"label": "DLMS-APDU(国网)", "value": "3"},
-        {"label": "DLMS Wrapper裸报文", "value": "4"},
-        {"label": "DLMS-APDU裸报文", "value": "5"},
-        {"label": "DLT645-2007 电表协议", "value": "6"},
-        {"label": "国网协议 (Q/GDW 10376.2-2024)", "value": "7"},
-        {"label": "698.45协议 (DL/T 698.45-2017)", "value": "8"},
-        {"label": "新一代载波协议 (通感一体化)", "value": "9"},
-        {"label": "国网新一代双模通信互联互通", "value": "10"},
-        {"label": "HDC 1.0 双模互联互通 (Q/GDW 12087.42-2020)", "value": "11"},
+        {"label": "[0] 南网协议 (Q/CSG1209021-2019)", "value": "0"},
+        {"label": "[1] PLC RF协议 (万胜海外 V1_04)", "value": "1"},
+        {"label": "[2] HDLC/国网DLMS (IEC 62056-46)", "value": "2"},
+        {"label": "[3] DLMS-APDU(国网)", "value": "3"},
+        {"label": "[4] DLMS Wrapper裸报文", "value": "4"},
+        {"label": "[5] DLMS-APDU裸报文", "value": "5"},
+        {"label": "[6] DLT645-2007 电表协议", "value": "6"},
+        {"label": "[7] 国网协议 (Q/GDW 10376.2-2024)", "value": "7"},
+        {"label": "[8] 698.45协议 (DL/T 698.45-2017)", "value": "8"},
+        {"label": "[9] 新一代载波协议 (通感一体化)", "value": "9"},
+        {"label": "[10] 国网新一代双模通信互联互通", "value": "10"},
+        {"label": "[11] HDC 1.0 双模互联互通 (Q/GDW 12087.42-2020)", "value": "11"},
     ]
 
     # ── 协议切换 ─────────────────────────────────────────────
@@ -203,6 +210,10 @@ class State(rx.State):
             self.current_protocol = 0
         # 预设命令跟随当前协议（协议 0 读 NW_command.json，7 读 GW_command.json）
         self._load_preset_buttons()
+        # 组帧选项随协议刷新（DI/AFN+Fn/698.45 APDU），对齐 GUI 切协议即重载下拉
+        self._load_di_options()
+        self._load_afn_fn_options()
+        self._load_dlt698_options()
 
     def set_csg_level(self, value: str):
         self.csg_parse_level = value
@@ -867,6 +878,24 @@ class State(rx.State):
         self._load_di_field_schema()
         self._update_gen_preview()
 
+    def set_gen_di_search(self, value: str):
+        """DI 可搜索下拉：按关键词过滤选项（匹配 value 或 label）"""
+        self.gen_di_search = value
+        kw = value.strip().lower()
+        if not kw:
+            self.di_filtered = []
+            return
+        self.di_filtered = [
+            o for o in self.di_options
+            if kw in o["value"].lower() or kw in o["label"].lower()
+        ]
+
+    def select_di(self, value: str):
+        """选择 DI 选项（可搜索下拉）"""
+        self.gen_di_search = ""
+        self.di_filtered = []
+        self.set_gen_di_key(value)
+
     def set_gen_afn_fn(self, value: str):
         """设置 AFN+Fn"""
         self.gen_afn_fn = value
@@ -874,6 +903,24 @@ class State(rx.State):
         self._reset_gen_editor()
         self._load_gdw_field_schema()
         self._update_gen_preview()
+
+    def set_gen_afn_search(self, value: str):
+        """AFN+Fn 可搜索下拉：按关键词过滤选项"""
+        self.gen_afn_search = value
+        kw = value.strip().lower()
+        if not kw:
+            self.afn_filtered = []
+            return
+        self.afn_filtered = [
+            o for o in self.afn_fn_options
+            if kw in o["value"].lower() or kw in o["label"].lower()
+        ]
+
+    def select_afn(self, value: str):
+        """选择 AFN+Fn 选项（可搜索下拉）"""
+        self.gen_afn_search = ""
+        self.afn_filtered = []
+        self.set_gen_afn_fn(value)
 
     def set_gen_dlt698_apdu(self, value: str):
         """设置 698.45 APDU 类型"""
@@ -884,6 +931,25 @@ class State(rx.State):
         self._load_dlt698_sub_options()
         self._load_dlt698_field_schema()
         self._update_gen_preview()
+
+    def set_gen_dlt698_search(self, value: str):
+        """698.45 APDU 可搜索下拉：按关键词过滤选项"""
+        self.gen_dlt698_search = value
+        kw = value.strip().lower()
+        if not kw:
+            self.dlt698_filtered = []
+            return
+        self.dlt698_filtered = [
+            {"value": o, "label": o}
+            for o in self.dlt698_apdu_options
+            if kw in o.lower()
+        ]
+
+    def select_dlt698(self, value: str):
+        """选择 698.45 APDU 选项（可搜索下拉）"""
+        self.gen_dlt698_search = ""
+        self.dlt698_filtered = []
+        self.set_gen_dlt698_apdu(value)
 
     def set_gen_dlt698_sub(self, value: str):
         """设置 698.45 子选项"""
@@ -2101,24 +2167,24 @@ def header() -> rx.Component:
             # Logo + 标题
             rx.hstack(
                 rx.icon("zap", size=28, color="white"),
-                rx.heading("南网协议解析工具", size="4", color="white", font_weight="bold"),
+                rx.heading("多协议解析平台", size="4", color="white", font_weight="bold"),
                 spacing="2",
             ),
             rx.spacer(),
-            # 协议选择器
+            # 协议选择器（索引号对齐 PySide6 版）
             rx.el.select(
-                rx.el.option("南网协议 (Q/CSG1209021-2019)", value="0"),
-                rx.el.option("PLC RF协议 (万胜海外 V1_04)", value="1"),
-                rx.el.option("HDLC/国网DLMS (IEC 62056-46)", value="2"),
-                rx.el.option("DLMS-APDU(国网)", value="3"),
-                rx.el.option("DLMS Wrapper裸报文", value="4"),
-                rx.el.option("DLMS-APDU裸报文", value="5"),
-                rx.el.option("DLT645-2007 电表协议", value="6"),
-                rx.el.option("国网协议 (Q/GDW 10376.2-2024)", value="7"),
-                rx.el.option("698.45协议 (DL/T 698.45-2017)", value="8"),
-                rx.el.option("新一代载波协议 (通感一体化)", value="9"),
-                rx.el.option("国网新一代双模通信互联互通", value="10"),
-                rx.el.option("HDC 1.0 双模互联互通 (Q/GDW 12087.42-2020)", value="11"),
+                rx.el.option("[0] 南网协议 (Q/CSG1209021-2019)", value="0"),
+                rx.el.option("[1] PLC RF协议 (万胜海外 V1_04)", value="1"),
+                rx.el.option("[2] HDLC/国网DLMS (IEC 62056-46)", value="2"),
+                rx.el.option("[3] DLMS-APDU(国网)", value="3"),
+                rx.el.option("[4] DLMS Wrapper裸报文", value="4"),
+                rx.el.option("[5] DLMS-APDU裸报文", value="5"),
+                rx.el.option("[6] DLT645-2007 电表协议", value="6"),
+                rx.el.option("[7] 国网协议 (Q/GDW 10376.2-2024)", value="7"),
+                rx.el.option("[8] 698.45协议 (DL/T 698.45-2017)", value="8"),
+                rx.el.option("[9] 新一代载波协议 (通感一体化)", value="9"),
+                rx.el.option("[10] 国网新一代双模通信互联互通", value="10"),
+                rx.el.option("[11] HDC 1.0 双模互联互通 (Q/GDW 12087.42-2020)", value="11"),
                 default_value="0",
                 on_change=State.set_protocol,
                 width="300px",
@@ -2820,6 +2886,78 @@ def _is_var_len(t) -> bool:
         ("visible-string", True), ("UTF8-string", True), ("bit-string", True),
         False,
     )
+def _searchable_select(
+    label: str,
+    search_query: Any,
+    set_search: Any,
+    filtered: Any,
+    on_select: Any,
+    selected: Any,
+    placeholder: str,
+) -> rx.Component:
+    """可搜索下拉：输入框实时过滤 + 点击选择（对齐 GUI QCompleter 行为）
+
+    search_query / filtered / selected 为 State Var；set_search / on_select 为事件。
+    过滤结果统一为 [{"value": ..., "label": ...}]。
+    """
+    return rx.vstack(
+        rx.hstack(
+            rx.text(label, size="2", font_weight="medium", width="60px"),
+            rx.input(
+                placeholder=placeholder,
+                value=search_query,
+                on_change=set_search,
+                class_name="flex-1 rounded border border-gray-300 px-3 py-2",
+            ),
+            spacing="2",
+            width="100%",
+        ),
+        # 已选提示
+        rx.cond(
+            selected != "",
+            rx.hstack(
+                rx.icon("check", size=14, color="#16a34a"),
+                rx.text("已选: ", size="1", color="#16a34a"),
+                rx.text(selected, size="1", color="#16a34a", font_family="monospace"),
+                spacing="1",
+            ),
+        ),
+        # 过滤结果列表（仅搜索时有）
+        rx.cond(
+            search_query != "",
+            rx.box(
+                rx.cond(
+                    filtered.length() > 0,
+                    rx.scroll_area(
+                        rx.vstack(
+                            rx.foreach(
+                                filtered,
+                                lambda opt: rx.button(
+                                    opt["label"],
+                                    on_click=on_select(opt["value"]),
+                                    variant="ghost",
+                                    size="1",
+                                    width="100%",
+                                    text_align="left",
+                                    justify="start",
+                                    class_name="hover:bg-blue-50",
+                                ),
+                            ),
+                            spacing="1",
+                        ),
+                        max_height="180px",
+                        class_name="w-full",
+                    ),
+                    rx.text("无匹配选项", size="1", color="gray"),
+                ),
+                class_name="w-full rounded border border-gray-200",
+            ),
+        ),
+        spacing="2",
+        width="100%",
+    )
+
+
 def _field_input(f: Any = None, name: str = "", ftype: str = "bytes", default: str = "",
                  enum_map: Any = None, on_change=None, placeholder: str = "",
                  monospace: bool = True) -> rx.Component:
@@ -3706,59 +3844,41 @@ def frame_gen_tab() -> rx.Component:
                 # 南网 DI 选择 (协议 0)
                 rx.cond(
                     State.current_protocol == 0,
-                    rx.hstack(
-                        rx.text("DI:", size="2", font_weight="medium", width="60px"),
-                        rx.el.select(
-                            rx.el.option("请选择 DI", value=""),
-                            rx.foreach(
-                                State.di_options,
-                                lambda opt: rx.el.option(opt["label"], value=opt["value"])
-                            ),
-                            default_value="",
-                            on_change=State.set_gen_di_key,
-                            class_name="flex-1 rounded border border-gray-300 px-3 py-2",
-                        ),
-                        spacing="2",
-                        width="100%",
+                    _searchable_select(
+                        "DI:",
+                        State.gen_di_search,
+                        State.set_gen_di_search,
+                        State.di_filtered,
+                        State.select_di,
+                        State.gen_di_key,
+                        "输入 DI 码/名称过滤，如 E8",
                     ),
                 ),
                 # 国网 AFN+Fn 选择 (协议 7)
                 rx.cond(
                     State.current_protocol == 7,
-                    rx.hstack(
-                        rx.text("AFN+Fn:", size="2", font_weight="medium", width="60px"),
-                        rx.el.select(
-                            rx.el.option("请选择 AFN+Fn", value=""),
-                            rx.foreach(
-                                State.afn_fn_options,
-                                lambda opt: rx.el.option(opt["label"], value=opt["value"])
-                            ),
-                            default_value="",
-                            on_change=State.set_gen_afn_fn,
-                            class_name="flex-1 rounded border border-gray-300 px-3 py-2",
-                        ),
-                        spacing="2",
-                        width="100%",
+                    _searchable_select(
+                        "AFN+Fn:",
+                        State.gen_afn_search,
+                        State.set_gen_afn_search,
+                        State.afn_filtered,
+                        State.select_afn,
+                        State.gen_afn_fn,
+                        "输入 AFN/Fn 码或名称过滤，如 0101",
                     ),
                 ),
                 # 698.45 APDU 选择 (协议 8)
                 rx.cond(
                     State.current_protocol == 8,
                     rx.vstack(
-                        rx.hstack(
-                            rx.text("APDU:", size="2", font_weight="medium", width="60px"),
-                            rx.el.select(
-                                rx.el.option("请选择 APDU 类型", value=""),
-                                rx.foreach(
-                                    State.dlt698_apdu_options,
-                                    lambda opt: rx.el.option(opt, value=opt)
-                                ),
-                                default_value="",
-                                on_change=State.set_gen_dlt698_apdu,
-                                class_name="flex-1 rounded border border-gray-300 px-3 py-2",
-                            ),
-                            spacing="2",
-                            width="100%",
+                        _searchable_select(
+                            "APDU:",
+                            State.gen_dlt698_search,
+                            State.set_gen_dlt698_search,
+                            State.dlt698_filtered,
+                            State.select_dlt698,
+                            State.gen_dlt698_apdu,
+                            "输入 APDU 类型过滤，如 GET",
                         ),
                         rx.cond(
                             State.gen_dlt698_apdu != "",
@@ -4668,4 +4788,4 @@ app = rx.App(
     ],
 )
 
-app.add_page(index, route="/", title="南网协议解析工具")
+app.add_page(index, route="/", title="多协议解析平台")
