@@ -962,7 +962,7 @@ class State(rx.State):
             self.dlt698_filtered = []
             return
         self.dlt698_filtered = [
-            {"value": o, "label": o}
+            {"value": o, "label": o, "name": o}
             for o in self.dlt698_apdu_options
             if kw in o.lower()
         ]
@@ -1226,7 +1226,7 @@ class State(rx.State):
                 key_hex = f"{di3:02X}{di2:02X}{di1:02X}{di0:02X}"
                 schema = gen.get_di_schema(di_key)
                 name = schema.get("name", key_hex) if schema else key_hex
-                options.append({"label": f"{key_hex} - {name}", "value": key_hex})
+                options.append({"label": f"{key_hex} - {name}", "value": key_hex, "name": name})
             self.di_options = sorted(options, key=lambda x: x["value"])
         except Exception:
             self.di_options = []
@@ -1239,7 +1239,7 @@ class State(rx.State):
             options = []
             for afn, fn, name in gen.get_supported_afn_fn():
                 key = f"{afn:02X}{fn:02X}"
-                options.append({"label": f"{key} - {name}", "value": key})
+                options.append({"label": f"{key} - {name}", "value": key, "name": name})
             self.afn_fn_options = sorted(options, key=lambda x: x["value"])
         except Exception:
             self.afn_fn_options = []
@@ -1250,7 +1250,7 @@ class State(rx.State):
             from dl_t698_45_frame_schema import APDU_TYPE_LIST
             self.dlt698_apdu_options = [item[1] for item in APDU_TYPE_LIST]
             self.dlt698_all_options = [
-                {"value": item[1], "label": item[1]} for item in APDU_TYPE_LIST
+                {"value": item[1], "label": item[1], "name": item[1]} for item in APDU_TYPE_LIST
             ]
         except ImportError:
             self.dlt698_apdu_options = []
@@ -2943,15 +2943,17 @@ def _searchable_select(
     """
 
     def _option_btn(opt: Any) -> rx.Component:
-        return rx.button(
-            opt["label"],
+        return rx.el.button(
+            rx.cond(
+                opt["value"] != opt["name"],
+                rx.fragment(
+                    rx.el.span(opt["value"], class_name="sd-value"),
+                    rx.el.span(opt["name"], class_name="sd-name"),
+                ),
+                rx.el.span(opt["name"], class_name="sd-name"),
+            ),
             on_mouse_down=on_select(opt["value"]),
-            variant="ghost",
-            size="1",
-            width="100%",
-            text_align="left",
-            justify="start",
-            class_name="hover:bg-blue-50",
+            class_name="sd-row",
         )
 
     return rx.vstack(
@@ -2964,7 +2966,7 @@ def _searchable_select(
                 on_focus=set_open,
                 on_click=set_open,  # 已聚焦时再次点击无 focus 事件，用 click 兜底展开
                 on_blur=close,
-                class_name="flex-1 rounded border border-gray-300 px-3 py-2",
+                class_name="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm",
             ),
             spacing="2",
             width="100%",
@@ -2987,26 +2989,18 @@ def _searchable_select(
                     search_query != "",
                     rx.cond(
                         filtered.length() > 0,
-                        rx.scroll_area(
-                            rx.vstack(
-                                rx.foreach(filtered, _option_btn),
-                                spacing="1",
-                            ),
-                            max_height="180px",
-                            class_name="w-full",
-                        ),
-                        rx.text("无匹配选项", size="1", color="gray"),
-                    ),
-                    rx.scroll_area(
                         rx.vstack(
-                            rx.foreach(options, _option_btn),
-                            spacing="1",
+                            rx.foreach(filtered, _option_btn),
+                            spacing="0",
                         ),
-                        max_height="180px",
-                        class_name="w-full",
+                        rx.text("无匹配选项", class_name="sd-empty"),
+                    ),
+                    rx.vstack(
+                        rx.foreach(options, _option_btn),
+                        spacing="0",
                     ),
                 ),
-                class_name="w-full rounded border border-gray-200",
+                class_name="searchable-dropdown",
             ),
         ),
         spacing="2",
@@ -4742,9 +4736,63 @@ def message_tool_tab() -> rx.Component:
 # 主页面
 # ══════════════════════════════════════════════════════════════
 
+# 可搜索下拉列表样式（项目未启用 Tailwind，class_name 仅作钩子，样式在此定义）
+SEARCHABLE_CSS = """
+.searchable-dropdown {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  max-height: 240px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.searchable-dropdown::-webkit-scrollbar { width: 6px; }
+.searchable-dropdown::-webkit-scrollbar-track { background: transparent; }
+.searchable-dropdown::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+.searchable-dropdown::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+.sd-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 12px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  color: #1f2937;
+  transition: background-color 0.1s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sd-row:hover { background: #f3f4f6; }
+.sd-value {
+  color: #2563eb;
+  font-weight: 600;
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  min-width: 72px;
+  display: inline-block;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+.sd-name {
+  vertical-align: middle;
+}
+.sd-empty {
+  padding: 10px 12px;
+  text-align: center;
+  color: #9ca3af;
+  font-size: 13px;
+}
+"""
+
+
 def index() -> rx.Component:
     """主页面"""
     return rx.box(
+        rx.el.style(SEARCHABLE_CSS),
         header(),
         rx.box(
             newgen_controls(),
