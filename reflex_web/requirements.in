@@ -1,0 +1,4 @@
+reflex==0.9.8
+uvicorn
+crcmod
+websockets

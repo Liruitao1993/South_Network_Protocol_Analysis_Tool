@@ -35,6 +35,9 @@ reflex_web/.tests/
 Output/
 # 依赖与工具目录
 node_modules/
+.venv/
+reflex_web/.venv/
+reflex_web/wheels/
 .zcode/
 .trae/
 .qoder/
