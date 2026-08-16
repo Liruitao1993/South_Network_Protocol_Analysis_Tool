@@ -2217,52 +2217,72 @@ class State(rx.State):
 def header() -> rx.Component:
     """顶部导航栏"""
     return rx.box(
-        rx.hstack(
-            # Logo + 标题
+        rx.box(
             rx.hstack(
-                rx.icon("zap", size=28, color="white"),
-                rx.heading("多协议解析平台", size="4", color="white", font_weight="bold"),
-                spacing="2",
-            ),
-            rx.spacer(),
-            # 协议选择器（索引号对齐 PySide6 版）
-            rx.el.select(
-                rx.el.option("[0] 南网协议 (Q/CSG1209021-2019)", value="0"),
-                rx.el.option("[1] PLC RF协议 (万胜海外 V1_04)", value="1"),
-                rx.el.option("[2] HDLC/国网DLMS (IEC 62056-46)", value="2"),
-                rx.el.option("[3] DLMS-APDU(国网)", value="3"),
-                rx.el.option("[4] DLMS Wrapper裸报文", value="4"),
-                rx.el.option("[5] DLMS-APDU裸报文", value="5"),
-                rx.el.option("[6] DLT645-2007 电表协议", value="6"),
-                rx.el.option("[7] 国网协议 (Q/GDW 10376.2-2024)", value="7"),
-                rx.el.option("[8] 698.45协议 (DL/T 698.45-2017)", value="8"),
-                rx.el.option("[9] 新一代载波协议 (通感一体化)", value="9"),
-                rx.el.option("[10] 国网新一代双模通信互联互通", value="10"),
-                rx.el.option("[11] HDC 1.0 双模互联互通 (Q/GDW 12087.42-2020)", value="11"),
-                default_value="0",
-                on_change=State.set_protocol,
-                width="300px",
-                class_name="rounded-md border border-white/30 bg-white/10 px-3 py-2 text-sm text-white focus:border-white/50",
-            ),
-            # 版本徽章
-            rx.badge("v1.13.0", color_scheme="indigo", variant="soft", size="2"),
-            # 状态指示
-            rx.hstack(
-                rx.box(
-                    width="8px",
-                    height="8px",
-                    border_radius="50%",
-                    background="#22c55e",
+                # Logo + 标题
+                rx.hstack(
+                    rx.box(
+                        rx.icon("zap", size=20, color="white"),
+                        style={
+                            "width": "38px",
+                            "height": "38px",
+                            "border_radius": "11px",
+                            "background": "rgba(255,255,255,0.16)",
+                            "display": "flex",
+                            "align_items": "center",
+                            "justify_content": "center",
+                            "box_shadow": "inset 0 1px 0 rgba(255,255,255,0.25)",
+                        },
+                    ),
+                    rx.vstack(
+                        rx.heading("多协议解析平台", size="3", color="white", font_weight="bold"),
+                        rx.text("电力通信协议解析 · 支持 12 种协议", size="1", color="rgba(255,255,255,0.72)"),
+                        spacing="0",
+                    ),
+                    spacing="3",
                 ),
-                rx.text("就绪", size="1", color="white"),
-                spacing="1",
+                rx.spacer(),
+                # 协议选择器（索引号对齐 PySide6 版）
+                rx.el.select(
+                    rx.el.option("[0] 南网协议 (Q/CSG1209021-2019)", value="0"),
+                    rx.el.option("[1] PLC RF协议 (万胜海外 V1_04)", value="1"),
+                    rx.el.option("[2] HDLC/国网DLMS (IEC 62056-46)", value="2"),
+                    rx.el.option("[3] DLMS-APDU(国网)", value="3"),
+                    rx.el.option("[4] DLMS Wrapper裸报文", value="4"),
+                    rx.el.option("[5] DLMS-APDU裸报文", value="5"),
+                    rx.el.option("[6] DLT645-2007 电表协议", value="6"),
+                    rx.el.option("[7] 国网协议 (Q/GDW 10376.2-2024)", value="7"),
+                    rx.el.option("[8] 698.45协议 (DL/T 698.45-2017)", value="8"),
+                    rx.el.option("[9] 新一代载波协议 (通感一体化)", value="9"),
+                    rx.el.option("[10] 国网新一代双模通信互联互通", value="10"),
+                    rx.el.option("[11] HDC 1.0 双模互联互通 (Q/GDW 12087.42-2020)", value="11"),
+                    default_value="0",
+                    on_change=State.set_protocol,
+                    width="320px",
+                    class_name="app-header-select",
+                ),
+                # 版本徽章
+                rx.badge("v1.13.0", color_scheme="blue", variant="soft", size="2"),
+                # 状态指示
+                rx.hstack(
+                    rx.box(
+                        width="8px",
+                        height="8px",
+                        border_radius="50%",
+                        background="#4ade80",
+                        box_shadow="0 0 6px rgba(74, 222, 128, 0.8)",
+                    ),
+                    rx.text("就绪", size="1", color="white"),
+                    spacing="1",
+                ),
+                spacing="4",
+                width="100%",
             ),
-            spacing="4",
+            class_name="app-header-inner",
             width="100%",
-            padding_x="6",
             padding_y="3",
         ),
-        background="linear-gradient(135deg, #1e40af 0%, #2563eb 50%, #3b82f6 100%)",
+        background="linear-gradient(135deg, #1e40af 0%, #2563eb 55%, #3b82f6 100%)",
         box_shadow="0 2px 16px rgba(30, 64, 175, 0.25)",
         position="sticky",
         top="0",
@@ -2290,7 +2310,7 @@ def newgen_controls() -> rx.Component:
                         rx.el.option("应用层报文", value="app"),
                         default_value="auto",
                         on_change=State.set_csg_level,
-                        class_name="rounded border border-gray-300 px-2 py-1 text-sm",
+                        class_name="app-select",
                     ),
                 ),
                 # 国网新一代（协议10）解析级别
@@ -2306,7 +2326,7 @@ def newgen_controls() -> rx.Component:
                         rx.el.option("应用层报文", value="app"),
                         default_value="auto",
                         on_change=State.set_gw_level,
-                        class_name="rounded border border-gray-300 px-2 py-1 text-sm",
+                        class_name="app-select",
                     ),
                 ),
                 # HDC 1.0（协议11）解析级别
@@ -2322,7 +2342,7 @@ def newgen_controls() -> rx.Component:
                         rx.el.option("应用层报文", value="app"),
                         default_value="auto",
                         on_change=State.set_hdc10_level,
-                        class_name="rounded border border-gray-300 px-2 py-1 text-sm",
+                        class_name="app-select",
                     ),
                 ),
                 # 国网新一代/HDC 1.0 通道下拉（PLC/HRF）
@@ -2337,14 +2357,14 @@ def newgen_controls() -> rx.Component:
                                 rx.el.option("HRF 无线", value="hrf"),
                                 default_value="plc",
                                 on_change=State.set_gw_channel,
-                                class_name="rounded border border-gray-300 px-2 py-1 text-sm",
+                                class_name="app-select",
                             ),
                             rx.el.select(
                                 rx.el.option("PLC 载波", value="plc"),
                                 rx.el.option("HRF 无线", value="hrf"),
                                 default_value="plc",
                                 on_change=State.set_hdc10_channel,
-                                class_name="rounded border border-gray-300 px-2 py-1 text-sm",
+                                class_name="app-select",
                             ),
                         ),
                         spacing="2",
@@ -2655,7 +2675,7 @@ def batch_parse_tab() -> rx.Component:
                                 default_value="__custom__",
                                 on_change=State.apply_pp_preset,
                                 width="220px",
-                                class_name="rounded border border-gray-300 px-2 py-1 text-sm",
+                                class_name="app-select",
                             ),
                             rx.input(
                                 placeholder="如: find 60F0 hex_extract（管道式，空格分隔命令）",
@@ -2986,7 +3006,7 @@ def _searchable_select(
                 on_focus=set_open,
                 on_click=set_open,  # 已聚焦时再次点击无 focus 事件，用 click 兜底展开
                 on_blur=close,
-                class_name="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm",
+                style={"flex": "1", "min_width": "0"},
             ),
             spacing="2",
             width="100%",
@@ -3447,7 +3467,7 @@ def frame_gen_tab() -> rx.Component:
                                 rx.el.option("checksum", value="checksum"),
                                 default_value=tpl["ftype"],
                                 on_change=lambda val, idx=i: State.set_gen_custom_template(idx, "ftype", val),
-                                class_name="rounded border border-gray-300 px-2 py-1",
+                                class_name="app-select",
                                 size="1",
                                 width="12%",
                             ),
@@ -3456,7 +3476,7 @@ def frame_gen_tab() -> rx.Component:
                                 rx.el.option("big", value="big"),
                                 default_value=tpl["endian"],
                                 on_change=lambda val, idx=i: State.set_gen_custom_template(idx, "endian", val),
-                                class_name="rounded border border-gray-300 px-2 py-1",
+                                class_name="app-select",
                                 size="1",
                                 width="10%",
                             ),
@@ -3465,7 +3485,7 @@ def frame_gen_tab() -> rx.Component:
                                 rx.el.option("dec", value="dec"),
                                 default_value=tpl["display"],
                                 on_change=lambda val, idx=i: State.set_gen_custom_template(idx, "display", val),
-                                class_name="rounded border border-gray-300 px-2 py-1",
+                                class_name="app-select",
                                 size="1",
                                 width="10%",
                             ),
@@ -3514,7 +3534,7 @@ def frame_gen_tab() -> rx.Component:
                     ),
                     default_value=item["type"],
                     on_change=lambda val, idx=i: State.set_gen_axdr_item(idx.to_string(), "type", val),
-                    class_name="rounded border border-gray-300 px-2 py-1",
+                    class_name="app-select",
                     size="1",
                     width="180px",
                 ),
@@ -3577,7 +3597,7 @@ def frame_gen_tab() -> rx.Component:
                                 rx.el.option("1-高优先级", value="1"),
                                 default_value="0",
                                 on_change=lambda v: State.set_gen_axdr_fixed("PIID_优先级", v),
-                                class_name="rounded border border-gray-300 px-2 py-1",
+                                class_name="app-select",
                                 size="1",
                             ),
                             spacing="1",
@@ -3688,7 +3708,7 @@ def frame_gen_tab() -> rx.Component:
                                 rx.el.option("广播地址(3)", value="3"),
                                 default_value="0",
                                 on_change=lambda v: State.set_gen_dlt698_sa("addr_type", v),
-                                class_name="rounded border border-gray-300 px-2 py-1",
+                                class_name="app-select",
                                 size="1",
                             ),
                             spacing="1",
@@ -3702,7 +3722,7 @@ def frame_gen_tab() -> rx.Component:
                                 rx.el.option("3", value="3"),
                                 default_value="0",
                                 on_change=lambda v: State.set_gen_dlt698_sa("logic_addr", v),
-                                class_name="rounded border border-gray-300 px-2 py-1",
+                                class_name="app-select",
                                 size="1",
                             ),
                             spacing="1",
@@ -3736,7 +3756,7 @@ def frame_gen_tab() -> rx.Component:
                                 rx.el.option("分帧(1)", value="1"),
                                 default_value="0",
                                 on_change=lambda v: State.set_gen_dlt698_sa("seg", v),
-                                class_name="rounded border border-gray-300 px-2 py-1",
+                                class_name="app-select",
                                 size="1",
                             ),
                             spacing="1",
@@ -3748,7 +3768,7 @@ def frame_gen_tab() -> rx.Component:
                                 rx.el.option("加扰(1)", value="1"),
                                 default_value="0",
                                 on_change=lambda v: State.set_gen_dlt698_sa("sc", v),
-                                class_name="rounded border border-gray-300 px-2 py-1",
+                                class_name="app-select",
                                 size="1",
                             ),
                             spacing="1",
@@ -3760,7 +3780,7 @@ def frame_gen_tab() -> rx.Component:
                                 rx.el.option("用户数据(3)", value="3"),
                                 default_value="3",
                                 on_change=lambda v: State.set_gen_dlt698_sa("func", v),
-                                class_name="rounded border border-gray-300 px-2 py-1",
+                                class_name="app-select",
                                 size="1",
                             ),
                             spacing="1",
@@ -4042,7 +4062,7 @@ def frame_gen_tab() -> rx.Component:
                             rx.el.option("上行(终端→主站)", value="1"),
                             default_value="0",
                             on_change=State.set_gen_dir,
-                            class_name="rounded border border-gray-300 px-3 py-2",
+                            class_name="app-select",
                         ),
                         spacing="1",
                     ),
@@ -4053,7 +4073,7 @@ def frame_gen_tab() -> rx.Component:
                             rx.el.option("从动站发起(0)", value="0"),
                             default_value="1",
                             on_change=State.set_gen_prm,
-                            class_name="rounded border border-gray-300 px-3 py-2",
+                            class_name="app-select",
                         ),
                         spacing="1",
                     ),
@@ -4713,7 +4733,7 @@ def message_tool_tab() -> rx.Component:
                         rx.el.option("大端(高字节在前)", value="big"),
                         default_value="little",
                         on_change=State.set_tool_endian,
-                        class_name="rounded border border-gray-300 px-2 py-1",
+                        class_name="app-select",
                     ),
                     tool_button("HEX→十进制", "hex_to_decimal"),
                     rx.spacer(),
@@ -4811,73 +4831,199 @@ SEARCHABLE_CSS = """
 }
 """
 
+# 全局设计系统：页面背景/容器/卡片/表格/按钮/输入控件/Tab 导航
+# 项目未启用 Tailwind，Radix 组件通过 .rt-* 类覆盖，自定义类直接定义
+GLOBAL_CSS = """
+/* ===== 基础 ===== */
+body {
+  background: #f1f5f9;
+  -webkit-font-smoothing: antialiased;
+}
+/* 内容容器（限宽居中） */
+.app-container {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 20px 28px 64px;
+  width: 100%;
+  box-sizing: border-box;
+}
+/* 顶栏容器 */
+.app-header-inner {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 0 28px;
+  width: 100%;
+  box-sizing: border-box;
+}
+/* ===== 卡片 ===== */
+.rt-Card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+  padding: 18px 22px;
+}
+/* ===== 表格 ===== */
+.rt-TableRoot {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #ffffff;
+}
+.rt-TableRoot .rt-TableColumnHeaderCell {
+  background: #f8fafc;
+  color: #334155;
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  padding: 10px 14px;
+  border-bottom: 1px solid #e2e8f0;
+  white-space: nowrap;
+}
+.rt-TableRoot .rt-TableCell {
+  padding: 8px 14px;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 13px;
+  vertical-align: middle;
+}
+.rt-TableRoot .rt-TableRow:last-child .rt-TableCell { border-bottom: none; }
+.rt-TableRoot .rt-TableRow:hover .rt-TableCell { background: #f8fafc; }
+/* ===== 按钮 ===== */
+.rt-Button { border-radius: 8px; font-weight: 600; }
+/* ===== 输入框 / 文本域 ===== */
+.rt-TextFieldRoot, .rt-TextAreaRoot {
+  border-radius: 8px;
+  transition: box-shadow 0.15s, border-color 0.15s;
+}
+.rt-TextFieldRoot:focus-within, .rt-TextAreaRoot:focus-within {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+/* ===== 原生 select ===== */
+.app-select {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: #ffffff;
+  font-size: 13px;
+  color: #334155;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.app-select:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+/* 顶栏内 select（深色背景） */
+.app-header-select {
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  color: #ffffff;
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 13px;
+  outline: none;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  transition: background 0.15s;
+}
+.app-header-select:hover { background: rgba(255, 255, 255, 0.22); }
+.app-header-select option { color: #0f172a; background: #ffffff; }
+/* ===== Tab 导航 ===== */
+.app-tabbar {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid #e2e8f0;
+  margin-bottom: 18px;
+  background: #ffffff;
+  border-radius: 12px 12px 0 0;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  overflow-x: auto;
+  padding: 0 8px;
+}
+.app-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  padding: 12px 16px;
+  font-size: 14px;
+  color: #64748b;
+  cursor: pointer;
+  font-weight: 500;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.app-tab:hover { color: #2563eb; background: #f1f5f9; }
+.app-tab-active {
+  color: #2563eb;
+  border-bottom-color: #2563eb;
+  font-weight: 600;
+  background: #eff6ff;
+}
+.app-tab svg { width: 16px; height: 16px; flex-shrink: 0; }
+/* ===== 消息条 ===== */
+.rt-Callout { border-radius: 10px; }
+/* ===== 全局滚动条 ===== */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+::-webkit-scrollbar-track { background: transparent; }
+"""
+
 
 def index() -> rx.Component:
     """主页面"""
     return rx.box(
-        rx.el.style(SEARCHABLE_CSS),
+        rx.el.style(SEARCHABLE_CSS + GLOBAL_CSS),
         header(),
         rx.box(
             newgen_controls(),
             message_banner(),
-            # Tab 切换按钮
+            # Tab 导航
             rx.hstack(
-                rx.button(
-                    rx.icon("file_input", size=16),
-                    "单帧解析",
+                rx.el.button(
+                    rx.hstack(rx.icon("file_input", size=16), "单帧解析", spacing="1"),
                     on_click=lambda: State.set_tab("single"),
-                    variant=rx.cond(State.active_tab == "single", "solid", "soft"),
-                    color_scheme=rx.cond(State.active_tab == "single", "blue", "gray"),
-                    size="2",
+                    class_name=rx.cond(State.active_tab == "single", "app-tab app-tab-active", "app-tab"),
                     data_testid="tab-single",
                 ),
-                rx.button(
-                    rx.icon("list", size=16),
-                    "批量解析",
+                rx.el.button(
+                    rx.hstack(rx.icon("list", size=16), "批量解析", spacing="1"),
                     on_click=lambda: State.set_tab("batch"),
-                    variant=rx.cond(State.active_tab == "batch", "solid", "soft"),
-                    color_scheme=rx.cond(State.active_tab == "batch", "blue", "gray"),
-                    size="2",
+                    class_name=rx.cond(State.active_tab == "batch", "app-tab app-tab-active", "app-tab"),
                     data_testid="tab-batch",
                 ),
-                rx.button(
-                    rx.icon("square_pen", size=18, color="#2563eb"),
-                    "协议组帧",
+                rx.el.button(
+                    rx.hstack(rx.icon("square_pen", size=16), "协议组帧", spacing="1"),
                     on_click=lambda: State.set_tab("frame"),
-                    variant=rx.cond(State.active_tab == "frame", "solid", "soft"),
-                    color_scheme=rx.cond(State.active_tab == "frame", "blue", "gray"),
-                    size="2",
+                    class_name=rx.cond(State.active_tab == "frame", "app-tab app-tab-active", "app-tab"),
                     data_testid="tab-frame",
                 ),
-                rx.button(
-                    rx.icon("git_compare", size=16),
-                    "报文对比",
+                rx.el.button(
+                    rx.hstack(rx.icon("git_compare", size=16), "报文对比", spacing="1"),
                     on_click=lambda: State.set_tab("diff"),
-                    variant=rx.cond(State.active_tab == "diff", "solid", "soft"),
-                    color_scheme=rx.cond(State.active_tab == "diff", "blue", "gray"),
-                    size="2",
+                    class_name=rx.cond(State.active_tab == "diff", "app-tab app-tab-active", "app-tab"),
                     data_testid="tab-diff",
                 ),
-                rx.button(
-                    rx.icon("search", size=16),
-                    "查询",
+                rx.el.button(
+                    rx.hstack(rx.icon("search", size=16), "查询", spacing="1"),
                     on_click=lambda: State.set_tab("lookup"),
-                    variant=rx.cond(State.active_tab == "lookup", "solid", "soft"),
-                    color_scheme=rx.cond(State.active_tab == "lookup", "blue", "gray"),
-                    size="2",
+                    class_name=rx.cond(State.active_tab == "lookup", "app-tab app-tab-active", "app-tab"),
                     data_testid="tab-lookup",
                 ),
-                rx.button(
-                    rx.icon("wrench", size=16),
-                    "报文工具",
+                rx.el.button(
+                    rx.hstack(rx.icon("wrench", size=16), "报文工具", spacing="1"),
                     on_click=lambda: State.set_tab("tool"),
-                    variant=rx.cond(State.active_tab == "tool", "solid", "soft"),
-                    color_scheme=rx.cond(State.active_tab == "tool", "blue", "gray"),
-                    size="2",
+                    class_name=rx.cond(State.active_tab == "tool", "app-tab app-tab-active", "app-tab"),
                     data_testid="tab-tool",
                 ),
-                spacing="2",
-                margin_bottom="4",
+                class_name="app-tabbar",
+                width="100%",
             ),
             # Tab 内容
             rx.cond(
@@ -4901,11 +5047,10 @@ def index() -> rx.Component:
                     ),
                 ),
             ),
-            padding_x="10%",
-            padding_y="4",
+            class_name="app-container",
             width="100%",
         ),
-        background="#f5f7fa",
+        background="#f1f5f9",
         min_height="100vh",
     )
 
