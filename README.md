@@ -249,6 +249,7 @@ message_tool_widget.py       # 报文工具组件
 theme_settings.py            # 主题与字体设置
 enhanced_export.py           # 增强导出功能
 reflex_web/                  # Reflex Web 版（实验性）
+test/                        # 测试脚本目录（所有 test_*.py 统一存放）
 validator/                   # 协议校验引擎（含 hdc10_validator.py 等）
 monitor/frame_monitor.py     # 串口实时帧监听组件
 report/excel_reporter.py     # Excel 测试报告
@@ -259,23 +260,25 @@ docs/Lua脚本使用说明.md       # Lua 脚本使用文档
 
 ## 测试
 
-项目无正式测试框架，`test_*.py` 为独立脚本，直接运行：
+项目无正式测试框架，`test/*.py` 为独立脚本，直接运行（命令在项目根执行）：
 
 ```bash
-python test_csg_new_gen.py            # 新一代载波协议
-python test_gw_new_gen.py             # 国网新一代双模协议
-python test_hdc10.py                  # HDC 1.0 双模互联互通协议
-python test_dl_t698_45.py             # 698.45 协议
-python test_hdlc.py                   # HDLC 帧
-python test_plc_rf.py                 # PLC RF
-python test_lua_engine.py             # Lua 脚本引擎
-python test_sack_fix.py               # SACK 帧解析
-python test_diff_engine.py            # 报文对比引擎
-python test_monitor_deframe.py        # 监控解帧
-python test_monitor_plc2_deframe.py   # PLC2 解帧
-python test_gw_monitor_summary.py     # 国网新一代监控摘要
-python test_theme_settings.py         # 主题与字体设置
+python test/test_csg_new_gen.py            # 新一代载波协议
+python test/test_gw_new_gen.py             # 国网新一代双模协议
+python test/test_hdc10.py                  # HDC 1.0 双模互联互通协议
+python test/test_dl_t698_45.py             # 698.45 协议
+python test/test_hdlc.py                   # HDLC 帧
+python test/test_plc_rf.py                 # PLC RF
+python test/test_lua_engine.py             # Lua 脚本引擎
+python test/test_sack_fix.py               # SACK 帧解析
+python test/test_diff_engine.py            # 报文对比引擎
+python test/test_monitor_deframe.py        # 监控解帧
+python test/test_monitor_plc2_deframe.py   # PLC2 解帧
+python test/test_gw_monitor_summary.py     # 国网新一代监控摘要
+python test/test_theme_settings.py         # 主题与字体设置
 ```
+
+> **约定**：所有测试文件一律放入 `test/` 目录（项目根目录禁止新增 `test_*.py`）。新测试文件头需 `import _path_setup`（详见 `test/_path_setup.py` 说明与 `AGENTS.md` §7）。
 
 ## 开发文档
 

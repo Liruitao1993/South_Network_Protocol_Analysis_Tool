@@ -54,3 +54,9 @@ upx-5.0.0-win64/
 .roo/
 .claude/settings.local.json
 .codegraph/config.json
+# 测试文件统一放入 test/ 目录（项目根目录禁止新增 test_*.py 测试文件）
+/test_*.py
+/_ocr_paddle_test.py
+# 测试运行输出产物
+/docx_tables_out.txt
+/test_ofdma_out.txt
