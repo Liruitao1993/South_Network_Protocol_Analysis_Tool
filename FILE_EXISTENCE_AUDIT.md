@@ -27,16 +27,10 @@ send_frame_lib.py, gdw_send_frame_lib.py, dl_t698_45_frame_gen.py, dl_t698_45_fr
 ### GUI Components (8/8)
 frame_gen_widget.py, preset_buttons.py, test_plan_widget.py, serial_worker.py, gui_utils.py, archive_widget.py, topology_widget.py, diff_widget.py
 
-### Web Files (21/21)
-- Entry: streamlit_app.py, web_app.py
-- Core: web/main_page.py, web/protocol_registry.py, web/frame_extractor.py, web/__init__.py
-- Adapters: web/adapters/serial_adapter.py, web/adapters/__init__.py
-- Components: web/components/hex_input.py, web/components/parse_table.py, web/components/protocol_selector.py, web/components/byte_highlighter.py, web/components/serial_panel.py, web/components/__init__.py
-- Tabs: web/tabs/single_parse.py, web/tabs/batch_parse.py, web/tabs/diff.py, web/tabs/lookup.py, web/tabs/frame_gen.py, web/tabs/preset_cmd.py, web/tabs/test_plan.py, web/tabs/archive.py, web/tabs/topology.py, web/tabs/__init__.py
-- Styles: web/styles/custom.css
-
-### TUI (2/2)
-tui_app.py, tui_app.tcss
+### Web Files (Reflex)
+- Entry: reflex_web/run_app.py
+- Core: reflex_web/reflex_web/reflex_web.py, reflex_web/reflex_web/web_utils.py, reflex_web/reflex_web/lookup_utils.py
+- Utils: reflex_web/frame_gen_utils.py, reflex_web/build_offline_deploy.py
 
 ### Validator Files (10/10 including gw_new_gen_validator.py)
 validator/__init__.py, validator/base.py, validator/nw_validator.py, validator/gdw_validator.py, validator/hdlc_validator.py, validator/plc_rf_validator.py, validator/dlt645_validator.py, validator/dl_t698_45_validator.py, validator/csg_new_gen_validator.py

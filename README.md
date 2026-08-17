@@ -62,14 +62,10 @@
 
 ```bash
 pip install pyside6        # GUI 必需
-pip install nicegui        # NiceGUI Web 版（1.8.2 起）
-pip install pyserial       # NiceGUI Web 版串口通信（1.8.2 起）
-pip install textual        # TUI 终端版（1.8.2 起，可选）
 pip install crcmod         # 698.45 协议 CRC 校验（1.7.0 起）
 pip install lupa           # Lua 脚本引擎（1.8.1 起，可选）
 pip install openpyxl       # Excel 测试报告（可选）
 pip install scapy          # TCP 流量监控（可选，Windows 需 npcap）
-pip install streamlit      # Streamlit Web 版（可选，功能子集）
 pip install reflex         # Reflex Web 版（实验性）
 ```
 
@@ -80,15 +76,6 @@ pip install reflex         # Reflex Web 版（实验性）
 ```bash
 # PySide6 GUI 版（主入口）
 python main_gui.py
-
-# NiceGUI Web 版（完整功能）
-python web_app.py
-
-# Textual TUI 终端版
-python tui_app.py
-
-# Streamlit Web 版（功能子集）
-streamlit run streamlit_app.py
 
 # Reflex Web 版（实验性）
 python reflex_web/run_app.py
@@ -261,10 +248,6 @@ system_integration/          # 系统集成：托盘 / 热键 / 剪贴板 / Note
 message_tool_widget.py       # 报文工具组件
 theme_settings.py            # 主题与字体设置
 enhanced_export.py           # 增强导出功能
-tui_app.py                   # Textual TUI 终端版
-tui_app.tcss                 # TUI 样式表
-web_app.py                   # NiceGUI Web 版入口
-web/                         # NiceGUI Web 版组件
 reflex_web/                  # Reflex Web 版（实验性）
 validator/                   # 协议校验引擎（含 hdc10_validator.py 等）
 monitor/frame_monitor.py     # 串口实时帧监听组件
