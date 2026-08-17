@@ -317,9 +317,47 @@ class State(rx.State):
             from protocol_parser import ProtocolFrameParser
             return ProtocolFrameParser()
 
+    def _safe_parse_to_table(self, parser, frame_bytes, **kwargs):
+        """解析帧为表格行；对没有 parse_to_table 的 parser（DLT645）用 parse() + 桌面版同款转换。"""
+        if not hasattr(parser, "parse_to_table"):
+            # DLT645Parser 只有 parse() 返回 dict，fields 为 (字段名, 原始值, 说明) 三元组，
+            # 用桌面版（main_gui.DLT645GuiParser）同款逻辑补字节范围，转成表格行。
+            dlt645_result = parser.parse(frame_bytes)
+            result = []
+            data_len = dlt645_result.get("data_length", 0)
+            total_len = 10 + data_len + 2
+            for field, raw, desc in dlt645_result.get("fields", []):
+                byte_start, byte_end, parsed_value = 0, 0, ""
+                if "帧起始符 1" in field:
+                    byte_start, byte_end = 0, 0
+                elif "从站地址" in field:
+                    byte_start, byte_end = 1, 6
+                elif "帧起始符 2" in field:
+                    byte_start, byte_end = 7, 7
+                elif "控制码" in field:
+                    byte_start, byte_end = 8, 8
+                    parsed_value = dlt645_result.get("control_parsed", "")
+                elif "数据长度" in field:
+                    byte_start, byte_end = 9, 9
+                elif "数据标识 DI" in field:
+                    byte_start, byte_end = 10, 13
+                    di_code = dlt645_result.get("di_code", "")
+                    di_desc = dlt645_result.get("di_desc", "")
+                    parsed_value = f"{di_code} ({di_desc})" if di_code and di_desc else di_code
+                elif "数据内容" in field:
+                    byte_start, byte_end = 14, 10 + data_len - 1
+                elif "数据域" in field:
+                    byte_start, byte_end = 10, 10 + data_len - 1
+                elif "校验和" in field:
+                    byte_start, byte_end = total_len - 2, total_len - 2
+                elif "帧结束符" in field:
+                    byte_start, byte_end = total_len - 1, total_len - 1
+                result.append((field, raw, parsed_value, desc, byte_start, byte_end))
+            return result
+        return parser.parse_to_table(frame_bytes, **kwargs)
+
     def _get_validator(self):
         """获取校验器"""
-        p = self.current_protocol
         try:
             from validator import (
                 NWValidator, PLCRFValidator, HDLCValidator,
@@ -398,7 +436,7 @@ class State(rx.State):
                     channel=self.hdc10_channel,
                 )
             else:
-                result = parser.parse_to_table(frame_bytes)
+                result = self._safe_parse_to_table(parser, frame_bytes)
 
             # 转换结果
             self.parse_result = []
@@ -650,7 +688,7 @@ class State(rx.State):
                             channel=self.hdc10_channel,
                         )
                     else:
-                        result = parser.parse_to_table(frame_bytes)
+                        result = self._safe_parse_to_table(parser, frame_bytes)
 
                     status = "成功" if result and (not result[0] or "❌" not in str(result[0][0])) else "失败"
                     proto_name = get_frame_summary(result, self.current_protocol)
@@ -1550,7 +1588,7 @@ class State(rx.State):
         try:
             frame_bytes = bytes.fromhex("".join(self.gen_result_hex.split()))
             parser = self._get_parser()
-            result = parser.parse_to_table(frame_bytes)
+            result = self._safe_parse_to_table(parser, frame_bytes)
             rows = []
             for idx, row in enumerate(result):
                 if len(row) < 4:
