@@ -294,7 +294,29 @@ class State(rx.State):
             return PLCRFProtocolParser()
         elif p in (2, 3, 4, 5):
             from hdlc_parser import HDLCParser
-            return HDLCParser()
+
+            if p == 2:
+                # 完整 HDLC 帧
+                return HDLCParser()
+            if p in (3, 5):
+                # DLMS-APDU(国网) / DLMS-APDU裸报文：直接解析 APDU（对齐桌面版 APDUParser）
+                class APDUParserWeb:
+                    def __init__(self, hdlc_parser):
+                        self.hdlc_parser = hdlc_parser
+
+                    def parse_to_table(self, data, **kwargs):
+                        return self.hdlc_parser.parse_apdu_to_table(data)
+
+                return APDUParserWeb(HDLCParser())
+            # p == 4：DLMS Wrapper 裸报文，直接解析 Wrapper+APDU（对齐桌面版 WrapperParser）
+            class WrapperParserWeb:
+                def __init__(self, hdlc_parser):
+                    self.hdlc_parser = hdlc_parser
+
+                def parse_to_table(self, data, **kwargs):
+                    return self.hdlc_parser.parse_wrapper_to_table(data)
+
+            return WrapperParserWeb(HDLCParser())
         elif p == 6:
             from dlt645_parser import DLT645Parser
             return DLT645Parser()
