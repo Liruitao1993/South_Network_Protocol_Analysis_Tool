@@ -52,7 +52,7 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 | 10 | 国网新一代双模通信互联互通 | 国网新一代双模通信互联互通技术规范 | 小端 | CRC-32（MAC帧） |
 | 11 | HDC 1.0 双模互联互通 | Q/GDW 12087.42-2020 | 小端（MAC 地址大端） | CRC-24（FC/PB）+ CRC-32（MAC） |
 
-> 协议覆盖差异：**HDC 1.0（索引 11）目前仅在 PySide6 主程序支持**；NiceGUI Web 版支持索引 0-10（11 种），Textual TUI 版支持索引 0-9（10 种）。修改协议相关文档/代码时注意区分。
+> 协议覆盖差异：**HDC 1.0（索引 11）目前仅在 PySide6 主程序支持**；Reflex Web 版支持索引 0-10（11 种）。修改协议相关文档/代码时注意区分。
 
 ---
 
@@ -62,16 +62,7 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 # 运行 GUI（唯一入口点）
 python main_gui.py
 
-# 运行 NiceGUI Web 版（完整功能，1.8.2 新增）
-python web_app.py
-
-# 运行 Textual TUI 终端版（1.8.2 新增）
-python tui_app.py
-
-# 运行 Streamlit Web 版（功能子集）
-streamlit run streamlit_app.py
-
-# Reflex Web 版（实验性）
+# 运行 Reflex Web 版（实验性）
 python reflex_web/run_app.py
 
 pyinstaller 南网协议解析工具.spec --noconfirm   # 主程序单文件 EXE
@@ -95,10 +86,6 @@ python main_gui.py --clipboard
 
 **依赖：**
 - `pip install pyside6`（GUI 必需）
-- `pip install nicegui`（NiceGUI Web 版，**1.8.2 新增**）
-- `pip install pyserial`（NiceGUI Web 版串口通信，**1.8.2 新增**）
-- `pip install textual`（Textual TUI 版，**1.8.2 新增**，可选）
-- `pip install streamlit`（Streamlit Web 版）
 - `pip install crcmod`（698.45 协议 CRC 校验，**1.7.0 起新增**）
 - `pip install openpyxl`（Excel 测试报告，可选）
 - `pip install lupa`（测试方案 Lua 脚本引擎，**1.8.1 新增**，未安装时静默降级为不可用）
@@ -245,34 +232,6 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 │   │   ├── parse_prompt_dialog.py   #   剪贴板报文解析提示框（置顶、协议选择、复用实例）
 │   │   ├── npp_integration.py       #   Notepad++ 集成（右键菜单 + 运行命令，触发 --clipboard）
 │   │   └── system_settings.py       #   系统集成设置面板与 config.json "system" 段
-│   ├── streamlit_app.py            # Web 版（功能子集）
-│   ├── web_app.py                  # NiceGUI Web 版入口（1.8.2 新增）
-│   └── web/                        # NiceGUI Web 版（1.8.2 新增）
-│       ├── main_page.py            #   主页面布局
-│       ├── protocol_registry.py    #   协议注册表（解析器/校验器映射）
-│       ├── frame_extractor.py      #   帧提取工具
-│       ├── adapters/               #   适配器
-│       │   └── serial_adapter.py   #     串口通信适配器
-│       ├── components/             #   UI 组件
-│       │   ├── hex_input.py        #     十六进制输入
-│       │   ├── parse_table.py      #     解析结果表格
-│       │   ├── protocol_selector.py#     协议选择器
-│       │   ├── byte_highlighter.py #     字节高亮
-│       │   └── serial_panel.py     #     串口面板
-│       ├── tabs/                   #   标签页
-│       │   ├── single_parse.py     #     单帧解析
-│       │   ├── batch_parse.py      #     批量解析
-│       │   ├── diff.py             #     报文对比
-│       │   ├── lookup.py           #     查询页
-│       │   ├── frame_gen.py        #     帧生成
-│       │   ├── preset_cmd.py       #     预设命令
-│       │   ├── test_plan.py        #     测试计划
-│       │   ├── archive.py          #     档案管理
-│       │   └── topology.py         #     拓扑信息
-│       └── styles/
-│           └── custom.css          #     自定义暗色主题样式
-│
-│   ├── tui_app.py                  # TUI 版（基于 Textual，终端图形化解析）
 │   └── reflex_web/                 # Reflex Web 版（实验性，run_app.py + reflex_web_exe.spec）
 │
 ├── 验证引擎 validator/ ── BaseValidator + 各协议 validator，统一 ValidationResult
@@ -612,7 +571,7 @@ python test_theme_settings.py  # 主题与字体设置
    - [ ] 添加 `protocol_combo.addItem`（注意索引顺序）
    - [ ] 在 `_on_protocol_changed` / `_parse_single_frame` / `_extract_frames_for_protocol` / `_update_protocol_lookup_tab` 加分支
    - [ ] 新建 `validator/xxx_validator.py` 继承 `BaseValidator`，在 `_run_validation` 注册（`main_gui.py` 的 `validators` dict）
-   - [ ] 如需 Web 版支持，同步更新 `web/protocol_registry.py` 与 `web/components/protocol_selector.py`
+   - [ ] 如需 Web 版支持，同步更新 `reflex_web/reflex_web/reflex_web.py` 与 `reflex_web/reflex_web/lookup_utils.py`
    - [ ] 同步更新本文件 §1（协议表）、§3（架构）、§5（文档映射）、§6（集成点）
    - [ ] 新建 `test_xxx.py`，含硬编码测试帧
    - [ ] 如需打包，更新 spec 的 `datas`

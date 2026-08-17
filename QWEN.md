@@ -28,7 +28,6 @@
 ├── protocol_parser.py      # 核心协议解析器（ProtocolFrameParser类）
 ├── protocol_tool.py        # 控制域结构体和帧生成工具
 ├── main_gui.py            # PySide6桌面GUI应用（主入口）
-├── streamlit_app.py       # Streamlit Web应用
 ├── custom_di.json         # 自定义DI配置文件
 ├── 南网协议解析工具.spec   # PyInstaller打包配置
 ├── analyze_e8000302.py    # 特定DI分析脚本
@@ -79,13 +78,9 @@
 - **DI查询**：搜索和浏览DI映射表，支持添加/删除自定义DI
 - **批量解析**：批量解析多帧报文，支持导出JSON结果
 
-### 4. Web应用 (`streamlit_app.py`)
+### 4. Web 应用
 
-基于Streamlit的Web界面，提供：
-- 报文输入和解析
-- 完整JSON展示
-- 帧结构可视化
-- 原始字节分析
+Reflex Web 版（`reflex_web/run_app.py`）提供协议解析与组帧功能（实验性）。
 
 ## 运行和构建
 
@@ -98,17 +93,6 @@ python main_gui.py
 **依赖安装**：
 ```bash
 pip install PySide6
-```
-
-### 运行Web应用
-
-```bash
-streamlit run streamlit_app.py
-```
-
-**依赖安装**：
-```bash
-pip install streamlit
 ```
 
 ### 打包为可执行文件

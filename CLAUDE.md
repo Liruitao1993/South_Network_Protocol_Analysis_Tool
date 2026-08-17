@@ -28,12 +28,9 @@
 ## 快速开始
 
 ```bash
-pip install pyside6 nicegui pyserial textual crcmod lupa openpyxl scapy streamlit reflex
+pip install pyside6 crcmod lupa openpyxl scapy reflex
 
 python main_gui.py                 # PySide6 GUI 主入口
-python web_app.py                  # NiceGUI Web 版
-python tui_app.py                  # Textual TUI 版
-streamlit run streamlit_app.py     # Streamlit 功能子集
 python reflex_web/run_app.py       # Reflex Web 版（实验性）
 
 pyinstaller 南网协议解析工具.spec --noconfirm
@@ -54,7 +51,6 @@ python main_gui.py --clipboard
 - `monitor_widget.py`：实时监控器，面向南网新一代（`ED..EE`）与国网新一代（`96..16`）包装格式
 - `monitor/tcp_monitor.py`：TCP 流量监控，基于 scapy 抓包、双向流重组与监控封装解帧
 - `system_integration/`：系统托盘、全局热键、剪贴板报文自动检测、Notepad++ 集成、单实例、注册表右键菜单、开机自启与系统设置
-- `web_app.py` 与 `web/`：NiceGUI Web 版
 - `reflex_web/`：Reflex Web 版（实验性）
 - `validator/`：统一协议校验引擎，各协议 validator 继承 `BaseValidator`
 
