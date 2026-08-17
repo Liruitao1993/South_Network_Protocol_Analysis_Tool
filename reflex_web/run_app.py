@@ -87,6 +87,12 @@ def main():
 
     if str(root_dir) not in sys.path:
         sys.path.insert(0, str(root_dir))
+    # Reflex 的 get_config() 只会在「当前工作目录」查找 rxconfig.py（find_spec 失败即返回空
+    # config，不会回退 sys.path）。部署时 cwd 是部署根而非 reflex_web/，导致 on_load 触发
+    # get_config 时 app_name 为空而报错。这里把工作目录切到 rxconfig.py 所在目录（resource_dir）。
+    os.chdir(resource_dir)
+    if str(resource_dir) not in sys.path:
+        sys.path.insert(0, str(resource_dir))
 
     # 延迟导入（环境变量设置后）
     import uvicorn
