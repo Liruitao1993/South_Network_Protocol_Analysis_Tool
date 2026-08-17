@@ -55,3 +55,22 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 3: 国网协议7 福建增补(AFN 50H~56H)+EB数据标识 解析与组帧
+
+**Date**: 2026-08-17
+**Task**: 国网协议7 福建增补(AFN 50H~56H)+EB数据标识 解析与组帧
+**Branch**: `main`
+
+### Summary
+
+基于 协议文档/7.国网本地接口协议/ 三份新文档（附件1 本地模块扩展协议V3.31 / 附件3 福建增补V1.4 / 附件4 以太网补充），为协议7 国网解析器新增福建增补规约全功能解析+组帧+EB数据标识深度解析。改动：gdw10376_parser.py(AFN/FN映射+福建增补帧结构识别+_parse_fujian_afn+_parse_eb_di)、gdw_eb_di_lookup.py(新,52项)、gdw_frame_generator_schema.py(+27 (AFN,Fn))、gdw_send_frame_lib.py(增补R/A结构+length_field bug修复)、validator/gdw_validator.py(AFN定位)、main_gui.py(版本1.14.0+CHANGELOG+EB查询区块)、test/test_gdw_fujian.py(新,15项全过)。验证：py_compile全过、test_gdw_fujian 15/15、test_web_frame_gen_utils 18/18、GUI组帧页冒烟通过。
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
