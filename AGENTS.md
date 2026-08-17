@@ -489,43 +489,46 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 
 ## 7. 测试
 
-**没有正式测试框架**（无 pytest / unittest 配置）。`test_*.py` 是独立脚本，直接运行：
+> **规则（强制）**：所有测试文件一律放入 `test/` 目录，**项目根目录禁止新增 `test_*.py` 测试文件**（`.gitignore` 已忽略根目录 `/test_*.py`）。新增测试在 `test/` 下建 `test_xxx.py`，文件头必须包含 `import _path_setup  # noqa: E402`（位于 docstring 之后、业务 import 之前），它会自动把项目根加入 `sys.path` 并把工作目录切到项目根，使 `from xxx_parser import ...` 与 JSON 数据文件读取在任意启动目录下都成立。
+
+**没有正式测试框架**（无 pytest / unittest 配置）。`test/*.py` 是独立脚本，直接运行（命令在项目根执行）：
 
 ```bash
 # 长期维护的核心测试
-python test_dlms.py            # DLMS 基础
-python test_hdlc.py            # HDLC 帧
-python test_plc_rf.py          # PLC RF
-python test_ber_tlv.py         # BER-TLV 编码
-python test_actual_hdlc.py     # 真实 HDLC 报文
-python test_special_frame.py   # 特殊帧
-python test_snrm_frame.py      # SNRM 帧
-python test_dl_t698_45.py      # 698.45 协议
-python test_oad_enrichment.py  # 698.45 OAD 增强
-python test_csg_new_gen.py     # 新一代载波协议
-python test_csg_hrf_mac.py     # 新一代载波无线单跳MAC帧（表12/表139）
-python test_csg_batch_prefix.py # 新一代载波监控日志前缀剥离
-python test_csg_batch_parse_level.py # 新一代载波解析级别/完整 MPDU
-python test_csg_summary.py     # 新一代载波批量摘要
-python test_gw_new_gen.py      # 国网新一代双模协议
-python test_hdc10.py           # HDC 1.0 双模互联互通协议（时隙分配条目/信标 BPCS/PBCS）
-python test_gw_batch_parse.py  # 国网新一代批量解析
-python test_gw_ext_cmd.py      # 国网新一代扩展命令载荷
-python test_gw_parse_levels.py # 国网新一代解析级别
-python test_gw_monitor_summary.py # 国网新一代监控摘要
-python test_sack_fix.py        # SACK 帧解析
-python test_diff_engine.py    # 报文对比引擎
-python test_plan_widget.py     # 测试计划组件（需 GUI 环境）
-python test_monitor_widget.py  # 实时监控器组件（需 GUI 环境）
-python test_monitor_deframe.py # 国网新一代 96..16 解帧
-python test_monitor_plc2_deframe.py # 南网新一代 ED..EE 解帧
-python test_monitor_strip.py   # 监控报文头尾剔除
-python test_theme_settings.py  # 主题与字体设置
+python test/test_dlms.py            # DLMS 基础
+python test/test_hdlc.py            # HDLC 帧
+python test/test_plc_rf.py          # PLC RF
+python test/test_ber_tlv.py         # BER-TLV 编码
+python test/test_actual_hdlc.py     # 真实 HDLC 报文
+python test/test_special_frame.py   # 特殊帧
+python test/test_snrm_frame.py      # SNRM 帧
+python test/test_dl_t698_45.py      # 698.45 协议
+python test/test_oad_enrichment.py  # 698.45 OAD 增强
+python test/test_csg_new_gen.py     # 新一代载波协议
+python test/test_csg_hrf_mac.py     # 新一代载波无线单跳MAC帧（表12/表139）
+python test/test_csg_batch_prefix.py # 新一代载波监控日志前缀剥离
+python test/test_csg_batch_parse_level.py # 新一代载波解析级别/完整 MPDU
+python test/test_csg_summary.py     # 新一代载波批量摘要
+python test/test_gw_new_gen.py      # 国网新一代双模协议
+python test/test_hdc10.py           # HDC 1.0 双模互联互通协议（时隙分配条目/信标 BPCS/PBCS）
+python test/test_gw_batch_parse.py  # 国网新一代批量解析
+python test/test_gw_ext_cmd.py      # 国网新一代扩展命令载荷
+python test/test_gw_parse_levels.py # 国网新一代解析级别
+python test/test_gw_monitor_summary.py # 国网新一代监控摘要
+python test/test_sack_fix.py        # SACK 帧解析
+python test/test_diff_engine.py    # 报文对比引擎
+python test/test_plan_widget.py     # 测试计划组件（需 GUI 环境）
+python test/test_monitor_widget.py  # 实时监控器组件（需 GUI 环境）
+python test/test_monitor_deframe.py # 国网新一代 96..16 解帧
+python test/test_monitor_plc2_deframe.py # 南网新一代 ED..EE 解帧
+python test/test_monitor_strip.py   # 监控报文头尾剔除
+python test/test_theme_settings.py  # 主题与字体设置
+python test/test_web_frame_gen_utils.py # Reflex Web 版组帧纯逻辑
 
 # 调试用临时脚本（可清理）：test_mac_*.py / test_msdu_debug.py / test_user_frame.py / test_full_debug.py / test_len_debug.py
 ```
 
-每个脚本内含**硬编码测试帧 + 预期输出**，用 `assert` 或 `print` 对比。新增解析逻辑时，应同步在对应 `test_xxx.py` 增加用例。
+每个脚本内含**硬编码测试帧 + 预期输出**，用 `assert` 或 `print` 对比。新增解析逻辑时，应同步在 `test/` 下对应 `test_xxx.py` 增加用例。
 
 ---
 
