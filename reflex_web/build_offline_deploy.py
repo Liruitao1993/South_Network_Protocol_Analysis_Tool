@@ -98,19 +98,30 @@ def copy_runtime_files(out_dir: Path) -> None:
         shutil.copytree(validator_src, out_dir / "validator", dirs_exist_ok=True)
 
     web_dest = out_dir / "reflex_web"
+
+    _BASE_IGNORE = {
+        "__pycache__", ".states", ".tests", "tests", "reflex.lock",
+        "uploaded_files",
+    }
+
+    def _ignore_web_only(src: str, names: list[str]) -> set[str]:
+        """忽略任意层级的缓存/测试/锁文件；reflex_web 顶层额外忽略 PyInstaller 中间产物 build/dist。"""
+        src_path = Path(src)
+        ignored = set(_BASE_IGNORE)
+        # 任意层级忽略 .spec 与 .pyc
+        for name in names:
+            if name.endswith(".spec") or name.endswith(".pyc"):
+                ignored.add(name)
+        if src_path.resolve() == REFLEX_WEB.resolve():
+            for name in names:
+                if name in {"build", "dist"}:
+                    ignored.add(name)
+        return ignored
+
     shutil.copytree(
         REFLEX_WEB,
         web_dest,
-        ignore=shutil.ignore_patterns(
-            "__pycache__",
-            ".states",
-            ".tests",
-            "tests",
-            "reflex.lock",
-            "uploaded_files",
-            "*.spec",
-            "*.pyc",
-        ),
+        ignore=_ignore_web_only,
     )
 
 
