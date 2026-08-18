@@ -211,14 +211,28 @@ class DLT69845APDUParser:
                 return None
             from gdw_eb_di_fields import EB_DI_FIELDS
             schema = EB_DI_FIELDS.get(di)
-            if not schema:
-                # 无字段定义：展示 A-XDR 头（类型+长度）并尝试 date_time_s 时间解码
-                dv = data_dict.get("解析值", "")
-                if isinstance(dv, str):
+            # 请求附加参数（1C 开头 = date_time_s 时间，如 EB030307 读取参数）优先走时间解码，
+            # 响应/上报数据（时间+边沿+NTB 数组）走字段 schema
+            dv = data_dict.get("解析值", "")
+            if isinstance(dv, str):
+                try:
+                    raw_bytes = bytes.fromhex(dv)
+                except (ValueError, TypeError):
+                    raw_bytes = None
+                if raw_bytes and len(raw_bytes) >= 8 and raw_bytes[0] == 0x1C:
                     try:
-                        raw_bytes = bytes.fromhex(dv)
-                    except (ValueError, TypeError):
-                        raw_bytes = None
+                        dt, _ = self.axdr.decode(raw_bytes)
+                        return {"A-XDR类型": {"值": data_dict.get("tag_name", "octet-string"),
+                                              "类型": f"0x{data_dict.get('tag', 0x09):02X}",
+                                              "长度": 1},
+                                "A-XDR长度": {"值": len(raw_bytes), "类型": "长度域", "长度": 1},
+                                "数据时间": {"值": dt.get("解析值", dv),
+                                            "类型": "date_time_s", "长度": 8}}
+                    except Exception:
+                        pass
+            if not schema:
+                # 无字段定义：展示 A-XDR 头（类型+长度）并保留原始 hex
+                if isinstance(dv, str):
                     axdr_head = {}
                     tag = data_dict.get("tag")
                     tag_name = data_dict.get("tag_name", "")
@@ -228,14 +242,6 @@ class DLT69845APDUParser:
                                                   "长度": 1}
                     axdr_head["A-XDR长度"] = {"值": len(raw_bytes) if raw_bytes else 0,
                                               "类型": "长度域", "长度": 1}
-                    if raw_bytes and len(raw_bytes) >= 8 and raw_bytes[0] == 0x1C:
-                        try:
-                            dt, _ = self.axdr.decode(raw_bytes)
-                            axdr_head["数据时间"] = {"值": dt.get("解析值", dv),
-                                                    "类型": "date_time_s", "长度": 8}
-                            return axdr_head
-                        except Exception:
-                            pass
                     axdr_head["原始数据"] = {"值": dv, "类型": "hex",
                                              "长度": len(raw_bytes) if raw_bytes else 0}
                     return axdr_head
@@ -263,9 +269,38 @@ class DLT69845APDUParser:
                             pass
             if data_bytes is None:
                 return None
+            # 数据长度不足以覆盖固定头字段时回退 A-XDR 头 + 原始数据
+            # （固定头 = 非 list 字段的总长度；数据不足时按 schema 解会截断错解）
+            fixed_len = self._eb_fixed_len(fields)
+            if fixed_len > 0 and len(data_bytes) < fixed_len:
+                return {"A-XDR类型": {"值": data_dict.get("tag_name", "octet-string"),
+                                      "类型": f"0x{data_dict.get('tag', 0x09):02X}",
+                                      "长度": 1},
+                        "A-XDR长度": {"值": len(data_bytes), "类型": "长度域", "长度": 1},
+                        "原始数据": {"值": data_bytes.hex().upper(), "类型": "hex",
+                                     "长度": len(data_bytes)}}
             return self._decode_eb_fields(fields, data_bytes)
         except Exception:
             return None
+
+    def _eb_fixed_len(self, fields: list) -> int:
+        """计算字段定义中非 list 字段的固定头长度（list 之后忽略）"""
+        total = 0
+        for f in fields:
+            ftype = f.get("type", "hex")
+            if ftype == "list":
+                break
+            if ftype.startswith("uint"):
+                total += int(ftype[4:]) // 8
+            elif ftype in ("bcd", "hex", "ascii"):
+                total += f.get("length", 1)
+            elif ftype == "bcd_time":
+                total += f.get("length", 6)
+            elif ftype in ("enum", "bs8"):
+                total += 1
+            else:
+                return 0
+        return total
 
     def _decode_eb_fields(self, fields: list, data: bytes) -> Dict[str, Any]:
         """按字段定义顺序解码数据字节
@@ -300,8 +335,16 @@ class DLT69845APDUParser:
                     raw = data[offset:offset + n]
                     offset += n
                     if len(raw) >= 6:
-                        v = (f"{raw[0]:02X}{raw[1]:02X}{raw[2]:02X} "
-                             f"{raw[3]:02X}{raw[4]:02X}{raw[5]:02X}")
+                        # YY MM DD hh mm ss (BCD 每字节两位十进制)
+                        def _bcd(b):
+                            return (b >> 4) * 10 + (b & 0x0F)
+                        yy, mm, dd = _bcd(raw[0]), _bcd(raw[1]), _bcd(raw[2])
+                        hh, mi, ss = _bcd(raw[3]), _bcd(raw[4]), _bcd(raw[5])
+                        year = 2000 + yy if yy <= 99 else yy
+                        try:
+                            v = f"{year:04d}-{mm:02d}-{dd:02d} {hh:02d}:{mi:02d}:{ss:02d}"
+                        except (ValueError, TypeError):
+                            v = raw.hex().upper()
                     else:
                         v = raw.hex().upper()
                     result[name] = {"值": v, "类型": "bcd_time", "长度": n}
@@ -370,6 +413,33 @@ class DLT69845APDUParser:
             else:
                 return 0  # 未知/变长 → 无法定长切分
         return total
+
+    def _parse_axdr_items_or_single(self, data: bytes, offset: int) -> Tuple[list, int]:
+        """兼容解析：数据个数前缀 + N×A-XDR，或直接单个 A-XDR
+
+        福建简化698 的 ACTION-Response NormalList 每项 DAR 后可能带「数据个数」：
+        `00`(DAR) + `01`(数据个数) + `09 81 81 ...`(octet-string)
+        文档示例（无数据个数）为 `00`(DAR) + `09 ...`(直接 A-XDR)。
+
+        先尝试「数据个数 N（1~64）+ N 个 A-XDR」，失败回退「单个 A-XDR」。
+
+        Returns: (数据项列表, 新偏移)
+        """
+        try:
+            n = data[offset]
+            if 1 <= n <= 64 and offset + 1 < len(data):
+                o = offset + 1
+                items = []
+                for _ in range(n):
+                    d, c = self.axdr.decode(data, o)
+                    items.append(d)
+                    o += c
+                if o <= len(data):
+                    return items, o
+        except Exception:
+            pass
+        d, c = self.axdr.decode(data, offset)
+        return [d], offset + c
 
     def _enrich_dar(self, dar_result: dict) -> dict:
         """为 DAR 结果添加语义说明"""
@@ -890,12 +960,20 @@ class DLT69845APDUParser:
                     item["结果"] = self._enrich_dar({"类型": "unsigned", "原始值": f"0x{dar_val:02X}",
                                                      "解析值": dar_val, "说明": ""})
                 if offset < len(data):
-                    resp, consumed = self.axdr.decode(data, offset)
+                    # 兼容：DAR 后可能带「数据个数」前缀（福建简化698）或直接 A-XDR
+                    resps, consumed = self._parse_axdr_items_or_single(data, offset)
                     offset += consumed
-                    item["响应数据"] = resp
-                    eb_biz = self._decode_eb_data_content(item["OMD"], resp)
-                    if eb_biz:
-                        item["数据业务"] = eb_biz
+                    if len(resps) == 1:
+                        item["响应数据"] = resps[0]
+                        eb_biz = self._decode_eb_data_content(item["OMD"], resps[0])
+                        if eb_biz:
+                            item["数据业务"] = eb_biz
+                    else:
+                        item["响应数据列表"] = resps
+                        if resps:
+                            eb_biz = self._decode_eb_data_content(item["OMD"], resps[0])
+                            if eb_biz:
+                                item["数据业务"] = eb_biz
                 items.append(item)
             result["列表"] = items
 

@@ -145,6 +145,23 @@ EB_DI_FIELDS: Dict[str, Dict[str, Any]] = {
             {"name": "状态", "type": "bs8", "bits": {"Bit0 A相": 0, "Bit1 B相": 1, "Bit2 C相": 2}},
         ],
     },
+    "EB030307": {
+        "名称": "通信模块最近1个整分整秒过零时刻NTB值",
+        "fields": [
+            {"name": "数据开始时间", "type": "bcd_time", "length": 6,
+             "note": "YYMMDD hhmmss (BCD)"},
+            {"name": "边沿类型", "type": "enum",
+             "enum_map": {0: "保留", 1: "下降沿", 2: "上升沿"}},
+            {"name": "数据周期_分钟", "type": "uint8"},
+            {"name": "数据点数M", "type": "uint8"},
+            {"name": "NTB值数组", "type": "list",
+             "item_fields": [
+                 {"name": "相线1 NTB值", "type": "uint32", "note": "40ns"},
+                 {"name": "相线2 NTB值", "type": "uint32", "note": "40ns, 单相填0"},
+                 {"name": "相线3 NTB值", "type": "uint32", "note": "40ns, 单相填0"},
+             ]},
+        ],
+    },
     "EB030308": {
         "名称": "过零NTB值数据更新周期和上报点数",
         "fields": [

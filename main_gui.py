@@ -62,10 +62,17 @@ from llm_api_manager import LLMApiManagerDialog
 from preprocessors import list_scripts as _list_pp_scripts, get_script as _get_pp_script
 
 
-APP_VERSION = "1.14.2"
+APP_VERSION = "1.14.3"
 BUILD_DATE = "2026-08-19"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    ("1.14.3", "2026-08-19", [
+        "协议8（DL/T 698.45）EB030307 过零NTB值上行数据解析：ACTION-Response NormalList 兼容「数据个数」前缀（DAR 后 `01`=数据个数 + octet-string 数据，此前被误当 A-XDR array tag 解导致 0x81 报错），新增 `_parse_axdr_items_or_single` 双路径兜底（数据个数 N×A-XDR 失败回退单 A-XDR，兼容文档示例无前缀格式）",
+        "EB030307 字段 schema（gdw_eb_di_fields.py）：数据开始时间(bcd_time 6B)/边沿类型(enum)/数据周期_分钟(uint8)/数据点数M(uint8)/NTB值数组(list，每项 相线1+相线2+相线3 NTB值 uint32)，真实上行帧 129B 解码为 10 组相线 NTB 值",
+        "bcd_time 可读化：YYMMDDhhmmss（BCD）→ `2026-08-14 14:42:00` 格式（此前仅 hex 拼接）；EB030307 请求参数（1C 开头 date_time_s）优先走时间解码，响应数据走字段 schema",
+        "数据不足防护：EB 数据内容长度不足固定头时回退 A-XDR 头 + 原始数据（避免截断错解）",
+        "新增 test_dl_t698_45_fujian.py 2 项测试（用户真实上行帧解析 + 表格相线 NTB 展示）；全量回归 62+19+12 项通过；Web 实测显示 数据开始时间/边沿/点数/相线1/2/3 NTB 值",
+    ]),
     ("1.14.2", "2026-08-19", [
         "协议8（DL/T 698.45）福建简化698 解析（choice=0x02 List 结构）：新增 SET-Request/Response、ACTION-Request/Response 的 NormalList 分支（PIID + count + SEQUENCE OF {OAD/OMD, Data/DAR}），支持福建「本地通信模块扩展协议」V3.42 698 承载格式（EB030110 台区识别/EB030307 过零NTB 等）",
         "REPORT-Notification/Response 带 count 结构：PIID-ACD + count + OAD 列表 + 数据个数 + A-XDR 数据（对齐福建 698 上报示例 88 01 00 01 ... / 08 01 00 01 ...）",
