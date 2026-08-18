@@ -27,11 +27,16 @@ def test_action_request_list_user_frame():
     # 参数 octet-string 保留
     assert items[0]["参数"]["类型"] == "octet-string"
     assert items[0]["参数"]["原始值"] == "1C07E80B1B0A2000"
-    # 无字段 schema → date_time_s 时间解码（1C 开头 7 字节 BIN 时间）
+    # 无字段 schema → A-XDR 头字段 + date_time_s 时间解码（1C 开头 7 字节 BIN 时间）
     biz = items[0]["数据业务"]
+    assert biz["A-XDR类型"]["值"] == "octet-string", biz
+    assert biz["A-XDR类型"]["类型"] == "0x09", biz
+    assert biz["A-XDR长度"]["值"] == 8, biz
     assert biz["数据时间"]["值"] == "2024-11-27 10:32:00", biz
     assert biz["数据时间"]["类型"] == "date_time_s", biz
     assert biz["数据时间"]["长度"] == 8, biz
+    # 参数行展示完整 A-XDR 编码（含 09 08 头字节）
+    assert items[0]["参数"]["原始编码"] == "09081C07E80B1B0A2000", items[0]["参数"]
     print("test_action_request_list_user_frame PASSED")
 
 
@@ -154,7 +159,9 @@ def test_set_request_multiple_oads():
     assert items[0]["OAD"]["原始值"] == "EB030110"
     assert items[0]["数据业务"]["识别时长(分钟)"]["值"] == 5
     assert items[1]["OAD"]["原始值"] == "EB030307"
-    assert items[1]["数据业务"]["原始数据"]["值"] == "0102"
+    # EB030307 数据 0102（非 1C 开头）→ A-XDR 头 + 原始数据
+    assert items[1]["数据业务"]["A-XDR类型"]["值"] == "octet-string", items[1]["数据业务"]
+    assert items[1]["数据业务"]["原始数据"]["值"] == "0102", items[1]["数据业务"]
     print("test_set_request_multiple_oads PASSED")
 
 
@@ -175,7 +182,7 @@ def test_eb_uint_big_endian():
 
 
 def test_table_shows_type_length():
-    """表格：EB 字段展示 类型+长度（如 识别时长 | uint16 2字节 | 5）"""
+    """表格：EB 字段展示 类型+长度；A-XDR 参数行显示完整编码（含 09 08 头）"""
     from dl_t698_45_frame_gen import DLT69845FrameGenerator
     from dl_t698_45_parser import DLT69845Parser
 
@@ -190,6 +197,17 @@ def test_table_shows_type_length():
     assert rows["识别时长(分钟)"][2] == "5", rows.get("识别时长(分钟)")
     assert "uint16" in rows["识别时长(分钟)"][3], rows["识别时长(分钟)"]
     assert "2字节" in rows["识别时长(分钟)"][3], rows["识别时长(分钟)"]
+
+    # 用户帧：参数行显示完整 A-XDR 编码（0908 + 内容）
+    apdu2 = bytes.fromhex("07020001EB03030709081C07E80B1B0A200000")
+    frame2 = gen._assemble_frame(sa=bytes([0x01, 0x07, 0x08]), ca=0x09, control=0x43, apdu=apdu2)
+    table2 = parser.parse_to_table(frame2)
+    rows2 = {r[0].strip(): r for r in table2}
+    assert rows2["参数"][1] == "09081C07E80B1B0A2000", rows2.get("参数")
+    assert "A-XDR:octet-string" in rows2["参数"][3], rows2["参数"]
+    assert rows2["A-XDR长度"][2] == "8", rows2.get("A-XDR长度")
+    assert rows2["数据时间"][2] == "2024-11-27 10:32:00", rows2.get("数据时间")
+    assert "date_time_s" in rows2["数据时间"][3], rows2["数据时间"]
     print("test_table_shows_type_length PASSED")
 
 

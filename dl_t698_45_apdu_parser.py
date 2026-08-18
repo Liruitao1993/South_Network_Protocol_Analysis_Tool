@@ -212,22 +212,33 @@ class DLT69845APDUParser:
             from gdw_eb_di_fields import EB_DI_FIELDS
             schema = EB_DI_FIELDS.get(di)
             if not schema:
-                # 无字段定义：尝试 date_time_s（1C 开头 7 字节 BIN 时间）或保留原始 hex
+                # 无字段定义：展示 A-XDR 头（类型+长度）并尝试 date_time_s 时间解码
                 dv = data_dict.get("解析值", "")
                 if isinstance(dv, str):
                     try:
                         raw_bytes = bytes.fromhex(dv)
                     except (ValueError, TypeError):
                         raw_bytes = None
+                    axdr_head = {}
+                    tag = data_dict.get("tag")
+                    tag_name = data_dict.get("tag_name", "")
+                    if tag is not None:
+                        axdr_head["A-XDR类型"] = {"值": tag_name,
+                                                  "类型": f"0x{tag:02X}",
+                                                  "长度": 1}
+                    axdr_head["A-XDR长度"] = {"值": len(raw_bytes) if raw_bytes else 0,
+                                              "类型": "长度域", "长度": 1}
                     if raw_bytes and len(raw_bytes) >= 8 and raw_bytes[0] == 0x1C:
                         try:
                             dt, _ = self.axdr.decode(raw_bytes)
-                            return {"数据时间": {"值": dt.get("解析值", dv),
-                                                "类型": "date_time_s", "长度": 8}}
+                            axdr_head["数据时间"] = {"值": dt.get("解析值", dv),
+                                                    "类型": "date_time_s", "长度": 8}
+                            return axdr_head
                         except Exception:
                             pass
-                    return {"原始数据": {"值": dv, "类型": "hex",
-                                         "长度": len(raw_bytes) if raw_bytes else 0}}
+                    axdr_head["原始数据"] = {"值": dv, "类型": "hex",
+                                             "长度": len(raw_bytes) if raw_bytes else 0}
+                    return axdr_head
                 return None
             fields = schema.get("fields", [])
             # 取数据字节：A-XDR octet-string 的 解析值 为 hex 字符串
