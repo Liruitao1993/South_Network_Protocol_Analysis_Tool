@@ -360,6 +360,30 @@ class DLT69845Parser:
 
         return table_data
 
+    def _add_eb_business_fields(self, biz: dict, table_data: list, level: int):
+        """展示 EB 字段解码结果 {字段名: {值, 类型, 长度}} 或标准字符串值"""
+        indent = "  " * level
+        for biz_k, biz_v in biz.items():
+            if isinstance(biz_v, dict) and "值" in biz_v:
+                # EB 字段解码：{值, 类型, 长度}
+                biz_type = biz_v.get("类型", "")
+                biz_len = biz_v.get("长度", 0)
+                biz_val = biz_v.get("值")
+                if isinstance(biz_val, list):
+                    # list 字段：显示数量，递归展开各项
+                    table_data.append((f"{indent}{biz_k}", "-",
+                                       f"[{len(biz_val)}项]",
+                                       f"类型={biz_type}, 长度={biz_len}字节", None, None))
+                    for sub in biz_val:
+                        if isinstance(sub, dict):
+                            self._add_eb_business_fields(sub, table_data, level + 1)
+                else:
+                    table_data.append((f"{indent}{biz_k}", "-", str(biz_val),
+                                       f"类型={biz_type}, 长度={biz_len}字节", None, None))
+            else:
+                # 标准 OAD 业务解码：字符串值
+                table_data.append((f"{indent}{biz_k}", "-", str(biz_v), "", None, None))
+
     def _add_apdu_to_table(self, apdu_result: dict, table_data: list, level: int = 0):
         """递归添加 APDU 解析结果到表格"""
         indent = "  " * level
@@ -370,10 +394,9 @@ class DLT69845Parser:
                 continue
             if isinstance(value, dict):
                 if key == "数据业务" and not ("类型" in value or "原始值" in value):
-                    # 业务解码结果：逐项展示（如 总: 1234.567 kWh / A相: 220.5 V）
+                    # 业务解码结果：逐项展示（EB 字段带 类型+长度，如 识别时长 | uint16 2字节 | 5）
                     table_data.append((f"{indent}{key}", "-", f"{len(value)}项", "按对象属性解码的业务值", None, None))
-                    for biz_k, biz_v in value.items():
-                        table_data.append((f"{indent}  {biz_k}", "-", str(biz_v), "", None, None))
+                    self._add_eb_business_fields(value, table_data, level + 1)
                 elif "嵌套APDU" in value:
                     # 安全报文等包含嵌套APDU的数据：摘要显示一行，然后递归展开嵌套APDU
                     raw = value.get("原始值", "-")

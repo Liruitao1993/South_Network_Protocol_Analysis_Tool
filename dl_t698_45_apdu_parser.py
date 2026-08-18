@@ -222,10 +222,12 @@ class DLT69845APDUParser:
                     if raw_bytes and len(raw_bytes) >= 8 and raw_bytes[0] == 0x1C:
                         try:
                             dt, _ = self.axdr.decode(raw_bytes)
-                            return {"数据时间": dt.get("解析值", dv)}
+                            return {"数据时间": {"值": dt.get("解析值", dv),
+                                                "类型": "date_time_s", "长度": 8}}
                         except Exception:
                             pass
-                    return {"原始数据": dv}
+                    return {"原始数据": {"值": dv, "类型": "hex",
+                                         "长度": len(raw_bytes) if raw_bytes else 0}}
                 return None
             fields = schema.get("fields", [])
             # 取数据字节：A-XDR octet-string 的 解析值 为 hex 字符串
@@ -258,6 +260,7 @@ class DLT69845APDUParser:
         """按字段定义顺序解码数据字节
 
         字段类型: enum/uint8/16/24/32/bcd/bcd_time/ascii/hex/bs8/list
+        返回: {字段名: {值, 类型, 长度}}（长度=字节数）
         """
         result: Dict[str, Any] = {}
         offset = 0
@@ -269,35 +272,38 @@ class DLT69845APDUParser:
                     v = data[offset]
                     offset += 1
                     emap = f.get("enum_map", {})
-                    result[name] = emap.get(v, f"{v}(未定义)")
+                    result[name] = {"值": emap.get(v, f"{v}(未定义)"), "类型": "enum", "长度": 1}
                 elif ftype.startswith("uint"):
                     nbytes = int(ftype[4:]) // 8
                     # 698 承载按「645 减33逆序」规则：多字节 uint 高位在前（大端）
                     v = int.from_bytes(data[offset:offset + nbytes], "big")
                     offset += nbytes
-                    result[name] = v
+                    result[name] = {"值": v, "类型": ftype, "长度": nbytes}
                 elif ftype == "bcd":
                     n = f.get("length", 1)
                     raw = data[offset:offset + n].hex().upper()
                     offset += n
-                    result[name] = raw
+                    result[name] = {"值": raw, "类型": "bcd", "长度": n}
                 elif ftype == "bcd_time":
                     n = f.get("length", 6)
                     raw = data[offset:offset + n]
                     offset += n
                     if len(raw) >= 6:
-                        result[name] = (f"{raw[0]:02X}{raw[1]:02X}{raw[2]:02X} "
-                                        f"{raw[3]:02X}{raw[4]:02X}{raw[5]:02X}")
+                        v = (f"{raw[0]:02X}{raw[1]:02X}{raw[2]:02X} "
+                             f"{raw[3]:02X}{raw[4]:02X}{raw[5]:02X}")
                     else:
-                        result[name] = raw.hex().upper()
+                        v = raw.hex().upper()
+                    result[name] = {"值": v, "类型": "bcd_time", "长度": n}
                 elif ftype == "ascii":
                     n = f.get("length", 1)
                     raw = data[offset:offset + n]
                     offset += n
-                    result[name] = raw.decode("ascii", errors="replace").rstrip()
+                    result[name] = {"值": raw.decode("ascii", errors="replace").rstrip(),
+                                    "类型": "ascii", "长度": n}
                 elif ftype == "hex":
                     n = f.get("length", 1)
-                    result[name] = data[offset:offset + n].hex().upper()
+                    result[name] = {"值": data[offset:offset + n].hex().upper(),
+                                    "类型": "hex", "长度": n}
                     offset += n
                 elif ftype == "bs8":
                     v = data[offset]
@@ -311,25 +317,29 @@ class DLT69845APDUParser:
                             parts.append(f"{bname}:{benum[bitval]}")
                         else:
                             parts.append(f"{bname}:{bitval}")
-                    result[name] = " | ".join(parts) if parts else hex(v)
+                    result[name] = {"值": " | ".join(parts) if parts else hex(v),
+                                    "类型": "bs8", "长度": 1}
                 elif ftype == "list":
                     # 每项固定长度（item_fields 均为定长）→ 按 item 长度切分
                     item_fields = f.get("item_fields", [])
                     item_len = self._eb_item_len(item_fields)
                     if item_len <= 0:
-                        result[name] = data[offset:].hex().upper()
+                        result[name] = {"值": data[offset:].hex().upper(),
+                                        "类型": "list", "长度": len(data) - offset}
                         offset = len(data)
                         continue
                     items = []
                     while offset + item_len <= len(data):
                         items.append(self._decode_eb_fields(item_fields, data[offset:offset + item_len]))
                         offset += item_len
-                    result[name] = items
+                    result[name] = {"值": items, "类型": "list",
+                                    "长度": len(items) * item_len}
                 else:
-                    result[name] = f"(未知类型 {ftype})"
+                    result[name] = {"值": f"(未知类型 {ftype})", "类型": ftype, "长度": 0}
                     break
             except (IndexError, ValueError):
-                result[name + " (解析截断)"] = data[offset:].hex().upper()
+                result[name + " (解析截断)"] = {"值": data[offset:].hex().upper(),
+                                                "类型": "hex", "长度": len(data) - offset}
                 break
         return result
 
