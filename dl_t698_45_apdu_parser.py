@@ -141,6 +141,10 @@ class DLT69845APDUParser:
         attr = pv.get("属性编号", 0)
         index = pv.get("元素索引", 0)
         desc = self.oi_lookup.get_oad_description(oi, attr, index)
+        # EB 数据标识（OI 高字节 0xEB）：按 OAD 4 字节原样查福建扩展协议名称
+        eb_name = self._lookup_eb_di(oad_result)
+        if eb_name:
+            desc = f"{eb_name} ({desc})"
         oad_result["语义说明"] = desc
         return oad_result
 
@@ -154,8 +158,187 @@ class DLT69845APDUParser:
             oi = 0
         method = pv.get("方法标识", 0)
         desc = self.oi_lookup.get_omd_description(oi, method)
+        # EB 数据标识（OI 高字节 0xEB）：按 OMD 4 字节原样查福建扩展协议名称
+        eb_name = self._lookup_eb_di(omd_result)
+        if eb_name:
+            desc = f"{eb_name} ({desc})"
         omd_result["语义说明"] = desc
         return omd_result
+
+    def _lookup_eb_di(self, oad_omd: dict) -> str:
+        """按 OAD/OMD 4 字节原样查 EB 数据标识名称（福建本地通信模块扩展协议）
+
+        OAD/OMD 原始值形如 'EB030110'，恰为 EB 数据标识 DI3DI2DI1DI0。
+        仅当 OI 高字节为 0xEB 时按 EB 数据标识查询，否则返回空串。
+        """
+        try:
+            pv = oad_omd.get("解析值", {})
+            oi_str = pv.get("OI", "")
+            if not oi_str.startswith("0x"):
+                return ""
+            oi = int(oi_str, 16)
+            if (oi >> 8) != 0xEB:
+                return ""
+            raw = oad_omd.get("原始值", "")
+            if len(raw) != 8:
+                return ""
+            from gdw_eb_di_lookup import get_eb_di_lookup
+            info = get_eb_di_lookup().get(raw)
+            if isinstance(info, dict):
+                return info.get("名称", "")
+        except Exception:
+            pass
+        return ""
+
+    def _decode_eb_data_content(self, oad: dict, data_dict: Any) -> Optional[Dict[str, Any]]:
+        """按 EB 数据标识字段定义解码数据内容（福建扩展协议 698 承载）
+
+        Args:
+            oad: OAD/OMD 解析结果（含 原始值 4 字节 hex）
+            data_dict: A-XDR 解码结果（octet-string 等）
+
+        Returns:
+            {字段名: 解码值} 或 None（非 EB / 无字段定义 / 解码失败）
+        """
+        try:
+            if not isinstance(oad, dict) or data_dict is None:
+                return None
+            raw = oad.get("原始值", "")
+            if len(raw) != 8 or not raw.isalnum():
+                return None
+            di = raw.upper()
+            if not di.startswith("EB"):
+                return None
+            from gdw_eb_di_fields import EB_DI_FIELDS
+            schema = EB_DI_FIELDS.get(di)
+            if not schema:
+                # 无字段定义：返回原始数据字节 hex
+                dv = data_dict.get("解析值", "")
+                if isinstance(dv, str):
+                    return {"原始数据": dv}
+                return None
+            fields = schema.get("fields", [])
+            # 取数据字节：A-XDR octet-string 的 解析值 为 hex 字符串
+            data_bytes = None
+            dv = data_dict.get("解析值")
+            if isinstance(dv, str):
+                try:
+                    data_bytes = bytes.fromhex(dv)
+                except (ValueError, TypeError):
+                    data_bytes = None
+            elif isinstance(dv, list):
+                # array/structure 解析值：逐项取 解析值 拼接
+                data_bytes = b""
+                for item in dv:
+                    v = item.get("解析值") if isinstance(item, dict) else item
+                    if isinstance(v, int):
+                        data_bytes += v.to_bytes(max(1, (v.bit_length() + 7) // 8), "little")
+                    elif isinstance(v, str):
+                        try:
+                            data_bytes += bytes.fromhex(v)
+                        except (ValueError, TypeError):
+                            pass
+            if data_bytes is None:
+                return None
+            return self._decode_eb_fields(fields, data_bytes)
+        except Exception:
+            return None
+
+    def _decode_eb_fields(self, fields: list, data: bytes) -> Dict[str, Any]:
+        """按字段定义顺序解码数据字节
+
+        字段类型: enum/uint8/16/24/32/bcd/bcd_time/ascii/hex/bs8/list
+        """
+        result: Dict[str, Any] = {}
+        offset = 0
+        for f in fields:
+            ftype = f.get("type", "hex")
+            name = f.get("name", "字段")
+            try:
+                if ftype == "enum":
+                    v = data[offset]
+                    offset += 1
+                    emap = f.get("enum_map", {})
+                    result[name] = emap.get(v, f"{v}(未定义)")
+                elif ftype.startswith("uint"):
+                    nbytes = int(ftype[4:]) // 8
+                    # 698 承载按「645 减33逆序」规则：多字节 uint 高位在前（大端）
+                    v = int.from_bytes(data[offset:offset + nbytes], "big")
+                    offset += nbytes
+                    result[name] = v
+                elif ftype == "bcd":
+                    n = f.get("length", 1)
+                    raw = data[offset:offset + n].hex().upper()
+                    offset += n
+                    result[name] = raw
+                elif ftype == "bcd_time":
+                    n = f.get("length", 6)
+                    raw = data[offset:offset + n]
+                    offset += n
+                    if len(raw) >= 6:
+                        result[name] = (f"{raw[0]:02X}{raw[1]:02X}{raw[2]:02X} "
+                                        f"{raw[3]:02X}{raw[4]:02X}{raw[5]:02X}")
+                    else:
+                        result[name] = raw.hex().upper()
+                elif ftype == "ascii":
+                    n = f.get("length", 1)
+                    raw = data[offset:offset + n]
+                    offset += n
+                    result[name] = raw.decode("ascii", errors="replace").rstrip()
+                elif ftype == "hex":
+                    n = f.get("length", 1)
+                    result[name] = data[offset:offset + n].hex().upper()
+                    offset += n
+                elif ftype == "bs8":
+                    v = data[offset]
+                    offset += 1
+                    bits = f.get("bits", {})
+                    parts = []
+                    for bname, bit in bits.items():
+                        bitval = (v >> bit) & 0x01
+                        benum = f.get("bit_enums", {}).get(bname, {})
+                        if isinstance(benum, dict) and bitval in benum:
+                            parts.append(f"{bname}:{benum[bitval]}")
+                        else:
+                            parts.append(f"{bname}:{bitval}")
+                    result[name] = " | ".join(parts) if parts else hex(v)
+                elif ftype == "list":
+                    # 每项固定长度（item_fields 均为定长）→ 按 item 长度切分
+                    item_fields = f.get("item_fields", [])
+                    item_len = self._eb_item_len(item_fields)
+                    if item_len <= 0:
+                        result[name] = data[offset:].hex().upper()
+                        offset = len(data)
+                        continue
+                    items = []
+                    while offset + item_len <= len(data):
+                        items.append(self._decode_eb_fields(item_fields, data[offset:offset + item_len]))
+                        offset += item_len
+                    result[name] = items
+                else:
+                    result[name] = f"(未知类型 {ftype})"
+                    break
+            except (IndexError, ValueError):
+                result[name + " (解析截断)"] = data[offset:].hex().upper()
+                break
+        return result
+
+    def _eb_item_len(self, item_fields: list) -> int:
+        """计算 list 单条 item 的固定长度（字节）"""
+        total = 0
+        for f in item_fields:
+            ftype = f.get("type", "hex")
+            if ftype.startswith("uint"):
+                total += int(ftype[4:]) // 8
+            elif ftype in ("bcd", "hex", "ascii"):
+                total += f.get("length", 1)
+            elif ftype == "bcd_time":
+                total += f.get("length", 6)
+            elif ftype in ("enum", "bs8"):
+                total += 1
+            else:
+                return 0  # 未知/变长 → 无法定长切分
+        return total
 
     def _enrich_dar(self, dar_result: dict) -> dict:
         """为 DAR 结果添加语义说明"""
@@ -485,6 +668,38 @@ class DLT69845APDUParser:
                 biz = self._decode_oad_business(result["OAD"], d)
                 if biz:
                     result["数据业务"] = biz
+                else:
+                    # EB 数据标识：按福建扩展协议字段定义解码
+                    eb_biz = self._decode_eb_data_content(result["OAD"], d)
+                    if eb_biz:
+                        result["数据业务"] = eb_biz
+
+        elif choice_tag == 0x02:
+            result["子类型"] = "SetRequestNormalList"
+            # PIID (unsigned)
+            piid_byte = data[offset]
+            offset += 1
+            result["PIID"] = self._parse_piid(piid_byte)
+            # count + SEQUENCE OF {OAD, Data}
+            count = data[offset]
+            offset += 1
+            items = []
+            for _ in range(count):
+                item = {"OAD": self._parse_oad_raw(data, offset)}
+                offset += 4
+                if offset < len(data):
+                    d, consumed = self.axdr.decode(data, offset)
+                    offset += consumed
+                    item["数据"] = d
+                    biz = self._decode_oad_business(item["OAD"], d)
+                    if biz:
+                        item["数据业务"] = biz
+                    else:
+                        eb_biz = self._decode_eb_data_content(item["OAD"], d)
+                        if eb_biz:
+                            item["数据业务"] = eb_biz
+                items.append(item)
+            result["列表"] = items
 
         return result
 
@@ -512,6 +727,28 @@ class DLT69845APDUParser:
                 dar, consumed = self.axdr.decode(data, offset)
                 offset += consumed
                 result["结果"] = self._enrich_dar(dar)
+
+        elif choice_tag == 0x02:
+            result["子类型"] = "SetResponseNormalList"
+            # PIID-ACD
+            piid_byte = data[offset]
+            offset += 1
+            result["PIID-ACD"] = self._parse_piid(piid_byte, is_acd=True)
+            # count + SEQUENCE OF {OAD, 结果}
+            count = data[offset]
+            offset += 1
+            items = []
+            for _ in range(count):
+                item = {"OAD": self._parse_oad_raw(data, offset)}
+                offset += 4
+                if offset < len(data):
+                    # DAR: 原始 1 字节（00=成功 / FF=否认 / 其他错误码）
+                    dar_val = data[offset]
+                    offset += 1
+                    item["结果"] = self._enrich_dar({"类型": "unsigned", "原始值": f"0x{dar_val:02X}",
+                                                     "解析值": dar_val, "说明": ""})
+                items.append(item)
+            result["列表"] = items
 
         return result
 
@@ -541,6 +778,30 @@ class DLT69845APDUParser:
                 param, consumed = self.axdr.decode(data, offset)
                 offset += consumed
                 result["参数"] = param
+
+        elif choice_tag == 0x02:
+            result["子类型"] = "ActionRequestNormalList"
+            # PIID
+            piid_byte = data[offset]
+            offset += 1
+            result["PIID"] = self._parse_piid(piid_byte)
+            # count + SEQUENCE OF {OMD, Data}
+            count = data[offset]
+            offset += 1
+            items = []
+            for _ in range(count):
+                item = {"OMD": self._parse_omd_raw(data, offset)}
+                offset += 4
+                if offset < len(data):
+                    d, consumed = self.axdr.decode(data, offset)
+                    offset += consumed
+                    item["参数"] = d
+                    # EB 数据标识：按福建扩展协议字段定义解码
+                    eb_biz = self._decode_eb_data_content(item["OMD"], d)
+                    if eb_biz:
+                        item["数据业务"] = eb_biz
+                items.append(item)
+            result["列表"] = items
 
         return result
 
@@ -573,6 +834,39 @@ class DLT69845APDUParser:
                 resp, consumed = self.axdr.decode(data, offset)
                 offset += consumed
                 result["响应数据"] = resp
+                # EB 数据标识：按福建扩展协议字段定义解码
+                eb_biz = self._decode_eb_data_content(result["OMD"], resp)
+                if eb_biz:
+                    result["数据业务"] = eb_biz
+
+        elif choice_tag == 0x02:
+            result["子类型"] = "ActionResponseNormalList"
+            # PIID-ACD
+            piid_byte = data[offset]
+            offset += 1
+            result["PIID-ACD"] = self._parse_piid(piid_byte, is_acd=True)
+            # count + SEQUENCE OF {OMD, DAR, [响应数据]}
+            count = data[offset]
+            offset += 1
+            items = []
+            for _ in range(count):
+                item = {"OMD": self._parse_omd_raw(data, offset)}
+                offset += 4
+                if offset < len(data):
+                    # DAR: 原始 1 字节（00=成功 / FF=否认 / 其他错误码）
+                    dar_val = data[offset]
+                    offset += 1
+                    item["结果"] = self._enrich_dar({"类型": "unsigned", "原始值": f"0x{dar_val:02X}",
+                                                     "解析值": dar_val, "说明": ""})
+                if offset < len(data):
+                    resp, consumed = self.axdr.decode(data, offset)
+                    offset += consumed
+                    item["响应数据"] = resp
+                    eb_biz = self._decode_eb_data_content(item["OMD"], resp)
+                    if eb_biz:
+                        item["数据业务"] = eb_biz
+                items.append(item)
+            result["列表"] = items
 
         return result
 
@@ -601,26 +895,60 @@ class DLT69845APDUParser:
 
         if choice_tag == 0x01:
             result["子类型"] = "ReportResponseList"
-            # SEQUENCE OF OAD
-            oads = []
-            while offset < len(data):
-                try:
-                    oads.append(self._parse_oad_raw(data, offset))
-                    offset += 4
-                except Exception:
+            # count + SEQUENCE OF {OAD, 结果}（福建简化698：PIID-ACD 后为对象个数）
+            if offset >= len(data):
+                return result
+            count = data[offset]
+            offset += 1
+            items = []
+            for _ in range(count):
+                item = {}
+                if offset + 4 > len(data):
                     break
-            result["OAD列表"] = oads
+                item["OAD"] = self._parse_oad_raw(data, offset)
+                offset += 4
+                # 结果 (1 字节: 00 成功 / 其他错误)
+                if offset < len(data):
+                    res = data[offset]
+                    offset += 1
+                    item["结果"] = self._enrich_dar({"类型": "unsigned", "原始值": f"0x{res:02X}",
+                                                     "解析值": res, "说明": ""})
+                items.append(item)
+            if len(items) == 1:
+                single = items[0]
+                if "OAD" in single:
+                    result["OAD"] = single["OAD"]
+                if "结果" in single:
+                    result["结果"] = single["结果"]
+            result["列表"] = items
 
         elif choice_tag == 0x02:
             result["子类型"] = "ReportResponseRecordList"
-            oads = []
-            while offset < len(data):
-                try:
-                    oads.append(self._parse_oad_raw(data, offset))
-                    offset += 4
-                except Exception:
+            # 与 List 相同：count + SEQUENCE OF {OAD, 结果}
+            if offset >= len(data):
+                return result
+            count = data[offset]
+            offset += 1
+            items = []
+            for _ in range(count):
+                item = {}
+                if offset + 4 > len(data):
                     break
-            result["OAD列表"] = oads
+                item["OAD"] = self._parse_oad_raw(data, offset)
+                offset += 4
+                if offset < len(data):
+                    res = data[offset]
+                    offset += 1
+                    item["结果"] = self._enrich_dar({"类型": "unsigned", "原始值": f"0x{res:02X}",
+                                                     "解析值": res, "说明": ""})
+                items.append(item)
+            if len(items) == 1:
+                single = items[0]
+                if "OAD" in single:
+                    result["OAD"] = single["OAD"]
+                if "结果" in single:
+                    result["结果"] = single["结果"]
+            result["列表"] = items
 
         elif choice_tag == 0x03:
             result["子类型"] = "ReportResponseTransData"
@@ -669,19 +997,42 @@ class DLT69845APDUParser:
             piid_byte = data[offset]
             offset += 1
             result["PIID-ACD"] = self._parse_piid(piid_byte, is_acd=True)
-            # OAD
-            if offset + 4 <= len(data):
-                result["OAD"] = self._parse_oad_raw(data, offset)
+            # count + SEQUENCE OF OAD（福建简化698：PIID-ACD 后为对象个数，OAD 连续排列）
+            if offset >= len(data):
+                return result
+            count = data[offset]
+            offset += 1
+            oads = []
+            for _ in range(count):
+                if offset + 4 > len(data):
+                    break
+                oads.append(self._parse_oad_raw(data, offset))
                 offset += 4
+            result["OAD列表"] = oads
+            # 数据个数标志（01，固定）
+            data_flag = None
+            if offset < len(data):
+                data_flag = data[offset]
+                offset += 1
+            if data_flag is not None:
+                result["数据个数"] = data_flag
             # Data
             if offset < len(data):
                 d, consumed = self.axdr.decode(data, offset)
                 offset += consumed
                 result["数据"] = d
-                # 业务解码
-                biz = self._decode_oad_business(result.get("OAD"), d)
-                if biz:
-                    result["数据业务"] = biz
+                # 业务解码（单 OAD 时按 OAD 解码）
+                if oads:
+                    biz = self._decode_oad_business(oads[0], d)
+                    if biz:
+                        result["数据业务"] = biz
+                    else:
+                        eb_biz = self._decode_eb_data_content(oads[0], d)
+                        if eb_biz:
+                            result["数据业务"] = eb_biz
+            # 时间标签 (optional, 00 00)
+            if offset + 1 < len(data):
+                result["剩余数据"] = data[offset:].hex().upper()
 
         elif choice_tag == 0x02:
             result["子类型"] = "ReportNotificationSimplify"

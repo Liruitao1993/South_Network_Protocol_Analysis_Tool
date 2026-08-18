@@ -1,13 +1,13 @@
 # 南网协议解析工具
 
-[![Version](https://img.shields.io/badge/version-1.14.1-blue)]()
+[![Version](https://img.shields.io/badge/version-1.14.2-blue)]()
 [![Python](https://img.shields.io/badge/Python-3.8%2B-brightgreen)]()
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)]()
 [![License](https://img.shields.io/badge/License-MIT-green)]()
 
 一个面向电力通信现场调试的多协议解析工具，基于 Python / PySide6 开发，支持 12 种电力通信协议，覆盖单帧解析、批量解析、协议校验、帧生成、串口通信、测试方案、Lua 脚本、实时监控与 TCP 抓包等工作流。
 
-当前版本为 `1.14.1`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
+当前版本为 `1.14.2`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
 
 ## 功能总览
 
@@ -27,7 +27,7 @@
 | TCP 监控 | 基于 scapy 的 TCP 抓包、流重组与南网新一代 / 国网新一代自动识别解析 |
 | 档案与拓扑 | 南网 / 国网协议档案导入导出、拓扑组网统计 |
 | 查询页 | DI、AFN、DLT645 DI、OBIS、PLC RF 命令字、新一代业务标识、HDC 1.0 报文 ID 查询 |
-| 多端界面 | PySide6 GUI、Textual TUI、NiceGUI Web、实验性 Reflex Web |
+| 多端界面 | PySide6 GUI、实验性 Reflex Web |
 | 主题与字体 | 5 套主题与字体设置，支持配置持久化 |
 | 系统集成 | 系统托盘、全局热键、剪贴板报文检测、Notepad++ 集成、单实例、命令行解析、文件右键菜单与开机自启 |
 
@@ -271,6 +271,7 @@ python test/test_gdw_fujian.py             # 国网福建增补规约 + EB 数�
 python test/test_hdc10.py                  # HDC 1.0 双模互联互通协议
 python test/test_dl_t698_45.py             # 698.45 协议
 python test/test_dl_t698_45_data_decode.py # 698.45 APDU 数据内容业务解码（1.14.1 起）
+python test/test_dl_t698_45_fujian.py      # 698.45 福建简化698 List 结构（1.14.2 起）
 python test/test_hdlc.py                   # HDLC 帧
 python test/test_plc_rf.py                 # PLC RF
 python test/test_lua_engine.py             # Lua 脚本引擎
@@ -279,6 +280,9 @@ python test/test_diff_engine.py            # 报文对比引擎
 python test/test_monitor_deframe.py        # 监控解帧
 python test/test_monitor_plc2_deframe.py   # PLC2 解帧
 python test/test_gw_monitor_summary.py     # 国网新一代监控摘要
+python test/test_sack_fix.py               # SACK 帧解析
+python test/test_ed_fallback_fix.py         # ED..EE 监控帧非法回退修复（1.11.1 起）
+python test/test_dl_t698_45_fujian.py      # 698.45 福建简化698 解析
 python test/test_theme_settings.py         # 主题与字体设置
 ```
 
@@ -291,6 +295,16 @@ python test/test_theme_settings.py         # 主题与字体设置
 - [`.trellis/workflow.md`](.trellis/workflow.md)：Trellis 开发工作流与任务规范
 
 ## 更新记录
+
+### 1.14.2 — 2026-08-19
+
+#### 协议 8（698.45）福建简化698 解析
+
+- 新增 SET/ACTION 的 Request/Response List 分支（choice=0x02：PIID + count + SEQUENCE OF {OAD/OMD, Data/DAR}），支持福建「本地通信模块扩展协议」V3.42 698 承载格式（EB030110 台区识别、EB030307 过零NTB 等）
+- REPORT-Notification/Response 带 count 结构（对齐福建示例 `88 01 00 01 ...` / `08 01 00 01 ...`）
+- EB 数据标识名称（gdw_eb_di_lookup 57 项）+ 数据内容字段解码（enum/uint/bcd/bs8/list，无 schema 保留原始 hex）
+- 修复 EB 数据内容多字节 uint 字节序：按文档「645 减33逆序」规则为大端（识别时长 5 分钟正确显示，此前误读 1280）
+- 新增 `test/test_dl_t698_45_fujian.py`（9 项测试全过）
 
 ### 1.14.1 — 2026-08-17
 
@@ -339,7 +353,7 @@ python test/test_theme_settings.py         # 主题与字体设置
 - 批量解析复用国网新一代前缀剥离与摘要逻辑；新增 `test_hdc10.py` 回归用例（时隙分配条目长度、信标 BPCS/PBCS 校验）
 - 帧结构约定：`MPDU = FC(16B) + PB×N`；`PB = PBH(1B) + PB 体 + PBCS(3B, CRC-24)`；`MAC帧 = MAC头 + MSDU + ICV(4B, CRC-32)`；多字节字段小端、MAC 地址大端
 
-> 注：HDC 1.0 目前仅在 PySide6 主程序支持；NiceGUI Web 版（协议 0-10）与 Textual TUI 版（协议 0-9）暂未包含。
+> 注：HDC 1.0 目前仅在 PySide6 主程序支持；Reflex Web 版支持协议 0-10（11 种）。NiceGUI/TUI 版本已于 2026-08-17 移除。
 
 #### 新一代载波协议（索引 9）增强
 

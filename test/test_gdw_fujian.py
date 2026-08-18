@@ -402,7 +402,7 @@ def test_eb_698_frame_generation():
     # 字段编码（附件1 定义）
     assert encode_eb_di_data('EB030002', {'停上电类型': 1, '本次上报数量': 1,
                                           '模块地址列表': [{'模块地址': '112233445566'}]}).hex() == '0101112233445566'
-    assert encode_eb_di_data('EB030110', {'台区识别方法': 0, '识别时长(分钟)': 5}).hex() == '000500'
+    assert encode_eb_di_data('EB030110', {'台区识别方法': 0, '识别时长(分钟)': 5}).hex() == '000005'
     assert len(EB_DI_FIELDS) >= 40, f"字段定义不足: {len(EB_DI_FIELDS)}"
 
     sa = build_dlt698_sa(0, 0, 6, "000000000000")
