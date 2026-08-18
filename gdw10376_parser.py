@@ -6,7 +6,11 @@ from gdw10376_tool import GDWControlField, COMM_TYPE_MAP, DIR_MAP, PRM_MAP
 
 
 class GDW10376Parser:
-    """国网集中器本地通信模块接口协议解析器 (Q/GDW 10376.2—2024)"""
+    """国网集中器本地通信模块接口协议解析器 (Q/GDW 10376.2—2024 + 福建增补)"""
+
+    # 福建增补规约 AFN 集合（附件3：1376.2集中器本地通信模块接口协议【福建增补】）
+    # 福建增补所有功能码均增加 50H，信息域/地址域结构与 2024 国网不同
+    FUJIAN_AFNS = {0x50, 0x51, 0x52, 0x53, 0x55, 0x56}
 
     # AFN 定义
     AFN_MAP = {
@@ -25,6 +29,13 @@ class GDW10376Parser:
         0x15: "文件传输",
         0xF0: "内部调试",
         0xF1: "并发抄表",
+        # ===== 福建增补（附件3）=====
+        0x50: "确认/否认（福建增补）",
+        0x51: "初始化（福建增补）",
+        0x52: "数据转发（福建增补）",
+        0x53: "查询数据（福建增补）",
+        0x55: "控制命令（福建增补）",
+        0x56: "主动上报（福建增补）",
     }
 
     # FN 定义 (AFN -> {Fn: 名称})
@@ -132,6 +143,58 @@ class GDW10376Parser:
         0xF1: {
             1: "集中器主动并发抄表",
             2: "集中器确认主动上报",
+        },
+        # ===================== 福建增补（附件3） =====================
+        0x50: {
+            1: "确认",
+            2: "否认",
+            3: "确认且还有后续任务",
+        },
+        0x51: {
+            1: "硬件初始化",
+            2: "参数区初始化",
+            3: "数据区初始化",
+        },
+        0x52: {
+            1: "转发通信协议数据帧",
+            2: "CCO任务队列_智能补采",
+            3: "CCO任务队列_本地定时",
+            11: "CCO并发抄表_福建",
+            12: "清空CCO并发抄表队列",
+        },
+        0x53: {
+            1: "本地模块参数配置请求",
+            2: "主节点地址",
+            4: "本地通信模块厂商代码和版本信息",
+            5: "本地通信模块通信信道信息",
+            6: "本地通信模块串口当前通信参数",
+            10: "模块通信协议模式切换",
+        },
+        0x55: {
+            1: "设置主节点地址",
+            2: "允许、禁止从节点上报",
+            3: "启动广播命令（不需要进行时标修正）",
+            4: "启动广播命令（需要进行时标修正）",
+            6: "启动从节点主动注册",
+            7: "结束当前任务",
+            8: "启动预告任务执行",
+            9: "预告抄读对象",
+            10: "模块通信协议模式切换",
+            11: "本地通信模块串口通信速率协商",
+            12: "自动恢复默认通信速率时长",
+            13: "本地通信模块串口允许协商最高通信速率设置",
+            18: "启动预告任务执行（2字节报文长度模式）",
+        },
+        0x56: {
+            1: "主动注册的从节点信息",
+            2: "从节点主动上报事件内容",
+            3: "通信对象具体抄读内容请求",
+            4: "预告的通信对象响应报文",
+            5: "信道延时信息报文",
+            6: "广播任务完成",
+            13: "通信对象具体抄读内容请求（2字节报文长度模式）",
+            14: "预告的通信对象响应报文（2字节报文长度模式）",
+            15: "带任务信息的事件上报",
         },
     }
 
@@ -333,6 +396,16 @@ class GDW10376Parser:
         info_end = min(offset + info_domain_len, frame_len)
         actual_info_len = info_end - offset
 
+        # ========== 福建增补帧判定（附件3）==========
+        # 福建增补帧结构: 68 L C R(6B) A1(6B) A3(6B) AFN DT data CS 16
+        # AFN 固定位于 info_start + 18 (R6 + A1/A3 12B)，即 frame[22]
+        # 2024 国网帧 AFN 位于 info_start + info_len + addr_len
+        # 通过探测 info_start+18 处字节是否 ∈ FUJIAN_AFNS 判定
+        is_fujian = False
+        fujian_afn_probe = frame_bytes[info_end + 12] if info_end + 12 < cs_pos else None
+        if fujian_afn_probe is not None and fujian_afn_probe in self.FUJIAN_AFNS:
+            is_fujian = True
+
         if actual_info_len > 0:
             info_bytes = frame_bytes[offset:info_end]
             table_data.append((
@@ -344,7 +417,21 @@ class GDW10376Parser:
             ))
 
             # 解析信息域内容
-            if dir_val == 0 and actual_info_len >= 5:
+            if is_fujian:
+                # ===== 福建增补信息域（附件3 §5.2）=====
+                # 下行: 保留(5B) + 报文序列号(1B)
+                # 上行: 保留(4B, BS) + 事件标志(1B, BS: D0) + 报文序列号(1B)
+                for i in range(min(actual_info_len, 6)):
+                    if i == 5:
+                        seq = info_bytes[5]
+                        table_data.append(("  报文序列号", f"0x{seq:02X}", str(seq), "0~255循环（福建增补）", offset + 5, offset + 5))
+                    elif dir_val == 1 and i == 4:
+                        b4 = info_bytes[4]
+                        event_flag = b4 & 0x01
+                        table_data.append(("  D0 事件标志", f"{b4 & 0x01:01b}", str(event_flag), "0=无上报事件, 1=有上报事件（福建增补）", offset + 4, offset + 4))
+                    else:
+                        table_data.append((f"  保留{i}", f"0x{info_bytes[i]:02X}", str(info_bytes[i]), "保留（福建增补）", offset + i, offset + i))
+            elif dir_val == 0 and actual_info_len >= 5:
                 # 下行信息域
                 b0 = info_bytes[0]
                 b0_bits = f"{b0:08b}"
@@ -475,7 +562,10 @@ class GDW10376Parser:
             else:
                 comm_module_flag = (info_bytes[0] >> 2) & 0x01
 
-        if comm_module_flag == 1:
+        if is_fujian:
+            # 福建增补帧：固定 A1(6B) + A3(6B) = 12B，无中继 A2
+            addr_len = 12
+        elif comm_module_flag == 1:
             addr_len = 12 + 6 * relay_level
 
         # 检查帧长度是否足够容纳地址域
@@ -707,6 +797,11 @@ class GDW10376Parser:
             return
 
         fn = fn_list[0]  # 简化处理，只解析第一个Fn
+
+        # 福建增补 AFN（附件3）单独处理
+        if afn in self.FUJIAN_AFNS:
+            self._parse_fujian_afn(afn, fn, data_bytes, table_data, base_offset, is_upstream)
+            return
 
         # AFN=00H 确认/否认
         if afn == 0x00:
@@ -1767,6 +1862,701 @@ class GDW10376Parser:
                 afn_name = self.get_afn_name(afn)
                 fn_name = self.get_fn_name(afn, fn)
                 table_data.append(("  用户数据(HEX)", hex_str, f"{data_len}字节", f"AFN={afn:02X}H({afn_name}) {fn_name} - 数据单元按HEX展示", base_offset, base_offset + data_len - 1))
+
+    # ===================== 福建增补（附件3）=====================
+    def _parse_fujian_afn(self, afn: int, fn: int, data_bytes: bytes, table_data: list, base_offset: int, is_upstream: bool = False):
+        """解析福建增补规约 AFN=50H~56H 数据单元（1376.2集中器本地通信模块接口协议【福建增补】V1.4）
+
+        帧内 645/698 报文内容用透明转发承载，本方法负责 376.2 帧应用层数据单元结构解析。
+        """
+        data_len = len(data_bytes)
+        offset = 0
+        proto_map = {0x00: "透明传输", 0x01: "DL/T 645-1997", 0x02: "DL/T 645-2007", 0x03: "DL/T 698.45"}
+        rate_map = {0: "300", 1: "600", 2: "1200", 3: "2400", 4: "4800", 5: "7200", 6: "9600", 7: "19200", 8: "38400", 9: "57600", 10: "115200"}
+        mode_map = {0: "无效", 1: "国网协议", 2: "福建增补协议", 3: "无效"}
+
+        # ---------- AFN=50H 确认/否认 ----------
+        if afn == 0x50:
+            if fn == 1:  # F1 确认
+                table_data.append(("  确认", "-", "无数据单元", "福建增补 AFN=50H F1 确认", base_offset, base_offset + max(data_len - 1, 0)))
+            elif fn == 2 and data_len >= 1:  # F2 否认
+                err = data_bytes[0]
+                err_desc = self._get_deny_error_desc(err)
+                table_data.append(("  错误状态字", f"0x{err:02X}", str(err), err_desc, base_offset, base_offset))
+            elif fn == 3:  # F3 确认且还有后续任务
+                table_data.append(("  确认且还有后续任务", "-", "无数据单元", "福建增补 AFN=50H F3", base_offset, base_offset + max(data_len - 1, 0)))
+            return
+
+        # ---------- AFN=51H 初始化 ----------
+        if afn == 0x51:
+            fn_names = {1: "硬件初始化(复位)", 2: "参数区初始化(恢复出厂)", 3: "数据区初始化(节点侦听信息)"}
+            table_data.append(("  说明", "-", "无数据单元", f"福建增补 AFN=51H {fn_names.get(fn, f'F{fn}')}", base_offset, base_offset + max(data_len - 1, 0)))
+            return
+
+        # ---------- AFN=52H 数据转发 ----------
+        if afn == 0x52:
+            if fn == 1:
+                if not is_upstream and data_len >= 2:
+                    # 下行 F1 透明转发: 通信对象类型(1) + 通信对象地址(6) + 透明转发控制字(1) + 等待报文超时(1) + 等待字节超时(1) + 报文长度(2) + 报文内容(k)
+                    obj_type = data_bytes[0]
+                    obj_addr = self._format_addr(data_bytes[1:7])
+                    ctrl_word = data_bytes[7]
+                    wait_msg = data_bytes[8]
+                    wait_byte = data_bytes[9]
+                    msg_len = int.from_bytes(data_bytes[10:12], 'little')
+                    table_data.append(("  通信对象类型", f"0x{obj_type:02X}", str(obj_type), f"{self._get_obj_type_name(obj_type)}", base_offset, base_offset))
+                    table_data.append(("  通信对象地址", obj_addr, obj_addr, "BCD编码，6字节", base_offset + 1, base_offset + 6))
+                    table_data.append(("  透明转发通信控制字", f"0x{ctrl_word:02X}", str(ctrl_word), "BS8", base_offset + 7, base_offset + 7))
+                    table_data.append(("  接收等待报文超时", f"0x{wait_msg:02X}", str(wait_msg), "10ms或1s", base_offset + 8, base_offset + 8))
+                    table_data.append(("  接收等待字节超时", f"0x{wait_byte:02X}", str(wait_byte), "10ms", base_offset + 9, base_offset + 9))
+                    table_data.append(("  报文长度", f"0x{data_bytes[10]:02X}{data_bytes[11]:02X}", str(msg_len), "字节", base_offset + 10, base_offset + 11))
+                    if data_len >= 12 + msg_len:
+                        content = data_bytes[12:12+msg_len]
+                        self._append_raw_payload(content, base_offset + 12, table_data)
+                elif is_upstream and data_len >= 2:
+                    # 上行 F1 转发通信协议数据帧: 通信对象类型(1) + 通信对象地址(6) + 报文长度(2) + 报文内容(L)
+                    obj_type = data_bytes[0]
+                    obj_addr = self._format_addr(data_bytes[1:7])
+                    msg_len = int.from_bytes(data_bytes[7:9], 'little')
+                    table_data.append(("  本次返回报文通信对象类型", f"0x{obj_type:02X}", str(obj_type), f"{self._get_obj_type_name(obj_type)}", base_offset, base_offset))
+                    table_data.append(("  通信对象地址", obj_addr, obj_addr, "BCD编码，6字节", base_offset + 1, base_offset + 6))
+                    table_data.append(("  报文长度", f"0x{data_bytes[7]:02X}{data_bytes[8]:02X}", str(msg_len), "字节", base_offset + 7, base_offset + 8))
+                    if msg_len == 1:
+                        err = data_bytes[9]
+                        table_data.append(("  错误代码", f"0x{err:02X}", str(err), self._get_err_code_desc(err), base_offset + 9, base_offset + 9))
+                    elif data_len >= 9 + msg_len:
+                        content = data_bytes[9:9+msg_len]
+                        self._append_raw_payload(content, base_offset + 9, table_data)
+                else:
+                    table_data.append(("  数据单元", ' '.join(f'{b:02X}' for b in data_bytes), f"{data_len}字节", "数据不足或按HEX展示", base_offset, base_offset + data_len - 1))
+            elif fn in (2, 3, 11):
+                # F2 智能补采 / F3 本地定时 / F11 并发抄表_福建
+                # 上下行同构: 任务方案号(2) + 具体任务序号(2) + 通信对象类型(1) + 通信对象地址(6) + [规约类型(1)+保留(1)+报文长度(2)+报文内容(L)]
+                if data_len >= 2:
+                    plan = int.from_bytes(data_bytes[0:2], 'little')
+                    task_seq = int.from_bytes(data_bytes[2:4], 'little')
+                    table_data.append(("  任务方案号", f"0x{data_bytes[0]:02X}{data_bytes[1]:02X}", str(plan), "", base_offset, base_offset + 1))
+                    table_data.append(("  具体任务序号", f"0x{data_bytes[2]:02X}{data_bytes[3]:02X}", str(task_seq), "", base_offset + 2, base_offset + 3))
+                    if data_len >= 4:
+                        obj_type = data_bytes[4]
+                        table_data.append(("  通信对象类型", f"0x{obj_type:02X}", str(obj_type), f"{self._get_obj_type_name(obj_type)}", base_offset + 4, base_offset + 4))
+                    if data_len >= 10:
+                        obj_addr = self._format_addr(data_bytes[5:11])
+                        table_data.append(("  通信对象地址", obj_addr, obj_addr, "BCD编码，6字节", base_offset + 5, base_offset + 10))
+                    if data_len >= 11:
+                        proto_type = data_bytes[11]
+                        table_data.append(("  规约类型", f"0x{proto_type:02X}", str(proto_type), proto_map.get(proto_type, "保留"), base_offset + 11, base_offset + 11))
+                    if data_len >= 12:
+                        reserved = data_bytes[12]
+                        table_data.append(("  保留", f"0x{reserved:02X}", str(reserved), "", base_offset + 12, base_offset + 12))
+                    if data_len >= 14:
+                        msg_len = int.from_bytes(data_bytes[13:15], 'little')
+                        table_data.append(("  报文长度", f"0x{data_bytes[13]:02X}{data_bytes[14]:02X}", str(msg_len), "字节", base_offset + 13, base_offset + 14))
+                        if data_len >= 15 + msg_len:
+                            content = data_bytes[15:15+msg_len]
+                            self._append_raw_payload(content, base_offset + 15, table_data)
+            elif fn == 12:
+                table_data.append(("  清空CCO并发抄表队列", "-", "无数据单元", "福建增补 AFN=52H F12", base_offset, base_offset + max(data_len - 1, 0)))
+            else:
+                table_data.append(("  数据单元", ' '.join(f'{b:02X}' for b in data_bytes), f"{data_len}字节", "福建增补 AFN=52H", base_offset, base_offset + data_len - 1))
+            return
+
+        # ---------- AFN=53H 查询数据 ----------
+        if afn == 0x53:
+            if is_upstream:
+                if fn == 1 and data_len >= 3:
+                    # F1 本地模块参数配置请求（上行）: 每轮次支持的总预告任务对象数量(2) + 每次预告抄读对象数量(1)
+                    total = int.from_bytes(data_bytes[0:2], 'little')
+                    per = data_bytes[2]
+                    table_data.append(("  每轮次支持的总预告任务对象数量", f"0x{data_bytes[0]:02X}{data_bytes[1]:02X}", str(total), "", base_offset, base_offset + 1))
+                    table_data.append(("  每次预告抄读对象数量", f"0x{per:02X}", str(per), "", base_offset + 2, base_offset + 2))
+                elif fn == 2 and data_len >= 6:
+                    addr = self._format_addr(data_bytes[0:6])
+                    table_data.append(("  主节点地址", addr, addr, "BCD编码，6字节", base_offset, base_offset + 5))
+                elif fn == 4 and data_len >= 9:
+                    # F4 厂商代码和版本信息（上行）: 通信对象类型(1) + 通信对象地址(6) + 厂商代码(2) + 芯片代码(2) + 版本日期-日(1)+月(1)+年(1) + 版本(2)
+                    obj_type = data_bytes[0]
+                    obj_addr = self._format_addr(data_bytes[1:7])
+                    vendor = bytes(data_bytes[7:9]).decode('ascii', errors='replace')
+                    chip = bytes(data_bytes[9:11]).decode('ascii', errors='replace')
+                    day, month, year = data_bytes[11], data_bytes[12], data_bytes[13]
+                    ver = int.from_bytes(data_bytes[14:16], 'big')
+                    table_data.append(("  通信对象类型", f"0x{obj_type:02X}", str(obj_type), f"{self._get_obj_type_name(obj_type)}", base_offset, base_offset))
+                    table_data.append(("  通信对象地址", obj_addr, obj_addr, "BCD编码，6字节", base_offset + 1, base_offset + 6))
+                    table_data.append(("  厂商代码", f"0x{data_bytes[7]:02X}{data_bytes[8]:02X}", vendor, "ASCII，2字节", base_offset + 7, base_offset + 8))
+                    table_data.append(("  芯片代码", f"0x{data_bytes[9]:02X}{data_bytes[10]:02X}", chip, "ASCII，2字节", base_offset + 9, base_offset + 10))
+                    table_data.append(("  版本日期", f"20{year:02X}-{month:02X}-{day:02X}", f"20{year:02X}-{month:02X}-{day:02X}", "BCD，日月年", base_offset + 11, base_offset + 13))
+                    table_data.append(("  版本", f"0x{data_bytes[14]:02X}{data_bytes[15]:02X}", str(ver), "BCD，2字节", base_offset + 14, base_offset + 15))
+                elif fn == 5 and data_len >= 9:
+                    # F5 本地通信模块通信信道信息（上行）: 通信对象(1) + 通信对象地址(6) + 模块所在实际相位(2)
+                    obj_type = data_bytes[0]
+                    obj_addr = self._format_addr(data_bytes[1:7])
+                    phase = int.from_bytes(data_bytes[7:9], 'little')
+                    phase_map = {0: "未知/默认", 1: "A相", 2: "B相", 3: "C相"}
+                    table_data.append(("  通信对象", f"0x{obj_type:02X}", str(obj_type), f"{self._get_obj_type_name(obj_type)}", base_offset, base_offset))
+                    table_data.append(("  通信对象地址", obj_addr, obj_addr, "BCD编码，6字节", base_offset + 1, base_offset + 6))
+                    table_data.append(("  模块所在实际相位", f"0x{data_bytes[7]:02X}{data_bytes[8]:02X}", str(phase), phase_map.get(phase, "保留"), base_offset + 7, base_offset + 8))
+                elif fn == 6 and data_len >= 4:
+                    # F6 本地通信模块串口当前通信参数（上行）: 当前通信速率(1) + 允许协商最高通信速率(1) + 自动恢复默认时长(2)
+                    cur_rate = data_bytes[0]
+                    max_rate = data_bytes[1]
+                    restore = int.from_bytes(data_bytes[2:4], 'little')
+                    table_data.append(("  串口当前通信速率", f"0x{cur_rate:02X}", f"{rate_map.get(cur_rate, '保留')}bps", f"枚举值{cur_rate}", base_offset, base_offset))
+                    table_data.append(("  允许协商最高通信速率", f"0x{max_rate:02X}", f"{rate_map.get(max_rate, '保留')}bps", f"枚举值{max_rate}", base_offset + 1, base_offset + 1))
+                    table_data.append(("  自动恢复默认速率时长", f"0x{data_bytes[2]:02X}{data_bytes[3]:02X}", f"{restore}分钟", "16~1400，默认120", base_offset + 2, base_offset + 3))
+                elif fn == 10 and data_len >= 1:
+                    b0 = data_bytes[0]
+                    mode = b0 & 0x03
+                    table_data.append(("  模块运行模式", f"0x{b0:02X}", mode_map.get(mode, f"保留({mode})"), "D0~D1: 1=国网, 2=福建增补", base_offset, base_offset))
+                else:
+                    table_data.append(("  数据单元", ' '.join(f'{b:02X}' for b in data_bytes), f"{data_len}字节", "福建增补 AFN=53H 上行", base_offset, base_offset + data_len - 1))
+            else:
+                table_data.append(("  查询请求", "-", "无数据单元", "福建增补 AFN=53H 下行查询", base_offset, base_offset + max(data_len - 1, 0)))
+            return
+
+        # ---------- AFN=55H 控制命令 ----------
+        if afn == 0x55:
+            if fn == 1 and data_len >= 6:
+                addr = self._format_addr(data_bytes[0:6])
+                table_data.append(("  主节点地址", addr, addr, "BCD编码，6字节", base_offset, base_offset + 5))
+            elif fn == 2 and data_len >= 1:
+                # 本次设置的对象数量n + n×[通信对象类型(1)+任务对象通信地址(6)+事件上报状态标志(1)]
+                count = data_bytes[0]
+                table_data.append(("  本次设置的对象数量", f"0x{count:02X}", str(count), "", base_offset, base_offset))
+                offset = 1
+                for i in range(count):
+                    if offset + 8 > data_len:
+                        table_data.append((f"  对象{i+1}", "-", "数据不足", f"需要8字节,剩余{data_len-offset}", base_offset + offset, base_offset + data_len - 1))
+                        break
+                    obj_type = data_bytes[offset]
+                    addr = self._format_addr(data_bytes[offset+1:offset+7])
+                    status = data_bytes[offset+7]
+                    status_map = {0: "禁止", 1: "允许"}
+                    table_data.append((f"  对象{i+1}通信对象类型", f"0x{obj_type:02X}", str(obj_type), f"{self._get_obj_type_name(obj_type)}", base_offset + offset, base_offset + offset))
+                    table_data.append((f"  对象{i+1}任务对象通信地址", addr, addr, "BCD编码，6字节", base_offset + offset + 1, base_offset + offset + 6))
+                    table_data.append((f"  对象{i+1}事件上报状态标志", f"0x{status:02X}", status_map.get(status, "保留"), "0禁止,1允许", base_offset + offset + 7, base_offset + offset + 7))
+                    offset += 8
+            elif fn == 3 and data_len >= 2:
+                # 通信对象类型(1) + 广播时长(1) + 广播报文长度n(1) + 广播请求内容(N)
+                obj_type = data_bytes[0]
+                duration = data_bytes[1]
+                table_data.append(("  通信对象类型", f"0x{obj_type:02X}", str(obj_type), f"{self._get_obj_type_name(obj_type)}", base_offset, base_offset))
+                table_data.append(("  广播时长", f"0x{duration:02X}", f"{duration}分钟", "", base_offset + 1, base_offset + 1))
+                if data_len >= 3:
+                    bcast_len = data_bytes[2]
+                    table_data.append(("  广播报文长度", f"0x{bcast_len:02X}", str(bcast_len), "字节", base_offset + 2, base_offset + 2))
+                    if data_len >= 3 + bcast_len:
+                        content = data_bytes[3:3+bcast_len]
+                        self._append_raw_payload(content, base_offset + 3, table_data)
+            elif fn == 4 and data_len >= 2:
+                obj_type = data_bytes[0]
+                duration = data_bytes[1]
+                table_data.append(("  通信对象类型", f"0x{obj_type:02X}", str(obj_type), f"{self._get_obj_type_name(obj_type)}", base_offset, base_offset))
+                table_data.append(("  广播时长", f"0x{duration:02X}", f"{duration}分钟", "需要通信延时修正", base_offset + 1, base_offset + 1))
+            elif fn == 6 and data_len >= 2:
+                duration = int.from_bytes(data_bytes[0:2], 'little')
+                table_data.append(("  允许执行时间", f"0x{data_bytes[0]:02X}{data_bytes[1]:02X}", f"{duration}分钟", "启动从节点主动注册", base_offset, base_offset + 1))
+            elif fn in (7, 8, 18):
+                fn_names = {7: "结束当前任务", 8: "启动预告任务执行", 18: "启动预告任务执行（2字节报文长度模式）"}
+                table_data.append(("  说明", "-", "无数据单元", f"福建增补 AFN=55H F{fn} {fn_names.get(fn,'')}", base_offset, base_offset + max(data_len - 1, 0)))
+            elif fn == 9 and data_len >= 3:
+                # 本次预告对象数量(2) + 本次通信对象是否延时修正(1) + n×[预告对象序号(2)+通信对象类型(1)+地址(6)]
+                total = int.from_bytes(data_bytes[0:2], 'little')
+                delay_flag = data_bytes[2]
+                table_data.append(("  本次预告对象数量", f"0x{data_bytes[0]:02X}{data_bytes[1]:02X}", str(total), "", base_offset, base_offset + 1))
+                table_data.append(("  通信延时修正标志", f"0x{delay_flag:02X}", "需要修正" if delay_flag else "不需要修正", "0=不修正, 1=修正", base_offset + 2, base_offset + 2))
+                offset = 3
+                for i in range(total):
+                    if offset + 9 > data_len:
+                        table_data.append((f"  预告对象{i+1}", "-", "数据不足", f"需要9字节,剩余{data_len-offset}", base_offset + offset, base_offset + data_len - 1))
+                        break
+                    seq = int.from_bytes(data_bytes[offset:offset+2], 'little')
+                    obj_type = data_bytes[offset+2]
+                    addr_bytes = data_bytes[offset+3:offset+9]
+                    addr = self._format_addr(addr_bytes)
+                    table_data.append((f"  预告对象{i+1}序号", f"0x{data_bytes[offset]:02X}{data_bytes[offset+1]:02X}", str(seq), "", base_offset + offset, base_offset + offset + 1))
+                    table_data.append((f"  预告对象{i+1}通信对象类型", f"0x{obj_type:02X}", str(obj_type), f"{self._get_obj_type_name(obj_type)}", base_offset + offset + 2, base_offset + offset + 2))
+                    table_data.append((f"  预告对象{i+1}通信地址", addr, addr, "BCD编码，6字节", base_offset + offset + 3, base_offset + offset + 8))
+                    offset += 9
+            elif fn in (10, 11, 12, 13):
+                fn_names = {10: "模块通信协议模式切换", 11: "串口通信速率协商", 12: "自动恢复默认通信速率时长", 13: "允许协商最高通信速率设置"}
+                if fn == 10 and data_len >= 1:
+                    b0 = data_bytes[0]
+                    mode = b0 & 0x03
+                    table_data.append(("  模块运行模式", f"0x{b0:02X}", mode_map.get(mode, f"保留({mode})"), "D0~D1: 1=国网, 2=福建增补", base_offset, base_offset))
+                elif fn in (11, 13) and data_len >= 1:
+                    rate = data_bytes[0]
+                    table_data.append((f"  通信速率", f"0x{rate:02X}", f"{rate_map.get(rate, '保留')}bps", f"枚举值{rate}", base_offset, base_offset))
+                elif fn == 12 and data_len >= 2:
+                    restore = int.from_bytes(data_bytes[0:2], 'little')
+                    table_data.append(("  自动恢复默认速率时长", f"0x{data_bytes[0]:02X}{data_bytes[1]:02X}", f"{restore}分钟", "16~1400，默认120", base_offset, base_offset + 1))
+                else:
+                    table_data.append(("  数据单元", ' '.join(f'{b:02X}' for b in data_bytes), f"{data_len}字节", f"福建增补 AFN=55H F{fn}", base_offset, base_offset + data_len - 1))
+            else:
+                table_data.append(("  数据单元", ' '.join(f'{b:02X}' for b in data_bytes), f"{data_len}字节", f"福建增补 AFN=55H F{fn}", base_offset, base_offset + data_len - 1))
+            return
+
+        # ---------- AFN=56H 主动上报 ----------
+        if afn == 0x56:
+            if is_upstream:
+                if fn == 1 and data_len >= 1:
+                    # F1 主动注册的从节点信息: 本次上报从节点数量n + n×[从节点地址(6)]
+                    count = data_bytes[0]
+                    table_data.append(("  本次上报从节点数量", f"0x{count:02X}", str(count), "", base_offset, base_offset))
+                    offset = 1
+                    for i in range(count):
+                        if offset + 6 > data_len:
+                            table_data.append((f"  从节点{i+1}", "-", "数据不足", f"需要6字节,剩余{data_len-offset}", base_offset + offset, base_offset + data_len - 1))
+                            break
+                        addr = self._format_addr(data_bytes[offset:offset+6])
+                        table_data.append((f"  从节点{i+1}地址", addr, addr, "BCD编码，6字节", base_offset + offset, base_offset + offset + 5))
+                        offset += 6
+                elif fn == 2 and data_len >= 9:
+                    # F2 从节点主动上报事件内容: 通信对象类型(1) + 任务对象通信地址(6) + 主动上报报文长度(1) + 主动上报报文(L)
+                    obj_type = data_bytes[0]
+                    obj_addr = self._format_addr(data_bytes[1:7])
+                    msg_len = data_bytes[7]
+                    table_data.append(("  通信对象类型", f"0x{obj_type:02X}", str(obj_type), f"{self._get_obj_type_name(obj_type)}", base_offset, base_offset))
+                    table_data.append(("  任务对象通信地址", obj_addr, obj_addr, "BCD编码，6字节", base_offset + 1, base_offset + 6))
+                    table_data.append(("  主动上报报文长度", f"0x{msg_len:02X}", str(msg_len), "字节", base_offset + 7, base_offset + 7))
+                    if data_len >= 8 + msg_len:
+                        content = data_bytes[8:8+msg_len]
+                        self._append_raw_payload(content, base_offset + 8, table_data)
+                elif fn in (3, 13) and data_len >= 9:
+                    # F3/F13 通信对象具体抄读内容请求: 本次请求通信对象类型(1) + 通信对象地址(6) + 信道延时时间(2)
+                    obj_type = data_bytes[0]
+                    obj_addr = self._format_addr(data_bytes[1:7])
+                    delay = int.from_bytes(data_bytes[7:9], 'little')
+                    table_data.append(("  本次请求通信对象类型", f"0x{obj_type:02X}", str(obj_type), f"{self._get_obj_type_name(obj_type)}", base_offset, base_offset))
+                    table_data.append(("  通信对象地址", obj_addr, obj_addr, "BCD编码，6字节", base_offset + 1, base_offset + 6))
+                    table_data.append(("  通信对象信道延时时间", f"0x{data_bytes[7]:02X}{data_bytes[8]:02X}", f"{delay*10}ms", "单位10ms", base_offset + 7, base_offset + 8))
+                elif fn in (4, 14) and data_len >= 11:
+                    # F4/F14 预告的通信对象响应报文: 任务方案号(2) + 具体任务序号(2) + 本次请求通信对象类型(1) + 任务对象通信地址(6) + 返回内容报文长度(1/2) + 返回报文内容(n)
+                    plan = int.from_bytes(data_bytes[0:2], 'little')
+                    task_seq = int.from_bytes(data_bytes[2:4], 'little')
+                    obj_type = data_bytes[4]
+                    obj_addr = self._format_addr(data_bytes[5:11])
+                    len_bytes = 1 if fn == 4 else 2
+                    table_data.append(("  任务方案号", f"0x{data_bytes[0]:02X}{data_bytes[1]:02X}", str(plan), "", base_offset, base_offset + 1))
+                    table_data.append(("  具体任务序号", f"0x{data_bytes[2]:02X}{data_bytes[3]:02X}", str(task_seq), "", base_offset + 2, base_offset + 3))
+                    table_data.append(("  本次请求通信对象类型", f"0x{obj_type:02X}", str(obj_type), f"{self._get_obj_type_name(obj_type)}", base_offset + 4, base_offset + 4))
+                    table_data.append(("  任务对象通信地址", obj_addr, obj_addr, "BCD编码，6字节", base_offset + 5, base_offset + 10))
+                    if data_len >= 11 + len_bytes:
+                        msg_len = data_bytes[11] if len_bytes == 1 else int.from_bytes(data_bytes[11:13], 'little')
+                        table_data.append((f"  返回内容报文长度", f"0x{' '.join(f'{b:02X}' for b in data_bytes[11:11+len_bytes])}", str(msg_len), "字节", base_offset + 11, base_offset + 11 + len_bytes - 1))
+                        if msg_len == 1:
+                            err = data_bytes[11+len_bytes]
+                            table_data.append(("  错误代码", f"0x{err:02X}", str(err), self._get_err_code_desc(err), base_offset + 11 + len_bytes, base_offset + 11 + len_bytes))
+                        elif data_len >= 11 + len_bytes + msg_len:
+                            content = data_bytes[11+len_bytes:11+len_bytes+msg_len]
+                            self._append_raw_payload(content, base_offset + 11 + len_bytes, table_data)
+                elif fn == 5 and data_len >= 2:
+                    delay = int.from_bytes(data_bytes[0:2], 'little')
+                    table_data.append(("  本次通信对象延时时间", f"0x{data_bytes[0]:02X}{data_bytes[1]:02X}", f"{delay*10}ms", "单位10ms", base_offset, base_offset + 1))
+                elif fn == 6:
+                    table_data.append(("  广播任务完成", "-", "无数据单元", "福建增补 AFN=56H F6", base_offset, base_offset + max(data_len - 1, 0)))
+                elif fn == 15 and data_len >= 10:
+                    # F15 带任务信息的事件上报: 任务方案号(2) + 具体任务序号(2) + 通信对象类型(1) + 通信对象地址(6) + 规约类型(1) + 返回内容报文长度(2) + 返回报文内容(L)
+                    plan = int.from_bytes(data_bytes[0:2], 'little')
+                    task_seq = int.from_bytes(data_bytes[2:4], 'little')
+                    obj_type = data_bytes[4]
+                    obj_addr = self._format_addr(data_bytes[5:11])
+                    proto_type = data_bytes[11]
+                    msg_len = int.from_bytes(data_bytes[12:14], 'little')
+                    table_data.append(("  任务方案号", f"0x{data_bytes[0]:02X}{data_bytes[1]:02X}", str(plan), "", base_offset, base_offset + 1))
+                    table_data.append(("  具体任务序号", f"0x{data_bytes[2]:02X}{data_bytes[3]:02X}", str(task_seq), "", base_offset + 2, base_offset + 3))
+                    table_data.append(("  通信对象类型", f"0x{obj_type:02X}", str(obj_type), f"{self._get_obj_type_name(obj_type)}", base_offset + 4, base_offset + 4))
+                    table_data.append(("  通信对象地址", obj_addr, obj_addr, "BCD编码，6字节", base_offset + 5, base_offset + 10))
+                    table_data.append(("  规约类型", f"0x{proto_type:02X}", str(proto_type), proto_map.get(proto_type, "保留"), base_offset + 11, base_offset + 11))
+                    table_data.append(("  返回内容报文长度", f"0x{data_bytes[12]:02X}{data_bytes[13]:02X}", str(msg_len), "字节", base_offset + 12, base_offset + 13))
+                    if msg_len == 1:
+                        err = data_bytes[14]
+                        table_data.append(("  错误代码", f"0x{err:02X}", str(err), self._get_err_code_desc(err), base_offset + 14, base_offset + 14))
+                    elif data_len >= 14 + msg_len:
+                        content = data_bytes[14:14+msg_len]
+                        self._append_raw_payload(content, base_offset + 14, table_data)
+                else:
+                    table_data.append(("  数据单元", ' '.join(f'{b:02X}' for b in data_bytes), f"{data_len}字节", f"福建增补 AFN=56H F{fn} 上行", base_offset, base_offset + data_len - 1))
+            else:
+                # 下行: 对主动上报的确认/否认（F1/F2/F4/F5/F6/F13/F14/F15）
+                if fn in (1, 2, 4, 5, 6, 13, 14, 15):
+                    table_data.append(("  确认/否认", ' '.join(f'{b:02X}' for b in data_bytes), f"{data_len}字节", f"福建增补 AFN=56H F{fn} 下行确认", base_offset, base_offset + data_len - 1))
+                else:
+                    table_data.append(("  数据单元", ' '.join(f'{b:02X}' for b in data_bytes), f"{data_len}字节", f"福建增补 AFN=56H F{fn}", base_offset, base_offset + data_len - 1))
+            return
+
+        table_data.append(("  数据单元", ' '.join(f'{b:02X}' for b in data_bytes), f"{data_len}字节", f"福建增补 AFN={afn:02X}H F{fn}", base_offset, base_offset + data_len - 1))
+
+    @staticmethod
+    def _get_obj_type_name(obj_type: int) -> str:
+        """通信对象类型名称（附件3 引用 376.1 定义）"""
+        obj_map = {
+            0x00: "主节点模块", 0x01: "电能表通信模块", 0x02: "I型采集器通信模块",
+            0x03: "II型采集器通信模块", 0x04: "路由模块", 0x05: "信号处理模块",
+            0x09: "主节点模块", 0x0A: "从节点模块",
+        }
+        return obj_map.get(obj_type, "保留")
+
+    @staticmethod
+    def _get_err_code_desc(err: int) -> str:
+        """错误代码说明（附件3 附录B / 附件1 附录2）"""
+        err_map = {
+            0: "正确", 1: "其他错误", 2: "表地址重复", 3: "报文超长", 4: "报文校验错误",
+            6: "地址校验失败", 11: "响应超时", 14: "运用层无响应", 15: "信道忙",
+            16: "设备离线", 17: "设备未注册",
+        }
+        return err_map.get(err, f"备用({err})")
+
+    def _append_raw_payload(self, content: bytes, base_offset: int, table_data: list):
+        """附加原始报文内容（含 EB 数据标识 645 帧深度解析）"""
+        hex_str = ' '.join(f'{b:02X}' for b in content)
+        # 检测 645 帧（68 ... 68 控制码 长度 数据 ... CS 16）内含 EB 数据标识
+        if self._try_parse_embedded_eb(content, base_offset, table_data):
+            return
+        table_data.append(("  报文内容", hex_str, f"{len(content)}字节", "原始报文数据", base_offset, base_offset + len(content) - 1))
+
+    def _try_parse_embedded_eb(self, content: bytes, base_offset: int, table_data: list) -> bool:
+        """尝试解析内嵌 645 帧的 EB 数据标识（附件1 本地通信模块扩展协议）
+
+        645 帧: 68 A0..A5 68 控制码 数据域长度L DI3 DI2 DI1 DI0 数据 CS 16
+        EB 数据标识: 数据域前 4 字节为 DI3 DI2 DI1 DI0，小端合成 DI = 0xEBXXXXXX
+        """
+        if len(content) < 12 or content[0] != 0x68:
+            return False
+        # 定位 645 数据域：68(0) A0~A5(1-6) 68(7) 控制码(8) 长度(9) 数据(10:)
+        if content[7] != 0x68:
+            return False
+        ctrl = content[8]
+        data_len_field = content[9]
+        if 10 + data_len_field + 2 > len(content):
+            # 长度域与实际不符时尽力解析数据域
+            data_slice = content[10:]
+        else:
+            data_slice = content[10:10+data_len_field]
+        # 645 数据域前4字节 DI 小端: DI3 DI2 DI1 DI0 → 0xEBXXXXXXXX 需 DI0=EB
+        if len(data_slice) < 4 or data_slice[0] != 0xEB:
+            return False
+        di3, di2, di1, di0 = data_slice[0], data_slice[1], data_slice[2], data_slice[3]
+        # 附件1 数据标识为 EB XX XX XX（DI3=EB 固定）
+        di_code = f"EB{di2:02X}{di1:02X}{di0:02X}"
+        di_name = self._get_eb_di_name(di_code)
+        table_data.append(("  [内嵌645]控制码", f"0x{ctrl:02X}", self._get_645_ctrl_desc(ctrl), "645帧控制码", base_offset, base_offset + 8))
+        table_data.append(("  [内嵌645]数据域长度", f"0x{data_len_field:02X}", str(data_len_field), "字节", base_offset + 9, base_offset + 9))
+        table_data.append(("  [内嵌645]数据标识", di_code, di_name, "附件1 本地通信模块扩展协议", base_offset + 10, base_offset + 13))
+        # 解析 EB 数据内容
+        eb_data = data_slice[4:]
+        self._parse_eb_di(di_code, eb_data, base_offset + 14, table_data)
+        return True
+
+    def _get_645_ctrl_desc(self, ctrl: int) -> str:
+        """645 控制码说明（附件1 附录3）"""
+        desc_map = {
+            0x11: "主站读数据请求", 0x91: "从站读数据响应(无后续)",
+            0x14: "主站写数据请求", 0x94: "从站写数据响应",
+            0x81: "从站主动上报", 0x01: "主站上报确认",
+            0x13: "主站读后续数据", 0x93: "从站读后续数据响应",
+            0xD1: "从站写数据否认",
+        }
+        return desc_map.get(ctrl, f"0x{ctrl:02X}")
+
+    def _get_eb_di_name(self, di_code: str) -> str:
+        """获取 EB 数据标识名称（附件1）"""
+        from gdw_eb_di_lookup import get_eb_di_lookup
+        return get_eb_di_lookup().get_name(di_code)
+
+    def _parse_eb_di(self, di_code: str, data_bytes: bytes, base_offset: int, table_data: list):
+        """深度解析 EB 数据标识数据内容（附件1）
+
+        按各数据项的数据格式/长度/单位解析内容。
+        """
+        from gdw_eb_di_lookup import get_eb_di_lookup
+        lookup = get_eb_di_lookup()
+        info = lookup.get(di_code)
+        data_len = len(data_bytes)
+        if not info:
+            if data_len > 0:
+                table_data.append(("  数据内容", ' '.join(f'{b:02X}' for b in data_bytes), f"{data_len}字节", "未知EB数据标识", base_offset, base_offset + data_len - 1))
+            return
+        fmt = info.get("格式", "XX")
+        name = info.get("名称", di_code)
+        unit = info.get("单位", "")
+
+        if data_len == 0:
+            table_data.append(("  数据内容", "-", "空", name, base_offset, base_offset))
+            return
+
+        if fmt == "BCD" or fmt.startswith("BCD"):
+            # 常见长度 6（YYMMDD hhmmss）/2（XXXX）/1（HH）
+            if data_len >= 6:
+                # 时间格式 YYMMDD hhmmss
+                bcd_str = ''.join(f'{b:02X}' for b in data_bytes[0:6])
+                table_data.append(("  数据内容", ' '.join(f'{b:02X}' for b in data_bytes), f"20{bcd_str[0:2]}-{bcd_str[2:4]}-{bcd_str[4:6]} {bcd_str[6:8]}:{bcd_str[8:10]}:{bcd_str[10:12]}", name, base_offset, base_offset + 5))
+            elif data_len >= 2:
+                bcd_str = ''.join(f'{b:02X}' for b in data_bytes[0:2])
+                table_data.append(("  数据内容", ' '.join(f'{b:02X}' for b in data_bytes), f"{int(bcd_str)}", name + (f"（{unit}）" if unit else ""), base_offset, base_offset + data_len - 1))
+            else:
+                table_data.append(("  数据内容", ' '.join(f'{b:02X}' for b in data_bytes), ''.join(f'{b:02X}' for b in data_bytes), name, base_offset, base_offset + data_len - 1))
+        elif fmt in ("ASCII", "XX"):
+            table_data.append(("  数据内容", ' '.join(f'{b:02X}' for b in data_bytes), data_bytes.decode('ascii', errors='replace'), name, base_offset, base_offset + data_len - 1))
+        elif fmt == "BS8":
+            b0 = data_bytes[0]
+            table_data.append(("  数据内容", f"0x{b0:02X}", f"{b0:08b}", f"BS8 {name}", base_offset, base_offset))
+        elif fmt == "BIN" or fmt.startswith("BIN"):
+            table_data.append(("  数据内容", ' '.join(f'{b:02X}' for b in data_bytes), f"{data_len}字节", f"{name}（BIN）", base_offset, base_offset + data_len - 1))
+        else:
+            # 组合格式：按长度展示 + 特殊处理常见数据项
+            if di_code in ("EB030002", "EB030101"):
+                # 停上电事件/档案异常： 停上电类型(1) + 上报数量(1) + n×[模块地址(6)]
+                if data_len >= 2:
+                    evt_type = data_bytes[0]
+                    count = data_bytes[1]
+                    type_map = {0: "模块停电", 1: "模块上电"}
+                    table_data.append(("  停上电类型", f"0x{evt_type:02X}", type_map.get(evt_type, f"保留({evt_type})"), "", base_offset, base_offset))
+                    table_data.append(("  本次上报数量", f"0x{count:02X}", str(count), "", base_offset + 1, base_offset + 1))
+                    offset = 2
+                    for i in range(count):
+                        if offset + 6 > data_len:
+                            break
+                        addr = self._format_addr(data_bytes[offset:offset+6])
+                        table_data.append((f"  模块地址{i+1}", addr, addr, "BCD编码，6字节", base_offset + offset, base_offset + offset + 5))
+                        offset += 6
+                else:
+                    table_data.append(("  数据内容", ' '.join(f'{b:02X}' for b in data_bytes), f"{data_len}字节", name, base_offset, base_offset + data_len - 1))
+            elif di_code in ("EB031101", "EB031102"):
+                # 从节点档案清单管理：操作类型(1) + 删除数量(1) + n×[地址(6)]
+                if data_len >= 2:
+                    op = data_bytes[0]
+                    count = data_bytes[1]
+                    op_map = {0: "删除", 1: "添加"}
+                    table_data.append(("  操作类型", f"0x{op:02X}", op_map.get(op, f"保留({op})"), "", base_offset, base_offset))
+                    table_data.append(("  数量", f"0x{count:02X}", str(count), "0=删除所有", base_offset + 1, base_offset + 1))
+                    offset = 2
+                    for i in range(count):
+                        if offset + 6 > data_len:
+                            break
+                        addr = self._format_addr(data_bytes[offset:offset+6])
+                        table_data.append((f"  表计地址{i+1}", addr, addr, "BCD编码，6字节", base_offset + offset, base_offset + offset + 5))
+                        offset += 6
+                else:
+                    table_data.append(("  数据内容", ' '.join(f'{b:02X}' for b in data_bytes), f"{data_len}字节", name, base_offset, base_offset + data_len - 1))
+            elif di_code == "EB040302":
+                # 上N次停上电记录：n×[停电时刻(6)+上电时刻(6)]
+                if data_len >= 12:
+                    offset = 0
+                    idx = 1
+                    while offset + 12 <= data_len:
+                        off_t = ''.join(f'{b:02X}' for b in data_bytes[offset:offset+6])
+                        on_t = ''.join(f'{b:02X}' for b in data_bytes[offset+6:offset+12])
+                        table_data.append((f"  记录{idx}停电时刻", off_t, f"20{off_t[0:2]}-{off_t[2:4]}-{off_t[4:6]} {off_t[6:8]}:{off_t[8:10]}:{off_t[10:12]}", "BCD", base_offset + offset, base_offset + offset + 5))
+                        table_data.append((f"  记录{idx}上电时刻", on_t, f"20{on_t[0:2]}-{on_t[2:4]}-{on_t[4:6]} {on_t[6:8]}:{on_t[8:10]}:{on_t[10:12]}", "BCD", base_offset + offset + 6, base_offset + offset + 11))
+                        offset += 12
+                        idx += 1
+                else:
+                    table_data.append(("  数据内容", ' '.join(f'{b:02X}' for b in data_bytes), f"{data_len}字节", name, base_offset, base_offset + data_len - 1))
+            elif di_code == "EB030501":
+                # 通信模块时钟 YYMMDD hhmmss
+                if data_len >= 6:
+                    bcd_str = ''.join(f'{b:02X}' for b in data_bytes[0:6])
+                    table_data.append(("  模块时钟", bcd_str, f"20{bcd_str[0:2]}-{bcd_str[2:4]}-{bcd_str[4:6]} {bcd_str[6:8]}:{bcd_str[8:10]}:{bcd_str[10:12]}", name, base_offset, base_offset + 5))
+                else:
+                    table_data.append(("  数据内容", ' '.join(f'{b:02X}' for b in data_bytes), f"{data_len}字节", name, base_offset, base_offset + data_len - 1))
+            elif di_code in ("EB030503", "EB030505"):
+                # 校时记录/NTB校时: YYMMDD hhmmss(6) + 低4字节NTB
+                if data_len >= 10:
+                    bcd_str = ''.join(f'{b:02X}' for b in data_bytes[0:6])
+                    ntb = int.from_bytes(data_bytes[6:10], 'little')
+                    table_data.append(("  校时时刻", bcd_str, f"20{bcd_str[0:2]}-{bcd_str[2:4]}-{bcd_str[4:6]} {bcd_str[6:8]}:{bcd_str[8:10]}:{bcd_str[10:12]}", name, base_offset, base_offset + 5))
+                    table_data.append(("  低4字节时间差/NTB", f"0x{' '.join(f'{b:02X}' for b in data_bytes[6:10])}", str(ntb), "单位40ns", base_offset + 6, base_offset + 9))
+                else:
+                    table_data.append(("  数据内容", ' '.join(f'{b:02X}' for b in data_bytes), f"{data_len}字节", name, base_offset, base_offset + data_len - 1))
+            elif di_code in ("EB040601",):
+                # 任务队列情况: 6组 [容量(3)+已用(3)+条数(2)]
+                if data_len >= 16:
+                    fields = [
+                        ("智能补采支持缓存容量", 0, 3), ("智能补采已用缓存容量", 3, 3), ("智能补采队列任务条数", 6, 2),
+                        ("本地定时支持缓存容量", 8, 3), ("本地定时已用缓存容量", 11, 3), ("本地定时队列任务条数", 14, 2),
+                    ]
+                    for fname, foff, flen in fields:
+                        if foff + flen <= data_len:
+                            val = int.from_bytes(data_bytes[foff:foff+flen], 'little')
+                            table_data.append((f"  {fname}", f"0x{' '.join(f'{b:02X}' for b in data_bytes[foff:foff+flen])}", str(val), "字节/条", base_offset + foff, base_offset + foff + flen - 1))
+                else:
+                    table_data.append(("  数据内容", ' '.join(f'{b:02X}' for b in data_bytes), f"{data_len}字节", name, base_offset, base_offset + data_len - 1))
+            elif di_code == "EB030110":
+                # 台区识别任务启动: 台区识别方法(1) + 识别时长(2)
+                if data_len >= 3:
+                    method = data_bytes[0]
+                    duration = int.from_bytes(data_bytes[1:3], 'little')
+                    method_map = {0: "自动", 1: "工频电压特征", 2: "工频频率特征", 3: "工频周期特征"}
+                    table_data.append(("  台区识别方法", f"0x{method:02X}", method_map.get(method, f"保留({method})"), "", base_offset, base_offset))
+                    table_data.append(("  识别时长", f"0x{data_bytes[1]:02X}{data_bytes[2]:02X}", f"{duration}分钟", "0=自动, 1~1440=给定, 9999=剩余时间不确定", base_offset + 1, base_offset + 2))
+                else:
+                    table_data.append(("  数据内容", ' '.join(f'{b:02X}' for b in data_bytes), f"{data_len}字节", name, base_offset, base_offset + data_len - 1))
+            elif di_code == "EB030115":
+                # 从节点主动注册任务启动: 允许注册时长(2)
+                if data_len >= 2:
+                    duration = int.from_bytes(data_bytes[0:2], 'little')
+                    table_data.append(("  允许注册时长", f"0x{data_bytes[0]:02X}{data_bytes[1]:02X}", f"{duration}分钟", "FFFF=一直注册", base_offset, base_offset + 1))
+                else:
+                    table_data.append(("  数据内容", ' '.join(f'{b:02X}' for b in data_bytes), f"{data_len}字节", name, base_offset, base_offset + data_len - 1))
+            elif di_code == "EBEEEEEE":
+                # 通信模块自身多数据项抄读: 数据项个数M(1) + n×[长度L(1) + 内容(L)]
+                if data_len >= 1:
+                    count = data_bytes[0]
+                    table_data.append(("  数据项个数", f"0x{count:02X}", str(count), "1~16", base_offset, base_offset))
+                    offset = 1
+                    for i in range(count):
+                        if offset + 1 > data_len:
+                            table_data.append((f"  数据项{i+1}", "-", "数据不足", f"剩余{data_len-offset}字节", base_offset + offset, base_offset + data_len - 1))
+                            break
+                        item_len = data_bytes[offset]
+                        offset += 1
+                        if offset + item_len > data_len:
+                            table_data.append((f"  数据项{i+1}长度", f"0x{item_len:02X}", str(item_len), f"需要{item_len}字节,剩余{data_len-offset}", base_offset + offset - 1, base_offset + offset - 1))
+                            break
+                        item_content = data_bytes[offset:offset+item_len]
+                        # 内容前4字节为 EB 数据标识
+                        if len(item_content) >= 4 and item_content[0] == 0xEB:
+                            sub_di = f"EB{item_content[1]:02X}{item_content[2]:02X}{item_content[3]:02X}"
+                            sub_name = self._get_eb_di_name(sub_di)
+                            sub_data = item_content[4:]
+                            table_data.append((f"  数据项{i+1}标识", sub_di, sub_name, "", base_offset + offset, base_offset + offset + 3))
+                            sub_rows = []
+                            self._parse_eb_di(sub_di, sub_data, 0, sub_rows)
+                            for name, raw, val, desc, bs, be in sub_rows:
+                                table_data.append((f"    {name.strip()}", raw, val, desc, base_offset + offset + 4 + bs, base_offset + offset + 4 + be))
+                        else:
+                            table_data.append((f"  数据项{i+1}内容", ' '.join(f'{b:02X}' for b in item_content), f"{item_len}字节", "", base_offset + offset, base_offset + offset + item_len - 1))
+                        offset += item_len
+                else:
+                    table_data.append(("  数据内容", ' '.join(f'{b:02X}' for b in data_bytes), f"{data_len}字节", name, base_offset, base_offset + data_len - 1))
+            elif di_code in ("EB040201", "EB040202"):
+                # 复位/停电总次数 HHHH
+                if data_len >= 2:
+                    val = int.from_bytes(data_bytes[0:2], 'little')
+                    table_data.append(("  数据内容", f"0x{data_bytes[0]:02X}{data_bytes[1]:02X}", str(val), f"{name}（次）", base_offset, base_offset + 1))
+                else:
+                    table_data.append(("  数据内容", ' '.join(f'{b:02X}' for b in data_bytes), f"{data_len}字节", name, base_offset, base_offset + data_len - 1))
+            elif di_code == "EB032001":
+                # 主节点地址 XXXXXXXXXXXX (BCD 6B)
+                if data_len >= 6:
+                    addr = self._format_addr(data_bytes[0:6])
+                    table_data.append(("  主节点地址", addr, addr, "BCD编码，6字节", base_offset, base_offset + 5))
+                else:
+                    table_data.append(("  数据内容", ' '.join(f'{b:02X}' for b in data_bytes), f"{data_len}字节", name, base_offset, base_offset + data_len - 1))
+            elif di_code == "EB030313":
+                # 周边节点信号通信质量_本台区: M(1) + n×[地址6 + 载波成功率1 + 载波SNR1 + 载波RSSI1 + 无线成功率1 + 无线SNR1 + 无线RSSI1]
+                if data_len >= 1:
+                    count = data_bytes[0]
+                    table_data.append(("  周边节点数量", f"0x{count:02X}", str(count), "≤100", base_offset, base_offset))
+                    offset = 1
+                    for i in range(count):
+                        if offset + 12 > data_len:
+                            table_data.append((f"  节点{i+1}", "-", "数据不足", f"需要12字节,剩余{data_len-offset}", base_offset + offset, base_offset + data_len - 1))
+                            break
+                        addr = self._format_addr(data_bytes[offset:offset+6])
+                        plc_succ = data_bytes[offset+6]
+                        plc_snr = data_bytes[offset+7]
+                        plc_rssi = data_bytes[offset+8]
+                        rf_succ = data_bytes[offset+9]
+                        rf_snr = data_bytes[offset+10]
+                        rf_rssi = data_bytes[offset+11]
+                        table_data.append((f"  节点{i+1}地址", addr, addr, "BCD编码，6字节", base_offset + offset, base_offset + offset + 5))
+                        table_data.append((f"  节点{i+1}载波上下行通信成功率", f"0x{plc_succ:02X}", f"{plc_succ}%", "", base_offset + offset + 6, base_offset + offset + 6))
+                        table_data.append((f"  节点{i+1}载波信噪比SNR", f"0x{plc_snr:02X}", f"{plc_snr}%", "0~100%", base_offset + offset + 7, base_offset + offset + 7))
+                        table_data.append((f"  节点{i+1}载波信号质量RSSI", f"0x{plc_rssi:02X}", f"{plc_rssi}%", "0~100%", base_offset + offset + 8, base_offset + offset + 8))
+                        table_data.append((f"  节点{i+1}无线上下行通信成功率", f"0x{rf_succ:02X}", f"{rf_succ}%", "", base_offset + offset + 9, base_offset + offset + 9))
+                        table_data.append((f"  节点{i+1}无线信噪比SNR", f"0x{rf_snr:02X}", f"{rf_snr}%", "0~100%", base_offset + offset + 10, base_offset + offset + 10))
+                        table_data.append((f"  节点{i+1}无线信号质量RSSI", f"0x{rf_rssi:02X}", f"{rf_rssi}%", "0~100%", base_offset + offset + 11, base_offset + offset + 11))
+                        offset += 12
+                else:
+                    table_data.append(("  数据内容", ' '.join(f'{b:02X}' for b in data_bytes), f"{data_len}字节", name, base_offset, base_offset + data_len - 1))
+            elif di_code == "EB030314":
+                # 周边节点信号通信质量_非本台区: M(1) + n×[SNID 3 + TEI 2 + 载波SNR1 + 载波RSSI1 + 无线SNR1 + 无线RSSI1]
+                if data_len >= 1:
+                    count = data_bytes[0]
+                    table_data.append(("  周边节点数量", f"0x{count:02X}", str(count), "≤100", base_offset, base_offset))
+                    offset = 1
+                    for i in range(count):
+                        if offset + 9 > data_len:
+                            table_data.append((f"  节点{i+1}", "-", "数据不足", f"需要9字节,剩余{data_len-offset}", base_offset + offset, base_offset + data_len - 1))
+                            break
+                        snid = int.from_bytes(data_bytes[offset:offset+3], 'big')
+                        tei = int.from_bytes(data_bytes[offset+3:offset+5], 'big')
+                        plc_snr = data_bytes[offset+5]
+                        plc_rssi = data_bytes[offset+6]
+                        rf_snr = data_bytes[offset+7]
+                        rf_rssi = data_bytes[offset+8]
+                        table_data.append((f"  节点{i+1}SNID", f"0x{' '.join(f'{b:02X}' for b in data_bytes[offset:offset+3])}", str(snid), "3字节", base_offset + offset, base_offset + offset + 2))
+                        table_data.append((f"  节点{i+1}TEI", f"0x{data_bytes[offset+3]:02X}{data_bytes[offset+4]:02X}", str(tei), "2字节", base_offset + offset + 3, base_offset + offset + 4))
+                        table_data.append((f"  节点{i+1}载波信噪比SNR", f"0x{plc_snr:02X}", f"{plc_snr}%", "0~100%", base_offset + offset + 5, base_offset + offset + 5))
+                        table_data.append((f"  节点{i+1}载波信号质量RSSI", f"0x{plc_rssi:02X}", f"{plc_rssi}%", "0~100%", base_offset + offset + 6, base_offset + offset + 6))
+                        table_data.append((f"  节点{i+1}无线信噪比SNR", f"0x{rf_snr:02X}", f"{rf_snr}%", "0~100%", base_offset + offset + 7, base_offset + offset + 7))
+                        table_data.append((f"  节点{i+1}无线信号质量RSSI", f"0x{rf_rssi:02X}", f"{rf_rssi}%", "0~100%", base_offset + offset + 8, base_offset + offset + 8))
+                        offset += 9
+                else:
+                    table_data.append(("  数据内容", ' '.join(f'{b:02X}' for b in data_bytes), f"{data_len}字节", name, base_offset, base_offset + data_len - 1))
+            elif di_code == "EB030320":
+                # 启动通信测距: 测距类型1 + 允许时间1 + 结果是否上报1 + 对象数量N + N×地址6
+                if data_len >= 4:
+                    rtype = data_bytes[0]
+                    allow_min = data_bytes[1]
+                    report = data_bytes[2]
+                    count = data_bytes[3]
+                    type_map = {0: "有直接通信的上下级节点", 1: "能直接侦听到的节点"}
+                    table_data.append(("  测距类型", f"0x{rtype:02X}", type_map.get(rtype, f"保留({rtype})"), "", base_offset, base_offset))
+                    table_data.append(("  允许时间", f"0x{allow_min:02X}", f"{allow_min}分钟", "", base_offset + 1, base_offset + 1))
+                    table_data.append(("  结果是否主动上报", f"0x{report:02X}", "上报" if report else "不上报", "0=不上报,1=上报", base_offset + 2, base_offset + 2))
+                    table_data.append(("  测距对象数量", f"0x{count:02X}", str(count), "0=按类型自动选择", base_offset + 3, base_offset + 3))
+                    offset = 4
+                    for i in range(count):
+                        if offset + 6 > data_len:
+                            table_data.append((f"  对象{i+1}", "-", "数据不足", f"需要6字节,剩余{data_len-offset}", base_offset + offset, base_offset + data_len - 1))
+                            break
+                        addr = self._format_addr(data_bytes[offset:offset+6])
+                        table_data.append((f"  对象{i+1}地址", addr, addr, "BCD编码，6字节", base_offset + offset, base_offset + offset + 5))
+                        offset += 6
+                else:
+                    table_data.append(("  数据内容", ' '.join(f'{b:02X}' for b in data_bytes), f"{data_len}字节", name, base_offset, base_offset + data_len - 1))
+            elif di_code == "EB030321":
+                # 测距结果情况表: 开始时间6 + 结束时间6 + 有结果M(2) + 本次N(1) + n×[地址6+载波测距2+无线测距2]
+                if data_len >= 15:
+                    start_t = ''.join(f'{b:02X}' for b in data_bytes[0:6])
+                    end_t = ''.join(f'{b:02X}' for b in data_bytes[6:12])
+                    total_m = int.from_bytes(data_bytes[12:14], 'little')
+                    count = data_bytes[14]
+                    table_data.append(("  测试开始时间", start_t, f"20{start_t[0:2]}-{start_t[2:4]}-{start_t[4:6]} {start_t[6:8]}:{start_t[8:10]}:{start_t[10:12]}", "BCD", base_offset, base_offset + 5))
+                    table_data.append(("  测试结束时间", end_t, f"20{end_t[0:2]}-{end_t[2:4]}-{end_t[4:6]} {end_t[6:8]}:{end_t[8:10]}:{end_t[10:12]}", "BCD", base_offset + 6, base_offset + 11))
+                    table_data.append(("  本轮测距有结果信息数量", f"0x{data_bytes[12]:02X}{data_bytes[13]:02X}", str(total_m), "", base_offset + 12, base_offset + 13))
+                    table_data.append(("  本次提供信息数量", f"0x{count:02X}", str(count), "", base_offset + 14, base_offset + 14))
+                    offset = 15
+                    for i in range(count):
+                        if offset + 10 > data_len:
+                            table_data.append((f"  结果{i+1}", "-", "数据不足", f"需要10字节,剩余{data_len-offset}", base_offset + offset, base_offset + data_len - 1))
+                            break
+                        addr = self._format_addr(data_bytes[offset:offset+6])
+                        plc_dist = int.from_bytes(data_bytes[offset+6:offset+8], 'little')
+                        rf_dist = int.from_bytes(data_bytes[offset+8:offset+10], 'little')
+                        table_data.append((f"  结果{i+1}目的地址", addr, addr, "BCD编码，6字节", base_offset + offset, base_offset + offset + 5))
+                        table_data.append((f"  结果{i+1}载波测距值", f"0x{data_bytes[offset+6]:02X}{data_bytes[offset+7]:02X}", f"{plc_dist}ns", "单位1ns, FFFF=无结果", base_offset + offset + 6, base_offset + offset + 7))
+                        table_data.append((f"  结果{i+1}无线测距值", f"0x{data_bytes[offset+8]:02X}{data_bytes[offset+9]:02X}", f"{rf_dist}ns", "单位1ns, FFFF=无结果", base_offset + offset + 8, base_offset + offset + 9))
+                        offset += 10
+                else:
+                    table_data.append(("  数据内容", ' '.join(f'{b:02X}' for b in data_bytes), f"{data_len}字节", name, base_offset, base_offset + data_len - 1))
+            elif di_code == "EB030506":
+                # NTB校时_698方式专用: 1C(1B 固定前缀) + YYYYMMDDhhmmss(BCD 7B) + NTB(4B) = 12B
+                if data_len >= 8:
+                    b0 = data_bytes[0]
+                    table_data.append(("  前缀", f"0x{b0:02X}", str(b0), "固定1C", base_offset, base_offset))
+                    bcd_str = ''.join(f'{b:02X}' for b in data_bytes[1:8])
+                    table_data.append(("  校时时间", f"0x{' '.join(f'{b:02X}' for b in data_bytes[1:8])}", f"{bcd_str[0:4]}-{bcd_str[4:6]}-{bcd_str[6:8]} {bcd_str[8:10]}:{bcd_str[10:12]}:{bcd_str[12:14]}", "YYYYMMDDhhmmss, BCD编码", base_offset + 1, base_offset + 7))
+                    if data_len >= 12:
+                        ntb = int.from_bytes(data_bytes[8:12], 'little')
+                        table_data.append(("  低4字节NTB时间", f"0x{' '.join(f'{b:02X}' for b in data_bytes[8:12])}", str(ntb), "单位40ns", base_offset + 8, base_offset + 11))
+                else:
+                    table_data.append(("  数据内容", ' '.join(f'{b:02X}' for b in data_bytes), f"{data_len}字节", name, base_offset, base_offset + data_len - 1))
+            else:
+                table_data.append(("  数据内容", ' '.join(f'{b:02X}' for b in data_bytes), f"{data_len}字节", name, base_offset, base_offset + data_len - 1))
 
     def _get_deny_error_desc(self, err: int) -> str:
         """获取否认错误状态字说明"""
