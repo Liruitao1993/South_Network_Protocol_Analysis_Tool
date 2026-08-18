@@ -446,8 +446,19 @@ class State(rx.State):
             return None
 
     def _clean_hex(self, hex_str: str) -> bytes:
-        """清洗并转换 hex 字符串"""
-        cleaned = "".join(hex_str.split()).upper()
+        """清洗并转换 hex 字符串
+
+        支持输入格式（对齐 GUI 版 _clean_hex_input）：
+          - 纯 hex: 6811010101
+          - 空格分隔: 68 11 01 01 01
+          - 逗号/分号/顿号等标点分隔: 68,11,01,01,01 或 68；11；01
+          - 0x 前缀: 0x68 0x11 0x01 或 0x68,0x11,0x01
+          - 混合分隔: 68, 11 - 01. 01
+        """
+        import re
+        # 先处理 0x/0X 前缀，避免 0x 被误清洗导致字节对齐错误
+        text = re.sub(r'0[xX]([0-9A-Fa-f])', r'\1', hex_str)
+        cleaned = re.sub(r'[^0-9A-Fa-f]', '', text).upper()
         if len(cleaned) % 2 != 0:
             cleaned = cleaned[:-1]
         if not cleaned:
