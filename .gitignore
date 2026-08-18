@@ -62,3 +62,6 @@ upx-5.0.0-win64/
 # 测试运行输出产物
 /docx_tables_out.txt
 /test_ofdma_out.txt
+
+# 工具目录
+/.pi-glla/
