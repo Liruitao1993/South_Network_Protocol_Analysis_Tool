@@ -83,7 +83,15 @@ class GDWValidator(BaseValidator):
 
         # 6. AFN 值域检查
         if len(frame_bytes) >= 8:
-            afn = frame_bytes[6]
+            # 福建增补帧（附件3）: 68 L C R(6B) A1(6B) A3(6B) AFN ...，AFN 位于 offset 22
+            # 2024 国网帧: AFN 位于 offset 6（无地址域）或 offset 6+12+6*relay（有地址域）
+            # 探测: frame[4+6+12] = frame[22] 处字节 ∈ 福建增补 AFN 集合则按福建增补定位
+            FUJIAN_AFNS = {0x50, 0x51, 0x52, 0x53, 0x55, 0x56}
+            afn_probe = frame_bytes[22] if len(frame_bytes) > 22 else None
+            if afn_probe is not None and afn_probe in FUJIAN_AFNS:
+                afn = afn_probe
+            else:
+                afn = frame_bytes[6]
             if afn in self.AFN_VALID_RANGE:
                 check = CheckItem(
                     name="AFN值域",
