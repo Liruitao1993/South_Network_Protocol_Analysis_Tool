@@ -33,7 +33,7 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 
 ## 1. 项目概览
 
-多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.13.0`）。
+多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.14.1`）。
 
 **支持的协议（共 12 种，对应 GUI 协议下拉框 `current_protocol` 索引）：**
 
@@ -52,7 +52,7 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 | 10 | 国网新一代双模通信互联互通 | 国网新一代双模通信互联互通技术规范 | 小端 | CRC-32（MAC帧） |
 | 11 | HDC 1.0 双模互联互通 | Q/GDW 12087.42-2020 | 小端（MAC 地址大端） | CRC-24（FC/PB）+ CRC-32（MAC） |
 
-> 协议覆盖差异：**HDC 1.0（索引 11）目前仅在 PySide6 主程序支持**；Reflex Web 版支持索引 0-10（11 种）。修改协议相关文档/代码时注意区分。
+> 协议覆盖差异：**HDC 1.0（索引 11）目前仅在 PySide6 主程序支持**；Reflex Web 版支持索引 0-10（11 种）。NiceGUI/TUI 版本已于 2026-08-17 移除。修改协议相关文档/代码时注意区分。
 
 ---
 
@@ -511,6 +511,7 @@ python test/test_special_frame.py   # 特殊帧
 python test/test_snrm_frame.py      # SNRM 帧
 python test/test_dl_t698_45.py      # 698.45 协议
 python test/test_dl_t698_45_data_decode.py  # 698.45 APDU 数据内容业务解码（电能量/需量/分相/单值）
+python test/test_dl_t698_45_fujian.py  # 698.45 福建简化698（choice=0x02 List 结构，1.14.2 起）
 python test/test_oad_enrichment.py  # 698.45 OAD 增强
 python test/test_csg_new_gen.py     # 新一代载波协议
 python test/test_csg_hrf_mac.py     # 新一代载波无线单跳MAC帧（表12/表139）
@@ -525,6 +526,8 @@ python test/test_gw_ext_cmd.py      # 国网新一代扩展命令载荷
 python test/test_gw_parse_levels.py # 国网新一代解析级别
 python test/test_gw_monitor_summary.py # 国网新一代监控摘要
 python test/test_sack_fix.py        # SACK 帧解析
+python test/test_ed_fallback_fix.py  # ED..EE 监控帧非法回退修复（1.11.1 起）
+python test/test_dl_t698_45_fujian.py # 698.45 福建简化698（choice=0x02 List）解析
 python test/test_diff_engine.py    # 报文对比引擎
 python test/test_plan_widget.py     # 测试计划组件（需 GUI 环境）
 python test/test_monitor_widget.py  # 实时监控器组件（需 GUI 环境）
@@ -599,6 +602,13 @@ python test/test_web_frame_gen_utils.py # Reflex Web 版组帧纯逻辑
 
 > 本节按版本倒序记录。详细 commit 见 `git log`。每发新版本必须更新此处。
 
+### 1.14.2 — 2026-08-19
+- **协议8（DL/T 698.45）福建简化698 解析（choice=0x02 List 结构）**：`dl_t698_45_apdu_parser.py` 新增 SET/ACTION 的 Request/Response NormalList 分支（PIID + count + SEQUENCE OF {OAD/OMD, Data/DAR}），支持福建「本地通信模块扩展协议」V3.42 698 承载格式（A.2 要求 V3.3 起支持）——EB030110 台区识别、EB030307 过零NTB 等此前只能解析出「子类型码:0x02」
+- **REPORT 带 count 结构**：REPORT-Notification/Response 按 `PIID-ACD + count + OAD列表 + 数据个数 + A-XDR 数据` 解析（对齐福建示例 `88 01 00 01 ...` / `08 01 00 01 ...`），OAD 逐项中文名 + 数据业务解码
+- **EB 数据标识名称与字段解码**：OAD/OMD 的 OI 高字节 0xEB 时按 4 字节原样查 `gdw_eb_di_lookup` 名称（如 EB030110→台区识别_任务启动）；数据内容按 `gdw_eb_di_fields` 字段 schema 解码（enum→名称、uint→值、bcd/bs8/list），无 schema 保留原始 hex
+- **修复 EB 数据内容 uint 字节序**：按文档「645 减33逆序」规则为**大端**（识别时长 `00 05`=5 分钟，此前小端误读 1280）；`gdw_eb_di_fields.py` 编码器同步修正
+- 新增 `test/test_dl_t698_45_fujian.py`（9 项）；回归 `test_dl_t698_45.py` / `test_dl_t698_45_data_decode.py` / `test_gdw_fujian.py`（19项）/ `test_web_frame_gen_utils.py`（62项）全过；Web 浏览器实测用户帧 + 文档示例
+
 ### 1.14.1 — 2026-08-17
 - **协议8（DL/T 698.45）APDU 数据内容业务解码**（`dl_t698_45_data_decode.py` 新增）：按对象属性格式解码 A-XDR 数据为业务值，覆盖常用数据项——电能量数组（kWh 换算+费率展开）、最大需量数组（值@发生时间）、分相电压/电流/功率/谐波（A/B/C 相+单位）、单值数据变量；Scaler_Unit 换算按 10^scaler，单位码映射表；无属性3 时按 OI 推断单位与默认缩放
 - **APDU 解析器接入**（`dl_t698_45_apdu_parser.py`）：GET-Response Normal/NormalList/Next、SET-Request、REPORT-Notification Normal 新增「数据业务」键；REPORT-Notification Normal 补齐 OAD 解析（此前漏解）
@@ -621,7 +631,7 @@ python test/test_web_frame_gen_utils.py # Reflex Web 版组帧纯逻辑
 - **修复 main_gui.py 启动崩溃**：`test_plan_widget.py` 是 GUI 组件（`main_gui.py` 导入的 TestPlanWidget），此前被 `bdf4d22`（测试文件迁移）误移入 `test/` 目录，根目录 `/test_*.py` 忽略规则使其丢失，启动报 `ModuleNotFoundError: test_plan_widget`。已恢复至根目录，`.gitignore` 增加 `!/test_plan_widget.py` 例外；`test/test_plan_widget.py` 作为独立测试副本保留（AGENTS.md §7 测试列表不变）
 
 ### 1.13.0 — 2026-08-14
-- **新增「HDC 1.0 双模互联互通」协议（索引 11，独立协议）**：主程序第 12 种协议（Q/GDW 12087.42-2020 旧版双模）。新增 `hdc10_parser.py`（HDC10Parser：FC/可变区域/信标载荷/时隙分配条目/MAC 帧/应用层）、`hdc10_mme_parser.py`（MME 管理消息）、`validator/hdc10_validator.py`（HDC10Validator）、`test_hdc10.py`。GUI 集成：协议下拉框、解析级别 + 通道下拉（复用国网新一代控件）、查询页（`_create_hdc10_lookup_content`）、校验注册（`_run_validation` 11 → HDC10Validator）、批量前缀剥离 + 摘要（复用 `_strip_gw_new_gen_prefix` / `_get_gw_new_gen_summary`）。仅 PySide6 主程序支持（Web 0-10 / TUI 0-9 未含）
+- **新增「HDC 1.0 双模互联互通」协议（索引 11，独立协议）**：主程序第 12 种协议（Q/GDW 12087.42-2020 旧版双模）。新增 `hdc10_parser.py`（HDC10Parser：FC/可变区域/信标载荷/时隙分配条目/MAC 帧/应用层）、`hdc10_mme_parser.py`（MME 管理消息）、`validator/hdc10_validator.py`（HDC10Validator）、`test_hdc10.py`。GUI 集成：协议下拉框、解析级别 + 通道下拉（复用国网新一代控件）、查询页（`_create_hdc10_lookup_content`）、校验注册（`_run_validation` 11 → HDC10Validator）、批量前缀剥离 + 摘要（复用 `_strip_gw_new_gen_prefix` / `_get_gw_new_gen_summary`）。仅 PySide6 主程序支持（Reflex Web 版 0-10，NiceGUI/TUI 已移除）
 - **协议选择持久化**（`main_gui.py`）：上次使用的协议索引存入 `config.json` 的 `parse.protocol`，启动时 `_restore_saved_protocol` 自动恢复选中（UI 全部就绪后执行，走正常切换逻辑），用户无需每次打开软件重新选择协议
 - **所有解析/查询/监控表格支持 Ctrl+滚轮缩放（类 Excel）**：新增 `gui_utils.py::ZoomableTableWidget(QTableWidget)`——Ctrl+滚轮按 1.1/0.9 倍整体缩放（字号+行高同步，5-24pt 钳制，列宽保持避免破坏固定列布局），Ctrl+0 恢复缩放前基准；缩放为 per-table 覆盖，改全局字体设置后回到基准字号。全仓 35 处 `QTableWidget(` 实例（11 文件：main_gui 17、monitor 系列 8、diff/查询/档案/测试方案等 10）替换为该基类，原右键复制/Ctrl+C/字节高亮/双击深度解析等行为不变（子类即父类）；单元格级 `setCellWidget`/固定字体 item 不随缩放（可接受）
 - **校验结果 展开/收缩 + 解析结果表 全屏**（`main_gui.py`）：校验结果区新增「展开/收缩」按钮对（内容 `verify_label` 移入 QScrollArea，收缩后仅保留组标题+按钮行，默认收缩，重新展开恢复全文）；单帧解析结果表、批量摘要表、批量详情表各新增单个「全屏」按钮——与报文对比「结果详情」交互一致：点击在新窗口弹窗克隆展示表格快照（`_open_table_popup`），点「关闭」或窗口 X 关闭即恢复，主界面不做隐藏/重排。通用辅助 `_make_table_fullscreen_btn` 与 `_open_table_popup`
@@ -813,6 +823,19 @@ python test/test_web_frame_gen_utils.py # Reflex Web 版组帧纯逻辑
 ### 1.0.0 — 2026-04-14
 - 初始版本：南网/PLC RF/HDLC/DLMS 多协议解析；单帧/批量解析；DI/命令字/OBIS 查询
 
+
+**最近一次（2026-08-19）：发布 1.14.2（协议8 福建简化698 解析）**
+
+变更：
+- **协议8（DL/T 698.45）福建简化698 解析**（`dl_t698_45_apdu_parser.py`）：新增 SET-Request/Response、ACTION-Request/Response 的 choice=0x02 NormalList 分支（PIID + count + SEQUENCE OF {OAD/OMD, Data/DAR}），支持福建「本地通信模块扩展协议」V3.42 698 承载格式——EB030110 台区识别、EB030307 过零NTB 等此前只能解析出「子类型码:0x02」，现完整解析 PIID/count/OAD/OMD/数据
+- **REPORT 带 count 结构**：REPORT-Notification（`88 01 PIID-ACD count OAD列表 数据个数01 A-XDR 00 00`）/ REPORT-Response（`08 01 PIID-ACD count OAD 结果`）按福建示例解析，OAD 逐项中文名 + 数据业务解码
+- **EB 名称与字段解码**：OAD/OMD 的 OI 高字节 0xEB 时按 4 字节原样查 `gdw_eb_di_lookup`（57 项）显示 EB 名称；数据内容按 `gdw_eb_di_fields`（42 项）字段 schema 解码（enum→名称/uint→值/bcd/bs8/list），无 schema 保留原始 hex
+- **修复 EB uint 字节序**：按文档「645 减33逆序」规则 EB 数据内容多字节 uint 为**大端**（编码器 `gdw_eb_di_fields.py` 同步修正，`test_gdw_fujian.py`/`test_web_frame_gen_utils.py` 断言更新）
+- **新增测试** `test/test_dl_t698_45_fujian.py`（9 项：用户实测帧/文档示例 SET/ACTION/REPORT/多对象/大端）；Web 浏览器实测用户帧显示 ActionRequestNormalList + 台区识别方法=自动 + 识别时长=5
+
+涉及文件：
+- 修改：`dl_t698_45_apdu_parser.py`（List 分支 + EB 名称/字段解码 + uint 大端）、`gdw_eb_di_fields.py`（编码大端）、`main_gui.py`（CHANGELOG/APP_VERSION 1.14.2）、`AGENTS.md`、`test/test_gdw_fujian.py`、`test/test_web_frame_gen_utils.py`、`test/test_dl_t698_45_data_decode.py`（REPORT count 结构）
+- 新增：`test/test_dl_t698_45_fujian.py`
 
 **最近一次（2026-08-17）：发布 1.14.1（协议8 APDU 数据内容业务解码）**
 

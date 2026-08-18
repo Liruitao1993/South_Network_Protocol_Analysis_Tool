@@ -147,16 +147,17 @@ def test_set_request_business():
 
 
 def test_report_notification_business():
-    """REPORT-Notification Normal：OAD + 数据业务"""
+    """REPORT-Notification Normal：count + OAD + 数据业务"""
     from dl_t698_45_apdu_parser import DLT69845APDUParser
 
     parser = DLT69845APDUParser()
     data = _enc_array([1234567, 5000])
-    apdu = bytes([0x88, 0x01, 0x00]) + bytes.fromhex("0000") + bytes([0x02, 0x00]) + data
+    # 福建简化698: 88 01 [PIID-ACD] [count] [OAD] [数据个数01] [Data]
+    apdu = bytes([0x88, 0x01, 0x00, 0x01]) + bytes.fromhex("0000") + bytes([0x02, 0x00]) + bytes([0x01]) + data
     result = parser.parse(apdu)
     assert result["APDU类型"] == "REPORT-Notification"
     assert result["子类型"] == "ReportNotificationNormal"
-    assert result["OAD"]["解析值"]["OI"] == "0x0000", result.get("OAD")
+    assert result["OAD列表"][0]["解析值"]["OI"] == "0x0000", result.get("OAD列表")
     assert result["数据业务"]["总"] == "1234.567 kWh", result.get("数据业务")
     print("test_report_notification_business PASSED")
 

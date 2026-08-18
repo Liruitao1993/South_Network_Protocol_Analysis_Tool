@@ -5,7 +5,7 @@
 Web EB 生成器选中 OAD 后按字段渲染表单，自动组装数据字节（698 A-XDR octet-string 内容）。
 
 字段类型：
-- uint8/uint16/uint24/uint32: 无符号整数（小端，与 645/698 多字节一致）
+- uint8/uint16/uint24/uint32: 无符号整数（大端，698 承载按「645 减33逆序」规则为高位在前）
 - enum: 下拉选择（枚举值 → uint8）
 - bcd: 十六进制 BCD 字节（hex 字符串）
 - bcd_time: YYMMDD hhmmss → 6 字节 BCD
@@ -342,11 +342,11 @@ def _encode_field_value(field: Dict[str, Any], value: Any) -> bytes:
     if ftype in ("uint8",):
         return bytes([int(value) & 0xFF])
     if ftype == "uint16":
-        return (int(value) & 0xFFFF).to_bytes(2, 'little')
+        return (int(value) & 0xFFFF).to_bytes(2, 'big')
     if ftype == "uint24":
-        return (int(value) & 0xFFFFFF).to_bytes(3, 'little')
+        return (int(value) & 0xFFFFFF).to_bytes(3, 'big')
     if ftype == "uint32":
-        return (int(value) & 0xFFFFFFFF).to_bytes(4, 'little')
+        return (int(value) & 0xFFFFFFFF).to_bytes(4, 'big')
     if ftype == "bcd":
         try:
             b = bytes.fromhex(str(value).replace(" ", ""))

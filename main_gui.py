@@ -62,10 +62,17 @@ from llm_api_manager import LLMApiManagerDialog
 from preprocessors import list_scripts as _list_pp_scripts, get_script as _get_pp_script
 
 
-APP_VERSION = "1.14.1"
-BUILD_DATE = "2026-08-17"  # 编译日期，每次打包前更新
+APP_VERSION = "1.14.2"
+BUILD_DATE = "2026-08-19"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    ("1.14.2", "2026-08-19", [
+        "协议8（DL/T 698.45）福建简化698 解析（choice=0x02 List 结构）：新增 SET-Request/Response、ACTION-Request/Response 的 NormalList 分支（PIID + count + SEQUENCE OF {OAD/OMD, Data/DAR}），支持福建「本地通信模块扩展协议」V3.42 698 承载格式（EB030110 台区识别/EB030307 过零NTB 等）",
+        "REPORT-Notification/Response 带 count 结构：PIID-ACD + count + OAD 列表 + 数据个数 + A-XDR 数据（对齐福建 698 上报示例 88 01 00 01 ... / 08 01 00 01 ...）",
+        "EB 数据标识名称与字段解码：OAD/OMD 为 EB 数据标识（OI 高字节 0xEB）时按 4 字节原样查 gdw_eb_di_lookup 名称；数据内容按 gdw_eb_di_fields 字段 schema 解码（enum→名称、uint→值、bcd/bs8/list），无 schema 时保留原始 hex",
+        "修复 EB 数据内容多字节 uint 字节序：按文档「645 减33逆序」规则为**大端**（此前编码器/解码器用 小端 导致识别时长 00 05 误读为 1280，现正确为 5 分钟），gdw_eb_di_fields.py 编码器同步修正",
+        "新增 test/test_dl_t698_45_fujian.py：9 项测试（用户实测帧/文档示例 SET/ACTION/REPORT/多对象/大端编解码）全过；test_dl_t698_45.py、test_dl_t698_45_data_decode.py、test_gdw_fujian.py（19项）、test_web_frame_gen_utils.py（62项）回归全过",
+    ]),
     ("1.14.1", "2026-08-17", [
         "协议8（DL/T 698.45）APDU 数据内容业务解码（常用数据项全覆盖）：新建 dl_t698_45_data_decode.py——按对象属性格式解码 A-XDR 数据为业务值，覆盖电能量数组（kWh 换算+费率展开）、最大需量数组（值@发生时间）、分相电压/电流/功率/谐波（A/B/C 相+单位）、单值数据变量（数据/参数）；Scaler_Unit 换算按 10^scaler，单位码映射表；OI 未带属性3 时按 OI_UNIT_HINT 推断单位与默认缩放（762 个 OI 名称辅助）",
         "APDU 解析器接入（dl_t698_45_apdu_parser.py）：GET-Response Normal/NormalList/Next、SET-Request、REPORT-Notification Normal 在「数据」后新增「数据业务」键（不破坏原始 A-XDR 结果）；REPORT-Notification Normal 补齐缺失的 OAD 解析（此前 PIID-ACD 后直接当 Data）",
