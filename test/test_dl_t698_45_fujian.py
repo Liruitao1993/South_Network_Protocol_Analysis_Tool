@@ -211,6 +211,74 @@ def test_table_shows_type_length():
     print("test_table_shows_type_length PASSED")
 
 
+def test_action_response_eb030307_real_frame():
+    """用户真实上行帧：ACTION-Response List，EB030307 过零NTB值（相线1/2/3 数组）"""
+    from dl_t698_45_apdu_parser import DLT69845APDUParser
+
+    parser = DLT69845APDUParser()
+    apdu = bytes.fromhex(
+        "87020001EB030307000109818126081414420001010A"
+        "6B837E8A0000000000000000C4ED35EE0000000000000000"
+        "1E5564EE000000000000000077BD93EE0000000000000000"
+        "D125C2EE00000000000000002A8DF1EE0000000000000000"
+        "83F620EE0000000000000000DD5E4FEE0000000000000000"
+        "0000000000000000000000000000000000000000000000000000"
+    )
+    r = parser.parse(apdu)
+    assert r["APDU类型"] == "ACTION-Response"
+    assert r["子类型"] == "ActionResponseNormalList"
+    item = r["列表"][0]
+    assert item["OMD"]["原始值"] == "EB030307"
+    assert "过零" in item["OMD"]["语义说明"]
+    assert item["结果"]["DAR说明"] == "成功", item["结果"]
+    # 响应数据：数据个数=01 + octet-string 129B
+    assert item["响应数据"]["类型"] == "octet-string"
+    # 数据业务：EB030307 字段 schema 解码
+    biz = item["数据业务"]
+    assert biz["数据开始时间"]["值"] == "2026-08-14 14:42:00", biz["数据开始时间"]
+    assert biz["数据开始时间"]["类型"] == "bcd_time"
+    assert biz["边沿类型"]["值"] == "下降沿", biz["边沿类型"]
+    assert biz["数据周期_分钟"]["值"] == 1
+    assert biz["数据点数M"]["值"] == 10
+    arr = biz["NTB值数组"]["值"]
+    assert len(arr) == 10
+    # 第1点: 相线1=0x6B837E8A=1803779722, 相线2/3=0（单相表）
+    assert arr[0]["相线1 NTB值"]["值"] == 1803779722, arr[0]
+    assert arr[0]["相线1 NTB值"]["类型"] == "uint32"
+    assert arr[0]["相线2 NTB值"]["值"] == 0
+    assert arr[0]["相线3 NTB值"]["值"] == 0
+    print("test_action_response_eb030307_real_frame PASSED")
+
+
+def test_action_response_eb030307_table():
+    """表格：EB030307 相线 NTB 值展示（含类型+长度）"""
+    from dl_t698_45_parser import DLT69845Parser
+
+    parser = DLT69845Parser()
+    frame = bytes.fromhex(
+        "689F00C30539439311001300F149"
+        "87020001EB030307000109818126081414420001010A"
+        "6B837E8A0000000000000000C4ED35EE0000000000000000"
+        "1E5564EE000000000000000077BD93EE0000000000000000"
+        "D125C2EE00000000000000002A8DF1EE0000000000000000"
+        "83F620EE0000000000000000DD5E4FEE0000000000000000"
+        "0000000000000000000000000000000000000000000000000000"
+        "061916"
+    )
+    table = parser.parse_to_table(frame)
+    rows = {r[0].strip(): r for r in table}
+    assert rows["数据开始时间"][2] == "2026-08-14 14:42:00", rows.get("数据开始时间")
+    assert "bcd_time" in rows["数据开始时间"][3]
+    assert rows["数据点数M"][2] == "10"
+    assert rows["NTB值数组"][2] == "[10项]", rows.get("NTB值数组")
+    # 相线 NTB 值行（前 3 点）
+    ntb_rows = [r for r in table if "相线1 NTB值" in r[0]]
+    assert len(ntb_rows) == 10, len(ntb_rows)
+    assert ntb_rows[0][2] == "1803779722", ntb_rows[0]
+    assert "uint32" in ntb_rows[0][3], ntb_rows[0]
+    print("test_action_response_eb030307_table PASSED")
+
+
 if __name__ == "__main__":
     test_action_request_list_user_frame()
     test_set_request_list_doc_example()
@@ -222,4 +290,6 @@ if __name__ == "__main__":
     test_set_request_multiple_oads()
     test_eb_uint_big_endian()
     test_table_shows_type_length()
+    test_action_response_eb030307_real_frame()
+    test_action_response_eb030307_table()
     print("ALL 福建简化698 测试 PASSED")

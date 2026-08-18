@@ -1,13 +1,13 @@
 # 南网协议解析工具
 
-[![Version](https://img.shields.io/badge/version-1.14.2-blue)]()
+[![Version](https://img.shields.io/badge/version-1.14.3-blue)]()
 [![Python](https://img.shields.io/badge/Python-3.8%2B-brightgreen)]()
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)]()
 [![License](https://img.shields.io/badge/License-MIT-green)]()
 
 一个面向电力通信现场调试的多协议解析工具，基于 Python / PySide6 开发，支持 12 种电力通信协议，覆盖单帧解析、批量解析、协议校验、帧生成、串口通信、测试方案、Lua 脚本、实时监控与 TCP 抓包等工作流。
 
-当前版本为 `1.14.2`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
+当前版本为 `1.14.3`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
 
 ## 功能总览
 
@@ -82,6 +82,32 @@ python reflex_web/run_app.py
 ```
 
 **Reflex Web 版组帧**：南网(0)/国网(7)/698.45(8) 三种协议组帧与 GUI 完全对齐——预定字段（uint/enum/bytes/ascii/bcd/oi/oad_list/list/sub_fields 按类型分派）、自定义模板（含校验和回填）、698.45 A-XDR 数据编辑器；实时回读解析预览；预设命令按钮（NW_command.json / GW_command.json）一键填入与保存。启动前先编译前端：`cd reflex_web && reflex export --frontend-only --env prod --no-zip`，再 `python reflex_web/run_app.py`。
+
+### 部署到目标机器
+
+有两种方式将 Reflex Web 版部署到没有 Python 环境的目标机器：
+
+**方式一：内嵌 Python（推荐，零安装）**
+
+构建包含 Python 运行时的部署目录，目标机器无需安装 Python，解压即用：
+
+```bash
+python reflex_web/build_embedded_deploy.py --python-version 3.12
+# 输出: dist/reflex_web_embedded/
+```
+
+把 `dist/reflex_web_embedded/` 整个目录复制到目标机器，运行 `start_web.cmd`（Windows）或 `./start_web.sh`（Linux）即可。
+
+**方式二：UV 虚拟环境（需要目标机器有 Python）**
+
+构建依赖虚拟环境的部署目录，目标机器需要安装相同版本的 Python：
+
+```bash
+python reflex_web/build_offline_deploy.py --python-version 3.12
+# 输出: dist/reflex_web_offline/
+```
+
+详细说明见 [`reflex_web/离线部署.md`](reflex_web/离线部署.md)。
 
 ### 打包 exe
 
@@ -295,6 +321,15 @@ python test/test_theme_settings.py         # 主题与字体设置
 - [`.trellis/workflow.md`](.trellis/workflow.md)：Trellis 开发工作流与任务规范
 
 ## 更新记录
+
+### 1.14.3 — 2026-08-19
+
+#### 协议 8（698.45）EB030307 过零NTB值上行数据解析
+
+- ACTION-Response NormalList 兼容「数据个数」前缀（DAR 后 `01`=数据个数 + octet-string 数据），修复 `0x81 未知类型` 报错
+- EB030307 字段 schema：数据开始时间/边沿类型/数据周期/数据点数/NTB 值数组（10 组相线1/2/3 NTB 值，uint32 40ns）
+- bcd_time 可读化：`2026-08-14 14:42:00` 格式
+- 新增 2 项测试（用户真实上行帧 + 表格展示）；`test_dl_t698_45_fujian.py` 增至 12 项
 
 ### 1.14.2 — 2026-08-19
 

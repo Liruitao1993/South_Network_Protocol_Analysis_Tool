@@ -136,6 +136,25 @@ Linux:   ./start_web.sh
 - 当前脚本输出默认在 `dist/reflex_web_offline/`，该路径已被 `.gitignore` 排除，实际部署产物不进入版本库
 - 详细说明见 `reflex_web/离线部署.md`
 
+### Reflex Web 内嵌 Python 部署（推荐，零安装）
+
+目标机器无需安装 Python，解压即用。使用 `reflex_web/build_embedded_deploy.py`：
+
+```bash
+python reflex_web/build_embedded_deploy.py --python-version 3.12
+```
+
+该脚本会：
+
+1. 下载 Python embeddable 包（Windows）或用 UV 安装 Python（Linux）
+2. 在部署目录中安装 pip 和所有依赖
+3. 复制运行时文件和预编译前端
+4. 生成启动脚本
+
+部署：把 `dist/reflex_web_embedded/` 整个目录复制到目标服务器，运行 `start_web.cmd` 或 `./start_web.sh`。
+
+**与 UV 方案的区别：** 目标机器不需要安装 Python，但部署目录体积更大（~30MB 额外）。Windows 构建的目录只能在 Windows 上运行，Linux 同理。
+
 **编译原则（exe打包）：**
 
 1. **窗口标题包含编译日期**：每次打包前必须更新 `main_gui.py` 中的 `BUILD_DATE` 变量为当前日期（格式：`YYYY-MM-DD`）
@@ -602,6 +621,12 @@ python test/test_web_frame_gen_utils.py # Reflex Web 版组帧纯逻辑
 
 > 本节按版本倒序记录。详细 commit 见 `git log`。每发新版本必须更新此处。
 
+### 1.14.3 — 2026-08-19
+- **协议8 EB030307 过零NTB值上行数据解析**（`dl_t698_45_apdu_parser.py`）：ACTION-Response NormalList 每项结构 = OMD + DAR + **数据个数** + [Data]——DAR 后 `01`=数据个数、`09 81 81`=octet-string 129B，此前把 `01` 当 A-XDR array tag 解导致 `0x81 未知类型` 报错；新增 `_parse_axdr_items_or_single` 双路径（数据个数 N×A-XDR 失败回退单 A-XDR，兼容文档示例无前缀格式）
+- **EB030307 字段 schema**（`gdw_eb_di_fields.py`）：数据开始时间(bcd_time 6B)/边沿类型(enum 0保留/1下降沿/2上升沿)/数据周期_分钟(uint8)/数据点数M(uint8)/NTB值数组(list，每项 相线1+相线2+相线3 NTB值 uint32 40ns)
+- **bcd_time 可读化**：YYMMDDhhmmss（BCD）→ `2026-08-14 14:42:00`；EB030307 请求参数（1C 开头 date_time_s）优先时间解码、响应数据走字段 schema；数据不足固定头时回退 A-XDR 头+原始数据
+- `test_dl_t698_45_fujian.py` 增至 12 项（新增用户真实上行帧 + 表格相线 NTB 展示）；全量回归 62+19+12 项通过
+
 ### 1.14.2 — 2026-08-19
 - **协议8（DL/T 698.45）福建简化698 解析（choice=0x02 List 结构）**：`dl_t698_45_apdu_parser.py` 新增 SET/ACTION 的 Request/Response NormalList 分支（PIID + count + SEQUENCE OF {OAD/OMD, Data/DAR}），支持福建「本地通信模块扩展协议」V3.42 698 承载格式（A.2 要求 V3.3 起支持）——EB030110 台区识别、EB030307 过零NTB 等此前只能解析出「子类型码:0x02」
 - **REPORT 带 count 结构**：REPORT-Notification/Response 按 `PIID-ACD + count + OAD列表 + 数据个数 + A-XDR 数据` 解析（对齐福建示例 `88 01 00 01 ...` / `08 01 00 01 ...`），OAD 逐项中文名 + 数据业务解码
@@ -823,6 +848,17 @@ python test/test_web_frame_gen_utils.py # Reflex Web 版组帧纯逻辑
 ### 1.0.0 — 2026-04-14
 - 初始版本：南网/PLC RF/HDLC/DLMS 多协议解析；单帧/批量解析；DI/命令字/OBIS 查询
 
+
+**最近一次（2026-08-19）：发布 1.14.3（EB030307 过零NTB值上行数据解析）**
+
+变更：
+- **ACTION-Response NormalList 数据个数兼容**（`dl_t698_45_apdu_parser.py`）：福建简化698 响应每项 = OMD + DAR + **数据个数**(1B) + [Data A-XDR]×N；此前 DAR 后 `01` 被当 A-XDR array tag（长度09）解，后续 `0x81` 报「未知类型」。新增 `_parse_axdr_items_or_single`：先按「个数N + N项A-XDR」解，失败回退单 A-XDR（兼容文档示例无前缀）
+- **EB030307 字段 schema**（`gdw_eb_di_fields.py`）：数据开始时间 bcd_time(6B) / 边沿类型 enum(0保留/1下降沿/2上升沿) / 数据周期_分钟 uint8 / 数据点数M uint8 / NTB值数组 list（每项 相线1/相线2/相线3 NTB值 uint32，40ns，单相表2/3填0）
+- **bcd_time 可读化**：YYMMDDhhmmss BCD → `2026-08-14 14:42:00`；EB030307 请求参数（`1C` 开头）优先 date_time_s 时间解码，响应/上报数据走字段 schema；数据不足固定头回退 A-XDR 头+原始数据
+- **新增测试**：`test_dl_t698_45_fujian.py` 增至 12 项（用户真实上行帧 129B→10 组相线 NTB 值 + 表格展示）；全量回归 62+19+12 项通过；Web 实测显示 数据开始时间/边沿类型/数据周期/数据点数/NTB 值数组（10 组相线1/2/3）
+
+涉及文件：
+- 修改：`dl_t698_45_apdu_parser.py`、`gdw_eb_di_fields.py`、`main_gui.py`（CHANGELOG/APP_VERSION 1.14.3）、`AGENTS.md`、`test/test_dl_t698_45_fujian.py`
 
 **最近一次（2026-08-19）：发布 1.14.2（协议8 福建简化698 解析）**
 
