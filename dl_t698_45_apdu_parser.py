@@ -207,6 +207,26 @@ class DLT69845APDUParser:
                 "说明": f"OI=0x{oi:04X}, 方法={method}, 模式={mode}"}
         return self._enrich_omd(result)
 
+    def _decode_oad_business(self, oad: Dict[str, Any], data: Any) -> Optional[Dict[str, str]]:
+        """按 OAD 对数据内容做业务解码（不破坏原始 A-XDR 结果）
+
+        在结果中新增「数据业务」键：电能量→kWh 换算、分相电压/电流→A相/B相/C相、
+        最大需量→值@时间、数据变量→单值换算。无匹配模板时返回 None。
+        """
+        try:
+            if not isinstance(oad, dict) or data is None:
+                return None
+            pv = oad.get("解析值")
+            if not isinstance(pv, dict):
+                return None
+            oi_str = pv.get("OI", "0x0000")
+            attr_no = pv.get("属性编号", 0)
+            oi = int(oi_str, 16) if isinstance(oi_str, str) else int(oi_str)
+            from dl_t698_45_data_decode import decode_oad_data
+            return decode_oad_data(oi, attr_no, data)
+        except Exception:
+            return None
+
     # --- LINK 服务 ---
 
     def _parse_link_request(self, data: bytes) -> dict:
@@ -376,6 +396,10 @@ class DLT69845APDUParser:
                     d, consumed = self.axdr.decode(data, offset)
                     offset += consumed
                     result["数据"] = d
+                    # 业务解码
+                    biz = self._decode_oad_business(result["OAD"], d)
+                    if biz:
+                        result["数据业务"] = biz
                 else:
                     # DAR 错误码
                     dar, consumed = self.axdr.decode(data, offset)
@@ -402,6 +426,10 @@ class DLT69845APDUParser:
                         d, consumed = self.axdr.decode(data, offset)
                         offset += consumed
                         item["数据"] = d
+                        # 业务解码
+                        biz = self._decode_oad_business(item["OAD"], d)
+                        if biz:
+                            item["数据业务"] = biz
                     else:
                         dar, consumed = self.axdr.decode(data, offset)
                         offset += consumed
@@ -453,6 +481,10 @@ class DLT69845APDUParser:
                 d, consumed = self.axdr.decode(data, offset)
                 offset += consumed
                 result["数据"] = d
+                # 业务解码（下行设置参数同样给出业务值）
+                biz = self._decode_oad_business(result["OAD"], d)
+                if biz:
+                    result["数据业务"] = biz
 
         return result
 
@@ -637,11 +669,19 @@ class DLT69845APDUParser:
             piid_byte = data[offset]
             offset += 1
             result["PIID-ACD"] = self._parse_piid(piid_byte, is_acd=True)
-            # Data (简化处理)
+            # OAD
+            if offset + 4 <= len(data):
+                result["OAD"] = self._parse_oad_raw(data, offset)
+                offset += 4
+            # Data
             if offset < len(data):
                 d, consumed = self.axdr.decode(data, offset)
                 offset += consumed
                 result["数据"] = d
+                # 业务解码
+                biz = self._decode_oad_business(result.get("OAD"), d)
+                if biz:
+                    result["数据业务"] = biz
 
         elif choice_tag == 0x02:
             result["子类型"] = "ReportNotificationSimplify"

@@ -1,13 +1,13 @@
 # 南网协议解析工具
 
-[![Version](https://img.shields.io/badge/version-1.14.0-blue)]()
+[![Version](https://img.shields.io/badge/version-1.14.1-blue)]()
 [![Python](https://img.shields.io/badge/Python-3.8%2B-brightgreen)]()
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)]()
 [![License](https://img.shields.io/badge/License-MIT-green)]()
 
 一个面向电力通信现场调试的多协议解析工具，基于 Python / PySide6 开发，支持 12 种电力通信协议，覆盖单帧解析、批量解析、协议校验、帧生成、串口通信、测试方案、Lua 脚本、实时监控与 TCP 抓包等工作流。
 
-当前版本为 `1.14.0`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
+当前版本为 `1.14.1`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
 
 ## 功能总览
 
@@ -227,6 +227,7 @@ dlt645_parser.py             # DLT645-2007 解析器
 dl_t698_45_parser.py         # 698.45 链路层解析器
 dl_t698_45_apdu_parser.py    # 698.45 APDU 解析器
 dl_t698_45_axdr.py           # A-XDR 编解码
+dl_t698_45_data_decode.py    # 698.45 APDU 数据内容业务解码（1.14.1 起）
 csg_new_gen_parser.py        # 新一代载波协议解析器
 csg_new_gen_cmd_payloads.py  # 新一代载波应用层命令载荷
 gw_new_gen_parser.py         # 国网新一代双模解析器
@@ -269,6 +270,7 @@ python test/test_gw_new_gen.py             # 国网新一代双模协议
 python test/test_gdw_fujian.py             # 国网福建增补规约 + EB 数据标识（1.14.0 起）
 python test/test_hdc10.py                  # HDC 1.0 双模互联互通协议
 python test/test_dl_t698_45.py             # 698.45 协议
+python test/test_dl_t698_45_data_decode.py # 698.45 APDU 数据内容业务解码（1.14.1 起）
 python test/test_hdlc.py                   # HDLC 帧
 python test/test_plc_rf.py                 # PLC RF
 python test/test_lua_engine.py             # Lua 脚本引擎
@@ -289,6 +291,16 @@ python test/test_theme_settings.py         # 主题与字体设置
 - [`.trellis/workflow.md`](.trellis/workflow.md)：Trellis 开发工作流与任务规范
 
 ## 更新记录
+
+### 1.14.1 — 2026-08-17
+
+#### 协议 8（698.45）APDU 数据内容业务解码
+
+- 新增 `dl_t698_45_data_decode.py`：按对象属性格式解码 A-XDR 数据为业务值——电能量数组（kWh 换算+费率展开）、最大需量数组（值@发生时间）、分相电压/电流/功率/谐波（A/B/C 相+单位）、单值数据变量；Scaler_Unit 换算按 10^scaler，单位码映射表
+- APDU 解析器（GET-Response/SET-Request/REPORT-Notification）新增「数据业务」键，不破坏原始 A-XDR 结果；REPORT-Notification Normal 补齐 OAD 解析
+- GUI 表格「数据业务」按项展开显示（如 `总: 1234.567 kWh` / `A相: 220.5 V`）
+- 修复 DLT69845Validator 长度域一致性公式（L=帧长-2，文档附录 H.1 例证）
+- 新增 `test/test_dl_t698_45_data_decode.py`（10 项测试全过）
 
 ### 1.14.0 — 2026-08-17
 

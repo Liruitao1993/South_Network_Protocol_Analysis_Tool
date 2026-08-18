@@ -449,7 +449,8 @@ def test_eb_698_full_frame():
     # APDU 内嵌 EB OAD（帧: 68 LL C SA(7) CA(1) HCS(2) APDU FCS(2) 16 → APDU = b[14:-3]）
     apdu = b[14:-3]
     check("APDU 含 EB OAD", apdu.hex().upper().find('EB030110') >= 0, apdu.hex())
-    # 长度域 = 长度域自身2 + 控制域1 + SA7 + CA1 + HCS2 + APDU + FCS2 → 帧长-2
+    # 长度域 L 含自身，不含起始符和结束符（文档例 H.1: 帧长32 → L=30=帧长-2）
+    # 帧总长 = 起始符1 + L + 结束符1 → L值 = 帧长 - 2
     length = int.from_bytes(b[1:3], 'little') & 0x3FFF
     check("长度域 = 帧长-2", length == len(b) - 2, f"{length} vs {len(b)-2}")
 
