@@ -62,10 +62,13 @@ from llm_api_manager import LLMApiManagerDialog
 from preprocessors import list_scripts as _list_pp_scripts, get_script as _get_pp_script
 
 
-APP_VERSION = "1.14.3"
+APP_VERSION = "1.14.4"
 BUILD_DATE = "2026-08-19"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    ("1.14.4", "2026-08-19", [
+        "内嵌 Python 部署增量构建：build_embedded_deploy.py 新增 --skip-deps 模式——复用已有 python/（解释器+site-packages），仅刷新源码/数据/前端层，重复构建从 10+ 分钟降至约 1 分钟；requirements.lock 已最新时跳过 uv 重新编译。完整/增量构建原则写入 AGENTS.md/README（日常迭代用 --skip-deps，仅首次/改依赖/换 Python 版本时完整重建）",
+    ]),
     ("1.14.3", "2026-08-19", [
         "协议8（DL/T 698.45）EB030307 过零NTB值上行数据解析：ACTION-Response NormalList 兼容「数据个数」前缀（DAR 后 `01`=数据个数 + octet-string 数据，此前被误当 A-XDR array tag 解导致 0x81 报错），新增 `_parse_axdr_items_or_single` 双路径兜底（数据个数 N×A-XDR 失败回退单 A-XDR，兼容文档示例无前缀格式）",
         "EB030307 字段 schema（gdw_eb_di_fields.py）：数据开始时间(bcd_time 6B)/边沿类型(enum)/数据周期_分钟(uint8)/数据点数M(uint8)/NTB值数组(list，每项 相线1+相线2+相线3 NTB值 uint32)，真实上行帧 129B 解码为 10 组相线 NTB 值",

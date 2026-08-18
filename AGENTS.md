@@ -155,6 +155,25 @@ python reflex_web/build_embedded_deploy.py --python-version 3.12
 
 **与 UV 方案的区别：** 目标机器不需要安装 Python，但部署目录体积更大（~30MB 额外）。Windows 构建的目录只能在 Windows 上运行，Linux 同理。
 
+**增量构建原则（重要）：**
+
+内嵌部署目录内含解释器 + site-packages 依赖（约 100MB+），完整重装每次需下载 Python 包并
+重新 pip 安装全部依赖（可达 10+ 分钟）。但**源码和依赖几乎不动，真正变化的只有你改的 parser/gui/web
+那几个 .py 文件**。因此：
+
+- **日常迭代（改源码/数据文件）**：用增量模式，复用已有 `python/` 目录，只刷新源码层，秒~分钟级：
+  ```bash
+  python reflex_web/build_embedded_deploy.py --skip-deps
+  ```
+- **首次构建 / 改依赖 / 换 Python 版本**：才用完整模式（重新下载解释器 + 装依赖，10+ 分钟）：
+  ```bash
+  python reflex_web/build_embedded_deploy.py --python-version 3.12
+  ```
+- 增量模式逻辑：先移走 `out_dir/python/`，重建其余目录，再移回——保留解释器与依赖，仅刷新源码/数据/前端。
+- `--skip-deps` 的前提是目标部署目录 `dist/reflex_web_embedded/python/` 已存在且完整（来自上次完整构建）。
+- 依赖锁文件 `requirements.lock` 存在且不旧于 `requirements.in` 时，uv 编译自动跳过（依赖未变则复用）。
+- 若不慎删了 `dist/reflex_web_embedded/python/`，需回到完整模式重建一次。
+
 **编译原则（exe打包）：**
 
 1. **窗口标题包含编译日期**：每次打包前必须更新 `main_gui.py` 中的 `BUILD_DATE` 变量为当前日期（格式：`YYYY-MM-DD`）

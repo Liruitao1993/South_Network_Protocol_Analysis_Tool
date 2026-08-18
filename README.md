@@ -98,6 +98,13 @@ python reflex_web/build_embedded_deploy.py --python-version 3.12
 
 把 `dist/reflex_web_embedded/` 整个目录复制到目标机器，运行 `start_web.cmd`（Windows）或 `./start_web.sh`（Linux）即可。
 
+**日常迭代构建（推荐）：** 源码/依赖几乎不动时，用增量模式只刷新源码层，复用已有内嵌 Python 与依赖，
+避免每次重新下载解释器 + 重装依赖（完整耗时 10+ 分钟 → 增量约 1 分钟）：
+```bash
+python reflex_web/build_embedded_deploy.py --skip-deps
+```
+仅首次构建、改依赖或换 Python 版本时才需要去掉 `--skip-deps` 完整重建。
+
 **方式二：UV 虚拟环境（需要目标机器有 Python）**
 
 构建依赖虚拟环境的部署目录，目标机器需要安装相同版本的 Python：
