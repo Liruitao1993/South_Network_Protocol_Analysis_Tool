@@ -6061,6 +6061,13 @@ body {
   font-size: 13px;
   vertical-align: middle;
 }
+/* 表格内等宽文本（hex 原始值等）自动换行，避免长报文撑宽列 */
+.rt-TableRoot .rt-TableCell code {
+  white-space: normal;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
 .rt-TableRoot .rt-TableRow:last-child .rt-TableCell { border-bottom: none; }
 .rt-TableRoot .rt-TableRow:hover .rt-TableCell { background: #f8fafc; }
 /* ===== 按钮 ===== */
