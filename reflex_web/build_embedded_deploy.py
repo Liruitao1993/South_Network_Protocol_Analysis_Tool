@@ -83,6 +83,11 @@ def check_uv(python_version: str) -> None:
 def compile_lockfile(python_version: str) -> None:
     if not REQUIREMENTS_IN.exists():
         raise SystemExit(f"缺少依赖清单: {REQUIREMENTS_IN}")
+    # 若 lock 已存在且比 in 新，说明依赖清单未变，直接复用无需重新编译
+    # （增量构建场景依赖几乎不动，省掉每次 uv pip compile 的秒~分钟级开销）
+    if REQUIREMENTS_LOCK.exists() and REQUIREMENTS_LOCK.stat().st_mtime >= REQUIREMENTS_IN.stat().st_mtime:
+        print(f"==> 依赖锁文件已是最新: {REQUIREMENTS_LOCK.name}，跳过重新编译")
+        return
     run_command([
         "uv", "pip", "compile",
         str(REQUIREMENTS_IN),
@@ -312,6 +317,12 @@ def main() -> None:
         default=DEFAULT_OUTPUT,
         help="Output directory (default: dist/reflex_web_embedded)",
     )
+    parser.add_argument(
+        "--skip-deps",
+        action="store_true",
+        help="增量构建：复用已有内嵌 Python 解释器与 site-packages 依赖，"
+             "只刷新源码与数据文件（大幅缩短重复构建时间）",
+    )
     args = parser.parse_args()
 
     is_windows = sys.platform == "win32"
@@ -320,6 +331,10 @@ def main() -> None:
     print("=" * 60)
     print("  南网协议解析工具 - 内嵌 Python 部署构建")
     print("=" * 60)
+    if args.skip_deps:
+        print("  模式: 增量构建（复用 Python 解释器 + 依赖，仅刷新源码）")
+    else:
+        print("  模式: 完整构建（重新安装 Python 解释器 + 全部依赖）")
     print()
 
     # Pre-checks
@@ -329,21 +344,44 @@ def main() -> None:
     compile_lockfile(args.python_version)
     ensure_frontend()
 
-    # Clean output directory
+    # 输出目录清理与增量保留
+    # 增量模式：保留已装好的 python/（解释器 + site-packages），仅重建其余源码层。
+    # 这样重复构建只复制改动的源码/数据文件，秒级完成，无需重新下载解释器和依赖。
+    python_backup: Path | None = None
     if out_dir.exists():
-        shutil.rmtree(out_dir)
-    out_dir.mkdir(parents=True)
+        keep_python = args.skip_deps and (out_dir / "python").exists()
+        if keep_python:
+            # 先移走 python/ 到临时目录，重建 out_dir 后再移回，避免整目录 rmtree 丢失依赖
+            python_backup = out_dir.with_name(out_dir.name + ".pytmp")
+            if python_backup.exists():
+                shutil.rmtree(python_backup)
+            shutil.move(out_dir / "python", python_backup)
+            shutil.rmtree(out_dir)
+            out_dir.mkdir(parents=True)
+            shutil.move(python_backup, out_dir / "python")
+            print("    增量保留 python/（内嵌解释器 + 依赖）")
+        else:
+            shutil.rmtree(out_dir)
+            out_dir.mkdir(parents=True)
+    else:
+        out_dir.mkdir(parents=True)
 
     # Copy runtime files
     print("\n[1/4] 复制运行时文件...")
     copy_runtime_files(out_dir)
 
-    # Install embedded Python
+    # Install embedded Python（增量模式若 python/ 已有效则跳过）
     print("\n[2/4] 安装内嵌 Python...")
-    if is_windows:
-        python_exe = install_embedded_python_windows(out_dir, args.python_version)
-    else:
-        python_exe = install_embedded_python_linux(out_dir, args.python_version)
+    need_install = True
+    if args.skip_deps and (out_dir / "python" / "python.exe").exists():
+        python_exe = out_dir / "python" / "python.exe"
+        print(f"    已存在内嵌 Python: {python_exe}，跳过下载与依赖安装（增量构建）")
+        need_install = False
+    if need_install:
+        if is_windows:
+            python_exe = install_embedded_python_windows(out_dir, args.python_version)
+        else:
+            python_exe = install_embedded_python_linux(out_dir, args.python_version)
 
     # Create launchers
     print("\n[3/4] 创建启动脚本...")
@@ -359,6 +397,10 @@ def main() -> None:
     print(f"    1. 把 {out_dir.name} 整个目录复制到目标机器")
     print(f"    2. 运行 start_web.cmd (Windows) 或 ./start_web.sh (Linux)")
     print(f"    3. 浏览器访问 http://服务器IP:8080")
+    print()
+    if args.skip_deps:
+        print("  本次为增量构建，python/ 依赖目录未被重建。")
+        print("  如需强制重建解释器与依赖，去掉 --skip-deps 重跑完整构建。")
     print("=" * 60)
 
 
