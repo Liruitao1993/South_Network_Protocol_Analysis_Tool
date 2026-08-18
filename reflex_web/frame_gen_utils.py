@@ -419,3 +419,178 @@ def encode_axdr_items(items: List[Dict[str, Any]]) -> bytes:
     for item in items:
         data += _encode_axdr_item(coder, item)
     return data
+
+
+# ═══════════════════════════════════════════════════════════════
+# EB 数据标识 698.45 APDU 生成（附件1 V3.42：EB 数据标识 698 承载）
+# ═══════════════════════════════════════════════════════════════
+
+# EB 数据标识 698 承载服务类型模板（依据附件1 文档 698 格式示例）：
+#   GET-Request      : 05 02 00 01 OAD 00 00
+#   GET-Response     : 85 02 00 01 OAD 00 A-XDR(数据) 00 00
+#   SET-Request      : 06 02 00 01 OAD A-XDR(数据) 00
+#   SET-Response确认 : 86 02 00 01 OAD 00 00 00
+#   SET-Response否认 : 86 02 00 01 OAD FF 00 00
+#   ACTION-Request   : 07 02 00 01 OAD 00 00
+#   ACTION-Response  : 87 02 00 01 OAD 00 A-XDR(数据) 00 00
+#   REPORT-Notification: 88 01 00 01 OAD 01 A-XDR(数据) 00 00
+#   REPORT-Response  : 08 01 00 01 OAD 00
+# 说明：OAD = EB 数据标识 4 字节（如 EB030002 → EB 03 00 02），
+#       数据内容 A-XDR octet-string 编码（09 长度 数据）。
+
+EB698_SERVICE_TEMPLATES = {
+    "GET-Request": 0x05,
+    "GET-Response": 0x85,
+    "SET-Request": 0x06,
+    "SET-Response": 0x86,
+    "ACTION-Request": 0x07,
+    "ACTION-Response": 0x87,
+    "REPORT-Notification": 0x88,
+    "REPORT-Response": 0x08,
+}
+
+
+def _axdr_octet_string(data: bytes) -> bytes:
+    """A-XDR octet-string 编码: 09 长度 数据（复用 AXDRCoder）"""
+    from dl_t698_45_axdr import AXDRCoder
+    coder = AXDRCoder()
+    return coder.encode(data, 0x09)
+
+
+def _build_oad(oi_hex: str, attr_no: int, attr_feat: int, index: int) -> bytes:
+    """组装 OAD 4 字节: OI(2B 大端) + 属性字节(高3位=属性特征, 低5位=属性编号) + 元素索引"""
+    oi = int(oi_hex, 16) if oi_hex else 0
+    attr = ((attr_feat & 0x07) << 5) | (attr_no & 0x1F)
+    return oi.to_bytes(2, 'big') + bytes([attr, index & 0xFF])
+
+
+def _build_omd(oi_hex: str, method: int, mode: int) -> bytes:
+    """组装 OMD 4 字节: OI(2B 大端) + 方法标识 + 操作模式"""
+    oi = int(oi_hex, 16) if oi_hex else 0
+    return oi.to_bytes(2, 'big') + bytes([method & 0xFF, mode & 0xFF])
+
+
+def build_eb_698_apdu(di_code: str, service: str,
+                      data_hex: str = "", deny: bool = False,
+                      piid: int = 0, choice: str = "list",
+                      oi_hex: str = "", attr_no: int = None, attr_feat: int = 0,
+                      index: int = None, method: int = None, mode: int = 0,
+                      extra_oads: List[str] = None) -> bytes:
+    """生成 EB 数据标识 698.45 APDU（附件1 V3.42 698 承载格式）
+
+    Args:
+        di_code: EB 数据标识，如 "EB030002"（4 字节 → 默认 OAD/OI）
+        service: GET-Request / GET-Response / SET-Request / SET-Response /
+                 ACTION-Request / ACTION-Response / REPORT-Notification / REPORT-Response
+        data_hex: 数据内容 hex（A-XDR octet-string 编码）
+        deny: SET-Response 否认（FF 代替 00 确认）
+        piid: 服务序号（0~63，默认 0）
+        choice: "one"=单对象(Normal, choice=01) / "list"=多对象(NormalList, choice=02)
+        oi_hex: 自定义 OI（2 字节 hex，默认用 EB 数据标识前 2 字节，如 EB030002 → EB03）
+        attr_no: 属性编号（GET/SET，默认 = EB 数据标识第 3 字节）
+        attr_feat: 属性特征（GET/SET，默认 0）
+        index: 元素索引（GET/SET，默认 = EB 数据标识第 4 字节）
+        method: 方法标识（ACTION，默认 = EB 数据标识第 3 字节）
+        mode: 操作模式（ACTION，默认 0）
+        extra_oads: choice="list" 时的额外 OAD 列表（4 字节 hex 字符串）
+
+    Returns:
+        APDU 字节（不含链路层 68 封装）
+    """
+    di_code = di_code.strip().upper()
+    if not di_code.startswith("EB") or len(di_code) != 8:
+        raise ValueError(f"EB 数据标识格式错误: {di_code}")
+    di_bytes = bytes.fromhex(di_code)  # EB030002 → EB 03 00 02
+    # 默认 OAD: OI=前2字节(EB03), attr=第3字节(00), index=第4字节(02)
+    default_oi = di_bytes[0:2].hex()
+    # 对象字节: 默认用 OAD（OI+属性+索引），ACTION 显式给 method/mode 时用 OMD（OI+方法+模式）
+    if service.startswith("ACTION") and (method is not None or mode != 0):
+        obj = _build_omd(oi_hex or default_oi, method if method is not None else di_bytes[2], mode)
+    else:
+        obj = _build_oad(oi_hex or default_oi,
+                         attr_no if attr_no is not None else di_bytes[2],
+                         attr_feat,
+                         index if index is not None else di_bytes[3])
+
+    try:
+        data = bytes.fromhex(data_hex.replace(" ", "")) if data_hex.strip() else b""
+    except ValueError:
+        raise ValueError(f"数据内容格式错误: {data_hex}")
+
+    if service not in EB698_SERVICE_TEMPLATES:
+        raise ValueError(f"不支持的 698 服务: {service}")
+
+    # choice 子类型: one → 01 (Normal), list → 02 (NormalList)
+    choice_tag = 0x01 if choice == "one" else 0x02
+    piid_byte = piid & 0x3F
+    # 多对象(list)时对象数量前置（count），单对象(one)无 count
+    # ACTION 用 OMD（OI+方法+模式），其余用 OAD（OI+属性+索引）
+    def _obj_prefix():
+        if choice == "one":
+            return bytes([0x01, piid_byte]) + obj
+        oads = [obj] + [bytes.fromhex(o.replace(" ", "")) for o in (extra_oads or [])]
+        return bytes([0x02, piid_byte, len(oads)]) + b"".join(oads)
+
+    if service == "GET-Request":
+        return bytes([0x05]) + _obj_prefix() + bytes([0x00, 0x00])
+    if service == "GET-Response":
+        return bytes([0x85]) + _obj_prefix() + bytes([0x00]) + _axdr_octet_string(data) + bytes([0x00, 0x00])
+    if service == "SET-Request":
+        return bytes([0x06]) + _obj_prefix() + _axdr_octet_string(data) + bytes([0x00])
+    if service == "SET-Response":
+        result = 0xFF if deny else 0x00
+        return bytes([0x86]) + _obj_prefix() + bytes([result, 0x00, 0x00])
+    if service == "ACTION-Request":
+        # ACTION 用 OMD（默认 OI=EB 数据标识前2字节, 方法=第3字节, 模式=第4字节）
+        return bytes([0x07]) + _obj_prefix() + bytes([0x00, 0x00])
+    if service == "ACTION-Response":
+        return bytes([0x87]) + _obj_prefix() + bytes([0x00]) + _axdr_octet_string(data) + bytes([0x00, 0x00])
+    if service == "REPORT-Notification":
+        # REPORT-Notification: 88 01 [piid] [count] OAD 01 A-XDR(数据) 00 00
+        count = 1 + len(extra_oads or [])
+        oads = [obj] + [bytes.fromhex(o.replace(" ", "")) for o in (extra_oads or [])]
+        return bytes([0x88, 0x01, piid_byte, count]) + b"".join(oads) + bytes([0x01]) + _axdr_octet_string(data) + bytes([0x00, 0x00])
+    if service == "REPORT-Response":
+        # REPORT-Response: 08 01 [piid] [count] OAD 00
+        return bytes([0x08, 0x01, piid_byte, 1]) + obj + bytes([0x00])
+    raise ValueError(f"不支持的 698 服务: {service}")
+
+
+def build_eb_698_frame(di_code: str, service: str, data_hex: str = "",
+                       sa: bytes = None, ca: int = 0,
+                       dir_bit: int = 0, prm_bit: int = 1,
+                       func_code: int = 3, deny: bool = False,
+                       piid: int = 0, choice: str = "list",
+                       oi_hex: str = "", attr_no: int = None, attr_feat: int = 0,
+                       index: int = None, method: int = None, mode: int = 0,
+                       extra_oads: List[str] = None) -> bytes:
+    """生成 EB 数据标识 698.45 **完整帧**（68 L L C SA CA [HCS] APDU [FCS] 16）
+
+    与 `build_eb_698_apdu` 的区别：本函数套用 DLT69845FrameGenerator._assemble_frame
+    组装完整链路层帧（含地址域、HCS/FCS 校验），而非裸 APDU。
+
+    Args:
+        di_code: EB 数据标识（4 字节 → 默认 OAD/OI）
+        service: GET-Request / GET-Response / SET-Request / SET-Response /
+                 ACTION-Request / ACTION-Response / REPORT-Notification / REPORT-Response
+        data_hex: 数据内容 hex（A-XDR octet-string 编码）
+        sa: 服务器地址字节（含地址特征字节，由 build_dlt698_sa 生成）
+        ca: 客户机地址（1 字节）
+        dir_bit: 控制域 D7 传输方向（0=客户机→服务器，1=服务器→客户机）
+        prm_bit: 控制域 D6 启动标志
+        func_code: 控制域 D2~D0 功能码（1=链路管理，3=用户数据）
+        deny: SET-Response 否认
+        piid/choice/oi_hex/attr_no/attr_feat/index/method/mode/extra_oads: 见 build_eb_698_apdu
+
+    Returns:
+        完整 698.45 帧字节（68 ... 16）
+    """
+    apdu = build_eb_698_apdu(di_code, service, data_hex, deny=deny, piid=piid, choice=choice,
+                             oi_hex=oi_hex, attr_no=attr_no, attr_feat=attr_feat,
+                             index=index, method=method, mode=mode, extra_oads=extra_oads)
+    from dl_t698_45_frame_gen import DLT69845FrameGenerator
+    gen = DLT69845FrameGenerator()
+    if sa is None:
+        sa = bytes([0xE0]) + bytes.fromhex("000000000000")  # 默认: 单地址+逻辑0+6字节
+    control = gen.build_control(dir_bit=dir_bit, prm_bit=prm_bit, func_code=func_code)
+    return gen._assemble_frame(sa, ca, control, apdu)

@@ -217,6 +217,43 @@ def _search_gdw_afn(keyword: str = "") -> List[List[str]]:
         return [[f"加载失败: {e}", "", "", ""]]
 
 
+def _search_gdw_eb(keyword: str = "") -> List[List[str]]:
+    """国网本地通信模块扩展协议 EB 数据标识查询（附件1 V3.31）
+
+    返回 [EB编码, 名称, 数据格式, 长度, 功能]
+    """
+    try:
+        from gdw_eb_di_lookup import get_eb_di_lookup
+        lookup = get_eb_di_lookup()
+        if keyword.strip():
+            data = lookup.search(keyword)
+        else:
+            data = lookup.get_all()
+        results = []
+        for code, info in sorted(data.items()):
+            results.append([
+                code,
+                info.get("名称", ""),
+                str(info.get("格式", "")),
+                str(info.get("长度", "")),
+                info.get("功能", ""),
+            ])
+        return results
+    except Exception as e:
+        return [[f"加载失败: {e}", "", "", "", ""]]
+
+
+def _is_eb_query(protocol_index: int, keyword: str) -> bool:
+    """判断是否为 EB 数据标识查询（协议7 + 关键词含 EB 前缀或 EB 编码）"""
+    if protocol_index != 7:
+        return False
+    kw = keyword.strip().upper()
+    if not kw:
+        return False
+    # 匹配 EB 前缀（如 EB03 / EB0402 / EBEEEEEE）或中文关键词（台区/时钟/档案等 EB 相关）
+    return kw.startswith("EB") or kw in ("台区", "时钟", "档案", "停上电", "事件", "任务队列")
+
+
 def _search_698_oi(keyword: str = "") -> List[List[str]]:
     """698.45 OI 查询"""
     try:
@@ -357,6 +394,12 @@ def get_lookup_data(protocol_index: int, keyword: str = "") -> List[Dict[str, st
 
     返回 List[Dict]，每个 dict 的键与列名对应。
     """
+    # EB 数据标识查询（协议7 + EB 关键词）：动态切换列
+    if _is_eb_query(protocol_index, keyword):
+        eb_columns = ["数据标识", "名称", "数据格式", "长度", "功能"]
+        eb_rows = _search_gdw_eb(keyword)
+        return [_row_to_dict(eb_rows[i], eb_columns) for i in range(len(eb_rows))]
+
     config = get_query_config(protocol_index)
     columns = config["columns"]
     search_func = _SEARCH_FUNCTIONS.get(protocol_index, _search_south_di)
@@ -369,3 +412,11 @@ def get_lookup_data(protocol_index: int, keyword: str = "") -> List[Dict[str, st
             item[col] = str(row[i]) if i < len(row) else ""
         results.append(item)
     return results
+
+
+def _row_to_dict(row: List[str], columns: List[str]) -> Dict[str, str]:
+    """将行转换为 dict（键与列名对应）"""
+    item = {}
+    for i, col in enumerate(columns):
+        item[col] = str(row[i]) if i < len(row) else ""
+    return item

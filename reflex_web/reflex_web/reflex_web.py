@@ -143,6 +143,46 @@ class State(rx.State):
     # 已选完整标签（代码+名称，供"已选"提示展示）
     gen_di_selected_label: str = ""
     gen_afn_selected_label: str = ""
+    # ── EB 数据标识 645 帧生成器（协议7 透明转发/事件上报报文内容辅助）──
+    eb_di_options: List[Dict[str, str]] = []      # [{value,label,name}] 全部 EB 数据标识
+    gen_eb_di: str = ""                           # 选中的 EB 数据标识（如 EB030002）
+    gen_eb_di_label: str = ""                     # 选中 EB 的完整标签
+    gen_eb_ctrl: str = "91"                       # 645 控制码（十六进制字符串）
+    gen_eb_addr: str = "000000000000"             # 645 地址域 A0~A5（12 位 hex）
+    gen_eb_data: str = ""                         # 数据内容 hex
+    gen_eb_frame: str = ""                        # 生成的 645 帧 hex
+    gen_eb_msg: str = ""                          # 生成提示
+    gen_eb_msg_type: str = "info"                 # success/error/info
+    # ── EB 数据标识 698.45 承载 ──
+    gen_eb_format: str = "645"                    # 645 / 698
+    gen_eb_698_service: str = "SET-Request"       # 698 服务类型
+    gen_eb_698_data: str = ""                     # 698 数据内容 hex
+    # 698 链路层头部配置（完整帧 68 L C SA CA HCS APDU FCS 16）
+    gen_eb_addr_type: int = 0                     # SA 地址类型 (0单/1通配/2组/3广播)
+    gen_eb_logic_addr: int = 0                    # SA 逻辑地址
+    gen_eb_addr_len: int = 6                      # SA 地址长度
+    gen_eb_sa_raw: str = "000000000000"           # SA 地址 hex
+    gen_eb_ca: str = "0"                          # CA 客户机地址
+    gen_eb_dir: str = "0"                         # 控制域 DIR (0下行/1上行)
+    gen_eb_prm: str = "1"                         # 控制域 PRM
+    gen_eb_func: str = "3"                        # 控制域功能码 (1链路/3用户数据)
+    # 698 对象配置（OAD/OMD 属性/方法/索引 + PIID + 单多对象）
+    gen_eb_piid: str = "0"                        # PIID 服务序号
+    gen_eb_choice: str = "list"                   # one=单对象 / list=多对象
+    gen_eb_oi: str = ""                           # 自定义 OI（hex，空=EB标识前2字节）
+    gen_eb_attr_no: str = ""                      # 属性编号（空=EB标识第3字节）
+    gen_eb_attr_feat: str = "0"                   # 属性特征
+    gen_eb_index: str = ""                        # 元素索引（空=EB标识第4字节）
+    gen_eb_method: str = ""                       # 方法标识（ACTION，空=EB标识第3字节）
+    gen_eb_mode: str = "0"                        # 操作模式（ACTION）
+    # ── EB 数据项字段表单（选 OAD 后按字段配置数据内容）──
+    eb_di_fields: List[Dict[str, str]] = []       # [{name,type,length,note,has_enum,has_list}]
+    eb_di_field_enum: List[List[Dict[str, str]]] = []  # [i] enum 选项
+    eb_di_field_vals: List[str] = []              # [i] 字段值（位置对齐）
+    eb_di_field_list: List[List[List[str]]] = []  # [i] list 字段行（[行][列]）
+    eb_di_field_list_meta: List[List[Dict[str, str]]] = []  # [i] list item_fields meta
+    eb_di_field_use: bool = False                 # 当前 OAD 是否用字段表单
+    eb_698_use_field: bool = True                 # 698 模式是否用字段表单组装数据
     gen_dlt698_selected_label: str = ""
     # 国网信息域配置
     gen_gdw_info: Dict[str, str] = {
@@ -176,6 +216,14 @@ class State(rx.State):
     lookup_results: List[Dict[str, Any]] = []
     lookup_columns: List[str] = ["DI3", "DI2", "DI1", "DI0", "AFN", "中文含义"]
     lookup_title: str = "DI 查询"
+
+    # ── 客户端下载 ────────────────────────────────────────────
+    download_exe_available: bool = False          # downloads/ 目录是否有 exe
+    download_exe_name: str = ""                   # exe 文件名
+    download_image_available: bool = False        # downloads/ 目录是否有截图
+    download_readme_available: bool = False       # downloads/ 目录是否有 README
+    download_readme_text: str = ""                # README 内容
+    download_msg: str = ""                        # 提示信息
 
     # ── 报文工具 ─────────────────────────────────────────────
     tool_input: str = ""
@@ -1083,6 +1131,346 @@ class State(rx.State):
         if 0 <= idx < len(self.gen_field_values):
             self.gen_field_values[idx] = value
         self._update_gen_preview()
+
+    # ── EB 数据标识 645 帧生成器 ──────────────────────────────
+    def load_eb_di_options(self):
+        """加载全部 EB 数据标识选项（gdw_eb_di_lookup）"""
+        try:
+            from gdw_eb_di_lookup import get_eb_di_lookup
+            data = get_eb_di_lookup().get_all()
+        except Exception:
+            data = {}
+        options = []
+        for code, info in sorted(data.items()):
+            options.append({
+                "value": code,
+                "label": f"{code} {info.get('名称', '')}",
+                "name": info.get("名称", ""),
+            })
+        self.eb_di_options = options
+
+    def set_eb_di(self, value: str):
+        """选择 EB 数据标识"""
+        self.gen_eb_di = value
+        for o in self.eb_di_options:
+            if o["value"] == value:
+                self.gen_eb_di_label = o["label"]
+                break
+        self._load_eb_di_field_schema(value)
+
+    def _load_eb_di_field_schema(self, di_code: str):
+        """加载 EB 数据项字段 schema（gdw_eb_di_fields.py）"""
+        self.eb_di_fields = []
+        self.eb_di_field_enum = []
+        self.eb_di_field_vals = []
+        self.eb_di_field_list = []
+        self.eb_di_field_list_meta = []
+        self.eb_di_field_use = False
+        try:
+            from gdw_eb_di_fields import EB_DI_FIELDS
+            info = EB_DI_FIELDS.get(di_code)
+            if not info:
+                return
+            fields = info["fields"]
+            self.eb_di_field_use = True
+            for f in fields:
+                ftype = f.get("type", "hex")
+                self.eb_di_fields.append({
+                    "name": f.get("name", ""),
+                    "type": ftype,
+                    "length": str(f.get("length", "")),
+                    "note": str(f.get("note", "")),
+                    "has_enum": "1" if ftype == "enum" else "0",
+                    "has_list": "1" if ftype == "list" else "0",
+                    "default": str(f.get("default", "")),
+                })
+                if ftype == "enum":
+                    self.eb_di_field_enum.append(
+                        [{"value": str(k), "label": v} for k, v in f.get("enum_map", {}).items()])
+                else:
+                    self.eb_di_field_enum.append([])
+                self.eb_di_field_vals.append(str(f.get("default", "")))
+                if ftype == "list":
+                    self.eb_di_field_list.append([])
+                    self.eb_di_field_list_meta.append([
+                        {"name": it.get("name", ""), "type": it.get("type", "hex"),
+                         "length": str(it.get("length", ""))}
+                        for it in f.get("item_fields", [])
+                    ])
+                else:
+                    self.eb_di_field_list.append([])
+                    self.eb_di_field_list_meta.append([])
+        except Exception:
+            self.eb_di_field_use = False
+
+    def set_eb_field(self, idx, value: str):
+        """设置 EB 字段值（idx = eb_di_fields 索引）"""
+        try:
+            idx = int(idx)
+        except (ValueError, TypeError):
+            return
+        if 0 <= idx < len(self.eb_di_field_vals):
+            self.eb_di_field_vals[idx] = value
+
+    def add_eb_list_row(self, fi):
+        """EB list 字段添加一行"""
+        try:
+            fi = int(fi)
+        except (ValueError, TypeError):
+            return
+        if 0 <= fi < len(self.eb_di_field_list):
+            meta = self.eb_di_field_list_meta[fi] if fi < len(self.eb_di_field_list_meta) else []
+            row = ["" for _ in meta]
+            rows = list(self.eb_di_field_list[fi])
+            rows.append(row)
+            self.eb_di_field_list[fi] = rows
+
+    def set_eb_list_cell(self, fi, row_idx, col_idx, value: str):
+        """EB list 字段设置单元格"""
+        try:
+            fi, row_idx, col_idx = int(fi), int(row_idx), int(col_idx)
+        except (ValueError, TypeError):
+            return
+        if 0 <= fi < len(self.eb_di_field_list):
+            rows = [list(r) for r in self.eb_di_field_list[fi]]
+            if row_idx < len(rows) and col_idx < len(rows[row_idx]):
+                rows[row_idx][col_idx] = value
+            self.eb_di_field_list[fi] = rows
+
+    def _collect_eb_field_values(self) -> Dict[str, Any]:
+        """从字段表单收集 {字段名: 值}"""
+        from gdw_eb_di_fields import EB_DI_FIELDS
+        info = EB_DI_FIELDS.get(self.gen_eb_di, {})
+        fields = info.get("fields", [])
+        values = {}
+        for i, f in enumerate(fields):
+            fname = f.get("name", "")
+            ftype = f.get("type", "hex")
+            if ftype == "list":
+                items = []
+                for row in self.eb_di_field_list[i] if i < len(self.eb_di_field_list) else []:
+                    item = {}
+                    meta = self.eb_di_field_list_meta[i] if i < len(self.eb_di_field_list_meta) else []
+                    for j, it in enumerate(meta):
+                        item[it["name"]] = row[j] if j < len(row) else ""
+                    items.append(item)
+                values[fname] = items
+            else:
+                values[fname] = self.eb_di_field_vals[i] if i < len(self.eb_di_field_vals) else ""
+        return values
+
+    def set_eb_ctrl(self, value: str):
+        """设置 645 控制码"""
+        self.gen_eb_ctrl = value
+
+    def set_eb_addr(self, value: str):
+        """设置 645 地址域"""
+        self.gen_eb_addr = value
+
+    def set_eb_data(self, value: str):
+        """设置数据内容 hex"""
+        self.gen_eb_data = value
+
+    def set_eb_format(self, value: str):
+        """切换 EB 承载格式（645 / 698）"""
+        self.gen_eb_format = value
+        self.gen_eb_frame = ""
+        self.gen_eb_msg = ""
+
+    def set_eb_698_service(self, value: str):
+        """设置 698 服务类型"""
+        self.gen_eb_698_service = value
+
+    def set_eb_698_data(self, value: str):
+        """设置 698 数据内容 hex"""
+        self.gen_eb_698_data = value
+
+    def set_eb_addr_type(self, value: str):
+        try: self.gen_eb_addr_type = int(value)
+        except (ValueError, TypeError): pass
+
+    def set_eb_logic_addr(self, value: str):
+        try: self.gen_eb_logic_addr = int(value)
+        except (ValueError, TypeError): pass
+
+    def set_eb_addr_len(self, value: str):
+        try: self.gen_eb_addr_len = int(value)
+        except (ValueError, TypeError): pass
+
+    def set_eb_sa_raw(self, value: str):
+        self.gen_eb_sa_raw = value
+
+    def set_eb_ca(self, value: str):
+        self.gen_eb_ca = value
+
+    def set_eb_dir(self, value: str):
+        self.gen_eb_dir = value
+
+    def set_eb_prm(self, value: str):
+        self.gen_eb_prm = value
+
+    def set_eb_func(self, value: str):
+        self.gen_eb_func = value
+
+    def set_eb_698_use_field(self, value: str):
+        """切换 698 数据内容来源（字段表单 / 自由 hex）"""
+        self.eb_698_use_field = (value == "1")
+
+    def set_eb_piid(self, value: str):
+        self.gen_eb_piid = value
+
+    def set_eb_choice(self, value: str):
+        self.gen_eb_choice = value
+
+    def set_eb_oi(self, value: str):
+        self.gen_eb_oi = value
+
+    def set_eb_attr_no(self, value: str):
+        self.gen_eb_attr_no = value
+
+    def set_eb_attr_feat(self, value: str):
+        self.gen_eb_attr_feat = value
+
+    def set_eb_index(self, value: str):
+        self.gen_eb_index = value
+
+    def set_eb_method(self, value: str):
+        self.gen_eb_method = value
+
+    def set_eb_mode(self, value: str):
+        self.gen_eb_mode = value
+
+    def gen_eb_645_frame(self):
+        """生成 EB 数据标识 645 帧: 68 A0..A5 68 C L DI3 DI2 DI1 DI0 DATA CS 16
+
+        645 数据标识为 4 字节小端（DI3 DI2 DI1 DI0 = EB XX XX XX），
+        EB 数据标识字符串如 "EB030002" → 帧内字节 EB 03 00 02。
+        """
+        if self.gen_eb_format == "698":
+            return self._gen_eb_698_frame()
+        try:
+            from gdw_eb_di_lookup import get_eb_di_lookup
+            lookup = get_eb_di_lookup()
+        except Exception:
+            lookup = None
+        di = self.gen_eb_di.strip()
+        if not di or not di.startswith("EB") or len(di) != 8:
+            self.gen_eb_msg = "请先选择 EB 数据标识（如 EB030002）"
+            self.gen_eb_msg_type = "error"
+            return
+        try:
+            ctrl = int(self.gen_eb_ctrl, 16)
+            data_bytes = bytes.fromhex(self.gen_eb_data.replace(" ", "")) if self.gen_eb_data.strip() else b""
+            addr_bytes = bytes.fromhex(self.gen_eb_addr.replace(" ", ""))
+            if len(addr_bytes) != 6:
+                addr_bytes = addr_bytes[:6].ljust(6, b'\x00')
+        except ValueError:
+            self.gen_eb_msg = "控制码/地址/数据内容格式错误（应为十六进制）"
+            self.gen_eb_msg_type = "error"
+            return
+        # DI 字节: "EB030002" → EB 03 00 02
+        try:
+            di_bytes = bytes.fromhex(di)
+        except ValueError:
+            self.gen_eb_msg = f"EB 数据标识格式错误: {di}"
+            self.gen_eb_msg_type = "error"
+            return
+        data_len = len(di_bytes) + len(data_bytes)
+        body = bytes([ctrl, data_len]) + di_bytes + data_bytes
+        cs = sum(body) & 0xFF
+        frame = bytes([0x68]) + addr_bytes + bytes([0x68]) + body + bytes([cs, 0x16])
+        self.gen_eb_frame = frame.hex()
+        info = lookup.get(di) if lookup else None
+        name = info.get("名称", "") if info else ""
+        self.gen_eb_msg = f"已生成 {di} {name} 645 帧（{len(frame)} 字节），点击「填入报文内容」写入透明转发字段"
+        self.gen_eb_msg_type = "success"
+
+    def _gen_eb_698_frame(self):
+        """生成 EB 数据标识 698.45 完整帧（附件1 V3.42 698 承载格式）"""
+        try:
+            from gdw_eb_di_lookup import get_eb_di_lookup
+            lookup = get_eb_di_lookup()
+        except Exception:
+            lookup = None
+        di = self.gen_eb_di.strip()
+        if not di or not di.startswith("EB") or len(di) != 8:
+            self.gen_eb_msg = "请先选择 EB 数据标识（如 EB030002）"
+            self.gen_eb_msg_type = "error"
+            return
+        try:
+            from frame_gen_utils import build_eb_698_frame, build_dlt698_sa
+            from gdw_eb_di_fields import encode_eb_di_data, EB_DI_FIELDS
+
+            # 数据内容：优先用字段表单组装，否则用自由 hex
+            data_hex = self.gen_eb_698_data
+            if self.eb_698_use_field and di in EB_DI_FIELDS:
+                values = self._collect_eb_field_values()
+                try:
+                    data_bytes = encode_eb_di_data(di, values)
+                    data_hex = data_bytes.hex()
+                except Exception:
+                    data_hex = self.gen_eb_698_data
+
+            # 完整帧头部配置（SA 由地址类型/逻辑地址/长度/hex 组装）
+            sa = build_dlt698_sa(
+                self.gen_eb_addr_type, self.gen_eb_logic_addr,
+                self.gen_eb_addr_len, self.gen_eb_sa_raw,
+            ) if hasattr(self, 'gen_eb_addr_type') else None
+
+            frame = build_eb_698_frame(
+                di, self.gen_eb_698_service, data_hex,
+                sa=sa, ca=int(self.gen_eb_ca or 0),
+                dir_bit=int(self.gen_eb_dir or 0),
+                prm_bit=int(self.gen_eb_prm or 1),
+                func_code=int(self.gen_eb_func or 3),
+                piid=int(self.gen_eb_piid or 0),
+                choice=self.gen_eb_choice,
+                oi_hex=self.gen_eb_oi,
+                attr_no=int(self.gen_eb_attr_no) if self.gen_eb_attr_no else None,
+                attr_feat=int(self.gen_eb_attr_feat or 0),
+                index=int(self.gen_eb_index) if self.gen_eb_index else None,
+                method=int(self.gen_eb_method) if self.gen_eb_method else None,
+                mode=int(self.gen_eb_mode or 0),
+            )
+            if isinstance(frame, bytes):
+                frame_hex = frame.hex()
+            else:
+                frame_hex = frame
+        except ValueError as e:
+            self.gen_eb_msg = str(e)
+            self.gen_eb_msg_type = "error"
+            return
+        self.gen_eb_frame = frame_hex
+        info = lookup.get(di) if lookup else None
+        name = info.get("名称", "") if info else ""
+        self.gen_eb_msg = f"已生成 {di} {name} 698 完整帧（{self.gen_eb_698_service}，{len(frame) if isinstance(frame, bytes) else len(frame_hex)//2} 字节，含 68 链路层封装），点击「填入报文内容」写入透明转发字段"
+        self.gen_eb_msg_type = "success"
+
+    def apply_eb_frame_to_content(self):
+        """将生成的 645 帧填入「报文内容」字段（第一个 bytes 类型字段）"""
+        if not self.gen_eb_frame:
+            self.gen_eb_msg = "请先生成 645 帧"
+            self.gen_eb_msg_type = "error"
+            return
+        # 找 gen_field_meta 中名为「报文内容」或第一个 bytes 字段
+        target_idx = None
+        for i, meta in enumerate(self.gen_field_meta):
+            if meta.get("name") == "报文内容":
+                target_idx = i
+                break
+        if target_idx is None:
+            for i, meta in enumerate(self.gen_field_meta):
+                if meta.get("type") == "bytes":
+                    target_idx = i
+                    break
+        if target_idx is None:
+            self.gen_eb_msg = "当前命令无「报文内容」字段可填入"
+            self.gen_eb_msg_type = "error"
+            return
+        self.gen_field_values[target_idx] = self.gen_eb_frame
+        self._update_gen_preview()
+        self.gen_eb_msg = f"已填入字段「{self.gen_field_meta[target_idx].get('name')}」（字段 #{target_idx}）"
+        self.gen_eb_msg_type = "success"
 
     def set_gen_sub_field(self, fi, si, value: str):
         """设置子字段值（fi = 字段索引，si = 子字段索引）"""
@@ -2176,11 +2564,16 @@ class State(rx.State):
         self.lookup_results = []
 
         try:
-            from .lookup_utils import get_query_config, get_lookup_data
+            from .lookup_utils import get_query_config, get_lookup_data, _is_eb_query
 
-            config = get_query_config(self.current_protocol)
-            self.lookup_title = config["title"]
-            self.lookup_columns = config["columns"]
+            if _is_eb_query(self.current_protocol, self.lookup_query):
+                # EB 数据标识查询（协议7）：动态切换标题与列
+                self.lookup_title = "EB 数据标识查询（本地通信模块扩展协议）"
+                self.lookup_columns = ["数据标识", "名称", "数据格式", "长度", "功能"]
+            else:
+                config = get_query_config(self.current_protocol)
+                self.lookup_title = config["title"]
+                self.lookup_columns = config["columns"]
 
             results = get_lookup_data(self.current_protocol, self.lookup_query)
             self.lookup_results = results
@@ -2199,7 +2592,7 @@ class State(rx.State):
     def load_lookup_default(self):
         """加载默认查询数据（切换到查询页时自动加载）"""
         try:
-            from .lookup_utils import get_query_config, get_lookup_data
+            from .lookup_utils import get_query_config, get_lookup_data, _is_eb_query
             config = get_query_config(self.current_protocol)
             self.lookup_title = config["title"]
             self.lookup_columns = config["columns"]
@@ -2222,6 +2615,62 @@ class State(rx.State):
             self._load_afn_fn_options()
             self._load_dlt698_options()
             self._load_preset_buttons()
+            self.load_eb_di_options()
+        if tab == "download":
+            self.load_download_info()
+
+    # ── 客户端下载 ────────────────────────────────────────────
+    def load_download_info(self):
+        """扫描 downloads/ 目录，获取 exe 与截图信息"""
+        try:
+            from pathlib import Path
+            # 部署目录: reflex_web/downloads/（开发时相对 reflex_web 包）
+            here = Path(__file__).resolve()
+            downloads_dir = here.parent.parent / "downloads"  # reflex_web/downloads/
+            if not downloads_dir.exists():
+                downloads_dir = here.parent / "downloads"
+            self.download_exe_available = False
+            self.download_exe_name = ""
+            self.download_image_available = False
+            self.download_readme_available = False
+            self.download_readme_text = ""
+            if downloads_dir.exists():
+                exes = sorted(downloads_dir.glob("*.exe"))
+                if exes:
+                    self.download_exe_available = True
+                    self.download_exe_name = exes[0].name
+                if (downloads_dir / "client_screenshot.png").exists():
+                    self.download_image_available = True
+                # 客户端 README（README.md 或 client_readme.md）
+                for readme_name in ("client_readme.md", "README.md"):
+                    readme_file = downloads_dir / readme_name
+                    if readme_file.exists():
+                        try:
+                            self.download_readme_text = readme_file.read_text(encoding="utf-8")
+                            self.download_readme_available = True
+                        except Exception:
+                            pass
+                        break
+                self.download_msg = ""
+            else:
+                self.download_msg = "downloads/ 目录不存在"
+        except Exception as e:
+            self.download_msg = f"扫描失败: {e}"
+
+    def download_client(self):
+        """触发客户端 exe 下载（整页导航到 /download/ 静态路由）
+
+        不能用 rx.redirect：那是前端 SPA 路由跳转，/download/ 无对应页面
+        会被 Reflex 前端 404 拦截。改用 window.location 整页导航，
+        让浏览器直接请求后端下载路由（返回 attachment 触发下载）。
+        """
+        if not self.download_exe_available:
+            self.download_msg = "客户端 exe 未就绪，请将 exe 放入 downloads/ 目录"
+            return
+        import urllib.parse
+        name = urllib.parse.quote(self.download_exe_name)
+        url = f"/download/{name}"
+        return rx.call_script(f"window.location.href = '{url}';")
 
     # ── 报文工具 ─────────────────────────────────────────────
     def set_tool_input(self, value: str):
@@ -3130,6 +3579,18 @@ def _field_input(f: Any = None, name: str = "", ftype: str = "bytes", default: s
             font_family="monospace",
             size="1",
             type="number",
+            width="100%",
+        )
+    if ftype == "bytes":
+        # bytes 字段（报文内容/帧数据）用多行 text_area，完整显示长报文
+        return rx.text_area(
+            value=State.gen_fields[name].to(str) if name else default,
+            on_change=on_change,
+            placeholder=placeholder or default,
+            font_family="monospace",
+            size="1",
+            width="100%",
+            min_height="60px",
         )
     return rx.input(
         value=State.gen_fields[name].to(str) if name else default,
@@ -3137,6 +3598,7 @@ def _field_input(f: Any = None, name: str = "", ftype: str = "bytes", default: s
         placeholder=placeholder or default,
         font_family="monospace",
         size="1",
+        width="100%",
     )
 
 
@@ -3313,6 +3775,511 @@ def frame_gen_tab() -> rx.Component:
             ),
         )
 
+    # ── EB 数据标识 645/698 帧生成器（协议7 透明转发报文内容辅助）──
+    def eb_645_generator() -> rx.Component:
+        return rx.card(
+            rx.vstack(
+                rx.hstack(
+                    rx.icon("layers", size=18, color="#2563eb"),
+                    rx.heading("EB 数据标识 帧生成器", size="2", font_weight="semibold"),
+                    rx.text("（附件1 本地通信模块扩展协议 V3.42）", size="1", color="gray"),
+                    spacing="2",
+                ),
+                rx.text(
+                    "用于填充 52H-F1 透明转发 / 56H-F2 事件上报的「报文内容」字段：选择 EB 数据标识后自动生成完整帧（645 或 698.45），一键填入。",
+                    size="1", color="gray",
+                ),
+                rx.hstack(
+                    rx.vstack(
+                        rx.text("承载格式:", size="1", font_weight="medium"),
+                        rx.el.select(
+                            rx.el.option("645 帧（68 封装）", value="645"),
+                            rx.el.option("698.45 APDU（裸 APDU）", value="698"),
+                            default_value="645",
+                            on_change=State.set_eb_format,
+                            class_name="w-full rounded border border-gray-300 px-3 py-1.5",
+                            size="1",
+                        ),
+                        spacing="1",
+                        width="100%",
+                    ),
+                    rx.vstack(
+                        rx.text("EB 数据标识:", size="1", font_weight="medium"),
+                        rx.el.select(
+                            rx.el.option("-- 选择 EB 数据标识 --", value=""),
+                            rx.foreach(
+                                State.eb_di_options,
+                                lambda o: rx.el.option(o["label"], value=o["value"]),
+                            ),
+                            default_value="",
+                            on_change=State.set_eb_di,
+                            class_name="w-full rounded border border-gray-300 px-3 py-1.5",
+                            size="1",
+                        ),
+                        spacing="1",
+                        width="100%",
+                    ),
+                    columns="2",
+                    spacing="3",
+                    width="100%",
+                ),
+                # ── 645 格式控件 ──
+                rx.cond(
+                    State.gen_eb_format == "645",
+                    rx.vstack(
+                        rx.hstack(
+                            rx.vstack(
+                                rx.text("645 控制码:", size="1", font_weight="medium"),
+                                rx.el.select(
+                                    rx.el.option("91H 读数据响应", value="91"),
+                                    rx.el.option("11H 读数据请求", value="11"),
+                                    rx.el.option("14H 写数据请求", value="14"),
+                                    rx.el.option("94H 写数据响应", value="94"),
+                                    rx.el.option("81H 主动上报", value="81"),
+                                    rx.el.option("01H 上报确认", value="01"),
+                                    default_value="91",
+                                    on_change=State.set_eb_ctrl,
+                                    class_name="w-full rounded border border-gray-300 px-3 py-1.5",
+                                    size="1",
+                                ),
+                                spacing="1",
+                                width="100%",
+                            ),
+                            rx.vstack(
+                                rx.text("地址域 A0~A5 (hex):", size="1", font_weight="medium"),
+                                rx.input(
+                                    value=State.gen_eb_addr,
+                                    on_change=State.set_eb_addr,
+                                    placeholder="12位hex，如 000000000000",
+                                    font_family="monospace",
+                                    size="1",
+                                ),
+                                spacing="1",
+                                width="100%",
+                            ),
+                            columns="2",
+                            spacing="3",
+                            width="100%",
+                        ),
+                        rx.vstack(
+                            rx.text("数据内容 (hex，可留空):", size="1", font_weight="medium"),
+                            rx.input(
+                                value=State.gen_eb_data,
+                                on_change=State.set_eb_data,
+                                placeholder="如 01 01 11 22 33 44 55 66（停上电类型+数量+地址）",
+                                font_family="monospace",
+                                size="1",
+                                width="100%",
+                            ),
+                            spacing="1",
+                            width="100%",
+                        ),
+                        spacing="3",
+                        width="100%",
+                    ),
+                ),
+                # ── 698 格式控件 ──
+                rx.cond(
+                    State.gen_eb_format == "698",
+                    rx.vstack(
+                        # 数据内容来源切换
+                        rx.hstack(
+                            rx.vstack(
+                                rx.text("数据内容来源:", size="1", font_weight="medium"),
+                                rx.el.select(
+                                    rx.el.option("按字段配置（推荐）", value="1"),
+                                    rx.el.option("直接填 hex", value="0"),
+                                    default_value="1",
+                                    on_change=State.set_eb_698_use_field,
+                                    class_name="w-full rounded border border-gray-300 px-3 py-1.5",
+                                    size="1",
+                                ),
+                                spacing="1",
+                                width="100%",
+                            ),
+                            rx.vstack(
+                                rx.text("698 服务类型:", size="1", font_weight="medium"),
+                                rx.el.select(
+                                    rx.el.option("GET-Request 读取", value="GET-Request"),
+                                    rx.el.option("GET-Response 读响应", value="GET-Response"),
+                                    rx.el.option("SET-Request 设置/配置", value="SET-Request"),
+                                    rx.el.option("SET-Response 写确认", value="SET-Response"),
+                                    rx.el.option("ACTION-Request 操作", value="ACTION-Request"),
+                                    rx.el.option("ACTION-Response 操作响应", value="ACTION-Response"),
+                                    rx.el.option("REPORT-Notification 主动上报", value="REPORT-Notification"),
+                                    rx.el.option("REPORT-Response 上报确认", value="REPORT-Response"),
+                                    default_value="SET-Request",
+                                    on_change=State.set_eb_698_service,
+                                    class_name="w-full rounded border border-gray-300 px-3 py-1.5",
+                                    size="1",
+                                ),
+                                spacing="1",
+                                width="100%",
+                            ),
+                            columns="2",
+                            spacing="3",
+                            width="100%",
+                        ),
+                        # ── 按字段配置数据内容 ──
+                        rx.cond(
+                            State.eb_698_use_field & (State.eb_di_field_use) & (State.gen_eb_di != ""),
+                            rx.vstack(
+                                rx.text("数据内容字段（按附件1 V3.42 定义）:", size="1", font_weight="medium"),
+                                rx.foreach(
+                                    State.eb_di_fields,
+                                    lambda f, i: rx.vstack(
+                                        rx.hstack(
+                                            rx.text(f["name"], size="1", font_weight="medium", width="200px"),
+                                            rx.cond(
+                                                f["has_enum"] == "1",
+                                                rx.el.select(
+                                                    rx.el.option("-- 选择 --", value=""),
+                                                    rx.foreach(
+                                                        State.eb_di_field_enum[i],
+                                                        lambda o: rx.el.option(o["label"], value=o["value"]),
+                                                    ),
+                                                    default_value=State.eb_di_field_vals[i],
+                                                    on_change=lambda val, idx=i: State.set_eb_field(idx, val),
+                                                    class_name="flex-1 rounded border border-gray-300 px-3 py-1.5",
+                                                    size="1",
+                                                ),
+                                                rx.cond(
+                                                    f["has_list"] == "1",
+                                                    rx.vstack(
+                                                        rx.foreach(
+                                                            State.eb_di_field_list[i],
+                                                            lambda row, r: rx.hstack(
+                                                                rx.foreach(
+                                                                    State.eb_di_field_list_meta[i],
+                                                                    lambda it, c: rx.input(
+                                                                        value=row[c].to(str),
+                                                                        on_change=lambda val, fi=i, rr=r, cc=c: State.set_eb_list_cell(fi, rr, cc, val),
+                                                                        placeholder=it["name"],
+                                                                        font_family="monospace",
+                                                                        size="1",
+                                                                        width="140px",
+                                                                    ),
+                                                                ),
+                                                                spacing="1",
+                                                            ),
+                                                        ),
+                                                        rx.button(
+                                                            "添加一行",
+                                                            on_click=lambda fi=i: State.add_eb_list_row(fi),
+                                                            size="1",
+                                                            variant="soft",
+                                                        ),
+                                                        spacing="1",
+                                                    ),
+                                                    rx.input(
+                                                        value=State.eb_di_field_vals[i].to(str),
+                                                        on_change=lambda val, idx=i: State.set_eb_field(idx, val),
+                                                        placeholder=f["note"],
+                                                        font_family="monospace",
+                                                        size="1",
+                                                        width="100%",
+                                                    ),
+                                                ),
+                                            ),
+                                            spacing="2",
+                                            width="100%",
+                                        ),
+                                        spacing="1",
+                                        width="100%",
+                                    ),
+                                ),
+                                spacing="2",
+                                width="100%",
+                            ),
+                        ),
+                        # ── 自由 hex 数据 ──
+                        rx.cond(
+                            ~State.eb_698_use_field,
+                            rx.vstack(
+                                rx.text("数据内容 (hex，A-XDR octet-string):", size="1", font_weight="medium"),
+                                rx.input(
+                                    value=State.gen_eb_698_data,
+                                    on_change=State.set_eb_698_data,
+                                    placeholder="如 00 00 05（台区识别方法+时长）",
+                                    font_family="monospace",
+                                    size="1",
+                                    width="100%",
+                                ),
+                                spacing="1",
+                                width="100%",
+                            ),
+                        ),
+                        # ── 链路层头部配置 ──
+                        rx.text("698.45 链路层头部（完整帧 68 L C SA CA HCS APDU FCS 16）:", size="1", font_weight="medium"),
+                        rx.hstack(
+                            rx.vstack(
+                                rx.text("SA 地址类型:", size="1", font_weight="medium"),
+                                rx.el.select(
+                                    rx.el.option("单地址(0)", value="0"),
+                                    rx.el.option("通配地址(1)", value="1"),
+                                    rx.el.option("组地址(2)", value="2"),
+                                    rx.el.option("广播地址(3)", value="3"),
+                                    default_value="0",
+                                    on_change=State.set_eb_addr_type,
+                                    class_name="w-full rounded border border-gray-300 px-3 py-1.5",
+                                    size="1",
+                                ),
+                                spacing="1",
+                                width="100%",
+                            ),
+                            rx.vstack(
+                                rx.text("SA 地址长度:", size="1", font_weight="medium"),
+                                rx.input(
+                                    value=State.gen_eb_addr_len.to(str),
+                                    on_change=State.set_eb_addr_len,
+                                    placeholder="6",
+                                    size="1",
+                                    width="70px",
+                                ),
+                                spacing="1",
+                                width="100%",
+                            ),
+                            rx.vstack(
+                                rx.text("SA 地址 (hex):", size="1", font_weight="medium"),
+                                rx.input(
+                                    value=State.gen_eb_sa_raw,
+                                    on_change=State.set_eb_sa_raw,
+                                    placeholder="000000000000",
+                                    font_family="monospace",
+                                    size="1",
+                                ),
+                                spacing="1",
+                                width="100%",
+                            ),
+                            rx.vstack(
+                                rx.text("CA 客户机地址:", size="1", font_weight="medium"),
+                                rx.input(
+                                    value=State.gen_eb_ca,
+                                    on_change=State.set_eb_ca,
+                                    placeholder="0",
+                                    size="1",
+                                    width="60px",
+                                ),
+                                spacing="1",
+                                width="100%",
+                            ),
+                            columns="4",
+                            spacing="3",
+                            width="100%",
+                        ),
+                        rx.hstack(
+                            rx.vstack(
+                                rx.text("DIR:", size="1", font_weight="medium"),
+                                rx.el.select(
+                                    rx.el.option("0-客户机→服务器", value="0"),
+                                    rx.el.option("1-服务器→客户机", value="1"),
+                                    default_value="0",
+                                    on_change=State.set_eb_dir,
+                                    class_name="w-full rounded border border-gray-300 px-3 py-1.5",
+                                    size="1",
+                                ),
+                                spacing="1",
+                                width="100%",
+                            ),
+                            rx.vstack(
+                                rx.text("PRM:", size="1", font_weight="medium"),
+                                rx.el.select(
+                                    rx.el.option("1-启动站", value="1"),
+                                    rx.el.option("0-从动站", value="0"),
+                                    default_value="1",
+                                    on_change=State.set_eb_prm,
+                                    class_name="w-full rounded border border-gray-300 px-3 py-1.5",
+                                    size="1",
+                                ),
+                                spacing="1",
+                                width="100%",
+                            ),
+                            rx.vstack(
+                                rx.text("功能码:", size="1", font_weight="medium"),
+                                rx.el.select(
+                                    rx.el.option("3-用户数据", value="3"),
+                                    rx.el.option("1-链路管理", value="1"),
+                                    default_value="3",
+                                    on_change=State.set_eb_func,
+                                    class_name="w-full rounded border border-gray-300 px-3 py-1.5",
+                                    size="1",
+                                ),
+                                spacing="1",
+                                width="100%",
+                            ),
+                            columns="3",
+                            spacing="3",
+                            width="100%",
+                        ),
+                        # ── 对象配置（OAD/OMD 属性/方法/索引 + PIID + 单多对象）──
+                        rx.text("698 对象配置（OAD=OI+属性编号+属性特征+元素索引，ACTION 用 OMD=OI+方法标识+操作模式）:", size="1", font_weight="medium"),
+                        rx.hstack(
+                            rx.vstack(
+                                rx.text("对象个数:", size="1", font_weight="medium"),
+                                rx.el.select(
+                                    rx.el.option("一个对象(01)", value="one"),
+                                    rx.el.option("若干对象(02, 列表)", value="list"),
+                                    default_value="list",
+                                    on_change=State.set_eb_choice,
+                                    class_name="w-full rounded border border-gray-300 px-3 py-1.5",
+                                    size="1",
+                                ),
+                                spacing="1",
+                                width="100%",
+                            ),
+                            rx.vstack(
+                                rx.text("PIID 服务序号:", size="1", font_weight="medium"),
+                                rx.input(
+                                    value=State.gen_eb_piid,
+                                    on_change=State.set_eb_piid,
+                                    placeholder="0",
+                                    size="1",
+                                    width="60px",
+                                ),
+                                spacing="1",
+                                width="100%",
+                            ),
+                            rx.vstack(
+                                rx.text("OI (hex, 空=EB标识):", size="1", font_weight="medium"),
+                                rx.input(
+                                    value=State.gen_eb_oi,
+                                    on_change=State.set_eb_oi,
+                                    placeholder="EB03",
+                                    font_family="monospace",
+                                    size="1",
+                                ),
+                                spacing="1",
+                                width="100%",
+                            ),
+                            columns="3",
+                            spacing="3",
+                            width="100%",
+                        ),
+                        rx.cond(
+                            State.gen_eb_698_service.startswith("ACTION"),
+                            # ACTION: 方法标识 + 操作模式
+                            rx.hstack(
+                                rx.vstack(
+                                    rx.text("方法标识(空=EB标识):", size="1", font_weight="medium"),
+                                    rx.input(
+                                        value=State.gen_eb_method,
+                                        on_change=State.set_eb_method,
+                                        placeholder="0",
+                                        size="1",
+                                        width="70px",
+                                    ),
+                                    spacing="1",
+                                    width="100%",
+                                ),
+                                rx.vstack(
+                                    rx.text("操作模式:", size="1", font_weight="medium"),
+                                    rx.input(
+                                        value=State.gen_eb_mode,
+                                        on_change=State.set_eb_mode,
+                                        placeholder="0",
+                                        size="1",
+                                        width="70px",
+                                    ),
+                                    spacing="1",
+                                    width="100%",
+                                ),
+                                columns="2",
+                                spacing="3",
+                                width="100%",
+                            ),
+                            # GET/SET: 属性编号 + 属性特征 + 元素索引
+                            rx.hstack(
+                                rx.vstack(
+                                    rx.text("属性编号(空=EB标识):", size="1", font_weight="medium"),
+                                    rx.input(
+                                        value=State.gen_eb_attr_no,
+                                        on_change=State.set_eb_attr_no,
+                                        placeholder="0",
+                                        size="1",
+                                        width="70px",
+                                    ),
+                                    spacing="1",
+                                    width="100%",
+                                ),
+                                rx.vstack(
+                                    rx.text("属性特征:", size="1", font_weight="medium"),
+                                    rx.input(
+                                        value=State.gen_eb_attr_feat,
+                                        on_change=State.set_eb_attr_feat,
+                                        placeholder="0",
+                                        size="1",
+                                        width="70px",
+                                    ),
+                                    spacing="1",
+                                    width="100%",
+                                ),
+                                rx.vstack(
+                                    rx.text("元素索引(空=EB标识):", size="1", font_weight="medium"),
+                                    rx.input(
+                                        value=State.gen_eb_index,
+                                        on_change=State.set_eb_index,
+                                        placeholder="0",
+                                        size="1",
+                                        width="70px",
+                                    ),
+                                    spacing="1",
+                                    width="100%",
+                                ),
+                                columns="3",
+                                spacing="3",
+                                width="100%",
+                            ),
+                        ),
+                        rx.text(
+                            "OAD 默认 = EB 数据标识原样（如 EB030002 → OI=EB03, 属性=00, 索引=02）；可自定义属性/方法/索引。",
+                            size="1", color="gray",
+                        ),
+                        spacing="3",
+                        width="100%",
+                    ),
+                ),
+                rx.hstack(
+                    rx.button(
+                        "生成帧",
+                        on_click=State.gen_eb_645_frame,
+                        color_scheme="blue",
+                        size="2",
+                    ),
+                    rx.button(
+                        "填入报文内容字段",
+                        on_click=State.apply_eb_frame_to_content,
+                        color_scheme="green",
+                        size="2",
+                    ),
+                    spacing="2",
+                ),
+                rx.cond(
+                    State.gen_eb_msg != "",
+                    rx.text(
+                        State.gen_eb_msg,
+                        color_scheme=rx.cond(State.gen_eb_msg_type == "error", "red", "green"),
+                        size="1",
+                    ),
+                ),
+                rx.cond(
+                    State.gen_eb_frame != "",
+                    rx.vstack(
+                        rx.text("生成的帧:", size="1", font_weight="medium"),
+                        rx.scroll_area(
+                            rx.text(State.gen_eb_frame, font_family="monospace", font_size="12px", white_space="pre-wrap"),
+                            max_height="80px",
+                            width="100%",
+                        ),
+                        spacing="1",
+                        width="100%",
+                    ),
+                ),
+                spacing="3",
+                width="100%",
+            ),
+            width="100%",
+        )
+
     # ── 动态字段表单（按字段类型分派）──
     def dynamic_fields() -> rx.Component:
         return rx.cond(
@@ -3388,12 +4355,26 @@ def frame_gen_tab() -> rx.Component:
                         size="1",
                         width="100%",
                     ),
-                    rx.input(
-                        value=State.gen_field_values[i].to(str),
-                        on_change=lambda val, idx=i: State.set_gen_field(idx, val),
-                        placeholder=State.gen_field_meta[i]["default"],
-                        font_family="monospace",
-                        size="1",
+                    rx.cond(
+                        State.gen_field_meta[i]["type"] == "bytes",
+                        rx.text_area(
+                            value=State.gen_field_values[i].to(str),
+                            on_change=lambda val, idx=i: State.set_gen_field(idx, val),
+                            placeholder=State.gen_field_meta[i]["default"],
+                            font_family="monospace",
+                            size="1",
+                            width="100%",
+                            min_height="60px",
+                            height="auto",
+                        ),
+                        rx.input(
+                            value=State.gen_field_values[i].to(str),
+                            on_change=lambda val, idx=i: State.set_gen_field(idx, val),
+                            placeholder=State.gen_field_meta[i]["default"],
+                            font_family="monospace",
+                            size="1",
+                            width="100%",
+                        ),
                     ),
                 ),
             ),
@@ -4161,6 +5142,11 @@ def frame_gen_tab() -> rx.Component:
                 dynamic_fields(),
             ),
         ),
+        # EB 数据标识 645 帧生成器（协议7 透明转发/事件上报报文内容辅助）
+        rx.cond(
+            State.current_protocol == 7,
+            eb_645_generator(),
+        ),
         # 预览和结果
         rx.hstack(
             # 预览
@@ -4569,6 +5555,135 @@ def diff_tab() -> rx.Component:
 
 
 # ═══════════════════════════════════════════════════════════════
+# 客户端下载 Tab
+# ═══════════════════════════════════════════════════════════════
+
+def download_tab() -> rx.Component:
+    """客户端下载（GUI 版 exe 下载）"""
+    return rx.vstack(
+        rx.card(
+            rx.vstack(
+                rx.hstack(
+                    rx.icon("download", size=22, color="#2563eb"),
+                    rx.heading("客户端下载", size="4", font_weight="bold"),
+                    spacing="2",
+                ),
+                rx.text(
+                    "下载 Windows 桌面版（PySide6 GUI），功能与 Web 版一致，支持全部 12 种协议解析、组帧、串口通信与实时监控。",
+                    size="2",
+                    color="gray",
+                ),
+                spacing="3",
+                width="100%",
+            ),
+            width="100%",
+        ),
+        # 客户端展示图
+        rx.card(
+            rx.vstack(
+                rx.text("软件界面", size="2", font_weight="semibold"),
+                rx.cond(
+                    State.download_image_available,
+                    rx.image(
+                        src="/download/client_screenshot.png",
+                        alt="客户端软件界面",
+                        border_radius="8px",
+                        border="1px solid #e5e7eb",
+                        width="100%",
+                        max_width="960px",
+                        object_fit="contain",
+                    ),
+                    rx.box(
+                        rx.center(
+                            rx.vstack(
+                                rx.icon("image_off", size=40, color="#94a3b8"),
+                                rx.text("界面截图未上传，请将 client_screenshot.png 放入 downloads/ 目录", size="2", color="#94a3b8"),
+                                spacing="2",
+                            ),
+                            min_height="240px",
+                        ),
+                        border="1px dashed #cbd5e1",
+                        border_radius="8px",
+                    ),
+                ),
+                spacing="2",
+                width="100%",
+            ),
+            width="100%",
+        ),
+        # 客户端说明（README）
+        rx.cond(
+            State.download_readme_available,
+            rx.card(
+                rx.vstack(
+                    rx.hstack(
+                        rx.icon("file_text", size=18, color="#2563eb"),
+                        rx.heading("客户端说明 (README)", size="3", font_weight="semibold"),
+                        spacing="2",
+                    ),
+                    rx.scroll_area(
+                        rx.markdown(
+                            State.download_readme_text,
+                            font_size="13px",
+                            line_height="1.7",
+                            max_height="480px",
+                            width="100%",
+                        ),
+                        width="100%",
+                    ),
+                    spacing="3",
+                    width="100%",
+                ),
+                width="100%",
+            ),
+        ),
+        # 下载按钮
+        rx.card(
+            rx.vstack(
+                rx.hstack(
+                    rx.cond(
+                        State.download_exe_available,
+                        rx.button(
+                            rx.hstack(rx.icon("download", size=18), rx.text("下载客户端 (exe)"), spacing="2"),
+                            on_click=State.download_client,
+                            color_scheme="blue",
+                            size="3",
+                            cursor="pointer",
+                        ),
+                        rx.button(
+                            rx.hstack(rx.icon("download", size=18), rx.text("客户端 exe 未就绪"), spacing="2"),
+                            disabled=True,
+                            color_scheme="gray",
+                            size="3",
+                        ),
+                    ),
+                    spacing="3",
+                    align_items="center",
+                ),
+                rx.cond(
+                    State.download_exe_name != "",
+                    rx.text(f"当前版本: {State.download_exe_name}", size="1", color="gray"),
+                ),
+                rx.cond(
+                    State.download_msg != "",
+                    rx.text(State.download_msg, size="1", color="gray"),
+                ),
+                rx.text(
+                    "将 GUI 版 exe 放入服务器 downloads/ 目录（如 南网协议解析工具.exe），页面自动显示下载按钮。",
+                    size="1",
+                    color="#94a3b8",
+                ),
+                spacing="3",
+                width="100%",
+            ),
+            width="100%",
+        ),
+        spacing="3",
+        width="100%",
+    )
+
+
+# ═══════════════════════════════════════════════════════════════
 # 查询 Tab
 # ═══════════════════════════════════════════════════════════════
 
@@ -4586,7 +5701,7 @@ def lookup_tab() -> rx.Component:
                 ),
                 rx.hstack(
                     rx.input(
-                        placeholder="输入关键词过滤（DI码/名称/说明等）...",
+                        placeholder="输入关键词过滤（DI码/名称/说明等）；国网协议下输入 EB 前缀查扩展数据标识...",
                         value=State.lookup_query,
                         on_change=State.set_lookup_query,
                         width="400px",
@@ -5082,6 +6197,12 @@ def index() -> rx.Component:
                     class_name=rx.cond(State.active_tab == "tool", "app-tab app-tab-active", "app-tab"),
                     data_testid="tab-tool",
                 ),
+                rx.el.button(
+                    rx.hstack(rx.icon("download", size=16), "客户端下载", spacing="1"),
+                    on_click=lambda: State.set_tab("download"),
+                    class_name=rx.cond(State.active_tab == "download", "app-tab app-tab-active", "app-tab"),
+                    data_testid="tab-download",
+                ),
                 class_name="app-tabbar",
                 width="100%",
             ),
@@ -5101,7 +6222,11 @@ def index() -> rx.Component:
                             rx.cond(
                                 State.active_tab == "tool",
                                 message_tool_tab(),
-                                lookup_tab(),
+                                rx.cond(
+                                    State.active_tab == "download",
+                                    download_tab(),
+                                    lookup_tab(),
+                                ),
                             ),
                         ),
                     ),

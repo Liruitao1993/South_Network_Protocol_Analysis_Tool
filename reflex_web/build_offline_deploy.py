@@ -158,6 +158,12 @@ def write_launchers(out_dir: Path, venv_python: Path) -> None:
             f"\"{venv_python_rel}\" \"reflex_web\\run_app.py\" --host 0.0.0.0 --port 8080 %*\r\n",
             encoding="utf-8",
         )
+        # PowerShell 启动脚本（调用外部程序需 & 运算符）
+        out_dir.joinpath("start_web.ps1").write_text(
+            "Set-Location $PSScriptRoot\r\n"
+            "& .\\.venv\\Scripts\\python.exe .\\reflex_web\\run_app.py --host 0.0.0.0 --port 8080 $args\r\n",
+            encoding="utf-8",
+        )
         readable_python = ".venv\\Scripts\\python.exe"
     else:
         readable_python = ".venv/bin/python"
@@ -175,10 +181,11 @@ def write_launchers(out_dir: Path, venv_python: Path) -> None:
         "========================================\n"
         "要求：目标服务器与构建机同为 Windows/Linux、同 CPU 架构、同 Python 版本。\n"
         "启动：\n"
-        "  Windows: start_web.cmd\n"
-        "  Linux:   ./start_web.sh\n"
-        "也可以手动运行：\n"
-        f"  {readable_python} reflex_web/run_app.py --host 0.0.0.0 --port 8080\n"
+        "  Windows CMD:    start_web.cmd\n"
+        "  Windows PowerShell:  .\\start_web.ps1\n"
+        "  Linux:          ./start_web.sh\n"
+        "也可以手动运行（PowerShell 调用外部程序需 & 运算符）：\n"
+        f"  & {readable_python} reflex_web/run_app.py --host 0.0.0.0 --port 8080\n"
         "访问：http://服务器IP:8080\n",
         encoding="utf-8",
     )

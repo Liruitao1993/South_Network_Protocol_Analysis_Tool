@@ -183,14 +183,72 @@ def main():
 
         return new_body, new_headers
 
+    async def _serve_download(scope, receive, send, path: str):
+        """服务 downloads/ 目录下的 exe 与截图（/download/ 前缀路由）"""
+        from urllib.parse import unquote
+
+        # downloads 目录: reflex_web/downloads/（resource_dir 是 reflex_web/）
+        downloads_dir = resource_dir / "downloads"
+        filename = unquote(path[len("/download/"):])
+        # 防目录穿越
+        if not filename or ".." in filename or "/" in filename or "\\" in filename:
+            await _send_download_error(send, 404, "Invalid filename")
+            return
+        file_path = (downloads_dir / filename).resolve()
+        if not file_path.is_relative_to(downloads_dir.resolve()) or not file_path.exists():
+            await _send_download_error(send, 404, f"File not found: {filename}")
+            return
+
+        import mimetypes
+        mime, _ = mimetypes.guess_type(str(file_path))
+        content_type = mime or "application/octet-stream"
+        # README.md 显式用 markdown 类型
+        if file_path.suffix.lower() == ".md":
+            content_type = "text/markdown; charset=utf-8"
+        # exe 强制下载；图片内联展示；markdown 内联文本
+        if file_path.suffix.lower() == ".exe":
+            content_type = "application/octet-stream"
+            # 中文文件名用 RFC 5987 filename* 编码，ASCII 文件名直接放 filename
+            from urllib.parse import quote
+            ascii_name = file_path.name.encode("ascii", "ignore").decode("ascii")
+            if ascii_name == file_path.name:
+                disposition = f'attachment; filename="{file_path.name}"'
+            else:
+                disposition = f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(file_path.name)}"
+        elif file_path.suffix.lower() in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
+            disposition = "inline"
+        else:
+            disposition = "inline"
+
+        data = file_path.read_bytes()
+        headers = [
+            (b"content-type", content_type.encode("latin-1")),
+            (b"content-length", str(len(data)).encode()),
+            (b"content-disposition", disposition.encode("latin-1")),
+        ]
+        await send({"type": "http.response.start", "status": 200, "headers": headers})
+        await send({"type": "http.response.body", "body": data, "more_body": False})
+
+    async def _send_download_error(send, status: int, message: str):
+        body = message.encode("utf-8")
+        await send({
+            "type": "http.response.start",
+            "status": status,
+            "headers": [(b"content-type", b"text/plain; charset=utf-8"), (b"content-length", str(len(body)).encode())],
+        })
+        await send({"type": "http.response.body", "body": body, "more_body": False})
+
     async def env_rewrite_middleware(scope, receive, send):
         if scope["type"] != "http":
             return await asgi_app(scope, receive, send)
 
         path = scope.get("path", "")
-        # 只拦截 reflex-env JS 文件
-        if "/assets/reflex-env-" not in path or not path.endswith(".js"):
-            return await asgi_app(scope, receive, send)
+
+        # ===== 客户端下载路由 =====
+        # /download/xxx.exe → downloads/ 目录的 exe 文件
+        # /download/client_screenshot.png → downloads/ 目录的截图
+        if path.startswith("/download/"):
+            return await _serve_download(scope, receive, send, path)
 
         # 获取请求的 host 和 scheme
         host = None
