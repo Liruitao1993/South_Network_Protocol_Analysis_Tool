@@ -78,6 +78,8 @@ class AXDRCoder:
         result, consumed = decoder(data, offset)
         result["tag"] = tag
         result["tag_name"] = tag_name
+        # 完整 A-XDR 编码字节（含类型 tag + 长度头），便于展示 09 08 等头字节去向
+        result["原始编码"] = data[offset:offset + consumed].hex().upper()
         return result, consumed
 
     def _decode_length(self, data: bytes, offset: int) -> Tuple[int, int]:

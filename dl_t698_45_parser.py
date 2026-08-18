@@ -405,13 +405,18 @@ class DLT69845Parser:
                     table_data.append((f"{indent}{key}", str(raw), f"{length}字节", desc, None, None))
                     self._add_apdu_to_table(value["嵌套APDU"], table_data, level + 1)
                 elif "类型" in value and "解析值" in value:
-                    # A-XDR 解码结果
-                    raw = value.get("原始值", "-")
+                    # A-XDR 解码结果：显示完整编码（含类型tag+长度头），如 0908 1C07E80B1B0A2000
+                    raw = value.get("原始编码") or value.get("原始值", "-")
                     parsed = value.get("解析值", "-")
                     desc = value.get("说明", "")
+                    tag = value.get("tag")
+                    tag_name = value.get("tag_name", "")
                     semantic = value.get("语义说明", "")
                     if semantic:
                         desc = f"{desc} | {semantic}" if desc else semantic
+                    if tag is not None:
+                        axdr_desc = f"A-XDR:{tag_name}(0x{tag:02X})"
+                        desc = f"{desc} | {axdr_desc}" if desc else axdr_desc
                     if isinstance(parsed, dict):
                         parsed = str(parsed)
                     elif isinstance(parsed, list):
