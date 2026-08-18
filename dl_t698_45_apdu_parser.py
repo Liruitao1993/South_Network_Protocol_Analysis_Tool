@@ -212,9 +212,19 @@ class DLT69845APDUParser:
             from gdw_eb_di_fields import EB_DI_FIELDS
             schema = EB_DI_FIELDS.get(di)
             if not schema:
-                # 无字段定义：返回原始数据字节 hex
+                # 无字段定义：尝试 date_time_s（1C 开头 7 字节 BIN 时间）或保留原始 hex
                 dv = data_dict.get("解析值", "")
                 if isinstance(dv, str):
+                    try:
+                        raw_bytes = bytes.fromhex(dv)
+                    except (ValueError, TypeError):
+                        raw_bytes = None
+                    if raw_bytes and len(raw_bytes) >= 8 and raw_bytes[0] == 0x1C:
+                        try:
+                            dt, _ = self.axdr.decode(raw_bytes)
+                            return {"数据时间": dt.get("解析值", dv)}
+                        except Exception:
+                            pass
                     return {"原始数据": dv}
                 return None
             fields = schema.get("fields", [])
