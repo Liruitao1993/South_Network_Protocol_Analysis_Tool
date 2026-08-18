@@ -27,8 +27,9 @@ def test_action_request_list_user_frame():
     # 参数 octet-string 保留
     assert items[0]["参数"]["类型"] == "octet-string"
     assert items[0]["参数"]["原始值"] == "1C07E80B1B0A2000"
-    # 无字段 schema → 原始数据兜底
-    assert items[0]["数据业务"]["原始数据"] == "1C07E80B1B0A2000"
+    # 无字段 schema → date_time_s 时间解码（1C 开头 7 字节 BIN 时间）
+    biz = items[0]["数据业务"]
+    assert biz["数据时间"] == "2024-11-27 10:32:00", biz
     print("test_action_request_list_user_frame PASSED")
 
 

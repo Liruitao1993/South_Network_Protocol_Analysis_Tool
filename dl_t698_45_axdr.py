@@ -306,7 +306,8 @@ class AXDRCoder:
         if offset + 7 >= len(data):
             raise ValueError("date_time_s 数据不足")
         val = data[offset + 1:offset + 8]
-        year = int.from_bytes(val[0:2], 'little')
+        # 年 2 字节大端（文档 H.1 例: 07 E0 = 2016）
+        year = int.from_bytes(val[0:2], 'big')
         month = val[2]
         day = val[3]
         hour = val[4]
