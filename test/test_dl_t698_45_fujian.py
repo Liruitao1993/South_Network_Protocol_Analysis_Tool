@@ -29,7 +29,9 @@ def test_action_request_list_user_frame():
     assert items[0]["参数"]["原始值"] == "1C07E80B1B0A2000"
     # 无字段 schema → date_time_s 时间解码（1C 开头 7 字节 BIN 时间）
     biz = items[0]["数据业务"]
-    assert biz["数据时间"] == "2024-11-27 10:32:00", biz
+    assert biz["数据时间"]["值"] == "2024-11-27 10:32:00", biz
+    assert biz["数据时间"]["类型"] == "date_time_s", biz
+    assert biz["数据时间"]["长度"] == 8, biz
     print("test_action_request_list_user_frame PASSED")
 
 
@@ -47,8 +49,11 @@ def test_set_request_list_doc_example():
     assert "台区识别" in item["OAD"]["语义说明"]
     # 数据 000005: 方法0=自动(enum), 时长 00 05 大端=5分钟
     biz = item["数据业务"]
-    assert biz["台区识别方法"] == "自动", biz
-    assert biz["识别时长(分钟)"] == 5, biz
+    assert biz["台区识别方法"]["值"] == "自动", biz
+    assert biz["台区识别方法"]["类型"] == "enum", biz
+    assert biz["识别时长(分钟)"]["值"] == 5, biz
+    assert biz["识别时长(分钟)"]["类型"] == "uint16", biz
+    assert biz["识别时长(分钟)"]["长度"] == 2, biz
     print("test_set_request_list_doc_example PASSED")
 
 
@@ -79,8 +84,8 @@ def test_action_response_list_doc_example():
     assert item["OMD"]["原始值"] == "EB030110"
     assert item["结果"]["DAR说明"] == "成功", item["结果"]
     biz = item["数据业务"]
-    assert biz["台区识别方法"] == "工频电压特征", biz
-    assert biz["识别时长(分钟)"] == 5, biz
+    assert biz["台区识别方法"]["值"] == "工频电压特征", biz
+    assert biz["识别时长(分钟)"]["值"] == 5, biz
     print("test_action_response_list_doc_example PASSED")
 
 
@@ -113,9 +118,10 @@ def test_report_notification_doc_example():
     assert r["数据"]["类型"] == "octet-string"
     # EB030002 字段解码: 停上电类型0=停电 + 数量1 + 地址列表
     biz = r["数据业务"]
-    assert biz["停上电类型"] == "模块停电", biz
-    assert biz["本次上报数量"] == 1, biz
-    assert biz["模块地址列表"][0]["模块地址"] == "112233445566", biz
+    assert biz["停上电类型"]["值"] == "模块停电", biz
+    assert biz["本次上报数量"]["值"] == 1, biz
+    assert biz["模块地址列表"]["值"][0]["模块地址"]["值"] == "112233445566", biz
+    assert biz["模块地址列表"]["值"][0]["模块地址"]["类型"] == "bcd", biz
     print("test_report_notification_doc_example PASSED")
 
 
@@ -146,9 +152,9 @@ def test_set_request_multiple_oads():
     items = r["列表"]
     assert len(items) == 2
     assert items[0]["OAD"]["原始值"] == "EB030110"
-    assert items[0]["数据业务"]["识别时长(分钟)"] == 5
+    assert items[0]["数据业务"]["识别时长(分钟)"]["值"] == 5
     assert items[1]["OAD"]["原始值"] == "EB030307"
-    assert items[1]["数据业务"]["原始数据"] == "0102"
+    assert items[1]["数据业务"]["原始数据"]["值"] == "0102"
     print("test_set_request_multiple_oads PASSED")
 
 
@@ -164,8 +170,27 @@ def test_eb_uint_big_endian():
     # 解码器回读一致
     apdu = bytes([0x06, 0x02, 0x00, 0x01]) + bytes.fromhex("EB030110") + bytes([0x09, 0x03]) + b
     r = parser.parse(apdu)
-    assert r["列表"][0]["数据业务"]["识别时长(分钟)"] == 5
+    assert r["列表"][0]["数据业务"]["识别时长(分钟)"]["值"] == 5
     print("test_eb_uint_big_endian PASSED")
+
+
+def test_table_shows_type_length():
+    """表格：EB 字段展示 类型+长度（如 识别时长 | uint16 2字节 | 5）"""
+    from dl_t698_45_frame_gen import DLT69845FrameGenerator
+    from dl_t698_45_parser import DLT69845Parser
+
+    gen = DLT69845FrameGenerator()
+    parser = DLT69845Parser()
+    apdu = bytes.fromhex("06020001EB030110090300000500")
+    frame = gen._assemble_frame(sa=bytes([0x01, 0x07, 0x08]), ca=0x09, control=0x43, apdu=apdu)
+    table = parser.parse_to_table(frame)
+    rows = {r[0].strip(): r for r in table}
+    assert rows["台区识别方法"][2] == "自动", rows.get("台区识别方法")
+    assert "enum" in rows["台区识别方法"][3], rows["台区识别方法"]
+    assert rows["识别时长(分钟)"][2] == "5", rows.get("识别时长(分钟)")
+    assert "uint16" in rows["识别时长(分钟)"][3], rows["识别时长(分钟)"]
+    assert "2字节" in rows["识别时长(分钟)"][3], rows["识别时长(分钟)"]
+    print("test_table_shows_type_length PASSED")
 
 
 if __name__ == "__main__":
@@ -178,4 +203,5 @@ if __name__ == "__main__":
     test_report_response_doc_example()
     test_set_request_multiple_oads()
     test_eb_uint_big_endian()
+    test_table_shows_type_length()
     print("ALL 福建简化698 测试 PASSED")
