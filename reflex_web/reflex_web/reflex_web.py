@@ -6060,8 +6060,12 @@ body {
   border-bottom: 1px solid #f1f5f9;
   font-size: 13px;
   vertical-align: middle;
+  /* 所有单元格（含解析值/说明纯文本）自动换行，避免长内容撑爆列宽 */
+  white-space: normal;
+  word-break: break-all;
+  overflow-wrap: anywhere;
 }
-/* 表格内等宽文本（hex 原始值等）自动换行，避免长报文撑宽列 */
+/* 表格内等宽文本（hex 原始值等）自动换行 */
 .rt-TableRoot .rt-TableCell code {
   white-space: normal;
   word-break: break-all;
