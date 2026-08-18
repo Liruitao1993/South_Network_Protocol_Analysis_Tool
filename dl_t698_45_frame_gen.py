@@ -29,6 +29,7 @@ class DLT69845FrameGenerator:
         header = bytes([control]) + sa + bytes([ca])
 
         # 长度域 L = L自身(2) + 控制域(1) + SA(len) + CA(1) + HCS(2) + APDU(len) + FCS(2)
+        # （标准定义：不包含起始符和结束符的数据长度 → 帧总长 = 1 + L + 1）
         length = 2 + 1 + len(sa) + 1 + 2 + len(apdu) + 2
         length_bytes = struct.pack('<H', length & 0x3FFF)
 
