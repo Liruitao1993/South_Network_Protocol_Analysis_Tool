@@ -65,3 +65,6 @@ upx-5.0.0-win64/
 
 # 工具目录
 /.pi-glla/
+
+# Windows 重定向误生成文件
+/nul
