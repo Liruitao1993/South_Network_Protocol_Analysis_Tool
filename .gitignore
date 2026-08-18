@@ -56,6 +56,8 @@ upx-5.0.0-win64/
 .codegraph/config.json
 # 测试文件统一放入 test/ 目录（项目根目录禁止新增 test_*.py 测试文件）
 /test_*.py
+# 例外：test_plan_widget.py 是 GUI 组件（main_gui.py 依赖），非测试脚本
+!/test_plan_widget.py
 /_ocr_paddle_test.py
 # 测试运行输出产物
 /docx_tables_out.txt

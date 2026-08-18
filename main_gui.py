@@ -62,10 +62,27 @@ from llm_api_manager import LLMApiManagerDialog
 from preprocessors import list_scripts as _list_pp_scripts, get_script as _get_pp_script
 
 
-APP_VERSION = "1.13.0"
-BUILD_DATE = "2026-08-14"  # 编译日期，每次打包前更新
+APP_VERSION = "1.14.0"
+BUILD_DATE = "2026-08-17"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    ("1.14.0", "2026-08-17", [
+        "国网协议(索引7)新增「福建增补规约」（1376.2集中器本地通信模块接口协议【福建增补】V1.4）解析与组帧：AFN=50H~56H 全功能覆盖——50H确认/否认、51H初始化、52H数据转发(透明转发/任务队列智能补采/本地定时/并发抄表福建/清空队列)、53H查询数据(参数配置/主节点地址/厂商版本/信道信息/串口参数/模式切换)、55H控制命令(设置地址/允许禁止上报/广播/注册/预告抄读/速率协商/模式切换等)、56H主动上报(主动注册/事件内容/抄读请求/响应报文/信道延时/广播完成/带任务信息上报)",
+        "福建增补帧结构识别：信息域R按保留(5B)+序列号(1B)（上行加事件标志）、地址域A固定 A1+A3(12B 无中继)解析，与 2024 国网自动区分（AFN 探测）",
+        "新增「本地通信模块扩展协议」EB 数据标识深度解析（附件1 V3.31）：新建 gdw_eb_di_lookup.py 映射表（事件/台区识别/设备基础/时钟/档案/任务队列等 40+ 数据项），645 帧内嵌 EB030002 停上电事件/EB030110 台区识别/EB030501 时钟/EB040302 停上电记录/EBEEEEEE 多数据项抄读等深度解析，透明转发(52H-F1)/事件上报(56H-F2)自动识别",
+        "福建增补组帧：gdw_frame_generator_schema.py 新增 27 个 (AFN,Fn) 字段定义（含 list 字段自动数量、length_field 报文长度自动计算），gdw_send_frame_lib.py generate_frame 对增补 AFN 自动切换 R/A 结构",
+        "校验器 GDWValidator 支持福建增补帧：AFN 值域检查按增补帧结构定位真实 AFN（探测 offset 22）",
+        "GUI 集成：查询页自动含福建增补 AFN/Fn + 新增 EB 数据标识查询区块（搜索/浏览），组帧页自动可选福建增补命令",
+        "修复 gdw_send_frame_lib.py _pack_fields 的 length_field 语义 bug（此前取长度字段自身值而非内容字段值，导致 05H-F20/13H-F2/福建增补 52H 等命令报文长度计算错误）",
+        "新增 test/test_gdw_fujian.py：15 项测试（福建增补帧识别/各AFN Fn解析/EB深度解析/组帧回读/校验/2024回归）全部通过",
+        "本地通信模块扩展协议升级至 V3.42-20260514：新增 EB030313/314 周边节点信号通信质量（本台区/非本台区）、EB030320/321 通信测距（启动/结果表）、EB030506 NTB校时_698方式专用（1C+BCD时间+NTB）、EB030520 自动NTB校时模式扩展（0~3：停用/645/698格式）；EBEEEEEE 多数据项抄读标记取消（V3.40 起采用698读取方式）。gdw_eb_di_lookup.py 增至 57 项，test_gdw_fujian.py 增至 16 项测试",
+        "Reflex Web 版同步：协议7 解析/组帧/校验复用 GUI 模块自动获得福建增补支持；查询页新增 EB 数据标识查询（EB 前缀或台区/时钟等关键词）；test_web_frame_gen_utils.py 新增福建增补 + EB 查询用例（28 项全过）",
+        "Web 组帧页新增「EB 数据标识 645 帧生成器」：选择 EB 数据标识（57 项）+ 645 控制码 + 地址域 + 数据内容，自动生成完整 645 帧（含校验和），一键填入 52H-F1 透明转发/56H-F2 事件上报的报文内容字段（test_web_frame_gen_utils.py 增至 35 项）",
+        "EB 生成器新增 698.45 内容域填充：支持 6 种 698 服务（SET-Request/Response、ACTION-Request/Response、REPORT-Notification/Response），OAD=EB 数据标识原样，数据 A-XDR octet-string 编码，与附件1 文档 698 示例逐字节一致（test_web_frame_gen_utils.py 增至 44 项）",
+        "698 内容域填充增强：①完整链路层帧（68 L C SA CA HCS APDU FCS 16，SA 地址类型/长度/hex、CA、DIR/PRM/功能码可配置，HCS/FCS 自动计算）；②新增 gdw_eb_di_fields.py 为 42 个 EB 数据项定义数据内容字段 schema（枚举/整型/BCD/ASCII/时间/list 等类型），选 OAD 后按字段表单配置数据内容自动编码（test_web_frame_gen_utils.py 增至 58 项）",
+        "698 服务类型补齐 GET-Request/GET-Response（读取）+ 对象配置：服务类型 8 种（GET/SET/ACTION/REPORT 各请求/响应）；对象个数可选一个(01)/若干(02列表)；PIID、OI、属性编号/属性特征/元素索引（GET/SET）、方法标识/操作模式（ACTION）均可配置，默认=EB 数据标识对应字节（test_web_frame_gen_utils.py 增至 62 项）",
+        "修复 main_gui.py 启动崩溃：test_plan_widget.py（GUI 组件，非测试脚本）此前被误移入 test/ 目录，根目录 /test_*.py 忽略规则导致 ModuleNotFoundError；已恢复至根目录并在 .gitignore 增加 !/test_plan_widget.py 例外，test/test_plan_widget.py 作为独立测试副本保留",
+    ]),
     ("1.13.0", "2026-08-14", [
         "新增「HDC 1.0 双模互联互通」协议（索引11，独立协议，Q/GDW 12087.42-2020）：主程序第 12 种协议。新增 hdc10_parser.py（HDC10Parser：FC/可变区域/信标载荷/时隙分配条目/MAC帧/应用层）、hdc10_mme_parser.py（MME 管理消息）、validator/hdc10_validator.py（HDC10Validator）、test_hdc10.py",
         "HDC 1.0 GUI 集成：协议下拉框 [11]；解析级别（auto/fc_pb/fc_only/mac_only/pb_only/fc_mac/app）与通道（PLC/HRF）下拉复用国网新一代控件；查询页新增报文ID/端口/定界符/MSDU类型映射；校验注册 11 → HDC10Validator；批量解析复用前缀剥离与摘要。仅 PySide6 主程序支持（Web 0-10 / TUI 0-9 未含）",
@@ -2473,6 +2490,80 @@ class MainWindow(QMainWindow):
         table_font = self._ui_font(-2)
         self.gdw_table.setFont(table_font)
         layout.addWidget(self.gdw_table)
+
+        # ===== EB 数据标识查询区块（附件1 本地通信模块扩展协议）=====
+        eb_group = QGroupBox("EB 数据标识（本地通信模块扩展协议 V3.31）")
+        eb_layout = QVBoxLayout(eb_group)
+        eb_layout.setContentsMargins(6, 4, 6, 4)
+        eb_layout.setSpacing(4)
+
+        eb_search_layout = QHBoxLayout()
+        eb_search_label = QLabel("搜索:")
+        eb_search_label.setFixedWidth(45)
+        self.eb_di_search_input = QLineEdit()
+        self.eb_di_search_input.setPlaceholderText("输入EB数据标识(如EB030002)或中文关键词搜索...")
+        self.eb_di_search_input.setClearButtonEnabled(True)
+        self.eb_di_search_input.textChanged.connect(self._filter_eb_di_table)
+        eb_search_layout.addWidget(eb_search_label)
+        eb_search_layout.addWidget(self.eb_di_search_input)
+        eb_layout.addLayout(eb_search_layout)
+
+        self.eb_di_table = ZoomableTableWidget()
+        self.eb_di_table.setColumnCount(5)
+        self.eb_di_table.setHorizontalHeaderLabels(["数据标识", "名称", "数据格式", "长度", "功能"])
+        eheader = self.eb_di_table.horizontalHeader()
+        eheader.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        eheader.setStretchLastSection(True)
+        self.eb_di_table.setColumnWidth(0, 90)
+        self.eb_di_table.setColumnWidth(1, 220)
+        self.eb_di_table.setColumnWidth(2, 70)
+        self.eb_di_table.setColumnWidth(3, 50)
+        self.eb_di_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.eb_di_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.eb_di_table.setAlternatingRowColors(True)
+        self.eb_di_table.verticalHeader().hide()
+        self.eb_di_table.verticalHeader().setDefaultSectionSize(20)
+        self.eb_di_table.setFont(table_font)
+        eb_layout.addWidget(self.eb_di_table)
+        layout.addWidget(eb_group)
+
+        # 加载 EB 数据
+        self._load_eb_di_data()
+
+    def _load_eb_di_data(self):
+        """加载 EB 数据标识到表格"""
+        try:
+            from gdw_eb_di_lookup import get_eb_di_lookup
+            self._eb_di_lookup = get_eb_di_lookup()
+            data = self._eb_di_lookup.get_all()
+        except Exception:
+            data = {}
+        self._eb_di_data = data
+        self.eb_di_table.setRowCount(len(data))
+        for row, (code, info) in enumerate(sorted(data.items())):
+            self.eb_di_table.setItem(row, 0, QTableWidgetItem(code))
+            self.eb_di_table.setItem(row, 1, QTableWidgetItem(info.get("名称", "")))
+            self.eb_di_table.setItem(row, 2, QTableWidgetItem(str(info.get("格式", ""))))
+            self.eb_di_table.setItem(row, 3, QTableWidgetItem(str(info.get("长度", ""))))
+            self.eb_di_table.setItem(row, 4, QTableWidgetItem(info.get("功能", "")))
+
+    def _filter_eb_di_table(self, text: str):
+        """过滤 EB 数据标识表格"""
+        keyword = text.strip().upper()
+        if not keyword:
+            self._load_eb_di_data()
+            return
+        if hasattr(self, "_eb_di_lookup"):
+            results = self._eb_di_lookup.search(keyword)
+        else:
+            results = {}
+        self.eb_di_table.setRowCount(len(results))
+        for row, (code, info) in enumerate(sorted(results.items())):
+            self.eb_di_table.setItem(row, 0, QTableWidgetItem(code))
+            self.eb_di_table.setItem(row, 1, QTableWidgetItem(info.get("名称", "")))
+            self.eb_di_table.setItem(row, 2, QTableWidgetItem(str(info.get("格式", ""))))
+            self.eb_di_table.setItem(row, 3, QTableWidgetItem(str(info.get("长度", ""))))
+            self.eb_di_table.setItem(row, 4, QTableWidgetItem(info.get("功能", "")))
 
         # 加载数据
         self._load_gdw_map_data()

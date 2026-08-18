@@ -196,6 +196,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 │   ├── command_lookup.py           # PLC RF 命令字
 │   ├── dlt645_di_lookup.py         # DLT645 DI
 │   ├── gdw_afn_lookup.py           # 国网 AFN
+│   ├── gdw_eb_di_lookup.py         # 本地通信模块扩展 EB 数据标识（附件1，1.14.0 起）
 │   └── (698.45 OI 查询内嵌于 dl_t698_45_oi_lookup.py)
 │
 ├── 对比引擎
@@ -396,7 +397,11 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 - **组帧**：`gdw_send_frame_lib.py` + `gdw_frame_generator_schema.py`
 - **查询**：`gdw_afn_lookup.py`
 - **校验器**：`validator/gdw_validator.py`
-- **参考文档**：`集中器本地通信模块接口-2024.md`（Q/GDW 10376.2—2024，**严格依据此文档解析**）
+- **参考文档**：
+  - `集中器本地通信模块接口-2024.md`（Q/GDW 10376.2—2024，**严格依据此文档解析**）
+  - `协议文档/7.国网本地接口协议/附件3：1376.2集中器本地通信模块接口协议【福建增补】V1.4-20240729`（**福建增补规约，AFN=50H~56H，1.14.0 起支持**）
+  - `协议文档/7.国网本地接口协议/附件1：本地通信模块扩展协议 V3.42-20260514`（**EB 数据标识扩展，1.14.0 起支持**，V3.31 前置版本）
+  - `协议文档/7.国网本地接口协议/附件4：集中器和CCO通信接口补充要求-20220416`（以太网/UDP 通信链路要求）
 
 ### 5.6 DL/T 698.45-2017（索引 7，**1.7.0 新增**）
 - **解析器**：
@@ -510,6 +515,7 @@ python test/test_csg_batch_prefix.py # 新一代载波监控日志前缀剥离
 python test/test_csg_batch_parse_level.py # 新一代载波解析级别/完整 MPDU
 python test/test_csg_summary.py     # 新一代载波批量摘要
 python test/test_gw_new_gen.py      # 国网新一代双模协议
+python test/test_gdw_fujian.py      # 国网福建增补规约 + EB 数据标识（1.14.0 起）
 python test/test_hdc10.py           # HDC 1.0 双模互联互通协议（时隙分配条目/信标 BPCS/PBCS）
 python test/test_gw_batch_parse.py  # 国网新一代批量解析
 python test/test_gw_ext_cmd.py      # 国网新一代扩展命令载荷
@@ -589,6 +595,20 @@ python test/test_web_frame_gen_utils.py # Reflex Web 版组帧纯逻辑
 ## 10. 变更日志（与 `main_gui.py:CHANGELOG` 保持同步）
 
 > 本节按版本倒序记录。详细 commit 见 `git log`。每发新版本必须更新此处。
+
+### 1.14.0 — 2026-08-17
+- **国网协议（索引 7）新增「福建增补规约」解析与组帧**（`gdw10376_parser.py` / `gdw_send_frame_lib.py` / `gdw_frame_generator_schema.py` / `validator/gdw_validator.py`）：基于 `协议文档/7.国网本地接口协议/附件3：1376.2集中器本地通信模块接口协议【福建增补】V1.4-20240729`
+  - **AFN=50H~56H 全功能**：50H 确认/否认、51H 初始化、52H 数据转发（F1 透明转发 / F2 任务队列_智能补采 / F3 任务队列_本地定时 / F11 并发抄表_福建 / F12 清空队列）、53H 查询数据（F1 参数配置 / F2 主节点地址 / F4 厂商版本 / F5 信道信息 / F6 串口参数 / F10 模式切换）、55H 控制命令（F1 设置地址 / F2 允许禁止上报 / F3/F4 广播 / F6 注册 / F7 结束任务 / F8 预告执行 / F9 预告抄读 / F10 模式切换 / F11~F13 速率协商 / F18 2字节模式）、56H 主动上报（F1 注册信息 / F2 事件内容 / F3/F13 抄读请求 / F4/F14 响应报文 / F5 信道延时 / F6 广播完成 / F15 带任务信息上报）
+  - **帧结构识别**：福建增补信息域 R = 保留(5B)+序列号(1B)（上行加事件标志位）、地址域 A = A1+A3(12B 无中继 A2)，与 2024 国网（有中继地址）自动区分——按 `FUJIAN_AFNS` 探测 offset 22 处 AFN
+- **新增「本地通信模块扩展协议」EB 数据标识深度解析**（`gdw_eb_di_lookup.py`）：附件1 V3.31 的 40+ 数据项映射（事件/台区识别/设备基础/时钟/档案/任务队列等），645 帧内嵌 EB030002 停上电事件、EB030110 台区识别、EB030501 时钟、EB030503 校时、EB040302 停上电记录、EBEEEEEE 多数据项抄读等深度解析，透明转发(52H-F1)/事件上报(56H-F2)自动识别
+- **福建增补组帧**：schema 新增 27 个 (AFN,Fn) 定义（list 字段自动数量 + length_field 报文长度自动计算），`generate_frame` 对增补 AFN 自动切换 R/A 结构
+- **校验器**：GDWValidator AFN 值域检查按福建增补帧结构定位真实 AFN
+- **GUI**：查询页自动含福建增补 AFN/Fn + 新增 EB 数据标识查询区块；组帧页自动可选福建增补命令
+- **修复** `gdw_send_frame_lib.py::_pack_fields` 的 length_field 语义 bug（此前取长度字段自身值，导致含报文内容命令的长度计算错误）
+- 新增 `test/test_gdw_fujian.py`（15 项测试全过）
+- **本地通信模块扩展协议升级 V3.42-20260514**：新增 EB030313/314 周边节点信号通信质量（本台区/非本台区，含载波/无线成功率、SNR、RSSI）、EB030320/321 通信测距（启动指令/结果情况表，载波/无线测距值单位 1ns）、EB030506 NTB校时_698方式专用（`1C`+YYYYMMDDhhmmss(BCD 7B)+NTB(4B)）、EB030520 自动NTB校时模式扩展为 0~3（停用/645格式/698格式）；EBEEEEEE 标记取消（V3.40 起采用 698 读取方式）。`gdw_eb_di_lookup.py` 增至 57 项，`test/test_gdw_fujian.py` 增至 16 项测试；Web 查询页 EB 查询自动含新增项
+- **Reflex Web 版同步**：协议7 解析/组帧/校验复用 GUI 模块（`GDW10376Parser` / `GDWFrameGenerator` / `GDWValidator`），自动获得福建增补支持（AFN+Fn 下拉含 52H/55H 等增补命令、list/length_field 字段正常渲染组帧）；查询页新增 EB 数据标识查询（协议7 下输入 `EB` 前缀或「台区/时钟/档案」等关键词返回附件1 数据标识表）；组帧页新增「EB 数据标识 帧生成器」（645 帧 + 698.45 **完整链路层帧**双格式：698 支持 8 种服务含 GET 读取、SA/CA/DIR/PRM/功能码头部可配置、HCS/FCS 自动计算；对象个数一个/若干、PIID/OI/属性编号/属性特征/元素索引/方法标识/操作模式可配置；新增 `gdw_eb_di_fields.py` 为 42 个 EB 数据项定义数据内容字段 schema，选 OAD 后按字段表单配置自动编码）；`test_web_frame_gen_utils.py` 增至 62 项全过
+- **修复 main_gui.py 启动崩溃**：`test_plan_widget.py` 是 GUI 组件（`main_gui.py` 导入的 TestPlanWidget），此前被 `bdf4d22`（测试文件迁移）误移入 `test/` 目录，根目录 `/test_*.py` 忽略规则使其丢失，启动报 `ModuleNotFoundError: test_plan_widget`。已恢复至根目录，`.gitignore` 增加 `!/test_plan_widget.py` 例外；`test/test_plan_widget.py` 作为独立测试副本保留（AGENTS.md §7 测试列表不变）
 
 ### 1.13.0 — 2026-08-14
 - **新增「HDC 1.0 双模互联互通」协议（索引 11，独立协议）**：主程序第 12 种协议（Q/GDW 12087.42-2020 旧版双模）。新增 `hdc10_parser.py`（HDC10Parser：FC/可变区域/信标载荷/时隙分配条目/MAC 帧/应用层）、`hdc10_mme_parser.py`（MME 管理消息）、`validator/hdc10_validator.py`（HDC10Validator）、`test_hdc10.py`。GUI 集成：协议下拉框、解析级别 + 通道下拉（复用国网新一代控件）、查询页（`_create_hdc10_lookup_content`）、校验注册（`_run_validation` 11 → HDC10Validator）、批量前缀剥离 + 摘要（复用 `_strip_gw_new_gen_prefix` / `_get_gw_new_gen_summary`）。仅 PySide6 主程序支持（Web 0-10 / TUI 0-9 未含）

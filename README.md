@@ -1,13 +1,13 @@
 # 南网协议解析工具
 
-[![Version](https://img.shields.io/badge/version-1.13.0-blue)]()
+[![Version](https://img.shields.io/badge/version-1.14.0-blue)]()
 [![Python](https://img.shields.io/badge/Python-3.8%2B-brightgreen)]()
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)]()
 [![License](https://img.shields.io/badge/License-MIT-green)]()
 
 一个面向电力通信现场调试的多协议解析工具，基于 Python / PySide6 开发，支持 12 种电力通信协议，覆盖单帧解析、批量解析、协议校验、帧生成、串口通信、测试方案、Lua 脚本、实时监控与 TCP 抓包等工作流。
 
-当前版本为 `1.13.0`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
+当前版本为 `1.14.0`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
 
 ## 功能总览
 
@@ -44,7 +44,7 @@
 | 4 | DLMS Wrapper 裸报文 | IEC 62056-46 | 大端 | 无 |
 | 5 | DLMS-APDU 裸报文 | IEC 62056-46 | 大端 | 无 |
 | 6 | DLT645-2007 电表协议 | DL/T 645-2007 | BCD，低字节在前 | 累加和 & 0xFF |
-| 7 | 国网协议 | Q/GDW 10376.2-2024 | 小端 | 8 位位组算术和 |
+| 7 | 国网协议 | Q/GDW 10376.2-2024（含福建增补 AFN 50H~56H） | 小端 | 8 位位组算术和 |
 | 8 | 698.45 协议 | DL/T 698.45-2017 | 小端 | CRC-16（crcmod `x-25`） |
 | 9 | 新一代载波协议（通感一体化） | 通感一体化宽带载波通信规约 | 小端 | CRC-32（MAC 帧） |
 | 10 | 国网新一代双模通信互联互通 | 国网新一代双模通信互联互通技术规范 | 小端 | CRC-32（MAC 帧） |
@@ -219,6 +219,7 @@ Lua 脚本使用说明见 [`docs/Lua脚本使用说明.md`](docs/Lua脚本使用
 main_gui.py                  # PySide6 GUI 主程序，应用入口
 protocol_parser.py           # 南网协议解析器
 gdw10376_parser.py           # 国网协议解析器
+gdw_eb_di_lookup.py          # 本地通信模块扩展协议 EB 数据标识查询（附件1）
 plc_rf_parser.py             # PLC RF 协议解析器
 hdlc_parser.py               # HDLC / DLMS 解析器
 dlms_deep_parser.py          # DLMS APDU 深度解析
@@ -265,6 +266,7 @@ docs/Lua脚本使用说明.md       # Lua 脚本使用文档
 ```bash
 python test/test_csg_new_gen.py            # 新一代载波协议
 python test/test_gw_new_gen.py             # 国网新一代双模协议
+python test/test_gdw_fujian.py             # 国网福建增补规约 + EB 数据标识（1.14.0 起）
 python test/test_hdc10.py                  # HDC 1.0 双模互联互通协议
 python test/test_dl_t698_45.py             # 698.45 协议
 python test/test_hdlc.py                   # HDLC 帧
@@ -287,6 +289,30 @@ python test/test_theme_settings.py         # 主题与字体设置
 - [`.trellis/workflow.md`](.trellis/workflow.md)：Trellis 开发工作流与任务规范
 
 ## 更新记录
+
+### 1.14.0 — 2026-08-17
+
+#### 国网协议（索引 7）新增福建增补规约 + EB 数据标识扩展
+
+**福建增补规约解析与组帧**（附件3：1376.2集中器本地通信模块接口协议【福建增补】V1.4）：
+
+- **AFN=50H~56H 全功能覆盖**：50H 确认/否认、51H 初始化、52H 数据转发（F1 透明转发 / F2 任务队列智能补采 / F3 本地定时 / F11 并发抄表福建 / F12 清空队列）、53H 查询数据（F1 参数配置 / F2 主节点地址 / F4 厂商版本 / F5 信道信息 / F6 串口参数 / F10 模式切换）、55H 控制命令（F1 设置地址 / F2 允许禁止上报 / F3/F4 广播 / F6 注册 / F7 结束任务 / F8/F18 预告执行 / F9 预告抄读 / F10 模式切换 / F11~F13 速率协商）、56H 主动上报（F1 注册信息 / F2 事件内容 / F3/F13 抄读请求 / F4/F14 响应报文 / F5 信道延时 / F6 广播完成 / F15 带任务信息上报）
+- **帧结构自动识别**：福建增补信息域 R（保留5B+序列号1B，上行含事件标志）与地址域 A（A1+A3 12B 无中继）与 2024 国网自动区分
+- **组帧支持**：schema 新增 27 个 (AFN,Fn) 定义，`generate_frame` 对增补 AFN 自动切换 R/A 结构；报文长度自动计算
+
+**本地通信模块扩展协议 EB 数据标识深度解析**（附件1 V3.31）：
+
+- 新增 `gdw_eb_di_lookup.py`（40+ 数据项映射：事件/台区识别/设备基础/时钟/档案/任务队列等）
+- 645 帧内嵌 EB030002 停上电事件、EB030110 台区识别、EB030501 时钟、EB030503 校时、EB040302 停上电记录、EBEEEEEE 多数据项抄读等深度解析
+- 透明转发（52H-F1）/ 事件上报（56H-F2）自动识别内嵌 EB 帧
+
+**其他**：
+
+- 校验器 GDWValidator 支持福建增补帧 AFN 定位；查询页新增 EB 数据标识查询区块
+- **Reflex Web 版同步**：协议7 解析/组帧/校验自动获得福建增补支持；Web 查询页新增 EB 数据标识查询（协议7 下输入 `EB` 前缀或「台区/时钟/档案」等关键词）；组帧页新增「EB 数据标识 帧生成器」——支持 645 帧与 698.45 完整链路层帧双格式（698 含 8 种服务含 GET、SA/CA/控制域头部配置、HCS/FCS 自动计算、属性/方法/索引/PIID 可配置），42 个 EB 数据项支持按字段表单配置数据内容，一键填入报文内容字段
+- 修复 `gdw_send_frame_lib.py::_pack_fields` 的 length_field 语义 bug（报文长度计算）
+- 新增 `test/test_gdw_fujian.py`（16 项测试全过）；`test_web_frame_gen_utils.py` 增至 28 项
+- **扩展协议升级 V3.42**：EB 数据标识新增周边节点信号质量（EB030313/314）、通信测距（EB030320/321）、NTB校时698方式（EB030506）、自动NTB校时模式扩展（EB030520）；EBEEEEEE 标记取消
 
 ### 1.13.0 — 2026-08-14
 
