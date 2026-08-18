@@ -27,6 +27,8 @@ from dl_t698_45_frame_schema import DLT69845_FIELD_SCHEMA, APDU_TYPE_LIST, OI_PR
 from dl_t698_45_parser import DLT69845Parser
 from preset_buttons import PresetButtonManager, AddPresetDialog
 from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu, ZoomableTableWidget
+from gdw_eb_di_lookup import get_eb_di_lookup
+from gdw_eb_di_fields import EB_DI_FIELDS, encode_eb_di_data
 
 
 # =============================================================================
@@ -74,6 +76,12 @@ class FrameGenWidget(QWidget):
         self._axdr_items: list = []  # A-XDR tree items
         self._update_timer: QTimer = None
         self.serial_worker = None
+        # EB 数据标识 645/698 帧生成器状态
+        self._eb_fields_container: QWidget = None
+        self._eb_field_widgets: Dict[str, Dict[str, Any]] = {}
+        self._eb_list_widgets: Dict[str, Any] = {}
+        self._eb_current_di: str = ""
+        self.eb_gen_frame: str = ""
         self.setup_ui()
 
     # ------------------------------------------------------------------
@@ -416,6 +424,9 @@ class FrameGenWidget(QWidget):
         mode_layout.addStretch()
         left_layout.addWidget(self.mode_group)
 
+        # ---- EB 数据标识 645/698 帧生成器（仅协议7 国网显示） ----
+        self._build_eb_gen_group(left_layout)
+
         # ---- 动态表单区 ----
         form_scroll = QScrollArea()
         form_scroll.setWidgetResizable(True)
@@ -676,6 +687,418 @@ class FrameGenWidget(QWidget):
             self._rebuild_dlt698_field_form(self._current_dlt698_key)
         else:
             self._rebuild_gdw_field_form(self._current_afn_fn)
+
+    # ------------------------------------------------------------------
+    # EB 数据标识 645/698 帧生成器（协议7 国网 52H-F1/56H-F2 报文内容辅助）
+    # ------------------------------------------------------------------
+    EB_CTRL_OPTIONS = [
+        ("91H 读数据响应", "91"),
+        ("11H 读数据请求", "11"),
+        ("14H 写数据请求", "14"),
+        ("94H 写数据响应", "94"),
+        ("81H 主动上报", "81"),
+        ("01H 上报确认", "01"),
+    ]
+    EB_698_SERVICES = [
+        ("GET-Request 读取", "GET-Request"),
+        ("GET-Response 读响应", "GET-Response"),
+        ("SET-Request 设置/配置", "SET-Request"),
+        ("SET-Response 写确认", "SET-Response"),
+        ("ACTION-Request 操作", "ACTION-Request"),
+        ("ACTION-Response 操作响应", "ACTION-Response"),
+        ("REPORT-Notification 主动上报", "REPORT-Notification"),
+        ("REPORT-Response 上报确认", "REPORT-Response"),
+    ]
+
+    def _build_eb_gen_group(self, parent_layout: QVBoxLayout):
+        """构建 EB 数据标识 645/698 帧生成器面板（仅协议7 显示）"""
+        self.eb_gen_group = QGroupBox("EB 数据标识 645/698 帧生成器")
+        self.eb_gen_group.setCheckable(True)
+        self.eb_gen_group.setChecked(True)
+        self.eb_gen_group.setStyleSheet(
+            "QGroupBox { font-weight: bold; border: 1px solid #B0BEC5; border-radius: 4px; margin-top: 6px; }"
+            "QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; }"
+        )
+        eb_layout = QVBoxLayout(self.eb_gen_group)
+        eb_layout.setContentsMargins(6, 4, 6, 4)
+        eb_layout.setSpacing(4)
+
+        # 承载格式 + EB 数据标识
+        sel_row = QHBoxLayout()
+        sel_row.setSpacing(6)
+        sel_row.addWidget(QLabel("承载格式:"))
+        self.eb_format_combo = QComboBox()
+        self.eb_format_combo.addItem("645 帧（68 封装）", "645")
+        self.eb_format_combo.addItem("698.45 完整帧", "698")
+        self.eb_format_combo.currentIndexChanged.connect(self._on_eb_format_changed)
+        sel_row.addWidget(self.eb_format_combo)
+        sel_row.addWidget(QLabel("EB数据标识:"))
+        self.eb_di_combo = QComboBox()
+        self.eb_di_combo.setMinimumWidth(240)
+        self.eb_di_combo.setEditable(True)
+        self.eb_di_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.eb_di_combo.completer().setFilterMode(Qt.MatchFlag.MatchContains)
+        self.eb_di_combo.currentIndexChanged.connect(self._on_eb_di_changed)
+        sel_row.addWidget(self.eb_di_combo, 1)
+        eb_layout.addLayout(sel_row)
+
+        # ---- 645 模式配置 ----
+        self.eb_645_widget = QWidget()
+        eb645 = QHBoxLayout(self.eb_645_widget)
+        eb645.setContentsMargins(0, 0, 0, 0)
+        eb645.setSpacing(6)
+        eb645.addWidget(QLabel("控制码:"))
+        self.eb_ctrl_combo = QComboBox()
+        for label, val in self.EB_CTRL_OPTIONS:
+            self.eb_ctrl_combo.addItem(label, val)
+        eb645.addWidget(self.eb_ctrl_combo)
+        eb645.addWidget(QLabel("地址域A0~A5(hex):"))
+        self.eb_addr_edit = QLineEdit("000000000000")
+        self.eb_addr_edit.setMaxLength(12)
+        self.eb_addr_edit.setFixedWidth(110)
+        self.eb_addr_edit.setToolTip("12位hex（6字节）")
+        eb645.addWidget(self.eb_addr_edit)
+        eb645.addWidget(QLabel("数据内容(hex):"))
+        self.eb_data_edit = QLineEdit()
+        self.eb_data_edit.setPlaceholderText("可留空，如 01 01 112233445566")
+        eb645.addWidget(self.eb_data_edit, 1)
+        eb_layout.addWidget(self.eb_645_widget)
+
+        # ---- 698 模式配置 ----
+        self.eb_698_widget = QWidget()
+        eb698_top = QVBoxLayout(self.eb_698_widget)
+        eb698_top.setContentsMargins(0, 0, 0, 0)
+        eb698_top.setSpacing(4)
+        row1 = QHBoxLayout()
+        row1.setSpacing(6)
+        row1.addWidget(QLabel("数据内容来源:"))
+        self.eb_698_src_combo = QComboBox()
+        self.eb_698_src_combo.addItem("按字段配置（推荐）", 1)
+        self.eb_698_src_combo.addItem("直接填 hex", 0)
+        self.eb_698_src_combo.currentIndexChanged.connect(self._on_eb_format_changed)
+        row1.addWidget(self.eb_698_src_combo)
+        row1.addWidget(QLabel("698 服务:"))
+        self.eb_698_service_combo = QComboBox()
+        for label, val in self.EB_698_SERVICES:
+            self.eb_698_service_combo.addItem(label, val)
+        self.eb_698_service_combo.setCurrentIndex(2)  # SET-Request
+        row1.addWidget(self.eb_698_service_combo, 1)
+        eb698_top.addLayout(row1)
+
+        # 698 链路层头部
+        row2 = QHBoxLayout()
+        row2.setSpacing(6)
+        row2.addWidget(QLabel("SA类型:"))
+        self.eb_698_addr_type = QComboBox()
+        self.eb_698_addr_type.addItem("单地址(0)", 0)
+        self.eb_698_addr_type.addItem("通配地址(1)", 1)
+        self.eb_698_addr_type.addItem("组地址(2)", 2)
+        self.eb_698_addr_type.addItem("广播地址(3)", 3)
+        row2.addWidget(self.eb_698_addr_type)
+        row2.addWidget(QLabel("SA长度:"))
+        self.eb_698_addr_len = QComboBox()
+        for i in range(1, 17):
+            self.eb_698_addr_len.addItem(f"{i}", i)
+        self.eb_698_addr_len.setCurrentText("6")
+        row2.addWidget(self.eb_698_addr_len)
+        row2.addWidget(QLabel("SA(hex):"))
+        self.eb_698_sa_edit = QLineEdit("000000000000")
+        self.eb_698_sa_edit.setFixedWidth(100)
+        row2.addWidget(self.eb_698_sa_edit)
+        row2.addWidget(QLabel("CA:"))
+        self.eb_698_ca_edit = QLineEdit("0")
+        self.eb_698_ca_edit.setFixedWidth(30)
+        row2.addWidget(self.eb_698_ca_edit)
+        eb698_top.addLayout(row2)
+
+        row3 = QHBoxLayout()
+        row3.setSpacing(6)
+        row3.addWidget(QLabel("DIR:"))
+        self.eb_698_dir = QComboBox()
+        self.eb_698_dir.addItem("0-客户机→服务器", 0)
+        self.eb_698_dir.addItem("1-服务器→客户机", 1)
+        row3.addWidget(self.eb_698_dir)
+        row3.addWidget(QLabel("PRM:"))
+        self.eb_698_prm = QComboBox()
+        self.eb_698_prm.addItem("1-启动站", 1)
+        self.eb_698_prm.addItem("0-从动站", 0)
+        row3.addWidget(self.eb_698_prm)
+        row3.addWidget(QLabel("功能码:"))
+        self.eb_698_func = QComboBox()
+        self.eb_698_func.addItem("3-用户数据", 3)
+        self.eb_698_func.addItem("1-链路管理", 1)
+        row3.addWidget(self.eb_698_func)
+        row3.addWidget(QLabel("自由数据hex:"))
+        self.eb_698_data_edit = QLineEdit()
+        self.eb_698_data_edit.setPlaceholderText("A-XDR octet-string 内容")
+        row3.addWidget(self.eb_698_data_edit, 1)
+        eb698_top.addLayout(row3)
+        eb_layout.addWidget(self.eb_698_widget)
+
+        # 数据字段表单（按 EB 数据项 schema，复用 _create_field_widget）
+        self._eb_fields_container = QWidget()
+        self._eb_fields_layout = QVBoxLayout(self._eb_fields_container)
+        self._eb_fields_layout.setContentsMargins(0, 0, 0, 0)
+        self._eb_fields_layout.setSpacing(2)
+        self._eb_fields_layout.setAlignment(Qt.AlignTop)
+        eb_fields_scroll = QScrollArea()
+        eb_fields_scroll.setWidgetResizable(True)
+        eb_fields_scroll.setMaximumHeight(260)
+        eb_fields_scroll.setWidget(self._eb_fields_container)
+        eb_layout.addWidget(eb_fields_scroll)
+
+        # 生成按钮 + 消息
+        gen_row = QHBoxLayout()
+        gen_row.setSpacing(6)
+        self.eb_gen_btn = QPushButton("生成帧")
+        self.eb_gen_btn.setStyleSheet(
+            "QPushButton { background-color: #2196F3; color: white; "
+            "border-radius: 4px; padding: 2px 14px; font-weight: bold; }"
+        )
+        self.eb_gen_btn.clicked.connect(self._gen_eb_frame)
+        gen_row.addWidget(self.eb_gen_btn)
+        self.eb_apply_btn = QPushButton("填入报文内容字段")
+        self.eb_apply_btn.setStyleSheet(
+            "QPushButton { background-color: #4CAF50; color: white; "
+            "border-radius: 4px; padding: 2px 14px; font-weight: bold; }"
+        )
+        self.eb_apply_btn.clicked.connect(self._apply_eb_to_content)
+        gen_row.addWidget(self.eb_apply_btn)
+        self.eb_gen_msg = QLabel("")
+        self.eb_gen_msg.setStyleSheet("font-size: 11px;")
+        self.eb_gen_msg.setWordWrap(True)
+        gen_row.addWidget(self.eb_gen_msg, 1)
+        gen_row.addStretch()
+        eb_layout.addLayout(gen_row)
+
+        # 生成的 EB 帧（只读显示）
+        self.eb_gen_result = QLineEdit()
+        self.eb_gen_result.setReadOnly(True)
+        self.eb_gen_result.setFont(QFont("Consolas", 9))
+        self.eb_gen_result.setPlaceholderText("生成的 EB 645/698 帧显示在此")
+        eb_layout.addWidget(self.eb_gen_result)
+
+        self.eb_gen_group.setVisible(False)
+        parent_layout.addWidget(self.eb_gen_group)
+
+        # 最后填充 EB 数据标识下拉（此时 _eb_fields_layout 已存在）
+        self._populate_eb_di_combo()
+        # 连接 645/698 输入控件实时刷新（仅生成按钮触发，不需实时，故不连）
+        self.eb_698_widget.setVisible(False)
+        self._on_eb_format_changed(0)
+
+    def _populate_eb_di_combo(self):
+        """填充 EB 数据标识下拉框（gdw_eb_di_lookup 57 项）"""
+        self.eb_di_combo.clear()
+        self.eb_di_combo.addItem("-- 请选择 EB 数据标识 --", None)
+        try:
+            lookup = get_eb_di_lookup()
+            for code, info in sorted(lookup.get_all().items()):
+                label = f"{code} {info.get('名称', '')}"
+                self.eb_di_combo.addItem(label, code)
+        except Exception:
+            pass
+
+    def _on_eb_format_changed(self, index: int):
+        """承载格式 645/698 切换：切换配置面板与字段表单"""
+        fmt = self.eb_format_combo.currentData()
+        is_698 = (fmt == "698")
+        self.eb_645_widget.setVisible(not is_698)
+        self.eb_698_widget.setVisible(is_698)
+        self._rebuild_eb_fields()
+
+    def _on_eb_di_changed(self, index: int):
+        """EB 数据标识改变：重建数据字段表单"""
+        self._eb_current_di = self.eb_di_combo.currentData() or ""
+        self._rebuild_eb_fields()
+
+    def _rebuild_eb_fields(self):
+        """按当前 EB 数据标识重建数据字段表单（复用 _create_field_widget）"""
+        if not hasattr(self, '_eb_fields_layout'):
+            return
+        self._clear_layout(self._eb_fields_layout)
+        self._eb_field_widgets.clear()
+        self._eb_list_widgets.clear()
+
+        di = self._eb_current_di
+        fmt = self.eb_format_combo.currentData()
+        use_field = (fmt == "698") and self.eb_698_src_combo.currentData() == 1
+        info = EB_DI_FIELDS.get(di)
+        if not info or not use_field:
+            hint = QLabel("当前数据项无字段定义，请使用「数据内容 hex」直接填写。")
+            hint.setStyleSheet("color: #888; font-size: 11px;")
+            hint.setWordWrap(True)
+            self._eb_fields_layout.addWidget(hint)
+            return
+        title = QLabel(f"<b>数据内容字段（{info.get('名称', di)}）</b>")
+        self._eb_fields_layout.addWidget(title)
+        for field in info.get("fields", []):
+            widget = self._create_field_widget(field, widget_store=self._eb_field_widgets)
+            if widget:
+                # list 类型：实际 list widget（带 _items）存在 _eb_field_widgets[name]["widget"]
+                if field.get("type") == "list":
+                    lw = self._eb_field_widgets.get(field["name"], {}).get("widget")
+                    if lw is not None and hasattr(lw, "_items"):
+                        self._eb_list_widgets[field["name"]] = lw
+                self._eb_fields_layout.addWidget(widget)
+        apply_chinese_context_menus(self._eb_fields_container)
+
+    def _collect_eb_field_values(self) -> Dict[str, Any]:
+        """收集 EB 数据字段表单值 {字段名: 值}（list 从 _items 读取）"""
+        values: Dict[str, Any] = {}
+        info = EB_DI_FIELDS.get(self._eb_current_di, {})
+        for field in info.get("fields", []):
+            name = field["name"]
+            ftype = field.get("type", "hex")
+            if ftype == "list":
+                widget = self._eb_list_widgets.get(name)
+                if widget is None:
+                    widget = self._eb_field_widgets.get(name, {}).get("widget")
+                items = []
+                if widget is not None and hasattr(widget, "_items"):
+                    for _, item_widgets in widget._items:
+                        item = {}
+                        for iname, iw in item_widgets.items():
+                            if isinstance(iw, QComboBox):
+                                item[iname] = iw.currentData()
+                            else:
+                                item[iname] = iw.text().strip()
+                        items.append(item)
+                values[name] = items
+            else:
+                wi = self._eb_field_widgets.get(name, {})
+                w = wi.get("widget")
+                if w is None:
+                    values[name] = field.get("default", "")
+                    continue
+                if isinstance(w, QComboBox):
+                    values[name] = w.currentData()
+                else:
+                    values[name] = w.text().strip()
+        return values
+
+    def _build_eb_645_frame(self) -> bytes:
+        """生成 EB 数据标识 645 帧: 68 A0..A5 68 C L DI3 DI2 DI1 DI0 DATA CS 16"""
+        di = self._eb_current_di
+        if not di or not di.startswith("EB") or len(di) != 8:
+            raise ValueError("请先选择 EB 数据标识（如 EB030002）")
+        ctrl = int(self.eb_ctrl_combo.currentData(), 16)
+        data = bytes.fromhex(self.eb_data_edit.text().replace(" ", "")) if self.eb_data_edit.text().strip() else b""
+        addr = bytes.fromhex(self.eb_addr_edit.text().replace(" ", ""))
+        if len(addr) != 6:
+            addr = addr[:6].ljust(6, b'\x00')
+        di_bytes = bytes.fromhex(di)
+        data_len = len(di_bytes) + len(data)
+        body = bytes([ctrl, data_len]) + di_bytes + data
+        cs = sum(body) & 0xFF
+        return bytes([0x68]) + addr + bytes([0x68]) + body + bytes([cs, 0x16])
+
+    def _build_eb_698_frame(self) -> bytes:
+        """生成 EB 数据标识 698.45 完整帧（68 L C SA CA HCS APDU FCS 16）"""
+        di = self._eb_current_di
+        if not di or not di.startswith("EB") or len(di) != 8:
+            raise ValueError("请先选择 EB 数据标识（如 EB030002）")
+        service = self.eb_698_service_combo.currentData()
+        data_hex = self.eb_698_data_edit.text().strip()
+        if self.eb_698_src_combo.currentData() == 1 and di in EB_DI_FIELDS:
+            try:
+                data_bytes = encode_eb_di_data(di, self._collect_eb_field_values())
+                data_hex = data_bytes.hex()
+            except Exception:
+                data_hex = self.eb_698_data_edit.text().strip()
+
+        try:
+            import sys as _sys, os as _os
+            _reflex_dir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "reflex_web")
+            if _reflex_dir not in _sys.path:
+                _sys.path.insert(0, _reflex_dir)
+            from frame_gen_utils import build_eb_698_frame, build_dlt698_sa
+        except ImportError:
+            raise ValueError("缺少 reflex_web/frame_gen_utils.py，无法生成 698 帧")
+        addr_type = self.eb_698_addr_type.currentData()
+        addr_len = self.eb_698_addr_len.currentData()
+        sa_raw = self.eb_698_sa_edit.text().strip()
+        sa = build_dlt698_sa(addr_type, 0, addr_len, sa_raw)
+        ca_text = self.eb_698_ca_edit.text().strip()
+        try:
+            ca = int(ca_text, 0) & 0xFF
+        except (ValueError, TypeError):
+            ca = 0
+        frame = build_eb_698_frame(
+            di, service, data_hex,
+            sa=sa, ca=ca,
+            dir_bit=self.eb_698_dir.currentData(),
+            prm_bit=self.eb_698_prm.currentData(),
+            func_code=self.eb_698_func.currentData(),
+        )
+        if isinstance(frame, bytes):
+            return frame
+        return bytes.fromhex(frame.replace(" ", ""))
+
+    def _gen_eb_frame(self):
+        """生成 EB 645/698 帧并显示"""
+        try:
+            fmt = self.eb_format_combo.currentData()
+            if fmt == "698":
+                frame = self._build_eb_698_frame()
+            else:
+                frame = self._build_eb_645_frame()
+            self.eb_gen_frame = frame.hex()
+            hex_str = frame.hex().upper()
+            formatted = " ".join(hex_str[i:i+2] for i in range(0, len(hex_str), 2))
+            self.eb_gen_result.setText(formatted)
+            lookup = get_eb_di_lookup()
+            name = lookup.get(self._eb_current_di).get("名称", "") if lookup.get(self._eb_current_di) else ""
+            self._set_eb_msg(f"已生成 {self._eb_current_di} {name} {'698' if fmt == '698' else '645'} 帧（{len(frame)} 字节）", False)
+        except Exception as e:
+            self._set_eb_msg(f"生成失败: {e}", True)
+
+    def _apply_eb_to_content(self):
+        """将生成的 EB 帧填入当前国网命令的「报文内容」字段"""
+        if not self.eb_gen_frame:
+            self._set_eb_msg("请先生成 EB 帧", True)
+            return
+        if self.protocol_mode != "gdw" or not self._current_afn_fn:
+            self._set_eb_msg("请先在协议7 组帧页选择 52H-F1 等命令", True)
+            return
+        schema = GDW_AFNFN_SCHEMA.get(self._current_afn_fn, {})
+        target = None
+        for f in schema.get("fields", []):
+            if f.get("name") == "报文内容":
+                target = f
+                break
+        if target is None:
+            for f in schema.get("fields", []):
+                if f.get("type") == "bytes":
+                    target = f
+                    break
+        if target is None:
+            self._set_eb_msg("当前命令无「报文内容」字段可填入", True)
+            return
+        wi = self._field_widgets.get(target["name"], {})
+        widget = wi.get("widget")
+        if not isinstance(widget, QLineEdit):
+            self._set_eb_msg(f"字段「{target['name']}」不可编辑", True)
+            return
+        widget.setText(self.eb_gen_frame)
+        self._set_eb_msg(f"已填入字段「{target['name']}」（{len(self.eb_gen_frame)//2} 字节）", False)
+
+    def _set_eb_msg(self, text: str, is_error: bool):
+        self.eb_gen_msg.setText(text)
+        color = "#D32F2F" if is_error else "#388E3C"
+        self.eb_gen_msg.setStyleSheet(f"font-size: 11px; color: {color};")
+
+    def reset_eb_generator(self):
+        """重置 EB 生成器状态"""
+        self.eb_gen_frame = ""
+        self.eb_gen_result.clear()
+        self._set_eb_msg("", False)
+        if hasattr(self, "eb_format_combo"):
+            self.eb_format_combo.setCurrentIndex(0)
+        if hasattr(self, "eb_di_combo"):
+            self.eb_di_combo.setCurrentIndex(0)
+        self._eb_current_di = ""
+        self._rebuild_eb_fields()
 
     # ------------------------------------------------------------------
     # DI 下拉框
@@ -1910,7 +2333,15 @@ class FrameGenWidget(QWidget):
     # ------------------------------------------------------------------
     # 预定义字段控件
     # ------------------------------------------------------------------
-    def _create_field_widget(self, field: Dict[str, Any]) -> QWidget:
+    def _create_field_widget(self, field: Dict[str, Any], widget_store: Dict[str, Dict[str, Any]] = None) -> QWidget:
+        """创建单个字段的输入控件。
+
+        Args:
+            field: 字段 schema
+            widget_store: 控件存放字典（默认 self._field_widgets，EB 生成器传 _eb_field_widgets）
+        """
+        if widget_store is None:
+            widget_store = self._field_widgets
         name = field["name"]
         ftype = field["type"]
         desc = field.get("description", "")
@@ -1933,9 +2364,9 @@ class FrameGenWidget(QWidget):
             cb = QCheckBox("启用")
             cb.setChecked(True)
             layout.addWidget(cb)
-            self._field_widgets[name] = {"checkbox": cb, "widget": None}
+            widget_store[name] = {"checkbox": cb, "widget": None}
         else:
-            self._field_widgets[name] = {"widget": None}
+            widget_store[name] = {"widget": None}
 
         if "sub_fields" in field:
             sub_container = QWidget()
@@ -1980,8 +2411,8 @@ class FrameGenWidget(QWidget):
                     sub_widgets[sub_name] = edit
             sub_layout.addStretch()
             layout.addWidget(sub_container)
-            self._field_widgets[name]["widget"] = sub_container
-            self._field_widgets[name]["sub_widgets"] = sub_widgets
+            widget_store[name]["widget"] = sub_container
+            widget_store[name]["sub_widgets"] = sub_widgets
 
         elif ftype in ("uint8", "uint16", "uint32"):
             edit = QLineEdit()
@@ -1990,7 +2421,7 @@ class FrameGenWidget(QWidget):
             # 限制为非负整数
             edit.setValidator(QIntValidator(0, 2147483647, edit))
             layout.addWidget(edit)
-            self._field_widgets[name]["widget"] = edit
+            widget_store[name]["widget"] = edit
 
         elif ftype == "bytes":
             edit = QLineEdit()
@@ -2004,7 +2435,7 @@ class FrameGenWidget(QWidget):
             regex = QRegularExpression(r"[0-9A-Fa-f ]+")
             edit.setValidator(QRegularExpressionValidator(regex, edit))
             layout.addWidget(edit)
-            self._field_widgets[name]["widget"] = edit
+            widget_store[name]["widget"] = edit
 
         elif ftype == "enum":
             combo = QComboBox()
@@ -2016,19 +2447,19 @@ class FrameGenWidget(QWidget):
                 if idx >= 0:
                     combo.setCurrentIndex(idx)
             layout.addWidget(combo)
-            self._field_widgets[name]["widget"] = combo
+            widget_store[name]["widget"] = combo
 
         elif ftype == "list":
             list_widget = self._create_list_widget(field)
             layout.addWidget(list_widget, 1)
-            self._field_widgets[name]["widget"] = list_widget
+            widget_store[name]["widget"] = list_widget
 
         else:
             edit = QLineEdit()
             if default is not None:
                 edit.setText(str(default))
             layout.addWidget(edit)
-            self._field_widgets[name]["widget"] = edit
+            widget_store[name]["widget"] = edit
 
         layout.addStretch()
         return container
@@ -3240,6 +3671,11 @@ class FrameGenWidget(QWidget):
             self.afn_fn_combo.setVisible(True)
             self.gdw_config_group.setVisible(True)
 
+        # EB 数据标识 645/698 生成器仅协议7 显示
+        self.eb_gen_group.setVisible(mode == "gdw")
+        if mode != "gdw":
+            self.reset_eb_generator()
+
         # 清空当前选择
         self.di_combo.setCurrentIndex(0)
         self.afn_fn_combo.setCurrentIndex(0)
@@ -3295,3 +3731,4 @@ class FrameGenWidget(QWidget):
         self.mode_predefined_rb.setChecked(True)
         self.mode_custom_rb.setChecked(False)
         self._rebuild_form(None)
+        self.reset_eb_generator()

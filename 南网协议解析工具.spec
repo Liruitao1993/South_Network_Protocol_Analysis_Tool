@@ -13,6 +13,10 @@ a = Analysis(
         ('icons', 'icons'),
         ('enhanced_export.py', '.'),  # 增强导出模块
         ('scripts', 'scripts'),  # Python 脚本预处理示例脚本
+        # EB 数据标识 645/698 帧生成器：运行时动态 import 的纯逻辑模块
+        ('reflex_web/frame_gen_utils.py', '.'),  # build_eb_698_frame / build_dlt698_sa
+        ('gdw_eb_di_fields.py', '.'),  # EB_DI_FIELDS / encode_eb_di_data
+        ('gdw_eb_di_lookup.py', '.'),  # get_eb_di_lookup
     ],
     hiddenimports=[
         # PySide6 核心模块
@@ -58,6 +62,8 @@ a = Analysis(
         'dlt645_di_lookup',
         'gdw_afn_lookup',
         'frame_gen_widget',
+        'gdw_eb_di_fields',  # EB 数据标识字段定义（被 frame_gen_widget 静态 import）
+        'gdw_eb_di_lookup',  # EB 数据标识查询（被 frame_gen_widget 静态 import）
         'archive_widget',
         'topology_widget',
         'preset_buttons',

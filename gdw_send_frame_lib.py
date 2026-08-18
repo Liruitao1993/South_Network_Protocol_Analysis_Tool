@@ -58,10 +58,20 @@ class GDWFrameGenerator:
         # 2. 构建地址域A
         comm_module_flag = info_config.get("通信模块标识", 0)
         relay_level = info_config.get("中继级别", 0)
-        address = self._build_address_domain(
-            comm_module_flag, relay_level,
-            src_addr, dst_addr, relay_addrs or []
-        )
+
+        # 福建增补帧（附件3）：信息域 R = 保留(5B)+序列号(1B)，地址域 = A1+A3(12B 无中继)
+        is_fujian = afn in {0x50, 0x51, 0x52, 0x53, 0x55, 0x56}
+        if is_fujian:
+            # 福建增补信息域：保留5字节 + 报文序列号
+            seq = info_config.get("报文序列号", 0) & 0xFF
+            info_domain = b'\x00' * 5 + bytes([seq])
+            # 福建增补地址域：固定 A1(6B) + A3(6B)，无中继 A2
+            address = self._bcd_encode(src_addr, 6) + self._bcd_encode(dst_addr, 6)
+        else:
+            address = self._build_address_domain(
+                comm_module_flag, relay_level,
+                src_addr, dst_addr, relay_addrs or []
+            )
 
         # 3. 构建应用数据域
         app_data = self._build_application_data(afn, fn, field_values)
@@ -201,10 +211,17 @@ class GDWFrameGenerator:
                 processed[ref] = len(items) if isinstance(items, list) else 0
             if "length_field" in field:
                 ref = field["length_field"]
-                val = processed.get(name)
-                if val is not None:
-                    raw = self._to_raw_bytes(field, val)
-                    processed[ref] = len(raw) + field.get("length_offset", 0)
+                # 找到内容字段定义，用内容字段计算长度
+                content_field = None
+                for f2 in fields:
+                    if f2["name"] == ref:
+                        content_field = f2
+                        break
+                if content_field is not None:
+                    val = processed.get(ref)
+                    if val is not None:
+                        raw = self._to_raw_bytes(content_field, val)
+                        processed[name] = len(raw) + field.get("length_offset", 0)
 
         # 按顺序打包
         result = b""
