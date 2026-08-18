@@ -182,6 +182,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 │   │   └── dl_t698_45_apdu_parser.py # 698.45 APDU (DLT69845APDUParser) - 延迟导入避免循环依赖
 │   │       └── dl_t698_45_axdr.py     # A-XDR 编解码 (AXDRCoder, DL/T 790.6-2010)
 │   │           └── dl_t698_45_oi_lookup.py  # OI 对象标识查询 (OILookup)
+│   │           └── dl_t698_45_data_decode.py # APDU 数据内容业务解码 (CLASS_ATTR_TEMPLATES/OI_UNIT_HINT/decode_oad_data)
 │   ├── csg_new_gen_parser.py       # 新一代载波 (CSGNewGenParser) ~4970行
 │   └── csg_new_gen_cmd_payloads.py # 应用层命令业务数据单元解析
 ├── gw_new_gen_parser.py        # 国网新一代双模 (GWNewGenParser) — 国网新一代双模通信互联互通
@@ -408,6 +409,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
   - `dl_t698_45_parser.py` (DLT69845Parser) — 链路层帧（68 L L C SA CA [HCS] [APDU] [FCS] 16）
   - `dl_t698_45_apdu_parser.py` (DLT69845APDUParser) — APDU 服务类型（GET/SET/ACTION/REPORT/PROXY/LINK/CONNECT...）
   - `dl_t698_45_axdr.py` (AXDRCoder) — **A-XDR 编解码**（依据 DL/T 790.6-2010）
+  - `dl_t698_45_data_decode.py` — **APDU 数据内容业务解码**（按对象属性格式解码 A-XDR 数据：电能量 kWh 换算、需量值@时间、分相 A/B/C 相、单值换算；Scaler_Unit 10^scaler）
   - `dl_t698_45_oi_lookup.py` (OILookup) — OI 对象标识查询
 - **组帧**：`dl_t698_45_frame_gen.py` + `dl_t698_45_frame_schema.py`
 - **校验器**：`validator/dl_t698_45_validator.py`
@@ -508,6 +510,7 @@ python test/test_actual_hdlc.py     # 真实 HDLC 报文
 python test/test_special_frame.py   # 特殊帧
 python test/test_snrm_frame.py      # SNRM 帧
 python test/test_dl_t698_45.py      # 698.45 协议
+python test/test_dl_t698_45_data_decode.py  # 698.45 APDU 数据内容业务解码（电能量/需量/分相/单值）
 python test/test_oad_enrichment.py  # 698.45 OAD 增强
 python test/test_csg_new_gen.py     # 新一代载波协议
 python test/test_csg_hrf_mac.py     # 新一代载波无线单跳MAC帧（表12/表139）
@@ -595,6 +598,13 @@ python test/test_web_frame_gen_utils.py # Reflex Web 版组帧纯逻辑
 ## 10. 变更日志（与 `main_gui.py:CHANGELOG` 保持同步）
 
 > 本节按版本倒序记录。详细 commit 见 `git log`。每发新版本必须更新此处。
+
+### 1.14.1 — 2026-08-17
+- **协议8（DL/T 698.45）APDU 数据内容业务解码**（`dl_t698_45_data_decode.py` 新增）：按对象属性格式解码 A-XDR 数据为业务值，覆盖常用数据项——电能量数组（kWh 换算+费率展开）、最大需量数组（值@发生时间）、分相电压/电流/功率/谐波（A/B/C 相+单位）、单值数据变量；Scaler_Unit 换算按 10^scaler，单位码映射表；无属性3 时按 OI 推断单位与默认缩放
+- **APDU 解析器接入**（`dl_t698_45_apdu_parser.py`）：GET-Response Normal/NormalList/Next、SET-Request、REPORT-Notification Normal 新增「数据业务」键；REPORT-Notification Normal 补齐 OAD 解析（此前漏解）
+- **GUI 表格**（`dl_t698_45_parser.py`）：「数据业务」按项展开（总/费率N/A相/B相/C相）
+- **修复 DLT69845Validator 长度域公式**：L=帧长-2（文档附录 H.1 例证），此前 +4 误判合法帧
+- 新增 `test/test_dl_t698_45_data_decode.py`（10 项）；回归 `test_dl_t698_45.py` / `test_gdw_fujian.py`（19项）/ `test_web_frame_gen_utils.py`（62项）全过
 
 ### 1.14.0 — 2026-08-17
 - **国网协议（索引 7）新增「福建增补规约」解析与组帧**（`gdw10376_parser.py` / `gdw_send_frame_lib.py` / `gdw_frame_generator_schema.py` / `validator/gdw_validator.py`）：基于 `协议文档/7.国网本地接口协议/附件3：1376.2集中器本地通信模块接口协议【福建增补】V1.4-20240729`
@@ -803,6 +813,19 @@ python test/test_web_frame_gen_utils.py # Reflex Web 版组帧纯逻辑
 ### 1.0.0 — 2026-04-14
 - 初始版本：南网/PLC RF/HDLC/DLMS 多协议解析；单帧/批量解析；DI/命令字/OBIS 查询
 
+
+**最近一次（2026-08-17）：发布 1.14.1（协议8 APDU 数据内容业务解码）**
+
+变更：
+- **协议8（DL/T 698.45）APDU 数据内容业务解码**（新增 `dl_t698_45_data_decode.py`）：新建 CLASS_ATTR_TEMPLATES（电能量类(1)/最大需量类(2)/分相变量类(3)/功率类(4)/谐波类(5)/数据变量类(7) 的属性→格式模板）+ OI_UNIT_HINT（电压 V/电流 A/电能量 kWh/需量 W/相角 °/频率 Hz 等）+ UNIT_CODE_MAP 单位码表，`decode_oad_data(oi, attr_id, data)` 统一入口按 OAD 解码为业务值
+- **APDU 解析器接入**（`dl_t698_45_apdu_parser.py`）：新增 `_decode_oad_business` 辅助，GET-Response Normal/NormalList/Next、SET-Request、REPORT-Notification Normal 解析结果新增「数据业务」键（不破坏原始 A-XDR「数据」）；REPORT-Notification Normal 补齐 OAD 解析
+- **GUI 表格**（`dl_t698_45_parser.py`）：「数据业务」按项展开展示（总/费率N/A相/B相/C相 + 单位）
+- **修复 DLT69845Validator 长度域一致性公式**：698.45 L = 不含起始符和结束符的数据长度（文档附录 H.1：帧长32 → L=30），原公式 +4 误判合法帧，改 +2
+- **新增测试** `test/test_dl_t698_45_data_decode.py`（10 项）；`test_dl_t698_45.py`、`test_gdw_fujian.py`（19项）、`test_web_frame_gen_utils.py`（62项）回归全过
+
+涉及文件：
+- 新增：`dl_t698_45_data_decode.py`、`test/test_dl_t698_45_data_decode.py`
+- 修改：`dl_t698_45_apdu_parser.py`、`dl_t698_45_parser.py`、`validator/dl_t698_45_validator.py`、`main_gui.py`（CHANGELOG/APP_VERSION 1.14.1）、`AGENTS.md`、`test/test_web_frame_gen_utils.py`（长度域断言注释）
 
 **最近一次（2026-08-15）：Reflex Web 版协议组帧完整复刻**
 

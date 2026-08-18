@@ -36,8 +36,8 @@ class DLT69845Validator(BaseValidator):
         try:
             result = self.parser.parse(frame_bytes)
             length_val = result.get("长度域", {}).get("长度值", 0)
-            # 698.45: 帧总长度 = 起始符(1) + 长度域(2) + length_val + 结束符(1)
-            expected_len = length_val + 4
+            # 698.45: L = 不含起始符和结束符的数据长度 → 帧总长 = 起始符(1) + L + 结束符(1)
+            expected_len = length_val + 2
             len_ok = (n == expected_len)
             checks.append(CheckItem(
                 "长度域一致性", CheckLevel.PASS if len_ok else CheckLevel.FAIL,

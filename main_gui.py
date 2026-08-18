@@ -62,10 +62,17 @@ from llm_api_manager import LLMApiManagerDialog
 from preprocessors import list_scripts as _list_pp_scripts, get_script as _get_pp_script
 
 
-APP_VERSION = "1.14.0"
+APP_VERSION = "1.14.1"
 BUILD_DATE = "2026-08-17"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    ("1.14.1", "2026-08-17", [
+        "协议8（DL/T 698.45）APDU 数据内容业务解码（常用数据项全覆盖）：新建 dl_t698_45_data_decode.py——按对象属性格式解码 A-XDR 数据为业务值，覆盖电能量数组（kWh 换算+费率展开）、最大需量数组（值@发生时间）、分相电压/电流/功率/谐波（A/B/C 相+单位）、单值数据变量（数据/参数）；Scaler_Unit 换算按 10^scaler，单位码映射表；OI 未带属性3 时按 OI_UNIT_HINT 推断单位与默认缩放（762 个 OI 名称辅助）",
+        "APDU 解析器接入（dl_t698_45_apdu_parser.py）：GET-Response Normal/NormalList/Next、SET-Request、REPORT-Notification Normal 在「数据」后新增「数据业务」键（不破坏原始 A-XDR 结果）；REPORT-Notification Normal 补齐缺失的 OAD 解析（此前 PIID-ACD 后直接当 Data）",
+        "GUI 表格展示（dl_t698_45_parser.py parse_to_table）：「数据业务」按项展开显示（如 总: 1234.567 kWh / 费率1: 5 kWh / A相: 220.5 V），无模板 OI 不产生该行，原始解析不受影响",
+        "修复 DLT69845Validator 长度域一致性公式：L = 不含起始符和结束符的数据长度（文档附录 H.1 帧例：帧长32 → L=30=帧长-2），此前 +4 误判为 +2 导致合法帧校验失败；生成器 _assemble_frame 原公式与文档一致，补充注释说明",
+        "新增 test/test_dl_t698_45_data_decode.py：10 项测试（电能量/电压/电流/需量含时间/NormalList 逐项/SET/REPORT/未知OI/表格展示）全过；test_dl_t698_45.py、test_gdw_fujian.py（19项）、test_web_frame_gen_utils.py（62项）回归全过",
+    ]),
     ("1.14.0", "2026-08-17", [
         "国网协议(索引7)新增「福建增补规约」（1376.2集中器本地通信模块接口协议【福建增补】V1.4）解析与组帧：AFN=50H~56H 全功能覆盖——50H确认/否认、51H初始化、52H数据转发(透明转发/任务队列智能补采/本地定时/并发抄表福建/清空队列)、53H查询数据(参数配置/主节点地址/厂商版本/信道信息/串口参数/模式切换)、55H控制命令(设置地址/允许禁止上报/广播/注册/预告抄读/速率协商/模式切换等)、56H主动上报(主动注册/事件内容/抄读请求/响应报文/信道延时/广播完成/带任务信息上报)",
         "福建增补帧结构识别：信息域R按保留(5B)+序列号(1B)（上行加事件标志）、地址域A固定 A1+A3(12B 无中继)解析，与 2024 国网自动区分（AFN 探测）",

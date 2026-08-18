@@ -369,7 +369,12 @@ class DLT69845Parser:
             if key in skip_keys:
                 continue
             if isinstance(value, dict):
-                if "嵌套APDU" in value:
+                if key == "数据业务" and not ("类型" in value or "原始值" in value):
+                    # 业务解码结果：逐项展示（如 总: 1234.567 kWh / A相: 220.5 V）
+                    table_data.append((f"{indent}{key}", "-", f"{len(value)}项", "按对象属性解码的业务值", None, None))
+                    for biz_k, biz_v in value.items():
+                        table_data.append((f"{indent}  {biz_k}", "-", str(biz_v), "", None, None))
+                elif "嵌套APDU" in value:
                     # 安全报文等包含嵌套APDU的数据：摘要显示一行，然后递归展开嵌套APDU
                     raw = value.get("原始值", "-")
                     length = value.get("长度", "-")
