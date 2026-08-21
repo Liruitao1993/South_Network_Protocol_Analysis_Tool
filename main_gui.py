@@ -62,12 +62,22 @@ from llm_api_manager import LLMApiManagerDialog
 from preprocessors import list_scripts as _list_pp_scripts, get_script as _get_pp_script
 
 
-APP_VERSION = "1.14.4"
-BUILD_DATE = "2026-08-19"  # 编译日期，每次打包前更新
+APP_VERSION = "1.14.5"
+BUILD_DATE = "2026-08-21"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
-    ("1.14.4", "2026-08-19", [
+    ("1.14.5", "2026-08-21", [
+        "协议11（HDC 1.0）查询站点升级状态上行报文解析（hdc10_parser.py 0x034）：此前只按下行表40 解析（块数/起始块号/升级ID），上行应答的 升级状态(字节1高4位)/有效块数/升级位图 全部丢失。现按文档第4-3部分 表45 补全：升级状态（0空闲/1接收进行/2接收完成/3升级进行/4试运行）、有效块数、起始块号、升级ID + 接收位图（每bit对应一个文件块，显示 N/M块已接收）；升级位图逐块编号明细按 起始块号+i 编号，每行32块多行展开，[✓n]=已接收 [✕n]=丢包；下行恰12字节仍按表40 解析并区分方向行",
+        "协议11（HDC 1.0）台区户变关系识别(0x0A1)深度解析（hdc10_parser.py）：①修复报文头长度公式——6bit值(byte0[6:7]高2位+byte1[0:3]低4位)×4字节（类IPv4 IHL），此前错把「(b0低2位|b1高4位<<2)×4」致12字节头算成48字节、DATA从错误偏移切片只剩尾部16字节；校时/事件/通信测试/注册/升级等全部7处统一修正。②DATA域按采集类型深度解析：采集启动(表56 起始NTB/周期/数量/序列号)、特征信息告知(表57 TEI/采集方式/序列号/告知总数/起始NTB + 特征序列)、判别结果信息(表61 TEI/结束标志/识别结果/正确隶属CCO地址)。③特征序列按特征类型分派：工频电压(表58 BCD XXX.X 大端 220.5V)、工频频率(表59 BCD XX.XX 50.00Hz)、工频周期(表60 有符号偏差值+μs换算)，三相出线逐相展开，双沿采集解析 NTB2+第二组序列；test_hdc10 增至16项全过",
+    ]),
+    ("1.14.4", "2026-08-21", [
         "内嵌 Python 部署增量构建：build_embedded_deploy.py 新增 --skip-deps 模式——复用已有 python/（解释器+site-packages），仅刷新源码/数据/前端层，重复构建从 10+ 分钟降至约 1 分钟；requirements.lock 已最新时跳过 uv 重新编译。完整/增量构建原则写入 AGENTS.md/README（日常迭代用 --skip-deps，仅首次/改依赖/换 Python 版本时完整重建）",
+        "协议8（DL/T 698.45）组帧 OI 增强（frame_gen_widget.py）：预定义字段模式 OI 改为「预设下拉 + 手动 hex 输入」双通道；A-XDR 模式 OI 同样支持预设/手动，并新增「描述符类型」下拉可自由选择 属性(OAD)/方法(OMD)（默认按命令类型：ACTION→OMD 其余→OAD），属性标识/索引 与 方法标识/操作模式 随选择切换显示；A-XDR 数据项编辑器中 OI/OAD/OMD 的下拉改为可编辑（NoInsert），支持手动输入任意 OI（hex 回退解析），自定义数据内容仍按 A-XDR TLV 模式填充；回归 test_web_frame_gen_utils(62)/test_dl_t698_45/test_dl_t698_45_fujian 全过",
+        "修复协议8 A-XDR 复合类型（array/structure）编码语义：tag 后字节应为「元素个数」而非子项字节总长（文档附录 H.3.2：`01 — 类型=1，表示数组 / 03 — 数组元素个数=3`）。此前组帧 3 项 structure 误填 09（字节长），现正确填 03。修复点：frame_gen_widget.py / reflex_web/frame_gen_utils.py 编码器；dl_t698_45_axdr.py 解码器同步改为按个数循环（此前按字节长度截断，导致自组帧回读只显示 1 项）。回归 test_web_frame_gen_utils(62)/test_dl_t698_45/test_dl_t698_45_fujian/test_dl_t698_45_data_decode/test_oad_enrichment 全过",
+        "修复协议8 组帧 SET-Request/ACTION-Request 缺尾部「没有时间标签」字节：此前仅 GET-Request 尾补 `00`，SET/ACTION 生成的 APDU 少 1 字节（文档 H.4/H.5：GET/SET/ACTION 请求均以 OPTIONAL TimeLabel 结尾，00=无）。修复 frame_gen_widget.py 两条生成路径（实时预览 + 生成按钮）与 reflex_web/frame_gen_utils.py::build_dlt698_axdr_apdu；新增 SET APDU 尾 00 测试断言",
+        "协议8 解析表格 array/structure 成员逐项展开（dl_t698_45_parser.py）：此前复合类型仅显示「[N项]」，现对齐官方工具为每个成员生成子行（原始编码/值/类型说明，如 成员1 | 1101 | 1 | A-XDR:unsigned(0x11)），嵌套复合类型递归展开；新增 `_add_axdr_item_rows` 递归辅助",
+        "协议8 请求 APDU 尾部 TimeTag 解析（dl_t698_45_apdu_parser.py）：GET/SET/ACTION 的 Normal/NormalList 分支统一解析 OPTIONAL TimeTag 尾字节（00=无时间标签），表格显示「时间标签 | 0x00 | 无时间标签」对齐官方工具；新增公共 `_parse_time_tag` 辅助（GET-Request Normal 原有内联逻辑改用该辅助）",
+        "修复协议8 预设命令保存/显示：新增 DLT698_command.json 独立预设文件（此前 dlt698 预设被误存入 GW_command.json），PresetButtonWidget.set_protocol 支持 dlt698（此前静默忽略致预设页看不到 698 按钮），加载时按 protocol 过滤历史混入条目，AddPresetDialog 协议行显示「698.45 协议」",
     ]),
     ("1.14.3", "2026-08-19", [
         "协议8（DL/T 698.45）EB030307 过零NTB值上行数据解析：ACTION-Response NormalList 兼容「数据个数」前缀（DAR 后 `01`=数据个数 + octet-string 数据，此前被误当 A-XDR array tag 解导致 0x81 报错），新增 `_parse_axdr_items_or_single` 双路径兜底（数据个数 N×A-XDR 失败回退单 A-XDR，兼容文档示例无前缀格式）",
@@ -317,6 +327,33 @@ CHANGELOG = [
         "DI/命令字/OBIS查询功能",
     ]),
 ]
+
+
+def _field_leading(name: str) -> int:
+    """返回字段名的前导空格数"""
+    return len(name) - len(name.lstrip(' '))
+
+
+def _field_level_map(names) -> dict:
+    """把一张表里出现的不同前导空格深度归一化为层级 1,2,3...。
+
+    各解析器缩进单位不一（有的 2 空格一级、有的 4 空格一级），
+    按"出现的不同深度排序"映射，保证层级浅且父子关系一致。
+    """
+    depths = sorted({_field_leading(n) for n in names if _field_leading(n) > 0})
+    return {d: i + 1 for i, d in enumerate(depths)}
+
+
+def _format_tree_field(name: str, level: int):
+    """按层级生成树形标签，返回 (显示名, 层级)。
+
+    层级>0 加 "└" 前缀，每深一级额外增加 4 空格横向间距。
+    """
+    stripped = name.lstrip(' ')
+    if level <= 0:
+        return stripped, 0
+    indent = "    " * (level - 1)
+    return f"{indent}  └ {stripped}", level
 
 
 def _get_git_changelog() -> list:
@@ -572,12 +609,26 @@ class MainWindow(QMainWindow):
         self._stats_labels: List[tuple] = []      # (QLabel, 字号) 列表，主题切换时统一重设
         self._serial_status_color = "#999"       # 串口状态标签当前颜色（主题切换时重设）
         self._serial_status_bold = False       # 串口状态标签当前是否粗体（主题切换时重设）
+        # 自动更新配置（config.json "update" 段）
+        self._update_settings: Dict[str, Any] = {}
+        self._load_update_settings()
+        from auto_updater import merge_update_config
+        self._update_settings = merge_update_config(self._update_settings)
 
         self.setup_ui()
         self._setup_menu_bar()
 
         # 系统集成管理器（托盘 / 全局热键 / 单实例）
         self._setup_system_integration()
+
+        # 启动延迟自动检查更新 + 周期循环检查（网络失败静默；每 30 分钟重查一次，
+        # 覆盖"程序长期运行、作者中途发布新版本"的场景）
+        if self._update_settings.get("check_on_start", True) and self._update_settings.get("enabled", True):
+            QTimer.singleShot(3000, self._auto_check_update)
+            self._update_poll_timer = QTimer(self)
+            self._update_poll_timer.setInterval(30 * 60 * 1000)  # 30 分钟
+            self._update_poll_timer.timeout.connect(self._auto_check_update)
+            self._update_poll_timer.start()
 
     def setup_ui(self):
         """设置UI布局"""
@@ -634,6 +685,7 @@ class MainWindow(QMainWindow):
         self.csg_parse_level_combo.addItem("FC+eFC解析", "fc_efc")
         self.csg_parse_level_combo.addItem("仅FC解析", "fc_only")
         self.csg_parse_level_combo.addItem("应用层报文", "app")
+        self.csg_parse_level_combo.addItem("仅MAC帧(去除PBH)", "mac_only")
         self.csg_parse_level_combo.addItem("仅PB解析(完整物理块)", "pb_only")
         self.csg_parse_level_combo.setFont(self._ui_font(-1))
         self.csg_parse_level_combo.setMinimumWidth(180)
@@ -1889,8 +1941,10 @@ class MainWindow(QMainWindow):
         # 先切到对应协议（保持界面一致性）
         if protocol == "south" and self.current_protocol != 0:
             self.protocol_combo.setCurrentIndex(0)
-        elif protocol == "gdw" and self.current_protocol != 6:
-            self.protocol_combo.setCurrentIndex(6)
+        elif protocol == "gdw" and self.current_protocol != 7:
+            self.protocol_combo.setCurrentIndex(7)
+        elif protocol == "dlt698" and self.current_protocol != 8:
+            self.protocol_combo.setCurrentIndex(8)
 
         # 检查串口是否打开
         if not self.serial_worker or not self.serial_worker.is_open():
@@ -1999,8 +2053,8 @@ class MainWindow(QMainWindow):
         self.csg_strip_head_spin.setVisible(show_csg_level)
         self.csg_strip_tail_label.setVisible(show_csg_level)
         self.csg_strip_tail_spin.setVisible(show_csg_level)
-        self.csg_pb_frame_type_label.setVisible(show_csg_level and self._csg_parse_level == "pb_only")
-        self.csg_pb_frame_type_combo.setVisible(show_csg_level and self._csg_parse_level == "pb_only")
+        self.csg_pb_frame_type_label.setVisible(show_csg_level and self._csg_parse_level in ("pb_only", "mac_only"))
+        self.csg_pb_frame_type_combo.setVisible(show_csg_level and self._csg_parse_level in ("pb_only", "mac_only"))
         # ED 监控协议勾选项：仅协议索引9（南网新一代）时可见
         self.ed_monitor_chk.setVisible(show_csg_level)
         # 4字节反转勾选项：仅协议索引9（南网新一代）时可见
@@ -2067,8 +2121,8 @@ class MainWindow(QMainWindow):
         """新一代载波协议解析级别改变时的回调"""
         level = self.csg_parse_level_combo.currentData()
         self._csg_parse_level = level or "auto"
-        # pb_only模式显示帧类型选择
-        show_frame_type = (self._csg_parse_level == "pb_only")
+        # pb_only / mac_only 模式显示帧类型选择
+        show_frame_type = (self._csg_parse_level in ("pb_only", "mac_only"))
         self.csg_pb_frame_type_label.setVisible(show_frame_type)
         self.csg_pb_frame_type_combo.setVisible(show_frame_type)
 
@@ -3212,7 +3266,7 @@ class MainWindow(QMainWindow):
             if parse_level is None:
                 parse_level = getattr(self, '_csg_parse_level', 'auto')
             # pb_only模式下获取帧类型（未指定时用主窗口 combo）
-            if frame_type is None and parse_level == 'pb_only':
+            if frame_type is None and parse_level in ('pb_only', 'mac_only'):
                 frame_type = self.csg_pb_frame_type_combo.currentData()
             class CSGGenGuiParser:
                 def __init__(self, parser, level, ftype=None, channel='plc'):
@@ -3545,7 +3599,7 @@ class MainWindow(QMainWindow):
                     out_lines.append(hex_clean)
                 continue
 
-            if parse_level == "pb_only":
+            if parse_level in ("pb_only", "mac_only"):
                 pass  # 直接保留
             elif parse_level == "app":
                 found = False
@@ -4181,12 +4235,318 @@ class MainWindow(QMainWindow):
         sys_action = config_menu.addAction("系统集成设置(&S)...")
         sys_action.triggered.connect(self._show_system_settings_dialog)
         llm_api_action = config_menu.addAction("模型API管理(&M)...")
-        llm_api_action.triggered.connect(self._show_llm_api_manager)
+        update_act = config_menu.addAction("更新设置(&U)...")
+        update_act.triggered.connect(self._show_update_settings_dialog)
 
         help_menu = menubar.addMenu("帮助(&H)")
 
+        check_act = help_menu.addAction("检查更新(&C)")
+        check_act.triggered.connect(self._check_update_manual)
+
         about_action = help_menu.addAction("关于(&A)")
         about_action.triggered.connect(self._show_about_dialog)
+
+    # ==================== 自动更新 ====================
+    def _load_update_settings(self):
+        """加载 config.json "update" 段到 self._update_settings。"""
+        cfg = self._app_config.get("update", {})
+        self._update_settings = dict(cfg) if isinstance(cfg, dict) else {}
+
+    def _save_update_settings(self):
+        """把 self._update_settings 写回 config.json "update" 段。"""
+        try:
+            config = {}
+            if self._config_path.exists():
+                try:
+                    with open(self._config_path, "r", encoding="utf-8") as f:
+                        config = json.load(f)
+                except Exception:
+                    config = {}
+            config["update"] = self._update_settings
+            with open(self._config_path, "w", encoding="utf-8") as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[更新] 保存配置失败: {e}")
+
+    def _auto_check_update(self):
+        """启动时静默自动检查更新（网络失败/无新版均不打扰）。"""
+        try:
+            self._run_update_check(silent=True)
+        except Exception:
+            pass
+
+    def _check_update_manual(self):
+        """帮助菜单/关于「检查更新」：拉取仓库全部版本并弹列表，用户可选择任意版本下载。"""
+        self._run_update_check(silent=True, show_list=True)
+
+    def _run_update_check(self, silent: bool, show_list: bool = False):
+        """后台线程检查更新。
+
+        - show_list=True：拉取仓库全部版本列表，弹选择对话框（手动「检查更新」）
+        - 否则：检查最新版，有新版则询问（静默/周期自动检查）
+        """
+        cfg = dict(self._update_settings)
+
+        if not cfg.get("enabled", True):
+            if not silent:
+                QMessageBox.information(self, "检查更新", "已关闭自动更新（可在「配置→更新设置」开启）")
+            return
+
+        # 用 QThread 子类做网络 IO，避免阻塞 GUI；信号直连 MainWindow 槽，AutoConnection 自动正确排队
+        thread = getattr(self, "_update_check_thread", None)
+        if thread is not None:
+            try:
+                if thread.isRunning():
+                    return
+            except RuntimeError:
+                # C++ 对象已被 deleteLater 回收，Python wrapper 还在
+                pass
+
+        self._update_ctx = {"silent": silent, "show_list": show_list}
+
+        thread = _UpdateCheckWorker(cfg, APP_VERSION, list_all=show_list, parent=self)
+        self._update_check_thread = thread
+        if show_list:
+            thread.release_list_ready.connect(self._on_version_list_result_cb)
+        else:
+            thread.result_ready.connect(self._on_update_check_result_cb)
+        thread.finished.connect(thread.deleteLater)
+        thread.start()
+
+    def _on_update_check_result_cb(self, result: dict):
+        """检查更新完成回调（GUI 线程安全）。"""
+        ctx = getattr(self, "_update_ctx", {}) or {}
+        self._on_update_check_result(result, ctx.get("silent", True))
+
+    def _on_update_check_result(self, result: dict, silent: bool):
+        """检查完成：有新版则询问，无则视 silent 决定是否提示。"""
+        if result.get("error"):
+            if not silent:
+                QMessageBox.warning(self, "检查更新", f"检查失败：{result['error']}")
+            return
+        latest = result.get("latest") or {}
+        needed = result.get("needed", False)
+        if not needed:
+            if not silent:
+                ver = latest.get("version", "未知")
+                QMessageBox.information(self, "检查更新", f"已是最新版本（{ver}）。")
+            return
+        # 有新版：询问确认
+        local = result.get("local", APP_VERSION)
+        remote = latest.get("version", "?")
+        notes = (latest.get("notes") or "").strip()
+        msg = f"发现新版本：{local} → {remote}\n\n{notes}\n\n是否下载并更新？"
+        ret = QMessageBox.question(
+            self, "发现新版本", msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if ret == QMessageBox.StandardButton.Yes:
+            self._start_download(latest)
+
+    def _on_version_list_result_cb(self, releases: list, err: str):
+        """版本列表回调（GUI 线程安全）。"""
+        self._on_version_list_result(releases, err)
+
+    def _on_version_list_result(self, releases: list, err: str):
+        """手动「检查更新」：显示仓库全部版本列表，用户可选择任意版本下载。"""
+        from PySide6.QtWidgets import (
+            QDialog, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
+            QLabel, QPushButton, QMessageBox,
+        )
+        from PySide6.QtCore import Qt as _Qt
+        if err:
+            QMessageBox.warning(self, "检查更新", f"获取版本列表失败：{err}")
+            return
+        if not releases:
+            QMessageBox.information(self, "检查更新", "仓库中没有可更新的版本。")
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("检查更新 - 版本列表")
+        dlg.setMinimumSize(560, 420)
+        layout = QVBoxLayout(dlg)
+
+        cur = APP_VERSION
+        tip = QLabel(f"当前版本：{cur}\n选择下方任意版本下载（默认为最新版）：")
+        tip.setWordWrap(True)
+        layout.addWidget(tip)
+
+        listw = QListWidget()
+        for r in releases:
+            ver = r.get("version", "?")
+            created = r.get("created_at", "")[:10]
+            notes = (r.get("notes") or "")
+            notes_one = " ".join(notes.split())[:60] if notes else "（无说明）"
+            tag = "[最新] " if r is releases[0] else ""
+            cur_tag = " ← 当前" if ver.strip().lower().lstrip("v") == cur.strip().lower() else ""
+            label = f"{tag}{ver}  ({created}){cur_tag}"
+            item = QListWidgetItem(label)
+            item.setData(_Qt.ItemDataRole.UserRole, {"version": ver, "url": r.get("url", "")})
+            item.setToolTip(notes)
+            listw.addItem(item)
+        # 默认选中最新版
+        if listw.count():
+            listw.setCurrentRow(0)
+        layout.addWidget(listw)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        download_btn = QPushButton("下载选中版本")
+        download_btn.setFixedWidth(130)
+        cancel_btn = QPushButton("取消")
+        cancel_btn.setFixedWidth(80)
+        cancel_btn.clicked.connect(dlg.reject)
+        btn_row.addWidget(download_btn)
+        btn_row.addWidget(cancel_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        def on_download():
+            item = listw.currentItem()
+            if item is None:
+                QMessageBox.information(dlg, "下载", "请先选择一个版本。")
+                return
+            data = item.data(_Qt.ItemDataRole.UserRole) or {}
+            if not data.get("url"):
+                QMessageBox.warning(dlg, "下载", "该版本缺少下载地址。")
+                return
+            dlg.accept()
+            self._start_download(data)
+
+        download_btn.clicked.connect(on_download)
+        listw.itemDoubleClicked.connect(lambda item: on_download())
+
+        dlg.exec()
+
+    def _start_download(self, latest: dict):
+        """后台下载新版 exe 到临时目录，进度条展示，完成后编排替换。"""
+        from PySide6.QtWidgets import QProgressDialog
+        from auto_updater import Opdater, DownloadError
+
+        url = latest.get("url", "")
+        if not url:
+            QMessageBox.warning(self, "更新", "未获取到下载地址。")
+            return
+
+        exe_path = Path(sys.argv[0]) if getattr(sys, "frozen", False) else None
+        # 打包运行：exe 自身路径；源码运行：定位 dist 下的 exe（便于测试）
+        if exe_path is None or not exe_path.exists():
+            exe_path = Path(__file__).parent / "dist" / "南网协议解析工具.exe"
+            if not exe_path.exists():
+                exe_path = Path(__file__).parent / "南网协议解析工具.exe"
+
+        import tempfile
+        tmp_dir = Path(tempfile.gettempdir()) / "jiexigongju_updater"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        new_exe = Path(tmp_dir) / ("南网解析工具_" + latest.get("version", "new") + ".exe")
+
+        dlg = QProgressDialog("正在下载更新...", "取消", 0, 100, self)
+        dlg.setWindowTitle("下载更新")
+        dlg.setWindowModality(Qt.WindowModality.WindowModal)
+        dlg.setAutoClose(True)
+
+        # 保存上下文供 done 回调使用
+        self._download_ctx = {
+            "exe_path": str(exe_path),
+            "dlg": dlg,
+            "latest": latest,
+        }
+
+        thread = _UpdateDownloadWorker(url, new_exe, latest.get("sha256", ""), parent=self)
+        self._download_thread = thread
+        thread.progress.connect(dlg.setValue)
+        thread.done.connect(self._on_download_done_cb)
+        thread.finished.connect(thread.deleteLater)
+        thread.start()
+
+    def _on_download_done_cb(self, ok: bool, err: str, new_path: str):
+        """下载完成回调（GUI 线程安全）。"""
+        ctx = getattr(self, "_download_ctx", {}) or {}
+        self._on_download_done(
+            ok, err, new_path,
+            ctx.get("exe_path", ""),
+            ctx.get("dlg"),
+            ctx.get("latest", {}),
+        )
+
+    def _on_download_done(self, ok, err, new_path, exe_path, dlg, latest):
+        """下载结束：成功则编排替换并退出，失败提示。"""
+        if dlg is not None:
+            dlg.close()
+        if not ok:
+            QMessageBox.warning(self, "下载更新", f"下载失败：{err}")
+            return
+        # 下载校验成功，编排替换
+        from auto_updater import Opdater
+        updater = Opdater()
+        updater.make_backup(Path(exe_path))  # 可选备份，失败忽略
+        bat = updater.stage_and_replace(Path(new_path), Path(exe_path))
+        if bat is None:
+            QMessageBox.critical(self, "更新", "启动替换脚本失败，请手动覆盖 exe。")
+            return
+        QMessageBox.information(
+            self, "更新", "更新下载完成，即将替换并重启应用。")
+        self._schedule_quit()
+
+    def _schedule_quit(self):
+        """给 update.bat 留出启动时间后退出主程序。"""
+        QTimer.singleShot(800, self.close)
+
+    def _show_update_settings_dialog(self):
+        """配置菜单「更新设置」：编辑 config.json update 段。"""
+        from PySide6.QtWidgets import QDialog, QFormLayout, QLineEdit, QCheckBox, QComboBox, QDialogButtonBox, QLabel
+        from auto_updater import merge_update_config
+        cfg = merge_update_config(self._update_settings)
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("更新设置")
+        dialog.setMinimumWidth(460)
+        form = QFormLayout(dialog)
+
+        enabled_cb = QCheckBox("启用自动更新")
+        enabled_cb.setChecked(bool(cfg.get("enabled", True)))
+        form.addRow("自动更新", enabled_cb)
+
+        start_cb = QCheckBox("启动时自动检查")
+        start_cb.setChecked(bool(cfg.get("check_on_start", True)))
+        form.addRow("启动检查", start_cb)
+
+        source_combo = QComboBox()
+        source_combo.addItem("Gitee Releases（国内）", "gitee")
+        source_combo.addItem("私有 HTTP 服务器", "private")
+        idx = source_combo.findData(cfg.get("source_type", "gitee"))
+        source_combo.setCurrentIndex(max(0, idx))
+        form.addRow("更新源", source_combo)
+
+        owner_edit = QLineEdit(str(cfg.get("gitee_owner", "")))
+        form.addRow("Gitee owner", owner_edit)
+        repo_edit = QLineEdit(str(cfg.get("gitee_repo", "")))
+        form.addRow("Gitee repo", repo_edit)
+        private_edit = QLineEdit(str(cfg.get("private_url", "")))
+        private_edit.setPlaceholderText("https://host/version.json")
+        form.addRow("私有源 URL", private_edit)
+
+        sha_cb = QCheckBox("校验 SHA-256")
+        sha_cb.setChecked(bool(cfg.get("sha256_verify", True)))
+        form.addRow("安全校验", sha_cb)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._update_settings = {
+                "enabled": enabled_cb.isChecked(),
+                "check_on_start": start_cb.isChecked(),
+                "source_type": source_combo.currentData(),
+                "gitee_owner": owner_edit.text().strip(),
+                "gitee_repo": repo_edit.text().strip(),
+                "private_url": private_edit.text().strip(),
+                "sha256_verify": sha_cb.isChecked(),
+            }
+            self._save_update_settings()
 
     def _show_about_dialog(self):
         """显示"关于"对话框"""
@@ -4245,6 +4605,10 @@ class MainWindow(QMainWindow):
 
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
+        check_update_btn = QPushButton("检查更新")
+        check_update_btn.setFixedWidth(110)
+        check_update_btn.clicked.connect(lambda: (dialog.accept(), self._check_update_manual()))
+        btn_layout.addWidget(check_update_btn)
         ok_btn = QPushButton("确定")
         ok_btn.setFixedWidth(80)
         ok_btn.clicked.connect(dialog.accept)
@@ -6817,24 +7181,19 @@ class MainWindow(QMainWindow):
         if not table_data:
             return
 
+        level_map = _field_level_map([str(it[0]) for it in table_data if it[0] is not None])
         for r, item in enumerate(table_data):
             field_name = str(item[0]) if item[0] is not None else ""
             raw_val = str(item[1]) if item[1] is not None else ""
             parsed_val = str(item[2]) if item[2] is not None else ""
             comment = str(item[3]) if item[3] is not None else ""
 
-            # 检测子字段：优先用 is_child 标志(index 6)，其次用前导空格判断
-            is_child = False
-            if len(item) > 6:
-                is_child = bool(item[6])
-            if not is_child and (field_name.startswith("  ") or field_name.startswith("\t")):
-                is_child = True
-
-            # 构造显示用字段名
-            if is_child:
-                display_name = "  └ " + field_name.lstrip()
-            else:
-                display_name = field_name
+            # 检测子字段：优先用 is_child 标志(index 6)，其次用归一化层级判断
+            level = level_map.get(_field_leading(field_name), 0)
+            display_name, level = _format_tree_field(field_name, level)
+            if level == 0 and len(item) > 6 and bool(item[6]):
+                display_name, level = f"  └ {field_name.strip()}", 1
+            is_child = level > 0
 
             self.batch_detail_table.insertRow(r)
 
@@ -6897,13 +7256,19 @@ class MainWindow(QMainWindow):
         self.result_table_widget.setRowCount(0)
         self._byte_ranges = []
 
+        level_map = _field_level_map([str(item[0]) for item in table_data if item[0] is not None])
         for row, item in enumerate(table_data):
             field_name, raw_value, parsed_value, comment = item[0], item[1], item[2], item[3]
             byte_start = item[4] if len(item) > 4 else None
             byte_end = item[5] if len(item) > 5 else None
 
+            level = level_map.get(_field_leading(str(field_name)), 0)
+            display_name, level = _format_tree_field(str(field_name), level)
             self.result_table_widget.insertRow(row)
-            self.result_table_widget.setItem(row, 0, QTableWidgetItem(field_name))
+            field_item = QTableWidgetItem(display_name)
+            if level > 0:
+                field_item.setForeground(QColor("#555555"))
+            self.result_table_widget.setItem(row, 0, field_item)
             self.result_table_widget.setItem(row, 1, QTableWidgetItem(str(raw_value)))
             self.result_table_widget.setItem(row, 2, QTableWidgetItem(str(parsed_value)))
             self.result_table_widget.setItem(row, 3, QTableWidgetItem(str(comment)))
@@ -7540,6 +7905,57 @@ def main():
 
 
 
+class _UpdateCheckWorker(QThread):
+    """后台线程检查更新（QThread 子类化，避免 moveToThread + lambda 跨线程坑）。"""
+
+    result_ready = Signal(dict)          # 最新版本检查结果
+    release_list_ready = Signal(list, str)  # 全部版本列表 + 错误信息（list_all 模式）
+
+    def __init__(self, cfg: dict, local_version: str, list_all: bool = False, parent=None):
+        super().__init__(parent)
+        self.cfg = cfg
+        self.local_version = local_version
+        self.list_all = list_all
+
+    def run(self):
+        if self.list_all:
+            err = ""
+            rels = []
+            try:
+                from auto_updater import VersionChecker
+                rels = VersionChecker(self.cfg).fetch_all_releases()
+            except Exception as e:
+                err = str(e)
+            self.release_list_ready.emit(rels, err)
+            return
+        from auto_updater import check_for_update
+        res = check_for_update(self.local_version, self.cfg)
+        self.result_ready.emit(res)
+
+
+class _UpdateDownloadWorker(QThread):
+    """后台线程下载新版 exe（QThread 子类化）。"""
+
+    progress = Signal(int)
+    done = Signal(bool, str, str)   # (ok, error, new_path)
+
+    def __init__(self, url: str, dest_file: Path, sha256: str, parent=None):
+        super().__init__(parent)
+        self.url = url
+        self.dest_file = Path(dest_file)
+        self.sha256 = sha256
+
+    def run(self):
+        from auto_updater import Opdater, DownloadError
+        try:
+            op = Opdater()
+            op.download(self.url, self.dest_file, progress_cb=lambda p: self.progress.emit(int(p)))
+            if self.sha256 and not op.verify(self.dest_file, self.sha256):
+                self.done.emit(False, "SHA-256 校验失败，文件可能损坏", str(self.dest_file))
+            else:
+                self.done.emit(True, "", str(self.dest_file))
+        except Exception as e:
+            self.done.emit(False, str(e), str(self.dest_file))
 class _PyScriptWorker(QObject):
     """Python 脚本后台执行 Worker
 

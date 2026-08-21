@@ -2022,10 +2022,8 @@ class HDC10Parser:
         b2 = data[2]
         b3 = data[3]
 
-        # 协议版本号 (bit0-5, 固定为1)
-        proto_ver = b0 & 0x3F
-        # 报文头长度 (bit6-7 of b0 + bit0-3 of b1 = 6bit, 单位4字节块)
-        hdr_len = ((b0 >> 6) & 0x03) | ((b1 & 0x0F) << 2)
+        # 报文头长度: byte0[6:7](高2b)+byte1[0:3](低4b)=6bit, 单位4字节字(类IPv4 IHL)
+        hdr_len = (((b0 >> 6) & 0x03) << 4) | (b1 & 0x0F)
         hdr_bytes = hdr_len * 4
 
         table.append((
@@ -2130,7 +2128,7 @@ class HDC10Parser:
         b1 = data[1]
 
         proto_ver = b0 & 0x3F
-        hdr_len = ((b0 >> 6) & 0x03) | ((b1 & 0x0F) << 2)
+        hdr_len = (((b0 >> 6) & 0x03) << 4) | (b1 & 0x0F)  # 6bit, ×4字节
         hdr_bytes = hdr_len * 4
 
         direction = (b1 >> 4) & 0x01
@@ -2161,7 +2159,7 @@ class HDC10Parser:
         b3 = data[3]
 
         proto_ver = b0 & 0x3F
-        hdr_len = ((b0 >> 6) & 0x03) | ((b1 & 0x0F) << 2)
+        hdr_len = (((b0 >> 6) & 0x03) << 4) | (b1 & 0x0F)  # 6bit, ×4字节
         hdr_bytes = hdr_len * 4
 
         # 转发数据长度: byte2[4:7] + byte3[0:7] = 12bit
@@ -2195,7 +2193,7 @@ class HDC10Parser:
         b1 = data[1]
 
         proto_ver = b0 & 0x3F
-        hdr_len = ((b0 >> 6) & 0x03) | ((b1 & 0x0F) << 2)
+        hdr_len = (((b0 >> 6) & 0x03) << 4) | (b1 & 0x0F)  # 6bit, ×4字节
         hdr_bytes = hdr_len * 4
 
         dir_bit = (b1 >> 4) & 0x01
@@ -2273,7 +2271,7 @@ class HDC10Parser:
         b1 = data[1]
 
         proto_ver = b0 & 0x3F
-        hdr_len = ((b0 >> 6) & 0x03) | ((b1 & 0x0F) << 2)
+        hdr_len = (((b0 >> 6) & 0x03) << 4) | (b1 & 0x0F)  # 6bit, ×4字节
         hdr_bytes = hdr_len * 4
 
         force_ack = (b1 >> 4) & 0x01
@@ -2346,13 +2344,82 @@ class HDC10Parser:
                               offset + 12, offset + 12 + len(blk_data) - 1))
 
         elif msg_id == 0x034 and len(data) >= 12:
-            # 查询站点升级状态
+            # 查询站点升级状态: 下行(表40, 12字节) / 上行(表45, 12字节+接收位图)
+            b0, b1 = data[0], data[1]
+            version = b0 & 0x3F
+            hdr_len = (((b0 >> 6) & 0x03) << 4) | (b1 & 0x0F)  # 6bit, ×4字节
+            status_nib = (b1 >> 4) & 0x0F
             blk_count = int.from_bytes(data[2:4], 'little')
             start_blk = int.from_bytes(data[4:8], 'little')
             upgrade_id = int.from_bytes(data[8:12], 'little')
-            table.append(("    连续查询块数", f"0x{blk_count:04X}", str(blk_count), f"查询块数: {blk_count}", offset + 2, offset + 3))
-            table.append(("    起始块号", f"0x{start_blk:08X}", str(start_blk), f"起始块号: {start_blk}", offset + 4, offset + 7))
-            table.append(("    升级ID", f"0x{upgrade_id:08X}", str(upgrade_id), f"升级标识: {upgrade_id}", offset + 8, offset + 11))
+            # 方向判定: 上行带接收位图(len>12); 恰12字节按表40下行处理
+            # (表45上行的升级状态占字节1高4位, 表40同位置为保留0)
+            is_uplink = len(data) > 12 or status_nib in (1, 2, 3, 4)
+
+            table.append(("    协议版本号", f"0x{version:02X}", str(version),
+                          "固定为1", offset, offset))
+            table.append(("    报文头长度", str(hdr_len), str(hdr_len),
+                          "报文头(除数据域外)长度", offset, offset + 1))
+
+            if is_uplink:
+                status_names = {0: "空闲态", 1: "接收进行态", 2: "接收完成态",
+                                3: "升级进行态", 4: "试运行态"}
+                table.append(("    方向", "", "上行(STA→CCO)",
+                              "升级状态查询应答(表45)", offset, offset + 1))
+                table.append(("    升级状态", str(status_nib),
+                              status_names.get(status_nib, f"保留({status_nib})"),
+                              "升级进展状态", offset + 1, offset + 1))
+                table.append(("    有效块数", f"0x{blk_count:04X}", str(blk_count),
+                              f"位图中有效块数: {blk_count}", offset + 2, offset + 3))
+                table.append(("    起始块号", f"0x{start_blk:08X}", str(start_blk),
+                              f"起始块号: {start_blk}", offset + 4, offset + 7))
+                table.append(("    升级ID", f"0x{upgrade_id:08X}", str(upgrade_id),
+                              f"升级标识: {upgrade_id}", offset + 8, offset + 11))
+                if len(data) > 12:
+                    bitmap = data[12:]
+                    # 块i ↔ 第i//8字节的第i%8比特(LSB在前), 实际块号 = 起始块号 + i
+                    total_bits = min(blk_count, len(bitmap) * 8)
+                    recv = sum(
+                        1 for i in range(total_bits)
+                        if bitmap[i >> 3] & (1 << (i & 7))
+                    )
+                    table.append((
+                        "    升级位图",
+                        ' '.join(f'{b:02X}' for b in bitmap[:16]) + ("..." if len(bitmap) > 16 else ""),
+                        f"{recv}/{blk_count}块已接收",
+                        f"{len(bitmap)}字节, 每bit对应一个文件块(1=已接收)",
+                        offset + 12, offset + 12 + len(bitmap) - 1,
+                    ))
+                    # 逐块编号明细: 每行32个块, [✓n]=已接收 [✕n]=丢包
+                    per_row = 32
+                    for base in range(0, total_bits, per_row):
+                        end = min(base + per_row, total_bits)
+                        cells = []
+                        lost = 0
+                        for i in range(base, end):
+                            ok = bitmap[i >> 3] & (1 << (i & 7))
+                            if ok:
+                                cells.append(f"[✓{start_blk + i}]")
+                            else:
+                                cells.append(f"[✕{start_blk + i}]")
+                                lost += 1
+                        table.append((
+                            f"      位图明细{start_blk + base}-{start_blk + end - 1}",
+                            "",
+                            "".join(cells),
+                            "全部已接收" if lost == 0 else f"{lost}个丢包",
+                            offset + 12 + (base >> 3), offset + 12 + ((end - 1) >> 3),
+                        ))
+            else:
+                table.append(("    方向", "", "下行(CCO→STA)",
+                              "升级状态查询(表40)", offset, offset + 1))
+                table.append(("    连续查询块数", f"0x{blk_count:04X}",
+                              "查询所有块状态" if blk_count == 0xFFFF else str(blk_count),
+                              "0xFFFF=查询所有", offset + 2, offset + 3))
+                table.append(("    起始块号", f"0x{start_blk:08X}", str(start_blk),
+                              f"起始块号: {start_blk}", offset + 4, offset + 7))
+                table.append(("    升级ID", f"0x{upgrade_id:08X}", str(upgrade_id),
+                              f"升级标识: {upgrade_id}", offset + 8, offset + 11))
 
         elif msg_id == 0x035 and len(data) >= 12:
             # 执行升级
@@ -2375,7 +2442,7 @@ class HDC10Parser:
         b1 = data[1]
 
         proto_ver = b0 & 0x3F
-        hdr_len = ((b0 >> 6) & 0x03) | ((b1 & 0x0F) << 2)
+        hdr_len = (((b0 >> 6) & 0x03) << 4) | (b1 & 0x0F)  # 6bit, ×4字节
         hdr_bytes = hdr_len * 4
 
         dir_bit = (b1 >> 4) & 0x01
@@ -2417,6 +2484,8 @@ class HDC10Parser:
                           ' '.join(f'{b:02X}' for b in payload[:16]) + ("..." if len(payload) > 16 else ""),
                           f"{len(payload)}字节", "特征采集数据",
                           offset + hdr_bytes, offset + hdr_bytes + len(payload) - 1))
+            table.extend(self._parse_phase_ident_data(
+                payload, offset + hdr_bytes, feat_type, coll_type))
 
         return table
 
@@ -2483,7 +2552,7 @@ class HDC10Parser:
             "  精准校时报文",
             "",
             "",
-            "精准校时命令",
+            "精准校时",
             offset, offset + min(len(data), 8) - 1,
         ))
         table.append(("    转发数据长度", f"0x{data_len:03X}", f"{data_len}字节",
@@ -2500,6 +2569,154 @@ class HDC10Parser:
                           f"{len(payload)}字节", "校时应用报文",
                           offset + 8, offset + 8 + len(payload) - 1))
 
+        return table
+
+    def _parse_phase_ident_data(self, data: bytes, offset: int,
+                                feat_type: int, coll_type: int) -> List[Tuple]:
+        """台区户变 DATA 域按采集类型深度解析
+
+        表56 采集启动(0x01): 起始NTB(4B)+采集周期(1B)+采集数量(1B)+采集序列号(1B)+保留(1B)
+        表57 特征信息告知(0x03): TEI(12b)+采集方式(2b)+保留(2b) + 序号(1B)+总数(1B)
+                                + 起始NTB1(4B) + 特征序列1 [+ NTB2(4B)+序列2(双沿)]
+        表61 判别结果信息(0x05): TEI(2B)+结束标志(1B)+识别结果(1B)+CCO地址(6B)
+        """
+        table = []
+        if not data:
+            return table
+
+        if coll_type == 0x01 and len(data) >= 8:
+            # 表56: 台区特征采集启动命令
+            ntb = int.from_bytes(data[0:4], 'little')
+            period = data[4]
+            count = data[5]
+            seq = data[6]
+            table.append(("      起始NTB", f"0x{ntb:08X}", str(ntb),
+                          "全网开始采集时刻NTB", offset, offset + 3))
+            table.append(("      采集周期", f"0x{period:02X}", f"{period}秒",
+                          "工频周期特征时忽略; 其它特征单位秒", offset + 4, offset + 4))
+            table.append(("      采集数量", f"0x{count:02X}", str(count),
+                          "连续采集数量", offset + 5, offset + 5))
+            table.append(("      采集序列号", f"0x{seq:02X}", str(seq),
+                          "全网第几次启动采集(0-255循环)", offset + 6, offset + 6))
+
+        elif coll_type == 0x03 and len(data) >= 8:
+            # 表57: 台区特征信息告知 (上行 STA→CCO)
+            tei12 = int.from_bytes(data[0:2], 'little') & 0x0FFF
+            method = (data[1] >> 4) & 0x03
+            seq_no = data[2]
+            total = data[3]
+            ntb1 = int.from_bytes(data[4:8], 'little')
+            method_names = {0: "保留", 1: "下降沿采集", 2: "上升沿采集", 3: "双沿采集"}
+            table.append(("      TEI", f"0x{tei12:03X}", str(tei12),
+                          "STA地址(CCO通知自身特征时为1)", offset, offset + 1))
+            table.append(("      采集方式", f"0b{method:02b}",
+                          method_names.get(method, f"保留({method})"),
+                          "仅工频周期特征有效", offset + 1, offset + 1))
+            table.append(("      采集序列号", f"0x{seq_no:02X}", str(seq_no),
+                          "第几次采集活动", offset + 2, offset + 2))
+            table.append(("      告知总数量", f"0x{total:02X}", str(total),
+                          "特征信息序列包含的数据个数", offset + 3, offset + 3))
+            table.append(("      起始采集NTB1", f"0x{ntb1:08X}", str(ntb1),
+                          "第一个特征数据的采集时刻", offset + 4, offset + 7))
+            table.extend(self._parse_phase_feature_series(
+                data[8:], offset + 8, feat_type, total, "1"))
+            # 双沿采集: 第二组 NTB2 + 序列2
+            if method == 3:
+                rest = len(data) - 8 - self._phase_series_len(feat_type, total)
+                if rest >= 4:
+                    pos = 8 + self._phase_series_len(feat_type, total)
+                    ntb2 = int.from_bytes(data[pos:pos + 4], 'little')
+                    table.append(("      起始采集NTB2", f"0x{ntb2:08X}", str(ntb2),
+                                  "上升沿起始时刻(双沿)", offset + pos, offset + pos + 3))
+                    table.extend(self._parse_phase_feature_series(
+                        data[pos + 4:], offset + pos + 4, feat_type, total, "2"))
+
+        elif coll_type == 0x05 and len(data) >= 10:
+            # 表61: 台区判别结果信息
+            tei = int.from_bytes(data[0:2], 'little')
+            done = data[2]
+            result = data[3]
+            cco = data[4:10]
+            result_names = {0: "识别结果未知", 1: "是本台区", 2: "不是本台区"}
+            table.append(("      TEI", f"0x{tei:04X}", str(tei),
+                          "STA的TEI标识", offset, offset + 1))
+            table.append(("      判别结束标志", f"0x{done:02X}",
+                          "已结束" if done == 1 else ("进行中" if done == 0 else f"保留({done})"),
+                          "台区判别过程结束标志", offset + 2, offset + 2))
+            table.append(("      台区识别结果", f"0x{result:02X}",
+                          result_names.get(result, f"保留({result})"),
+                          "" if done == 1 else "未结束时无意义",
+                          offset + 3, offset + 3))
+            table.append(("      正确隶属CCO地址",
+                          ' '.join(f'{b:02X}' for b in cco),
+                          ':'.join(f'{b:02X}' for b in cco),
+                          "非本台区时填充正确隶属CCO地址(大端)",
+                          offset + 4, offset + 9))
+
+        elif coll_type in (0x02, 0x04):
+            # 收集/结果查询命令: DATA 为空
+            pass
+
+        if not table and any(data):
+            table.append((
+                "      未解析DATA",
+                ' '.join(f'{b:02X}' for b in data[:16]) + ("..." if len(data) > 16 else ""),
+                f"{len(data)}字节",
+                f"采集类型0x{coll_type:02X}暂不支持深度解析",
+                offset, offset + len(data) - 1,
+            ))
+        return table
+
+    def _phase_series_len(self, feat_type: int, total: int) -> int:
+        """单条特征序列的字节长度: 4字节报告数量头 + N×每项长度"""
+        per_item = {1: 2, 2: 2, 3: 2}.get(feat_type, 2)
+        return 4 + total * per_item
+
+    def _parse_phase_feature_series(self, data: bytes, offset: int,
+                                    feat_type: int, total: int, series_idx: str) -> List[Tuple]:
+        """特征序列解析: 表58电压/表59频率/表60周期
+        头4字节: 保留(1B)+第一出线数量(1B)+第二出线数量(1B)+第三出线数量(1B)
+        随后按相线顺序排列各出线的值(每项2字节)
+        """
+        table = []
+        type_names = {1: "工频电压(V)", 2: "工频频率(Hz)", 3: "工频周期偏差"}
+        name = type_names.get(feat_type, f"特征类型{feat_type}")
+        if len(data) < 4:
+            return table
+        reserved = data[0]
+        cnt = [data[1], data[2], data[3]]
+        phase_names = ["第一出线", "第二出线", "第三出线"]
+        table.append((f"      特征序列{series_idx}({name})", "",
+                      f"{sum(cnt)}个值/{total}告知",
+                      f"保留0x{reserved:02X}, 数量={cnt}", offset, offset + 3))
+        pos = 4
+        for ph in range(3):
+            if cnt[ph] == 0:
+                continue
+            vals = []
+            for i in range(cnt[ph]):
+                if pos + 2 > len(data):
+                    break
+                raw = int.from_bytes(data[pos:pos + 2], 'little')
+                if feat_type == 1:
+                    # BCD XXX.X 伏(大端): 高字节=百十个位, 低字节=个位.小数位
+                    hi, lo = data[pos], data[pos + 1]
+                    val = f"{hi >> 4}{hi & 0x0F}{lo >> 4}.{lo & 0x0F}V"
+                elif feat_type == 2:
+                    # BCD XX.XX Hz(大端): 高字节=十位.个位, 低字节=小数两位
+                    hi, lo = data[pos], data[pos + 1]
+                    val = f"{hi >> 4}{hi & 0x0F}.{lo >> 4}{lo & 0x0F}Hz"
+                else:
+                    # 有符号 HEX, 单位 1/3125000 秒, 与20ms理想周期偏差
+                    dev_us = raw * 1000000 / 3125000 - 20000 * 1000 / 1000
+                    dev_us = raw / 3125000 * 1e6  # 原始计数转微秒
+                    val = f"{raw:+d} ({dev_us:.1f}μs)"
+                vals.append(val)
+                pos += 2
+            table.append((f"        {phase_names[ph]}", "",
+                          " ".join(vals) if vals else "-",
+                          f"{cnt[ph]}个值", offset + 4 + sum(cnt[:ph]) * 2,
+                          offset + 4 + (sum(cnt[:ph]) + cnt[ph]) * 2 - 1))
         return table
 
     def _parse_meter_reader_cco(self, data: bytes, offset: int) -> List[Tuple]:
