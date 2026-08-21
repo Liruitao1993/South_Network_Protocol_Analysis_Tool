@@ -108,6 +108,147 @@ def test_remaining_data_shown():
     assert val == "34字节", f"剩余数据: {val}"
 
 
+# ====== 查询站点升级状态上行报文(表45): 升级位图解析 ======
+UPGRADE_STATUS_UP = (
+    "12 34 00 00 01 23 8A 04 00 00 00 00 B2 D6 D3 93 "
+    + "FF " * 152 + "03"
+)
+
+
+def parse_upgrade_rows():
+    data = bytes.fromhex(UPGRADE_STATUS_UP)
+    return HDC10Parser().parse_to_table(data)
+
+
+def test_upgrade_status_uplink_bitmap():
+    """0x034 上行应答应解出 升级状态/有效块数/起始块号/升级ID/升级位图"""
+    rows = parse_upgrade_rows()
+    _, val, _ = find(rows, "    方向")
+    assert val == "上行(STA→CCO)", f"方向: {val}"
+    _, status, _ = find(rows, "    升级状态")
+    assert status == "接收完成态", f"升级状态: {status}"
+    _, blocks, _ = find(rows, "    有效块数")
+    assert blocks == "1162", f"有效块数: {blocks}"
+    _, uid, _ = find(rows, "    升级ID")
+    assert uid == "2480133810", f"升级ID: {uid}"
+    raw, recv, desc = find(rows, "    升级位图")
+    # 位图153字节(1224bit >= 1162块), 全FF+末字节03 → 1162/1162 已接收
+    assert recv == "1162/1162块已接收", f"位图统计: {recv}"
+    assert "153字节" in desc, f"位图长度说明: {desc}"
+
+
+def test_upgrade_status_downlink():
+    """0x034 下行查询(表40, 恰12字节)仍按下行格式解析, 无位图行"""
+    down = bytes([0x01, 0x03, 0xFF, 0xFF, 0, 0, 0, 0, 0x11, 0x22, 0x33, 0x44])
+    rows = HDC10Parser()._parse_upgrade(down, 100, 0x034)
+    names = [r[0] for r in rows]
+    assert "    连续查询块数" in names, f"缺少下行字段: {names}"
+    assert "    升级位图" not in names and "    升级状态" not in names
+    for r in rows:
+        if r[0] == "    连续查询块数":
+            assert r[1] == "0xFFFF" and r[2] == "查询所有块状态"
+        if r[0] == "    升级ID":
+            assert r[1] == "0x44332211"
+
+
+def test_upgrade_bitmap_lost_blocks():
+    """丢包场景: bit=0 的块应标 [✕n], 统计与明细一致"""
+    bm = bytearray([0xFF] * 146)
+    bm[0] &= ~(1 << 5)     # 块5
+    bm[12] &= ~(1 << 4)    # 块100
+    bm[145] &= ~(1 << 0)   # 块1160
+    payload = (bytes([0x01, 0x23]) + (1162).to_bytes(2, 'little')
+               + (0).to_bytes(4, 'little') + (0x93D3D6B2).to_bytes(4, 'little')
+               + bytes(bm))
+    rows = HDC10Parser()._parse_upgrade(payload, 0, 0x034)
+    _, recv, _ = find(rows, "    升级位图")
+    assert recv == "1159/1162块已接收", f"统计: {recv}"
+    detail = ''.join(r[2] for r in rows if r[0].startswith("      位图明细"))
+    import re
+    lost = re.findall(r"\[✕(\d+)\]", detail)
+    assert lost == ["5", "100", "1160"], f"丢包编号: {lost}"
+    assert "[✓0]" in detail and "[✓1161]" in detail
+
+
+# ====== 台区户变关系识别(0x0A1) DATA 深度解析 ======
+
+def test_phase_ident_header_len():
+    """报文头长度6bit(byte0[6:7]+byte1[0:3])×4字节: 0x01,0x53 → 12字节头"""
+    biz = bytes.fromhex('01537C8A1139702500220303' + '01' + '00' + '14' + '00000000' + '2A00' * 20)
+    rows = HDC10Parser()._parse_phase_ident(biz, 0)
+    hdr = [r for r in rows if r[0] == "  台区户变关系识别报文"][0]
+    assert hdr[2] == "12字节头", f"头长: {hdr[2]}"
+    data_row = [r for r in rows if r[0] == "    数据(DATA)"][0]
+    assert data_row[2] == "47字节", f"DATA长度: {data_row[2]}"
+
+def test_phase_ident_period_series():
+    """采集类型3告知+特征类型3工频周期: TEI/方式/序号/总数/NTB1 + 三相周期值"""
+    biz = bytes.fromhex('01537C8A1139702500220303'   # 头12B: 特征3 采集3
+                        + '01000114'                  # TEI=1 方式=保留 序号1 总数20
+                        + 'B0D6A192'                  # NTB1
+                        + '2A002A002A002A002B00290029002B00'   # 第一出线10个
+                        + '2A002A002A002A002B00290029002B002A00')  # 第二出线10个
+    rows = HDC10Parser()._parse_phase_ident(biz, 0)
+    _, tei, _ = find(rows, "      TEI")
+    assert tei == "1", f"TEI: {tei}"
+    _, total, _ = find(rows, "      告知总数量")
+    assert total == "20", f"告知总数量: {total}"
+    _, ntb, _ = find(rows, "      起始采集NTB1")
+    assert ntb == "2460079792", f"NTB1: {ntb}"
+    series = [r for r in rows if r[0].startswith("      特征序列")]
+    assert len(series) == 1 and "工频周期偏差" in series[0][0]
+    phases = [r for r in rows if r[0].startswith("        第")][0]
+    assert "+42 (13.4μs)" in phases[2], f"周期值: {phases[2]}"
+
+
+def test_phase_ident_voltage_bcd():
+    """特征类型1工频电压: BCD XXX.X 大端解码 220.5V"""
+    data = bytes.fromhex('0103000600000000') + bytes([0x00, 1, 1, 1]) \
+        + bytes.fromhex('2205') + bytes.fromhex('2306') + bytes.fromhex('2407')
+    rows = HDC10Parser()._parse_phase_ident_data(data, 100, 1, 3)
+    vals = {r[0]: r[2] for r in rows if r[0].startswith("        第")}
+    assert vals["        第一出线"] == "220.5V", vals
+    assert vals["        第二出线"] == "230.6V"
+    assert vals["        第三出线"] == "240.7V"
+
+
+def test_phase_ident_freq_bcd():
+    """特征类型2工频频率: BCD XX.XX 大端解码 50.00Hz"""
+    data = bytes.fromhex('0103000400000000') + bytes([0x00, 2, 1, 1]) \
+        + bytes.fromhex('5000') + bytes.fromhex('4999') + bytes.fromhex('5002')
+    rows = HDC10Parser()._parse_phase_ident_data(data, 100, 2, 3)
+    vals = {r[0]: r[2] for r in rows if r[0].startswith("        第")}
+    assert vals["        第一出线"] == "50.00Hz 49.99Hz", vals
+    assert vals["        第二出线"] == "50.02Hz"
+
+
+def test_phase_ident_dual_edge():
+    """双沿采集(方式3): NTB1+序列1(下降沿)+NTB2+序列2(上升沿)"""
+    data = bytes([0x03, 0x30]) + bytes([0x00, 0x02]) + bytes([0, 0, 0, 0]) \
+        + bytes([0x00, 1, 1, 0]) + bytes.fromhex('2A002B00') \
+        + bytes([0, 0, 0, 0]) + bytes([0x00, 1, 1, 0]) + bytes.fromhex('2C002D00')
+    rows = HDC10Parser()._parse_phase_ident_data(data, 100, 3, 3)
+    _, method, _ = find(rows, "      采集方式")
+    assert method == "双沿采集", method
+    s1 = [r for r in rows if r[0] == "      特征序列1(工频周期偏差)"]
+    s2 = [r for r in rows if r[0] == "      特征序列2(工频周期偏差)"]
+    assert s1 and s2, "缺少双沿两组序列"
+    _, ntb2, _ = find(rows, "      起始采集NTB2")
+    assert ntb2 == "0"
+
+
+def test_phase_ident_result():
+    """采集类型5判别结果信息: TEI/结束标志/识别结果/CCO地址"""
+    data = bytes([0x07, 0x00, 0x01, 0x02]) + bytes.fromhex('AABBCCDDEEFF')
+    rows = HDC10Parser()._parse_phase_ident_data(data, 100, 0, 5)
+    _, done, _ = find(rows, "      判别结束标志")
+    assert done == "已结束", done
+    _, result, _ = find(rows, "      台区识别结果")
+    assert result == "不是本台区", result
+    _, cco, _ = find(rows, "      正确隶属CCO地址")
+    assert cco == "AA:BB:CC:DD:EE:FF", cco
+
+
 def test_fccs_valid():
     """FC 帧头校验(FCCS)仍应正确"""
     rows = parse_rows()

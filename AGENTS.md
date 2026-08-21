@@ -183,16 +183,18 @@ python reflex_web/build_embedded_deploy.py --python-version 3.12
    ```
    窗口标题格式：`协议解析工具 v{APP_VERSION} ({BUILD_DATE})`
 
-2. **打包流程**：
+2. **exe 文件名自动带版本号+时间戳**：`南网协议解析工具.spec` 顶部从 `main_gui.py` 的 `APP_VERSION` 自动读取版本号，输出名固定为 `南网协议解析工具_v{APP_VERSION}_{YYYYMMDDHHMMSS}.exe`（时间戳精确到秒）。窗口标题版本号与 exe 文件名版本号**天然对齐**（同一数据源），无需手工同步。spec 还会动态生成 `_version_info_gen.txt`（Windows 文件属性 FileVersion/ProductVersion 与 APP_VERSION 对齐），旧的静态 `version_info_nw.txt` 不再使用。
+
+3. **打包流程**：
    ```bash
-   # 1. 更新 BUILD_DATE 为当前日期
+   # 1. 更新 BUILD_DATE 为当前日期（APP_VERSION 仅在功能变更时 bump）
    # 2. 执行打包命令
    pyinstaller 南网协议解析工具.spec --noconfirm
-   # 3. 验证 exe 文件生成
+   # 3. 在 dist/ 下验证带版本号+时间戳的 exe 文件生成
    ```
 
-3. **版本号管理**：
-   - `APP_VERSION`：功能版本号，仅在有功能变更时更新
+4. **版本号管理**：
+   - `APP_VERSION`：功能版本号，仅在有功能变更时更新；是 exe 文件名、文件属性、窗口标题的唯一版本源
    - `BUILD_DATE`：编译日期，每次打包前必须更新
    - 两者共同构成完整版本标识，便于区分不同时间编译的版本
 
@@ -640,6 +642,20 @@ python test/test_web_frame_gen_utils.py # Reflex Web 版组帧纯逻辑
 
 > 本节按版本倒序记录。详细 commit 见 `git log`。每发新版本必须更新此处。
 
+### 1.14.5 — 2026-08-21
+- **协议11（HDC 1.0）查询站点升级状态上行报文解析**（`hdc10_parser.py::_parse_upgrade` 0x034）：此前只按下行表40 解析（连续查询块数/起始块号/升级ID），上行应答的 升级状态(字节1高4位)/有效块数/升级位图 全部丢失。现按文档第4-3部分 表45 补全：升级状态（0空闲/1接收进行/2接收完成/3升级进行/4试运行）、有效块数、起始块号、升级ID + 接收位图（每bit对应一个文件块，1=已接收，显示 `N/M块已接收`）。**升级位图逐块编号明细**：按 起始块号+i 编号，每行32块多行展开，`[✓n]`=已接收 `[✕n]`=丢包，行说明统计丢包数。方向判定：len>12 或字节1高4位∈{1..4} 判为上行；恰12字节且状态位0 按表40 下行。`test/test_hdc10.py` 增至 10 项（上行全收/下行/丢包编号）全过
+- **协议11（HDC 1.0）台区户变关系识别(0x0A1)深度解析**（`hdc10_parser.py`）：①修复报文头长度公式——6bit值(byte0[6:7]高2位+byte1[0:3]低4位)×4字节（类IPv4 IHL），此前错把「(b0低2位|b1高4位<<2)×4」致12字节头算成48字节、DATA 从错误偏移切片只剩尾部16字节；校时/事件/通信测试/注册/升级等全部 **7 处**统一修正。②DATA 域按采集类型深度解析：采集启动(表56)、特征信息告知(表57 TEI/采集方式/序列号/告知总数/起始NTB+特征序列)、判别结果信息(表61 TEI/结束标志/识别结果/正确隶属CCO地址)。③特征序列按特征类型分派：工频电压(表58 BCD XXX.X 大端)、工频频率(表59 BCD XX.XX 大端)、工频周期(表60 有符号偏差值+μs换算)，三相出线逐相展开，双沿采集解析 NTB2+第二组序列。`test/test_hdc10.py` 增至 16 项全过
+
+### 1.14.4 — 2026-08-21
+- **内嵌部署增量构建**（`reflex_web/build_embedded_deploy.py`）：新增 `--skip-deps` 模式——复用已有 `python/`（解释器+site-packages），仅刷新源码/数据/前端层，重复构建从 10+ 分钟降至约 1 分钟；`requirements.lock` 已最新时跳过 uv 重新编译（构建原则已写入 §2）
+- **协议8（DL/T 698.45）组帧 OI 增强**（`frame_gen_widget.py`）：预定义/A-XDR 两模式 OI 均改为「预设下拉 + 手动 hex 输入」双通道；A-XDR 模式新增「描述符类型」下拉可选 属性(OAD)/方法(OMD)（默认 ACTION→OMD 其余→OAD），属性标识/索引 与 方法标识/操作模式 随选择切换
+- **修复协议8 A-XDR 复合类型编码语义**：array/structure tag 后字节应为**元素个数**而非子项字节总长（文档附录 H.3.2）。此前组帧 3 项 structure 误填 09（字节长），现正确填 03；修复 `frame_gen_widget.py` / `reflex_web/frame_gen_utils.py` 编码器与 `dl_t698_45_axdr.py` 解码器（按个数循环，此前按字节长截断致自组帧回读只显示 1 项）
+- **修复协议8 SET/ACTION 组帧缺尾部 TimeLabel 字节**：此前仅 GET-Request 尾补 `00`，SET/ACTION 少 1 字节（文档 H.4/H.5 均以 OPTIONAL TimeLabel 结尾，00=无）；修复 `frame_gen_widget.py` 两条生成路径与 `frame_gen_utils.py::build_dlt698_axdr_apdu`
+- **解析表格 array/structure 成员逐项展开**（`dl_t698_45_parser.py`）：复合类型不再只显示「[N项]」，为每个成员生成子行（原始编码/值/类型说明，如 `成员1 | 1101 | 1 | A-XDR:unsigned(0x11)`），嵌套递归展开，对齐官方工具；新增 `_add_axdr_item_rows`
+- **请求 APDU 尾部 TimeTag 解析**（`dl_t698_45_apdu_parser.py`）：GET/SET/ACTION 的 Normal/NormalList 六个分支统一解析 OPTIONAL TimeTag 尾字节（00=无时间标签），表格显示「时间标签 | 0x00 | 无时间标签」；新增公共 `_parse_time_tag` 辅助
+- **修复协议8 预设命令保存/显示**（`preset_buttons.py`）：新增 `DLT698_command.json` 独立预设文件（此前 `_get_path` 只认 south，dlt698 预设被误存入 `GW_command.json`）；`PresetButtonWidget.set_protocol` 支持 dlt698（此前守卫只认 south/gdw，切协议8 时静默忽略致预设页看不到 698 按钮）；加载时按 `protocol` 过滤历史混入条目（国网页不再显示 GW 文件中误存的 dlt698 条目），无 protocol 键的老数据按文件归属正常显示；`AddPresetDialog` 协议行显示「698.45 协议」；新增 `test/test_dlt698_preset.py`（31 项）
+- 回归 `test_web_frame_gen_utils.py`（63项）/ `test_dl_t698_45.py` / `test_dl_t698_45_data_decode.py` / `test_dl_t698_45_fujian.py` / `test_oad_enrichment.py` 全过
+
 ### 1.14.3 — 2026-08-19
 - **协议8 EB030307 过零NTB值上行数据解析**（`dl_t698_45_apdu_parser.py`）：ACTION-Response NormalList 每项结构 = OMD + DAR + **数据个数** + [Data]——DAR 后 `01`=数据个数、`09 81 81`=octet-string 129B，此前把 `01` 当 A-XDR array tag 解导致 `0x81 未知类型` 报错；新增 `_parse_axdr_items_or_single` 双路径（数据个数 N×A-XDR 失败回退单 A-XDR，兼容文档示例无前缀格式）
 - **EB030307 字段 schema**（`gdw_eb_di_fields.py`）：数据开始时间(bcd_time 6B)/边沿类型(enum 0保留/1下降沿/2上升沿)/数据周期_分钟(uint8)/数据点数M(uint8)/NTB值数组(list，每项 相线1+相线2+相线3 NTB值 uint32 40ns)
@@ -868,7 +884,31 @@ python test/test_web_frame_gen_utils.py # Reflex Web 版组帧纯逻辑
 - 初始版本：南网/PLC RF/HDLC/DLMS 多协议解析；单帧/批量解析；DI/命令字/OBIS 查询
 
 
-**最近一次（2026-08-19）：发布 1.14.3（EB030307 过零NTB值上行数据解析）**
+**最近一次（2026-08-21）：发布 1.14.5（协议11 升级位图 + 台区户变深度解析）**
+
+变更：
+- **协议11（HDC 1.0）查询站点升级状态上行报文解析**：`hdc10_parser.py` 0x034 此前只按下行表40 解析，上行应答的 升级状态/有效块数/升级位图 全部丢失；现按文档第4-3部分 表45 补全 升级状态(0空闲/1接收进行/2接收完成/3升级进行/4试运行) + 有效块数 + 起始块号 + 升级ID + 接收位图（每bit一个文件块，显示 `N/M块已接收`）。**位图逐块编号明细**：按 起始块号+i 编号、每行32块多行展开，`[✓n]`=已接收 `[✕n]`=丢包。方向判定 len>12 或状态位∈{1..4} 判上行。`test/test_hdc10.py` 增至 10 项（上行全收/下行/丢包编号）全过
+- **协议11（HDC 1.0）台区户变关系识别(0x0A1)深度解析**：修复报文头长度公式——6bit值(byte0[6:7]高2位+byte1[0:3]低4位)×4字节，此前公式错致 12 字节头算成 48 字节、DATA 只剩尾部切片；校时/事件/通信测试/注册/升级等 7 处统一修正。DATA 按采集类型深度解析：采集启动(表56)/特征信息告知(表57 TEI+采集方式+告知总数+NTB+特征序列)/判别结果信息(表61)；特征序列按特征类型分派 工频电压(BCD XXX.X 大端)/工频频率(BCD XX.XX 大端)/工频周期(有符号偏差+μs)，三相逐相展开，双沿采集解 NTB2+第二组序列。`test/test_hdc10.py` 增至 16 项全过
+
+涉及文件：
+- 修改：`hdc10_parser.py`、`test/test_hdc10.py`、`main_gui.py`（APP_VERSION 1.14.5）、`AGENTS.md`
+
+**上一次（2026-08-21）：发布 1.14.4（协议8 组帧/解析对齐官方工具）**
+
+变更：
+- **A-XDR 复合类型计数语义修复**：array/structure tag 后字节 = **元素个数**非字节总长（文档附录 H.3.2）。组帧 3 项 structure 由误填 09 改为 03；编码器（`frame_gen_widget.py` / `reflex_web/frame_gen_utils.py`）+ 解码器（`dl_t698_45_axdr.py` 按个数循环）同步修复
+- **SET/ACTION 组帧补尾部 TimeLabel**：文档 H.4/H.5 GET/SET/ACTION 请求均以 OPTIONAL TimeLabel 结尾（00=无），此前仅 GET 补 `00`；修复两条 GUI 生成路径与 `frame_gen_utils.py::build_dlt698_axdr_apdu`
+- **解析表格成员逐项展开**（`dl_t698_45_parser.py::_add_axdr_item_rows`）：array/structure 为每个成员生成子行（原始编码/值/类型说明），嵌套递归展开，对齐官方工具
+- **请求尾部 TimeTag 解析**（`dl_t698_45_apdu_parser.py::_parse_time_tag`）：GET/SET/ACTION Normal/NormalList 六分支统一解析，表格显示「时间标签 | 0x00 | 无时间标签」
+- **组帧 OI 增强**：预定义/A-XDR 模式 OI 均支持「预设下拉 + 手动 hex」；A-XDR 新增「描述符类型」OAD/OMD 切换
+- **内嵌部署增量构建**：`build_embedded_deploy.py --skip-deps` 复用已有 python/ 目录，重复构建 10+ 分钟 → 约 1 分钟
+- **修复协议8 预设命令保存/显示**（`preset_buttons.py`）：新增 `DLT698_command.json` 独立预设文件（此前 dlt698 预设被误存入 `GW_command.json`）；`set_protocol` 支持 dlt698（此前静默忽略致预设页看不到 698 按钮）；加载时按 protocol 过滤历史混入条目；`AddPresetDialog` 协议行显示「698.45 协议」
+
+涉及文件：
+- 修改：`dl_t698_45_axdr.py`、`dl_t698_45_apdu_parser.py`、`dl_t698_45_parser.py`、`frame_gen_widget.py`、`preset_buttons.py`、`reflex_web/frame_gen_utils.py`、`reflex_web/build_embedded_deploy.py`、`test/test_web_frame_gen_utils.py`（63项）、`test/test_dl_t698_45_data_decode.py`、`main_gui.py`（CHANGELOG/APP_VERSION 1.14.4）、`AGENTS.md`
+- 新增：`test/test_dlt698_preset.py`（31 项）
+
+**上一次（2026-08-19）：发布 1.14.3（EB030307 过零NTB值上行数据解析）**
 
 变更：
 - **ACTION-Response NormalList 数据个数兼容**（`dl_t698_45_apdu_parser.py`）：福建简化698 响应每项 = OMD + DAR + **数据个数**(1B) + [Data A-XDR]×N；此前 DAR 后 `01` 被当 A-XDR array tag（长度09）解，后续 `0x81` 报「未知类型」。新增 `_parse_axdr_items_or_single`：先按「个数N + N项A-XDR」解，失败回退单 A-XDR（兼容文档示例无前缀）
