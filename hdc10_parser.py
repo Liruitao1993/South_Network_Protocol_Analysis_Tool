@@ -877,52 +877,35 @@ class HDC10Parser:
                 f"序列号:{seq}, 帧起始:{sof}, 帧结束:{eof}",
                 base_offset, base_offset,
             ))
-            # PB体 = MAC帧 = MAC头 + MSDU + ICV
+
+            # PB体 = MAC帧 = MAC头 + MSDU + ICV, 紧跟 PBH 之后(无保留字节)
             # PBCS在末尾3字节
-            # 对齐探测: 实机部分帧型 PBH 后有 1 字节保留(共2字节头), 
-            # 用"MSDU声明长度 vs 实际剩余"误差最小者选对齐
             if len(data) > 20:
-                pbcs = int.from_bytes(data[-3:], 'little')
-                calc_pbcs = _crc24(data[:-3])
-                status = "✓ 校验正确" if calc_pbcs == pbcs else f"✗ 校验错误(计算=0x{calc_pbcs:06X})"
+                # PBCS 存在性检测: 尾3B 若为合法 CRC-24(PBH+PB体) 则有 PBCS;
+                # 否则视为日志截断/无PBCS帧, 全部剩余数据归 MAC 帧(尾4B 为 ICV)
+                tail3 = int.from_bytes(data[-3:], 'little')
+                has_pbcs = (_crc24(data[:-3]) == tail3)
 
-                def _align_score(start):
-                    """返回 (误差, MME头合法性), 综合最优者胜
-
-                    h[7]=MSDU类型(0=网管); 头长含 MAC地址域(flag=b9 bit7);
-                    声明长度 vs 实际(MME内容) 差异越小越优.
-                    """
-                    h = data[start:-3]
-                    if len(h) < 16:
-                        return 10 ** 9, 0
-                    mac_flag = (h[9] >> 7) & 0x01
-                    hdr_total = 28 if mac_flag else 16
-                    declared = h[8] | ((h[9] & 0x07) << 8)
-                    payload = len(h) - hdr_total
-                    mme_ok = 1 if (payload >= 4 and h[hdr_total + 2] == 0) else 0
-                    return abs(declared - (payload - 3)) + (0 if mme_ok else 50), mme_ok
-
-                score1 = _align_score(1)
-                score2 = _align_score(2)
-                if score2[0] < score1[0]:
-                    body_start, hdr_note = 2, "PBH后含1字节保留"
-                else:
-                    body_start, hdr_note = 1, ""
-                pb_body = data[body_start:-3]
-                mac_table = self._parse_mac_frame(pb_body, base_offset + body_start)
-                if hdr_note:
-                    mac_table.insert(0, (
-                        "  ⚠ 对齐", "", f"MAC头从偏移{body_start}起",
-                        hdr_note + "(自动探测)", base_offset + 1, base_offset + body_start - 1,
-                    ))
+                pb_body = data[1:-3] if has_pbcs else data[1:]
+                mac_table = self._parse_mac_frame(pb_body, base_offset + 1)
                 table.extend(mac_table)
-                table.append((
-                    "  PBCS",
-                    ' '.join(f'{b:02X}' for b in data[-3:]),
-                    f"0x{pbcs:06X}",
-                    status,
-                    base_offset + len(data) - 3, base_offset + len(data) - 1,
-                ))
+
+                if has_pbcs:
+                    table.append((
+                        "  PBCS",
+                        ' '.join(f'{b:02X}' for b in data[-3:]),
+                        f"0x{tail3:06X}",
+                        "✓ 校验正确",
+                        base_offset + len(data) - 3, base_offset + len(data) - 1,
+                    ))
+                else:
+                    table.append((
+                        "  ⚠ 无PBCS",
+                        ' '.join(f'{b:02X}' for b in data[-3:]),
+                        "CRC-24不匹配",
+                        "尾部3字节非合法PBCS(日志截断或无PBCS格式), 已并入MAC帧解析",
+                        base_offset + len(data) - 3, base_offset + len(data) - 1,
+                    ))
         elif sof and not eof:
             # 多PB聚合的首块 - 需要重组
             # 简化处理：递归解析所有PB，拼接PB体后解析MAC
@@ -1596,11 +1579,19 @@ class HDC10Parser:
             ))
 
             # 尝试定位 ICV（最后4字节）
+            # ICV = CRC-32(MSDU载荷), 小端, 位于 PBCS 前4字节 (AGENTS.md §8-28)
             if len(msdu_data) >= 4:
-                icv = int.from_bytes(msdu_data[-4:], 'little')
+                icv_bytes = msdu_data[-4:]
+                icv = int.from_bytes(icv_bytes, 'little')
                 msdu_body = msdu_data[:-4]
                 calc_icv = _crc32(msdu_body)
-                icv_status = "✓ 校验正确" if calc_icv == icv else f"✗ 校验错误(计算=0x{calc_icv:08X})"
+                if icv == 0:
+                    # 明文模式: 实机不发加密时 ICV 填全0
+                    icv_status = "明文填充(ICV=0, 不校验)"
+                elif calc_icv == icv:
+                    icv_status = "✓ 校验正确"
+                else:
+                    icv_status = f"✗ 校验错误(计算=0x{calc_icv:08X}, 可能为多PB分片/加密帧)"
 
                 # MSDU解析
                 msdu_table = self._parse_msdu_payload(msdu_body, base_offset + msdu_abs,
@@ -1609,7 +1600,7 @@ class HDC10Parser:
 
                 table.append((
                     "完整性校验值(ICV)",
-                    ' '.join(f'{b:02X}' for b in msdu_data[-4:]),
+                    ' '.join(f'{b:02X}' for b in icv_bytes),
                     f"0x{icv:08X}",
                     icv_status,
                     base_offset + len(data) - 4, base_offset + len(data) - 1,
