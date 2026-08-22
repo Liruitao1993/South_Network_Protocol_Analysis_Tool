@@ -1004,7 +1004,7 @@ class HDC10Parser:
             next_pos = None
             for pb_size in (72, 136, 264, 520, 16, 40):
                 cand = pos + pb_size
-                if cand <= len(data):
+                if cand < len(data):
                     # 检查下一个PBH是否合理
                     next_pbh = data[cand]
                     next_seq = next_pbh & 0x3F
