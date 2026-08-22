@@ -45,11 +45,11 @@ def find(rows, name):
 
 
 def test_entry4_content_length():
-    """0xC0 条目长度字段2字节, 内容 = total_len - 3 = 32B (修复 total_len-2 bug)"""
+    """0xC0 条目长度字段2字节; 实机声明35B偏小, 内容按锚点延伸到管理区末尾(BPCS前)"""
     rows = parse_rows()
     raw, val, _ = find(rows, "    条目4: 时隙分配条目")
     assert raw == "头=0xC0 长=35B", f"条目4 长度字段: {raw}"
-    assert val == "内容32B", f"条目4 内容应为32B (35-3), 实际: {val}"
+    assert val == "内容66B", f"条目4 内容应延伸到BPCS前(66B), 实际: {val}"
 
 
 def test_fixed_header_fields():
@@ -102,10 +102,14 @@ def test_bpcs_pbcs_position():
 
 
 def test_remaining_data_shown():
-    """条目数声明之外的剩余数据应透明显示, 不静默丢弃"""
+    """时隙条目延伸到管理区末尾后, 声明条目之外不应再有剩余数据(17条信标时隙+3条CSMA全部消化)"""
     rows = parse_rows()
-    raw, val, _ = find(rows, "    未解析剩余数据")
-    assert val == "34字节", f"剩余数据: {val}"
+    names = [r[0] for r in rows]
+    assert "    未解析剩余数据" not in names, "不应再有未解析剩余数据"
+    assert "      未解析剩余" not in names, "时隙条目内不应有未解析剩余"
+    # 17条信标时隙明细(2代理+15发现)
+    slots = [n for n in names if n.startswith("      信标时隙") and n[-1].isdigit()]
+    assert len(slots) == 17, f"信标时隙明细: {len(slots)}条"
 
 
 # ====== 查询站点升级状态上行报文(表45): 升级位图解析 ======
@@ -255,6 +259,65 @@ def test_fccs_valid():
     raw, val, desc = find(rows, "帧控制校验序列(FCCS)")
     assert val == "0x296D42", f"FCCS: {val}"
     assert "校验正确" in desc, f"FCCS状态: {desc}"
+
+
+# ====== 时隙分配条目可变区(实机顺序) + 心跳检测(表94) + 发现列表(表95) ======
+def test_slot_entry_var_region():
+    """时隙条目可变区: CSMA先行 + 非中央信标信息到边界(17条全解无剩余)"""
+    rows = parse_rows()
+    names = [r[0] for r in rows]
+    csma = [n for n in names if n == "      CSMA时隙信息"]
+    assert len(csma) == 3, f"CSMA时隙: {len(csma)}条"
+    slots = [r for r in rows if r[0].startswith("      信标时隙") and r[0].strip()[-1].isdigit()]
+    assert len(slots) == 17, f"信标时隙明细: {len(slots)}条"
+    assert "TEI=129 代理信标" in slots[0][2], f"首条: {slots[0][2]}"
+    assert "载波+无线精简信标" in slots[1][3], f"第2条无线标志: {slots[1][3]}"
+    assert "    未解析剩余数据" not in names
+
+
+def test_heartbeat_table94():
+    """心跳检测表94: OSTEI/最大站点TEI/数量/位图大小 + 位图TEI明细"""
+    import struct
+    from hdc10_mme_parser import _parse_heartbeat, parse_management_message
+    bmp = bytearray(3)
+    for t in (1, 8, 9, 20):
+        bmp[t >> 3] |= (1 << (t & 7))
+    hb = bytes([0x05, 0x00, 0x09, 0x00]) + struct.pack('<HH', 12, 3) + bytes(bmp)
+    frame = struct.pack('<HB', 7, 0) + hb
+    rows = parse_management_message(frame, 0)
+    _, ostei, _ = find(rows, "    原始源TEI")
+    assert ostei == "5", ostei
+    _, max_tei, _ = find(rows, "    发现站点数最大站点TEI")
+    assert max_tei == "9", max_tei
+    detail = [r for r in rows if r[0].startswith("      位图明细")]
+    assert detail and "[✓1]" in detail[0][2] and "[✓20]" in detail[0][2]
+
+
+def test_discovery_list_table95():
+    """发现列表表95: 固定头32B + 路由条目 + 位图 + 接收计数与位图配对"""
+    import struct
+    from hdc10_mme_parser import parse_management_message
+    d = bytearray(32)
+    d[0] = 5; d[1] = 0x10            # TEI=5, 代理TEI=1
+    d[3] = 2 | (1 << 4)              # 角色2 层级1
+    d[16] = 0 | (1 << 2) | (2 << 4)  # 相线 A/B/C
+    d[17] = 30; d[18] = 95; d[19] = 90
+    struct.pack_into('<H', d, 20, 2)
+    d[22] = 3; d[23] = 1             # 发送个数3, 路由条目1
+    struct.pack_into('<H', d, 24, 100)
+    struct.pack_into('<H', d, 26, 2)
+    d[28] = 95
+    bmp = bytearray(2); bmp[1] = 0x03   # TEI 8, 9
+    dl = bytes(d) + bytes([0x03, 0x30]) + bytes(bmp) + bytes([4, 6])
+    rows = parse_management_message(struct.pack('<HB', 8, 0) + dl, 0)
+    _, tei, _ = find(rows, "    TEI")
+    assert tei == "5", tei
+    _, ptei, _ = find(rows, "    代理TEI")
+    assert ptei == "1", ptei
+    route = [r for r in rows if r[0] == "    上行路由1"][0]
+    assert "下一跳TEI=3" in route[2] and "代理主路径" in route[3]
+    recv = [r for r in rows if r[0] == "    接收发现列表信息"][0]
+    assert "[TEI8←4]" in recv[2] and "[TEI9←6]" in recv[2], recv[2]
 
 
 def main():

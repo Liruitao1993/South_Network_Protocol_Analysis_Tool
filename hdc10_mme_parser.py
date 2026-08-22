@@ -30,6 +30,50 @@ MME_TYPE_NAMES = {
 }
 
 
+
+
+def _tei_bitmap_rows(bitmap: bytes, base_offset: int,
+                     label: str = "发现站点位图") -> List[Tuple]:
+    """TEI 位图 → 统计行 + 逐 TEI 编号明细行
+
+    bit i 置1 ↔ TEI=i (LSB 在前)。每行16个TEI, [✓n]有效。
+    返回行列表(可能为空, 位图为空时不产生行)。
+    """
+    rows: List[Tuple] = []
+    total_bits = len(bitmap) * 8
+    if total_bits == 0:
+        return rows
+    teis = [i for i in range(total_bits) if bitmap[i >> 3] & (1 << (i & 7))]
+    rows.append((
+        f"    {label}",
+        ' '.join(f'{b:02X}' for b in bitmap[:12]) + ("..." if len(bitmap) > 12 else ""),
+        f"{len(teis)}个站点",
+        f"{len(bitmap)}字节, 每bit对应一个TEI(bit n=TEI n, LSB在前)",
+        base_offset, base_offset + len(bitmap) - 1,
+    ))
+    per_row = 16
+    for start in range(0, total_bits, per_row * 4):
+        chunk_teis = [t for t in teis if start <= t < start + per_row * 4]
+        if not chunk_teis:
+            continue
+        cells = "".join(f"[✓{t}]" for t in chunk_teis)
+        rows.append((
+            f"      位图明细TEI{chunk_teis[0]}-{chunk_teis[-1]}",
+            "",
+            cells,
+            f"{len(chunk_teis)}个可发现站点",
+            base_offset + (chunk_teis[0] >> 3),
+            base_offset + (chunk_teis[-1] >> 3),
+        ))
+    return rows
+
+
+def _tei12(data: bytes, pos: int) -> int:
+    """读12bit小端TEI: data[pos]低8b | data[pos+1]低4b<<8"""
+    return data[pos] | ((data[pos + 1] & 0x0F) << 8)
+
+
+ 
 def parse_management_message(data: bytes, offset: int = 0) -> List[Tuple]:
     """解析网络管理消息 (MSDU类型0时调用"""
     table = []
@@ -234,16 +278,165 @@ def _parse_comm_success_rate(data: bytes, offset: int) -> List[Tuple]:
     return table
 
 
-def _parse_network_conflict(data: bytes, offset: int) -> List[Tuple]:
-    """网络冲突 (0x000A)"""
+def _parse_heartbeat(data: bytes, offset: int) -> List[Tuple]:
+    """心跳检测 (0x0007, 表94)
+
+    原始源TEI(12b) | 发现站点数最大站点TEI(12b) | 最大发现站点数(2B) | 位图大小(2B) | 发现站点位图
+    """
     table = []
-    table.append(("  网络冲突", "", "", "网络冲突检测", offset, offset + len(data) - 1))
-    table.append(("    冲突信息",
-                  ' '.join(f'{b:02X}' for b in data[:16]) + ("..." if len(data) > 16 else ""),
-                  f"{len(data)}字节", "冲突网络冲突信息",
-                  offset, offset + min(len(data), 16) - 1))
+    end = len(data)
+    table.append(("  心跳检测", "", "", "心跳检测报文(表94)", offset, offset + end - 1))
+    if end < 8:
+        if end:
+            table.append(("    数据不足", "", f"{end}字节", "表94固定头需8字节",
+                          offset, offset + end - 1))
+        return table
+
+    ostei = _tei12(data, 0)
+    max_tei = _tei12(data, 2)
+    table.append(("    原始源TEI", ' '.join(f'{b:02X}' for b in data[0:2]), str(ostei),
+                  "初始产生报文的站点TEI(转发时不变)", offset, offset + 1))
+    table.append(("    发现站点数最大站点TEI", ' '.join(f'{b:02X}' for b in data[2:4]),
+                  str(max_tei), "沿途转发站点中周围站点数最多的站点", offset + 2, offset + 3))
+
+    import struct
+    max_cnt = struct.unpack('<H', data[4:6])[0]
+    bmp_size = struct.unpack('<H', data[6:8])[0]
+    table.append(("    最大的发现站点数", ' '.join(f'{b:02X}' for b in data[4:6]),
+                  str(max_cnt), "最多站点发现的周围站点数量", offset + 4, offset + 5))
+    table.append(("    位图大小", ' '.join(f'{b:02X}' for b in data[6:8]),
+                  f"{bmp_size}字节", "发现站点位图字段大小", offset + 6, offset + 7))
+
+    bmp_start = offset + 8
+    bmp = data[8:8 + bmp_size]
+    if len(bmp) < bmp_size:
+        table.append(("    ⚠ 位图数据不足", "", f"声明{bmp_size}字节",
+                      f"实际仅{len(bmp)}字节", bmp_start, offset + end - 1))
+    table.extend(_tei_bitmap_rows(bmp, bmp_start, "发现站点位图"))
     return table
 
+
+_ROUTE_TYPE_NAMES = {0: "错误路由", 1: "同级路由", 2: "上级路由",
+                     3: "代理主路径", 4: "上上级路由"}
+
+
+def _parse_discovery_list(data: bytes, offset: int) -> List[Tuple]:
+    """发现列表 (0x0008, 表95)
+
+    固定头32B + [上行路由条目信息 × 路由条目总数(2B/条)]
+             + 发现站点列表位图(位图大小B)
+             + 接收发现列表信息(与位图置位TEI一一对应, 1B/个)
+    """
+    table = []
+    end = len(data)
+    table.append(("  发现列表", "", "", "发现列表报文(表95)", offset, offset + end - 1))
+    if end < 32:
+        table.append(("    数据不足", "", f"{end}字节", "表95固定头需32字节",
+                      offset, offset + max(end - 1, offset)))
+        return table
+
+    tei = _tei12(data, 0)
+    # 代理TEI 12b: byte1高4b(低4位) + byte2(高8位), 表95
+    ptei = ((data[1] >> 4) & 0x0F) | (data[2] << 4)
+    role = data[3] & 0x0F
+    level = (data[3] >> 4) & 0x0F
+    mac = data[4:10]
+    cco_mac = data[10:16]
+    phase_bits = data[16]
+    ch_quality = data[17]
+    up_rate = data[18]
+    down_rate = data[19]
+    sta_total = int.from_bytes(data[20:22], 'little')
+    sent_cnt = data[22]
+    route_total = data[23]
+    route_remain = int.from_bytes(data[24:26], 'little')
+    bmp_size = int.from_bytes(data[26:28], 'little')
+    min_rate = data[28]
+    phase_names = {0: "A相", 1: "B相", 2: "C相", 3: "保留"}
+
+    def _r(name, raw, val, desc, s, e):
+        table.append((f"    {name}", raw, val, desc,
+                      offset + s, offset + min(e, end - 1)))
+
+    _r("TEI", ' '.join(f'{b:02X}' for b in data[0:2]), str(tei), "发送站点TEI(12b)", 0, 1)
+    _r("代理TEI", ' '.join(f'{b:02X}' for b in data[1:3]), str(ptei), "代理站点TEI(12b)", 1, 2)
+    _r("角色", f"0x{role:02X}", str(role), "站点角色", 2, 2)
+    _r("层级", f"0x{(data[3] >> 4) & 0x0F:01X}", str((data[3] >> 4) & 0x0F),
+       "网络层级(高4b)", 3, 3)
+    _r("MAC地址", ' '.join(f'{b:02X}' for b in mac),
+       ':'.join(f'{b:02X}' for b in mac), "发送站点MAC(大端)", 4, 9)
+    _r("CCO MAC地址", ' '.join(f'{b:02X}' for b in cco_mac),
+       ':'.join(f'{b:02X}' for b in cco_mac), "本网络CCO MAC(大端)", 10, 15)
+    ph = [(phase_bits >> (i * 2)) & 0x03 for i in range(3)]
+    _r("相线评估", f"0x{phase_bits:02X}",
+       "/".join(phase_names.get(p, "?") for p in ph),
+       "按可能性排序的三个相线评估(各2b)", 16, 16)
+    _r("代理站点信道质量", f"0x{ch_quality:02X}", str(ch_quality),
+       "接收代理报文的原始信噪比", 17, 17)
+    _r("代理通信成功率", f"0x{up_rate:02X}", f"{up_rate}%", "与代理上下行成功率", 18, 18)
+    _r("代理下行成功率", f"0x{down_rate:02X}", f"{down_rate}%", "接收代理下行报文成功率", 19, 19)
+    _r("站点总数", ' '.join(f'{b:02X}' for b in data[20:22]), str(sta_total),
+       "携带发现站点信息的站点数量", 20, 21)
+    _r("发送发现列表个数", f"0x{sent_cnt:02X}", str(sent_cnt),
+       "上个路由周期发送的发现列表总数", 22, 22)
+    _r("上行路由条目总数", f"0x{route_total:02X}", str(route_total),
+       "到CCO的路由表项数(最大5)", 23, 23)
+    _r("路由周期剩余时间", ' '.join(f'{b:02X}' for b in data[24:26]),
+       f"{route_remain}s", "距当前路由周期到期剩余秒数", 24, 25)
+    _r("位图大小", ' '.join(f'{b:02X}' for b in data[26:28]),
+       f"{bmp_size}字节", "发现站点列表位图字段大小", 26, 27)
+    _r("最小通信成功率", f"0x{min_rate:02X}", f"{min_rate}%",
+       "到CCO路径最弱连接成功率", 28, 28)
+    _r("保留", ' '.join(f'{b:02X}' for b in data[29:32]), "3字节", "保留", 29, 31)
+
+    # ── 变长区1: 上行路由条目信息(每条2B: 下一跳TEI 12b + 路由类型 4b, 表97/98) ──
+    pos = 32
+    for i in range(route_total):
+        if pos + 2 > end:
+            break
+        nh_tei = _tei12(data, pos)
+        rt = (data[pos + 1] >> 4) & 0x07
+        table.append((f"    上行路由{i + 1}",
+                      ' '.join(f'{b:02X}' for b in data[pos:pos + 2]),
+                      f"下一跳TEI={nh_tei}",
+                      f"类型={_ROUTE_TYPE_NAMES.get(rt, f'保留({rt})')}",
+                      offset + pos, offset + pos + 1))
+        pos += 2
+
+    # ── 变长区2: 发现站点列表位图(锚点: 位图大小) ──
+    bmp = data[pos:pos + bmp_size]
+    bmp_short = len(bmp) < bmp_size
+    if bmp_short:
+        table.append(("    ⚠ 位图数据不足", "", f"声明{bmp_size}字节",
+                      f"实际仅{len(bmp)}字节", offset + pos, offset + end - 1))
+    teis = [i for i in range(len(bmp) * 8) if bmp[i >> 3] & (1 << (i & 7))]
+    table.extend(_tei_bitmap_rows(bmp, offset + pos, "发现站点列表位图"))
+    pos += len(bmp)
+
+    # ── 变长3: 接收发现列表信息(与位图置位TEI按顺序一一配对, 表99) ──
+    recv = data[pos:]
+    n_pair = min(len(recv), len(teis))
+    if teis and recv:
+        pairs = " ".join(
+            f"[TEI{teis[i]}←{recv[i]}]" for i in range(n_pair))
+        table.append((
+            "    接收发现列表信息",
+            ' '.join(f'{b:02X}' for b in recv[:12]) + ("..." if len(recv) > 12 else ""),
+            pairs[:120],
+            f"{n_pair}项, 按位图置位TEI顺序对应(收到该站点的发现报文数)",
+            offset + pos, offset + pos + n_pair - 1,
+        ))
+        pos += n_pair
+    elif not recv and teis:
+        table.append(("    ⚠ 接收发现列表信息缺失", "",
+                      f"{len(teis)}个置位TEI无对应计数",
+                      "数据在位图后结束", offset + pos, offset + end - 1))
+    if pos < end:
+        remain = data[pos:]
+        table.append(("    未解析剩余", ' '.join(f'{b:02X}' for b in remain[:12]),
+                      f"{len(remain)}字节", "超出结构的剩余数据",
+                      offset + pos, offset + end - 1))
+    return table
 
 def parse_singlehop_msdu(data: bytes, offset: int, msg_type: int) -> List[Tuple]:
     """解析单跳帧MSDU（无线发现列表等）"""
@@ -264,13 +457,8 @@ def parse_singlehop_msdu(data: bytes, offset: int, msg_type: int) -> List[Tuple]
     ))
 
     if msg_type == 0:
-        # 发现列表消息
-        table.append(("  发现列表",
-                   ' '.join(f'{b:02X}' for b in data[offset:offset+16]) +
-                   ("..." if len(data) - offset > 16 else ""),
-                   f"{len(data) - offset}字节",
-                   "无线发现列表",
-                   offset, offset + min(len(data) - offset, 16) - 1))
+        # 发现列表消息(表95): 复用深度解析
+        table.extend(_parse_discovery_list(data, offset))
     elif msg_type == 128:
         # 应用层报文，复用应用层解析
         from hdc10_parser import HDC10Parser
