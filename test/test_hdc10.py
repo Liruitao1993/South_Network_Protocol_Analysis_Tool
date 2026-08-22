@@ -283,7 +283,7 @@ def test_heartbeat_table94():
     for t in (1, 8, 9, 20):
         bmp[t >> 3] |= (1 << (t & 7))
     hb = bytes([0x05, 0x00, 0x09, 0x00]) + struct.pack('<HH', 12, 3) + bytes(bmp)
-    frame = struct.pack('<HB', 7, 0) + hb
+    frame = struct.pack('<HH', 7, 0) + hb
     rows = parse_management_message(frame, 0)
     _, ostei, _ = find(rows, "    原始源TEI")
     assert ostei == "5", ostei
@@ -309,7 +309,7 @@ def test_discovery_list_table95():
     d[28] = 95
     bmp = bytearray(2); bmp[1] = 0x03   # TEI 8, 9
     dl = bytes(d) + bytes([0x03, 0x30]) + bytes(bmp) + bytes([4, 6])
-    rows = parse_management_message(struct.pack('<HB', 8, 0) + dl, 0)
+    rows = parse_management_message(struct.pack('<HH', 8, 0) + dl, 0)
     _, tei, _ = find(rows, "    TEI")
     assert tei == "5", tei
     _, ptei, _ = find(rows, "    代理TEI")
@@ -318,6 +318,23 @@ def test_discovery_list_table95():
     assert "下一跳TEI=3" in route[2] and "代理主路径" in route[3]
     recv = [r for r in rows if r[0] == "    接收发现列表信息"][0]
     assert "[TEI8←4]" in recv[2] and "[TEI9←6]" in recv[2], recv[2]
+
+
+
+
+def test_pb_frame_with_mac_addr_flag():
+    """PB帧(MAC地址标志=1, MSDU类型0网管): 对齐探测+地址域+MME关联请求"""
+    frame = bytes.fromhex(
+        'C0000001000194FB005C80FF0800EE'
+        '00000110010000030000000000020000000001100100000301000000000000'
+        '000001030001DD02CD754BA7640D00000000A8303E4907DC1FCB5F76000001'
+        '00162448 4C30390000000000000000D9B200000000000000000000000000'
+        '000000000000002E50B69E000000000000005BF08C'.replace(' ', ''))
+    rows = HDC10Parser().parse_to_table(frame, parse_level="pb_only")
+    _, mtype, _ = find(rows, "  消息类型(MMTYPE)")
+    assert mtype == "0x0000", f"MMTYPE: {mtype}"
+    _, mac, _ = find(rows, "    站点MAC地址")
+    assert mac == "01:10:01:00:00:03", f"站点MAC: {mac}"
 
 
 def main():

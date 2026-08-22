@@ -333,17 +333,18 @@ class HDC10Parser:
         return calc == fccs
 
     def _detect_mac_header(self, data: bytes) -> bool:
-        """检测是否为MAC帧起始"""
+        """检测是否为MAC帧起始（裸MAC 或 PBH+MAC）"""
         if len(data) < 4:
             return False
         ver = data[0] & 0x0F
-        if ver not in (0, 1):
-            return False
-        if ver == 0:  # 标准帧
-            return len(data) >= 16
-        return True  # 单跳帧4字节即有效
-
-    # ─── FC 解析 ──────────────────────────────────────────────
+        if ver in (0, 1):
+            return len(data) >= 16 if ver == 0 else True
+        # PBH 前缀(表37: bit7=帧结束,bit6=帧起始): 起始PB 后跟 MAC头
+        if (data[0] >> 6) & 0x03:  # sof/eof 至少一个置位
+            inner = data[1:]
+            if len(inner) >= 16 and (inner[0] & 0x0F) in (0, 1):
+                return True
+        return False
 
     def _parse_fc(self, data: bytes, offset: int) -> List[Tuple]:
         """解析 16 字节 FC 帧控制"""
@@ -878,12 +879,42 @@ class HDC10Parser:
             ))
             # PB体 = MAC帧 = MAC头 + MSDU + ICV
             # PBCS在末尾3字节
-            if len(data) > 4:
-                pb_body = data[1:-3]
+            # 对齐探测: 实机部分帧型 PBH 后有 1 字节保留(共2字节头), 
+            # 用"MSDU声明长度 vs 实际剩余"误差最小者选对齐
+            if len(data) > 20:
                 pbcs = int.from_bytes(data[-3:], 'little')
                 calc_pbcs = _crc24(data[:-3])
                 status = "✓ 校验正确" if calc_pbcs == pbcs else f"✗ 校验错误(计算=0x{calc_pbcs:06X})"
-                mac_table = self._parse_mac_frame(pb_body, base_offset + 1)
+
+                def _align_score(start):
+                    """返回 (误差, MME头合法性), 综合最优者胜
+
+                    h[7]=MSDU类型(0=网管); 头长含 MAC地址域(flag=b9 bit7);
+                    声明长度 vs 实际(MME内容) 差异越小越优.
+                    """
+                    h = data[start:-3]
+                    if len(h) < 16:
+                        return 10 ** 9, 0
+                    mac_flag = (h[9] >> 7) & 0x01
+                    hdr_total = 28 if mac_flag else 16
+                    declared = h[8] | ((h[9] & 0x07) << 8)
+                    payload = len(h) - hdr_total
+                    mme_ok = 1 if (payload >= 4 and h[hdr_total + 2] == 0) else 0
+                    return abs(declared - (payload - 3)) + (0 if mme_ok else 50), mme_ok
+
+                score1 = _align_score(1)
+                score2 = _align_score(2)
+                if score2[0] < score1[0]:
+                    body_start, hdr_note = 2, "PBH后含1字节保留"
+                else:
+                    body_start, hdr_note = 1, ""
+                pb_body = data[body_start:-3]
+                mac_table = self._parse_mac_frame(pb_body, base_offset + body_start)
+                if hdr_note:
+                    mac_table.insert(0, (
+                        "  ⚠ 对齐", "", f"MAC头从偏移{body_start}起",
+                        hdr_note + "(自动探测)", base_offset + 1, base_offset + body_start - 1,
+                    ))
                 table.extend(mac_table)
                 table.append((
                     "  PBCS",
@@ -1524,8 +1555,13 @@ class HDC10Parser:
 
     # ─── MAC 帧解析 ──────────────────────────────────────────
 
-    def _parse_mac_frame(self, data: bytes, base_offset: int) -> List[Tuple]:
-        """解析完整 MAC 帧（MAC头 + MSDU + ICV）"""
+    def _parse_mac_frame(self, data: bytes, base_offset: int,
+                         hdr_start: int = 0) -> List[Tuple]:
+        """解析完整 MAC 帧（MAC头 + MSDU + ICV）
+
+        hdr_start: MAC头在 data 内的解析起点(默认0)。
+        base_offset: 原帧显示偏移(=切片在原帧中的绝对位置)。
+        """
         table = []
         if len(data) < 4:
             table.append(("❌ MAC帧解析失败", "", "", "长度不足", base_offset, base_offset + len(data) - 1))
@@ -1540,18 +1576,23 @@ class HDC10Parser:
         ))
 
         # 解析MAC头
-        mac_header_len, mac_header_table = self._parse_mac_header(data, base_offset)
+        mac_header_len, mac_header_table = self._parse_mac_header(data[hdr_start:], 0)
         table.extend(mac_header_table)
 
+        # MSDU类型: 标准头@byte7; 单跳头@byte1(表11/13)
+        tpos = hdr_start + (7 if mac_header_len >= 16 else 1)
+        msdu_type = data[tpos] if len(data) > tpos else None
+
         # MSDU + ICV
-        if len(data) > mac_header_len:
-            msdu_data = data[mac_header_len:]
+        msdu_abs = hdr_start + mac_header_len
+        if len(data) > msdu_abs:
+            msdu_data = data[msdu_abs:]
             table.append((
                 "── MSDU + ICV ──",
                 "",
                 f"{len(msdu_data)}字节",
                 "MSDU载荷 + 完整性校验值",
-                base_offset + mac_header_len, base_offset + len(data) - 1,
+                base_offset + msdu_abs, base_offset + len(data) - 1,
             ))
 
             # 尝试定位 ICV（最后4字节）
@@ -1562,7 +1603,8 @@ class HDC10Parser:
                 icv_status = "✓ 校验正确" if calc_icv == icv else f"✗ 校验错误(计算=0x{calc_icv:08X})"
 
                 # MSDU解析
-                msdu_table = self._parse_msdu_payload(msdu_body, base_offset + mac_header_len)
+                msdu_table = self._parse_msdu_payload(msdu_body, base_offset + msdu_abs,
+                                                      msdu_type=msdu_type)
                 table.extend(msdu_table)
 
                 table.append((
@@ -1578,7 +1620,7 @@ class HDC10Parser:
                     ' '.join(f'{b:02X}' for b in msdu_data),
                     f"{len(msdu_data)}字节",
                     "MSDU载荷(过短，无ICV)",
-                    base_offset + mac_header_len, base_offset + len(data) - 1,
+                    base_offset + msdu_abs, base_offset + len(data) - 1,
                 ))
 
         return table
@@ -1684,8 +1726,8 @@ class HDC10Parser:
             base + 7, base + 7,
         ))
 
-        # MSDU长度: byte8 + byte9[0:2] = 11bit
-        msdu_len = (b8 << 3) | (b9 & 0x07)
+        # MSDU长度: 表22 11bit = byte8[0:7]低8b + byte9[0:2]低2b(小端bit序)
+        msdu_len = b8 | ((b9 & 0x07) << 8)
         table.append((
             "  MSDU长度",
             f"0x{msdu_len:03X}",
@@ -1845,44 +1887,54 @@ class HDC10Parser:
 
     # ─── MSDU 解析 ────────────────────────────────────────────
 
-    def _parse_msdu_payload(self, data: bytes, base_offset: int) -> List[Tuple]:
-        """解析MSDU载荷（按类型分发）"""
+    def _parse_msdu_payload(self, data: bytes, base_offset: int,
+                            msdu_type: Optional[int] = None) -> List[Tuple]:
+        """解析MSDU载荷（按类型分发）
+
+        msdu_type: MAC头中的 MSDU类型字段(表10)。None 时按首字节启发式检测。
+        """
         table = []
         if not data:
             return table
 
-        # 从MAC头获知类型需传参，这里尝试自动检测
-        # 首字节判断：0x00=管理消息, 0x30=应用层(端口0x11在另一个位置)...
-        # 简化：直接按应用层尝试检测
-        # 应用层特征：首字节=端口号(0x11/0x12/0x1A)
         first = data[0]
+        if msdu_type == 0 or (msdu_type is None and first == 0x00):
+            # 网络管理消息(MME)
+            try:
+                from hdc10_mme_parser import parse_management_message
+                # MME 解析器约定 offset 为切片内相对索引, 数据已按 msdu_abs 切好
+                mme_table = parse_management_message(data, 0)
+                table.extend(mme_table)
+            except Exception:
+                table.append((
+                    "  网络管理消息",
+                    ' '.join(f'{b:02X}' for b in data[:16]) + ("..." if len(data) > 16 else ""),
+                    f"{len(data)}字节",
+                    "管理消息解析失败, 显示原始数据",
+                    base_offset, base_offset + min(len(data), 16) - 1,
+                ))
+            return table
+
         if first in (0x11, 0x12, 0x1A):
             app_table = self._parse_application_layer(data, base_offset)
             table.extend(app_table)
-        elif first == 0x00:
-            # 可能是管理消息(MMTYPE低8位=0, 但MMTYPE是2字节小端)
-            # 尝试解析管理消息
-            try:
-                from hdc10_mme_parser import parse_management_message
-                mme_table = parse_management_message(data, base_offset)
-                table.extend(mme_table)
-            except (ImportError, Exception):
-                table.append((
-                    "  网络管理消息",
-                    f"0x{first:02X}",
-                    "",
-                    "管理消息(hdc10_mme_parser未加载)",
-                    base_offset, base_offset + min(len(data), 4) - 1,
-                ))
-        else:
-            # 未知类型，显示原始数据
-            table.append((
-                "  MSDU数据",
-                ' '.join(f'{b:02X}' for b in data[:16]) + ("..." if len(data) > 16 else ""),
-                f"{len(data)}字节",
-                f"MSDU载荷({len(data)}字节)",
-                base_offset, base_offset + min(len(data), 16) - 1,
-            ))
+            return table
+
+        # 未知/厂商扩展类型: 原始hex + 可读ASCII片段提示
+        printable = ''.join(chr(b) if 32 <= b < 127 else '.' for b in data)
+        import re as _re
+        segs = [s for s in _re.split(r'[^A-Za-z0-9_\-]', printable) if len(s) >= 3]
+        ascii_hint = ' '.join(segs)[:48]
+        type_name = (f"类型{msdu_type}" if msdu_type is not None else f"首字节0x{first:02X}")
+        table.append((
+            "  MSDU数据",
+            ' '.join(f'{b:02X}' for b in data[:16]) + ("..." if len(data) > 16 else ""),
+            f"{len(data)}字节",
+            f"{type_name}: 未定义(厂商扩展/待扩展), 原始数据" +
+            (f"; 含ASCII标记[{ascii_hint}]" if ascii_hint else ""),
+            base_offset, base_offset + min(len(data), 16) - 1,
+        ))
+
 
         return table
 
@@ -2797,10 +2849,14 @@ class HDC10Parser:
                  ' '.join(f'{b:02X}' for b in data[:16]) + ("..." if len(data) > 16 else ""),
                  f"{len(data)}字节",
                  "未识别格式的应用层数据", 0, min(len(data), 16) - 1)]
-
     def _parse_mac_only(self, data: bytes, frame_type: int) -> List[Tuple]:
-        """mac_only 模式：直接解析MAC帧"""
-        return self._parse_mac_frame(data, 0)
+        """mac_only 模式：直接解析MAC帧（支持 PBH 前缀自动剥离）"""
+        hdr_start = 0
+        if data and (data[0] & 0x80):
+            # b0 bit7=1: MAC标准头 b0 bit7 恒为0(源TEI≤0x7FF), 故该字节必为 PBH
+            hdr_start = 1
+            data = data[hdr_start:]
+        return self._parse_mac_frame(data, hdr_start)
 
     def _parse_pb_only(self, data: bytes, frame_type: int) -> List[Tuple]:
         """pb_only 模式：解析物理块"""
