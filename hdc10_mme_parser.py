@@ -84,8 +84,8 @@ def parse_management_message(data: bytes, offset: int = 0) -> List[Tuple]:
 
     # MMTYPE (2字节小端)
     mmtype = int.from_bytes(data[offset:offset + 2], 'little')
-    # 保留字段（1字节）
-    reserved = data[offset + 2]
+    # 保留字段（2字节, 表58: MMTYPE 2B + 保留 2B = 4字节头）
+    reserved = int.from_bytes(data[offset + 2:offset + 4], 'little')
 
     name = MME_TYPE_NAMES.get(mmtype, f"保留(0x{mmtype:04X})")
 
@@ -105,18 +105,19 @@ def parse_management_message(data: bytes, offset: int = 0) -> List[Tuple]:
     ))
     table.append((
         "  保留",
-        f"0x{reserved:02X}",
-        str(reserved),
-        "保留字段",
-        offset + 2, offset + 2,
+        ' '.join(f'{b:02X}' for b in data[offset + 2:offset + 4]),
+        f"0x{reserved:04X}",
+        "保留字段(2字节)",
+        offset + 2, offset + 3,
     ))
 
-    # 报文内容
-    content_offset = offset + 3
+    # 报文内容 (表58: MME头4字节)
+    content_offset = offset + 4
     content = data[content_offset:]
 
     if content:
-        content_table = _parse_mme_content(content, content_offset, mmtype)
+        # content 已切片, 子解析器 offset 传 0(相对), 行偏移由 content_offset 统一加在显示列
+        content_table = _parse_mme_content(content, 0, mmtype)
         table.extend(content_table)
 
     return table
@@ -157,31 +158,47 @@ def _parse_mme_content(data: bytes, offset: int, mmtype: int) -> List[Tuple]:
 
 
 def _parse_associate_req(data: bytes, offset: int) -> List[Tuple]:
-    """关联请求 (0x0000)"""
+    """关联请求 (0x0000, 表60): 站点MAC(6B) + 候选代理TEI×5(每条2B: TEI12b+链路类型1b+保留3b)"""
     table = []
-    if len(data) < 8:
-        return [("  关联请求(过短)", "", "", "长度不足", offset, offset + len(data) - 1)]
+    end = len(data)
+    table.append(("  关联请求", "", "", "STA向CCO请求关联(表60)", offset, offset + end - 1))
+    if end < 6:
+        table.append(("    数据不足", "", f"{end}字节", "站点MAC需6字节",
+                      offset, offset + max(end - 1, offset)))
+        return table
 
-    # 简化实现: TEI(2) + MAC(6) + 能力(...)
-    tei = int.from_bytes(data[0:2], 'little')
-    mac = data[2:8]
-
-    table.append(("  关联请求", "", "", "STA向CCO请求关联", offset, offset + len(data) - 1))
-    table.append(("    请求TEI", f"0x{tei:04X}", str(tei),
-                  f"请求的TEI: {tei}", offset, offset + 1))
+    mac = data[0:6]
     table.append(("    站点MAC地址",
                   ' '.join(f'{b:02X}' for b in mac),
                   ':'.join(f'{b:02X}' for b in mac),
-                  "站点MAC地址(大端)", offset + 2, offset + 7))
+                  "请求关联的站点MAC(大端)", offset, offset + 5))
 
-    if len(data) > 8:
-        rest = data[8:]
+    pos = 6
+    for i in range(5):
+        if pos + 2 > end:
+            break
+        tei = _tei12(data, pos)
+        link = (data[pos + 1] >> 4) & 0x01
+        if tei == 0 and i > 0:
+            pos += 2
+            continue
+        table.append((f"    候选代理{i + 1}",
+                      ' '.join(f'{b:02X}' for b in data[pos:pos + 2]),
+                      f"TEI={tei}",
+                      f"链路类型={'无线' if link else '载波'}",
+                      offset + pos, offset + pos + 1))
+        pos += 2
+
+    if pos < end:
+        rest = data[pos:]
         table.append(("    其他信息",
                       ' '.join(f'{b:02X}' for b in rest[:16]) + ("..." if len(rest) > 16 else ""),
-                      f"{len(rest)}字节", "关联请求附加信息",
-                      offset + 8, offset + 8 + len(rest) - 1))
+                      f"{len(rest)}字节", "厂商扩展/附加信息",
+                      offset + pos, offset + end - 1))
 
     return table
+
+
 
 
 def _parse_associate_cnf(data: bytes, offset: int) -> List[Tuple]:
@@ -233,38 +250,6 @@ def _parse_leave_ind(data: bytes, offset: int) -> List[Tuple]:
                       offset + 2, offset + 2 + len(rest) - 1))
     return table
 
-
-def _parse_heartbeat(data: bytes, offset: int) -> List[Tuple]:
-    """心跳检测 (0x0007)"""
-    table = []
-    table.append(("  心跳检测", "", "", "心跳检测报文", offset, offset + len(data) - 1))
-    if data:
-        table.append(("    心跳数据",
-                      ' '.join(f'{b:02X}' for b in data[:16]) + ("..." if len(data) > 16 else ""),
-                      f"{len(data)}字节", "心跳检测内容",
-                      offset, offset + min(len(data), 16) - 1))
-    return table
-
-
-def _parse_discovery_list(data: bytes, offset: int) -> List[Tuple]:
-    """发现列表 (0x0008)"""
-    table = []
-    table.append(("  发现列表", "", "", "发现列表消息", offset, offset + len(data) - 1))
-    if len(data) >= 1:
-        count = data[0]
-        table.append(("    站点数量", f"0x{count:02X}", str(count),
-                      f"发现站点数: {count}", offset, offset))
-        # 每个站点条目
-        pos = 1
-        idx = 0
-        while pos + 8 <= len(data) and idx < count:
-            entry = data[pos:pos + 8]
-            table.append((f"    站点[{idx}]",
-                          ' '.join(f'{b:02X}' for b in entry),
-                          "", f"站点{idx}: TEI/MAC信息", offset + pos, offset + pos + 7))
-            pos += 8
-            idx += 1
-    return table
 
 
 def _parse_comm_success_rate(data: bytes, offset: int) -> List[Tuple]:
