@@ -1252,8 +1252,13 @@ class HDC10Parser:
                 content_len = 0
             content_start = idx
             content_end = min(idx + content_len, end)
+            # 时隙分配条目(0xC0/F0): 实机声明 total_len 常偏小(不含非中央信标信息数组),
+            # 且无独立尾部锚点 → 内容直接延伸到管理区可用边界(end = BPCS 前)
+            if hdr in (0xC0, 0xF0) and content_end < end:
+                content_len = end - content_start
+                content_end = end
             content = data[content_start:content_end]
-            truncated = (idx + content_len) > end
+            truncated = False
 
             entry_name = self.BEACON_ENTRY_NAMES.get(hdr, f"保留(0x{hdr:02X})")
             warn = " ⚠声明长度超出数据(已截断)" if truncated else ""
@@ -1428,14 +1433,39 @@ class HDC10Parser:
                                ' '.join(f'{x:02X}' for x in content[18:20]),
                                str(rf_bcn_len),
                                f"RF链路上信标时隙长度={rf_bcn_len}ms", bo + 18, bo + 20, True))
-            # 可变部分: 非中央信标信息 + CSHA时隙信息 + BCSHA时隙信息
+            # 可变部分: HDC 1.0 实机顺序与表50声明不同(实测帧验证):
+            #   [CSMA时隙信息 × csha_phases (4B/条)] →
+            #   [非中央信标信息 × 代理信标时隙总数 (2B/条)] →
+            #   [绑定CSMA时隙信息 × bcsha_phases (4B/条)]
+            # 注意: 非中央信标信息条数锚定"代理信标时隙总数"(byte3),
+            #       非"非中央信标时隙总数"(byte0, =代理+发现总时隙数, 发现时隙不占描述条目)
             if ln > 20:
                 var_data = content[20:]
                 var_pos = 0
                 parsed_any = False
-                # 1) 非中央信标信息(表51): 每条2B = TEI(12b) + 信标类型(1b) + 无线信标标志(3b)
-                #    表50: 发现信标省略该字段(为节省报文空间)
-                n_non_ccn = 0 if discovery else non_ccn_beacon
+
+                def _csma_slot_row(prefix, seg, abs_pos):
+                    c_len = int.from_bytes(seg[0:3], 'little')
+                    phase = seg[3] & 0x03
+                    phase_names = {0: "全相线", 1: "A相线", 2: "B相线", 3: "C相线"}
+                    return (prefix, ' '.join(f'{x:02X}' for x in seg),
+                            f"长度={c_len}ms 相线={phase_names.get(phase, phase)}",
+                            "时隙长度(24b)+相线(2b)", abs_pos, abs_pos + 4, True)
+
+                # 1) CSMA时隙信息(表52): 每条4B = 时隙长度(24b LE) + 相线(2b) + 保留(6b)
+                for i in range(csha_phases):
+                    if var_pos + 4 > len(var_data):
+                        break
+                    result.append(_csma_slot_row(
+                        "      CSMA时隙信息", var_data[var_pos:var_pos + 4],
+                        bo + 20 + var_pos))
+                    var_pos += 4
+                    parsed_any = True
+
+                # 2) 非中央信标信息(表51): 每条2B = TEI(12b) + 信标类型(1b) + 无线信标标志(3b)
+                #    条数不预设: 实机声明值与实际条目数常不一致, 按剩余数据逐2B解析到耗尽
+                #    注: HDC 1.0 实测发现信标同样携带非中央信标信息, 不做表50的省略假设
+                n_non_ccn = (len(var_data) - var_pos) // 2
                 n_parsed = 0
                 for i in range(n_non_ccn):
                     if var_pos + 2 > len(var_data):
@@ -1447,9 +1477,9 @@ class HDC10Parser:
                     btype_names = {0: "发现信标", 1: "代理信标"}
                     wflag_names = {0: "仅载波信标", 1: "仅无线标准信标", 2: "载波+无线标准信标",
                                    3: "载波+无线精简信标", 4: "载波+CSMA无线精简信标"}
-                    result.append(("      非中央信标信息", f"{b0:02X} {b1:02X}",
-                                   f"TEI={tei} 类型={btype_names.get(btype, btype)}",
-                                   f"无线信标标志={wflag_names.get(wflag, f'保留({wflag})')}",
+                    result.append((f"      信标时隙{i + 1}", f"{b0:02X} {b1:02X}",
+                                   f"TEI={tei} {btype_names.get(btype, btype)}",
+                                   f"无线={wflag_names.get(wflag, f'保留({wflag})')}",
                                    bo + 20 + var_pos, bo + 20 + var_pos + 2, True))
                     var_pos += 2
                     parsed_any = True
@@ -1458,50 +1488,19 @@ class HDC10Parser:
                     result.append(("      ⚠ 非中央信标信息不足",
                                    f"声明{n_non_ccn}条",
                                    f"数据仅够{n_parsed}条",
-                                   "声明条数与实际数据长度不符(帧可能被截断或字段含义不同)",
-                                   bo + 20, bo + ln, True))
-                # 2) CSMA时隙信息(表52): 每条4B = CSMA时隙长度(24b) + 相线(2b) + 保留(6b)
-                n_csha_parsed = 0
-                for i in range(csha_phases):
-                    if var_pos + 4 > len(var_data):
-                        break
-                    seg = var_data[var_pos:var_pos + 4]
-                    c_len = int.from_bytes(seg[0:3], 'little')
-                    phase = seg[3] & 0x03
-                    phase_names = {0: "全相线", 1: "A相线", 2: "B相线", 3: "C相线"}
-                    result.append(("      CSMA时隙信息", ' '.join(f'{x:02X}' for x in seg),
-                                   f"长度={c_len}ms 相线={phase_names.get(phase, phase)}",
-                                   "CSMA时隙长度(24b)+相线(2b)", bo + 20 + var_pos, bo + 20 + var_pos + 4, True))
-                    var_pos += 4
-                    parsed_any = True
-                    n_csha_parsed += 1
-                if n_csha_parsed < csha_phases and csha_phases > 0:
-                    result.append(("      ⚠ CSMA时隙信息不足",
-                                   f"声明{csha_phases}条",
-                                   f"数据仅够{n_csha_parsed}条",
-                                   "声明条数与实际数据长度不符(CSMA时隙相线个数)",
-                                   bo + 20, bo + ln, True))
-                # 3) 绑定CSMA时隙信息(表53): 每条4B = 绑定CSMA时隙长度(24b) + 相线(2b) + 保留(6b)
-                n_bcsha_parsed = 0
+                                   "代理信标时隙总数与实际数据不符",
+                                   bo + 20 + var_pos, bo + ln, True))
+
+                # 3) 绑定CSMA时隙信息(表53): 每条4B, 结构同CSMA
                 for i in range(bcsha_phases):
                     if var_pos + 4 > len(var_data):
                         break
-                    seg = var_data[var_pos:var_pos + 4]
-                    c_len = int.from_bytes(seg[0:3], 'little')
-                    phase = seg[3] & 0x03
-                    phase_names = {0: "全相线", 1: "A相线", 2: "B相线", 3: "C相线"}
-                    result.append(("      绑定CSMA时隙信息", ' '.join(f'{x:02X}' for x in seg),
-                                   f"长度={c_len}ms 相线={phase_names.get(phase, phase)}",
-                                   "绑定CSMA时隙长度(24b)+相线(2b)", bo + 20 + var_pos, bo + 20 + var_pos + 4, True))
+                    result.append(_csma_slot_row(
+                        "      绑定CSMA时隙", var_data[var_pos:var_pos + 4],
+                        bo + 20 + var_pos))
                     var_pos += 4
                     parsed_any = True
-                    n_bcsha_parsed += 1
-                if n_bcsha_parsed < bcsha_phases and bcsha_phases > 0:
-                    result.append(("      ⚠ 绑定CSMA时隙信息不足",
-                                   f"声明{bcsha_phases}条",
-                                   f"数据仅够{n_bcsha_parsed}条",
-                                   "声明条数与实际数据长度不符(绑定CSMA时隙相线个数)",
-                                   bo + 20, bo + ln, True))
+
                 # 剩余未解析字节
                 if var_pos < len(var_data):
                     remain = var_data[var_pos:]
@@ -1510,10 +1509,10 @@ class HDC10Parser:
                                    f"{len(remain)}字节",
                                    "超出声明条数的剩余数据", bo + 20 + var_pos, bo + ln, True))
                 elif not parsed_any:
-                    result.append(("      非中央信标信息/CSHA/BCSHA时隙信息",
+                    result.append(("      CSHA/非中央信标/BCSHA时隙信息",
                                    ' '.join(f'{x:02X}' for x in var_data[:12]) + ('...' if len(var_data) > 12 else ''),
                                    f"{len(var_data)}字节",
-                                   "变长时隙描述(非中央信标信息+CSMA+绑定CSMA时隙)", bo + 20, bo + ln, True))
+                                   "变长时隙描述(CSMA+非中央信标+绑定CSMA)", bo + 20, bo + ln, True))
         elif ln > 0:
             # 未知条目: 显示原始内容
             result.append(("      内容(原始)",
