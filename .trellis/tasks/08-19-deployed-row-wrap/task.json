@@ -1,0 +1,30 @@
+{
+  "id": "deployed-row-wrap",
+  "name": "deployed-row-wrap",
+  "title": "修复部署后特殊帧单帧解析行显示满",
+  "description": "内嵌部署包前端 bundle 陈旧导致换行 CSS 未生效，修复 build_embedded_deploy 前端新鲜度判定并重打部署包",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "Liruitao1993",
+  "assignee": "Liruitao1993",
+  "createdAt": "2026-08-19",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "reflex_web/build_embedded_deploy.py",
+    "reflex_web/build_offline_deploy.py",
+    "reflex_web/reflex_web/reflex_web.py"
+  ],
+  "notes": "根因：ensure_frontend 只在 bundle 缺失时 export，CSS 在 .py 中无法触发重建；bundle 比 CSS 修复早 5 小时",
+  "meta": {}
+}

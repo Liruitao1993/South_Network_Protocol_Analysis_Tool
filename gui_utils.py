@@ -19,9 +19,20 @@ class ZoomableTableWidget(QTableWidget):
 
     def _zoom_start(self):
         """首次缩放前记录基准（缩放前字体为基准字号）"""
-        if self._zoom_base is None:
-            self._zoom_base = (self.font().pointSizeF() or 9.0,
-                               self.verticalHeader().defaultSectionSize() or 20)
+        f = self.font()
+        vh = self.verticalHeader()
+        self._zoom_base = (f.pointSizeF(), vh.defaultSectionSize() or 20)
+
+    def refresh_qss_font(self):
+        """主题 QSS font-size 生效后调用：以当前实际字体为新缩放基准。
+
+        Qt 限制：样式表设置的字体不反映到 widget.font()，Ctrl+0 恢复会
+        用旧基准字号覆盖 QSS 字号；行高也需按新字号重算，否则文字被裁切。
+        """
+        self._zoom_base = None
+        fm = self.fontMetrics()
+        vh = self.verticalHeader()
+        vh.setDefaultSectionSize(max(6, fm.height() + 6))
 
     def _apply_zoom(self, factor: float):
         self._zoom_start()

@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
+from app_paths import data_path
+
 
 class OBISLookup:
     """OBIS 查询管理器"""
@@ -107,7 +109,7 @@ class OBISLookup:
             self._load_custom_obis(custom_obis_file)
         else:
             # 默认保存位置
-            default_path = Path(__file__).parent / "custom_obis.json"
+            default_path = data_path("custom_obis.json")
             if default_path.exists():
                 self._load_custom_obis(str(default_path))
 
@@ -128,7 +130,7 @@ class OBISLookup:
     def save_custom_obis(self, filepath: Optional[str] = None):
         """保存自定义 OBIS 到 JSON 文件"""
         if filepath is None:
-            filepath = str(Path(__file__).parent / "custom_obis.json")
+            filepath = str(data_path("custom_obis.json"))
 
         data = []
         for obis, (name, desc) in self.custom_obis.items():

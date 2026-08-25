@@ -61,6 +61,20 @@ upx-5.0.0-win64/
 /_ocr_paddle_test.py
 # 测试运行输出产物
 /docx_tables_out.txt
+# Reflex web 前端构建产物 / OMP 运行时缓存 / spec 动态生成文件
+.web/
+.omo/
+_version_info_gen.txt
+# 一次性诊断/临时脚本
+_diag.py
+_find_omp.ps1
+context.md
+bun.lock
+reflex_web/downloads/o.k..png
+# 协议文档 Word 临时锁文件（~$ 开头）
+协议文档/*/~$*
+**.doc~
+~$*
 /test_ofdma_out.txt
 
 # 工具目录
@@ -68,3 +82,8 @@ upx-5.0.0-win64/
 
 # Windows 重定向误生成文件
 /nul
+# HDC 真实报文遍历日志（16M 运行日志，不进版本库）
+国网新一代协议/HDC-国网双模协议/TMI模式遍历测试_频段1__All.log
+# 临时测试/用户导出产物
+导出选中的测试.xlsx
+testfile.txt

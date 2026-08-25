@@ -30,6 +30,7 @@ from PySide6.QtGui import (
 )
 
 from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu, ZoomableTableWidget
+from app_paths import data_path
 
 try:
     from lua_script_engine import LuaScriptEngine, LUA_TEMPLATES
@@ -38,7 +39,7 @@ except ImportError:
     LUA_AVAILABLE = False
 
 # 自动持久化文件路径
-TEST_PLAN_PATH = Path(__file__).parent / "test_plan.json"
+TEST_PLAN_PATH = data_path("test_plan.json")
 
 
 # ------------------------------------------------------------------------------

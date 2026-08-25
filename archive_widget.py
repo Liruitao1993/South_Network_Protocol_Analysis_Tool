@@ -25,8 +25,9 @@ from gdw10376_parser import GDW10376Parser
 from dlt645_parser import DLT645Parser
 from lme_info_entry_parser import parse_lme_info_entries, format_lme_info_summary
 from gui_utils import ZoomableTableWidget
+from app_paths import data_path
 
-ARCHIVE_FILE = "archive_data.json"
+ARCHIVE_FILE = str(data_path("archive_data.json"))
 
 
 def _crc16_x25(data: bytes) -> int:

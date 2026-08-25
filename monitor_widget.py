@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QMenu,
 )
 from gui_utils import ZoomableTableWidget
+from app_paths import app_data_dir
 
 
 class RealtimeMonitorWidget(QWidget):
@@ -1072,9 +1073,10 @@ class RealtimeMonitorWidget(QWidget):
     def _start_csv_recording(self):
         """开始CSV记录：创建Output目录并打开文件"""
         try:
-            os.makedirs("Output", exist_ok=True)
+            output_dir = str(app_data_dir() / "Output")
+            os.makedirs(output_dir, exist_ok=True)
             filename = f"monitor_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-            self._csv_path = os.path.join("Output", filename)
+            self._csv_path = os.path.join(output_dir, filename)
             self._csv_file = open(self._csv_path, "w", newline="", encoding="utf-8-sig")
             self._csv_writer = csv.writer(self._csv_file)
             self._csv_writer.writerow([
@@ -1107,7 +1109,7 @@ class RealtimeMonitorWidget(QWidget):
 
     def _open_log_directory(self):
         """打开日志目录"""
-        log_dir = os.path.abspath("Output")
+        log_dir = str(app_data_dir() / "Output")
         os.makedirs(log_dir, exist_ok=True)
         try:
             os.startfile(log_dir)  # Windows

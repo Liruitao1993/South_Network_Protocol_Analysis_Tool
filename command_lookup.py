@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
+from app_paths import data_path
+
 
 class CommandLookup:
     """命令字查询管理器"""
@@ -43,7 +45,7 @@ class CommandLookup:
             self._load_custom_commands(custom_commands_file)
         else:
             # 默认保存位置
-            default_path = Path(__file__).parent / "custom_commands.json"
+            default_path = data_path("custom_commands.json")
             if default_path.exists():
                 self._load_custom_commands(str(default_path))
 
@@ -64,7 +66,7 @@ class CommandLookup:
     def save_custom_commands(self, filepath: Optional[str] = None) -> bool:
         """保存自定义命令字到 JSON 文件"""
         if filepath is None:
-            filepath = str(Path(__file__).parent / "custom_commands.json")
+            filepath = str(data_path("custom_commands.json"))
 
         data = []
         for code, (name, desc) in self.custom_commands.items():

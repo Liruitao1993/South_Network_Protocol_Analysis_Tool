@@ -6,6 +6,8 @@ import json
 import os
 from typing import List, Tuple, Optional
 
+from app_paths import data_path
+
 
 class DLT645DILookup:
     """DLT645-2007 DI标识查询器"""
@@ -13,7 +15,7 @@ class DLT645DILookup:
     def __init__(self):
         self._di_map: dict = {}  # DI标识 -> DI信息
         self._data: List[Tuple[str, str, str, str, str, bool]] = []  # (di_code, di_name, unit, data_type, desc, is_custom)
-        self._custom_file = os.path.join(os.path.dirname(__file__), 'dlt645_di_custom.json')
+        self._custom_file = str(data_path('dlt645_di_custom.json'))
         self._load_di_map()
 
     def _load_di_map(self):

@@ -133,7 +133,8 @@ hiddenimports = reflex_hidden + [
     "command_lookup",
     "dlt645_di_lookup",
     "gdw_afn_lookup",
-    "dl_t698_45_oi_lookup",
+    "gdw_eb_di_lookup",
+    "gdw_eb_di_fields",
 
     # ---- 项目模块：校验器 ----
     "validator",

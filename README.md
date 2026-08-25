@@ -1,13 +1,13 @@
 # 南网协议解析工具
 
-[![Version](https://img.shields.io/badge/version-1.14.3-blue)]()
+[![Version](https://img.shields.io/badge/version-1.14.5-blue)]()
 [![Python](https://img.shields.io/badge/Python-3.8%2B-brightgreen)]()
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)]()
 [![License](https://img.shields.io/badge/License-MIT-green)]()
 
 一个面向电力通信现场调试的多协议解析工具，基于 Python / PySide6 开发，支持 12 种电力通信协议，覆盖单帧解析、批量解析、协议校验、帧生成、串口通信、测试方案、Lua 脚本、实时监控与 TCP 抓包等工作流。
 
-当前版本为 `1.14.3`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
+当前版本为 `1.14.5`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
 
 ## 功能总览
 
@@ -328,6 +328,26 @@ python test/test_theme_settings.py         # 主题与字体设置
 - [`.trellis/workflow.md`](.trellis/workflow.md)：Trellis 开发工作流与任务规范
 
 ## 更新记录
+
+### 1.14.5 — 2026-08-21
+
+#### 协议 11（HDC 1.0）深度解析增强
+
+- **查询站点升级状态上行报文解析**：此前只按下行表40解析（连续查询块数/起始块号/升级ID），上行应答的升级状态（0空闲/1接收进行/2接收完成/3升级进行/4试运行）、有效块数、升级位图全部丢失。现按文档第4-3部分表45补全：升级状态 + 有效块数 + 起始块号 + 升级ID + 接收位图（每bit对应一个文件块，显示 `N/M块已接收`）；升级位图逐块编号明细按起始块号+i编号，每行32块多行展开，`[✓n]`=已接收 `[✕n]`=丢包
+- **台区户变关系识别(0x0A1)深度解析**：修复报文头长度公式——6bit值×4字节（此前公式错致12字节头算成48字节）；校时/事件/通信测试/注册/升级等7处统一修正。DATA域按采集类型深度解析：采集启动(表56)、特征信息告知(表57 TEI+采集方式+NTB+特征序列)、判别结果信息(表61)；特征序列按特征类型分派：工频电压(BCD XXX.X 大端)、工频频率(BCD XX.XX 大端)、工频周期(有符号偏差+μs)，三相逐相展开
+- **信标时隙分配条目/心跳检测/发现列表深度解析**：时隙分配条目(0xC0/F0)可变区按实机顺序解析——CSMA时隙信息先行 → 非中央信标信息 → 绑定CSMA；心跳检测(0x0007)按表94实现：原始源TEI/发现站点位图逐TEI明细；发现列表(0x0008)按表95实现：固定头32B逐字段 + 上行路由条目 + 发现站点列表位图 + 接收发现列表信息与位图置位TEI配对显示
+
+### 1.14.4 — 2026-08-21
+
+#### 协议 8（698.45）组帧/解析对齐官方工具 + 内嵌部署增量构建
+
+- **内嵌部署增量构建**：`build_embedded_deploy.py` 新增 `--skip-deps` 模式——复用已有 `python/`（解释器+site-packages），仅刷新源码/数据/前端层，重复构建从 10+ 分钟降至约 1 分钟
+- **A-XDR 复合类型计数语义修复**：array/structure tag 后字节应为元素个数（非字节总长）；组帧 3 项 structure 由误填 09 改为 03；编码器与解码器同步修复
+- **SET/ACTION 组帧补尾部 TimeLabel**：GET/SET/ACTION 请求均以 OPTIONAL TimeLabel 结尾（00=无），此前仅 GET 补 00；修复两条 GUI 生成路径与 `frame_gen_utils.py`
+- **解析表格 array/structure 成员逐项展开**：复合类型不再只显示「[N项]」，为每个成员生成子行（原始编码/值/类型说明），嵌套递归展开，对齐官方工具
+- **请求 APDU 尾部 TimeTag 解析**：GET/SET/ACTION 的 Normal/NormalList 分支统一解析 OPTIONAL TimeTag 尾字节
+- **组帧 OI 增强**：预定义/A-XDR 模式 OI 均改为「预设下拉 + 手动 hex 输入」双通道；A-XDR 新增「描述符类型」OAD/OMD 切换
+- **修复协议8 预设命令保存/显示**：新增 `DLT698_command.json` 独立预设文件；`set_protocol` 支持 dlt698；加载时按 protocol 过滤历史混入条目
 
 ### 1.14.3 — 2026-08-19
 

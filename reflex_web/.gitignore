@@ -4,3 +4,10 @@ __pycache__/
 assets/external/
 *.py[cod]
 .web
+# 管理员配置（密码哈希）
+admin_config.json
+# 下载目录中的 exe 和版本信息（运行时生成）
+downloads/*.exe
+downloads/version.json
+downloads/archive/
+downloads/*.exe.*

@@ -429,7 +429,8 @@ class LLMPreprocessWidget(QWidget):
         """从 config.json 加载配置 + 刷新模型列表"""
         try:
             import json
-            config_path = os.path.join(os.path.dirname(__file__), "config.json")
+            from app_paths import data_path
+            config_path = str(data_path("config.json"))
             with open(config_path, encoding="utf-8") as f:
                 cfg = json.load(f).get("llm", {})
             self.chunk_spin.setCurrentText(str(cfg.get("chunk_lines", 200)))
@@ -444,7 +445,8 @@ class LLMPreprocessWidget(QWidget):
     def save_config(self):
         """保存 LLM 配置到 config.json（仅 prompt 和 chunk_lines）"""
         import json
-        config_path = os.path.join(os.path.dirname(__file__), "config.json")
+        from app_paths import data_path
+        config_path = str(data_path("config.json"))
         try:
             with open(config_path, encoding="utf-8") as f:
                 cfg = json.load(f)

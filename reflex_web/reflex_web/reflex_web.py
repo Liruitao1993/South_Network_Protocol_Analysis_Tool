@@ -32,6 +32,7 @@ class State(rx.State):
     # ── 协议选择 ─────────────────────────────────────────────
     current_protocol: int = 0
     csg_parse_level: str = "auto"
+    csg_pb_frame_type: str = "sof"
     csg_strip_head: int = 0
     csg_strip_tail: int = 0
     gw_parse_level: str = "auto"
@@ -221,9 +222,51 @@ class State(rx.State):
     download_exe_available: bool = False          # downloads/ 目录是否有 exe
     download_exe_name: str = ""                   # exe 文件名
     download_image_available: bool = False        # downloads/ 目录是否有截图
+    download_image_data_url: str = ""             # 截图 base64 data URL
     download_readme_available: bool = False       # downloads/ 目录是否有 README
     download_readme_text: str = ""                # README 内容
     download_msg: str = ""                        # 提示信息
+    download_version: str = ""                    # 当前版本号（从 version.json 读取）
+    download_version_notes: str = ""              # 当前版本更新说明
+    download_version_date: str = ""               # 当前版本发布日期
+    download_version_url: str = ""                # 当前版本下载地址（从 version.json 读取）
+    download_history: List[Dict[str, str]] = []   # 历史版本列表（公开版）
+
+    # ── 管理员发布管理 ────────────────────────────────────────
+    admin_logged_in: bool = False                 # 是否已登录
+    admin_show_login_dialog: bool = False         # 登录对话框显示
+    admin_password_input: str = ""                # 登录密码输入
+    admin_is_default_pwd: bool = False            # 是否默认密码
+    admin_change_old: str = ""                    # 修改密码-原密码
+    admin_change_new: str = ""                    # 修改密码-新密码
+    admin_change_confirm: str = ""                # 修改密码-确认
+    admin_msg: str = ""                           # 管理员操作提示
+
+    release_version: str = ""                     # 发布版本号
+    release_notes: str = ""                       # 更新说明
+    release_url: str = ""                         # 下载地址
+    release_status: str = ""                      # 发布状态/结果消息
+    release_status_type: str = "info"            # 状态类型: info / success / error
+    release_progress: int = 0                     # SHA-256 计算进度
+    release_publishing: bool = False              # 正在发布中
+    release_show_success_dialog: bool = False     # 发布成功弹窗
+    release_success_info: Dict[str, str] = {       # 发布成功信息（弹窗用）
+        "version": "", "size_mb": "", "exe_name": "", "sha256": "",
+    }
+    release_current: Dict[str, str] = {}          # 当前版本信息字典
+    release_history: List[Dict[str, str]] = []    # 历史版本列表
+    release_upload_name: str = ""                 # 已上传文件名（前端显示）
+    release_upload_size_mb: float = 0.0           # 已上传文件大小（前端显示）
+    release_screenshot_uploaded: bool = False      # 是否已上传截图
+    release_readme_text: str = ""                  # README 内容（来自上传文件或已有文件）
+    release_readme_name: str = ""                  # 已上传 README 文件名（前端显示）
+    # 后端数据（不发送到前端）
+    _release_screenshot_data: bytes = b""          # 截图二进制（后端）
+
+    # 后端单例/数据（不发送到前端）
+    _release_mgr: Any = None
+    _admin_cfg: Any = None
+    _release_exe_data: bytes = b""                # 上传的 exe 内容（后端存）
 
     # ── 报文工具 ─────────────────────────────────────────────
     tool_input: str = ""
@@ -273,6 +316,9 @@ class State(rx.State):
 
     def set_csg_level(self, value: str):
         self.csg_parse_level = value
+
+    def set_csg_pb_frame_type(self, value: str):
+        self.csg_pb_frame_type = value
 
     def set_gw_level(self, value: str):
         self.gw_parse_level = value
@@ -503,7 +549,11 @@ class State(rx.State):
 
             # 新一代载波/国网新一代/HDC 1.0 需要 parse_level
             if self.current_protocol == 9:
-                result = parser.parse_to_table(frame_bytes, parse_level=self.csg_parse_level)
+                result = parser.parse_to_table(
+                            frame_bytes,
+                            parse_level=self.csg_parse_level,
+                            pb_frame_type=self.csg_pb_frame_type,
+                        )
             elif self.current_protocol == 10:
                 result = parser.parse_to_table(
                     frame_bytes,
@@ -755,7 +805,11 @@ class State(rx.State):
 
                     # 按协议类型传解析级别
                     if self.current_protocol == 9:
-                        result = parser.parse_to_table(frame_bytes, parse_level=self.csg_parse_level)
+                        result = parser.parse_to_table(
+                            frame_bytes,
+                            parse_level=self.csg_parse_level,
+                            pb_frame_type=self.csg_pb_frame_type,
+                        )
                     elif self.current_protocol == 10:
                         result = parser.parse_to_table(
                             frame_bytes,
@@ -2629,6 +2683,8 @@ class State(rx.State):
             self.load_eb_di_options()
         if tab == "download":
             self.load_download_info()
+        if tab == "release":
+            self.load_release_info()
 
     # ── 客户端下载 ────────────────────────────────────────────
     def load_download_info(self):
@@ -2646,12 +2702,49 @@ class State(rx.State):
             self.download_readme_available = False
             self.download_readme_text = ""
             if downloads_dir.exists():
-                exes = sorted(downloads_dir.glob("*.exe"))
-                if exes:
+                # 先读 version.json 获取文件名和版本信息
+                vj = downloads_dir / "version.json"
+                vj_data = {}
+                if vj.exists():
+                    try:
+                        import json as _json
+                        vj_data = _json.loads(vj.read_text(encoding="utf-8"))
+                    except Exception:
+                        pass
+
+                # 从 version.json 读 exe_name，找不到再 fallback
+                exe_from_vj = vj_data.get("exe_name", "")
+                primary_exe = None
+                if exe_from_vj:
+                    candidate = downloads_dir / exe_from_vj
+                    if candidate.exists():
+                        primary_exe = candidate
+                if primary_exe is None:
+                    # fallback: 固定文件名
+                    fixed = downloads_dir / "南网协议解析工具.exe"
+                    if fixed.exists():
+                        primary_exe = fixed
+                if primary_exe is None:
+                    # fallback: 找第一个 exe
+                    exes = sorted(downloads_dir.glob("*.exe"))
+                    if exes:
+                        primary_exe = exes[0]
+
+                if primary_exe is not None:
                     self.download_exe_available = True
-                    self.download_exe_name = exes[0].name
-                if (downloads_dir / "client_screenshot.png").exists():
+                    self.download_exe_name = primary_exe.name
+                else:
+                    self.download_exe_available = False
+                    self.download_exe_name = ""
+                ss_file = downloads_dir / "client_screenshot.png"
+                if ss_file.exists():
                     self.download_image_available = True
+                    try:
+                        import base64
+                        img_data = ss_file.read_bytes()
+                        self.download_image_data_url = f"data:image/png;base64,{base64.b64encode(img_data).decode('ascii')}"
+                    except Exception:
+                        pass
                 # 客户端 README（README.md 或 client_readme.md）
                 for readme_name in ("client_readme.md", "README.md"):
                     readme_file = downloads_dir / readme_name
@@ -2662,6 +2755,39 @@ class State(rx.State):
                         except Exception:
                             pass
                         break
+                # 读取 version.json（前面已读，这里直接用 vj_data）
+                if vj_data:
+                    try:
+                        self.download_version = vj_data.get("version", "")
+                        self.download_version_notes = vj_data.get("notes", "")
+                        self.download_version_url = vj_data.get("url", "")
+                        # 用 exe 的修改时间作发布日期
+                        if primary_exe is not None:
+                            import time as _time
+                            self.download_version_date = _time.strftime(
+                                "%Y-%m-%d", _time.localtime(primary_exe.stat().st_mtime)
+                            )
+                    except Exception:
+                        pass
+                # 读取归档目录中的历史版本（公开，不含下载链接）
+                archive_dir = downloads_dir / "archive"
+                if archive_dir.exists():
+                    import time as _time
+                    hist = []
+                    for f in sorted(archive_dir.glob("*.exe")):
+                        if f.is_file():
+                            mtime = _time.strftime(
+                                "%Y-%m-%d", _time.localtime(f.stat().st_mtime)
+                            )
+                            size_mb = round(f.stat().st_size / 1024 / 1024, 2)
+                            hist.append({
+                                "version": f.stem,
+                                "date": mtime,
+                                "size_mb": str(size_mb),
+                            })
+                    # 新版本在上
+                    hist.sort(key=lambda x: [int(p) for p in x["version"].split(".") if p.isdigit()], reverse=True)
+                    self.download_history = hist
                 self.download_msg = ""
             else:
                 self.download_msg = "downloads/ 目录不存在"
@@ -2669,19 +2795,499 @@ class State(rx.State):
             self.download_msg = f"扫描失败: {e}"
 
     def download_client(self):
-        """触发客户端 exe 下载（整页导航到 /download/ 静态路由）
+        """触发客户端 exe 下载
 
-        不能用 rx.redirect：那是前端 SPA 路由跳转，/download/ 无对应页面
-        会被 Reflex 前端 404 拦截。改用 window.location 整页导航，
-        让浏览器直接请求后端下载路由（返回 attachment 触发下载）。
+        优先使用 version.json 中的 url（管理员发布时配置的下载地址），
+        没有 version.json 时回退到本地 /api/download/ 路径（开发/生产均可用）。
+        兼容 /downloads/ 旧写法，自动修正为 /download/。
         """
         if not self.download_exe_available:
-            self.download_msg = "客户端 exe 未就绪，请将 exe 放入 downloads/ 目录"
+            self.download_msg = "客户端 exe 未就绪"
             return
         import urllib.parse
-        name = urllib.parse.quote(self.download_exe_name)
-        url = f"/download/{name}"
-        return rx.call_script(f"window.location.href = '{url}';")
+        # 如果 version.json 里配置了下载地址，直接跳转
+        if self.download_version_url:
+            url = self.download_version_url
+        else:
+            name = urllib.parse.quote(self.download_exe_name)
+            url = f"/api/download/{name}"
+        # 兼容旧写法：/downloads/ → /download/（下载路由是单数）
+        url = url.replace("/downloads/", "/download/")
+        # 用 json.dumps 自动转义，避免特殊字符导致 JS 语法错误
+        return rx.call_script(f"window.location.href = {json.dumps(url)};")
+
+    # ── 管理员发布管理 ────────────────────────────────────────
+
+    def _get_release_mgr(self):
+        """获取 ReleaseManager 单例（懒加载）"""
+        if self._release_mgr is not None:
+            return self._release_mgr
+        try:
+            from .admin_release import ReleaseManager
+            here = Path(__file__).resolve()
+            downloads_dir = here.parent.parent / "downloads"
+            if not downloads_dir.exists():
+                downloads_dir = here.parent / "downloads"
+            self._release_mgr = ReleaseManager(downloads_dir)
+        except Exception as e:
+            self.admin_msg = f"初始化发布管理器失败: {e}"
+            self._release_mgr = None
+        return self._release_mgr
+
+    def _get_admin_cfg(self):
+        """获取 AdminConfig 单例（懒加载）"""
+        if self._admin_cfg is not None:
+            return self._admin_cfg
+        try:
+            from .admin_release import AdminConfig
+            here = Path(__file__).resolve()
+            config_dir = here.parent.parent
+            if not (config_dir / "downloads").exists():
+                config_dir = here.parent
+            config_path = config_dir / "admin_config.json"
+            self._admin_cfg = AdminConfig(config_path)
+        except Exception as e:
+            self.admin_msg = f"初始化配置失败: {e}"
+            self._admin_cfg = None
+        return self._admin_cfg
+
+    def toggle_login_dialog(self):
+        self.admin_show_login_dialog = not self.admin_show_login_dialog
+        self.admin_password_input = ""
+        self.admin_msg = ""
+
+    def set_admin_password_input(self, value: str):
+        self.admin_password_input = value
+
+    def set_release_version(self, value: str):
+        self.release_version = value
+
+    def set_release_url(self, value: str):
+        self.release_url = value
+
+    def set_release_notes(self, value: str):
+        self.release_notes = value
+
+    async def handle_screenshot_upload(self, files: List[rx.UploadFile]):
+        """处理上传的软件界面截图"""
+        if not self.admin_logged_in:
+            return
+        if not files:
+            return
+        try:
+            f = files[0]
+            data = await f.read()
+            name = getattr(f, "filename", None) or getattr(f, "name", None) or ""
+            # 校验图片格式（png/jpg/jpeg/gif/webp）
+            if not name.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp")):
+                self.release_status = "截图仅支持 png/jpg/jpeg/gif/webp 格式"
+                return
+            # 简单校验文件头
+            if len(data) < 4:
+                self.release_status = "截图文件过小"
+                return
+            self._release_screenshot_data = data
+            self.release_screenshot_uploaded = True
+            self.release_status = f"截图已上传（{len(data) // 1024} KB），发布时一起更新"
+        except Exception as e:
+            self.release_status = f"截图上传失败: {e}"
+
+    async def handle_readme_upload(self, files: List[rx.UploadFile]):
+        """处理上传的 README 文本文件"""
+        if not self.admin_logged_in:
+            return
+        if not files:
+            return
+        try:
+            f = files[0]
+            data = await f.read()
+            name = getattr(f, "filename", None) or getattr(f, "name", None) or ""
+            if not name.lower().endswith((".md", ".markdown", ".txt")):
+                self.release_status = "README 仅支持 md/txt 文本文件"
+                self.release_status_type = "error"
+                return
+            if not data:
+                self.release_status = "README 文件为空"
+                self.release_status_type = "error"
+                return
+            try:
+                text = data.decode("utf-8")
+            except UnicodeDecodeError:
+                text = data.decode("gbk", errors="replace")
+            self.release_readme_text = text
+            self.release_readme_name = name
+            self.release_status = f"README 已加载（{name}，{len(text)} 字符），发布时一起更新"
+            self.release_status_type = "success"
+        except Exception as e:
+            self.release_status = f"README 上传失败: {e}"
+            self.release_status_type = "error"
+
+    def set_admin_change_old(self, value: str):
+        self.admin_change_old = value
+
+    def set_admin_change_new(self, value: str):
+        self.admin_change_new = value
+
+    def set_admin_change_confirm(self, value: str):
+        self.admin_change_confirm = value
+
+    def admin_login(self):
+        """管理员登录"""
+        cfg = self._get_admin_cfg()
+        if cfg is None:
+            self.admin_msg = "配置未就绪"
+            return
+        pwd = self.admin_password_input
+        if cfg.verify_password(pwd):
+            self.admin_logged_in = True
+            self.admin_show_login_dialog = False
+            self.admin_is_default_pwd = cfg.is_default_password
+            self.admin_msg = "登录成功"
+            self.admin_password_input = ""
+        else:
+            self.admin_msg = "密码错误"
+
+    def admin_logout(self):
+        self.admin_logged_in = False
+        self.admin_password_input = ""
+        self.admin_msg = ""
+        self.active_tab = "single"
+
+    def admin_change_password(self):
+        """修改管理员密码"""
+        if not self.admin_logged_in:
+            self.admin_msg = "请先登录"
+            return
+        cfg = self._get_admin_cfg()
+        if cfg is None:
+            return
+        if self.admin_change_new != self.admin_change_confirm:
+            self.admin_msg = "两次输入的新密码不一致"
+            return
+        ok, msg = cfg.change_password(self.admin_change_old, self.admin_change_new)
+        self.admin_msg = msg
+        if ok:
+            self.admin_is_default_pwd = False
+            self.admin_change_old = ""
+            self.admin_change_new = ""
+            self.admin_change_confirm = ""
+
+    def load_release_info(self):
+        """加载当前版本和历史版本信息"""
+        if not self.admin_logged_in:
+            return
+        mgr = self._get_release_mgr()
+        if mgr is None:
+            return
+        try:
+            cur = mgr.get_current_version()
+            if cur:
+                self.release_current = {
+                    "version": cur.version,
+                    "url": cur.url,
+                    "notes": cur.notes,
+                    "sha256": cur.sha256,
+                    "size_mb": str(cur.size_mb),
+                    "exe_name": cur.exe_name,
+                    "published_at": cur.published_at,
+                }
+            else:
+                self.release_current = {}
+            self.release_history = mgr.list_history()
+            # 默认版本号和 URL
+            if not self.release_version and cur:
+                # 尝试自增最后一段
+                parts = cur.version.split(".")
+                if parts and parts[-1].isdigit():
+                    parts[-1] = str(int(parts[-1]) + 1)
+                    self.release_version = ".".join(parts)
+            if not self.release_url and cur and cur.url:
+                self.release_url = cur.url.replace("/downloads/", "/download/")
+            # 如果还是空的，自动生成一个下载地址
+            if not self.release_url:
+                import reflex as rx
+                import socket
+                from urllib.parse import quote
+                try:
+                    config = rx.config.get_config()
+                    backend_port = getattr(config, "backend_port", 8000)
+                    # 尝试获取本机 IP
+                    try:
+                        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                        s.connect(("8.8.8.8", 80))
+                        host_ip = s.getsockname()[0]
+                        s.close()
+                    except Exception:
+                        host_ip = "127.0.0.1"
+                    exe_name = self.release_upload_name or "南网协议解析工具.exe"
+                    self.release_url = f"http://{host_ip}:{backend_port}/download/{quote(exe_name)}"
+                except Exception:
+                    pass
+            # 读取 README 内容（供编辑）
+            mgr2 = self._get_release_mgr()
+            if mgr2:
+                dl_dir = mgr2.downloads_dir
+                readme = dl_dir / "client_readme.md"
+                if not readme.exists():
+                    readme = dl_dir / "README.md"
+                if readme.exists():
+                    try:
+                        self.release_readme_text = readme.read_text(encoding="utf-8")
+                    except Exception:
+                        pass
+        except Exception as e:
+            self.release_status = f"加载失败: {e}"
+
+    def set_release_url_from_host(self, host: str):
+        """从前端传来的 host 设置默认下载 URL
+
+        开发模式下自动替换为后端端口（Vite 不代理下载路由）。
+        文件名优先使用用户上传的文件名。
+        """
+        if not host:
+            return
+        from urllib.parse import quote
+        import reflex as rx
+
+        exe_name = self.release_upload_name or "南网协议解析工具.exe"
+
+        # 开发模式：前端端口和后端端口不一致，下载走后端端口
+        # 生产模式：前后端共用一个端口，直接用 host
+        config = rx.config.get_config()
+        try:
+            frontend_port = getattr(config, "frontend_port", None)
+            backend_port = getattr(config, "backend_port", None)
+            # 如果 host 里的端口是前端端口，替换成后端端口
+            if frontend_port and backend_port and frontend_port != backend_port:
+                import re
+                host_with_backend = re.sub(
+                    r":\d+$", f":{backend_port}", host
+                )
+                if host_with_backend == host:
+                    # host 里没有端口号，补上后端端口
+                    host_with_backend = f"{host}:{backend_port}"
+                self.release_url = f"http://{host_with_backend}/download/{quote(exe_name)}"
+                return
+        except Exception:
+            pass
+
+        self.release_url = f"http://{host}/download/{quote(exe_name)}"
+
+    async def handle_release_upload(self, files: List[rx.UploadFile]):
+        """处理上传的 exe 文件（内容存后端）"""
+        if not self.admin_logged_in:
+            return
+        if not files:
+            return
+        try:
+            f = files[0]
+            data = await f.read()
+            name = getattr(f, "filename", None) or getattr(f, "name", None) or "未知文件"
+
+            # 校验 PE 头
+            if len(data) < 2 or data[:2] != b"MZ":
+                self.release_status = "文件不是有效的 exe（缺少 MZ 头）"
+                self.release_upload_name = ""
+                self.release_upload_size_mb = 0.0
+                self._release_exe_data = b""
+                return
+
+            self._release_exe_data = data
+            self.release_upload_name = name
+            self.release_upload_size_mb = round(len(data) / 1024 / 1024, 2)
+            self.release_status = f"已加载 {name}（{self.release_upload_size_mb:.2f} MB），填写版本号后点击发布"
+            # 上传后自动更新下载地址中的文件名
+            self._update_release_url_filename(name)
+        except Exception as e:
+            self.release_status = f"读取文件失败: {e}"
+
+    def _update_release_url_filename(self, name: str):
+        """更新下载地址中的文件名部分
+
+        - 如果 URL 为空，自动生成完整 URL（后端端口）
+        - 如果 URL 已有 /download/ 路径，替换文件名
+        - 如果 URL 是其他格式，保持不变
+        """
+        from urllib.parse import quote
+        import re
+
+        if not self.release_url:
+            # URL 为空，自动生成
+            import reflex as rx
+            import socket
+            try:
+                config = rx.config.get_config()
+                backend_port = getattr(config, "backend_port", 8000)
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    s.connect(("8.8.8.8", 80))
+                    host_ip = s.getsockname()[0]
+                    s.close()
+                except Exception:
+                    host_ip = "127.0.0.1"
+                self.release_url = f"http://{host_ip}:{backend_port}/download/{quote(name)}"
+            except Exception:
+                self.release_url = f"/download/{quote(name)}"
+            return
+
+        # 替换 /download/ 后面的文件名
+        m = re.sub(
+            r"(/download/)[^?#]*",
+            lambda m: m.group(1) + quote(name),
+            self.release_url,
+            count=1,
+        )
+        if m != self.release_url:
+            self.release_url = m
+
+    def publish_release(self):
+        """发布新版本
+
+        同步执行，确保状态变更全部推送到前端。
+        完成后自动刷新当前版本、历史列表，并弹出成功对话框。
+        """
+        if not self.admin_logged_in:
+            self.release_status = "请先登录"
+            self.release_status_type = "error"
+            return
+        mgr = self._get_release_mgr()
+        if mgr is None:
+            self.release_status = "发布管理器未就绪"
+            self.release_status_type = "error"
+            return
+        if not self._release_exe_data:
+            self.release_status = "请先上传 exe 文件"
+            self.release_status_type = "error"
+            return
+        if not self.release_version:
+            self.release_status = "请填写版本号"
+            self.release_status_type = "error"
+            return
+        if not self.release_url:
+            self.release_status = "请填写下载地址"
+            self.release_status_type = "error"
+            return
+
+        self.release_publishing = True
+        self.release_progress = 0
+        self.release_status = "发布中...请稍候"
+        self.release_status_type = "info"
+        self.release_show_success_dialog = False
+
+        try:
+            def progress_cb(p):
+                self.release_progress = int(p)
+
+            ok, msg, vi = mgr.publish(
+                exe_data=self._release_exe_data,
+                version=self.release_version.strip(),
+                notes=self.release_notes.strip(),
+                download_url=self.release_url.strip(),
+                exe_name=self.release_upload_name or "",
+                progress_cb=progress_cb,
+            )
+
+            if not ok:
+                self.release_status = msg
+                self.release_status_type = "error"
+                self.release_publishing = False
+                return
+
+            status_parts = [msg]
+
+            # 保存截图
+            if self._release_screenshot_data:
+                try:
+                    ss_path = mgr.downloads_dir / "client_screenshot.png"
+                    ss_path.write_bytes(self._release_screenshot_data)
+                    status_parts.append("截图已更新")
+                except Exception as se:
+                    status_parts.append(f"截图保存失败: {se}")
+
+            # 保存 README
+            if self.release_readme_text.strip():
+                try:
+                    readme_path = mgr.downloads_dir / "client_readme.md"
+                    readme_path.write_text(
+                        self.release_readme_text, encoding="utf-8"
+                    )
+                    status_parts.append("README 已更新")
+                except Exception as re:
+                    status_parts.append(f"README 保存失败: {re}")
+
+            # 清空上传缓存
+            self._release_exe_data = b""
+            self.release_upload_name = ""
+            self.release_upload_size_mb = 0.0
+            self._release_screenshot_data = b""
+            self.release_screenshot_uploaded = False
+
+            # 刷新数据
+            self.load_release_info()
+            self.load_download_info()
+
+            # 填充成功信息（弹窗用）
+            self.release_success_info = {
+                "version": self.release_current.get("version", "") if isinstance(self.release_current, dict) else "",
+                "size_mb": self.release_current.get("size_mb", "") if isinstance(self.release_current, dict) else "",
+                "exe_name": self.release_current.get("exe_name", "") if isinstance(self.release_current, dict) else "",
+                "sha256": self.release_current.get("sha256", "") if isinstance(self.release_current, dict) else "",
+            }
+
+            # 最终状态
+            self.release_status = "；".join(status_parts)
+            self.release_status_type = "success"
+            self.release_progress = 100
+            self.release_publishing = False
+            self.release_notes = ""
+            self.release_show_success_dialog = True
+
+        except Exception as e:
+            self.release_status = f"发布异常: {e}"
+            self.release_status_type = "error"
+            self.release_publishing = False
+
+    def close_release_success_dialog(self):
+        """关闭发布成功弹窗"""
+        self.release_show_success_dialog = False
+
+    def set_release_show_success_dialog(self, value: bool):
+        """设置发布成功弹窗显示状态"""
+        self.release_show_success_dialog = value
+
+    def rollback_version(self, version: str):
+        """回滚到指定版本"""
+        if not self.admin_logged_in:
+            self.release_status = "请先登录"
+            self.release_status_type = "error"
+            return
+        mgr = self._get_release_mgr()
+        if mgr is None:
+            return
+        # 确认提示由前端处理，这里直接执行
+        url = self.release_url or (self.release_current.get("url", "") if self.release_current else "")
+        exe_name = self.release_current.get("exe_name", "") if self.release_current else ""
+        ok, msg = mgr.rollback(version, download_url=url, exe_name=exe_name)
+        self.release_status = msg
+        self.release_status_type = "success" if ok else "error"
+        if ok:
+            self.load_release_info()
+            self.load_download_info()
+
+    def delete_history_version(self, version: str):
+        """删除历史版本"""
+        if not self.admin_logged_in:
+            self.release_status = "请先登录"
+            self.release_status_type = "error"
+            return
+        mgr = self._get_release_mgr()
+        if mgr is None:
+            return
+        ok, msg = mgr.delete_history(version)
+        self.release_status = msg
+        self.release_status_type = "success" if ok else "error"
+        if ok:
+            self.load_release_info()
 
     # ── 报文工具 ─────────────────────────────────────────────
     def set_tool_input(self, value: str):
@@ -2783,6 +3389,22 @@ def header() -> rx.Component:
                 ),
                 # 版本徽章
                 rx.badge("v1.13.0", color_scheme="blue", variant="soft", size="2"),
+                # 管理员登录/登出按钮
+                rx.cond(
+                    State.admin_logged_in,
+                    rx.el.button(
+                        rx.hstack(rx.icon("log_out", size=14), "退出", spacing="1"),
+                        on_click=State.admin_logout,
+                        class_name="app-header-btn",
+                        data_testid="btn-logout",
+                    ),
+                    rx.el.button(
+                        rx.hstack(rx.icon("shield", size=14), "管理员登录", spacing="1"),
+                        on_click=State.toggle_login_dialog,
+                        class_name="app-header-btn",
+                        data_testid="btn-login",
+                    ),
+                ),
                 # 状态指示
                 rx.hstack(
                     rx.box(
@@ -5572,6 +6194,7 @@ def diff_tab() -> rx.Component:
 def download_tab() -> rx.Component:
     """客户端下载（GUI 版 exe 下载）"""
     return rx.vstack(
+        # 标题
         rx.card(
             rx.vstack(
                 rx.hstack(
@@ -5589,14 +6212,137 @@ def download_tab() -> rx.Component:
             ),
             width="100%",
         ),
-        # 客户端展示图
+        # 下载按钮（最显眼，放前面）
+        rx.card(
+            rx.vstack(
+                rx.hstack(
+                    rx.cond(
+                        State.download_exe_available,
+                        rx.button(
+                            rx.hstack(rx.icon("download", size=18), rx.text("下载客户端 (exe)"), spacing="2"),
+                            on_click=State.download_client,
+                            color_scheme="blue",
+                            size="3",
+                            cursor="pointer",
+                        ),
+                        rx.button(
+                            rx.hstack(rx.icon("download", size=18), rx.text("客户端 exe 未就绪"), spacing="2"),
+                            disabled=True,
+                            color_scheme="gray",
+                            size="3",
+                        ),
+                    ),
+                    spacing="3",
+                    align_items="center",
+                ),
+                rx.cond(
+                    State.download_exe_name != "",
+                    rx.text(f"文件: {State.download_exe_name}", size="1", color="gray"),
+                ),
+                rx.cond(
+                    State.download_msg != "",
+                    rx.text(State.download_msg, size="1", color="gray"),
+                ),
+                spacing="3",
+                width="100%",
+            ),
+            width="100%",
+        ),
+        # 当前版本信息
+        rx.cond(
+            State.download_version != "",
+            rx.card(
+                rx.vstack(
+                    rx.hstack(
+                        rx.icon("info", size=20, color="#2563eb"),
+                        rx.heading("当前版本", size="3", font_weight="bold"),
+                        rx.spacer(),
+                        rx.badge(State.download_version, color_scheme="blue", variant="soft", size="2"),
+                        spacing="2",
+                        width="100%",
+                    ),
+                    rx.hstack(
+                        rx.text("发布日期:", size="2", color="gray", width="90px"),
+                        rx.text(State.download_version_date, size="2"),
+                        width="100%",
+                    ),
+                    rx.cond(
+                        State.download_version_notes != "",
+                        rx.vstack(
+                            rx.text("更新说明:", size="2", color="gray"),
+                            rx.text(
+                                State.download_version_notes,
+                                size="2",
+                                white_space="pre-wrap",
+                                line_height="1.8",
+                            ),
+                            spacing="1",
+                            width="100%",
+                        ),
+                    ),
+                    spacing="3",
+                    width="100%",
+                ),
+                width="100%",
+            ),
+        ),
+        # 历史版本
+        rx.cond(
+            State.download_history.length() > 0,
+            rx.card(
+                rx.vstack(
+                    rx.hstack(
+                        rx.icon("history", size=20, color="#6b7280"),
+                        rx.heading("版本历史", size="3", font_weight="bold"),
+                        rx.spacer(),
+                        rx.badge(
+                            f"{State.download_history.length()} 个历史版本",
+                            color_scheme="gray",
+                            variant="soft",
+                            size="1",
+                        ),
+                        spacing="2",
+                        width="100%",
+                    ),
+                    rx.table.root(
+                        rx.table.header(
+                            rx.table.row(
+                                rx.table.column_header_cell("版本号", width="25%"),
+                                rx.table.column_header_cell("发布日期", width="25%"),
+                                rx.table.column_header_cell("大小", width="20%"),
+                                rx.table.column_header_cell("说明", width="30%"),
+                            ),
+                        ),
+                        rx.table.body(
+                            rx.foreach(
+                                State.download_history,
+                                lambda item: rx.table.row(
+                                    rx.table.cell(item["version"], font_weight="medium"),
+                                    rx.table.cell(item["date"], size="1"),
+                                    rx.table.cell(item["size_mb"] + " MB", size="1"),
+                                    rx.table.cell(
+                                        rx.text("历史版本归档", size="1", color="gray"),
+                                    ),
+                                ),
+                            ),
+                        ),
+                        width="100%",
+                        size="2",
+                    ),
+                    spacing="3",
+                    width="100%",
+                ),
+                width="100%",
+            ),
+        ),
+        # 软件界面截图
         rx.card(
             rx.vstack(
                 rx.text("软件界面", size="2", font_weight="semibold"),
                 rx.cond(
                     State.download_image_available,
                     rx.image(
-                        src="/download/client_screenshot.png",
+                        src=State.download_image_data_url,
                         alt="客户端软件界面",
                         border_radius="8px",
                         border="1px solid #e5e7eb",
@@ -5608,10 +6354,10 @@ def download_tab() -> rx.Component:
                         rx.center(
                             rx.vstack(
                                 rx.icon("image_off", size=40, color="#94a3b8"),
-                                rx.text("界面截图未上传，请将 client_screenshot.png 放入 downloads/ 目录", size="2", color="#94a3b8"),
+                                rx.text("暂无界面截图", size="2", color="#94a3b8"),
                                 spacing="2",
                             ),
-                            min_height="240px",
+                            min_height="200px",
                         ),
                         border="1px dashed #cbd5e1",
                         border_radius="8px",
@@ -5648,44 +6394,550 @@ def download_tab() -> rx.Component:
                 width="100%",
             ),
         ),
-        # 下载按钮
+        spacing="3",
+        width="100%",
+    )
+
+
+# ═══════════════════════════════════════════════════════════════
+# 管理员登录对话框
+# ═══════════════════════════════════════════════════════════════
+
+def admin_login_dialog() -> rx.Component:
+    """管理员登录对话框（模态）"""
+    return rx.cond(
+        State.admin_show_login_dialog,
+        rx.dialog.root(
+            rx.dialog.content(
+                rx.dialog.title("管理员登录"),
+                rx.dialog.description(
+                    "输入管理员密码以访问发布管理功能。"
+                ),
+                rx.vstack(
+                    rx.input(
+                        type="password",
+                        placeholder="请输入管理员密码",
+                        value=State.admin_password_input,
+                        on_change=State.set_admin_password_input,
+                        width="100%",
+                    ),
+                    rx.cond(
+                        State.admin_msg != "",
+                        rx.text(State.admin_msg, size="1", color="red"),
+                    ),
+                    rx.text(
+                        "默认密码: admin123（首次登录后请及时修改）",
+                        size="1",
+                        color="gray",
+                    ),
+                    spacing="3",
+                    width="100%",
+                    padding_top="12px",
+                ),
+                rx.dialog.close(
+                    rx.hstack(
+                        rx.spacer(),
+                        rx.button("取消", variant="soft", size="2"),
+                        rx.button(
+                            "登录",
+                            on_click=State.admin_login,
+                            color_scheme="blue",
+                            size="2",
+                        ),
+                        spacing="2",
+                    ),
+                    top="auto",
+                ),
+                max_width="420px",
+            ),
+            open=State.admin_show_login_dialog,
+        ),
+    )
+
+
+# ═══════════════════════════════════════════════════════════════
+# 发布管理 Tab
+# ═══════════════════════════════════════════════════════════════
+
+def release_tab() -> rx.Component:
+    """发布管理页面（管理员登录后可见）"""
+    return rx.vstack(
+        # 当前版本信息卡片
         rx.card(
             rx.vstack(
                 rx.hstack(
-                    rx.cond(
-                        State.download_exe_available,
-                        rx.button(
-                            rx.hstack(rx.icon("download", size=18), rx.text("下载客户端 (exe)"), spacing="2"),
-                            on_click=State.download_client,
-                            color_scheme="blue",
-                            size="3",
-                            cursor="pointer",
-                        ),
-                        rx.button(
-                            rx.hstack(rx.icon("download", size=18), rx.text("客户端 exe 未就绪"), spacing="2"),
-                            disabled=True,
-                            color_scheme="gray",
-                            size="3",
-                        ),
+                    rx.icon("package", size=22, color="#16a34a"),
+                    rx.heading("当前版本", size="4", font_weight="bold"),
+                    rx.spacer(),
+                    rx.button(
+                        rx.icon("refresh_ccw", size=14),
+                        size="1",
+                        variant="soft",
+                        on_click=State.load_release_info,
+                        cursor="pointer",
                     ),
-                    spacing="3",
-                    align_items="center",
+                    rx.cond(
+                        State.admin_is_default_pwd,
+                        rx.badge("使用默认密码，请修改", color_scheme="red", variant="soft"),
+                    ),
+                    spacing="2",
+                    width="100%",
                 ),
                 rx.cond(
-                    State.download_exe_name != "",
-                    rx.text(f"当前版本: {State.download_exe_name}", size="1", color="gray"),
-                ),
-                rx.cond(
-                    State.download_msg != "",
-                    rx.text(State.download_msg, size="1", color="gray"),
-                ),
-                rx.text(
-                    "将 GUI 版 exe 放入服务器 downloads/ 目录（如 南网协议解析工具.exe），页面自动显示下载按钮。",
-                    size="1",
-                    color="#94a3b8",
+                    State.release_current != {},
+                    rx.vstack(
+                        rx.hstack(
+                            rx.text("版本号:", font_weight="medium", width="100px", color="gray"),
+                            rx.text(State.release_current["version"], size="2", font_weight="semibold"),
+                            width="100%",
+                        ),
+                        rx.hstack(
+                            rx.text("文件名:", font_weight="medium", width="100px", color="gray"),
+                            rx.text(State.release_current["exe_name"], size="2"),
+                            width="100%",
+                        ),
+                        rx.hstack(
+                            rx.text("大小:", font_weight="medium", width="100px", color="gray"),
+                            rx.text(State.release_current["size_mb"] + " MB", size="2"),
+                            width="100%",
+                        ),
+                        rx.hstack(
+                            rx.text("发布时间:", font_weight="medium", width="100px", color="gray"),
+                            rx.text(State.release_current["published_at"], size="2"),
+                            width="100%",
+                        ),
+                        rx.hstack(
+                            rx.text("下载地址:", font_weight="medium", width="100px", color="gray"),
+                            rx.text(State.release_current["url"], size="1", color="blue", word_break="break-all"),
+                            width="100%",
+                        ),
+                        rx.hstack(
+                            rx.text("SHA-256:", font_weight="medium", width="100px", color="gray"),
+                            rx.code(State.release_current["sha256"], size="1", word_break="break-all"),
+                            width="100%",
+                        ),
+                        rx.hstack(
+                            rx.text("更新说明:", font_weight="medium", width="100px", color="gray", align_self="flex-start"),
+                            rx.text(State.release_current["notes"], size="2", white_space="pre-wrap"),
+                            width="100%",
+                        ),
+                        spacing="2",
+                        width="100%",
+                        padding_top="8px",
+                    ),
+                    rx.text("暂无已发布版本", size="2", color="gray", padding="20px"),
                 ),
                 spacing="3",
                 width="100%",
+            ),
+            width="100%",
+        ),
+        # 发布新版本卡片
+        rx.card(
+            rx.vstack(
+                rx.hstack(
+                    rx.icon("upload", size=20, color="#2563eb"),
+                    rx.heading("发布新版本", size="4", font_weight="bold"),
+                    spacing="2",
+                ),
+                # exe 上传
+                rx.vstack(
+                    rx.text("exe 文件:", size="2", font_weight="medium"),
+                    rx.upload(
+                        rx.vstack(
+                            rx.icon("upload", size=32, color="#94a3b8"),
+                            rx.text("拖拽 exe 到此处，或点击选择文件", size="2", color="gray"),
+                            rx.text("支持 .exe，最大 500MB", size="1", color="#94a3b8"),
+                            spacing="2",
+                            align="center",
+                            justify="center",
+                            padding="20px",
+                        ),
+                        border="1px dashed #cbd5e1",
+                        border_radius="8px",
+                        padding="20px",
+                        on_drop=State.handle_release_upload,
+                        accept={
+                            ".exe": [
+                                "application/octet-stream",
+                                "application/x-msdownload",
+                                "application/x-dosexec",
+                                "application/vnd.microsoft.portable-executable",
+                            ]
+                        },
+                        max_files=1,
+                        max_size=500 * 1024 * 1024,
+                        width="100%",
+                        id="release-upload",
+                    ),
+                    # 已上传文件信息
+                    rx.cond(
+                        State.release_upload_name != "",
+                        rx.hstack(
+                            rx.icon("file_check", size=18, color="#16a34a"),
+                            rx.text(State.release_upload_name, size="2", font_weight="medium"),
+                            rx.text(f"（{State.release_upload_size_mb} MB）", size="1", color="gray"),
+                            spacing="2",
+                            align="center",
+                        ),
+                    ),
+                    spacing="2",
+                    width="100%",
+                ),
+                # 版本号
+                rx.vstack(
+                    rx.text("版本号:", size="2", font_weight="medium"),
+                    rx.input(
+                        placeholder="如 1.14.0",
+                        value=State.release_version,
+                        on_change=State.set_release_version,
+                        width="100%",
+                    ),
+                    spacing="1",
+                    width="100%",
+                ),
+                # 下载地址
+                rx.vstack(
+                    rx.text("下载地址:", size="2", font_weight="medium"),
+                    rx.input(
+                        placeholder="http://服务器地址/download/南网协议解析工具.exe",
+                        value=State.release_url,
+                        on_change=State.set_release_url,
+                        width="100%",
+                    ),
+                    rx.text(
+                        "必须是完整 URL（含 http://），客户端 auto_updater 直接使用此字段下载。默认继承上一版本的地址。",
+                        size="1",
+                        color="gray",
+                    ),
+                    spacing="1",
+                    width="100%",
+                ),
+                # 更新说明
+                rx.vstack(
+                    rx.text("更新说明:", size="2", font_weight="medium"),
+                    rx.text_area(
+                        placeholder="本次更新内容...",
+                        value=State.release_notes,
+                        on_change=State.set_release_notes,
+                        min_height="80px",
+                        width="100%",
+                    ),
+                    spacing="1",
+                    width="100%",
+                ),
+                # 软件界面截图上传
+                rx.vstack(
+                    rx.text("软件界面截图:", size="2", font_weight="medium"),
+                    rx.upload(
+                        rx.vstack(
+                            rx.icon("image", size=24, color="#94a3b8"),
+                            rx.text("拖拽截图到此处，或点击选择", size="2", color="gray"),
+                            rx.text("支持 png/jpg/jpeg/gif/webp", size="1", color="#94a3b8"),
+                            spacing="1",
+                            align="center",
+                            justify="center",
+                            padding="12px",
+                        ),
+                        border="1px dashed #cbd5e1",
+                        border_radius="8px",
+                        padding="12px",
+                        on_drop=State.handle_screenshot_upload,
+                        accept={
+                            "image/*": [".png", ".jpg", ".jpeg", ".gif", ".webp"],
+                        },
+                        max_files=1,
+                        max_size=10 * 1024 * 1024,
+                        width="100%",
+                        id="screenshot-upload",
+                    ),
+                    rx.cond(
+                        State.release_screenshot_uploaded,
+                        rx.hstack(
+                            rx.icon("check_check", size=16, color="#16a34a"),
+                            rx.text("截图已上传，发布时一起更新", size="1", color="#16a34a"),
+                            spacing="1",
+                        ),
+                    ),
+                    rx.text(
+                        "发布后显示在客户端下载页的「软件界面」区域，文件名固定为 client_screenshot.png",
+                        size="1",
+                        color="gray",
+                    ),
+                    spacing="1",
+                    width="100%",
+                ),
+                # README 上传
+                rx.vstack(
+                    rx.text("客户端说明 (README):", size="2", font_weight="medium"),
+                    rx.upload(
+                        rx.vstack(
+                            rx.icon("file-text", size=24, color="#94a3b8"),
+                            rx.text("拖拽 README 文件到此处，或点击选择", size="2", color="gray"),
+                            rx.text("支持 md/markdown/txt 文本文件", size="1", color="#94a3b8"),
+                            spacing="1",
+                            align="center",
+                            justify="center",
+                            padding="12px",
+                        ),
+                        border="1px dashed #cbd5e1",
+                        border_radius="8px",
+                        padding="12px",
+                        on_drop=State.handle_readme_upload,
+                        accept={
+                            "text/markdown": [".md", ".markdown"],
+                            "text/plain": [".txt"],
+                        },
+                        max_files=1,
+                        max_size=2 * 1024 * 1024,
+                        width="100%",
+                        id="readme-upload",
+                    ),
+                    rx.cond(
+                        State.release_readme_name != "",
+                        rx.hstack(
+                            rx.icon("check_check", size=16, color="#16a34a"),
+                            rx.text(f"已加载 {State.release_readme_name}，发布时一起更新", size="1", color="#16a34a"),
+                            spacing="1",
+                        ),
+                    ),
+                    rx.text(
+                        "发布后显示在客户端下载页底部，留空则不更新（保留已有 README）。",
+                        size="1",
+                        color="gray",
+                    ),
+                    spacing="1",
+                    width="100%",
+                ),
+                # 进度条
+                rx.cond(
+                    State.release_publishing,
+                    rx.vstack(
+                        rx.progress(value=State.release_progress, width="100%"),
+                        rx.text(f"SHA-256 计算中... {State.release_progress}%", size="1", color="gray"),
+                        spacing="1",
+                        width="100%",
+                    ),
+                ),
+                # 状态消息
+                rx.cond(
+                    State.release_status != "",
+                    rx.vstack(
+                        rx.cond(
+                            State.release_status_type == "success",
+                            rx.text(State.release_status, size="2", color="green", font_weight="semibold"),
+                        ),
+                        rx.cond(
+                            State.release_status_type == "error",
+                            rx.text(State.release_status, size="2", color="red"),
+                        ),
+                        rx.cond(
+                            State.release_status_type == "info",
+                            rx.text(State.release_status, size="2", color="blue"),
+                        ),
+                        spacing="1",
+                        width="100%",
+                    ),
+                ),
+                # 发布按钮
+                rx.hstack(
+                    rx.spacer(),
+                    rx.button(
+                        rx.hstack(rx.icon("rocket", size=16), "发布", spacing="2"),
+                        on_click=State.publish_release,
+                        color_scheme="blue",
+                        size="3",
+                        disabled=State.release_publishing,
+                        cursor="pointer",
+                    ),
+                    spacing="2",
+                    width="100%",
+                ),
+                spacing="4",
+                width="100%",
+            ),
+            width="100%",
+        ),
+        # 发布成功弹窗
+        rx.dialog.root(
+            rx.dialog.content(
+                rx.dialog.title(
+                    rx.hstack(
+                        rx.icon("check_check", size=24, color="green"),
+                        "发布成功",
+                        spacing="2",
+                    ),
+                ),
+                rx.dialog.description(
+                    rx.vstack(
+                        rx.text(
+                            State.release_success_info["version"],
+                            size="3",
+                            font_weight="medium",
+                        ),
+                        rx.text(
+                            State.release_success_info["size_mb"],
+                            size="2",
+                            color="gray",
+                        ),
+                        rx.text(
+                            State.release_success_info["exe_name"],
+                            size="2",
+                            color="gray",
+                        ),
+                        rx.vstack(
+                            rx.text("SHA-256:", size="2", color="gray"),
+                            rx.code(
+                                State.release_success_info["sha256"],
+                                size="1",
+                                word_break="break-all",
+                                background="#f1f5f9",
+                                padding="8px",
+                                border_radius="4px",
+                                width="100%",
+                            ),
+                            spacing="1",
+                            width="100%",
+                        ),
+                        spacing="3",
+                        width="100%",
+                        align="start",
+                    ),
+                ),
+                rx.dialog.close(
+                    rx.button(
+                        "知道了",
+                        color_scheme="green",
+                        size="3",
+                        width="100%",
+                        cursor="pointer",
+                    ),
+                ),
+                spacing="4",
+                width="100%",
+                max_width="500px",
+            ),
+            open=State.release_show_success_dialog,
+            on_open_change=State.set_release_show_success_dialog,
+        ),
+        # 历史版本卡片
+        rx.card(
+            rx.vstack(
+                rx.hstack(
+                    rx.icon("history", size=20, color="#f59e0b"),
+                    rx.heading("历史版本", size="4", font_weight="bold"),
+                    spacing="2",
+                ),
+                rx.cond(
+                    State.release_history.length() > 0,
+                    rx.table.root(
+                        rx.table.header(
+                            rx.table.row(
+                                rx.table.column_header_cell("版本号", width="20%"),
+                                rx.table.column_header_cell("大小", width="15%"),
+                                rx.table.column_header_cell("归档时间", width="25%"),
+                                rx.table.column_header_cell("操作", width="40%"),
+                            ),
+                        ),
+                        rx.table.body(
+                            rx.foreach(
+                                State.release_history,
+                                lambda item: rx.table.row(
+                                    rx.table.cell(item["version"], font_weight="medium"),
+                                    rx.table.cell(item["size_mb"] + " MB"),
+                                    rx.table.cell(item["archived_at"], size="1"),
+                                    rx.table.cell(
+                                        rx.hstack(
+                                            rx.button(
+                                                "回滚到此版本",
+                                                size="1",
+                                                variant="soft",
+                                                color_scheme="amber",
+                                                on_click=lambda: State.rollback_version(item["version"]),
+                                            ),
+                                            rx.button(
+                                                "删除",
+                                                size="1",
+                                                variant="soft",
+                                                color_scheme="red",
+                                                on_click=lambda: State.delete_history_version(item["version"]),
+                                            ),
+                                            spacing="2",
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                        width="100%",
+                        size="2",
+                    ),
+                    rx.text("暂无历史版本", size="2", color="gray", padding="20px"),
+                ),
+                spacing="3",
+                width="100%",
+            ),
+            width="100%",
+        ),
+        # 修改密码卡片
+        rx.card(
+            rx.vstack(
+                rx.hstack(
+                    rx.icon("key", size=20, color="#6366f1"),
+                    rx.heading("修改密码", size="4", font_weight="bold"),
+                    spacing="2",
+                ),
+                rx.vstack(
+                    rx.text("原密码:", size="2", font_weight="medium"),
+                    rx.input(
+                        type="password",
+                        value=State.admin_change_old,
+                        on_change=State.set_admin_change_old,
+                        width="100%",
+                    ),
+                    spacing="1",
+                    width="100%",
+                ),
+                rx.vstack(
+                    rx.text("新密码:", size="2", font_weight="medium"),
+                    rx.input(
+                        type="password",
+                        value=State.admin_change_new,
+                        on_change=State.set_admin_change_new,
+                        width="100%",
+                    ),
+                    spacing="1",
+                    width="100%",
+                ),
+                rx.vstack(
+                    rx.text("确认新密码:", size="2", font_weight="medium"),
+                    rx.input(
+                        type="password",
+                        value=State.admin_change_confirm,
+                        on_change=State.set_admin_change_confirm,
+                        width="100%",
+                    ),
+                    spacing="1",
+                    width="100%",
+                ),
+                rx.cond(
+                    State.admin_msg != "",
+                    rx.text(State.admin_msg, size="2", color="blue"),
+                ),
+                rx.hstack(
+                    rx.spacer(),
+                    rx.button(
+                        "修改密码",
+                        on_click=State.admin_change_password,
+                        color_scheme="indigo",
+                        size="2",
+                        cursor="pointer",
+                    ),
+                    spacing="2",
+                    width="100%",
+                ),
+                spacing="3",
+                width="100%",
+                max_width="480px",
             ),
             width="100%",
         ),
@@ -6127,6 +7379,21 @@ body {
 }
 .app-header-select:hover { background: rgba(255, 255, 255, 0.22); }
 .app-header-select option { color: #0f172a; background: #ffffff; }
+.app-header-btn {
+  background: rgba(255, 255, 255, 0.15);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.15s;
+}
+.app-header-btn:hover { background: rgba(255, 255, 255, 0.25); }
 /* ===== Tab 导航 ===== */
 .app-tabbar {
   display: flex;
@@ -6225,6 +7492,16 @@ def index() -> rx.Component:
                     class_name=rx.cond(State.active_tab == "download", "app-tab app-tab-active", "app-tab"),
                     data_testid="tab-download",
                 ),
+                # 发布管理 tab（仅登录后显示）
+                rx.cond(
+                    State.admin_logged_in,
+                    rx.el.button(
+                        rx.hstack(rx.icon("rocket", size=16), "发布管理", spacing="1"),
+                        on_click=lambda: State.set_tab("release"),
+                        class_name=rx.cond(State.active_tab == "release", "app-tab app-tab-active", "app-tab"),
+                        data_testid="tab-release",
+                    ),
+                ),
                 class_name="app-tabbar",
                 width="100%",
             ),
@@ -6247,7 +7524,11 @@ def index() -> rx.Component:
                                 rx.cond(
                                     State.active_tab == "download",
                                     download_tab(),
-                                    lookup_tab(),
+                                    rx.cond(
+                                        State.active_tab == "release",
+                                        release_tab(),
+                                        lookup_tab(),
+                                    ),
                                 ),
                             ),
                         ),
@@ -6257,6 +7538,8 @@ def index() -> rx.Component:
             class_name="app-container",
             width="100%",
         ),
+        # 管理员登录对话框
+        admin_login_dialog(),
         background="#f1f5f9",
         min_height="100vh",
     )
@@ -6280,3 +7563,78 @@ app = rx.App(
 )
 
 app.add_page(index, route="/", title="多协议解析平台")
+
+
+# ═══════════════════════════════════════════════════════════════
+# 开发模式下载路由（生产模式由 run_app.py 的 ASGI 中间件提供）
+# ═══════════════════════════════════════════════════════════════
+
+def _get_downloads_dir() -> Path:
+    """获取 downloads 目录路径"""
+    here = Path(__file__).resolve()
+    d = here.parent.parent / "downloads"
+    if d.exists():
+        return d
+    return here.parent / "downloads"
+
+
+async def _dev_download_handler(request):
+    """Starlette 路由：开发模式下提供 /download/ 静态文件
+
+    生产模式（run_app.py）由 ASGI 中间件 _serve_download 提供。
+    """
+    from starlette.responses import FileResponse, PlainTextResponse
+    from urllib.parse import unquote
+    import mimetypes
+
+    path = request.path_params.get("path", "")
+    filename = unquote(path)
+
+    # 防目录穿越
+    if not filename or ".." in filename or filename.startswith("/") or "\\" in filename:
+        return PlainTextResponse("Invalid filename", status_code=404)
+
+    # archive/ 历史版本归档目录不对外公开
+    if filename.startswith("archive/") or filename == "archive":
+        return PlainTextResponse("Forbidden", status_code=403)
+
+    # 只允许文件名（不允许子目录）—— 但支持 archive/ 前缀已被禁
+    # 这里再做一次路径规范化校验
+    downloads_dir = _get_downloads_dir()
+    file_path = (downloads_dir / filename).resolve()
+    try:
+        file_path.relative_to(downloads_dir.resolve())
+    except ValueError:
+        return PlainTextResponse("Invalid filename", status_code=404)
+
+    if not file_path.exists() or not file_path.is_file():
+        return PlainTextResponse(f"File not found: {filename}", status_code=404)
+
+    mime, _ = mimetypes.guess_type(str(file_path))
+    content_type = mime or "application/octet-stream"
+
+    # exe 强制下载
+    if file_path.suffix.lower() == ".exe":
+        from urllib.parse import quote
+        ascii_name = file_path.name.encode("ascii", "ignore").decode("ascii")
+        if ascii_name == file_path.name:
+            disp = f'attachment; filename="{file_path.name}"'
+        else:
+            disp = f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(file_path.name)}"
+        return FileResponse(
+            str(file_path),
+            media_type="application/octet-stream",
+            filename=file_path.name,
+            headers={"Content-Disposition": disp},
+        )
+
+    return FileResponse(str(file_path), media_type=content_type)
+
+
+# 注册到 Reflex 的 Starlette 后端（开发模式生效）
+# 同时注册 /download/ 和 /api/download/：
+#   /download/       —— 生产模式（run_app.py 中间件）直连
+#   /api/download/   —— 开发模式 Vite 会把 /api/* 代理到后端
+from starlette.routing import Route
+app._api.routes.insert(0, Route("/download/{path:path}", _dev_download_handler, methods=["GET"]))
+app._api.routes.insert(0, Route("/api/download/{path:path}", _dev_download_handler, methods=["GET"]))

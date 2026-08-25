@@ -21,7 +21,9 @@ from PySide6.QtWidgets import (
 
 from system_integration import registry_menu
 
-CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.json"
+from app_paths import data_path
+
+CONFIG_PATH = data_path("config.json")
 
 DEFAULT_SYSTEM_SETTINGS = {
     "auto_start": False,

@@ -1,0 +1,164 @@
+{
+  "commands": [
+    {
+      "protocol": "dlt698",
+      "button_name": "柔控命令",
+      "group_name": "常用查询",
+      "frame_hex": "68 1F 00 43 04 33 00 00 00 00 00 0C 57 06 01 01 80 02 02 00 02 02 05 D0 07 00 00 11 05 00 32 4D 16",
+      "description": "用于测试柔控使用",
+      "config": {
+        "protocol_mode": "dlt698",
+        "current_di_key": null,
+        "current_afn_fn": null,
+        "custom_mode": false,
+        "south": {
+          "src_addr": "000000000000",
+          "dst_addr": "000000000000",
+          "dir": 0,
+          "prm": 0,
+          "add": 0
+        },
+        "gdw": {
+          "comm_type": 0,
+          "dir": 0,
+          "prm": 1,
+          "seq": "0",
+          "route_flag": 0,
+          "comm_module": 0,
+          "relay_level": 0,
+          "channel": "0",
+          "resp_bytes": "0",
+          "src_addr": "000000000000",
+          "dst_addr": "000000000000",
+          "relay_addrs": []
+        },
+        "field_values": {
+          "OI": 32770,
+          "属性标识": 2
+        },
+        "custom_templates": []
+      },
+      "id": "446671e5"
+    },
+    {
+      "protocol": "dlt698",
+      "button_name": "事件",
+      "group_name": "常用查询",
+      "frame_hex": "68 1F 00 43 04 33 00 00 00 00 00 0C 57 06 01 01 80 03 02 00 02 02 05 D0 07 00 00 11 05 00 9F 48 16",
+      "description": "",
+      "config": {
+        "protocol_mode": "dlt698",
+        "current_di_key": null,
+        "current_afn_fn": null,
+        "custom_mode": false,
+        "south": {
+          "src_addr": "000000000000",
+          "dst_addr": "000000000000",
+          "dir": 0,
+          "prm": 0,
+          "add": 0
+        },
+        "gdw": {
+          "comm_type": 0,
+          "dir": 0,
+          "prm": 1,
+          "seq": "0",
+          "route_flag": 0,
+          "comm_module": 0,
+          "relay_level": 0,
+          "channel": "0",
+          "resp_bytes": "0",
+          "src_addr": "000000000000",
+          "dst_addr": "000000000000",
+          "relay_addrs": []
+        },
+        "field_values": {
+          "OI": 32771,
+          "属性标识": 2
+        },
+        "custom_templates": []
+      },
+      "id": "552a3163"
+    },
+    {
+      "protocol": "dlt698",
+      "button_name": "读取分布式设备版本信息",
+      "group_name": "常用查询",
+      "frame_hex": "68 17 00 43 05 09 00 00 00 00 00 00 4B 38 05 01 01 43 00 03 00 00 6D 5C 16",
+      "description": "",
+      "config": {
+        "protocol_mode": "dlt698",
+        "current_di_key": null,
+        "current_afn_fn": null,
+        "custom_mode": false,
+        "south": {
+          "src_addr": "000000000000",
+          "dst_addr": "000000000000",
+          "dir": 0,
+          "prm": 0,
+          "add": 0
+        },
+        "gdw": {
+          "comm_type": 0,
+          "dir": 0,
+          "prm": 1,
+          "seq": "0",
+          "route_flag": 0,
+          "comm_module": 0,
+          "relay_level": 0,
+          "channel": "0",
+          "resp_bytes": "0",
+          "src_addr": "000000000000",
+          "dst_addr": "000000000000",
+          "relay_addrs": []
+        },
+        "field_values": {
+          "OI": 17152,
+          "属性标识": 3
+        },
+        "custom_templates": []
+      },
+      "id": "b139cb2d"
+    },
+    {
+      "protocol": "dlt698",
+      "button_name": "南瑞分布式读取版本信息",
+      "group_name": "常用查询",
+      "frame_hex": "68 17 00 43 05 89 00 00 00 00 25 00 DD E3 05 01 01 43 00 03 00 00 6D 5C 16",
+      "description": "",
+      "config": {
+        "protocol_mode": "dlt698",
+        "current_di_key": null,
+        "current_afn_fn": null,
+        "custom_mode": false,
+        "south": {
+          "src_addr": "000000000000",
+          "dst_addr": "000000000000",
+          "dir": 0,
+          "prm": 0,
+          "add": 0
+        },
+        "gdw": {
+          "comm_type": 0,
+          "dir": 0,
+          "prm": 1,
+          "seq": "0",
+          "route_flag": 0,
+          "comm_module": 0,
+          "relay_level": 0,
+          "channel": "0",
+          "resp_bytes": "0",
+          "src_addr": "000000000000",
+          "dst_addr": "000000000000",
+          "relay_addrs": []
+        },
+        "field_values": {
+          "OI": 17152,
+          "属性标识": 3
+        },
+        "custom_templates": []
+      },
+      "id": "adabb357"
+    }
+  ]
+}

@@ -97,10 +97,37 @@ def compile_lockfile(python_version: str) -> None:
     ])
 
 
-def ensure_frontend() -> None:
-    if FRONTEND_CLIENT.exists():
-        print(f"==> 前端产物已存在: {FRONTEND_CLIENT}")
-        return
+def _frontend_sources() -> list[Path]:
+    """返回会编译进前端 bundle 的源码文件（用于新鲜度判定）。
+
+    GLOBAL_CSS 等前端样式与页面结构写在 reflex_web/reflex_web/*.py 里，
+    经 rx.el.style() 编译进 .web/build/client bundle。若这些源码比 bundle 新，
+    说明 bundle 是陈旧产物，必须重新 export，否则增量/重复构建会把旧 CSS
+    打进部署包（详见 08-19-deployed-row-wrap 任务）。
+    """
+    srcs: list[Path] = []
+    app_dir = REFLEX_WEB / "reflex_web"
+    for pat in ("*.py", "*.pyx", "*.txt", "*.md"):
+        srcs.extend(app_dir.glob(pat))
+    rxconfig = REFLEX_WEB / "rxconfig.py"
+    if rxconfig.exists():
+        srcs.append(rxconfig)
+    return srcs
+
+
+def ensure_frontend(*, force: bool = False) -> None:
+    if not force and FRONTEND_CLIENT.exists():
+        newest_src = _frontend_sources()
+        newest_src = max(newest_src, key=lambda p: p.stat().st_mtime, default=None) if newest_src else None
+        newest_ts = newest_src.stat().st_mtime if newest_src else 0
+        newest_client_ts = max(
+            (p.stat().st_mtime for p in FRONTEND_CLIENT.rglob("*") if p.is_file()),
+            default=0,
+        )
+        if newest_src is None or newest_ts <= newest_client_ts:
+            print(f"==> 前端产物已是最新: {FRONTEND_CLIENT}")
+            return
+        print("==> 检测到前端源码较新，重新构建前端 bundle…")
 
     reflex_cli = shutil.which("reflex")
     if reflex_cli:

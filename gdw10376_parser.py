@@ -3,6 +3,7 @@ import os
 import struct
 from typing import Dict, Any, Optional, Tuple, List
 from gdw10376_tool import GDWControlField, COMM_TYPE_MAP, DIR_MAP, PRM_MAP
+from app_paths import data_path, ensure_data_file
 
 
 class GDW10376Parser:
@@ -198,19 +199,23 @@ class GDW10376Parser:
         },
     }
 
-    def __init__(self, custom_config_path: str = "gdw_custom_afn.json"):
+    def __init__(self, custom_config_path: Optional[str] = None):
         """初始化解析器，加载自定义AFN+Fn定义
 
         Args:
-            custom_config_path: 自定义AFN+Fn配置文件路径
+            custom_config_path: 自定义AFN+Fn配置文件路径（None 时用数据目录下的 gdw_custom_afn.json）
         """
         self._custom_afn_map: Dict[int, str] = {}
         self._custom_fn_map: Dict[int, Dict[int, str]] = {}
+        if custom_config_path is None:
+            custom_config_path = str(data_path("gdw_custom_afn.json"))
         self._custom_config_path = custom_config_path
         self._load_custom_config()
 
     def _load_custom_config(self):
         """从JSON文件加载自定义AFN+Fn定义"""
+        if self._custom_config_path == str(data_path("gdw_custom_afn.json")):
+            ensure_data_file("gdw_custom_afn.json")
         if not os.path.exists(self._custom_config_path):
             return
         try:

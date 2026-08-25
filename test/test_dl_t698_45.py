@@ -156,15 +156,21 @@ def test_apdu_get_response_normal():
     parser = DLT69845APDUParser()
     axdr = AXDRCoder()
 
-    # GET-Response Normal: 85 01 [PIID-ACD=00] [OAD=2000 40 01] [00=DAR_OK] [Data]
-    # Data = long-unsigned 1234 (tag=0x12, value=0x1234)
+    # GET-Response Normal: 85 01 [PIID-ACD=00] [OAD=2000 40 01] [Get-Result]
+    # 表54: Get-Result::=CHOICE { 错误信息[0] DAR, 数据[1] Data }（附录H.3.1 示例同）
+    # [1]=Data: long-unsigned 1234 (tag=0x12, value=0x1234)
     data_bytes = axdr.encode(0x1234, 0x12)
-    apdu = bytes([0x85, 0x01, 0x00, 0x20, 0x00, 0x40, 0x01, 0x00]) + data_bytes
+    apdu = bytes([0x85, 0x01, 0x00, 0x20, 0x00, 0x40, 0x01, 0x01]) + data_bytes
     result = parser.parse(apdu)
     assert result["APDU类型"] == "GET-Response"
     assert result["子类型"] == "GetResponseNormal"
     assert result["OAD"]["解析值"]["OI"] == "0x2000"
-    assert result.get("数据访问结果", {}).get("DAR") == 0
+    assert result["数据"]["解析值"] == 0x1234
+    # [0]=DAR: 错误响应（如 拒绝读写=3）
+    apdu_err = bytes([0x85, 0x01, 0x00, 0x20, 0x00, 0x40, 0x01, 0x00, 0x03])
+    r2 = parser.parse(apdu_err)
+    assert r2.get("数据访问结果", {}).get("解析值") == 3
+    assert r2["数据访问结果"]["说明"] == "拒绝读写"
     print("test_apdu_get_response_normal PASSED")
 
 

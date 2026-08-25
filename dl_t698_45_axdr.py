@@ -234,11 +234,11 @@ class AXDRCoder:
     # --- 复合类型 ---
 
     def _decode_array(self, data: bytes, offset: int) -> Tuple[dict, int]:
-        length, llen = self._decode_length(data, offset + 1)
+        # tag 后为元素个数（文档 H.3.2：01 array / 03 元素个数=3）
+        count, llen = self._decode_length(data, offset + 1)
         items = []
         pos = offset + 1 + llen
-        end = pos + length
-        while pos < end:
+        for _ in range(count):
             item, consumed = self.decode(data, pos)
             items.append(item)
             pos += consumed
@@ -246,11 +246,10 @@ class AXDRCoder:
                 "解析值": items, "说明": f"{len(items)}个元素"}, pos - offset
 
     def _decode_structure(self, data: bytes, offset: int) -> Tuple[dict, int]:
-        length, llen = self._decode_length(data, offset + 1)
+        count, llen = self._decode_length(data, offset + 1)
         items = []
         pos = offset + 1 + llen
-        end = pos + length
-        while pos < end:
+        for _ in range(count):
             item, consumed = self.decode(data, pos)
             items.append(item)
             pos += consumed

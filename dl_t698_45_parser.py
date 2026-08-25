@@ -361,28 +361,61 @@ class DLT69845Parser:
         return table_data
 
     def _add_eb_business_fields(self, biz: dict, table_data: list, level: int):
-        """展示 EB 字段解码结果 {字段名: {值, 类型, 长度}} 或标准字符串值"""
+        """展示 EB 字段解码结果 {字段名: {值, 类型, 长度, 原始值}} 或标准字符串值"""
         indent = "  " * level
         for biz_k, biz_v in biz.items():
             if isinstance(biz_v, dict) and "值" in biz_v:
-                # EB 字段解码：{值, 类型, 长度}
+                # EB 字段解码：{值, 类型, 长度[, 原始值][, 说明]}
                 biz_type = biz_v.get("类型", "")
                 biz_len = biz_v.get("长度", 0)
                 biz_val = biz_v.get("值")
+                raw = biz_v.get("原始值", "-")
+                biz_desc = biz_v.get("说明", "")
+                if raw is None or isinstance(raw, list):
+                    raw = "-"
                 if isinstance(biz_val, list):
                     # list 字段：显示数量，递归展开各项
-                    table_data.append((f"{indent}{biz_k}", "-",
+                    table_data.append((f"{indent}{biz_k}", str(raw),
                                        f"[{len(biz_val)}项]",
-                                       f"类型={biz_type}, 长度={biz_len}字节", None, None))
+                                       biz_desc or f"类型={biz_type}, 长度={biz_len}字节", None, None))
                     for sub in biz_val:
                         if isinstance(sub, dict):
                             self._add_eb_business_fields(sub, table_data, level + 1)
+                elif isinstance(biz_val, dict):
+                    # 嵌套结构（如 645帧头/专用参数）：显示容器行，递归展开子字段
+                    table_data.append((f"{indent}{biz_k}", str(raw),
+                                       f"{biz_len}字节",
+                                       biz_desc or f"类型={biz_type}, 长度={biz_len}字节", None, None))
+                    self._add_eb_business_fields(biz_val, table_data, level + 1)
                 else:
-                    table_data.append((f"{indent}{biz_k}", "-", str(biz_val),
-                                       f"类型={biz_type}, 长度={biz_len}字节", None, None))
+                    table_data.append((f"{indent}{biz_k}", str(raw), str(biz_val),
+                                       biz_desc or f"类型={biz_type}, 长度={biz_len}字节", None, None))
             else:
                 # 标准 OAD 业务解码：字符串值
                 table_data.append((f"{indent}{biz_k}", "-", str(biz_v), "", None, None))
+
+    def _add_axdr_item_rows(self, item, table_data: list, level: int, idx: int = None):
+        """递归添加单个 A-XDR 数据项到表格（array/structure 成员逐项展开）"""
+        if not isinstance(item, dict) or "类型" not in item:
+            return
+        indent = "  " * level
+        name = f"成员{idx}" if idx is not None else item.get("类型", "-")
+        raw = item.get("原始编码") or item.get("原始值", "-")
+        parsed = item.get("解析值", "-")
+        desc = item.get("说明", "")
+        tag = item.get("tag")
+        tag_name = item.get("tag_name", "")
+        if tag is not None:
+            axdr_desc = f"A-XDR:{tag_name}(0x{tag:02X})"
+            desc = f"{desc} | {axdr_desc}" if desc else axdr_desc
+        if isinstance(parsed, list):
+            table_data.append((f"{indent}{name}", str(raw), f"[{len(parsed)}项]", desc, None, None))
+            for i, child in enumerate(parsed, 1):
+                self._add_axdr_item_rows(child, table_data, level + 1, i)
+        elif isinstance(parsed, dict):
+            table_data.append((f"{indent}{name}", str(raw), str(parsed), desc, None, None))
+        else:
+            table_data.append((f"{indent}{name}", str(raw), str(parsed), desc, None, None))
 
     def _add_apdu_to_table(self, apdu_result: dict, table_data: list, level: int = 0):
         """递归添加 APDU 解析结果到表格"""
@@ -422,6 +455,10 @@ class DLT69845Parser:
                     elif isinstance(parsed, list):
                         parsed = f"[{len(parsed)}项]"
                     table_data.append((f"{indent}{key}", str(raw), str(parsed), desc, None, None))
+                    # array/structure 成员逐项展开（对齐官方工具：每个成员显示类型+值）
+                    if value.get("类型") in ("array", "structure") and isinstance(value.get("解析值"), list):
+                        for i, child in enumerate(value["解析值"], 1):
+                            self._add_axdr_item_rows(child, table_data, level + 1, i)
                 elif "原始值" in value and "解析值" in value:
                     # 标准解码结果（安全类型、SecurityRequestVerifyType 等）横向显示为一行
                     raw = value.get("原始值", "-")

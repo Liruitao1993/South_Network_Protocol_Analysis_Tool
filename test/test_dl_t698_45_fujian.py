@@ -279,6 +279,56 @@ def test_action_response_eb030307_table():
     print("test_action_response_eb030307_table PASSED")
 
 
+def test_version_info_user_frame():
+    """用户实测帧：GET-Response 版本信息（OI=0x4300 属性3，表191 设备管理类）
+
+    68 47 00 C3 05 09 ... DC 40 | 85 01 01 43 00 03 00 01 02 06 [JCDZ/V1.5/250901/V1.0/230602/SHANDONG] | 00 00 3E 14 16
+    此前 GetResult 标签颠倒导致整包解析报错「未知类型(0x44)」。
+    """
+    from dl_t698_45_parser import DLT69845Parser
+
+    parser = DLT69845Parser()
+    frame = bytes.fromhex(
+        "684700C30509000000000000DC40"
+        "850101430003000102060A044A43445A0A0456312E350A06323530393031"
+        "0A0456312E300A063233303630320A085348414E444F4E47"
+        "00003E1416"
+    )
+    table = parser.parse_to_table(frame)
+    rows = {r[0].strip(): r for r in table}
+    # 不再有解析错误
+    assert not any("解析错误" in r[0] for r in table), [r for r in table if "解析错误" in r[0]]
+    assert rows["APDU类型"][2] == "GET-Response", rows.get("APDU类型")
+    assert rows["APDU类型"][3] == "GetResponseNormal"
+    assert "0x4300" in rows["OAD"][3] and "属性=3" in rows["OAD"][3], rows.get("OAD")
+    # A-XDR 原始结构成员
+    member_rows = [r for r in table if r[0].strip().startswith("成员")]
+    assert len(member_rows) == 6, len(member_rows)
+    # 业务解码行：厂商代码/软件版本号/软件版本日期/硬件版本号/硬件版本日期/厂商扩展信息
+    biz = {r[0].strip(): (r[2], r[3]) for r in table}
+    assert biz["厂商代码"][0] == "JCDZ", biz.get("厂商代码")
+    assert biz["软件版本号"][0] == "V1.5", biz.get("软件版本号")
+    assert biz["软件版本日期"][0] == "2025-09-01", biz.get("软件版本日期")
+    assert biz["硬件版本号"][0] == "V1.0", biz.get("硬件版本号")
+    assert biz["硬件版本日期"][0] == "2023-06-02", biz.get("硬件版本日期")
+    assert biz["厂商扩展信息"][0] == "SHANDONG", biz.get("厂商扩展信息")
+    print("test_version_info_user_frame PASSED")
+
+
+def test_get_result_dar_error():
+    """Get-Result [0]=DAR 错误响应正常展示（不再按 A-XDR 硬解崩溃）"""
+    from dl_t698_45_apdu_parser import DLT69845APDUParser
+
+    parser = DLT69845APDUParser()
+    # GET-Response Normal, OAD=40010200(通信地址), DAR=对象不存在(6)
+    apdu = bytes.fromhex("850101400102000006")
+    r = parser.parse(apdu)
+    dar = r["数据访问结果"]
+    assert dar["解析值"] == 6 and dar["说明"] == "对象不存在", dar
+    assert "数据" not in r
+    print("test_get_result_dar_error PASSED")
+
+
 if __name__ == "__main__":
     test_action_request_list_user_frame()
     test_set_request_list_doc_example()
@@ -292,4 +342,6 @@ if __name__ == "__main__":
     test_table_shows_type_length()
     test_action_response_eb030307_real_frame()
     test_action_response_eb030307_table()
+    test_version_info_user_frame()
+    test_get_result_dar_error()
     print("ALL 福建简化698 测试 PASSED")

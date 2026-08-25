@@ -33,7 +33,7 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 
 ## 1. 项目概览
 
-多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.14.5`）。
+多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.14.7`）。
 
 **支持的协议（共 12 种，对应 GUI 协议下拉框 `current_protocol` 索引）：**
 
@@ -313,9 +313,14 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 │   ├── gap_analysis.py / create_work_list.py / search_di.py
 │   └── lme_info_entry_parser.py    # LME 信息条目解析
 │
-└── 数据文件（运行时读写，需随打包/版本管理）
-    ├── custom_di.json              # 南网自定义DI（GUI 增删）
-    ├── gdw_custom_afn.json         # 国网自定义AFN+Fn（GUI 增删）
+├── app_paths.py                    # 所有可写数据文件路径的唯一入口（1.14.7 起）
+│                                   #   app_data_dir()/data_path(name)/ensure_data_file(name)
+│                                   #   frozen(单文件exe) → exe 所在目录；dev → 项目根
+│                                   #   纯 stdlib 无 Qt；函数内惰性读 sys.frozen/_MEIPASS/executable
+│
+└── 数据文件（运行时读写，需随打包/版本管理；一律经 app_paths.data_path 定位，frozen 下落 exe 目录）
+    ├── custom_di.json              # 南网自定义DI（GUI 增删；打包内置，exe 目录缺失时从 _MEIPASS 复制种子）
+    ├── gdw_custom_afn.json         # 国网自定义AFN+Fn（GUI 增删；打包内置，exe 目录缺失时从 _MEIPASS 复制种子）
     ├── dlt645_di.json              # DLT645 DI 映射（generate_dlt645_di.py 生成，勿手改）
     ├── dlt645_di_custom.json       # DLT645 自定义 DI（GUI 增删）
     ├── NW_command.json             # 南网预设命令
@@ -473,6 +478,8 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
   - `5-...第5部分 应用层通信协议（文本校对）.md` — **应用层（业务报文结构）**
   - `6-...第6部分：检验规范（文本校对）.md` — 检验规范
   - 源 docx 可用 `convert_docx_to_md.py` 重新转换
+  - `《南方电网计量自动化系统双模通信技术规范 第2部分：无线通信接入协议》（报批稿）.md` — **无线信道(HRF)协议定义权威参考**（同目录 .pdf 为原始文件，192页，Q/CSG 报批稿）。**引用优先级：新一代协议本身有定义 → 以新一代为准；新一代未定义的无线专有内容（RF物理层前导/SFD、无线信道编号与option、无线路由参数条目等）→ 本文档**。已核对布局一致：精简信标载荷（无线表154≡新一代表73）、0x0E 精简条目（表155≡表74）、信标载荷固定区（表134≈表51）；差异点——信标条目头 0x0F 起无线版为保留，新一代扩展了 信标机制切换(0x0F)/代理角色(0x10)
+
 ### 5.8 国网新一代双模通信互联互通（索引 10）
 - **解析器**：
   - `gw_new_gen_parser.py` (GWNewGenParser) — 国网新一代双模通信互联互通协议解析，支持 HDC 1.0 / HDC 2.0 版本判定
@@ -551,7 +558,7 @@ python test/test_special_frame.py   # 特殊帧
 python test/test_snrm_frame.py      # SNRM 帧
 python test/test_dl_t698_45.py      # 698.45 协议
 python test/test_dl_t698_45_data_decode.py  # 698.45 APDU 数据内容业务解码（电能量/需量/分相/单值）
-python test/test_dl_t698_45_fujian.py  # 698.45 福建简化698（choice=0x02 List 结构，1.14.2 起）
+python test/test_dl_t698_45_fujian.py  # 698.45 福建简化698 + 版本信息深度解析（1.14.2/1.14.6 起）
 python test/test_oad_enrichment.py  # 698.45 OAD 增强
 python test/test_csg_new_gen.py     # 新一代载波协议
 python test/test_csg_hrf_mac.py     # 新一代载波无线单跳MAC帧（表12/表139）
@@ -650,6 +657,25 @@ python test/test_web_frame_gen_utils.py # Reflex Web 版组帧纯逻辑
 ## 10. 变更日志（与 `main_gui.py:CHANGELOG` 保持同步）
 
 > 本节按版本倒序记录。详细 commit 见 `git log`。每发新版本必须更新此处。
+
+### 1.14.7 — 2026-08-24
+- **修复 exe 打包后用户配置丢失**：新增 `app_paths.py` 作为所有可写数据文件路径的**唯一入口**——`app_data_dir()` / `data_path(name)` / `ensure_data_file(name)`。frozen（PyInstaller 单文件 exe）下定位到 **exe 所在目录**（`sys.executable` 的 parent），开发模式落项目根；函数内**惰性读取** `sys.frozen` / `sys._MEIPASS` / `sys.executable`（禁止模块级缓存，测试需 monkeypatch）。此前 `Path(__file__).parent` 指向 `_MEIPASS` 临时解压目录（进程退出即删）、cwd 相对路径随启动位置漂移，导致每次更新 exe 后用户配置全部丢失
+- **接入范围**：config.json（main_gui / llm_api_manager / llm_preprocess_widget / theme_settings / system_settings）、预设命令 NW/GW/DLT698_command.json（preset_buttons 模块级常量名保留，测试 monkeypatch 依赖）、test_plan.json、custom_di.json、gdw_custom_afn.json（GDW10376Parser 签名改 Optional-None 默认）、dlt645_di_custom.json、custom_commands.json、custom_obis.json、archive_data.json、监控 CSV Output/ 目录（monitor_widget / monitor/tcp_monitor）
+- **内置种子自愈**：custom_di.json / gdw_custom_afn.json 在 exe 目录不存在时由 `ensure_data_file` 从 `_MEIPASS` 打包资源复制一份作为初始值，之后读写均落 exe 目录；已存在的用户文件**不覆盖**。只读资源（icons/、dlt645_di.json、app_icon.ico）保持原定位不变；不做旧目录迁移
+- **测试**：新增 `test/test_app_paths.py`（11 项：dev 定位 + frozen monkeypatch 种子复制/不覆盖/缺失静默）；回归 `test_dlt698_preset.py`(31) / `test_theme_settings.py`(29) / `test_gdw_fujian.py`(19) / `test_dlms.py` / `test_monitor_widget.py` 全过
+- **修复低分屏/高DPI 批量解析页重叠 + 工具栏视觉凌乱**：工具栏单行流式布局 → **三行独立 QHBoxLayout**（核心操作+帧计数 / CLI 预处理 / Python 脚本+导出），行内下拉框 `addWidget(w, 1)` 吃掉剩余宽度——QGridLayout 多行共享列宽时列最小宽度竞争会算出负间隙，独立行布局彻底规避；文字按钮统一 `min_width`（普通 100 / 导出 120）等高对齐；图标按钮（★保存 ×删除 ?帮助）**既不能用 setMaximumWidth 也不能用空文本**——前者 QSS padding 使 sizeHint 变宽后冲突致相邻几何重叠，后者用户无法辨识功能；正确做法 = 内联收紧 padding + `ensurePolished()` 后 `setFixedWidth(sizeHint().width())` 固定统一方块尺寸且保留字形；全部工具栏按钮补 tooltip
+- **窗口最小尺寸按屏幕自适应**（`MainWindow.__init__`）：`min(1000, 可用宽度×0.85)` / `min(700, 可用高度×0.8)`，1366×768 低分屏不再超出可视区压缩布局；主题 QSS 控件瘦身——按钮 padding 8px16px→4px12px、输入框 5px→2px6px、下拉框/选项卡同步收紧
+- **主题 QSS 字号与表格缩放基准脱节修复**（`gui_utils.py::refresh_qss_font` + `theme_settings.py`）：QSS `font-size` 不反映到 `widget.font()`，缩放基准记录旧字号致 Ctrl+0 恢复裁切文字；`ThemeManager.apply` 后 `QTimer.singleShot(0)` 遍历 `allWidgets()` 重置 ZoomableTableWidget 基准并按 `fontMetrics().height()+6` 重算行高
+- **修复关闭软件周期性报错**（`main_gui.py::closeEvent`）：`_run_update_check` 连接 `thread.finished→deleteLater` 后 C++ 对象可能已被回收，旧代码 `thread.disconnect()` 触碰已删对象抛 `RuntimeError: Internal C++ object(_UpdateCheckWorker) already deleted`。修复：整个线程收尾块 `try/except(RuntimeError)`、`disconnect` 带参数兜 `(RuntimeError, TypeError)`、等待超时(500ms)不再 `quit()`（阻塞网络 IO 不可中断，反触发 `Destroyed while running`）只断开信号放行、`_UpdateCheckWorker` 去 `parent=self`。实测三场景（C++已删/运行中/已结束）closeEvent 均无异常
+- **批量解析新增「导出选中」**（`main_gui.py`）：摘要表 `SingleSelection` → `ExtendedSelection`（Ctrl/Shift 多选行），工具栏新增「导出选中」按钮——只导出高亮帧，用于从大批量结果中挑出信标帧等目标子集；过滤栏新增「按类型全选」下拉+按钮（解析完成后动态提取类型列表，一键选中该类型全部可见行）与「已选 N 帧」实时计数标签。实现：`_get_selected_batch_indices()`（selectedItems → 序号列 UserRole 原始索引）、`_on_batch_select_by_type()`（QItemSelection 批量选中，注意该类在 **QtCore** 非 QtGui）、`_refresh_batch_type_combo()`、`export_batch('selected_dialog')` 用 `export_pool` 子集走 Excel/JSON 导出器；`batch_results` 新增 `_type_name` 键
+- **协议8 新增安徽分布式电源接入单元补充规约对象解析**（文档 `协议文档/8.698.45协议/安徽省2025年一批分布式电源接入单元补充技术协议.md`）：补齐 17 个新增 OI 的名称/类绑定与业务解码——发电量(2801)/发电时间(2802, IC6)、光伏逆变器开关机/有功/无功/功率因数控制事件(3060-3063)与通信异常(3065/3066/3095/3096, IC7)、光伏越限事件单元(3097)/逆变器控制事件记录单元(3361)/控制指令事件单元(3363, IC8)、逆变器档案单元(4039)/光伏逆变器(4820, IC19)/分布式电源调控调度计划表(4822)/计划单元(4823, IC8)。`dl_t698_45_data_decode.py` 新增 `ANHUI_ATTR_TEMPLATES`（按完整 OI 键优先匹配，避免与标准 (class_id,attr_id) 冲突）+ `ANHUI_STRUCT_SPECS`（structure 成员规格驱动解码）+ `decode_action_parameter`（方法参数: 4820 开关机/负荷控制、4822 调控计划增删清、8000 跳闸/合闸）；`dl_t698_45_apdu_parser.py` `_parse_action_request` Normal/NormalList 分支接入方法参数解码；`dl_t698_45_oi_lookup.py` 手动追加 OI 名称/类绑定；`generate_oi_lookup.py` 加 `ANHUI_OI_TO_CLASS` 常量保证重跑不丢（OI_NAME_MAP 从源码提取回写，手动项天然保留）。关键 tag：date_time_s=0x1C（7B 值，年2B大端）、long64-unsigned=0x15、enum=0x16、structure=0x02、bit-string=0x04。`test/test_dl_t698_45_data_decode.py` 新增 8 个安徽用例，全量 698.45 回归（数据解码/基础/福建/OAD增强/组帧63/国网福建19/预设31）全过
+
+### 1.14.6 — 2026-08-24
+- **协议9（新一代载波）精简信标帧载荷深度解析**（`csg_new_gen_parser.py`）：此前信标载荷只按标准信标表51 布局解析，精简信标（载荷头 bit4=1，表73）的 CCO MAC(6B)+信标周期计数(4B) 固定区被误读为 SNID/无线信道/信标机制字段、0x0E 精简条目头错位成「保留98」。现按表73 分支解析：标志+组网序列号+CCO MAC+周期计数+管理信息+BPCS；新增 0x0E 精简信标站点信息及时隙条目（表74）逐字段深度解析——TEI/代理TEI/角色(CCO=4/STA=1/PCO=2)/层级/MAC/RF跳数/载波频段/CSMA时隙开始NTB与长度。用户实测中央精简信标现正确解出 组网序列号70 / CCO MAC=00:00:90:98:01:63 / 周期计数20(与FC一致) / TEI=1(与FC源TEI一致) / 角色=CCO；`test_csg_new_gen.py` 新增 `test_compact_beacon_real`
+- **修复协议8（DL/T 698.45）GET-Response 解析失败**（`dl_t698_45_apdu_parser.py`）：Get-Result 的 CHOICE 标签此前写反——文档表54 与附录 H.3.1 官方示例均为 **错误信息[0]=DAR、数据[1]=Data**，旧代码把 `res_tag==0x00` 当数据、其余当 DAR 按 A-XDR 硬解，真实响应帧（如版本信息查询应答）报 `未知类型(0x44)` 整包丢弃。新增公共 `_parse_get_result`：`01`→Data（A-XDR）、`00`→DAR（裸 enum 单字节）、其他值按裸 DAR 兼容；GET/SET/ACTION-Response 的 DAR 均改为裸 enum 解析（此前非零错误码如 0x03 撞 array 标签崩溃）。GET-Request choice 映射同步按表45 修正（[3]Record/[4]RecordList/[5]Next/[6]MD5，删除不存在的 [5]Signature），GET-Response 补 [3]Record/[4]RecordList/[23]SimplifyRecord 分支
+- **协议8 版本信息深度解析**（`dl_t698_45_data_decode.py`）：CLASS_ATTR_TEMPLATES 新增设备管理类(class_id=19)模板——属性3 版本信息 structure{厂商代码/软件版本号/软件版本日期/硬件版本号/硬件版本日期/厂商扩展信息}（表191）逐字段业务解码，YYMMDD 日期补全为 `20YY-MM-DD`；属性2 设备描述符(visible-string)、属性4 生产日期(date_time_s) 同步支持。用户实测帧 `85 01 01 43000300 ...` 现解析出 厂商代码=JCDZ / 软件版本号=V1.5 / 软件版本日期=2025-09-01 / 硬件版本号=V1.0 / 硬件版本日期=2023-06-02 / 厂商扩展信息=SHANDONG
+- **修复关闭软件后仍周期性弹更新提示**（`main_gui.py`）：①点X最小化到托盘时暂停 30 分钟周期更新检查（closeEvent 托盘分支停 `_update_poll_timer`），从托盘恢复显示时 `showEvent` 重启；启动 3 秒延迟单次检查加 `isVisible()` 守卫——主窗口隐藏时自动检查直接跳过。②真正退出时收尾：停止周期定时器 + 断开并等待 `_UpdateCheckWorker` 线程结束（500ms 快速等待，超时 quit+2s 兜底），不再残留后台线程周期联网
+- **测试**：`test_dl_t698_45.py` GET-Response 用例改为文档语义（[1]=Data/[0]=DAR 双断言）；`test_dl_t698_45_data_decode.py` 合成帧 GetResult 标签 0x00→0x01；`test_dl_t698_45_fujian.py` 增至 14 项（用户版本信息真实帧全链路表格断言 + DAR 错误响应）；四套件回归全过
 
 ### 1.14.5 — 2026-08-21
 - **协议11（HDC 1.0）查询站点升级状态上行报文解析**（`hdc10_parser.py::_parse_upgrade` 0x034）：此前只按下行表40 解析（连续查询块数/起始块号/升级ID），上行应答的 升级状态(字节1高4位)/有效块数/升级位图 全部丢失。现按文档第4-3部分 表45 补全：升级状态（0空闲/1接收进行/2接收完成/3升级进行/4试运行）、有效块数、起始块号、升级ID + 接收位图（每bit对应一个文件块，1=已接收，显示 `N/M块已接收`）。**升级位图逐块编号明细**：按 起始块号+i 编号，每行32块多行展开，`[✓n]`=已接收 `[✕n]`=丢包，行说明统计丢包数。方向判定：len>12 或字节1高4位∈{1..4} 判为上行；恰12字节且状态位0 按表40 下行。`test/test_hdc10.py` 增至 10 项（上行全收/下行/丢包编号）全过
@@ -904,7 +930,28 @@ python test/test_web_frame_gen_utils.py # Reflex Web 版组帧纯逻辑
 涉及文件：
 - 修改：`hdc10_parser.py`、`test/test_hdc10.py`、`main_gui.py`（APP_VERSION 1.14.5）、`AGENTS.md`
 
-**上一次（2026-08-21）：发布 1.14.4（协议8 组帧/解析对齐官方工具）**
+**最近一次（2026-08-24）：发布 1.14.7（修复 exe 打包后用户配置丢失）**
+
+变更：
+- **新增 `app_paths.py` 数据文件路径唯一入口**：frozen（单文件 exe）下 `app_data_dir()` 返回 exe 所在目录（`sys.executable` parent），开发模式落项目根；所有可写数据文件（config.json / 预设 / test_plan / 自定义 DI / AFN / OBIS / 命令字 / 档案 / 监控 CSV Output/）统一经 `data_path()` 定位——此前 `__file__` 指向 `_MEIPASS` 临时目录（退出即删）+ cwd 相对路径漂移，导致每次更新 exe 后用户配置全部丢失
+- **内置种子自愈**：`ensure_data_file()` 在 exe 目录缺失 custom_di.json / gdw_custom_afn.json 时从 `_MEIPASS` 打包资源复制初始值，已有用户文件不覆盖；只读资源保持原定位；不做旧目录迁移
+- **测试**：新增 `test/test_app_paths.py`（11 项，frozen monkeypatch）；回归 test_dlt698_preset(31) / test_theme_settings(29) / test_gdw_fujian(19) / test_dlms / test_monitor_widget 全过
+
+涉及文件：
+- 新增：`app_paths.py`、`test/test_app_paths.py`
+- 修改：`main_gui.py`（config.json/CHANGELOG/APP_VERSION 1.14.7）、`llm_api_manager.py`、`llm_preprocess_widget.py`、`theme_settings.py`、`system_integration/system_settings.py`、`preset_buttons.py`、`test_plan_widget.py`、`test/test_plan_widget.py`、`protocol_parser.py`、`gdw10376_parser.py`、`dlt645_di_lookup.py`、`command_lookup.py`、`obis_lookup.py`、`archive_widget.py`、`monitor_widget.py`、`monitor/tcp_monitor.py`、`AGENTS.md`
+
+**上一次（2026-08-24）：发布 1.14.6（协议8 GET-Response 修复 + 版本信息深度解析）**
+
+变更：
+- **协议9 精简信标帧载荷深度解析**：载荷头 bit4=1 走表73 布局（CCO MAC+周期计数固定区），0x0E 条目按表74 逐字段解析（TEI/角色/层级/MAC/RF跳数/频段/CSMA时隙）；用户帧解出 组网序列号70 / CCO MAC=00:00:90:98:01:63 / 周期20 / TEI=1 / 角色=CCO
+- **修复关闭软件后仍周期性弹更新提示**：点X到托盘时暂停周期检查、恢复显示时 showEvent 重启；隐藏状态自动检查 isVisible 守卫拦截；真正退出停定时器+收尾 _UpdateCheckWorker 线程
+- **版本信息深度解析**：设备管理类(19)属性3 structure{厂商代码/软件版本号/软件版本日期/硬件版本号/硬件版本日期/厂商扩展信息} 逐字段解码，YYMMDD→`20YY-MM-DD`；用户帧解出 JCDZ / V1.5 / 2025-09-01 / V1.0 / 2023-06-02 / SHANDONG
+
+涉及文件：
+- 修改：`dl_t698_45_apdu_parser.py`、`dl_t698_45_data_decode.py`、`main_gui.py`（CHANGELOG/APP_VERSION 1.14.6）、`AGENTS.md`、`test/test_dl_t698_45.py`、`test/test_dl_t698_45_data_decode.py`、`test/test_dl_t698_45_fujian.py`（增至14项）
+
+**上一次（2026-08-21）：发布 1.14.5（协议11 升级位图 + 台区户变深度解析）**
 
 变更：
 - **A-XDR 复合类型计数语义修复**：array/structure tag 后字节 = **元素个数**非字节总长（文档附录 H.3.2）。组帧 3 项 structure 由误填 09 改为 03；编码器（`frame_gen_widget.py` / `reflex_web/frame_gen_utils.py`）+ 解码器（`dl_t698_45_axdr.py` 按个数循环）同步修复
@@ -1138,6 +1185,7 @@ python test/test_web_frame_gen_utils.py # Reflex Web 版组帧纯逻辑
 - `CLAUDE.md` — Claude Code 专用指南（与本文档部分重叠，**以 AGENTS.md 为权威**）
 - `work_list.md` — 工作清单/字段定义（开发参考）
 - `docs/superpowers/specs/2026-05-12-dl-t698-45-parser-design.md` — 698.45 解析器设计规格
+- `南网新一代20260226校对/南网新一代20260226校对/《南方电网计量自动化系统双模通信技术规范 第2部分：无线通信接入协议》（报批稿）.md` — 协议9 无线信道(HRF)协议定义参考（原 PDF 同目录；引用优先级见 §5.7：新一代有定义用新一代，无线专有内容用本文档）
 - `docs/superpowers/plans/2026-05-12-dl-t698-45-parser.md` — 698.45 实现计划
 - `docs/superpowers/specs/2026-05-09-topology-formation-timing-design.md` — 拓扑组网时序设计
 - `docs/superpowers/specs/2026-07-15-nicegui-web-version-design.md` — NiceGUI Web 版设计规格

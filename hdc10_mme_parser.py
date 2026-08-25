@@ -157,14 +157,70 @@ def _parse_mme_content(data: bytes, offset: int, mmtype: int) -> List[Tuple]:
     return table
 
 
+_DEVICE_TYPE_NAMES = {
+    1: "抄控器", 2: "集中器本地通信单元", 3: "电表通信单元", 4: "中继器",
+    5: "II型采集器", 6: "I型采集器单元", 7: "三相电表通信单元",
+}
+_MAC_ADDR_TYPE_NAMES = {0: "电能表地址作为入网MAC", 1: "通信模块本身MAC作为入网MAC"}
+_MODULE_TYPE_NAMES = {0: "高速载波单模模块", 1: "双模高速载波和无线模块", 2: "无线单模模块"}
+_BOOT_REASON_NAMES = {0: "正常启动", 1: "断电重启", 2: "看门狗复位", 3: "程序指针异常"}
+_PHASE_NAMES = {0: "未知", 1: "A相", 2: "B相", 3: "C相"}
+
+
+def _parse_version_info(ver: bytes, base_offset: int) -> List[Tuple]:
+    """解析站点版本信息字(表66, 10B):
+    启动原因(1) + BOOT版本(1) + 软件版本(2,BCD) + 版本时间(2,BIN) + 厂商代码(2,ASCII) + 芯片代码(2)
+    """
+    rows: List[Tuple] = []
+    reason = ver[0]
+    rows.append(("      系统启动原因", f"0x{reason:02X}",
+                 _BOOT_REASON_NAMES.get(reason, f"保留({reason})"),
+                 "表67", base_offset, base_offset))
+    rows.append(("      BOOT版本号", f"0x{ver[1]:02X}", str(ver[1]),
+                 "BOOT版本", base_offset + 1, base_offset + 1))
+    # 软件版本号 BCD: 高字节主版本, 低字节次版本
+    sw_major = (ver[2] >> 4) * 10 + (ver[2] & 0x0F)
+    sw_minor = (ver[3] >> 4) * 10 + (ver[3] & 0x0F)
+    rows.append(("      软件版本号", ' '.join(f'{b:02X}' for b in ver[2:4]),
+                 f"V{sw_major}.{sw_minor}", "BCD码(与本地通信模块接口协议一致)",
+                 base_offset + 2, base_offset + 3))
+    # 版本时间(表68): 年7b(byte0 bit0-6), 月4b(byte0 bit7 + byte1 bit0-2), 日5b(byte1 bit3-7)
+    y = ver[4] & 0x7F
+    m = ((ver[4] >> 7) << 3) | (ver[5] & 0x07)
+    d = (ver[5] >> 3) & 0x1F
+    rows.append(("      版本时间", ' '.join(f'{b:02X}' for b in ver[4:6]),
+                 f"20{y:02d}-{m:02d}-{d:02d}", f"年={y} 月={m} 日={d}(BIN, 表68)",
+                 base_offset + 4, base_offset + 5))
+    # 厂商代码/芯片代码: 2字节小端(多字节字段统一小端), 显示时高字节在前
+    vendor_raw = int.from_bytes(ver[6:8], 'little')
+    vendor = bytes([(vendor_raw >> 8) & 0xFF, vendor_raw & 0xFF]).decode(
+        'ascii', errors='replace')
+    rows.append(("      厂商代码", ' '.join(f'{b:02X}' for b in ver[6:8]),
+                 vendor, "ASCII码(2字节小端, 高字节在前显示)",
+                 base_offset + 6, base_offset + 7))
+    chip_raw = int.from_bytes(ver[8:10], 'little')
+    chip = bytes([(chip_raw >> 8) & 0xFF, chip_raw & 0xFF]).decode(
+        'ascii', errors='replace')
+    rows.append(("      芯片代码", ' '.join(f'{b:02X}' for b in ver[8:10]),
+                 chip, "芯片标识(2字节小端)",
+                 base_offset + 8, base_offset + 9))
+    return rows
+
+
 def _parse_associate_req(data: bytes, offset: int) -> List[Tuple]:
-    """关联请求 (0x0000, 表60): 站点MAC(6B) + 候选代理TEI×5(每条2B: TEI12b+链路类型1b+保留3b)"""
+    """关联请求 (0x0000, 表60):
+    站点MAC(6) + 候选代理TEI×5(各2B: TEI12b+链路类型1b+保留3b)
+    + 相线(1) + 设备类型(1) + MAC地址类型(1) + 模块类型(1)
+    + 站点关联随机数(4) + 厂家自定义信息(18) + 站点版本信息(10)
+    + 硬复位累积次数(2) + 软复位累积次数(2) + 代理类型(1) + 保留(3)
+    + 端到端序列号(4) + 管理ID信息(24)
+    """
     table = []
     end = len(data)
     table.append(("  关联请求", "", "", "STA向CCO请求关联(表60)", offset, offset + end - 1))
     if end < 6:
         table.append(("    数据不足", "", f"{end}字节", "站点MAC需6字节",
-                      offset, offset + max(end - 1, offset)))
+                      offset, offset + max(end - 1, 0)))
         return table
 
     mac = data[0:6]
@@ -173,6 +229,7 @@ def _parse_associate_req(data: bytes, offset: int) -> List[Tuple]:
                   ':'.join(f'{b:02X}' for b in mac),
                   "请求关联的站点MAC(大端)", offset, offset + 5))
 
+    # 候选代理 ×5 (offset 6-15)
     pos = 6
     for i in range(5):
         if pos + 2 > end:
@@ -185,15 +242,141 @@ def _parse_associate_req(data: bytes, offset: int) -> List[Tuple]:
         table.append((f"    候选代理{i + 1}",
                       ' '.join(f'{b:02X}' for b in data[pos:pos + 2]),
                       f"TEI={tei}",
-                      f"链路类型={'无线' if link else '载波'}",
+                      f"链路类型={'无线' if link else '高速载波'}",
                       offset + pos, offset + pos + 1))
         pos += 2
 
+    if pos >= end:
+        return table
+
+    # ── 字节16: 相线 (主2b + 备选1 2b + 备选2 2b + 保留2b) ──
+    ph = data[pos]
+    ph_main = ph & 0x03
+    ph_alt1 = (ph >> 2) & 0x03
+    ph_alt2 = (ph >> 4) & 0x03
+    table.append(("    相线", f"0x{ph:02X}",
+                  f"主:{_PHASE_NAMES.get(ph_main, ph_main)} "
+                  f"备选1:{_PHASE_NAMES.get(ph_alt1, ph_alt1)} "
+                  f"备选2:{_PHASE_NAMES.get(ph_alt2, ph_alt2)}",
+                  "最低2b为评估所属相线, 其余依次备选(表62)",
+                  offset + pos, offset + pos))
+    pos += 1
+
+    # ── 字节17: 设备类型 ──
     if pos < end:
-        rest = data[pos:]
-        table.append(("    其他信息",
-                      ' '.join(f'{b:02X}' for b in rest[:16]) + ("..." if len(rest) > 16 else ""),
-                      f"{len(rest)}字节", "厂商扩展/附加信息",
+        dt = data[pos]
+        table.append(("    设备类型", f"0x{dt:02X}",
+                      _DEVICE_TYPE_NAMES.get(dt, f"保留({dt})"), "表63",
+                      offset + pos, offset + pos))
+        pos += 1
+
+    # ── 字节18: MAC地址类型 ──
+    if pos < end:
+        mt = data[pos]
+        table.append(("    MAC地址类型", f"0x{mt:02X}",
+                      _MAC_ADDR_TYPE_NAMES.get(mt, f"保留({mt})"), "表64",
+                      offset + pos, offset + pos))
+        pos += 1
+
+    # ── 字节19: 模块类型(低2b) + 保留(高6b) ──
+    if pos < end:
+        mbt = data[pos] & 0x03
+        table.append(("    模块类型", f"0x{data[pos]:02X}",
+                      _MODULE_TYPE_NAMES.get(mbt, f"保留({mbt})"), "低2bit, 表65",
+                      offset + pos, offset + pos))
+        pos += 1
+
+    # ── 字节20-23: 站点关联随机数 (4B, 出厂首次上电随机值) ──
+    if pos + 4 <= end:
+        rand = int.from_bytes(data[pos:pos + 4], 'little')
+        table.append(("    站点关联随机数",
+                      ' '.join(f'{b:02X}' for b in data[pos:pos + 4]),
+                      f"0x{rand:08X}", "32bit随机数, 掉电保持(表5.1.3.2.9)",
+                      offset + pos, offset + pos + 3))
+        pos += 4
+    elif pos < end:
+        pos = end
+
+    # ── 字节24-41: 厂家自定义信息 (18B) ──
+    vendor_len = min(18, end - pos)
+    if vendor_len > 0:
+        seg = data[pos:pos + vendor_len]
+        ascii_hint = ''.join(chr(b) if 32 <= b < 127 else '.' for b in seg)
+        table.append(("    厂家自定义信息",
+                      ' '.join(f'{b:02X}' for b in seg[:18]) +
+                      ("..." if vendor_len > 18 else ""),
+                      f"{vendor_len}字节" + (f" [{ascii_hint}]" if ascii_hint.strip('.') else ""),
+                      "厂家自定义, 按需使用(表5.1.3.2.10)",
+                      offset + pos, offset + pos + vendor_len - 1))
+        pos += vendor_len
+
+    # ── 字节42-51: 站点版本信息 (10B, 表66) ──
+    if pos + 10 <= end:
+        table.append(("    站点版本信息",
+                      ' '.join(f'{b:02X}' for b in data[pos:pos + 10]),
+                      "10字节", "版本信息字(表66)",
+                      offset + pos, offset + pos + 9))
+        table.extend(_parse_version_info(data[pos:pos + 10], offset + pos))
+        pos += 10
+    elif pos < end:
+        # 不足10B, 显示原始
+        seg = data[pos:]
+        table.append(("    站点版本信息(截断)",
+                      ' '.join(f'{b:02X}' for b in seg), f"{len(seg)}字节",
+                      "表66需10字节", offset + pos, offset + end - 1))
+        pos = end
+
+    # ── 字节52-53: 硬复位累积次数 (2B 小端) ──
+    if pos + 2 <= end:
+        hard = int.from_bytes(data[pos:pos + 2], 'little')
+        table.append(("    硬复位累积次数",
+                      ' '.join(f'{b:02X}' for b in data[pos:pos + 2]),
+                      str(hard), "硬件复位累计次数",
+                      offset + pos, offset + pos + 1))
+        pos += 2
+
+    # ── 字节54-55: 软复位累积次数 (2B 小端) ──
+    if pos + 2 <= end:
+        soft = int.from_bytes(data[pos:pos + 2], 'little')
+        table.append(("    软复位累积次数",
+                      ' '.join(f'{b:02X}' for b in data[pos:pos + 2]),
+                      str(soft), "软件复位累计次数",
+                      offset + pos, offset + pos + 1))
+        pos += 2
+
+    # ── 字节56: 代理类型 ──
+    if pos < end:
+        pt = data[pos]
+        table.append(("    代理类型", f"0x{pt:02X}",
+                      "站点动态选择的代理" if pt == 0 else f"保留({pt})",
+                      "表69", offset + pos, offset + pos))
+        pos += 1
+
+    # ── 字节57-59: 保留 (3B) ──
+    if pos + 3 <= end:
+        table.append(("    保留",
+                      ' '.join(f'{b:02X}' for b in data[pos:pos + 3]),
+                      "3字节", "保留字段",
+                      offset + pos, offset + pos + 2))
+        pos += 3
+
+    # ── 字节60-63: 端到端序列号 (4B 小端) ──
+    if pos + 4 <= end:
+        e2e = int.from_bytes(data[pos:pos + 4], 'little')
+        table.append(("    端到端序列号",
+                      ' '.join(f'{b:02X}' for b in data[pos:pos + 4]),
+                      str(e2e), "端到端管理报文序列号(关联确认需回填)",
+                      offset + pos, offset + pos + 3))
+        pos += 4
+
+    # ── 字节64-87: 管理ID信息 (24B) ──
+    if pos < end:
+        remain = data[pos:]
+        table.append(("    管理ID信息",
+                      ' '.join(f'{b:02X}' for b in remain[:24]) +
+                      ("..." if len(remain) > 24 else ""),
+                      f"{len(remain)}字节",
+                      f"管理ID信息(标准24B, 表5.1.3.2.16){'; 超出' if len(remain) > 24 else ''}",
                       offset + pos, offset + end - 1))
 
     return table

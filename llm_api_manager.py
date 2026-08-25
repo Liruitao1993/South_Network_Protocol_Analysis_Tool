@@ -79,7 +79,8 @@ PROVIDER_PRESETS: Dict[str, Dict[str, str]] = {
 
 
 def _config_path() -> str:
-    return os.path.join(os.path.dirname(__file__), "config.json")
+    from app_paths import data_path
+    return str(data_path("config.json"))
 
 
 def load_profiles() -> Dict[str, Any]:

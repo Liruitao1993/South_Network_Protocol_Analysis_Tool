@@ -3,7 +3,7 @@
 主题与字体设置测试（test_theme_settings.py）
 运行：python test_theme_settings.py
 覆盖：
-- 5 套内置主题 apply 不崩溃，style/QSS 正确切换
+- 6 套内置主题 apply 不崩溃，style/QSS 正确切换（毛玻璃为参数化动态 QSS）
 - 字体族/字号设置生效
 - ThemeSettingsDialog：创建、取值、恢复默认、取消还原
 - MainWindow 集成：实例化、主题切换后 _restyle_for_theme 不崩溃
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import QApplication, QStyleFactory, QDialog
 from theme_settings import (
     THEMES, get_theme, is_dark,
     ThemeManager, ThemeSettingsDialog,
+    build_glass_qss, GLASS_DEFAULTS,
 )
 
 app = QApplication(sys.argv)
@@ -59,13 +60,51 @@ for t in THEMES:
         # 风格名在平台可创建（PySide6 将带 QSS 的风格包装为私有 QStyleSheetStyle，无法检查类名）
         s = QStyleFactory.create(t["style"])
         ThemeManager.apply(app, t["id"], "Microsoft YaHei", 10)
-        qss_ok = (app.styleSheet() == (t["qss"] or ""))
+        # 毛玻璃主题 QSS 由 build_glass_qss 按默认参数动态生成（含主窗口背景覆盖段）
+        expect_qss = build_glass_qss() if t.get("win_blur") else (t["qss"] or "")
+        qss_ok = (app.styleSheet() == expect_qss)
         check(f"{t['id']} 应用", s is not None and qss_ok,
               f"style={t['style']} qss_len={len(app.styleSheet())}")
     except Exception:
         failed += 1
         print(f"  [FAIL] {t['id']} 应用抛异常")
         traceback.print_exc()
+
+# ---------------- 1b. 毛玻璃参数 ----------------
+section("毛玻璃参数 (build_glass_qss)")
+try:
+    import re as _re
+    q30 = build_glass_qss(opacity=30)
+    m = _re.search(r"QWidget \{\s*background-color: rgba\(255, 255, 255, (\d+)\)", q30)
+    check("透明度缩放", m is not None and int(m.group(1)) == 75,
+          m.group(1) if m else "未匹配")
+    check("近不透明弹窗保持", "rgba(248, 250, 255, 230)" in q30)
+    check("玻璃着色", "rgba(255, 136, 0," in build_glass_qss(tint="#ff8800"))
+    check("无效背景图回退着色", "border-image" not in build_glass_qss(bg_image=r"C:\nonexistent\x.jpg"))
+    import tempfile as _tf
+    _img = os.path.join(_tf.gettempdir(), "glass_test_bg.png")
+    with open(_img, "wb") as f:
+        f.write(b"\x89PNG\r\n\x1a\n")
+    qb = build_glass_qss(tint="#ff8800", bg_image=_img)
+    check("背景图 border-image", "border-image: url(" in qb and "glass_test_bg.png" in qb)
+    check("背景图叠加色", "rgba(255, 136, 0," in qb)
+    ThemeManager.apply(app, "glass", glass={"opacity": 40, "tint": "#00ff00"})
+    check("apply 传参生效", "rgba(0, 255, 0," in app.styleSheet())
+    dlg = ThemeSettingsDialog("glass", "Microsoft YaHei", 10, glass={"opacity": 40})
+    check("对话框玻璃选项可见", dlg.glass_group.isVisibleTo(dlg))
+    dlg.glass_opacity_slider.setValue(80)
+    g = dlg.get_glass_settings()
+    check("对话框取值", g["opacity"] == 80 and g["tint"] == GLASS_DEFAULTS["tint"] and g["bg_image"] == "")
+    dlg2 = ThemeSettingsDialog("default", "Microsoft YaHei", 10)
+    check("非玻璃主题隐藏选项", not dlg2.glass_group.isVisibleTo(dlg2))
+    cfg = ThemeManager.to_config("glass", "Microsoft YaHei", 10,
+                                 glass={"opacity": 33, "tint": "#112233", "bg_image": _img})
+    check("配置读写往返",
+          ThemeManager.load_glass_config({"ui": cfg}) == {"opacity": 33, "tint": "#112233", "bg_image": _img})
+except Exception:
+    failed += 1
+    print("  [FAIL] 毛玻璃参数抛异常")
+    traceback.print_exc()
 
 # 未知主题回退默认（回退到带 QSS 的 default 主题）
 ThemeManager.apply(app, "not_exist_theme")

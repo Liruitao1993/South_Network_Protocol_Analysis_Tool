@@ -1566,6 +1566,20 @@ class HDC10Parser:
         tpos = hdr_start + (7 if mac_header_len >= 16 else 1)
         msdu_type = data[tpos] if len(data) > tpos else None
 
+        # 从 MAC 头读取 MSDU 长度，用于精确定位 ICV
+        # 标准长帧头(版本=0): byte8[0:7] + byte9[0:2] = 11bit 小端
+        # 单跳短帧头(版本=1): byte2[0:7] + byte3[0:2] = 11bit
+        msdu_len = None
+        ver = data[hdr_start] & 0x0F if len(data) > hdr_start else 0
+        if ver == 0 and len(data) - hdr_start >= 10:
+            b8 = data[hdr_start + 8]
+            b9 = data[hdr_start + 9]
+            msdu_len = b8 | ((b9 & 0x07) << 8)
+        elif ver == 1 and len(data) - hdr_start >= 4:
+            b2 = data[hdr_start + 2]
+            b3 = data[hdr_start + 3]
+            msdu_len = (b2 << 3) | (b3 & 0x07)
+
         # MSDU + ICV
         msdu_abs = hdr_start + mac_header_len
         if len(data) > msdu_abs:
@@ -1578,15 +1592,29 @@ class HDC10Parser:
                 base_offset + msdu_abs, base_offset + len(data) - 1,
             ))
 
-            # 尝试定位 ICV（最后4字节）
-            # ICV = CRC-32(MSDU载荷), 小端, 位于 PBCS 前4字节 (AGENTS.md §8-28)
-            if len(msdu_data) >= 4:
+            # 定位 ICV：优先按 MSDU长度字段定位（帧尾可能有填充/多余数据）
+            # ICV = CRC-32(MSDU载荷), 小端, 共 4 字节
+            icv_pos = -1  # 在 msdu_data 中的起始偏移
+            icv_bytes = b''
+            msdu_body = msdu_data
+            extra_bytes = b''
+
+            if msdu_len is not None and len(msdu_data) >= msdu_len + 4:
+                # 按头中声明的长度精确切割
+                icv_pos = msdu_len
+                icv_bytes = msdu_data[msdu_len:msdu_len + 4]
+                msdu_body = msdu_data[:msdu_len]
+                extra_bytes = msdu_data[msdu_len + 4:]
+            elif len(msdu_data) >= 4:
+                # 回退：取数据最后 4 字节作为 ICV（截断帧 / 无 MSDU 长度字段）
+                icv_pos = len(msdu_data) - 4
                 icv_bytes = msdu_data[-4:]
-                icv = int.from_bytes(icv_bytes, 'little')
                 msdu_body = msdu_data[:-4]
+
+            if icv_bytes:
+                icv = int.from_bytes(icv_bytes, 'little')
                 calc_icv = _crc32(msdu_body)
                 if icv == 0:
-                    # 明文模式: 实机不发加密时 ICV 填全0
                     icv_status = "明文填充(ICV=0, 不校验)"
                 elif calc_icv == icv:
                     icv_status = "✓ 校验正确"
@@ -1603,8 +1631,23 @@ class HDC10Parser:
                     ' '.join(f'{b:02X}' for b in icv_bytes),
                     f"0x{icv:08X}",
                     icv_status,
-                    base_offset + len(data) - 4, base_offset + len(data) - 1,
+                    base_offset + msdu_abs + icv_pos,
+                    base_offset + msdu_abs + icv_pos + 3,
                 ))
+
+                # 帧尾多余字节（填充/日志噪声）
+                if extra_bytes:
+                    preview = ' '.join(f'{b:02X}' for b in extra_bytes[:16])
+                    if len(extra_bytes) > 16:
+                        preview += ' ...'
+                    table.append((
+                        "  帧尾多余数据",
+                        preview,
+                        f"{len(extra_bytes)}字节",
+                        "MSDU+ICV 之后的多余字节(填充/尾标/日志噪声)",
+                        base_offset + msdu_abs + msdu_len + 4,
+                        base_offset + len(data) - 1,
+                    ))
             else:
                 table.append((
                     "MSDU数据",
@@ -1656,8 +1699,8 @@ class HDC10Parser:
             base, base,
         ))
 
-        # 原始源TEI: byte0[4:7](高4bit) + byte1(低8bit) = 12bit
-        src_tei = ((b0 >> 4) << 8) | b1
+        # 原始源TEI: byte0[4:7](低4bit) + byte1(高8bit) = 12bit 小端
+        src_tei = ((b0 >> 4) & 0x0F) | (b1 << 4)
         table.append((
             "  原始源TEI",
             f"0x{src_tei:03X}",
@@ -1666,8 +1709,8 @@ class HDC10Parser:
             base, base + 1,
         ))
 
-        # 原始目的TEI: byte2(高8bit) + byte3[0:3](低4bit) = 12bit
-        dst_tei = (b2 << 4) | (b3 & 0x0F)
+        # 原始目的TEI: byte2(低8bit) + byte3[0:3](高4bit) = 12bit 小端
+        dst_tei = b2 | ((b3 & 0x0F) << 8)
         table.append((
             "  原始目的TEI",
             f"0x{dst_tei:03X}",

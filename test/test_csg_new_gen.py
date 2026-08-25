@@ -499,6 +499,34 @@ def test_aggregated_frame_app_layer():
     print("[OK] 聚合帧级联块应用层解析通过")
 
 
+def test_compact_beacon_real():
+    """精简信标载荷解析（表73）：用户实测帧字段
+
+    载荷头D2(中央+精简标志) + 组网序列号46 + CCO MAC 00:00:90:98:01:63
+    + 信标周期计数20(=FC) + 条目数1 + 0x0E条目(TEI=1/角色CCO) + BPCS
+    此前按标准信标表51解析导致 MAC 被误读为 SNID/信道字段、0x0E 条目错位成"保留98"。
+    """
+    parser = CSGNewGenParser()
+    payload = (bytes.fromhex("D246000090980163")
+               + (20).to_bytes(4, 'little')
+               + bytes.fromhex("010E13")            # 条目数1 + 0x0E + 长度19
+               + bytes.fromhex("01000004000000000000000000000000000000")  # TEI=1 角色4=CCO 层级0
+               + b"\x00\x39\x1d\x89")                # BPCS
+    table = parser._parse_beacon_payload(payload, 16)
+    rows = {r[0].strip(): r for r in table}
+    assert rows["信标载荷头(精简)"][3].startswith("信标类型:2"), rows.get("信标载荷头(精简)")
+    assert "精简:1" in rows["信标载荷头(精简)"][3]
+    assert rows["组网序列号"][2] == "70"
+    assert rows["CCO MAC地址"][2] == "00:00:90:98:01:63", rows.get("CCO MAC地址")
+    assert rows["信标周期计数"][2] == "20", rows.get("信标周期计数")
+    # 条目深度解析（表74）
+    assert rows["条目类型"][1] == "0E" and "精简信标站点信息及时隙条目" in rows["条目类型"][3], rows.get("条目类型")
+    assert rows["条目长度"][2] == "19"
+    assert rows["TEI"][2] == "1", rows.get("TEI")
+    assert "CCO" in rows["角色/层级数"][2], rows.get("角色/层级数")
+    print("[OK] 精简信标载荷表73解析通过")
+
+
 def main():
     print("=" * 50)
     print("新一代载波协议解析器测试")
@@ -524,8 +552,8 @@ def main():
     test_district_phase_downlink()
     test_station_to_station()
     test_net_frame_real()
-    test_net_frame_nonzero_fields()
     test_aggregated_frame_app_layer()
+    test_compact_beacon_real()
     print("=" * 50)
     print("[OK] 全部测试通过")
 

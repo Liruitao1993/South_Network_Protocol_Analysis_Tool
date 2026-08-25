@@ -165,16 +165,20 @@ def test_axdr_and_apdu():
     check("uint8 编码", encode_axdr_items([{"tag": 0x11, "type": "unsigned", "value": 1, "length": 0}]).hex() == "1101",
           f"={encode_axdr_items([{'tag':0x11,'type':'unsigned','value':1,'length':0}]).hex()}")
     check("AXDRCoder 一致", encode_axdr_items([{"tag": 0x11, "type": "unsigned", "value": 1, "length": 0}]) == AXDRCoder().encode(1, 0x11))
-    # 复合 structure: tag 0x02 + length + children
+    # 复合 structure: tag 0x02 + 元素个数 + children
     items = [{"tag": 0x02, "type": "structure", "value": 0, "length": 0, "children": [
         {"tag": 0x11, "type": "unsigned", "value": 1, "length": 0},
         {"tag": 0x11, "type": "unsigned", "value": 2, "length": 0},
     ]}]
-    check("structure 编码", encode_axdr_items(items).hex() == "020411011102", f"={encode_axdr_items(items).hex()}")
+    check("structure 编码", encode_axdr_items(items).hex() == "020211011102", f"={encode_axdr_items(items).hex()}")
     # GET-Request get_normal APDU
     apdu = build_dlt698_axdr_apdu("GET-Request", "get_normal", 0x0F, "0000",
                                   {"属性标识": 2, "索引": 0}, b"\x11\x01", False)
     check("GET APDU", apdu.hex() == "05010f00000200110100", f"={apdu.hex()}")
+    # SET-Request set_normal：尾补「没有时间标签」00（文档 H.4）
+    apdu_set = build_dlt698_axdr_apdu("SET-Request", "set_normal", 0x01, "0000",
+                                      {"属性标识": 2, "索引": 0}, b"\x02\x02\x11\x01\x11\x02", False)
+    check("SET APDU 尾00", apdu_set.hex() == "0601010000020002021101110200", f"={apdu_set.hex()}")
     # custom
     apdu2 = build_dlt698_axdr_apdu("_custom_", "", 0x05, "", {}, b"\x11\x01", True)
     check("custom APDU", apdu2.hex() == "0501051101", f"={apdu2.hex()}")

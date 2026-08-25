@@ -172,6 +172,86 @@
         "custom_templates": []
       },
       "id": "f0f9d6f1"
+    },
+    {
+      "protocol": "dlt698",
+      "button_name": "福建冻结",
+      "group_name": "福建扩展",
+      "frame_hex": "68 1F 00 43 05 00 00 00 00 00 00 00 D8 C5 06 01 01 EB E0 02 00 02 03 11 01 11 02 11 03 00 7E 26 16",
+      "description": "福建扩展内容",
+      "config": {
+        "protocol_mode": "dlt698",
+        "current_di_key": null,
+        "current_afn_fn": null,
+        "custom_mode": false,
+        "south": {
+          "src_addr": "000000000000",
+          "dst_addr": "000000000000",
+          "dir": 0,
+          "prm": 0,
+          "add": 0
+        },
+        "gdw": {
+          "comm_type": 0,
+          "dir": 0,
+          "prm": 1,
+          "seq": "0",
+          "route_flag": 0,
+          "comm_module": 0,
+          "relay_level": 0,
+          "channel": "0",
+          "resp_bytes": "0",
+          "src_addr": "000000000000",
+          "dst_addr": "000000000000",
+          "relay_addrs": []
+        },
+        "field_values": {
+          "OI": 60384,
+          "属性标识": 2
+        },
+        "custom_templates": []
+      },
+      "id": "80a2337f"
+    },
+    {
+      "protocol": "dlt698",
+      "button_name": "111111111111",
+      "group_name": "福建扩展",
+      "frame_hex": "68 1F 00 43 05 00 00 00 00 00 00 00 D8 C5 06 01 01 EB E0 02 00 02 03 11 01 11 02 11 03 00 7E 26 16",
+      "description": "",
+      "config": {
+        "protocol_mode": "dlt698",
+        "current_di_key": null,
+        "current_afn_fn": null,
+        "custom_mode": false,
+        "south": {
+          "src_addr": "000000000000",
+          "dst_addr": "000000000000",
+          "dir": 0,
+          "prm": 0,
+          "add": 0
+        },
+        "gdw": {
+          "comm_type": 0,
+          "dir": 0,
+          "prm": 1,
+          "seq": "0",
+          "route_flag": 0,
+          "comm_module": 0,
+          "relay_level": 0,
+          "channel": "0",
+          "resp_bytes": "0",
+          "src_addr": "000000000000",
+          "dst_addr": "000000000000",
+          "relay_addrs": []
+        },
+        "field_values": {
+          "OI": 60384,
+          "属性标识": 2
+        },
+        "custom_templates": []
+      },
+      "id": "f9652e8a"
     }
   ]
 }

@@ -19,7 +19,8 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QTextEdit,
     QTableWidget, QTableWidgetItem, QFileDialog, QMessageBox,
     QHeaderView, QSplitter, QGroupBox, QDialog, QTabWidget, QComboBox,
-    QListView, QFrame, QMenuBar, QSpinBox, QCheckBox, QMenu, QScrollArea
+    QListView, QFrame, QMenuBar, QSpinBox, QCheckBox, QMenu, QScrollArea,
+    QGridLayout
 )
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QObject
 from PySide6.QtWidgets import QStyle
@@ -34,6 +35,7 @@ from dl_t698_45_parser import DLT69845Parser
 from csg_new_gen_parser import CSGNewGenParser
 from gw_new_gen_parser import GWNewGenParser
 from hdc10_parser import HDC10Parser
+from app_paths import app_data_dir, data_path
 from obis_lookup import OBISLookup, get_obis_lookup
 from command_lookup import CommandLookup, get_command_lookup
 from dlt645_di_lookup import DLT645DILookup, get_dlt645_di_lookup
@@ -62,10 +64,27 @@ from llm_api_manager import LLMApiManagerDialog
 from preprocessors import list_scripts as _list_pp_scripts, get_script as _get_pp_script
 
 
-APP_VERSION = "1.14.5"
-BUILD_DATE = "2026-08-21"  # 编译日期，每次打包前更新
+APP_VERSION = "1.14.7"
+BUILD_DATE = "2026-08-24"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    ("1.14.7", "2026-08-24", [
+        "修复 exe 打包后用户配置丢失：新增 app_paths.py 作为所有可写数据文件路径的唯一入口——frozen（PyInstaller 单文件 exe）下定位到 exe 所在目录，开发模式落项目根；此前 Path(__file__).parent 指向 _MEIPASS 临时解压目录（进程退出即删）、cwd 相对路径随启动位置漂移，导致每次更新 exe 后用户配置全部丢失",
+        "接入文件：config.json（main_gui/llm_api_manager/llm_preprocess_widget/theme_settings/system_settings）、预设命令 NW/GW/DLT698_command.json、test_plan.json、custom_di.json、gdw_custom_afn.json、dlt645_di_custom.json、custom_commands.json、custom_obis.json、archive_data.json、监控 CSV Output/ 目录",
+        "内置种子自愈：custom_di.json / gdw_custom_afn.json 在 exe 目录不存在时自动从 _MEIPASS 打包资源复制一份作为初始值（ensure_data_file），之后读写均落 exe 目录；已存在的用户文件不覆盖",
+        "只读资源（icons/、dlt645_di.json、app_icon.ico 等）保持原定位不变；不做旧目录迁移；新增 test/test_app_paths.py（11 项：开发模式定位 + frozen monkeypatch 种子复制/不覆盖）",
+        "修复低分屏/高DPI 下批量解析页按钮与输入框重叠 + 工具栏视觉凌乱：单行流式布局 → 三行独立 QHBoxLayout（核心操作+帧计数 / CLI 预处理 / Python 脚本+导出），行内下拉框吃掉剩余宽度，消除多行列宽竞争导致的负间隙重叠；全部文字按钮统一 min_width（普通 100/导出 120）等高等宽对齐；图标按钮（★保存 ×删除 ?帮助）弃用 setMaximumWidth 与空文本方案——QSS padding 使 sizeHint 变宽后与 maximumWidth 冲突致相邻重叠、空文本则让人无法辨识功能，改为内联收紧 padding + ensurePolished 后 setFixedWidth(sizeHint 宽度) 固定统一方块尺寸且保留字形；所有工具栏按钮补充 tooltip 说明",
+        "修复关闭软件时周期性报 RuntimeError:Internal C++ object (_UpdateCheckWorker) already deleted：_run_update_check 连接 thread.finished→deleteLater 后 C++ 对象可能已被回收，closeEvent 旧代码 thread.disconnect() 直接触碰已删对象抛 RuntimeError。改为 try/except(RuntimeError) 包裹整个线程收尾块、disconnect 带参数并兜住 (RuntimeError, TypeError)；等待超时(500ms)时不再 quit()（阻塞网络 IO 无法中断、反而触发 Destroyed while running 警告），只断开信号放行；_UpdateCheckWorker 去掉 parent=self 避免窗口析构牵扯子线程。实测三场景（C++已删/运行中/已结束）closeEvent 均无异常",
+        "批量解析新增「导出选中」：摘要表支持 Ctrl/Shift 多选行（原单选），工具栏新增「导出选中」按钮只导出高亮帧——用于从大批量结果中挑出信标帧等目标子集再导出；过滤栏新增「按类型全选」下拉+按钮（解析后动态提取类型列表，一键选中该类型全部帧，如全部信标帧）+「已选 N 帧」实时计数；导出对话框标题显示导出范围（仅选中帧 N/M 或全部）；清空/重新解析时自动重置选区与类型下拉",
+        "窗口最小尺寸按屏幕自适应（min(1000, 可用宽度×0.85) / min(700, 可用高度×0.8)），1366×768 等低分屏下不再超出可视区压缩布局；主题 QSS 控件瘦身——按钮内边距 8px16px→4px12px、输入框 5px→2px6px、下拉框/选项卡同步收紧",
+        "修复主题 QSS 字号与表格缩放基准脱节（gui_utils/theme_settings）：ThemeManager.apply 后重置全部 ZoomableTableWidget 缩放基准并按新字号重算行高，Ctrl+0 恢复不再把字号打回旧基准裁切文字",
+    ]),
+    ("1.14.6", "2026-08-24", [
+        "协议9（新一代载波）精简信标帧载荷深度解析（csg_new_gen_parser.py）：此前信标载荷只按标准信标表51 布局解析，精简信标（载荷头 bit4=1，表73）的 CCO MAC(6B)+信标周期计数(4B) 固定区被误读为 SNID/无线信道/信标机制字段、0x0E 精简条目头错位成「保留98」。现按表73 分支解析：标志+组网序列号+CCO MAC+周期计数+管理信息+BPCS；新增 0x0E 精简信标站点信息及时隙条目（表74）逐字段深度解析——TEI/代理TEI/角色(CCO/STA/PCO)/层级/MAC/RF跳数/载波频段/CSMA时隙开始NTB与长度。用户实测中央精简信标现正确解出 组网序列号70 / CCO MAC=00:00:90:98:01:63 / 周期计数20(=FC) / TEI=1(=FC源TEI) / 角色=CCO",
+        "修复关闭软件后仍周期性弹更新提示：①点X最小化到托盘时暂停30分钟周期更新检查（closeEvent托盘分支停 _update_poll_timer），从托盘恢复显示时 showEvent 重启；启动3秒延迟单次检查加 isVisible 守卫——主窗口隐藏状态下自动检查直接跳过。②真正退出时收尾：停止周期定时器 + 断开并等待 _UpdateCheckWorker 线程结束（500ms 快速等待，超时 quit+2s 兜底），不再残留后台线程周期联网",
+        "DAR 错误码表按文档表25 权威重写（dl_t698_45_apdu_parser.py DAR_MAP）：0成功~36比对失败+255其它 全量对齐；SET-Response/ACTION-Response Normal 的 DAR 改为裸 enum 单字节解析（此前走 A-XDR decode，非零错误码如 0x03 会撞 array 标签崩溃）",
+        "测试：test_dl_t698_45.py GET-Response 用例改为文档语义（[1]=Data/[0]=DAR 双断言）；test_dl_t698_45_data_decode.py 全部合成帧 GetResult 标签 0x00→0x01；test_dl_t698_45_fujian.py 新增 用户版本信息真实帧全链路表格断言 + DAR 错误响应用例；四套件回归全过",
+    ]),
     ("1.14.5", "2026-08-21", [
         "协议11（HDC 1.0）查询站点升级状态上行报文解析（hdc10_parser.py 0x034）：此前只按下行表40 解析（块数/起始块号/升级ID），上行应答的 升级状态(字节1高4位)/有效块数/升级位图 全部丢失。现按文档第4-3部分 表45 补全：升级状态（0空闲/1接收进行/2接收完成/3升级进行/4试运行）、有效块数、起始块号、升级ID + 接收位图（每bit对应一个文件块，显示 N/M块已接收）；升级位图逐块编号明细按 起始块号+i 编号，每行32块多行展开，[✓n]=已接收 [✕n]=丢包；下行恰12字节仍按表40 解析并区分方向行",
         "协议11（HDC 1.0）台区户变关系识别(0x0A1)深度解析（hdc10_parser.py）：①修复报文头长度公式——6bit值(byte0[6:7]高2位+byte1[0:3]低4位)×4字节（类IPv4 IHL），此前错把「(b0低2位|b1高4位<<2)×4」致12字节头算成48字节、DATA从错误偏移切片只剩尾部16字节；校时/事件/通信测试/注册/升级等全部7处统一修正。②DATA域按采集类型深度解析：采集启动(表56 起始NTB/周期/数量/序列号)、特征信息告知(表57 TEI/采集方式/序列号/告知总数/起始NTB + 特征序列)、判别结果信息(表61 TEI/结束标志/识别结果/正确隶属CCO地址)。③特征序列按特征类型分派：工频电压(表58 BCD XXX.X 大端 220.5V)、工频频率(表59 BCD XX.XX 50.00Hz)、工频周期(表60 有符号偏差值+μs换算)，三相出线逐相展开，双沿采集解析 NTB2+第二组序列；test_hdc10 增至16项全过",
@@ -467,11 +486,11 @@ class ConfigDialog(QDialog):
     def _browse_file(self, key: str, edit: QLineEdit):
         """弹出文件选择对话框"""
         current = edit.text().strip()
-        start_dir = str(Path(__file__).parent)
+        start_dir = str(app_data_dir())
         if current:
             p = Path(current)
             if not p.is_absolute():
-                p = Path(__file__).parent / p
+                p = app_data_dir() / p
             if p.parent.exists():
                 start_dir = str(p.parent)
 
@@ -481,7 +500,7 @@ class ConfigDialog(QDialog):
         if path:
             # 尽量保存为相对路径
             try:
-                rel = Path(path).relative_to(Path(__file__).parent)
+                rel = Path(path).relative_to(app_data_dir())
                 edit.setText(str(rel))
             except ValueError:
                 edit.setText(path)
@@ -548,15 +567,20 @@ class DragDropTextEdit(QTextEdit):
                         from PySide6.QtWidgets import QMessageBox
                         QMessageBox.critical(self, "错误", f"读取文件失败：{e}")
             event.acceptProposedAction()
-        else:
-            super().dropEvent(event)
-
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        # 最小尺寸按屏幕自适应：低分屏（如 1366×768）下固定 1000×700 超出可视区，
+        # 布局被压缩到小于控件最小尺寸时 Qt 会出现控件重叠
+        screen = QGuiApplication.primaryScreen()
+        if screen is not None:
+            avail = screen.availableGeometry()
+            self.setMinimumSize(min(1000, int(avail.width() * 0.85)),
+                                min(700, int(avail.height() * 0.8)))
+        else:
+            self.setMinimumSize(1000, 700)
         self.setWindowTitle(f"协议解析工具 v{APP_VERSION} ({BUILD_DATE}) - 作者: liruitao")
-        self.setMinimumSize(1000, 700)
 
         # 协议选择：0=南网协议，1=PLC RF协议，2=HDLC/国网DLMS，3=DLMS-APDU(国网)，4=Wrapper，5=APDU，6=DLT645，7=国网协议，8=698.45，9=新一代载波协议(通感一体化)
         self.current_protocol = 0
@@ -598,13 +622,14 @@ class MainWindow(QMainWindow):
         self._last_parsed_hex: Optional[str] = None
 
         # 应用配置（先加载，setup_ui 会用到）
-        self._config_path = Path(__file__).parent / "config.json"
+        self._config_path = data_path("config.json")
         self._app_config: Dict[str, Any] = {}
         self._file_paths: Dict[str, Path] = {}
         self._load_app_config()
 
         # 主题与字体配置（应用级样式由 main() 在 QApplication 上应用，此处仅保存配置供动态控件适配）
         self._theme_id, self._font_family, self._font_size = ThemeManager.load_from_config(self._app_config)
+        self._glass_settings = ThemeManager.load_glass_config(self._app_config)
         # 系统集成配置（config.json "system" 段）
         self._system_settings: Dict[str, Any] = {}
         self._load_system_settings()
@@ -619,6 +644,14 @@ class MainWindow(QMainWindow):
 
         self.setup_ui()
         self._setup_menu_bar()
+
+        # 发现新版本不再弹窗打扰：状态栏右下角常驻绿色⬆提示，点击可选择下载更新
+        self._pending_update = None
+        self._update_status_lbl = _UpdateStatusLink()
+        self._update_status_lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._update_status_lbl.clicked.connect(self._on_update_status_clicked)
+        self._update_status_lbl.hide()
+        self.statusBar().addPermanentWidget(self._update_status_lbl)
 
         # 系统集成管理器（托盘 / 全局热键 / 单实例）
         self._setup_system_integration()
@@ -1546,41 +1579,53 @@ class MainWindow(QMainWindow):
         input_layout = QVBoxLayout(input_group)
         input_layout.setSpacing(8)
 
-        # 工具栏
-        toolbar = QHBoxLayout()
-        toolbar.setSpacing(6)
+        # 工具栏（三行独立 HBox：核心操作 / CLI 预处理 / Python 脚本+导出。
+        # 单行流式布局在低分屏/高DPI 下放不下会把控件挤到重叠，故按功能拆行；
+        # 每行独立布局互不竞争列宽，下拉框吃掉行内剩余宽度，视觉整齐不留死区）
+        toolbar_box = QVBoxLayout()
+        toolbar_box.setSpacing(4)
 
-        self.load_file_btn = self._make_toolbar_btn("从文件加载")
-        self.load_file_btn.setToolTip("支持每行一帧的文本文件")
+        # ── 第一行：核心操作 ─────────────────────────────────
+        row0 = QHBoxLayout()
+        row0.setSpacing(6)
+        self.load_file_btn = self._make_toolbar_btn("从文件加载", min_width=100)
+        self.load_file_btn.setToolTip("从文本文件加载报文（支持每行一帧）")
         self.load_file_btn.clicked.connect(self.load_from_file)
-        toolbar.addWidget(self.load_file_btn)
+        row0.addWidget(self.load_file_btn)
 
-        self.paste_btn = self._make_toolbar_btn("从剪贴板粘贴")
+        self.paste_btn = self._make_toolbar_btn("从剪贴板粘贴", min_width=100)
+        self.paste_btn.setToolTip("从剪贴板粘贴报文文本")
         self.paste_btn.clicked.connect(self.paste_from_clipboard)
-        toolbar.addWidget(self.paste_btn)
+        row0.addWidget(self.paste_btn)
 
-        self.batch_parse_btn = self._make_toolbar_btn("开始批量解析", min_width=90)
+        self.batch_parse_btn = self._make_toolbar_btn("开始批量解析", min_width=100)
+        self.batch_parse_btn.setToolTip("逐帧解析输入框中的全部报文")
         self.batch_parse_btn.clicked.connect(self.parse_batch)
-        toolbar.addWidget(self.batch_parse_btn)
+        row0.addWidget(self.batch_parse_btn)
 
-        self.clear_batch_btn = self._make_toolbar_btn("清空")
+        self.clear_batch_btn = self._make_toolbar_btn("清空", min_width=100)
+        self.clear_batch_btn.setToolTip("清空输入框与解析结果")
         self.clear_batch_btn.clicked.connect(self.clear_batch)
-        toolbar.addWidget(self.clear_batch_btn)
+        row0.addWidget(self.clear_batch_btn)
 
-        # ── CLI 预处理 ──────────────────────────────────────────
-        sep1 = QFrame()
-        sep1.setFrameShape(QFrame.VLine)
-        sep1.setFrameShadow(QFrame.Sunken)
-        toolbar.addWidget(sep1)
+        row0.addStretch()
+        # 帧计数徽章右对齐（窄屏时不会被挤出可视区）
+        self.batch_frame_count_label = QLabel("共 0 帧")
+        self.batch_frame_count_label.setStyleSheet(self._batch_count_style())
+        row0.addWidget(self.batch_frame_count_label)
+        toolbar_box.addLayout(row0)
 
+        # ── 第二行：CLI 文本预处理 ────────────────────────────
+        row1 = QHBoxLayout()
+        row1.setSpacing(6)
         pp_label = QLabel("预处理:")
         pp_label.setFont(self._ui_font(-1))
-        toolbar.addWidget(pp_label)
+        row1.addWidget(pp_label)
 
         self._pp_cmd_combo = QComboBox()
         self._pp_cmd_combo.setEditable(True)
         self._pp_cmd_combo.setFont(self._ui_font(-1, family="Consolas"))
-        self._pp_cmd_combo.setMinimumWidth(260)
+        self._pp_cmd_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self._pp_cmd_combo.setPlaceholderText('如: find "tcp data:" excluding "len:\\d+: "')
         self._pp_cmd_combo.setToolTip(
             "通用文本预处理命令链（支持正则）\n"
@@ -1600,92 +1645,86 @@ class MainWindow(QMainWindow):
             'excluding "len:" head 50',
         ]
         self._load_pp_commands()
-        toolbar.addWidget(self._pp_cmd_combo)
+        row1.addWidget(self._pp_cmd_combo, 1)
 
         self._pp_save_btn = self._make_toolbar_btn("★", icon_btn=True)
-        self._pp_save_btn.setToolTip("保存当前命令到常用列表")
+        self._pp_save_btn.setToolTip("保存当前输入的命令到常用列表")
         self._pp_save_btn.clicked.connect(self._save_pp_command)
-        toolbar.addWidget(self._pp_save_btn)
+        row1.addWidget(self._pp_save_btn)
 
         self._pp_del_btn = self._make_toolbar_btn("×", icon_btn=True)
         self._pp_del_btn.setToolTip("删除下拉列表中选中的命令")
         self._pp_del_btn.clicked.connect(self._delete_pp_command)
-        toolbar.addWidget(self._pp_del_btn)
+        row1.addWidget(self._pp_del_btn)
 
-        self._pp_run_btn = self._make_toolbar_btn("执行")
+        self._pp_run_btn = self._make_toolbar_btn("执行", min_width=100)
         self._pp_run_btn.setToolTip("对输入框内容执行预处理命令链，结果回填到输入框")
         self._pp_run_btn.clicked.connect(self._run_cli_preprocessor)
-        toolbar.addWidget(self._pp_run_btn)
+        row1.addWidget(self._pp_run_btn)
 
         self._pp_help_btn = self._make_toolbar_btn("?", icon_btn=True)
         self._pp_help_btn.setToolTip("显示预处理命令帮助")
         self._pp_help_btn.clicked.connect(self._show_pp_help)
-        toolbar.addWidget(self._pp_help_btn)
+        row1.addWidget(self._pp_help_btn)
+        toolbar_box.addLayout(row1)
 
-        # ── Python 脚本预处理 ───────────────────────────────────
-        sep_py = QFrame()
-        sep_py.setFrameShape(QFrame.VLine)
-        sep_py.setFrameShadow(QFrame.Sunken)
-        toolbar.addWidget(sep_py)
-
+        # ── 第三行：Python 脚本预处理 + 导出 ───────────────────
+        row2 = QHBoxLayout()
+        row2.setSpacing(6)
         py_label = QLabel("脚本:")
         py_label.setFont(self._ui_font(-1))
-        toolbar.addWidget(py_label)
+        row2.addWidget(py_label)
 
         self._py_script_combo = QComboBox()
         self._py_script_combo.setFont(self._ui_font(-1, family="Consolas"))
-        self._py_script_combo.setMinimumWidth(180)
+        self._py_script_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self._py_script_combo.setToolTip(
             "Python 脚本预处理\n"
             "加载自定义 .py 脚本，对输入文本进行清洗/转换\n"
             "脚本需定义 process(text, context) -> str\n"
             "⚠ 直接运行本地脚本，仅加载可信脚本")
         self._load_py_scripts()
-        toolbar.addWidget(self._py_script_combo)
+        row2.addWidget(self._py_script_combo, 1)
 
-        self._py_load_btn = self._make_toolbar_btn("加载")
+        self._py_load_btn = self._make_toolbar_btn("加载", min_width=100)
         self._py_load_btn.setToolTip("加载 .py 脚本文件到列表")
         self._py_load_btn.clicked.connect(self._load_py_script_file)
-        toolbar.addWidget(self._py_load_btn)
+        row2.addWidget(self._py_load_btn)
 
-        self._py_run_btn = self._make_toolbar_btn("运行")
+        self._py_run_btn = self._make_toolbar_btn("运行", min_width=100)
         self._py_run_btn.setToolTip("对输入框内容运行当前脚本，结果回填")
         self._py_run_btn.clicked.connect(self._run_py_script)
-        toolbar.addWidget(self._py_run_btn)
+        row2.addWidget(self._py_run_btn)
 
         self._py_del_btn = self._make_toolbar_btn("×", icon_btn=True)
         self._py_del_btn.setToolTip("从列表中移除当前脚本（不删除磁盘文件）")
         self._py_del_btn.clicked.connect(self._delete_py_script)
-        toolbar.addWidget(self._py_del_btn)
+        row2.addWidget(self._py_del_btn)
 
         self._py_help_btn = self._make_toolbar_btn("?", icon_btn=True)
         self._py_help_btn.setToolTip("显示 Python 脚本预处理帮助")
         self._py_help_btn.clicked.connect(self._show_py_script_help)
-        toolbar.addWidget(self._py_help_btn)
+        row2.addWidget(self._py_help_btn)
 
-        # 分隔线
-        sep = QFrame()
-        sep.setFrameShape(QFrame.VLine)
-        sep.setFrameShadow(QFrame.Sunken)
-        toolbar.addWidget(sep)
-
-        # 导出按钮
-        self.batch_export_excel_btn = self._make_toolbar_btn("导出 Excel")
+        row2.addStretch()
+        self.batch_export_excel_btn = self._make_toolbar_btn("导出 Excel", min_width=120)
+        self.batch_export_excel_btn.setToolTip("解析结果导出为 Excel 文件")
         self.batch_export_excel_btn.clicked.connect(lambda: self.export_batch("excel"))
-        toolbar.addWidget(self.batch_export_excel_btn)
+        row2.addWidget(self.batch_export_excel_btn)
 
-        self.batch_export_json_btn = self._make_toolbar_btn("导出 JSON")
+        self.batch_export_json_btn = self._make_toolbar_btn("导出 JSON", min_width=120)
+        self.batch_export_json_btn.setToolTip("解析结果导出为 JSON 文件")
         self.batch_export_json_btn.clicked.connect(lambda: self.export_batch("json"))
-        toolbar.addWidget(self.batch_export_json_btn)
+        row2.addWidget(self.batch_export_json_btn)
 
-        toolbar.addStretch()
+        self.batch_export_selected_btn = self._make_toolbar_btn("导出选中", min_width=100)
+        self.batch_export_selected_btn.setToolTip(
+            "只导出摘要表中高亮选中的帧（Ctrl/Shift 多选）；未选中任何行时导出全部")
+        self.batch_export_selected_btn.clicked.connect(lambda: self.export_batch("selected_dialog"))
+        row2.addWidget(self.batch_export_selected_btn)
+        toolbar_box.addLayout(row2)
 
-        # 帧计数徽章
-        self.batch_frame_count_label = QLabel("共 0 帧")
-        self.batch_frame_count_label.setStyleSheet(self._batch_count_style())
-        toolbar.addWidget(self.batch_frame_count_label)
-
-        input_layout.addLayout(toolbar)
+        input_layout.addLayout(toolbar_box)
 
         # 输入文本框
         self.batch_input = DragDropTextEdit()
@@ -1758,10 +1797,24 @@ class MainWindow(QMainWindow):
         self.batch_status_filter.currentIndexChanged.connect(self._on_batch_filter_changed)
         filter_bar.addWidget(self.batch_status_filter)
 
-        self.batch_filter_count = QLabel("")
-        self.batch_filter_count.setFont(self._ui_font(-1))
-        self.batch_filter_count.setStyleSheet("color: #666;")
-        filter_bar.addWidget(self.batch_filter_count)
+        # 按类型一键勾选（解析完成后动态填充类型列表，用于快速挑出信标帧等）
+        self.batch_type_combo = QComboBox()
+        self.batch_type_combo.setFont(self._ui_font(-1))
+        self.batch_type_combo.setMinimumWidth(120)
+        self.batch_type_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.batch_type_combo.setToolTip("选择帧类型后点「全选」，自动勾选该类型的全部帧")
+        self.batch_type_combo.addItem("按类型全选…", None)
+        filter_bar.addWidget(self.batch_type_combo)
+
+        self.batch_select_type_btn = self._make_toolbar_btn("全选", min_width=60, height=24)
+        self.batch_select_type_btn.setToolTip("勾选当前所选类型的全部帧；未选类型时清空全部勾选")
+        self.batch_select_type_btn.clicked.connect(self._on_batch_select_by_type)
+        filter_bar.addWidget(self.batch_select_type_btn)
+
+        self.batch_selected_count = QLabel("")
+        self.batch_selected_count.setFont(self._ui_font(-1))
+        self.batch_selected_count.setStyleSheet("color: #2196F3; font-weight: bold;")
+        filter_bar.addWidget(self.batch_selected_count)
 
         summary_layout.addLayout(filter_bar)
 
@@ -1781,8 +1834,11 @@ class MainWindow(QMainWindow):
         header.setSectionResizeMode(3, QHeaderView.Interactive)
         header.setSectionResizeMode(4, QHeaderView.Stretch)
         self.batch_summary_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.batch_summary_table.setSelectionMode(QTableWidget.SingleSelection)
+        # 扩展多选：Ctrl/Shift 选多行，配合「导出选中」挑选信标帧等子集
+        self.batch_summary_table.setSelectionMode(QTableWidget.ExtendedSelection)
         self.batch_summary_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        # 选区变化联动「已选 N 帧」计数
+        self.batch_summary_table.itemSelectionChanged.connect(self._update_batch_selected_count)
         self.batch_summary_table.setAlternatingRowColors(True)
         self.batch_summary_table.verticalHeader().hide()
         table_font = self._ui_font(-2)
@@ -4271,7 +4327,13 @@ class MainWindow(QMainWindow):
             print(f"[更新] 保存配置失败: {e}")
 
     def _auto_check_update(self):
-        """启动时静默自动检查更新（网络失败/无新版均不打扰）。"""
+        """启动/周期静默自动检查更新（网络失败/无新版均不打扰）。
+
+        主窗口隐藏（已关闭到托盘/最小化退出路径）时不检查——
+        用户要求：只有软件打开时才检查更新，避免后台周期性弹更新提示。
+        """
+        if not self.isVisible():
+            return
         try:
             self._run_update_check(silent=True)
         except Exception:
@@ -4306,7 +4368,7 @@ class MainWindow(QMainWindow):
 
         self._update_ctx = {"silent": silent, "show_list": show_list}
 
-        thread = _UpdateCheckWorker(cfg, APP_VERSION, list_all=show_list, parent=self)
+        thread = _UpdateCheckWorker(cfg, APP_VERSION, list_all=show_list)
         self._update_check_thread = thread
         if show_list:
             thread.release_list_ready.connect(self._on_version_list_result_cb)
@@ -4321,7 +4383,7 @@ class MainWindow(QMainWindow):
         self._on_update_check_result(result, ctx.get("silent", True))
 
     def _on_update_check_result(self, result: dict, silent: bool):
-        """检查完成：有新版则询问，无则视 silent 决定是否提示。"""
+        """检查完成：自动检查发现新版仅在状态栏提示（不弹窗打扰），无新版则隐藏提示。"""
         if result.get("error"):
             if not silent:
                 QMessageBox.warning(self, "检查更新", f"检查失败：{result['error']}")
@@ -4329,15 +4391,59 @@ class MainWindow(QMainWindow):
         latest = result.get("latest") or {}
         needed = result.get("needed", False)
         if not needed:
+            self._set_update_status(None)
             if not silent:
                 ver = latest.get("version", "未知")
                 QMessageBox.information(self, "检查更新", f"已是最新版本（{ver}）。")
             return
-        # 有新版：询问确认
+        # 有新版
+        if silent:
+            # 自动/周期检查：不弹窗，仅状态栏右下角绿色⬆提示，用户点击后再确认下载
+            self._set_update_status(latest)
+            return
         local = result.get("local", APP_VERSION)
         remote = latest.get("version", "?")
         notes = (latest.get("notes") or "").strip()
         msg = f"发现新版本：{local} → {remote}\n\n{notes}\n\n是否下载并更新？"
+        ret = QMessageBox.question(
+            self, "发现新版本", msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if ret == QMessageBox.StandardButton.Yes:
+            self._start_download(latest)
+
+    def _set_update_status(self, latest):
+        """设置/清除状态栏「发现新版本」提示（latest=None 时隐藏，表示已是最新版）。"""
+        lbl = getattr(self, "_update_status_lbl", None)
+        if lbl is None:
+            return
+        if not latest:
+            self._pending_update = None
+            lbl.hide()
+            return
+        self._pending_update = latest
+        remote = latest.get("version", "?")
+        notes = " ".join((latest.get("notes") or "").split())[:80]
+        lbl.setText(f"⬆ 发现新版本 v{remote}，点击更新")
+        lbl.setToolTip(f"发现新版本：{APP_VERSION} → {remote}\n{notes}\n点击下载并更新" if notes
+                       else f"发现新版本：{APP_VERSION} → {remote}\n点击下载并更新")
+        lbl.setStyleSheet(self._update_status_style())
+        lbl.show()
+
+    def _update_status_style(self):
+        """状态栏更新提示样式：绿色加粗醒目显示（暗色主题用亮绿）。"""
+        from theme_settings import is_dark
+        color = "#4ade80" if is_dark(self._theme_id) else "#0a8f2e"
+        return f"color: {color}; font-weight: bold; font-size: {self._font_size + 1}pt; padding: 0 6px;"
+
+    def _on_update_status_clicked(self):
+        """点击状态栏更新提示：弹确认框，确认后下载更新。"""
+        latest = getattr(self, "_pending_update", None)
+        if not latest:
+            return
+        remote = latest.get("version", "?")
+        notes = (latest.get("notes") or "").strip()
+        msg = f"发现新版本：{APP_VERSION} → {remote}\n\n{notes}\n\n是否下载并更新？"
         ret = QMessageBox.question(
             self, "发现新版本", msg,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -4752,14 +4858,56 @@ class MainWindow(QMainWindow):
         self._tray_exit = True
         self.close()
 
+    def showEvent(self, event):
+        """主窗口显示（含从托盘恢复）：恢复周期更新检查。"""
+        super().showEvent(event)
+        if self._update_settings.get("check_on_start", True) and self._update_settings.get("enabled", True):
+            timer = getattr(self, "_update_poll_timer", None)
+            if timer is not None and not timer.isActive():
+                timer.start()
+
     def closeEvent(self, event):
         """关闭窗口：若启用托盘且非主动退出，最小化到托盘"""
         if (self._tray_manager is not None and not self._tray_exit
                 and self._system_settings.get("close_to_tray", True)):
             event.ignore()
             self.hide()
+            # 主窗口隐藏后不再周期性检查更新（避免后台静默弹更新提示占资源）；
+            # 从托盘恢复显示时由 showEvent 重启周期检查
+            timer = getattr(self, "_update_poll_timer", None)
+            if timer is not None:
+                timer.stop()
             self._tray_manager.show_hint_once()
             return
+        # 停止周期更新检查 + 收尾检查线程（网络IO最长15s超时）。
+        # 注意：_run_update_check 里连接了 thread.finished→deleteLater，
+        # 线程结束后 C++ 对象可能已被回收，Python weakref 仍指向它——
+        # 直接调用任何方法都会抛 RuntimeError("already deleted")。
+        timer = getattr(self, "_update_poll_timer", None)
+        if timer is not None:
+            timer.stop()
+        thread = getattr(self, "_update_check_thread", None)
+        if thread is not None:
+            try:
+                # wait() 对已删 C++ 对象抛 RuntimeError；对未结束线程返回 False
+                if not thread.wait(500):
+                    # run() 是阻塞网络 IO；等待超时只断开信号并放行，
+                    # 不 quit()（无法中断网络调用，且会触发 Destroyed while running）
+                    try:
+                        thread.disconnect(thread)
+                    except (RuntimeError, TypeError):
+                        pass
+                    thread.wait(2000)
+                else:
+                    # 线程已自然结束，断开发信号连接
+                    try:
+                        thread.disconnect(thread)
+                    except (RuntimeError, TypeError):
+                        pass
+            except RuntimeError:
+                # C++ 对象已被 deleteLater 回收，Python wrapper 还在——忽略
+                pass
+
         # 清理托盘与热键
         if self._tray_manager is not None:
             self._tray_manager.hide_tray()
@@ -5407,11 +5555,13 @@ class MainWindow(QMainWindow):
                         status = "成功"
                         success_count += 1
 
-                # 保存结果（表格数据可以在详情查看时使用）
+                # 保存结果（表格数据可以在详情查看时使用；_type_name 供「按类型全选」）
+                proto_type = self._get_frame_type_name(table_data, status)
                 self.batch_results.append({
                     "_input": frame_hex,
                     "_status": status,
                     "_table_data": table_data,
+                    "_type_name": proto_type,
                     "摘要": summary
                 })
 
@@ -5451,8 +5601,8 @@ class MainWindow(QMainWindow):
             len_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.batch_summary_table.setItem(row, 2, len_item)
 
-            # 协议/类型
-            proto_type = self._get_frame_type_name(table_data, status)
+            # 协议/类型（parse 循环内已算过并存在 batch_results，直接复用）
+            proto_type = self.batch_results[-1].get("_type_name") or self._get_frame_type_name(table_data, status)
             proto_item = QTableWidgetItem(proto_type)
             if status != "成功":
                 proto_item.setForeground(Qt.red)
@@ -5463,6 +5613,12 @@ class MainWindow(QMainWindow):
 
         # 更新状态栏
         self._update_status_bar(success_count, fail_count, len(frames))
+
+        # 刷新「按类型全选」下拉（信标帧等类型一键勾选的来源）
+        if hasattr(self, 'batch_type_combo'):
+            self._refresh_batch_type_combo()
+            if hasattr(self, 'batch_selected_count'):
+                self.batch_selected_count.setText("")
 
         # 自动选中第一行并显示详情
         if self.batch_summary_table.rowCount() > 0:
@@ -6745,20 +6901,99 @@ class MainWindow(QMainWindow):
             self.batch_status_filter.setCurrentIndex(0)
         if hasattr(self, 'batch_filter_count'):
             self.batch_filter_count.setText("")
+        # 重置类型全选下拉与选中计数
+        if hasattr(self, 'batch_type_combo'):
+            self.batch_type_combo.blockSignals(True)
+            while self.batch_type_combo.count() > 1:
+                self.batch_type_combo.removeItem(1)
+            self.batch_type_combo.setCurrentIndex(0)
+            self.batch_type_combo.blockSignals(False)
+        if hasattr(self, 'batch_selected_count'):
+            self.batch_selected_count.setText("")
+
+    def _get_selected_batch_indices(self) -> list:
+        """摘要表当前高亮行对应的 batch_results 原始索引（升序去重）"""
+        idxs = set()
+        for item in self.batch_summary_table.selectedItems():
+            row = item.row()
+            num_item = self.batch_summary_table.item(row, 0)
+            if num_item is not None:
+                orig = num_item.data(Qt.UserRole)
+                if orig is not None and 0 <= orig < len(self.batch_results):
+                    idxs.add(orig)
+        return sorted(idxs)
+
+    def _on_batch_select_by_type(self):
+        """按类型一键勾选：把所选类型的全部可见行加入高亮选区；未选类型时清空选区"""
+        type_data = self.batch_type_combo.currentData()
+        self.batch_summary_table.clearSelection()
+        if type_data is None:
+            self._update_batch_selected_count()
+            return
+        from PySide6.QtCore import QItemSelection, QItemSelectionModel
+        selection = QItemSelection()
+        model = self.batch_summary_table.model()
+        for row in range(self.batch_summary_table.rowCount()):
+            if self.batch_summary_table.isRowHidden(row):
+                continue
+            proto_item = self.batch_summary_table.item(row, 3)
+            if proto_item is None or proto_item.text() != type_data:
+                continue
+            left = model.index(row, 0)
+            right = model.index(row, self.batch_summary_table.columnCount() - 1)
+            selection.select(left, right)
+        sel_model = self.batch_summary_table.selectionModel()
+        if sel_model is not None:
+            sel_model.select(selection, QItemSelectionModel.Select | QItemSelectionModel.Rows)
+        self._update_batch_selected_count()
+
+    def _update_batch_selected_count(self):
+        """更新「已选 N 帧」标签"""
+        n = len(self._get_selected_batch_indices())
+        self.batch_selected_count.setText(f"已选 {n} 帧" if n else "")
+
+    def _refresh_batch_type_combo(self):
+        """解析完成后刷新类型下拉（从当前结果提取全部协议/类型）"""
+        current = self.batch_type_combo.currentData()
+        self.batch_type_combo.blockSignals(True)
+        self.batch_type_combo.clear()
+        self.batch_type_combo.addItem("按类型全选…", None)
+        types = []
+        for r in self.batch_results:
+            t = r.get("_type_name")
+            if t and t not in types:
+                types.append(t)
+        for t in sorted(types):
+            self.batch_type_combo.addItem(t, t)
+        if current is not None:
+            pos = self.batch_type_combo.findData(current)
+            if pos >= 0:
+                self.batch_type_combo.setCurrentIndex(pos)
+        self.batch_type_combo.blockSignals(False)
 
     def export_batch(self, fmt=None):
         """增强版批量解析结果导出 - 支持 JSON/Excel 多格式，Excel 含 Sheet2 详细解析
 
         Args:
-            fmt: 导出格式，可选 "excel" / "json" / None
+            fmt: 导出格式，可选 "excel" / "json" / "selected_dialog" / None
                  - "excel" 或 "json": 直接弹出保存对话框，跳过格式选择
+                 - "selected_dialog": 显示完整导出对话框，且默认只导出当前选中帧
                  - None: 显示完整的导出选项对话框（默认，向后兼容）
         """
         from PySide6.QtWidgets import QFileDialog
-        
+
         if not self.batch_results:
             QMessageBox.warning(self, "警告", "没有可导出的解析结果！")
             return
+
+        # 导出范围：选中帧（多选行模式，Ctrl/Shift 挑选信标帧等子集）
+        selected_only = (fmt == "selected_dialog")
+        selected_idxs = self._get_selected_batch_indices() if selected_only else []
+        if selected_only and not selected_idxs:
+            QMessageBox.warning(self, "提示", "请先在摘要表中选中要导出的帧（Ctrl/Shift 可多选）！")
+            return
+        export_pool = ([self.batch_results[i] for i in selected_idxs]
+                       if selected_only else self.batch_results)
 
         # 获取协议名称
         protocol_names = [
@@ -6820,7 +7055,9 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(20, 20, 20, 20)
 
         # 标题
-        title = QLabel(f"导出协议: {protocol_name}  |  共 {len(self.batch_results)} 条结果")
+        scope_text = (f"仅选中帧 {len(export_pool)}/{len(self.batch_results)} 条"
+                      if selected_only else f"共 {len(self.batch_results)} 条结果")
+        title = QLabel(f"导出协议: {protocol_name}  |  {scope_text}")
         title.setStyleSheet("font-size: 13px; font-weight: bold; color: #2196F3;")
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
@@ -6908,17 +7145,15 @@ class MainWindow(QMainWindow):
                 exporter = EnhancedBatchResultExporter(export_dir)
 
                 if excel_radio.isChecked():
-                    # Excel 导出需要完整的文件路径
                     result_path = exporter.export_to_excel(
-                        self.batch_results, protocol_name,
+                        export_pool, protocol_name,
                         output_file=file_path
                     )
                 else:
                     result_path = exporter.export_to_json(
-                        self.batch_results, protocol_name,
+                        export_pool, protocol_name,
                         output_file=file_path
                     )
-
                 QMessageBox.information(self, "导出成功", f"结果已保存到:\n{result_path}")
                 dialog.accept()
             except Exception as e:
@@ -7429,7 +7664,7 @@ class MainWindow(QMainWindow):
 
     def _load_serial_config(self):
         """从 config.json 加载串口配置"""
-        config_path = Path(__file__).parent / "config.json"
+        config_path = data_path("config.json")
         if not config_path.exists():
             return
         try:
@@ -7469,7 +7704,7 @@ class MainWindow(QMainWindow):
         p = Path(raw)
         if p.is_absolute():
             return p
-        return Path(__file__).parent / p
+        return app_data_dir() / p
 
     def _load_app_config(self):
         """加载应用配置（串口 + 文件路径）"""
@@ -7569,14 +7804,16 @@ class MainWindow(QMainWindow):
         for key, path in self._file_paths.items():
             if path:
                 try:
-                    rel = path.relative_to(Path(__file__).parent)
+                    rel = path.relative_to(app_data_dir())
                     file_paths[key] = str(rel)
                 except ValueError:
                     file_paths[key] = str(path)
         config["file_paths"] = file_paths
 
-        # 更新主题与字体配置
-        config["ui"] = ThemeManager.to_config(self._theme_id, self._font_family, self._font_size)
+        # 更新主题与字体配置（含毛玻璃参数）
+        config["ui"] = ThemeManager.to_config(
+            self._theme_id, self._font_family, self._font_size,
+            glass=getattr(self, "_glass_settings", None))
 
         # 更新 LLM 预处理配置
         if hasattr(self, "llm_preprocess_widget"):
@@ -7602,7 +7839,7 @@ class MainWindow(QMainWindow):
         for key, path in self._file_paths.items():
             if path:
                 try:
-                    rel = path.relative_to(Path(__file__).parent)
+                    rel = path.relative_to(app_data_dir())
                     current_paths[key] = str(rel)
                 except ValueError:
                     current_paths[key] = str(path)
@@ -7669,9 +7906,12 @@ class MainWindow(QMainWindow):
         if min_width:
             btn.setMinimumWidth(min_width)
         if icon_btn:
-            btn.setMaximumWidth(height)
-            # 保持内边距一致，避免不同主题下发散
-            btn.setStyleSheet(f"QPushButton {{ padding: 2px {height // 4}px; }}")
+            # 小方块按钮（★/×/?）：保留字形让人看得出作用；内联收紧内边距，
+            # 固定统一宽度。不用 setMaximumWidth——QSS padding 使 sizeHint
+            # 变宽后会与 maximumWidth 冲突，导致相邻按钮几何重叠。
+            btn.setStyleSheet(f"QPushButton {{ padding: 1px {max(2, height // 7)}px; }}")
+            btn.ensurePolished()
+            btn.setFixedWidth(max(36, btn.sizeHint().width()))
         return btn
 
     def _batch_count_style(self) -> str:
@@ -7748,12 +7988,19 @@ class MainWindow(QMainWindow):
                 self.batch_status_bar.setStyleSheet(self._batch_status_style())
             except RuntimeError:
                 pass
+        if getattr(self, "_update_status_lbl", None) is not None:
+            try:
+                self._update_status_lbl.setStyleSheet(self._update_status_style())
+            except RuntimeError:
+                pass
 
     def _show_theme_settings_dialog(self):
         """显示主题与字体设置对话框（含系统集成设置）"""
-        dialog = ThemeSettingsDialog(self._theme_id, self._font_family, self._font_size, self)
+        dialog = ThemeSettingsDialog(self._theme_id, self._font_family, self._font_size,
+                                     glass=self._glass_settings, parent=self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._theme_id, self._font_family, self._font_size = dialog.get_settings()
+            self._glass_settings = dialog.get_glass_settings()
             self._save_app_config()
             # 应用系统集成设置（自启 / 热键 / 关闭行为）
             sys_settings = dialog.get_system_settings()
@@ -7905,6 +8152,16 @@ def main():
     sys.exit(app.exec())
 
 
+
+
+class _UpdateStatusLink(QLabel):
+    """状态栏「发现新版本」提示标签（可点击，发出 clicked 信号）。"""
+
+    clicked = Signal()
+
+    def mousePressEvent(self, ev):
+        self.clicked.emit()
+        super().mousePressEvent(ev)
 
 
 class _UpdateCheckWorker(QThread):

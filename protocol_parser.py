@@ -1,6 +1,7 @@
 import struct
 from typing import Dict, Any, Optional, Tuple
 from protocol_tool import ControlField
+from app_paths import data_path, ensure_data_file
 import ctypes
 
 
@@ -774,8 +775,8 @@ class ProtocolFrameParser:
     def _load_custom_di(self):
         """从 custom_di.json 加载用户自定义DI条目，合并到 DI_COMBINATION_MAP"""
         import json
-        from pathlib import Path
-        custom_file = Path(self.CUSTOM_DI_FILE)
+        ensure_data_file(self.CUSTOM_DI_FILE)
+        custom_file = data_path(self.CUSTOM_DI_FILE)
         if custom_file.exists():
             try:
                 with open(custom_file, 'r', encoding='utf-8') as f:
@@ -791,8 +792,7 @@ class ProtocolFrameParser:
     def save_custom_di(entries: list):
         """保存自定义DI条目到 custom_di.json"""
         import json
-        from pathlib import Path
-        custom_file = Path(ProtocolFrameParser.CUSTOM_DI_FILE)
+        custom_file = data_path(ProtocolFrameParser.CUSTOM_DI_FILE)
         with open(custom_file, 'w', encoding='utf-8') as f:
             json.dump(entries, f, ensure_ascii=False, indent=2)
 
@@ -800,8 +800,8 @@ class ProtocolFrameParser:
     def load_custom_di_list() -> list:
         """读取 custom_di.json 返回列表"""
         import json
-        from pathlib import Path
-        custom_file = Path(ProtocolFrameParser.CUSTOM_DI_FILE)
+        ensure_data_file(ProtocolFrameParser.CUSTOM_DI_FILE)
+        custom_file = data_path(ProtocolFrameParser.CUSTOM_DI_FILE)
         if custom_file.exists():
             try:
                 with open(custom_file, 'r', encoding='utf-8') as f:

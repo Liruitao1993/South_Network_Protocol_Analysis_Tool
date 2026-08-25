@@ -336,6 +336,97 @@ EB_DI_FIELDS: Dict[str, Dict[str, Any]] = {
              ]},
         ],
     },
+
+    # ── 通用数据冻结 EBE0（公共参数类） ──
+    "EBE0E000": {
+        "名称": "任务配置管理_清除任务组别",
+        "fields": [
+            {"name": "需删除的组别数M1", "type": "uint8"},
+            {"name": "任务组别号列表", "type": "list",
+             "item_fields": [{"name": "任务组别号", "type": "uint8"}]},
+        ],
+    },
+    "EBE0E001": {
+        "名称": "每组任务数据记录最大允许长度",
+        "fields": [{"name": "最大允许长度(字节)", "type": "uint8", "note": "默认200"}],
+    },
+    "EBE0E002": {
+        "名称": "主动上报允许次数（24小时）",
+        "fields": [{"name": "允许次数", "type": "uint8", "note": "V1.32起取消，不限制"}],
+    },
+    "EBE0E003": {
+        "名称": "已配置的任务组别数量",
+        "fields": [
+            {"name": "已配置组别数M1", "type": "uint8"},
+            {"name": "任务组别号列表", "type": "list",
+             "item_fields": [{"name": "任务组别号", "type": "uint8"}]},
+        ],
+    },
+    "EBE0E004": {
+        "名称": "任务暂停时长",
+        "fields": [{"name": "暂停时长(分钟,BCD)", "type": "bcd", "length": 2,
+                    "note": "0~1440分钟，停电恢复为0"}],
+    },
+    "EBE0E006": {
+        "名称": "主动上报失败重试次数",
+        "fields": [
+            {"name": "重试次数(BS8)", "type": "bs8",
+             "bits": {"普通可靠性(高4位)": 4, "高可靠性(低4位)": 0},
+             "bit_enums": {}},
+        ],
+    },
+    "EBE0E007": {
+        "名称": "表计多数据项支持标识",
+        "fields": [
+            {"name": "多数据项支持标识", "type": "enum",
+             "enum_map": {0: "不支持", 1: "支持多数据项抄读(EEEEEEXX)"}},
+        ],
+    },
+    "EBE0E008": {
+        "名称": "任务管理_重启任务组别",
+        "fields": [
+            {"name": "需重启的组别数M1", "type": "uint8"},
+            {"name": "任务组别号列表", "type": "list",
+             "item_fields": [{"name": "任务组别号", "type": "uint8"}]},
+        ],
+    },
+    "EBE0E009": {
+        "名称": "上报模式",
+        "fields": [{"name": "上报模式", "type": "enum",
+                    "enum_map": {0: "645方式", 1: "698方式"},
+                    "note": "V1.32起取消，均按698上报"}],
+    },
+    "EBE0E00A": {
+        "名称": "数据合并上报数量配置",
+        "fields": [
+            {"name": "配置的组别数M", "type": "uint8"},
+            {"name": "合并上报配置列表", "type": "list",
+             "item_fields": [
+                 {"name": "任务组别号", "type": "uint8"},
+                 {"name": "本组合并上报点数", "type": "uint8"},
+             ]},
+        ],
+    },
+    "EBE0E00B": {
+        "名称": "数据上报状态",
+        "fields": [
+            {"name": "数据上报状态组别数M", "type": "uint8"},
+            {"name": "上报状态列表", "type": "list",
+             "item_fields": [
+                 {"name": "任务组别号", "type": "uint8"},
+                 {"name": "未成功上报数据点数", "type": "uint16"},
+                 {"name": "已成功上报数据点数", "type": "uint16"},
+             ]},
+        ],
+    },
+    "EBE0E00C": {
+        "名称": "停电主动上报指定任务组最后1次数据",
+        "fields": [{"name": "指定任务组别号", "type": "uint8"}],
+    },
+    "EBE0E698": {
+        "名称": "698明文APDU专用功能映射",
+        "fields": [{"name": "明文APDU", "type": "hex", "length": 0}],
+    },
 }
 
 # 有字段定义的数据项

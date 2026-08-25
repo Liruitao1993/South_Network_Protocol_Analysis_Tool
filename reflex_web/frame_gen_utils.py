@@ -328,7 +328,7 @@ def build_dlt698_axdr_apdu(apdu_type: str, sub_type: str, piid: int, oi_hex: str
 
     is_custom -> bytes([0x05, 0x01, piid]) + axdr_data
     else -> 头 + B(piid) + [OI>H + attr|idx / method|mode 按 GET/SET/ACTION] + axdr_data
-      + GET-Request 且 sub_type in (get_normal, get_record, get_normal_list) 时尾补 b'\x00'
+      + GET/SET/ACTION 请求尾补 b'\x00'（没有时间标签，文档 H.3/H.4/H.5）
     """
     if is_custom:
         return bytes([0x05, 0x01, piid]) + axdr_data
@@ -356,7 +356,7 @@ def build_dlt698_axdr_apdu(apdu_type: str, sub_type: str, piid: int, oi_hex: str
 
     apdu_body += axdr_data
 
-    if apdu_type == "GET-Request" and sub_type in ("get_normal", "get_record", "get_normal_list"):
+    if apdu_type in ("GET-Request", "SET-Request", "ACTION-Request"):
         apdu_body += b'\x00'
 
     return apdu_header + apdu_body
@@ -375,7 +375,8 @@ def _encode_axdr_item(coder, item: Dict[str, Any]) -> bytes:
         child_data = b""
         for child in children:
             child_data += _encode_axdr_item(coder, child)
-        result += coder._encode_length(len(child_data))
+        # A-XDR structure/array：tag 后为元素个数（非字节总长）
+        result += coder._encode_length(len(children))
         result += child_data
         return result
 

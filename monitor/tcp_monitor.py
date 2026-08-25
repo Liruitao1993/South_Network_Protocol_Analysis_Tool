@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QFont, QKeySequence, QShortcut, QGuiApplication
 from gui_utils import ZoomableTableWidget
+from app_paths import app_data_dir
 
 # scapy 可选依赖
 try:
@@ -1010,9 +1011,10 @@ class TCPMonitorWidget(QWidget):
     def _start_csv_recording(self):
         """开始 CSV 记录"""
         try:
-            os.makedirs("Output", exist_ok=True)
+            output_dir = str(app_data_dir() / "Output")
+            os.makedirs(output_dir, exist_ok=True)
             filename = f"tcp_monitor_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-            self._csv_path = os.path.join("Output", filename)
+            self._csv_path = os.path.join(output_dir, filename)
             self._csv_file = open(self._csv_path, "w", newline="", encoding="utf-8-sig")
             self._csv_writer = csv.writer(self._csv_file)
             self._csv_writer.writerow([

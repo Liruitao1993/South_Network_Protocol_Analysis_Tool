@@ -14,6 +14,13 @@ with open('oi_to_class.json', 'r', encoding='utf-8') as f:
 # Convert string keys back to int
 oi_to_class = {int(k, 16): v for k, v in oi_to_class_raw.items()}
 
+# ---- 安徽分布式电源接入单元补充规约（2025）手动追加，重跑保留 ----
+ANHUI_OI_TO_CLASS = {
+    0x2801: 6, 0x2802: 6, 0x3060: 7, 0x3061: 7, 0x3062: 7, 0x3063: 7,
+    0x3065: 7, 0x3066: 7, 0x3095: 7, 0x3096: 7, 0x3097: 8, 0x3361: 8,
+    0x3363: 8, 0x4039: 8, 0x4820: 19, 0x4822: 8, 0x4823: 8,
+}
+oi_to_class.update(ANHUI_OI_TO_CLASS)
 # Build CLASS_ID_MAP with manual fixes for corrupted/missing data
 CLASS_ID_MAP = {}
 

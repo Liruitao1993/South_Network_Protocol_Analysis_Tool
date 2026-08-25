@@ -1493,57 +1493,87 @@ class FrameGenWidget(QWidget):
             piid_layout.addStretch()
             self._form_layout.addWidget(piid_container)
 
-            # OI
+            # OI（预设下拉 + 手动输入，二选一）
             oi_container = QWidget()
             oi_layout = QHBoxLayout(oi_container)
             oi_layout.setContentsMargins(4, 2, 4, 2)
             oi_layout.addWidget(QLabel("OI  [对象标识 (2字节小端序)]"))
+            oi_preset_combo = QComboBox()
+            oi_preset_combo.addItem("-- 预设OI --", None)
+            for oi_val, oi_name in OI_PRESET_LIST:
+                oi_preset_combo.addItem(f"{oi_name} (0x{oi_val:04X})", oi_val)
             oi_edit = QLineEdit()
-            oi_edit.setPlaceholderText("输入十六进制 如 0400")
+            oi_edit.setPlaceholderText("或手动输入hex 如 0400")
             oi_edit.setMinimumWidth(140)
             oi_edit.textChanged.connect(self._schedule_realtime_update)
+            def _on_axdr_oi_preset(idx, _c=oi_preset_combo, _e=oi_edit):
+                v = _c.itemData(idx)
+                if v is not None:
+                    _e.setText(f"{v:04X}")
+            oi_preset_combo.currentIndexChanged.connect(_on_axdr_oi_preset)
+            oi_layout.addWidget(oi_preset_combo)
             oi_layout.addWidget(oi_edit)
             self._field_widgets["OI"] = {"widget": oi_edit}
             oi_layout.addStretch()
             self._form_layout.addWidget(oi_container)
 
-            # 属性ID+索引 / 方法ID+操作模式
+            # 描述符类型：属性(OAD) / 方法(OMD) 可自由选择（默认按命令类型）
+            desc_container = QWidget()
+            desc_layout = QHBoxLayout(desc_container)
+            desc_layout.setContentsMargins(4, 2, 4, 2)
+            desc_layout.addWidget(QLabel("描述符类型"))
+            desc_combo = QComboBox()
+            desc_combo.addItem("属性 (OAD)", "OAD")
+            desc_combo.addItem("方法 (OMD)", "OMD")
             if apdu_type == "ACTION-Request":
-                attr_container = QWidget()
-                attr_layout = QHBoxLayout(attr_container)
-                attr_layout.setContentsMargins(4, 2, 4, 2)
-                attr_layout.addWidget(QLabel("方法标识"))
-                method_edit = QLineEdit("1")
-                method_edit.setFixedWidth(40)
-                method_edit.textChanged.connect(self._schedule_realtime_update)
-                attr_layout.addWidget(method_edit)
-                attr_layout.addWidget(QLabel("操作模式"))
-                mode_edit = QLineEdit("0")
-                mode_edit.setFixedWidth(40)
-                mode_edit.textChanged.connect(self._schedule_realtime_update)
-                attr_layout.addWidget(mode_edit)
-                self._field_widgets["方法标识"] = {"widget": method_edit}
-                self._field_widgets["操作模式"] = {"widget": mode_edit}
-                attr_layout.addStretch()
-                self._form_layout.addWidget(attr_container)
-            else:
-                attr_container = QWidget()
-                attr_layout = QHBoxLayout(attr_container)
-                attr_layout.setContentsMargins(4, 2, 4, 2)
-                attr_layout.addWidget(QLabel("属性标识"))
-                attr_edit = QLineEdit("2")
-                attr_edit.setFixedWidth(40)
-                attr_edit.textChanged.connect(self._schedule_realtime_update)
-                attr_layout.addWidget(attr_edit)
-                attr_layout.addWidget(QLabel("索引"))
-                idx_edit = QLineEdit("0")
-                idx_edit.setFixedWidth(40)
-                idx_edit.textChanged.connect(self._schedule_realtime_update)
-                attr_layout.addWidget(idx_edit)
-                self._field_widgets["属性标识"] = {"widget": attr_edit}
-                self._field_widgets["索引"] = {"widget": idx_edit}
-                attr_layout.addStretch()
-                self._form_layout.addWidget(attr_container)
+                desc_combo.setCurrentIndex(1)
+            desc_layout.addWidget(desc_combo)
+            desc_layout.addStretch()
+            self._form_layout.addWidget(desc_container)
+            self._field_widgets["描述符类型"] = {"widget": desc_combo}
+
+            # 属性(OAD)：属性标识 + 索引
+            attr_container = QWidget()
+            attr_layout = QHBoxLayout(attr_container)
+            attr_layout.setContentsMargins(4, 2, 4, 2)
+            attr_layout.addWidget(QLabel("属性标识"))
+            attr_edit = QLineEdit("2")
+            attr_edit.setFixedWidth(40)
+            attr_layout.addWidget(attr_edit)
+            attr_layout.addWidget(QLabel("索引"))
+            idx_edit = QLineEdit("0")
+            idx_edit.setFixedWidth(40)
+            attr_layout.addWidget(idx_edit)
+            attr_layout.addStretch()
+            self._form_layout.addWidget(attr_container)
+            self._field_widgets["属性标识"] = {"widget": attr_edit}
+            self._field_widgets["索引"] = {"widget": idx_edit}
+
+            # 方法(OMD)：方法标识 + 操作模式
+            omd_container = QWidget()
+            omd_layout = QHBoxLayout(omd_container)
+            omd_layout.setContentsMargins(4, 2, 4, 2)
+            omd_layout.addWidget(QLabel("方法标识"))
+            method_edit = QLineEdit("1")
+            method_edit.setFixedWidth(40)
+            omd_layout.addWidget(method_edit)
+            omd_layout.addWidget(QLabel("操作模式"))
+            mode_edit = QLineEdit("0")
+            mode_edit.setFixedWidth(40)
+            omd_layout.addWidget(mode_edit)
+            omd_layout.addStretch()
+            self._form_layout.addWidget(omd_container)
+            self._field_widgets["方法标识"] = {"widget": method_edit}
+            self._field_widgets["操作模式"] = {"widget": mode_edit}
+
+            def _on_desc_type_changed(idx, _c=desc_combo,
+                                      _a=attr_container, _m=omd_container):
+                is_oad = _c.itemData(idx) == "OAD"
+                _a.setVisible(is_oad)
+                _m.setVisible(not is_oad)
+                self._schedule_realtime_update()
+            desc_combo.currentIndexChanged.connect(_on_desc_type_changed)
+            _on_desc_type_changed(desc_combo.currentIndex())
 
             self._connect_field_signals()
             self._build_axdr_editor(key)
@@ -1564,7 +1594,7 @@ class FrameGenWidget(QWidget):
             for field in schema.get("fields", []):
                 ftype = field.get("type", "bytes")
                 if ftype == "oi":
-                    # OI 特殊处理：提供下拉框 + 手动输入
+                    # OI 特殊处理：预设下拉框 + 手动输入（二选一，手动输入优先）
                     container = QWidget()
                     layout = QHBoxLayout(container)
                     layout.setContentsMargins(4, 2, 4, 2)
@@ -1577,12 +1607,20 @@ class FrameGenWidget(QWidget):
                     label.setToolTip(desc)
                     layout.addWidget(label)
                     oi_combo = QComboBox()
-                    oi_combo.addItem("-- 选择OI --", None)
+                    oi_combo.addItem("-- 预设OI --", None)
                     for oi_val, oi_name in OI_PRESET_LIST:
                         oi_combo.addItem(f"{oi_name} (0x{oi_val:04X})", oi_val)
-                    oi_combo.currentIndexChanged.connect(self._schedule_realtime_update)
+                    oi_edit = QLineEdit()
+                    oi_edit.setPlaceholderText("或手动输入hex 如 0400")
+                    oi_edit.setFixedWidth(110)
+                    def _on_oi_preset(idx, _c=oi_combo, _e=oi_edit):
+                        v = _c.itemData(idx)
+                        if v is not None:
+                            _e.setText(f"{v:04X}")
+                    oi_combo.currentIndexChanged.connect(_on_oi_preset)
                     layout.addWidget(oi_combo)
-                    self._field_widgets[field["name"]] = {"widget": oi_combo}
+                    layout.addWidget(oi_edit)
+                    self._field_widgets[field["name"]] = {"widget": oi_edit}
                     layout.addStretch()
                     self._form_layout.addWidget(container)
                 elif ftype == "oad_list":
@@ -1885,11 +1923,17 @@ class FrameGenWidget(QWidget):
             from dl_t698_45_frame_schema import OI_PRESET_LIST
             for oi_val, oi_name in OI_PRESET_LIST:
                 combo.addItem(f"{oi_name} (0x{oi_val:04X})", oi_val)
+            combo.setEditable(True)
+            combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+            combo.lineEdit().setPlaceholderText("预设或手动输入hex 如 0400")
             cur = item.get("value", 0)
             idx = combo.findData(cur)
             if idx >= 0:
                 combo.setCurrentIndex(idx)
+            elif cur:
+                combo.setCurrentText(f"{int(cur):04X}")
             combo.currentIndexChanged.connect(self._schedule_realtime_update)
+            combo.lineEdit().textChanged.connect(lambda *_: self._schedule_realtime_update())
             layout.addWidget(combo)
             return container
 
@@ -1900,10 +1944,16 @@ class FrameGenWidget(QWidget):
             from dl_t698_45_frame_schema import OI_PRESET_LIST
             for oi_v, oi_name in OI_PRESET_LIST:
                 oi_combo.addItem(f"{oi_name} (0x{oi_v:04X})", oi_v)
+            oi_combo.setEditable(True)
+            oi_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+            oi_combo.lineEdit().setPlaceholderText("预设或手动输入hex")
             idx = oi_combo.findData(oi_val)
             if idx >= 0:
                 oi_combo.setCurrentIndex(idx)
+            elif oi_val:
+                oi_combo.setCurrentText(f"{int(oi_val):04X}")
             oi_combo.currentIndexChanged.connect(self._schedule_realtime_update)
+            oi_combo.lineEdit().textChanged.connect(lambda *_: self._schedule_realtime_update())
             layout.addWidget(QLabel("OI:"))
             layout.addWidget(oi_combo)
 
@@ -1927,10 +1977,16 @@ class FrameGenWidget(QWidget):
             from dl_t698_45_frame_schema import OI_PRESET_LIST
             for oi_v, oi_name in OI_PRESET_LIST:
                 oi_combo.addItem(f"{oi_name} (0x{oi_v:04X})", oi_v)
+            oi_combo.setEditable(True)
+            oi_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+            oi_combo.lineEdit().setPlaceholderText("预设或手动输入hex")
             idx = oi_combo.findData(oi_val)
             if idx >= 0:
                 oi_combo.setCurrentIndex(idx)
+            elif oi_val:
+                oi_combo.setCurrentText(f"{int(oi_val):04X}")
             oi_combo.currentIndexChanged.connect(self._schedule_realtime_update)
+            oi_combo.lineEdit().textChanged.connect(lambda *_: self._schedule_realtime_update())
             layout.addWidget(QLabel("OI:"))
             layout.addWidget(oi_combo)
 
@@ -2069,8 +2125,21 @@ class FrameGenWidget(QWidget):
         elif t in ("OAD", "OMD"):
             # 复合子控件
             combos = w.findChildren(QComboBox)
-            edits = w.findChildren(QLineEdit)
-            oi_val = combos[0].currentData() if combos else item.get("oi", 0)
+            # 排除可编辑下拉框内部的行编辑，避免干扰 属性/索引 输入框定位
+            edits = [e for e in w.findChildren(QLineEdit)
+                     if not isinstance(e.parent(), QComboBox)]
+            oi_val = item.get("oi", 0)
+            if combos:
+                data = combos[0].currentData()
+                if data is not None:
+                    oi_val = data
+                else:
+                    txt = combos[0].currentText().strip().replace(" ", "")
+                    try:
+                        oi_val = int(txt, 16) if txt else 0
+                    except ValueError:
+                        oi_val = item.get("oi", 0)
+            item["oi"] = oi_val
             sub_vals = {}
             for e in edits:
                 try:
@@ -2094,7 +2163,16 @@ class FrameGenWidget(QWidget):
             val = edit.text() if edit else ""
         elif t == "OI":
             combo = w.findChild(QComboBox)
-            val = combo.currentData() if combo else 0
+            if combo is not None:
+                val = combo.currentData()
+                if val is None:
+                    txt = combo.currentText().strip().replace(" ", "")
+                    try:
+                        val = int(txt, 16) if txt else 0
+                    except ValueError:
+                        val = 0
+            else:
+                val = 0
         elif t in ("integer", "long", "long64"):
             edit = w.findChild(QLineEdit)
             try:
@@ -2145,7 +2223,8 @@ class FrameGenWidget(QWidget):
             child_data = b""
             for child in children:
                 child_data += self._encode_axdr_item(coder, child)
-            result += coder._encode_length(len(child_data))
+            # A-XDR structure/array：tag 后为元素个数（非字节总长）
+            result += coder._encode_length(len(children))
             result += child_data
             return result
 
@@ -2937,21 +3016,34 @@ class FrameGenWidget(QWidget):
                         oi_bytes = b'\x00\x00'
                     oi_bytes = oi_bytes.ljust(2, b'\x00')[:2]
 
-                    if apdu_type in ("GET-Request", "SET-Request"):
-                        attr = int(field_values.get("属性标识", 2)) & 0x1F
-                        idx = int(field_values.get("索引", 0)) & 0xFF
-                        oad = oi_bytes + _struct.pack("B", attr) + _struct.pack("B", idx)
-                        apdu_body += oad
-                    elif apdu_type == "ACTION-Request":
-                        method = int(field_values.get("方法标识", 1)) & 0x1F
-                        mode = int(field_values.get("操作模式", 0)) & 0xFF
-                        omd = oi_bytes + _struct.pack("B", method) + _struct.pack("B", mode)
-                        apdu_body += omd
+                    if apdu_type in ("GET-Request", "SET-Request", "ACTION-Request"):
+                        desc_widget = self._field_widgets.get("描述符类型", {}).get("widget")
+                        desc_kind = desc_widget.currentData() if isinstance(desc_widget, QComboBox) else None
+                        if desc_kind is None:
+                            desc_kind = "OMD" if apdu_type == "ACTION-Request" else "OAD"
+
+                        def _int_edit(name, default):
+                            w = self._field_widgets.get(name, {}).get("widget")
+                            if isinstance(w, QLineEdit):
+                                try:
+                                    return int(w.text().strip() or default, 0)
+                                except ValueError:
+                                    return default
+                            return int(field_values.get(name, default))
+
+                        if desc_kind == "OMD":
+                            method = _int_edit("方法标识", 1) & 0x1F
+                            mode = _int_edit("操作模式", 0) & 0xFF
+                            apdu_body += oi_bytes + _struct.pack("B", method) + _struct.pack("B", mode)
+                        else:
+                            attr = _int_edit("属性标识", 2) & 0x1F
+                            idx = _int_edit("索引", 0) & 0xFF
+                            apdu_body += oi_bytes + _struct.pack("B", attr) + _struct.pack("B", idx)
 
                     apdu_body += axdr_data
 
-                    # GET-Request 时间标签
-                    if apdu_type == "GET-Request" and sub_type in ("get_normal", "get_record", "get_normal_list"):
+                    # 请求尾部「没有时间标签」（文档 H.3/H.4/H.5：GET/SET/ACTION 均以 OPTIONAL TimeLabel 结尾，00=无）
+                    if apdu_type in ("GET-Request", "SET-Request", "ACTION-Request"):
                         apdu_body += b'\x00'
 
                     apdu_bytes = apdu_header + apdu_body
@@ -3193,20 +3285,34 @@ class FrameGenWidget(QWidget):
                         oi_bytes = b'\x00\x00'
                     oi_bytes = oi_bytes.ljust(2, b'\x00')[:2]
 
-                    if apdu_type in ("GET-Request", "SET-Request"):
-                        attr = int(field_values.get("属性标识", 2)) & 0x1F
-                        idx = int(field_values.get("索引", 0)) & 0xFF
-                        oad = oi_bytes + _struct.pack("B", attr) + _struct.pack("B", idx)
-                        apdu_body += oad
-                    elif apdu_type == "ACTION-Request":
-                        method = int(field_values.get("方法标识", 1)) & 0x1F
-                        mode = int(field_values.get("操作模式", 0)) & 0xFF
-                        omd = oi_bytes + _struct.pack("B", method) + _struct.pack("B", mode)
-                        apdu_body += omd
+                    if apdu_type in ("GET-Request", "SET-Request", "ACTION-Request"):
+                        desc_widget = self._field_widgets.get("描述符类型", {}).get("widget")
+                        desc_kind = desc_widget.currentData() if isinstance(desc_widget, QComboBox) else None
+                        if desc_kind is None:
+                            desc_kind = "OMD" if apdu_type == "ACTION-Request" else "OAD"
+
+                        def _int_edit(name, default):
+                            w = self._field_widgets.get(name, {}).get("widget")
+                            if isinstance(w, QLineEdit):
+                                try:
+                                    return int(w.text().strip() or default, 0)
+                                except ValueError:
+                                    return default
+                            return int(field_values.get(name, default))
+
+                        if desc_kind == "OMD":
+                            method = _int_edit("方法标识", 1) & 0x1F
+                            mode = _int_edit("操作模式", 0) & 0xFF
+                            apdu_body += oi_bytes + _struct.pack("B", method) + _struct.pack("B", mode)
+                        else:
+                            attr = _int_edit("属性标识", 2) & 0x1F
+                            idx = _int_edit("索引", 0) & 0xFF
+                            apdu_body += oi_bytes + _struct.pack("B", attr) + _struct.pack("B", idx)
 
                     apdu_body += axdr_data
 
-                    if apdu_type == "GET-Request" and sub_type in ("get_normal", "get_record", "get_normal_list"):
+                    # 请求尾部「没有时间标签」（00=无，同实时预览路径）
+                    if apdu_type in ("GET-Request", "SET-Request", "ACTION-Request"):
                         apdu_body += b'\x00'
 
                     apdu_bytes = apdu_header + apdu_body

@@ -248,13 +248,14 @@ class CSGNewGenParser:
         解析帧为表格数据格式
         返回: [(字段名, 原始值, 解析值, 说明, byte_start, byte_end), ...]
 
-        支持六种输入模式（自动识别）:
+        支持七种输入模式（自动识别）:
         1. 完整 MPDU 帧 (FC帧控制16字节 + 物理块载荷)
         2. 完整 MAC 帧 (MAC头 + MSDU + 完整性校验)
         3. 仅 MSDU 负载 (VLAN标签 + MSDU类型 + 应用层数据)
         4. 仅应用层报文 (报文端口号 + 报文标识符 + ...)
         5. 裸级联聚合帧 (无FC无PB头, 2字节级联头+MAC帧重复)
         6. pb_only 物理块输入 (PB头 + MAC帧 + PBCS)
+        7. mac_only 仅MAC帧输入 (PB头4B + MAC帧，去除PBH后解析)
 
         Args:
             channel: "plc" (载波), "hrf" (高速无线) 或 "auto" (MPDU级输入自动判别)
@@ -317,6 +318,93 @@ class CSGNewGenParser:
                 return table_data
             offset, mac_data, msdu_payload = self._parse_pb_block(
                 frame_bytes, 0, table_data, frame_len)
+        elif parse_level == "mac_only":
+            # 仅MAC帧模式：输入 = PBH(4B) + MAC帧数据（SOF帧）
+            # 信标帧无PBH，输入即信标载荷
+            self._delimiter_type = {"sof": 1, "beacon": 0, "sack": 2, "net": 3}.get(pb_frame_type, 1)
+            self._cmt_index = 4
+            self._std_version = 1
+            self._pb_count = 1
+
+            # 信标帧(定界符类型=0)：无物理块头，输入即信标载荷，直接按表51解析
+            if self._delimiter_type == 0:
+                table_data.append(("── 信标帧载荷（仅MAC帧模式）──", "", "",
+                                   "信标帧无PB块头，输入即信标载荷，直接按表51解析",
+                                   0, frame_len - 1))
+                table_data.extend(self._parse_beacon_payload(frame_bytes, 0))
+                return table_data
+            # 选择确认帧(类型2)/网间协调帧(类型3)：仅FC头，无物理块/MSDU
+            if self._delimiter_type in (2, 3):
+                table_data.append(("❌ 解析失败", "", "",
+                                   "选择确认帧(SACK)/网间协调帧无物理块，不适合仅MAC帧解析",
+                                   None, None))
+                return table_data
+
+            table_data.append(("解析模式", "", "仅MAC帧",
+                               "去除4字节物理块头(PBH)后解析MAC帧", None, None, False))
+            pb_hdr_len = 4
+            if frame_len < pb_hdr_len:
+                table_data.append(("❌ 解析失败", "", "",
+                                   f"数据不足PBH（需{pb_hdr_len}字节，实际{frame_len}字节）",
+                                   None, None))
+                return table_data
+            pb_data = frame_bytes[0:pb_hdr_len]
+            pb_seq = int.from_bytes(pb_data[0:2], 'little')
+            pb_agg_flag = pb_data[2] & 0x01
+            pb_agg_desc = "物理块中有多个MAC帧" if pb_agg_flag else "物理块中只有一个MAC帧"
+            table_data.append(("物理块头(PBH)",
+                               ' '.join(f'{b:02X}' for b in pb_data),
+                               f"序列号:{pb_seq}, 聚合标志:{pb_agg_flag}",
+                               f"PBH: {pb_agg_desc}（4字节，将被去除）",
+                               0, pb_hdr_len - 1))
+            table_data.append(("  序列号",
+                               ' '.join(f'{b:02X}' for b in pb_data[0:2]),
+                               str(pb_seq),
+                               "MPDU载荷中物理块的序号",
+                               0, 1))
+            table_data.append(("  聚合标志",
+                               f"0b{pb_agg_flag}",
+                               str(pb_agg_flag),
+                               pb_agg_desc,
+                               2, 2))
+            pb_reserved = ((pb_data[2] >> 1) & 0x7F) | (pb_data[3] << 7)
+            table_data.append(("  保留",
+                               f"0x{pb_reserved:04X}",
+                               str(pb_reserved),
+                               "保留",
+                               2, 3))
+            # MAC帧从PBH之后开始
+            mac_start = pb_hdr_len
+            mac_bytes = frame_bytes[mac_start:]
+            if not mac_bytes:
+                table_data.append(("❌ 解析失败", "", "",
+                                   "PBH之后无MAC帧数据", None, None))
+                return table_data
+            offset, mac_table = self._parse_mac_frame(mac_bytes, base_offset=mac_start)
+            table_data.extend(mac_table)
+            # 设置msdu_payload供后续_parse_msdu_payload处理
+            first_byte_mac = mac_bytes[0]
+            mac_version = (first_byte_mac >> 1) & 0x03
+            mac_header_type = first_byte_mac & 0x01
+            if mac_version == 2:
+                mac_hdr_len = 4
+                msdu_payload = b""
+            elif mac_header_type == 0:
+                mac_hdr_len = 32
+                if len(mac_bytes) >= 4:
+                    msdu_len = int.from_bytes(mac_bytes[2:4], 'little')
+                    msdu_payload = mac_bytes[mac_hdr_len:mac_hdr_len + msdu_len]
+                else:
+                    msdu_payload = mac_bytes[mac_hdr_len:]
+            else:
+                mac_hdr_len = 12
+                if len(mac_bytes) >= 4:
+                    msdu_len = int.from_bytes(mac_bytes[2:4], 'little')
+                    msdu_payload = mac_bytes[mac_hdr_len:mac_hdr_len + msdu_len]
+                else:
+                    msdu_payload = mac_bytes[mac_hdr_len:]
+            mac_data = mac_bytes
+            offset = mac_start + mac_hdr_len
         elif is_mpdu:
             self._delimiter_type = delimiter_type
             offset, mpdu_table = self._parse_mpdu_frame(frame_bytes, offset)
@@ -1684,13 +1772,64 @@ class CSGNewGenParser:
     BEACON_TYPE_MAP = {0: "发现信标", 1: "代理信标", 2: "中央信标"}
 
     def _parse_beacon_payload(self, data: bytes, base_offset: int = 0) -> list:
-        """解析信标帧载荷（文档表51）"""
+        """解析信标帧载荷
+
+        - 精简信标（byte0 bit4=1）：表73 布局——标志+组网序列号+CCO MAC+信标周期计数+管理信息+CRC
+        - 标准信标：表51 布局——标志+组网序列号+SNID/无线/PLC+信道+通道机制+保留+管理信息+CRC
+        """
         table = []
         if len(data) < 6:
             if data:
                 table.append(("信标载荷", ' '.join(f'{b:02X}' for b in data),
                                f"{len(data)}字节", "信标载荷(长度不足)", base_offset, base_offset + len(data) - 1))
             return table
+        if data[0] & 0x10:  # 精简信标标志（表73）
+            return self._parse_compact_beacon_payload(data, base_offset)
+        return self._parse_std_beacon_payload(data, base_offset)
+
+    def _parse_compact_beacon_payload(self, data: bytes, base_offset: int = 0) -> list:
+        """精简信标帧载荷解析（文档表73）
+
+        布局: 信标类型等标志(1B) + 组网序列号(1B) + CCO MAC(6B)
+              + 信标周期计数(4B小端) + 信标管理信息(可变) + BPCS CRC-32(4B)
+        """
+        table = []
+        b0 = data[0]
+        bcn_type = b0 & 0x07
+        table.append(("信标载荷头(精简)", f"{b0:02X}",
+                       f"类型:{self.BEACON_TYPE_MAP.get(bcn_type,'?')}",
+                       f"信标类型:{bcn_type} 组网:{(b0>>3)&1} 精简:1 多网络:{(b0>>5)&1} 允许关联:{(b0>>6)&1} 信标使用:{(b0>>7)&1}",
+                       base_offset, base_offset))
+        table.append(("  组网序列号", f"{data[1]:02X}", str(data[1]),
+                       f"组网序列号: {data[1]}", base_offset + 1, base_offset + 1))
+        mac_colon = ':'.join(f'{b:02X}' for b in data[2:8])
+        table.append(("  CCO MAC地址", ' '.join(f'{b:02X}' for b in data[2:8]),
+                       mac_colon, f"CCO MAC={mac_colon}", base_offset + 2, base_offset + 7))
+        cycle = int.from_bytes(data[8:12], 'little')
+        table.append(("  信标周期计数", ' '.join(f'{b:02X}' for b in data[8:12]),
+                       str(cycle), f"信标周期序号: {cycle} (与FC可变区域一致)", base_offset + 8, base_offset + 11))
+        remaining = data[12:]
+        if len(remaining) > 4:
+            mgmt_info = remaining[:-4]
+            crc_bytes = remaining[-4:]
+            crc_val = int.from_bytes(crc_bytes, 'little')
+            if len(mgmt_info) > 0:
+                bcn_tbl = self._parse_beacon_entries(mgmt_info, base_offset + 12)
+                table.extend(bcn_tbl)
+            table.append(("  帧载荷校验序列",
+                           ' '.join(f'{b:02X}' for b in crc_bytes),
+                           f"0x{crc_val:08X}", f"信标载荷CRC-32=0x{crc_val:08X}",
+                           base_offset + 12 + len(mgmt_info), base_offset + len(data) - 1))
+        elif remaining:
+            table.append(("  信标载荷尾部",
+                           ' '.join(f'{b:02X}' for b in remaining),
+                           f"{len(remaining)}字节", "信标管理信息/CRC",
+                           base_offset + 12, base_offset + len(data) - 1))
+        return table
+
+    def _parse_std_beacon_payload(self, data: bytes, base_offset: int = 0) -> list:
+        """标准信标帧载荷解析（文档表51）"""
+        table = []
         offset = 0
         b0 = data[0]
         bcn_type = b0 & 0x07
@@ -1762,7 +1901,7 @@ class CSGNewGenParser:
         if len(data) < 1:
             return table
         entry_count = data[0]
-        table.append(("    信标条目数", f"{entry_count:02X}", str(entry_count),
+        table.append(("  信标条目数", f"{entry_count:02X}", str(entry_count),
                        f"共{entry_count}个信标条目", base_offset, base_offset))
         off = 1
         idx = 0
@@ -1788,11 +1927,11 @@ class CSGNewGenParser:
 
             # 条目类型和长度字段
             type_raw = f"{entry_type:02X}"
-            table.append(("    条目类型", type_raw, str(entry_type),
+            table.append(("  条目类型", type_raw, str(entry_type),
                            f"条目{idx}类型: {entry_name} (0x{entry_type:02X})",
                            base_offset + off - data_len - len_size - 1, base_offset + off - data_len - len_size - 1))
             len_raw = ' '.join(f'{b:02X}' for b in data[off - data_len - len_size:off - data_len])
-            table.append(("    条目长度", len_raw, str(entry_len),
+            table.append(("  条目长度", len_raw, str(entry_len),
                            f"条目{idx}长度: {entry_len}字节 (含类型和长度字段)",
                            base_offset + off - data_len - len_size, base_offset + off - data_len - 1))
 
@@ -1801,7 +1940,7 @@ class CSGNewGenParser:
             if detail:
                 table.extend(detail)
             else:
-                table.append(("    信标条目",
+                table.append(("  信标条目",
                                f"{entry_type:02X} {entry_len:02X} " + ' '.join(f'{b:02X}' for b in entry_data[:12]) + ("..." if len(entry_data) > 12 else ""),
                                f"类型:{entry_name} 长度:{entry_len}",
                                f"条目{idx}: {entry_name} ({entry_len}字节)",
@@ -1814,7 +1953,7 @@ class CSGNewGenParser:
         t = []
         ln = len(data)
         def _f(name, raw, parsed, desc, s, e):
-            t.append((f"        {name}", raw, parsed, desc, base + s, base + e))
+            t.append((f"    {name}", raw, parsed, desc, base + s, base + e))
         if etype == 0x01 and ln >= 20:  # 站点能力条目（表61）
             _f("层级数", f"{(data[0]&0x3F):02X}", str(data[0]&0x3F), f"层级数: {data[0]&0x3F}", 0, 0)
             ph = data[0] >> 6
@@ -1885,6 +2024,35 @@ class CSGNewGenParser:
             _f("切换目标机制", f"{data[0]:02X}", mech, f"目标机制: {mech}", 0, 0)
             ntb = self._read_u32_le(data, 1)
             _f("切换NTB时刻", ' '.join(f'{b:02X}' for b in data[1:5]), f"0x{ntb:08X}", f"切换NTB: 0x{ntb:08X}", 1, 4)
+        elif etype == 0x0E and ln >= 16:  # 精简信标站点信息及时隙条目（表74，固定长19=0x13）
+            tei = data[0] | ((data[1] & 0x0F) << 8)
+            _f("TEI", ' '.join(f'{b:02X}' for b in data[0:2]), str(tei), f"发送信标站点TEI: {tei}", 0, 1)
+            ptei = (data[1] >> 4) | (data[2] << 4)
+            _f("代理站点TEI", ' '.join(f'{b:02X}' for b in data[1:3]), str(ptei), f"代理站点(PCO) TEI: {ptei}", 1, 2)
+            role = data[3] & 0x0F
+            level = data[3] >> 4
+            role_map_e = {0: "未知", 1: "STA", 2: "PCO", 4: "CCO"}
+            _f("角色/层级数", f"{data[3]:02X}",
+               f"{role_map_e.get(role, '保留(' + str(role) + ')')} 层级{level}",
+               f"角色: {role_map_e.get(role, role)}, 层级数: {level}", 3, 3)
+            if ln >= 10:
+                mac_colon_e = ':'.join(f'{b:02X}' for b in data[4:10])
+                _f("发送信标MAC", ' '.join(f'{b:02X}' for b in data[4:10]),
+                   mac_colon_e, f"MAC={mac_colon_e}", 4, 9)
+            if ln >= 11:
+                rf_hop = data[10] & 0x0F
+                band = (data[10] >> 4) & 0x07
+                _f("RF跳数/载波频段", f"{data[10]:02X}",
+                   f"跳数{rf_hop} 频段{band}",
+                   f"链路RF跳数: {rf_hop}, 载波频段: {band}", 10, 10)
+            if ln >= 15:
+                csma_start_e = self._read_u32_le(data, 11)
+                _f("CSMA时隙开始时间", ' '.join(f'{b:02X}' for b in data[11:15]),
+                   f"{csma_start_e}NTB", f"CSMA时隙开始NTB: {csma_start_e}", 11, 14)
+            if ln >= 17:
+                csma_len_e = self._read_u16_le(data, 15)
+                _f("CSMA时隙长度", ' '.join(f'{b:02X}' for b in data[15:17]),
+                   f"{csma_len_e}ms", f"CSMA时隙持续: {csma_len_e}ms", 15, 16)
         elif etype == 0x10 and ln >= 2:  # 代理角色条目（表72）
             _f("代理角色条目", ' '.join(f'{b:02X}' for b in data[:min(8,ln)]), f"{ln}字节", f"代理站点数: {ln//2}", 0, ln - 1)
             for i in range(0, min(ln - 1, 40), 2):

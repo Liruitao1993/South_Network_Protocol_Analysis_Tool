@@ -127,9 +127,14 @@ def main():
     # 同时处理 gzip 预压缩响应（浏览器 Accept-Encoding: gzip 时 Reflex 返回 .gz 文件）。
     import gzip
 
-    # 匹配要替换的硬编码 URL 模式
-    _HTTP_PREFIX = "http://localhost:8000"
-    _WS_PREFIX = "ws://localhost:8000"
+    # 匹配要替换的硬编码 URL 模式。
+    # 前端编译时会把 api_url 硬编码为 localhost:<backend_port>（可能是 8000/8001/8002…，
+    # 具体取决于编译时 --backend-port），部署时端口又是动态的（--port 参数且 host 是服务器 IP）。
+    # 因此用正则匹配 localhost:任意端口 动态替换为实际访问的 host:port，不依赖编译期的端口号。
+    import re as _re
+    _LOCALHOST_RE = _re.compile(r"localhost:\d+")
+    _LOCALHOST_HTTP_RE = _re.compile(r"http://localhost:\d+")
+    _LOCALHOST_WS_RE = _re.compile(r"ws://localhost:\d+")
 
     def _rewrite_env_js(body_bytes, headers_list, host, scheme):
         """对 env.js 响应体做 URL 替换，返回 (new_body, new_headers)。
@@ -154,18 +159,18 @@ def main():
             except Exception:
                 return body_bytes, headers_list
 
-        # 判断是否是 env.js（包含我们要替换的标记）
-        if _HTTP_PREFIX not in text and _WS_PREFIX not in text:
+        # 判断是否是 env.js（包含我们要替换的 localhost:端口 标记）
+        if not _LOCALHOST_RE.search(text):
             return body_bytes, headers_list
 
-        # 计算替换后的 URL
-        base_url = f"{scheme}://{host}"
+        # 计算替换后的 URL（host 已含 host:port）
         ws_scheme = "wss" if scheme == "https" else "ws"
-        ws_base = f"{ws_scheme}://{host}"
 
-        # 替换
-        text = text.replace(_HTTP_PREFIX, base_url)
-        text = text.replace(_WS_PREFIX, ws_base)
+        # 替换：http://localhost:port → http://host:port（保留原 scheme）
+        text = _LOCALHOST_HTTP_RE.sub(f"http://{host}", text)
+        text = _LOCALHOST_WS_RE.sub(f"{ws_scheme}://{host}", text)
+        # 兜底：剩余裸 localhost:port（含 scheme 省略的场景）
+        text = _LOCALHOST_RE.sub(host, text)
 
         new_body = text.encode("utf-8")
 
@@ -173,13 +178,21 @@ def main():
         if content_encoding == "gzip":
             new_body = gzip.compress(new_body)
 
-        # 更新 Content-Length
+        # 更新 Content-Length，并强制 no-store：
+        # 我们改了响应体（端口替换），绝不能让它被浏览器/代理缓存——否则用户会拿到
+        # 缓存的、含旧硬编码端口（如 localhost:8002）的 env.js。直接清掉缓存相关头。
         new_headers = []
+        skip = {b"content-length", b"etag", b"last-modified", b"cache-control",
+                b"expires", b"pragma", b"age", b"max-age", b"vary:accept-encoding"}
         for k, v in headers_list:
-            if k.lower() == b"content-length":
+            kl = k.lower()
+            if kl == b"content-length":
                 new_headers.append((k, str(len(new_body)).encode()))
-            else:
+            elif kl not in skip:
                 new_headers.append((k, v))
+        new_headers.append((b"cache-control", b"no-store, no-cache, must-revalidate, max-age=0"))
+        new_headers.append((b"pragma", b"no-cache"))
+        new_headers.append((b"expires", b"0"))
 
         return new_body, new_headers
 
@@ -189,10 +202,18 @@ def main():
 
         # downloads 目录: reflex_web/downloads/（resource_dir 是 reflex_web/）
         downloads_dir = resource_dir / "downloads"
-        filename = unquote(path[len("/download/"):])
+        # 支持 /download/ 和 /api/download/ 两种前缀
+        if path.startswith("/api/download/"):
+            filename = unquote(path[len("/api/download/"):])
+        else:
+            filename = unquote(path[len("/download/"):])
         # 防目录穿越
         if not filename or ".." in filename or "/" in filename or "\\" in filename:
             await _send_download_error(send, 404, "Invalid filename")
+            return
+        # archive/ 历史版本归档目录不对外公开下载
+        if filename.startswith("archive/") or filename == "archive":
+            await _send_download_error(send, 403, "Forbidden")
             return
         file_path = (downloads_dir / filename).resolve()
         if not file_path.is_relative_to(downloads_dir.resolve()) or not file_path.exists():
@@ -247,7 +268,8 @@ def main():
         # ===== 客户端下载路由 =====
         # /download/xxx.exe → downloads/ 目录的 exe 文件
         # /download/client_screenshot.png → downloads/ 目录的截图
-        if path.startswith("/download/"):
+        # /api/download/xxx → 同 /download/（开发模式 Vite 代理 /api/* 用）
+        if path.startswith("/download/") or path.startswith("/api/download/"):
             return await _serve_download(scope, receive, send, path)
 
         # 获取请求的 host 和 scheme
