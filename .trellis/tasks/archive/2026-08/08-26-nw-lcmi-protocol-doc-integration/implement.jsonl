@@ -1,0 +1,3 @@
+{"file": "协议文档/0.南网协议/13 计量自动化终端本地通信模块接口协议.md", "reason": "新协议文档转换产物，全部 DI 字段定义的唯一依据（行号锚点见 design.md）"}
+{"file": "AGENTS.md", "reason": "协议0架构/字节序/dict契约/陷阱（§4/§5.1/§8-23 容错显示原则）与测试规则（§7）"}
+{"file": ".trellis/spec/guides/index.md", "reason": "项目通用编码规范索引"}

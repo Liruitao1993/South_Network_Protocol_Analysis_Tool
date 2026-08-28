@@ -1,0 +1,3 @@
+{"file": "AGENTS.md", "reason": "质量检查基准：§4.2 dict键名契约、§8 陷阱（字节序/容错显示）、§7 测试目录规则、§9 CHANGELOG 同步要求"}
+{"file": "协议文档/0.南网协议/13 计量自动化终端本地通信模块接口协议.md", "reason": "核对解析/组帧字段是否与文档定义一致"}
+{"file": ".trellis/spec/guides/index.md", "reason": "通用代码质量规范"}
