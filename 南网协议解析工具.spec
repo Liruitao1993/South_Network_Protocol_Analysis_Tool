@@ -76,6 +76,7 @@ a = Analysis(
         ('custom_di.json', '.'),
         ('dlt645_di.json', '.'),
         ('gdw_custom_afn.json', '.'),
+        ('meter_sim_data.json', '.'),  # 虚拟表（698.45 从站模拟器）档案种子数据
         ('icons', 'icons'),
         ('enhanced_export.py', '.'),  # 增强导出模块
         ('scripts', 'scripts'),  # Python 脚本预处理示例脚本
@@ -110,6 +111,8 @@ a = Analysis(
         'system_integration.npp_integration',
         'system_integration.clipboard_monitor',
         'system_integration.parse_prompt_dialog',
+        'system_integration.quick_parse_panel',
+        'system_integration.acrylic_effect',
         'protocol_parser',
         'plc_rf_parser',
         'hdlc_parser',
@@ -128,6 +131,8 @@ a = Analysis(
         'dlt645_di_lookup',
         'gdw_afn_lookup',
         'auto_updater',  # 自动升级检查（main_gui 函数体内运行时 import）
+        'thread_registry',  # QThread 注册中心（main_gui 顶层 import，显式声明保险）
+        'proc_stats',  # 状态栏 CPU/内存采样（main_gui 顶层 import，纯标准库，显式声明保险）
         'frame_gen_widget',
         'gdw_eb_di_fields',  # EB 数据标识字段定义（被 frame_gen_widget 静态 import）
         'gdw_eb_di_lookup',  # EB 数据标识查询（被 frame_gen_widget 静态 import）
@@ -137,6 +142,13 @@ a = Analysis(
         'test_plan_widget',
         'diff_widget',
         'serial_worker',
+        'meter_sim_widget',  # 虚拟表 tab（698.45 从站模拟器）
+        'meter_sim',
+        'meter_sim.archive',
+        'meter_sim.link_layer',
+        'meter_sim.response_builder',
+        'meter_sim.dynamic_data',
+        'meter_sim.engine',
         'gui_utils',
         'frame_diff_engine',
         'lua_script_engine',

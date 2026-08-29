@@ -13,6 +13,7 @@ This project is managed by Trellis. The working knowledge you need lives under `
 If a Trellis command is available on your platform (e.g. `/trellis:finish-work`, `/trellis:continue`), prefer it over manual steps. Not every platform exposes every command.
 
 If you're using Codex or another agent-capable tool, additional project-scoped helpers may live in:
+
 - `.agents/skills/` — reusable Trellis skills
 - `.codex/agents/` — optional custom subagents
 
@@ -27,18 +28,18 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 > 本文档是所有 AI Coding Agent / 模型接手本项目时的**唯一权威上手文档**。
 > 阅读本文档后应能完全掌握：项目架构、模块职责、协议→解析器→参考文档的映射、字节序/校验/编码约定、开发原则、最新变更与陷阱。
 >
-> **维护原则**：每次合并 PR / 完成功能后，请同步更新 §10「变更日志」与 §11「最新变更摘要」。如新增协议或解析器，必须更新 §2、§3、§5、§7。
+> **维护原则**：每次合并 PR / 完成功能后，请同步更新 `main_gui.py:CHANGELOG`。如新增协议或解析器，必须更新 §2、§3、§5、§7。
 
 ---
 
 ## 1. 项目概览
 
-多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.14.7`）。
+多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.17.0`）。
 
 **支持的协议（共 12 种，对应 GUI 协议下拉框 `current_protocol` 索引）：**
 
 | 索引 | 协议名（GUI显示） | 标准号 | 字节序 | 校验算法 |
-|------|------------------|--------|--------|----------|
+| ------ | ------------------ | -------- | -------- | ---------- |
 | 0 | 南网协议 | Q/CSG1209021-2019 | 小端 | 8位位组算术和（不溢出） |
 | 1 | PLC RF 协议（万胜海外） | 万胜 V1_04 | 大端 | 累加和 & 0xFF |
 | 2 | HDLC/国网DLMS | IEC 62056-46 | 大端（网络序） | CRC-16/FCS（CCITT） |
@@ -70,6 +71,7 @@ pyinstaller reflex_web/reflex_web_exe.spec      # Reflex Web 版 EXE（可选）
 ```
 
 **GUI 命令行参数（系统集成）：**
+
 ```bash
 # 按协议索引直接解析十六进制报文
 python main_gui.py --parse "68 0E 00 00 00 00 01 00 01 E8 00 05 EF 16" --protocol 0
@@ -85,6 +87,7 @@ python main_gui.py --clipboard
 ```
 
 **依赖：**
+
 - `pip install pyside6`（GUI 必需）
 - `pip install crcmod`（698.45 协议 CRC 校验，**1.7.0 起新增**）
 - `pip install openpyxl`（Excel 测试报告，可选）
@@ -94,6 +97,7 @@ python main_gui.py --clipboard
 - Reflex Web 在线/离线依赖以 `reflex_web/requirements.in` + `reflex_web/requirements.lock` 为准，至少包含 `reflex`、`uvicorn`、`crcmod`、`websockets`
 
 **运行环境注意：**
+
 - Windows 优先；中文路径需保证 UTF-8 / GBK 编码兼容
 - 当前主程序保留 `南网协议解析工具.spec`（单文件 EXE），打包 `custom_di.json`、`dlt645_di.json`、`gdw_custom_afn.json`、`icons/` 与 `enhanced_export.py` 等资源；新增需打包的数据文件时必须检查该 spec
 - `reflex_web/reflex_web_exe.spec` 负责 Reflex Web 版打包；开发模式先执行 `cd reflex_web && reflex export --frontend-only --env prod --no-zip`
@@ -162,13 +166,17 @@ python reflex_web/build_embedded_deploy.py --python-version 3.12
 那几个 .py 文件**。因此：
 
 - **日常迭代（改源码/数据文件）**：用增量模式，复用已有 `python/` 目录，只刷新源码层，秒~分钟级：
+
   ```bash
   python reflex_web/build_embedded_deploy.py --skip-deps
   ```
+
 - **首次构建 / 改依赖 / 换 Python 版本**：才用完整模式（重新下载解释器 + 装依赖，10+ 分钟）：
+
   ```bash
   python reflex_web/build_embedded_deploy.py --python-version 3.12
   ```
+
 - 增量模式逻辑：先移走 `out_dir/python/`，重建其余目录，再移回——保留解释器与依赖，仅刷新源码/数据/前端。
 - `--skip-deps` 的前提是目标部署目录 `dist/reflex_web_embedded/python/` 已存在且完整（来自上次完整构建）。
 - 依赖锁文件 `requirements.lock` 存在且不旧于 `requirements.in` 时，uv 编译自动跳过（依赖未变则复用）。
@@ -177,15 +185,18 @@ python reflex_web/build_embedded_deploy.py --python-version 3.12
 **编译原则（exe打包）：**
 
 1. **窗口标题包含编译日期**：每次打包前必须更新 `main_gui.py` 中的 `BUILD_DATE` 变量为当前日期（格式：`YYYY-MM-DD`）
+
    ```python
    APP_VERSION = "1.13.0"
    BUILD_DATE = "2026-08-14"  # 编译日期，每次打包前更新
    ```
+
    窗口标题格式：`协议解析工具 v{APP_VERSION} ({BUILD_DATE})`
 
 2. **exe 文件名自动带版本号+时间戳**：`南网协议解析工具.spec` 顶部从 `main_gui.py` 的 `APP_VERSION` 自动读取版本号，输出名固定为 `南网协议解析工具_v{APP_VERSION}_{YYYYMMDDHHMMSS}.exe`（时间戳精确到秒）。窗口标题版本号与 exe 文件名版本号**天然对齐**（同一数据源），无需手工同步。spec 还会动态生成 `_version_info_gen.txt`（Windows 文件属性 FileVersion/ProductVersion 与 APP_VERSION 对齐），旧的静态 `version_info_nw.txt` 不再使用。
 
 3. **打包流程**：
+
    ```bash
    # 1. 更新 BUILD_DATE 为当前日期（APP_VERSION 仅在功能变更时 bump）
    # 2. 执行打包命令
@@ -263,16 +274,24 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 │   ├── message_tool_widget.py       # 报文工具标签页 (MessageToolWidget) - ASCII/HEX转换/CRC/校验
 │   ├── enhanced_export.py           # 增强导出功能 (EnhancedBatchResultExporter) - Excel/CSV/TXT/JSON
 │   ├── theme_settings.py            # 主题与字体设置 (ThemeManager + ThemeSettingsDialog) - 5套主题/QSS/字体持久化
+│   ├── meter_sim_widget.py         # 虚拟表 tab (VirtualMeterWidget) - 698.45 从站模拟器（离线/串口从站，仅协议8，1.16.0 起）
+│   ├── meter_sim/                  # 虚拟表核心逻辑包（纯逻辑无 Qt，1.16.0 起）
+│   │   ├── archive.py              #   档案 meter_sim_data.json（194 OI，app_paths 持久化）
+│   │   ├── link_layer.py           #   68...16 帧提取（粘包/分片/FE前缀）+ 帧头解析
+│   │   ├── response_builder.py     #   Get-Response Normal/NormalList/Record、链接、安全MAC封装；复用 DLT69845FrameGenerator
+│   │   ├── dynamic_data.py         #   时间/地址/电能量递增/冻结时标/漏点
+│   │   └── engine.py               #   MeterSimEngine.handle_frame(frame) -> 0..n 响应帧
 │   ├── monitor_widget.py            # 实时监控器 (RealtimeMonitorWidget) - 串口原始字节流自动组帧/CSV记录
 │   ├── monitor/tcp_monitor.py       # TCP流量监控 (TCPMonitorWidget) - scapy抓包/流重组/自动解析
 │   ├── system_integration/          # 系统集成包（Windows）
 │   │   ├── sys_tray.py              #   系统托盘（关闭最小化/显示隐藏/自启/退出）
-│   │   ├── global_hotkey.py         #   全局热键（默认 Ctrl+Alt+X，解析剪贴板 hex）
+│   │   ├── global_hotkey.py         #   全局热键（默认 Ctrl+Alt+X，唤出快捷解析小窗）
 │   │   ├── single_instance.py       #   单实例（QLocalServer，转发命令行参数）
 │   │   ├── registry_menu.py         #   注册表：开机自启 + .log/.txt/.hex/.bin 右键菜单
 │   │   ├── clipboard_monitor.py     #   剪贴板报文自动检测（严格 hex 校验 + 协议特征识别）
 │   │   ├── parse_prompt_dialog.py   #   剪贴板报文解析提示框（置顶、协议选择、复用实例）
 │   │   ├── npp_integration.py       #   Notepad++ 集成（右键菜单 + 运行命令，触发 --clipboard）
+│   │   ├── quick_parse_panel.py     #   uTools 风格快捷解析小窗（热键唤出/实时解析卡片，1.17.0 起）
 │   │   └── system_settings.py       #   系统集成设置面板与 config.json "system" 段
 │   └── reflex_web/                 # Reflex Web 版（实验性，run_app.py + reflex_web_exe.spec）
 │
@@ -313,6 +332,8 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 │   ├── gap_analysis.py / create_work_list.py / search_di.py
 │   └── lme_info_entry_parser.py    # LME 信息条目解析
 │
+├── proc_stats.py                   # 本进程资源占用采样（CPU%/内存，纯标准库零依赖，1.18.0 起）
+│                                   #   Windows: ctypes GetProcessTimes/GetProcessMemoryInfo；Linux: /proc/self；其他降级 --
 ├── app_paths.py                    # 所有可写数据文件路径的唯一入口（1.14.7 起）
 │                                   #   app_data_dir()/data_path(name)/ensure_data_file(name)
 │                                   #   frozen(单文件exe) → exe 所在目录；dev → 项目根
@@ -321,6 +342,8 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 └── 数据文件（运行时读写，需随打包/版本管理；一律经 app_paths.data_path 定位，frozen 下落 exe 目录）
     ├── custom_di.json              # 南网自定义DI（GUI 增删；打包内置，exe 目录缺失时从 _MEIPASS 复制种子）
     ├── gdw_custom_afn.json         # 国网自定义AFN+Fn（GUI 增删；打包内置，exe 目录缺失时从 _MEIPASS 复制种子）
+    ├── meter_sim_data.json         # 虚拟表档案（194 个 OI→A-XDR 数据；scripts/gen_meter_sim_data.py 从开源 config.ini 生成，1.16.0 起）
+    ├── meter_sim_settings.json     # 虚拟表模拟设置（多表数/名单/递增/漏点/MAC 开关，运行时生成）
     ├── dlt645_di.json              # DLT645 DI 映射（generate_dlt645_di.py 生成，勿手改）
     ├── dlt645_di_custom.json       # DLT645 自定义 DI（GUI 增删）
     ├── NW_command.json             # 南网预设命令
@@ -336,6 +359,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 ```
 
 **数据流（核心调用链）：**
+
 ```
 用户输入 hex
   → main_gui.py 根据 current_protocol 选择 parser
@@ -353,6 +377,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 ## 4. 关键约定
 
 ### 4.1 代码风格
+
 - **类名** CamelCase：`ProtocolFrameParser`、`CSGNewGenParser`
 - **函数/变量** snake_case：`parse_frame`、`current_protocol`
 - **常量** UPPER_CASE：`AFN_MAP`、`DI_COMBINATION_MAP`、`MSG_PORT_MAP`
@@ -360,7 +385,9 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 - 所有 parser 返回**嵌套 dict**，禁止返回自定义类给 GUI 层
 
 ### 4.2 解析结果 dict 标准字段
+
 所有 parser 返回的 dict 中关键中文键名（GUI 表格列直接读取）：
+
 - `原始值` / `原始字节` — 十六进制原始数据
 - `十进制` / `解析值` — 解析后的数值
 - `说明` / `名称` / `业务说明` — 中文描述
@@ -374,6 +401,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 - ASCII / BCD 字段经常需要"反转后解析"，参考 CHANGELOG 1.6.4~1.6.7 的字节序修复历史
 
 ### 4.4 校验和 / CRC
+
 - 南网(0)：控制域 + 用户数据区的 8 位位组算术和（不考虑溢出）
 - 国网(7)：同南网（控制域 + 用户数据区算术和）
 - DLT645(6)：所有字节累加和 `& 0xFF`
@@ -382,8 +410,9 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 - HDC 1.0(11)：FC 的 FCCS 为 **CRC-24**，PB 尾 PBCS 为 **CRC-24**，MAC 帧尾 ICV 为 **CRC-32**（见 `hdc10_parser.py` 的 `_crc24` / `_crc32`）
 
 ### 4.5 自定义数据持久化
+
 | 文件 | 内容 | 来源 |
-|------|------|------|
+| ------ | ------ | ------ |
 | `custom_di.json` | 南网自定义 DI | GUI 运行时增删 |
 | `gdw_custom_afn.json` | 国网自定义 AFN+Fn | GUI 运行时增删 |
 | `dlt645_di.json` | DLT645 标准 DI 映射 | `generate_dlt645_di.py` 生成，**勿手改** |
@@ -391,6 +420,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 | `oi_to_class.json` | 698.45 OI→类 | `extract_oi_to_class.py` 生成 |
 
 ### 4.6 HDLC 字节填充（透明传输）
+
 - `7E` 在帧内 → 转义为 `7E 5D`
 - `7D` → 转义为 `7D 5D`
 - 解析器自动还原，**组帧时也必须处理**（否则生成的帧非法）
@@ -403,6 +433,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 > 文档路径均为**项目根目录**下的相对路径（新一代协议文档在子目录）。
 
 ### 5.1 南网协议（索引 0）
+
 - **解析器**：`protocol_parser.py` (ProtocolFrameParser) + `protocol_tool.py` (ControlField/Frame)
 - **组帧**：`send_frame_lib.py` + `frame_generator_schema.py`
 - **校验器**：`validator/nw_validator.py`
@@ -412,14 +443,17 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
   - `低压电力线宽带载波深化应用技术手册v1.1.md` — **深化应用**（台区识别/交采/模块资产）专用
   - `1.md` / `1-1.md` / `2.md` — 早期协议文档（Markdown）
   - `2.pdf` — Q/CSG1209021-2019 原始 PDF
+  - `协议文档/0.南网协议/13 计量自动化终端本地通信模块接口协议.md` — **本地通信模块接口协议（试行）**，108 个数据标识（E8 86 + EA 22），模块特征信息/即插即用/黑名单/相位等新增 DI 的字段定义以此为准（1.14.9 起）；源文件为同目录 `.doc`/`.docx`（OLE2 格式需用 Word COM 转 docx 后再 markitdown）
 
 ### 5.2 PLC RF 协议（索引 1，万胜海外）
+
 - **解析器**：`plc_rf_parser.py` (PLCRFProtocolParser) + `dlms_parser.py` (DLMSParser 基类)
 - **查询**：`command_lookup.py`
 - **校验器**：`validator/plc_rf_validator.py`
 - **参考文档**：`4.md`（万胜 V1_04 协议）
 
 ### 5.3 HDLC / DLMS（索引 2/3/4）
+
 - **解析器**：`hdlc_parser.py` (HDLCParser) + `dlms_deep_parser.py` (DLMSDeepParser，双击触发)
 - **查询**：`obis_lookup.py`
 - **校验器**：`validator/hdlc_validator.py`（Wrapper/APDU 复用）
@@ -430,6 +464,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
   - `DLMS_Protocol.md` / `DLMS_Protocol.pdf` — DLMS 协议
 
 ### 5.4 DLT645-2007（索引 5）
+
 - **解析器**：`dlt645_parser.py` (DLT645Parser)
 - **查询**：`dlt645_di_lookup.py` + `dlt645_di.json`
 - **校验器**：`validator/dlt645_validator.py`
@@ -439,6 +474,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
   - `国网计量中心电能表全性能试验检测公告-第4号补遗-事件记录采集-远程费控功能和负荷曲线抄读功能.pdf` — 补遗（PDF，需用 pdf skill 检索）
 
 ### 5.5 国网协议（索引 6）
+
 - **解析器**：`gdw10376_parser.py` (GDW10376Parser) + `gdw10376_tool.py`
 - **组帧**：`gdw_send_frame_lib.py` + `gdw_frame_generator_schema.py`
 - **查询**：`gdw_afn_lookup.py`
@@ -450,6 +486,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
   - `协议文档/7.国网本地接口协议/附件4：集中器和CCO通信接口补充要求-20220416`（以太网/UDP 通信链路要求）
 
 ### 5.6 DL/T 698.45-2017（索引 7，**1.7.0 新增**）
+
 - **解析器**：
   - `dl_t698_45_parser.py` (DLT69845Parser) — 链路层帧（68 L L C SA CA [HCS] [APDU] [FCS] 16）
   - `dl_t698_45_apdu_parser.py` (DLT69845APDUParser) — APDU 服务类型（GET/SET/ACTION/REPORT/PROXY/LINK/CONNECT...）
@@ -464,12 +501,13 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
   - **A-XDR 编码**：APDU 内部所有数据用 A-XDR，tag 高 3 位 = 010
 
 ### 5.7 新一代载波协议 / 通感一体化（索引 9，**1.7.0 新增**）
+
 - **解析器**：
   - `csg_new_gen_parser.py` (CSGNewGenParser) — MAC 帧（MPDU/MAC头/MSDU/CRC-32）+ 应用层业务报文
   - `csg_new_gen_cmd_payloads.py` — 应用层命令业务数据单元解析（依据第5部分）
 - **校验器**：`validator/csg_new_gen_validator.py`
 - **GUI 特性**：协议索引 9 时显示解析级别下拉（auto / fc_pb / fc_efc / fc_only / app / pb_only），pb_only 模式可指定 SOF/信标/ACK/NET 帧类型；由 `_csg_parse_level` 控制
-- **解析重点**：支持多物理块重组、聚合帧级联块应用层解析、NET 帧可变区域解析；批量解析支持监控日志前缀剥离与业务摘要
+- **解析重点**：支持多物理块重组、聚合帧级联块应用层解析、NET 帧可变区域解析；批量解析支持监控日志前缀剥离与业务摘要；ED..EE 包装的数据域若为《测试装置通信控制协议V1.1》工装板/功能驱动板控制帧，也由协议9解析器识别展开
 - **参考文档**（位于 `南网新一代20260226校对/南网新一代20260226校对/` 子目录，每部分同时有 .docx 和 .md）：
   - `1-通感一体化低压电力线宽带载波通信规约 第1部分 总则（文本校对）.md` — 总则
   - `2-...第2部分 技术要求（文本校对）_力合微_20260304.md` — 技术要求
@@ -479,11 +517,13 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
   - `6-...第6部分：检验规范（文本校对）.md` — 检验规范
   - 源 docx 可用 `convert_docx_to_md.py` 重新转换
   - `《南方电网计量自动化系统双模通信技术规范 第2部分：无线通信接入协议》（报批稿）.md` — **无线信道(HRF)协议定义权威参考**（同目录 .pdf 为原始文件，192页，Q/CSG 报批稿）。**引用优先级：新一代协议本身有定义 → 以新一代为准；新一代未定义的无线专有内容（RF物理层前导/SFD、无线信道编号与option、无线路由参数条目等）→ 本文档**。已核对布局一致：精简信标载荷（无线表154≡新一代表73）、0x0E 精简条目（表155≡表74）、信标载荷固定区（表134≈表51）；差异点——信标条目头 0x0F 起无线版为保留，新一代扩展了 信标机制切换(0x0F)/代理角色(0x10)
+  - `南网新一代载波通信互联互通测试装置 通信控制协议V1.1.md` — **测试装置工装板/功能驱动板控制协议参考**（ED..EE 数据域可能携带）。CCO/STA 仓工装板：`FE...05 + 地址 + 命令码 + 6字节数据 + 校验和`；功能驱动板：`FE FE FE 05 + 地址 + 指令 + 6字节数据 + 校验和 + AA 0D 0A`
 
 ### 5.8 国网新一代双模通信互联互通（索引 10）
+
 - **解析器**：
   - `gw_new_gen_parser.py` (GWNewGenParser) — 国网新一代双模通信互联互通协议解析，支持 HDC 1.0 / HDC 2.0 版本判定
-  - `gw_new_gen_mme_parser.py` (MMETYPE_NAMES + _MME_CONTENT_PARSERS) — MME 管理消息深度解析（关联/代理变更/发现列表/网络冲突/诊断等）
+  - `gw_new_gen_mme_parser.py` (MMETYPE_NAMES +_MME_CONTENT_PARSERS) — MME 管理消息深度解析（关联/代理变更/发现列表/网络冲突/诊断等）
   - `gw_new_gen_cmd_payloads.py` — 应用层命令业务数据单元解析
 - **校验器**：`validator/gw_new_gen_validator.py` (GWNewGenValidator)
 - **GUI 特性**：协议索引 10 时显示解析级别下拉（auto / fc_pb / fc_only / mac_only / pb_only / fc_mac / app），pb_only 模式可指定帧类型；由 `_gwcsg_parse_level` 控制
@@ -498,7 +538,9 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
   - 源文件（.doc/.docx）可用 markitdown 重新转换
 
 ### 5.9 HDC 1.0 双模互联互通（索引 11，**独立协议**）
+>
 > 与索引 10（国网新一代）的关系：国网新一代解析器内部按 FC 字节 12 高 4 位自动区分 HDC 1.0 / 2.0；**协议 11 是独立解析 HDC 1.0 帧的单独入口**（Q/GDW 12087.42-2020，旧版双模），帧结构与国网新一代共用同一套双模技术规范早期版本。
+
 - **解析器**：
   - `hdc10_parser.py` (HDC10Parser) — 完整 MPDU（FC 16B + 物理块 PB×N）、FC 可变区域（信标/SOF/SACK/网间协调）、信标载荷与管理信息条目（含时隙分配 0xC0）、MAC 帧（标准 16B 头 / 单跳 4B 头）、MSDU 载荷与应用层业务报文
   - `hdc10_mme_parser.py` (parse_management_message) — HDC 1.0 网络管理消息（MME）深度解析，MMTYPE 2 字节小端
@@ -514,13 +556,12 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 
 ---
 
-
 ## 6. GUI 协议集成点（添加/修改协议必读）
 
 `current_protocol` 索引在 `main_gui.py` **硬编码**，添加新协议必须**同时**修改以下位置（用 grep 定位）：
 
 | 位置 | 行为 |
-|------|------|
+| ------ | ------ |
 | `MainWindow.__init__`（~L285） | 注释列出索引含义，并初始化对应 parser 实例 |
 | `protocol_combo.addItem`（~L549-560） | 添加下拉项（顺序即索引，现 0~11） |
 | `_on_protocol_changed`（~L1300+） | 协议切换：输入提示 / 查询页 / 各 Tab 可见性 |
@@ -531,6 +572,8 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 | `_protocol_name_to_index`（~L4600） | 协议名 ↔ 索引映射（含 "HDC1.0"→11 等） |
 | 批量解析（~L4780+） | 前缀剥离（10/11 → `_strip_gw_new_gen_prefix`）、摘要（10/11 → `_get_gw_new_gen_summary`） |
 **Tab 可见性规则：**
+
+- 虚拟表（1.16.0 起）：**仅 698.45(8)**；`VirtualMeterWidget` 串口监听线程独立（不复用主 SerialWorker），关闭时须调 `shutdown()` 回收
 - 组帧 / 预设命令：南网(0) / 国网(7) / 698.45(8)，三种模式 `south` / `gdw` / `dlt698`
 - 档案管理 / 拓扑信息：仅南网(0) / 国网(7)
 - 新一代解析级别下拉：仅索引 9（新一代载波，auto/fc_pb/fc_efc/fc_only/app/pb_only）
@@ -556,9 +599,12 @@ python test/test_ber_tlv.py         # BER-TLV 编码
 python test/test_actual_hdlc.py     # 真实 HDLC 报文
 python test/test_special_frame.py   # 特殊帧
 python test/test_snrm_frame.py      # SNRM 帧
+python test/test_nw_lcmi.py         # 南网本地通信模块接口协议 LCMI（1.14.9 起：15 新 DI 解析 + 组帧回读 + 双格式兼容）
 python test/test_dl_t698_45.py      # 698.45 协议
 python test/test_dl_t698_45_data_decode.py  # 698.45 APDU 数据内容业务解码（电能量/需量/分相/单值）
-python test/test_dl_t698_45_fujian.py  # 698.45 福建简化698 + 版本信息深度解析（1.14.2/1.14.6 起）
+python test/test_meter_sim.py       # 698.45 虚拟表从站模拟器（62 项：自组帧自解析闭环/NormalList/Record/安全MAC/通配多表/名单/递增/漏点/粘包分片，1.16.0 起）
+python test/test_quick_parse_panel.py # uTools 风格快捷解析小窗（29 项：空态/真实帧/自动识别/错误态/徽章/显隐/手动切协议/MainWindow 集成，1.17.0 起）
+python test/test_app_exit.py         # 关闭/托盘退出进程不残留 + 线程回收（offscreen：X→托盘退出事件循环结束/直接关闭/虚拟表线程登记，1.17.2 起）
 python test/test_oad_enrichment.py  # 698.45 OAD 增强
 python test/test_csg_new_gen.py     # 新一代载波协议
 python test/test_csg_hrf_mac.py     # 新一代载波无线单跳MAC帧（表12/表139）
@@ -613,6 +659,7 @@ python test/test_web_frame_gen_utils.py # Reflex Web 版组帧纯逻辑
 18. **TCP 监控可选依赖**：`monitor/tcp_monitor.py` 使用 scapy QThread + signal 回主线程，Windows 需 npcap；scapy 缺失时不能调用 `get_if_list`，UI 已做降级，但新增抓包逻辑要保持 try/except。
 19. **输入即 PB 契约**：`mac_only` / `pb_only` / `app` 等仅输入解析模式不再剥离 FC，输入内容按界面提示的层级直接解析；不要再次假设输入包含完整 MPDU 而剥离 16 字节。
 20. **系统集成仅限 Windows**：`system_integration/registry_menu.py` 与 `global_hotkey.py` 依赖 Windows API 与 HKCU 注册表；热键注册失败时应打印提示而不是阻塞启动。`main()` 先做单实例判断，修改启动流程时不要破坏该顺序。
+20b. **退出必须显式 `QApplication.quit()`**（2026-08-28 修复）：Qt 仅在「最后一个可见顶层窗口关闭」时发 `lastWindowClosed` 并结束 `app.exec()`。点 X 最小化到托盘后窗口已 `hide()`，托盘「退出」/自动更新重启（`_schedule_quit`）再调 `self.close()` 时**没有可见窗口关闭**，即使 `closeEvent` 里 `event.accept()`、所有线程都已回收，事件循环仍不退出、进程残留。正确做法：`closeEvent` 真正退出路径（最小化到托盘的 `event.ignore()` 分支之后）在 `event.accept()` 后追加 `QTimer.singleShot(0, QApplication.quit)`（延迟到当前事件处理结束后，不能在 closeEvent 中途直接 quit）。新增 QThread 一律 `thread_registry.track(self, 名称)`，`_shutdown_threads` 的兜底回收依赖该注册表；回归测试 `test/test_app_exit.py`（offscreen）。
 21. **剪贴板检测与 Notepad++ 集成**：`clipboard_monitor.py` 监听 `QClipboard.dataChanged`，受 `config.json` 的 `system.clipboard_monitor` 控制；`npp_integration.py` 会修改 `%APPDATA%/Notepad++` 下的 XML 并保留 `.parser_backup`。改动时保持严格 hex 校验、去抖与提示框单实例复用，避免自身复制触发弹窗。
 22. **ED..EE 监控帧剥离失败禁止回退**：协议 9 下勾选「ED监控协议」（或弹窗「剥离ED监控头」）时，首字节 0xED 的报文只能是 ED 包装帧（CSG FC 起始字节低 4 位 ∈ {8,9,A,B}，0xED 永不是合法 FC 起始）。`_parse_ed_monitor_header` / `_extract_business_from_ed_frame` 校验失败（帧不完整、缺 EF/EE）时必须明确报错，**绝不能静默把 ED 首字节当 FC 起始符送解析器**。三处路径（`parse_single` / `_parse_and_show_dialog._preprocess` / 批量解析）必须保持一致。
 23. **字段声明与实际不一致时的容错显示原则**：当报文长度、字段声明值与实际内容不匹配时（如 DLT645 数据长度字段声明 102 字节但实际只有 15 字节），**解析器不得直接返回空白结果**（会让用户以为按钮失灵）。正确做法：尽力解析所有可解析字段，`valid` 置 `False`，并在解析结果表格中以醒目的 `⚠` 行插入错误提示。校验器对应项必须标记 FAIL。核心原则——用户点了解析按钮就必须看到内容和错误，不能什么都没有。
@@ -650,531 +697,42 @@ python test/test_web_frame_gen_utils.py # Reflex Web 版组帧纯逻辑
 5. **GUI 组件拆分**：新 UI 组件独立成文件，`main_gui.py` 只负责组合。
 6. **中文键名保持一致**：`原始值`/`十进制`/`说明` 等，GUI 表格列直接读这些键。
 7. **字节序显式**：`int.from_bytes(data, 'little'/'big')` 必须显式写参数，禁止依赖默认。
-8. **CHANGELOG 即时维护**：完成功能后，在 `main_gui.py` 的 `CHANGELOG` 列表头部新增条目（版本号/日期/要点），并在 §10 同步。
+8. **CHANGELOG 即时维护**：完成功能后，在 `main_gui.py` 的 `CHANGELOG` 列表头部新增条目（版本号/日期/要点）。
 
 ---
 
-## 10. 变更日志（与 `main_gui.py:CHANGELOG` 保持同步）
+## 10. 变更日志
 
-> 本节按版本倒序记录。详细 commit 见 `git log`。每发新版本必须更新此处。
+> 详细版本变更记录请查看 `main_gui.py:CHANGELOG`（按版本倒序），或运行 `git log --oneline` 查看提交历史。本文档仅保留最近两个版本的摘要。
 
-### 1.14.7 — 2026-08-24
-- **修复 exe 打包后用户配置丢失**：新增 `app_paths.py` 作为所有可写数据文件路径的**唯一入口**——`app_data_dir()` / `data_path(name)` / `ensure_data_file(name)`。frozen（PyInstaller 单文件 exe）下定位到 **exe 所在目录**（`sys.executable` 的 parent），开发模式落项目根；函数内**惰性读取** `sys.frozen` / `sys._MEIPASS` / `sys.executable`（禁止模块级缓存，测试需 monkeypatch）。此前 `Path(__file__).parent` 指向 `_MEIPASS` 临时解压目录（进程退出即删）、cwd 相对路径随启动位置漂移，导致每次更新 exe 后用户配置全部丢失
-- **接入范围**：config.json（main_gui / llm_api_manager / llm_preprocess_widget / theme_settings / system_settings）、预设命令 NW/GW/DLT698_command.json（preset_buttons 模块级常量名保留，测试 monkeypatch 依赖）、test_plan.json、custom_di.json、gdw_custom_afn.json（GDW10376Parser 签名改 Optional-None 默认）、dlt645_di_custom.json、custom_commands.json、custom_obis.json、archive_data.json、监控 CSV Output/ 目录（monitor_widget / monitor/tcp_monitor）
-- **内置种子自愈**：custom_di.json / gdw_custom_afn.json 在 exe 目录不存在时由 `ensure_data_file` 从 `_MEIPASS` 打包资源复制一份作为初始值，之后读写均落 exe 目录；已存在的用户文件**不覆盖**。只读资源（icons/、dlt645_di.json、app_icon.ico）保持原定位不变；不做旧目录迁移
-- **测试**：新增 `test/test_app_paths.py`（11 项：dev 定位 + frozen monkeypatch 种子复制/不覆盖/缺失静默）；回归 `test_dlt698_preset.py`(31) / `test_theme_settings.py`(29) / `test_gdw_fujian.py`(19) / `test_dlms.py` / `test_monitor_widget.py` 全过
-- **修复低分屏/高DPI 批量解析页重叠 + 工具栏视觉凌乱**：工具栏单行流式布局 → **三行独立 QHBoxLayout**（核心操作+帧计数 / CLI 预处理 / Python 脚本+导出），行内下拉框 `addWidget(w, 1)` 吃掉剩余宽度——QGridLayout 多行共享列宽时列最小宽度竞争会算出负间隙，独立行布局彻底规避；文字按钮统一 `min_width`（普通 100 / 导出 120）等高对齐；图标按钮（★保存 ×删除 ?帮助）**既不能用 setMaximumWidth 也不能用空文本**——前者 QSS padding 使 sizeHint 变宽后冲突致相邻几何重叠，后者用户无法辨识功能；正确做法 = 内联收紧 padding + `ensurePolished()` 后 `setFixedWidth(sizeHint().width())` 固定统一方块尺寸且保留字形；全部工具栏按钮补 tooltip
-- **窗口最小尺寸按屏幕自适应**（`MainWindow.__init__`）：`min(1000, 可用宽度×0.85)` / `min(700, 可用高度×0.8)`，1366×768 低分屏不再超出可视区压缩布局；主题 QSS 控件瘦身——按钮 padding 8px16px→4px12px、输入框 5px→2px6px、下拉框/选项卡同步收紧
-- **主题 QSS 字号与表格缩放基准脱节修复**（`gui_utils.py::refresh_qss_font` + `theme_settings.py`）：QSS `font-size` 不反映到 `widget.font()`，缩放基准记录旧字号致 Ctrl+0 恢复裁切文字；`ThemeManager.apply` 后 `QTimer.singleShot(0)` 遍历 `allWidgets()` 重置 ZoomableTableWidget 基准并按 `fontMetrics().height()+6` 重算行高
-- **修复关闭软件周期性报错**（`main_gui.py::closeEvent`）：`_run_update_check` 连接 `thread.finished→deleteLater` 后 C++ 对象可能已被回收，旧代码 `thread.disconnect()` 触碰已删对象抛 `RuntimeError: Internal C++ object(_UpdateCheckWorker) already deleted`。修复：整个线程收尾块 `try/except(RuntimeError)`、`disconnect` 带参数兜 `(RuntimeError, TypeError)`、等待超时(500ms)不再 `quit()`（阻塞网络 IO 不可中断，反触发 `Destroyed while running`）只断开信号放行、`_UpdateCheckWorker` 去 `parent=self`。实测三场景（C++已删/运行中/已结束）closeEvent 均无异常
-- **批量解析新增「导出选中」**（`main_gui.py`）：摘要表 `SingleSelection` → `ExtendedSelection`（Ctrl/Shift 多选行），工具栏新增「导出选中」按钮——只导出高亮帧，用于从大批量结果中挑出信标帧等目标子集；过滤栏新增「按类型全选」下拉+按钮（解析完成后动态提取类型列表，一键选中该类型全部可见行）与「已选 N 帧」实时计数标签。实现：`_get_selected_batch_indices()`（selectedItems → 序号列 UserRole 原始索引）、`_on_batch_select_by_type()`（QItemSelection 批量选中，注意该类在 **QtCore** 非 QtGui）、`_refresh_batch_type_combo()`、`export_batch('selected_dialog')` 用 `export_pool` 子集走 Excel/JSON 导出器；`batch_results` 新增 `_type_name` 键
-- **协议8 新增安徽分布式电源接入单元补充规约对象解析**（文档 `协议文档/8.698.45协议/安徽省2025年一批分布式电源接入单元补充技术协议.md`）：补齐 17 个新增 OI 的名称/类绑定与业务解码——发电量(2801)/发电时间(2802, IC6)、光伏逆变器开关机/有功/无功/功率因数控制事件(3060-3063)与通信异常(3065/3066/3095/3096, IC7)、光伏越限事件单元(3097)/逆变器控制事件记录单元(3361)/控制指令事件单元(3363, IC8)、逆变器档案单元(4039)/光伏逆变器(4820, IC19)/分布式电源调控调度计划表(4822)/计划单元(4823, IC8)。`dl_t698_45_data_decode.py` 新增 `ANHUI_ATTR_TEMPLATES`（按完整 OI 键优先匹配，避免与标准 (class_id,attr_id) 冲突）+ `ANHUI_STRUCT_SPECS`（structure 成员规格驱动解码）+ `decode_action_parameter`（方法参数: 4820 开关机/负荷控制、4822 调控计划增删清、8000 跳闸/合闸）；`dl_t698_45_apdu_parser.py` `_parse_action_request` Normal/NormalList 分支接入方法参数解码；`dl_t698_45_oi_lookup.py` 手动追加 OI 名称/类绑定；`generate_oi_lookup.py` 加 `ANHUI_OI_TO_CLASS` 常量保证重跑不丢（OI_NAME_MAP 从源码提取回写，手动项天然保留）。关键 tag：date_time_s=0x1C（7B 值，年2B大端）、long64-unsigned=0x15、enum=0x16、structure=0x02、bit-string=0x04。`test/test_dl_t698_45_data_decode.py` 新增 8 个安徽用例，全量 698.45 回归（数据解码/基础/福建/OAD增强/组帧63/国网福建19/预设31）全过
+### 1.18.1 — 2026-08-28
 
-### 1.14.6 — 2026-08-24
-- **协议9（新一代载波）精简信标帧载荷深度解析**（`csg_new_gen_parser.py`）：此前信标载荷只按标准信标表51 布局解析，精简信标（载荷头 bit4=1，表73）的 CCO MAC(6B)+信标周期计数(4B) 固定区被误读为 SNID/无线信道/信标机制字段、0x0E 精简条目头错位成「保留98」。现按表73 分支解析：标志+组网序列号+CCO MAC+周期计数+管理信息+BPCS；新增 0x0E 精简信标站点信息及时隙条目（表74）逐字段深度解析——TEI/代理TEI/角色(CCO=4/STA=1/PCO=2)/层级/MAC/RF跳数/载波频段/CSMA时隙开始NTB与长度。用户实测中央精简信标现正确解出 组网序列号70 / CCO MAC=00:00:90:98:01:63 / 周期计数20(与FC一致) / TEI=1(与FC源TEI一致) / 角色=CCO；`test_csg_new_gen.py` 新增 `test_compact_beacon_real`
-- **修复协议8（DL/T 698.45）GET-Response 解析失败**（`dl_t698_45_apdu_parser.py`）：Get-Result 的 CHOICE 标签此前写反——文档表54 与附录 H.3.1 官方示例均为 **错误信息[0]=DAR、数据[1]=Data**，旧代码把 `res_tag==0x00` 当数据、其余当 DAR 按 A-XDR 硬解，真实响应帧（如版本信息查询应答）报 `未知类型(0x44)` 整包丢弃。新增公共 `_parse_get_result`：`01`→Data（A-XDR）、`00`→DAR（裸 enum 单字节）、其他值按裸 DAR 兼容；GET/SET/ACTION-Response 的 DAR 均改为裸 enum 解析（此前非零错误码如 0x03 撞 array 标签崩溃）。GET-Request choice 映射同步按表45 修正（[3]Record/[4]RecordList/[5]Next/[6]MD5，删除不存在的 [5]Signature），GET-Response 补 [3]Record/[4]RecordList/[23]SimplifyRecord 分支
-- **协议8 版本信息深度解析**（`dl_t698_45_data_decode.py`）：CLASS_ATTR_TEMPLATES 新增设备管理类(class_id=19)模板——属性3 版本信息 structure{厂商代码/软件版本号/软件版本日期/硬件版本号/硬件版本日期/厂商扩展信息}（表191）逐字段业务解码，YYMMDD 日期补全为 `20YY-MM-DD`；属性2 设备描述符(visible-string)、属性4 生产日期(date_time_s) 同步支持。用户实测帧 `85 01 01 43000300 ...` 现解析出 厂商代码=JCDZ / 软件版本号=V1.5 / 软件版本日期=2025-09-01 / 硬件版本号=V1.0 / 硬件版本日期=2023-06-02 / 厂商扩展信息=SHANDONG
-- **修复关闭软件后仍周期性弹更新提示**（`main_gui.py`）：①点X最小化到托盘时暂停 30 分钟周期更新检查（closeEvent 托盘分支停 `_update_poll_timer`），从托盘恢复显示时 `showEvent` 重启；启动 3 秒延迟单次检查加 `isVisible()` 守卫——主窗口隐藏时自动检查直接跳过。②真正退出时收尾：停止周期定时器 + 断开并等待 `_UpdateCheckWorker` 线程结束（500ms 快速等待，超时 quit+2s 兜底），不再残留后台线程周期联网
-- **测试**：`test_dl_t698_45.py` GET-Response 用例改为文档语义（[1]=Data/[0]=DAR 双断言）；`test_dl_t698_45_data_decode.py` 合成帧 GetResult 标签 0x00→0x01；`test_dl_t698_45_fujian.py` 增至 14 项（用户版本信息真实帧全链路表格断言 + DAR 错误响应）；四套件回归全过
+- **快捷解析小窗毛玻璃化**（`system_integration/quick_parse_panel.py` + 新增 `acrylic_effect.py`）：Windows 10 1803+/11 用 ctypes 调 `SetWindowCompositionAttribute` 启用系统级亚克力模糊（失败静默降级），卡片约 50% 半透明；空态精简——无输入时面板透明无边框禁投影（只显示输入框本身，可拉高），输入有效报文展开后才呈现 1px 细毛玻璃边框+投影；输入框/协议下拉/按钮/结果表格全部半透明化，卡片圆角 14px，明暗主题各有配色
+- **修复小窗高度收回失效**：清空输入回空态时窗口高度滞留不回缩、手动调整高度被打回——根因 `_fit_height` 只 invalidate 内层布局未 activate，外层 `activate()`/`sizeHint()` 读到陈旧缓存；修复为先激活内层布局再取 sizeHint（`quick_parse_panel.py:_fit_height`）
+- **测试**：`test/test_quick_parse_panel.py` 现 62 项断言全过（空态透明/投影禁用/输入框可拉高/展开恢复细边/毛玻璃透明度/亚克力接口/空态收回 390→244px/MainWindow 集成），退出码正常
 
-### 1.14.5 — 2026-08-21
-- **协议11（HDC 1.0）查询站点升级状态上行报文解析**（`hdc10_parser.py::_parse_upgrade` 0x034）：此前只按下行表40 解析（连续查询块数/起始块号/升级ID），上行应答的 升级状态(字节1高4位)/有效块数/升级位图 全部丢失。现按文档第4-3部分 表45 补全：升级状态（0空闲/1接收进行/2接收完成/3升级进行/4试运行）、有效块数、起始块号、升级ID + 接收位图（每bit对应一个文件块，1=已接收，显示 `N/M块已接收`）。**升级位图逐块编号明细**：按 起始块号+i 编号，每行32块多行展开，`[✓n]`=已接收 `[✕n]`=丢包，行说明统计丢包数。方向判定：len>12 或字节1高4位∈{1..4} 判为上行；恰12字节且状态位0 按表40 下行。`test/test_hdc10.py` 增至 10 项（上行全收/下行/丢包编号）全过
-- **协议11（HDC 1.0）台区户变关系识别(0x0A1)深度解析**（`hdc10_parser.py`）：①修复报文头长度公式——6bit值(byte0[6:7]高2位+byte1[0:3]低4位)×4字节（类IPv4 IHL），此前错把「(b0低2位|b1高4位<<2)×4」致12字节头算成48字节、DATA 从错误偏移切片只剩尾部16字节；校时/事件/通信测试/注册/升级等全部 **7 处**统一修正。②DATA 域按采集类型深度解析：采集启动(表56)、特征信息告知(表57 TEI/采集方式/序列号/告知总数/起始NTB+特征序列)、判别结果信息(表61 TEI/结束标志/识别结果/正确隶属CCO地址)。③特征序列按特征类型分派：工频电压(表58 BCD XXX.X 大端)、工频频率(表59 BCD XX.XX 大端)、工频周期(表60 有符号偏差值+μs换算)，三相出线逐相展开，双沿采集解析 NTB2+第二组序列。`test/test_hdc10.py` 增至 16 项全过
-- **协议11（HDC 1.0）信标时隙分配条目/心跳检测/发现列表深度解析**（`hdc10_parser.py` + `hdc10_mme_parser.py`）：①时隙分配条目(0xC0/F0)可变区按**实机顺序**解析——CSMA时隙信息先行 → 非中央信标信息(逐2B到数据边界，实测发现信标也携带、不做表50省略假设) → 绑定CSMA；实机声明 total_len 偏小（只含固定头+CSMA），内容延伸到管理区末尾(BPCS前)，真实帧 17 条时隙(2代理+15发现)+3条CSMA 全解零剩余。②心跳检测(0x0007)按表94：原始源TEI/最大站点TEI(各12b跨字节)+数量+位图大小+位图逐TEI明细。③发现列表(0x0008)按表95：固定头32B逐字段 + 三段变长区锚点切分——上行路由条目(锚点:路由条目总数, TEI12b+路由类型表98)、发现站点列表位图(锚点:位图大小, TEI明细)、接收发现列表信息与位图置位TEI**一一配对**显示 `[TEIn←计数]`。`test/test_hdc10.py` 增至 19 项全过
-- **协议11（HDC 1.0）PB帧 MSDU 解析修复**（`hdc10_parser.py` + `hdc10_mme_parser.py`）：①MSDU长度公式修正——表22 11bit = byte8全8b + byte9低2b(小端bit序)，此前错用 `(b8<<3)|(b9&7)` 致长度荒谬。②MAC地址标志=1 时跳过 头后12B地址域再定位MSDU。③MSDU类型=0 显式接入 MME 链路；MME头按表58修正为 **4字节**(MMTYPE 2B+保留2B)，此前3B致业务字段错位1字节。④**PBH 剥离判据**：MAC标准头 b0 bit7 恒为0（源TEI 12bit 高位在 byte0[4:7]，≤0x7），b0 bit7=1 必为 PBH——auto/mac_only 自动识别剥离，解决 PBH低4位=0 与 MAC版本0 无法用 ver 区分的问题。⑤未知/厂商扩展类型显示原始数据+可读ASCII标记。⑥单PB对齐探测：声明MSDU长度 vs 实际+MME头合法性综合评分。`test/test_hdc10.py` 增至 20 项全过
+### 1.18.0 — 2026-08-28
 
-### 1.14.4 — 2026-08-21
-- **内嵌部署增量构建**（`reflex_web/build_embedded_deploy.py`）：新增 `--skip-deps` 模式——复用已有 `python/`（解释器+site-packages），仅刷新源码/数据/前端层，重复构建从 10+ 分钟降至约 1 分钟；`requirements.lock` 已最新时跳过 uv 重新编译（构建原则已写入 §2）
-- **协议8（DL/T 698.45）组帧 OI 增强**（`frame_gen_widget.py`）：预定义/A-XDR 两模式 OI 均改为「预设下拉 + 手动 hex 输入」双通道；A-XDR 模式新增「描述符类型」下拉可选 属性(OAD)/方法(OMD)（默认 ACTION→OMD 其余→OAD），属性标识/索引 与 方法标识/操作模式 随选择切换
-- **修复协议8 A-XDR 复合类型编码语义**：array/structure tag 后字节应为**元素个数**而非子项字节总长（文档附录 H.3.2）。此前组帧 3 项 structure 误填 09（字节长），现正确填 03；修复 `frame_gen_widget.py` / `reflex_web/frame_gen_utils.py` 编码器与 `dl_t698_45_axdr.py` 解码器（按个数循环，此前按字节长截断致自组帧回读只显示 1 项）
-- **修复协议8 SET/ACTION 组帧缺尾部 TimeLabel 字节**：此前仅 GET-Request 尾补 `00`，SET/ACTION 少 1 字节（文档 H.4/H.5 均以 OPTIONAL TimeLabel 结尾，00=无）；修复 `frame_gen_widget.py` 两条生成路径与 `frame_gen_utils.py::build_dlt698_axdr_apdu`
-- **解析表格 array/structure 成员逐项展开**（`dl_t698_45_parser.py`）：复合类型不再只显示「[N项]」，为每个成员生成子行（原始编码/值/类型说明，如 `成员1 | 1101 | 1 | A-XDR:unsigned(0x11)`），嵌套递归展开，对齐官方工具；新增 `_add_axdr_item_rows`
-- **请求 APDU 尾部 TimeTag 解析**（`dl_t698_45_apdu_parser.py`）：GET/SET/ACTION 的 Normal/NormalList 六个分支统一解析 OPTIONAL TimeTag 尾字节（00=无时间标签），表格显示「时间标签 | 0x00 | 无时间标签」；新增公共 `_parse_time_tag` 辅助
-- **修复协议8 预设命令保存/显示**（`preset_buttons.py`）：新增 `DLT698_command.json` 独立预设文件（此前 `_get_path` 只认 south，dlt698 预设被误存入 `GW_command.json`）；`PresetButtonWidget.set_protocol` 支持 dlt698（此前守卫只认 south/gdw，切协议8 时静默忽略致预设页看不到 698 按钮）；加载时按 `protocol` 过滤历史混入条目（国网页不再显示 GW 文件中误存的 dlt698 条目），无 protocol 键的老数据按文件归属正常显示；`AddPresetDialog` 协议行显示「698.45 协议」；新增 `test/test_dlt698_preset.py`（31 项）
-- 回归 `test_web_frame_gen_utils.py`（63项）/ `test_dl_t698_45.py` / `test_dl_t698_45_data_decode.py` / `test_dl_t698_45_fujian.py` / `test_oad_enrichment.py` 全过
+- **状态栏增强**：新增本软件自身 **CPU 占用 %** 与**内存占用（MB）**实时显示（CPU 为整机口径与任务管理器一致、0~100%；内存当前工作集 + 悬停看峰值；CPU <30% 灰、30~60% 橙、≥60% 红警示）。采样走新建 `proc_stats.py`（纯标准库零依赖：Windows ctypes、Linux /proc、其他平台安全降级 --），**4 秒慢刷新**定时器（微秒级系统调用，不影响 GUI 流畅度）
+- **线程数标签可点击**：点状态栏「线程: N」弹出轻量 QMenu 明细——Python 线程（名称/ident/守护/运行状态）+ QThread（名称/类名/运行或已回收）分组列出，底部「📋 复制线程列表」一键复制；点外部即关不阻塞。原 tooltip 保留简要提示。菜单构建与弹出拆为 `_build_thread_detail_menu()`/`_on_thread_count_clicked()` 两方法（构建纯函数化便于测试）
+- **测试**：新增 `test/test_statusbar_stats.py`（proc_stats 采样 / 三标签刷新 / 明细菜单结构+剪贴板 / CPU 着色阈值）；`test_app_exit.py` 线程回收回归通过
 
-### 1.14.3 — 2026-08-19
-- **协议8 EB030307 过零NTB值上行数据解析**（`dl_t698_45_apdu_parser.py`）：ACTION-Response NormalList 每项结构 = OMD + DAR + **数据个数** + [Data]——DAR 后 `01`=数据个数、`09 81 81`=octet-string 129B，此前把 `01` 当 A-XDR array tag 解导致 `0x81 未知类型` 报错；新增 `_parse_axdr_items_or_single` 双路径（数据个数 N×A-XDR 失败回退单 A-XDR，兼容文档示例无前缀格式）
-- **EB030307 字段 schema**（`gdw_eb_di_fields.py`）：数据开始时间(bcd_time 6B)/边沿类型(enum 0保留/1下降沿/2上升沿)/数据周期_分钟(uint8)/数据点数M(uint8)/NTB值数组(list，每项 相线1+相线2+相线3 NTB值 uint32 40ns)
-- **bcd_time 可读化**：YYMMDDhhmmss（BCD）→ `2026-08-14 14:42:00`；EB030307 请求参数（1C 开头 date_time_s）优先时间解码、响应数据走字段 schema；数据不足固定头时回退 A-XDR 头+原始数据
-- `test_dl_t698_45_fujian.py` 增至 12 项（新增用户真实上行帧 + 表格相线 NTB 展示）；全量回归 62+19+12 项通过
+### 1.17.2 — 2026-08-28
 
-### 1.14.2 — 2026-08-19
-- **协议8（DL/T 698.45）福建简化698 解析（choice=0x02 List 结构）**：`dl_t698_45_apdu_parser.py` 新增 SET/ACTION 的 Request/Response NormalList 分支（PIID + count + SEQUENCE OF {OAD/OMD, Data/DAR}），支持福建「本地通信模块扩展协议」V3.42 698 承载格式（A.2 要求 V3.3 起支持）——EB030110 台区识别、EB030307 过零NTB 等此前只能解析出「子类型码:0x02」
-- **REPORT 带 count 结构**：REPORT-Notification/Response 按 `PIID-ACD + count + OAD列表 + 数据个数 + A-XDR 数据` 解析（对齐福建示例 `88 01 00 01 ...` / `08 01 00 01 ...`），OAD 逐项中文名 + 数据业务解码
-- **EB 数据标识名称与字段解码**：OAD/OMD 的 OI 高字节 0xEB 时按 4 字节原样查 `gdw_eb_di_lookup` 名称（如 EB030110→台区识别_任务启动）；数据内容按 `gdw_eb_di_fields` 字段 schema 解码（enum→名称、uint→值、bcd/bs8/list），无 schema 保留原始 hex
-- **修复 EB 数据内容 uint 字节序**：按文档「645 减33逆序」规则为**大端**（识别时长 `00 05`=5 分钟，此前小端误读 1280）；`gdw_eb_di_fields.py` 编码器同步修正
-- 新增 `test/test_dl_t698_45_fujian.py`（9 项）；回归 `test_dl_t698_45.py` / `test_dl_t698_45_data_decode.py` / `test_gdw_fujian.py`（19项）/ `test_web_frame_gen_utils.py`（62项）全过；Web 浏览器实测用户帧 + 文档示例
+- **修复关闭软件（含托盘退出）后进程残留**：Qt 仅在「最后一个可见顶层窗口」关闭时才结束 `app.exec()`；X 最小化到托盘后窗口已隐藏，托盘退出/自动更新重启再调 `close()` 时 `lastWindowClosed` 不触发——`closeEvent` 真正退出路径 `event.accept()` 后追加 `QTimer.singleShot(0, QApplication.quit)` 显式结束事件循环。新增 `test/test_app_exit.py`（offscreen 三场景）；`SerialSlaveThread` 补登记 thread_registry；剪贴板 monitor `stop()` 屏蔽无害 disconnect RuntimeWarning
+- **修复协议9 ISAC-PLC SOF 帧 Bitloading/物理块大小解析错误**：字节6(表23) 拆分为 Bitloading标识(bit0) + 物理块大小码(bit1-2, 0:136 1:520 2:72 3:264，Bitloading=1时)；原实现误用表13 ROBO/TMI 映射（0→520，实为136）。Bitloading 模式显式 `_pb_size` 供 PB 解析，`parse_to_table` 入口每帧重置 `_pb_size/_cmt_index/_pb_count` 防跨帧残留；`test_csg_new_gen.py` +2 项
 
-### 1.14.1 — 2026-08-17
-- **协议8（DL/T 698.45）APDU 数据内容业务解码**（`dl_t698_45_data_decode.py` 新增）：按对象属性格式解码 A-XDR 数据为业务值，覆盖常用数据项——电能量数组（kWh 换算+费率展开）、最大需量数组（值@发生时间）、分相电压/电流/功率/谐波（A/B/C 相+单位）、单值数据变量；Scaler_Unit 换算按 10^scaler，单位码映射表；无属性3 时按 OI 推断单位与默认缩放
-- **APDU 解析器接入**（`dl_t698_45_apdu_parser.py`）：GET-Response Normal/NormalList/Next、SET-Request、REPORT-Notification Normal 新增「数据业务」键；REPORT-Notification Normal 补齐 OAD 解析（此前漏解）
-- **GUI 表格**（`dl_t698_45_parser.py`）：「数据业务」按项展开（总/费率N/A相/B相/C相）
-- **修复 DLT69845Validator 长度域公式**：L=帧长-2（文档附录 H.1 例证），此前 +4 误判合法帧
-- 新增 `test/test_dl_t698_45_data_decode.py`（10 项）；回归 `test_dl_t698_45.py` / `test_gdw_fujian.py`（19项）/ `test_web_frame_gen_utils.py`（62项）全过
+### 1.17.1 — 2026-08-27
 
-### 1.14.0 — 2026-08-17
-- **国网协议（索引 7）新增「福建增补规约」解析与组帧**（`gdw10376_parser.py` / `gdw_send_frame_lib.py` / `gdw_frame_generator_schema.py` / `validator/gdw_validator.py`）：基于 `协议文档/7.国网本地接口协议/附件3：1376.2集中器本地通信模块接口协议【福建增补】V1.4-20240729`
-  - **AFN=50H~56H 全功能**：50H 确认/否认、51H 初始化、52H 数据转发（F1 透明转发 / F2 任务队列_智能补采 / F3 任务队列_本地定时 / F11 并发抄表_福建 / F12 清空队列）、53H 查询数据（F1 参数配置 / F2 主节点地址 / F4 厂商版本 / F5 信道信息 / F6 串口参数 / F10 模式切换）、55H 控制命令（F1 设置地址 / F2 允许禁止上报 / F3/F4 广播 / F6 注册 / F7 结束任务 / F8 预告执行 / F9 预告抄读 / F10 模式切换 / F11~F13 速率协商 / F18 2字节模式）、56H 主动上报（F1 注册信息 / F2 事件内容 / F3/F13 抄读请求 / F4/F14 响应报文 / F5 信道延时 / F6 广播完成 / F15 带任务信息上报）
-  - **帧结构识别**：福建增补信息域 R = 保留(5B)+序列号(1B)（上行加事件标志位）、地址域 A = A1+A3(12B 无中继 A2)，与 2024 国网（有中继地址）自动区分——按 `FUJIAN_AFNS` 探测 offset 22 处 AFN
-- **新增「本地通信模块扩展协议」EB 数据标识深度解析**（`gdw_eb_di_lookup.py`）：附件1 V3.31 的 40+ 数据项映射（事件/台区识别/设备基础/时钟/档案/任务队列等），645 帧内嵌 EB030002 停上电事件、EB030110 台区识别、EB030501 时钟、EB030503 校时、EB040302 停上电记录、EBEEEEEE 多数据项抄读等深度解析，透明转发(52H-F1)/事件上报(56H-F2)自动识别
-- **福建增补组帧**：schema 新增 27 个 (AFN,Fn) 定义（list 字段自动数量 + length_field 报文长度自动计算），`generate_frame` 对增补 AFN 自动切换 R/A 结构
-- **校验器**：GDWValidator AFN 值域检查按福建增补帧结构定位真实 AFN
-- **GUI**：查询页自动含福建增补 AFN/Fn + 新增 EB 数据标识查询区块；组帧页自动可选福建增补命令
-- **修复** `gdw_send_frame_lib.py::_pack_fields` 的 length_field 语义 bug（此前取长度字段自身值，导致含报文内容命令的长度计算错误）
-- 新增 `test/test_gdw_fujian.py`（15 项测试全过）
-- **本地通信模块扩展协议升级 V3.42-20260514**：新增 EB030313/314 周边节点信号通信质量（本台区/非本台区，含载波/无线成功率、SNR、RSSI）、EB030320/321 通信测距（启动指令/结果情况表，载波/无线测距值单位 1ns）、EB030506 NTB校时_698方式专用（`1C`+YYYYMMDDhhmmss(BCD 7B)+NTB(4B)）、EB030520 自动NTB校时模式扩展为 0~3（停用/645格式/698格式）；EBEEEEEE 标记取消（V3.40 起采用 698 读取方式）。`gdw_eb_di_lookup.py` 增至 57 项，`test/test_gdw_fujian.py` 增至 16 项测试；Web 查询页 EB 查询自动含新增项
-- **Reflex Web 版同步**：协议7 解析/组帧/校验复用 GUI 模块（`GDW10376Parser` / `GDWFrameGenerator` / `GDWValidator`），自动获得福建增补支持（AFN+Fn 下拉含 52H/55H 等增补命令、list/length_field 字段正常渲染组帧）；查询页新增 EB 数据标识查询（协议7 下输入 `EB` 前缀或「台区/时钟/档案」等关键词返回附件1 数据标识表）；组帧页新增「EB 数据标识 帧生成器」（645 帧 + 698.45 **完整链路层帧**双格式：698 支持 8 种服务含 GET 读取、SA/CA/DIR/PRM/功能码头部可配置、HCS/FCS 自动计算；对象个数一个/若干、PIID/OI/属性编号/属性特征/元素索引/方法标识/操作模式可配置；新增 `gdw_eb_di_fields.py` 为 42 个 EB 数据项定义数据内容字段 schema，选 OAD 后按字段表单配置自动编码）；`test_web_frame_gen_utils.py` 增至 62 项全过
-- **修复 main_gui.py 启动崩溃**：`test_plan_widget.py` 是 GUI 组件（`main_gui.py` 导入的 TestPlanWidget），此前被 `bdf4d22`（测试文件迁移）误移入 `test/` 目录，根目录 `/test_*.py` 忽略规则使其丢失，启动报 `ModuleNotFoundError: test_plan_widget`。已恢复至根目录，`.gitignore` 增加 `!/test_plan_widget.py` 例外；`test/test_plan_widget.py` 作为独立测试副本保留（AGENTS.md §7 测试列表不变）
+- **快捷解析小窗拆为两张独立卡片**（`system_integration/quick_parse_panel.py`，用户反馈输入框与结果应分开）：单一大卡 → 输入卡（徽章行：协议下拉+帧长+校验徽章，加输入框）常驻 + 结果卡（状态提示/⚠错误 + 结果表格 + 底部操作行）在下方实时浮出；两卡各自圆角边框、独立投影，间隙空白可按住拖动窗口；空态仅显示输入卡
+- **缩放柄移位**：QSizeGrip 从旧大卡移挂到最外层窗口右下角 margin 空白处——不遮挡任何控件，空态与展开态均可拖拽调整大小；明暗主题 `_restyle` 同步作用于双卡并刷新两卡投影颜色；`_fit_height` 对两张卡布局强制重算高度
+- **测试**：`test/test_quick_parse_panel.py` 扩至 45 项断言（空态仅输入卡 / 双卡并存独立 / 错误态结果卡弹出 / 缩放柄挂外层 / 暗色主题双卡配色）；offscreen 截图核验。注：该套件退出码为本机已知的 MainWindow 关闭期 fastfail（0xC0000409），与改动无关、逻辑断言全过
 
-### 1.13.0 — 2026-08-14
-- **新增「HDC 1.0 双模互联互通」协议（索引 11，独立协议）**：主程序第 12 种协议（Q/GDW 12087.42-2020 旧版双模）。新增 `hdc10_parser.py`（HDC10Parser：FC/可变区域/信标载荷/时隙分配条目/MAC 帧/应用层）、`hdc10_mme_parser.py`（MME 管理消息）、`validator/hdc10_validator.py`（HDC10Validator）、`test_hdc10.py`。GUI 集成：协议下拉框、解析级别 + 通道下拉（复用国网新一代控件）、查询页（`_create_hdc10_lookup_content`）、校验注册（`_run_validation` 11 → HDC10Validator）、批量前缀剥离 + 摘要（复用 `_strip_gw_new_gen_prefix` / `_get_gw_new_gen_summary`）。仅 PySide6 主程序支持（Reflex Web 版 0-10，NiceGUI/TUI 已移除）
-- **协议选择持久化**（`main_gui.py`）：上次使用的协议索引存入 `config.json` 的 `parse.protocol`，启动时 `_restore_saved_protocol` 自动恢复选中（UI 全部就绪后执行，走正常切换逻辑），用户无需每次打开软件重新选择协议
-- **所有解析/查询/监控表格支持 Ctrl+滚轮缩放（类 Excel）**：新增 `gui_utils.py::ZoomableTableWidget(QTableWidget)`——Ctrl+滚轮按 1.1/0.9 倍整体缩放（字号+行高同步，5-24pt 钳制，列宽保持避免破坏固定列布局），Ctrl+0 恢复缩放前基准；缩放为 per-table 覆盖，改全局字体设置后回到基准字号。全仓 35 处 `QTableWidget(` 实例（11 文件：main_gui 17、monitor 系列 8、diff/查询/档案/测试方案等 10）替换为该基类，原右键复制/Ctrl+C/字节高亮/双击深度解析等行为不变（子类即父类）；单元格级 `setCellWidget`/固定字体 item 不随缩放（可接受）
-- **校验结果 展开/收缩 + 解析结果表 全屏**（`main_gui.py`）：校验结果区新增「展开/收缩」按钮对（内容 `verify_label` 移入 QScrollArea，收缩后仅保留组标题+按钮行，默认收缩，重新展开恢复全文）；单帧解析结果表、批量摘要表、批量详情表各新增单个「全屏」按钮——与报文对比「结果详情」交互一致：点击在新窗口弹窗克隆展示表格快照（`_open_table_popup`），点「关闭」或窗口 X 关闭即恢复，主界面不做隐藏/重排。通用辅助 `_make_table_fullscreen_btn` 与 `_open_table_popup`
-- **新一代载波协议(索引9)批量解析管理消息摘要崩溃修复**（`main_gui.py`）：`_get_csg_new_gen_summary` 中 `int(mmtype_val)` 未处理 `0x` 前缀（MMTYPE 解析值为 `'0x0030'` 形式字符串），关联请求/关联指示/发现列表等管理消息帧批量解析报 `invalid literal for int() with base 10` 并标记 ❌ 异常；改为 `int(val, 16)` + try/except 兜底。通道自动识别本身正常（3 帧均判为 PLC 载波），崩溃仅发生在摘要生成层
-- **新一代载波协议(索引9)通道自动识别 PLC/HRF**（`csg_new_gen_parser.py` + `main_gui.py`）：`parse_to_table` 新增 `channel="auto"`，MPDU 级输入按 FC SOF 可变区域结构判别通道——表45(HRF)/表20(BPLC)/表23(ISAC) 三假设分别预测帧长与实际帧长比对，命中者胜；强信号：载荷PB大小=40 → HRF（表44 独有）、物理块个数>1 → PLC（无线仅支持1个PB）；解析结果新增「通道判定」行。GUI 通道下拉首位新增「自动识别」(默认，配置持久化)。新增 test_csg_hrf_mac.py T5-T8（用户PLC帧/合成HRF帧/PB40强信号/显式通道回归）
-- **新一代载波协议(索引9)测试帧切频操作目标按 Option+信道号解析**（`csg_new_gen_cmd_payloads.py`）：测试模式/配置操作=6（频段切换操作/切频）的目标字段不再按 12bit 目标频段值（`20 00` 误显示 512）解析，改为 **Option(字节2高4位) + 无线信道号(字节3)**（`20 00` → Option=2, 信道号=0），与模式8（无线信道切换）一致；同步修正国网新一代 `gw_new_gen_cmd_payloads.py` 模式6（删除废弃 `_EXT_FREQ_BANDS`）并更新 `test_gw_ext_cmd.py` T3/T13/T14 断言
-- **新一代载波协议无线信道单跳MAC帧解析**（`csg_new_gen_parser.py`）：
-  - **版本2 单跳帧协议（表12，仅无线信道）MAC 帧头解析**：`_parse_mac_frame` 新增 `_parse_single_hop_mac` 分支——4 字节头（帧头类型1b+版本2b+保留5b / MSDU类型8b 表13 / MSDU长度16b 小端），载荷无 VLAN+类型前缀，按 MSDU 类型内联分派（1=应用层报文 / 2=无线发现列表 / 128=IPV4），尾部 CRC-32 校验
-  - **无线发现列表消息（表139 MMeRF DiscoverNodeList）**：新增 `_parse_rf_discover_node_list`——站点MAC 6B + 统计序号 1B + 信息单元 TLV 链（类型7bit+长度类型1bit，长度1/2B），类型0 站点属性按表142 展开 14B（CCO MAC/代理TEI/角色/层级/RF跳数/接收率/发现列表周期/老化周期个数）
-  - `parse_to_table` 步骤3 与 `_parse_pb_block` 尾段按版本2 定 4B 帧头长，`msdu_payload=b""` 防与内联解析重复
-  - 顺带修正版本1 MAC 帧头「发送序号」字节序（`(byte1<<4)|byte0高4位` 小端，与表7/表11 及原始目的TEI/源TEI 约定一致）
-  - 新增 `test_csg_hrf_mac.py`（4 用例：单跳帧直入 / 完整无线MPDU(fc_pb,hrf) / 无线发现列表 / PLC 短帧头回归）
-- **GUI 按钮风格统一**：批量解析工具栏、LLM API 管理对话框、LLM 预处理面板按钮高度/内边距/字号统一（`main_gui.py` 新增 `_make_toolbar_btn`、`llm_api_manager.py` 新增 `_style_action_btn`、`llm_preprocess_widget.py` 新增 `_make_btn`）；修复 `_py_run_btn` 连接到不存在方法 `_run_py_script_file` 的 bug
-- **国网新一代信标帧无 PBH 修复**（`gw_new_gen_parser.py`）：
-  - **根因**：`_parse_beacon_frame` 对 HDC 1.0 和 HDC 2.0 信标帧都误读 1 字节 PBH，导致信标载荷首字节（信标类型）被当作 PBH 吃掉，信标类型错位 1 字节（如发现信标 0xC8 被误判成中央信标 0x42）
-  - **协议依据**：HDC 1.0（5.1.2.4 节）与 HDC 2.0（表22）信标帧 PB 结构均为 FC + 信标载荷 + BPCS(4B CRC-32)，**无 PBH、无 PBCS**；表22 字段从字节0即信标类型，无 PBH 位置；文档第906行"以物理块头和物理块体为目标"是 **SOF 帧(图18)** 的 PBCS 描述，非信标帧
-  - **修复**：`_parse_beacon_frame` 对 HDC 1.0/2.0 均不再解析 PBH，FC 后直接解析信标载荷；尾部校验从 BPCS(4B)+PBCS(3B) 改为仅 BPCS(4B)；同步修正 HDC 1.0 信标固定头保留区域为字节14-19（与表38一致，管理信息从字节20开始）
-  - **验证**：用户提供的发现信标报文现正确识别为"发现信标"，4 个信标条目结构全部合法；全部 44 项回归测试通过
-- **DLT645 数据域长度一致性校验增强**：
-  - 解析器（`dlt645_parser.py`）新增数据长度声明值与实际帧长一致性检查，不匹配时 `valid=False` 并在 fields 中插入 `⚠ 数据长度错误` 行，**但仍尽力解析实际存在的所有字段**（地址、控制码、DI、数据内容、校验和均正常显示），不直接 return 空白结果
-  - 校验器（`validator/dlt645_validator.py`）"数据长度"项从只检查上限 200 字节改为先校验声明长度与实际帧长一致性，不一致标记 FAIL 并置整体 `valid=False`
-  - 设计原则：**协议字段声明与实际不一致时，不得静默截断也不得直接返回空白**，必须在用户可见结果中标红提示 + 尽力解析，保证用户点"解析"按钮始终有响应、有内容、知道哪里错了
-- **新增「TCP 流量监控」标签页**（`monitor/tcp_monitor.py`，TCPMonitorWidget）：基于 scapy 抓包，支持网卡选择、BPF 过滤、TCP 流列表、双向流重组、监控封装解帧、原始 TCP 报文 / 解析结果分页展示、CSV 实时记录与历史 CSV 加载；可自动识别南网新一代 / 国网新一代并调用对应解析器
-- **新增 Windows 系统集成**（`system_integration/`）：系统托盘、全局热键（默认 `Ctrl+Alt+X`）、单实例、命令行参数（`--parse` / `--protocol` / `--file` / `--minimized` / `--clipboard`）、文件右键菜单、开机自启、剪贴板报文自动检测与 Notepad++ 集成
-- **剪贴板报文自动检测**（`clipboard_monitor.py` + `parse_prompt_dialog.py`）：任意软件复制 hex 报文即弹提示框，自动协议识别、协议切换、解析级别 / PB 帧类型选择，支持 `ED..EE` 监控头剥离
-- **Notepad++ 集成**（`npp_integration.py`）：在 NPP 中选中报文 Ctrl+C 后，右键「用协议解析工具解析」或运行命令，通过 `--clipboard` 直接弹出解析结果
-- **解析弹窗增强**：热键 / 命令行 / 文件右键共用解析弹窗，支持协议下拉切换、南网新一代 / 国网新一代解析级别与 PB 帧类型，`--parse` / `--file` / `--clipboard` 解析动作不再弹出主窗口
-- **单实例加固**：`single_instance.py` 增加 ACK 握手，避免僵尸命名管道误判；`main()` 对解析动作与非解析动作区分窗口显示策略
-- **新增表格右键复制与 Ctrl+C**：`main_gui.py`、`monitor/frame_monitor.py`、`monitor/tcp_monitor.py` 等解析结果表格支持复制选中行或全部
-- **国网新一代 MME 管理消息解析持续完善**（`gw_new_gen_mme_parser.py`）：支持关联、代理变更、发现列表、网络冲突、无线信道冲突、过零 NTB、网络诊断等管理消息，MMTYPE 2 字节小端，0x0008 按发现列表处理
-- **监控器日志路径显示与浏览**（`monitor_widget.py`）：CSV 记录结束后可直接打开日志目录
-- `南网协议解析工具.spec` hidden imports 已补齐 `system_integration` 各模块
+### 1.17.0 — 2026-08-27
 
-### 1.11.1 — 2026-08-04
-- **修复勾选「ED监控协议」后不完整/非法 ED..EE 帧被静默回退为 FC 起始解析的 bug**：单帧解析（`parse_single`）、解析弹窗（`_parse_and_show_dialog._preprocess`）、批量解析三处路径在 `_parse_ed_monitor_header` / `_extract_business_from_ed_frame` 校验失败时明确报错（报文不完整/缺 EF 或 EE），首字节 ED 不再被当作南网新一代 FC 起始符
-- 新增 `test_ed_fallback_fix.py`（14 用例）
-
-### 1.11.0 — 2026-08-01
-- **新一代载波协议(通感一体化,索引9)网间协调帧(NET,定界符类型=3)可变区域解析**：邻居网络比特图1~4 / 本网络无线信道编号 / 持续时间(40ms) / 带宽结束标志位 / 本网络无线option / 带宽结束偏移(4ms) / 带宽开始偏移(4ms)，字节12短网络标识高位组合完整SNID（表41）
-- **新一代载波协议聚合帧级联块应用层解析**：抽取 `_parse_msdu_payload` 共享方法，级联块内 MAC 帧解析 MSDU 头并分派应用层报文（端口/控制域/业务标识/转发DLT645），消除伪 MSDU 残留行
-- 新增 `test_net_frame_real` / `test_net_frame_nonzero_fields` / `test_aggregated_frame_app_layer` 回归用例
-
-### 1.10.0 — 2026-07-31
-- **新增「主题与字体设置」**（菜单 配置→主题与字体）：5 套主题（默认浅色 / Fusion经典 / Fusion暗色 / Windows原生 / WindowsVista原生），切换即时预览
-- 全局样式表升级为**应用级**：QMessageBox / 文件对话框等所有弹窗统一跟随主题
-- **字体设置**：字体族（系统字体列表）+ 字号（8~24pt），与主题一起持久化到 `config.json` 的 `ui` 段
-- 暗色主题下自动适配统计标签 / 串口状态 / 批量状态等动态控件配色（`_restyle_for_theme` + `_make_stats_label` 等辅助方法）
-- 新增 `theme_settings.py`（主题注册表 + ThemeManager + ThemeSettingsDialog）与 `test_theme_settings.py`
-
-### 1.9.5 — 2026-06-27
-- **国网新一代（索引 10）自动区分 HDC 1.0 / HDC 2.0**：依据 FC 字节 12 高 4 位标准版本号，解析后新增「协议版本判定」行
-- HDC 1.0 下聚合帧标志 / 发送帧序号 / 链路标识符回退为保留字段；HDC 2.0 使用新消息类型表与聚合 MAC 帧标志
-- 新增 `test_gw_new_gen.py` 版本区分用例
-
-### 1.9.4 — 2026-06-27
-- **国网新一代解析级别新增「FC+PB解析(完整MPDU)」**：FC(16B) + 完整物理块 PB
-- 修正 FC+MAC 解析未计算 PBH(1B) 的缺陷，新增 `_locate_pbh_mac` 定位
-
-### 1.9.3 — 2026-06-27
-- 修复国网新一代完整帧结构解析：MPDU = FC(16B) + PB，PB = PBH(1B) + MAC帧头 + MSDU，FC 末 3 字节为 FCCS，其后直接为 PB，无独立 HCS
-- 新增 `_pbh_row` 展示 PBH 位域
-
-### 1.9.2 — 2026-06-27
-- **国网新一代监控 / 批量摘要增强**：NID、帧类型、MMTYPE、源→目的 TEI、报文 ID、方向、规约、数据长度等关键信息
-- 新增 `_get_gw_new_gen_summary` 与 `test_gw_monitor_summary.py`
-
-### 1.9.1 — 2026-06-27
-- **监控器新增「监控解帧(96..16)」模式**：按监控设备包装格式自动解帧，正确处理连帧与分片
-- 包装格式：`96H + RSSI(1) + NTB(4,小端) + [LEN(12b) + 协议类型(3b) + CHANNEL(1b)] + DATA(LEN) + CS(1) + 16H`
-- 新增 `test_monitor_deframe.py`
-
-### 1.9.0 — 2026-07-08
-- **新增「监控器」标签页**：南网新一代（索引 9）/ 国网新一代（索引 10）串口实时报文监控
-- 静默间隔自动组帧、报文头尾剔除、1000 帧环形缓冲、过滤 / 暂停 / 清空 / CSV 导出、解析行字节高亮
-- 新增 `monitor_widget.py` 与 `test_monitor_widget.py`
-
-### 1.8.2 — 2026-07-06
-- **新增「报文对比」标签页**：协议感知的双报文对比分析，支持字节级对比（字段感知对齐+差异高亮）和字段级语义对比（偏移/长度/值/差异类型）
-- 支持差异人话解读（自然语言解释业务含义）、配置选项（忽略校验和/序列号、仅显示差异）、导出对比报告
-- 新增 `frame_diff_engine.py`（帧对比引擎，FrameDiffEngine）和 `diff_widget.py`（GUI 组件，DiffWidget）
-- **新增 TUI 版本**：`tui_app.py` + `tui_app.tcss`，基于 Textual 框架，支持单帧解析+字节高亮、批量多帧解析+摘要、协议一致性校验
-- 新增 `test_diff_engine.py`（对比引擎测试）、`_tui_smoke_test.py`（TUI 冒烟测试）
-- `main_gui.py`：集成 DiffWidget 标签页，`APP_VERSION` bump 至 `1.8.2`
-- `test_plan_widget.py`：功能增强（+421 行）
-
-### 后续更新（2026-07-20 ~ 2026-07-29）
-- **新增「报文工具」标签页**（`message_tool_widget.py`）：ASCII/HEX 双向转换、DLT645 偏移（±0x33H）、字节逆序、报文↔Pn/Fn 转换、CRC/校验和计算、HEX↔bitstring 转换，20/20 功能测试通过
-- **修复国网新一代双模协议双击深度解析**：`main_gui.py` 修复双击表格行无法触发深度解析
-- **修复国网新一代 MSDU 定位**：`gw_new_gen_parser.py` 跳过 HCS(3B)+物理块头(1B)，正确定位 MSDU 起始
-- **添加 `parse_command_payload` 入口函数**：`gw_new_gen_cmd_payloads.py` 修复 ImportError
-
-### 1.8.1 — 2026-06-27
-- **测试方案新增 Lua 脚本支持**：测试项「性质」新增「Lua脚本」类型，可在测试流程中嵌入可编程逻辑（条件分支、循环遍历、数据解析、变量共享、动态组帧、延时控制）
-- 新增 `lua_script_engine.py`（Lua 脚本引擎），通过 `lupa`（Python-Lua 桥接）提供 API：`send` / `wait_for_response` / `wait` / `log` / `hex_to_bytes` / `bytes_to_hex` / `get_last_response` / `get_test_var` / `set_test_var` / `stop`
-- 新增 `test_lua_engine.py`（Lua 引擎测试）
-- 新增 `docs/Lua脚本使用说明.md`（Lua 功能用户文档）
-- `test_plan_widget.py` 新增 `LuaCodeEditor`（带行号+列线指示器的代码编辑器）与 Lua 模式切换逻辑
-- `serial_worker.py` 新增 `raw_data_received` 信号供 Lua 引擎桥接器接收原始串口数据
-- 依赖：`lupa`（未安装时 `LUA_AVAILABLE=False`，Lua 脚本类型不可用但其他功能不受影响）
-
-### 1.8.0 — 2026-07-04
-- **新增 DLMS-APDU(国网) 协议选项（索引3）**：复用 HDLC 解析器的 APDU 深度解析功能，专门服务国网 DLMS 报文
-- **HDLC/DLMS 协议重命名为 HDLC/国网DLMS**：明确国网协议背景，与新增的 DLMS-APDU(国网) 配套
-- **协议索引重新编号**：原 3~8 顺延为 4~9，共 10 种协议，所有索引硬编码位置已同步更新
-
-### 1.7.2 — 2026-06-21
-- **修复新一代载波协议(索引8)选择确认帧(SACK)解析**：
-  - `_parse_mpdu_sack` 返回值从 `offset + 1` 修正为 `offset + 11`，与其他子解析器一致
-  - 公共代码 `parse_mpdu` 字节12处理增加 SACK 定界符类型分支：SACK 帧字节12 = 扩展帧类型(4b) + 标准版本号(4b)，不再误解析为短网络标识高位
-  - `parse_to_table` auto 模式增加 SACK 早期返回：SACK 帧仅 FC 头16字节，无物理块/MSDU，解析完 FC 后直接返回，避免将 FC 头误当 MSDU 数据解析
-  - 删除 `_parse_mpdu_sack` 中冗余的字节12读取
-- **新一代载波协议(索引8)批量解析摘要增强**：`_extract_csg_core_content` 按帧类型+业务标识提取关键业务内容
-  - 确认帧：显示确认状态（如"确认报文，无业务数据"）
-  - 否认帧：显示否认原因（如"原因:格式错误"）
-  - 数据传输帧：显示源/目的地址 + 数据长度
-  - 命令帧：显示命令名 + 设备地址 + 关键参数（延时时间/查询数量等）
-- 新增测试 `test_sack_fix.py`（SACK 帧解析验证用例）
-
-### 1.7.1 — 2026-06-18
-- **新一代载波协议(索引8)批量解析**：新增监控日志前缀剥离预处理
-- 监控日志格式：`<时间> <序号> -> 接收机 Has Get <15字节监控头> <协议报文>`
-- `parse_batch` 在协议8下先调用 `_strip_csg_monitor_prefix` 剥离 `-> 接收机 Has Get` 标记及其后 15 字节监控头，再做 hex 清洗
-- 新增 `_extract_csg_new_gen_frames` 专用帧提取（按行 + 短行过滤 + 字节对齐兜底）
-- 新增测试 `test_csg_batch_prefix.py`（8 个用例，含精确 15 字节剥离验证与时间戳/测试标记过滤验证）
-- **修复**：`_strip_csg_monitor_prefix` 对不含监控前缀且非纯 hex 的日志行（如 `15:48:16 013 -> ...测试标记...`）不再原样保留，避免时间戳/中文/特殊符号被 `_clean_hex_input` 清洗成伪帧
-- **新一代载波协议(索引8)批量解析摘要**：区分网络层/应用层报文展示关键业务内容
-  - 网络层管理消息：摘要体现 MMTYPE 解析（如 `网络层 | MMTYPE:关联请求(MMeAssocReq) | 版本1`）
-  - 网络层 MPDU/MAC 帧：体现定界符类型 + 源/目的TEI
-- 应用层报文：体现 MSDU 类型 + 帧类型 + 业务标识 + 方向 + 核心内容（如 `应用层报文 | 确认/否认 | 业务标识:否认 | 下行(CCO→STA) | 原因:通信超时`）
-- 新增/更新 `_get_csg_new_gen_summary`：优先取 `MSDU类型` 字段作为顶层分类，管理消息/定界符帧/应用层报文均体现 MSDU 类型
-- 新增测试 `test_csg_summary.py`（6 个用例，覆盖确认/否认/管理消息/TEI回复/格式可读性/MSDU类型展示）
-
-### 1.7.0 — 2026-06-18
-- **新增 DL/T 698.45-2017 协议（索引7）**：链路层解析、APDU 解析、A-XDR 编解码、OI 查询、帧生成、校验器
-- **新增 新一代载波协议/通感一体化（索引8）**：MAC/MSDU 帧 + 应用层业务报文解析、命令载荷解析、校验器
-- 新一代协议支持 4 种解析级别切换（auto/fc_pb/fc_only/app）
-- 新一代协议业务标识查询页面
-- 组帧/预设标签页扩展支持 698.45（`dlt698` 模式）
-- 新增 `crcmod` 依赖（698.45 CRC 用 `x-25`）
-- **新增文件**：`dl_t698_45_*.py`（parser/apdu/axdr/oi_lookup/frame_gen/frame_schema）、`csg_new_gen_parser.py`、`csg_new_gen_cmd_payloads.py`、`validator/dl_t698_45_validator.py`、`validator/csg_new_gen_validator.py`、`convert_docx_to_md.py`、`南网新一代20260226校对/`（6 部分协议文档 md+docx）
-
-### 1.6.8 — 2026-05-09
-- 档案管理：修复缺失 json 导入导致导出失败
-- 档案管理：修复协议切换时错误清空档案数据
-- 拓扑信息：新增组网完成时间统计（自动刷新模式）；TEI 搜索改为精确匹配；组网完成判定支持比例/数量两种模式；多字段节点搜索（TEI/地址/角色）
-
-### 1.6.7 — 2026-04-30
-- 修复南网协议 DI 字节序解析（恢复小端序，修复 DI 查找匹配）
-- 修复查询运行参数(E8 03 03 74)数据内容解析 IndexError
-- 修复国网验证器长度域校验逻辑
-- 南网/国网控制域位域显示二进制位值（D7~D0），国网信息域（D0~D7）
-
-### 1.6.6 — 2026-04-30
-- 修复 DI 解析字节序，恢复小端序正确匹配 DI_COMBINATION_MAP
-
-### 1.6.5 — 2026-04-22
-- 系统性修复字节序：多字节字段统一小端序；ASCII/BCD 字段反转；所有 `int.from_bytes` 改 little；组帧引擎默认小端
-
-### 1.6.4 — 2026-04-22
-- 修复 BCD 日期/版本号解析（按 BCD 原值显示，多字节小端反转）
-
-### 1.6.3 — 2026-04-22
-- 添加任务字段优化：任务模式字位域拆分（响应/转发/优先级），报文内容拆分（业务代码+有效内容），引擎支持 sub_fields 位域合并
-
-### 1.6.2 — 2026-04-22
-- 字段定义修正：移除多余字段、补充缺失字段、修复字段名与文档不匹配
-
-### 1.6.1 — 2026-04-22
-- 协议组帧完善：支持 88 个下行 DI 命令；命令说明弹窗非模态；串口通信支持配置/发送/日志/接收解析
-
-### 1.6.0 — 2026-04-21
-- **新增国网协议（Q/GDW 10376.2-2024）**：AFN+Fn 组合查询、单帧/批量解析、字节高亮
-
-### 1.5.0 — 2026-04-17
-- 重构主界面，精简 GUI 代码；增强南网解析器；优化 PyInstaller 配置
-
-### 1.4.0 — 2026-04-16
-- 修复表格交替行颜色；新增 AGENTS.md；PyInstaller datas 修复
-
-### 1.3.0 — 2026-04-16
-- 修复查询页切换按钮残留；修复命令字查询缺失方法；新增菜单栏与"关于"对话框
-
-### 1.2.0 — 2026-04-16
-- 优化 HDLC 解析，修复 APDU 索引错误；新增 Wrapper 帧提取
-
-### 1.1.0 — 2026-04-15
-- 优化 HDLC 对返回数据/未知响应的处理；改善协议选择与输入提示
-
-### 1.0.0 — 2026-04-14
-- 初始版本：南网/PLC RF/HDLC/DLMS 多协议解析；单帧/批量解析；DI/命令字/OBIS 查询
-
-
-**最近一次（2026-08-21）：发布 1.14.5（协议11 升级位图 + 台区户变深度解析）**
-
-变更：
-- **协议11（HDC 1.0）查询站点升级状态上行报文解析**：`hdc10_parser.py` 0x034 此前只按下行表40 解析，上行应答的 升级状态/有效块数/升级位图 全部丢失；现按文档第4-3部分 表45 补全 升级状态(0空闲/1接收进行/2接收完成/3升级进行/4试运行) + 有效块数 + 起始块号 + 升级ID + 接收位图（每bit一个文件块，显示 `N/M块已接收`）。**位图逐块编号明细**：按 起始块号+i 编号、每行32块多行展开，`[✓n]`=已接收 `[✕n]`=丢包。方向判定 len>12 或状态位∈{1..4} 判上行。`test/test_hdc10.py` 增至 10 项（上行全收/下行/丢包编号）全过
-- **协议11（HDC 1.0）台区户变关系识别(0x0A1)深度解析**：修复报文头长度公式——6bit值(byte0[6:7]高2位+byte1[0:3]低4位)×4字节，此前公式错致 12 字节头算成 48 字节、DATA 只剩尾部切片；校时/事件/通信测试/注册/升级等 7 处统一修正。DATA 按采集类型深度解析：采集启动(表56)/特征信息告知(表57 TEI+采集方式+告知总数+NTB+特征序列)/判别结果信息(表61)；特征序列按特征类型分派 工频电压(BCD XXX.X 大端)/工频频率(BCD XX.XX 大端)/工频周期(有符号偏差+μs)，三相逐相展开，双沿采集解 NTB2+第二组序列。`test/test_hdc10.py` 增至 16 项全过
-
-涉及文件：
-- 修改：`hdc10_parser.py`、`test/test_hdc10.py`、`main_gui.py`（APP_VERSION 1.14.5）、`AGENTS.md`
-
-**最近一次（2026-08-24）：发布 1.14.7（修复 exe 打包后用户配置丢失）**
-
-变更：
-- **新增 `app_paths.py` 数据文件路径唯一入口**：frozen（单文件 exe）下 `app_data_dir()` 返回 exe 所在目录（`sys.executable` parent），开发模式落项目根；所有可写数据文件（config.json / 预设 / test_plan / 自定义 DI / AFN / OBIS / 命令字 / 档案 / 监控 CSV Output/）统一经 `data_path()` 定位——此前 `__file__` 指向 `_MEIPASS` 临时目录（退出即删）+ cwd 相对路径漂移，导致每次更新 exe 后用户配置全部丢失
-- **内置种子自愈**：`ensure_data_file()` 在 exe 目录缺失 custom_di.json / gdw_custom_afn.json 时从 `_MEIPASS` 打包资源复制初始值，已有用户文件不覆盖；只读资源保持原定位；不做旧目录迁移
-- **测试**：新增 `test/test_app_paths.py`（11 项，frozen monkeypatch）；回归 test_dlt698_preset(31) / test_theme_settings(29) / test_gdw_fujian(19) / test_dlms / test_monitor_widget 全过
-
-涉及文件：
-- 新增：`app_paths.py`、`test/test_app_paths.py`
-- 修改：`main_gui.py`（config.json/CHANGELOG/APP_VERSION 1.14.7）、`llm_api_manager.py`、`llm_preprocess_widget.py`、`theme_settings.py`、`system_integration/system_settings.py`、`preset_buttons.py`、`test_plan_widget.py`、`test/test_plan_widget.py`、`protocol_parser.py`、`gdw10376_parser.py`、`dlt645_di_lookup.py`、`command_lookup.py`、`obis_lookup.py`、`archive_widget.py`、`monitor_widget.py`、`monitor/tcp_monitor.py`、`AGENTS.md`
-
-**上一次（2026-08-24）：发布 1.14.6（协议8 GET-Response 修复 + 版本信息深度解析）**
-
-变更：
-- **协议9 精简信标帧载荷深度解析**：载荷头 bit4=1 走表73 布局（CCO MAC+周期计数固定区），0x0E 条目按表74 逐字段解析（TEI/角色/层级/MAC/RF跳数/频段/CSMA时隙）；用户帧解出 组网序列号70 / CCO MAC=00:00:90:98:01:63 / 周期20 / TEI=1 / 角色=CCO
-- **修复关闭软件后仍周期性弹更新提示**：点X到托盘时暂停周期检查、恢复显示时 showEvent 重启；隐藏状态自动检查 isVisible 守卫拦截；真正退出停定时器+收尾 _UpdateCheckWorker 线程
-- **版本信息深度解析**：设备管理类(19)属性3 structure{厂商代码/软件版本号/软件版本日期/硬件版本号/硬件版本日期/厂商扩展信息} 逐字段解码，YYMMDD→`20YY-MM-DD`；用户帧解出 JCDZ / V1.5 / 2025-09-01 / V1.0 / 2023-06-02 / SHANDONG
-
-涉及文件：
-- 修改：`dl_t698_45_apdu_parser.py`、`dl_t698_45_data_decode.py`、`main_gui.py`（CHANGELOG/APP_VERSION 1.14.6）、`AGENTS.md`、`test/test_dl_t698_45.py`、`test/test_dl_t698_45_data_decode.py`、`test/test_dl_t698_45_fujian.py`（增至14项）
-
-**上一次（2026-08-21）：发布 1.14.5（协议11 升级位图 + 台区户变深度解析）**
-
-变更：
-- **A-XDR 复合类型计数语义修复**：array/structure tag 后字节 = **元素个数**非字节总长（文档附录 H.3.2）。组帧 3 项 structure 由误填 09 改为 03；编码器（`frame_gen_widget.py` / `reflex_web/frame_gen_utils.py`）+ 解码器（`dl_t698_45_axdr.py` 按个数循环）同步修复
-- **SET/ACTION 组帧补尾部 TimeLabel**：文档 H.4/H.5 GET/SET/ACTION 请求均以 OPTIONAL TimeLabel 结尾（00=无），此前仅 GET 补 `00`；修复两条 GUI 生成路径与 `frame_gen_utils.py::build_dlt698_axdr_apdu`
-- **解析表格成员逐项展开**（`dl_t698_45_parser.py::_add_axdr_item_rows`）：array/structure 为每个成员生成子行（原始编码/值/类型说明），嵌套递归展开，对齐官方工具
-- **请求尾部 TimeTag 解析**（`dl_t698_45_apdu_parser.py::_parse_time_tag`）：GET/SET/ACTION Normal/NormalList 六分支统一解析，表格显示「时间标签 | 0x00 | 无时间标签」
-- **组帧 OI 增强**：预定义/A-XDR 模式 OI 均支持「预设下拉 + 手动 hex」；A-XDR 新增「描述符类型」OAD/OMD 切换
-- **内嵌部署增量构建**：`build_embedded_deploy.py --skip-deps` 复用已有 python/ 目录，重复构建 10+ 分钟 → 约 1 分钟
-- **修复协议8 预设命令保存/显示**（`preset_buttons.py`）：新增 `DLT698_command.json` 独立预设文件（此前 dlt698 预设被误存入 `GW_command.json`）；`set_protocol` 支持 dlt698（此前静默忽略致预设页看不到 698 按钮）；加载时按 protocol 过滤历史混入条目；`AddPresetDialog` 协议行显示「698.45 协议」
-
-涉及文件：
-- 修改：`dl_t698_45_axdr.py`、`dl_t698_45_apdu_parser.py`、`dl_t698_45_parser.py`、`frame_gen_widget.py`、`preset_buttons.py`、`reflex_web/frame_gen_utils.py`、`reflex_web/build_embedded_deploy.py`、`test/test_web_frame_gen_utils.py`（63项）、`test/test_dl_t698_45_data_decode.py`、`main_gui.py`（CHANGELOG/APP_VERSION 1.14.4）、`AGENTS.md`
-- 新增：`test/test_dlt698_preset.py`（31 项）
-
-**上一次（2026-08-19）：发布 1.14.3（EB030307 过零NTB值上行数据解析）**
-
-变更：
-- **ACTION-Response NormalList 数据个数兼容**（`dl_t698_45_apdu_parser.py`）：福建简化698 响应每项 = OMD + DAR + **数据个数**(1B) + [Data A-XDR]×N；此前 DAR 后 `01` 被当 A-XDR array tag（长度09）解，后续 `0x81` 报「未知类型」。新增 `_parse_axdr_items_or_single`：先按「个数N + N项A-XDR」解，失败回退单 A-XDR（兼容文档示例无前缀）
-- **EB030307 字段 schema**（`gdw_eb_di_fields.py`）：数据开始时间 bcd_time(6B) / 边沿类型 enum(0保留/1下降沿/2上升沿) / 数据周期_分钟 uint8 / 数据点数M uint8 / NTB值数组 list（每项 相线1/相线2/相线3 NTB值 uint32，40ns，单相表2/3填0）
-- **bcd_time 可读化**：YYMMDDhhmmss BCD → `2026-08-14 14:42:00`；EB030307 请求参数（`1C` 开头）优先 date_time_s 时间解码，响应/上报数据走字段 schema；数据不足固定头回退 A-XDR 头+原始数据
-- **新增测试**：`test_dl_t698_45_fujian.py` 增至 12 项（用户真实上行帧 129B→10 组相线 NTB 值 + 表格展示）；全量回归 62+19+12 项通过；Web 实测显示 数据开始时间/边沿类型/数据周期/数据点数/NTB 值数组（10 组相线1/2/3）
-
-涉及文件：
-- 修改：`dl_t698_45_apdu_parser.py`、`gdw_eb_di_fields.py`、`main_gui.py`（CHANGELOG/APP_VERSION 1.14.3）、`AGENTS.md`、`test/test_dl_t698_45_fujian.py`
-
-**最近一次（2026-08-19）：发布 1.14.2（协议8 福建简化698 解析）**
-
-变更：
-- **协议8（DL/T 698.45）福建简化698 解析**（`dl_t698_45_apdu_parser.py`）：新增 SET-Request/Response、ACTION-Request/Response 的 choice=0x02 NormalList 分支（PIID + count + SEQUENCE OF {OAD/OMD, Data/DAR}），支持福建「本地通信模块扩展协议」V3.42 698 承载格式——EB030110 台区识别、EB030307 过零NTB 等此前只能解析出「子类型码:0x02」，现完整解析 PIID/count/OAD/OMD/数据
-- **REPORT 带 count 结构**：REPORT-Notification（`88 01 PIID-ACD count OAD列表 数据个数01 A-XDR 00 00`）/ REPORT-Response（`08 01 PIID-ACD count OAD 结果`）按福建示例解析，OAD 逐项中文名 + 数据业务解码
-- **EB 名称与字段解码**：OAD/OMD 的 OI 高字节 0xEB 时按 4 字节原样查 `gdw_eb_di_lookup`（57 项）显示 EB 名称；数据内容按 `gdw_eb_di_fields`（42 项）字段 schema 解码（enum→名称/uint→值/bcd/bs8/list），无 schema 保留原始 hex
-- **修复 EB uint 字节序**：按文档「645 减33逆序」规则 EB 数据内容多字节 uint 为**大端**（编码器 `gdw_eb_di_fields.py` 同步修正，`test_gdw_fujian.py`/`test_web_frame_gen_utils.py` 断言更新）
-- **新增测试** `test/test_dl_t698_45_fujian.py`（9 项：用户实测帧/文档示例 SET/ACTION/REPORT/多对象/大端）；Web 浏览器实测用户帧显示 ActionRequestNormalList + 台区识别方法=自动 + 识别时长=5
-
-涉及文件：
-- 修改：`dl_t698_45_apdu_parser.py`（List 分支 + EB 名称/字段解码 + uint 大端）、`gdw_eb_di_fields.py`（编码大端）、`main_gui.py`（CHANGELOG/APP_VERSION 1.14.2）、`AGENTS.md`、`test/test_gdw_fujian.py`、`test/test_web_frame_gen_utils.py`、`test/test_dl_t698_45_data_decode.py`（REPORT count 结构）
-- 新增：`test/test_dl_t698_45_fujian.py`
-
-**最近一次（2026-08-17）：发布 1.14.1（协议8 APDU 数据内容业务解码）**
-
-变更：
-- **协议8（DL/T 698.45）APDU 数据内容业务解码**（新增 `dl_t698_45_data_decode.py`）：新建 CLASS_ATTR_TEMPLATES（电能量类(1)/最大需量类(2)/分相变量类(3)/功率类(4)/谐波类(5)/数据变量类(7) 的属性→格式模板）+ OI_UNIT_HINT（电压 V/电流 A/电能量 kWh/需量 W/相角 °/频率 Hz 等）+ UNIT_CODE_MAP 单位码表，`decode_oad_data(oi, attr_id, data)` 统一入口按 OAD 解码为业务值
-- **APDU 解析器接入**（`dl_t698_45_apdu_parser.py`）：新增 `_decode_oad_business` 辅助，GET-Response Normal/NormalList/Next、SET-Request、REPORT-Notification Normal 解析结果新增「数据业务」键（不破坏原始 A-XDR「数据」）；REPORT-Notification Normal 补齐 OAD 解析
-- **GUI 表格**（`dl_t698_45_parser.py`）：「数据业务」按项展开展示（总/费率N/A相/B相/C相 + 单位）
-- **修复 DLT69845Validator 长度域一致性公式**：698.45 L = 不含起始符和结束符的数据长度（文档附录 H.1：帧长32 → L=30），原公式 +4 误判合法帧，改 +2
-- **新增测试** `test/test_dl_t698_45_data_decode.py`（10 项）；`test_dl_t698_45.py`、`test_gdw_fujian.py`（19项）、`test_web_frame_gen_utils.py`（62项）回归全过
-
-涉及文件：
-- 新增：`dl_t698_45_data_decode.py`、`test/test_dl_t698_45_data_decode.py`
-- 修改：`dl_t698_45_apdu_parser.py`、`dl_t698_45_parser.py`、`validator/dl_t698_45_validator.py`、`main_gui.py`（CHANGELOG/APP_VERSION 1.14.1）、`AGENTS.md`、`test/test_web_frame_gen_utils.py`（长度域断言注释）
-
-**最近一次（2026-08-15）：Reflex Web 版协议组帧完整复刻**
-
-变更：
-- **Reflex Web 版组帧能力与 GUI 对齐**（`reflex_web/reflex_web.py`）：南网(0)/国网(7)/698.45(8) 三种协议、三种字段录入模式全部复刻——预定字段（predefined，按字段类型分派 uint/enum/bytes/ascii/bcd/oi/oad_list/list/sub_fields）、自定义模板（custom，字节/uint8/16/32/校验和，支持推荐序与 checksum 回填）、A-XDR（698.45 专属，单层数据项编辑器，复合类型由纯函数完整支持）
-- **新增纯逻辑模块 `reflex_web/frame_gen_utils.py`**：`collect_field_values`（位置对齐数组→name-keyed dict，sub_fields 父值由生成器 Pass3 打包）、`generate_custom_data`、`build_dlt698_sa`、`build_dlt698_axdr_apdu`、`encode_axdr_items`，无 Reflex 依赖，可被独立测试断言字节与 GUI 生成器一致
-- **实时回读预览**：字段 setter 与「生成帧」后自动重新组帧并送回解析器（`_refresh_gen_preview` / `gen_preview_rows` 表格），再现 GUI 200ms 实时预览
-- **预设命令按钮**：读取 `NW_command.json`（南网）/`GW_command.json`（国网），按分组渲染按钮一键填入结果区；支持「保存为预设」
-- **698.45 SA/控制字段**：地址类型/逻辑地址/地址长度/SA hex + seg/sc/func 下拉；**国网中继地址** A2 逗号分隔输入
-- **Reflex 兼容性适配**：字段编辑器用位置索引数组（`gen_field_values/gen_list_rows/gen_sub_fields` + 渲染模型 `gen_field_meta/gen_field_enum/gen_field_items/gen_field_subs` 等全 str 平行数组）规避 Reflex `foreach` 无法遍历 Any 值 dict、Var 不能作 dict key、`rx.wrap`/`rx.textarea` 不存在的限制
-
-涉及文件：
-- 新增：`reflex_web/frame_gen_utils.py`、`test_web_frame_gen_utils.py`
-- 修改：`reflex_web/reflex_web/reflex_web.py`、`README.md`、`AGENTS.md`
-
-验证：`python test_web_frame_gen_utils.py` 18 用例全过（南网含 list/enum/sub_fields、国网从节点列表、698.45 A-XDR/SA 字节与 GUI 生成器一致）；`State` 冒烟 9 项全过；`reflex export` 后 `python reflex_web/run_app.py` 返回 HTTP 200
-
-**最近一次（2026-08-14）：发布 1.13.0**
-
-变更：
-- **新增独立协议「HDC 1.0 双模互联互通」（索引 11）**：主程序支持 12 种协议。新增 `hdc10_parser.py`（HDC10Parser，Q/GDW 12087.42-2020）、`hdc10_mme_parser.py`、`validator/hdc10_validator.py`、`test_hdc10.py`
-- **GUI 集成**（`main_gui.py`）：协议下拉框新增 `[11]`；解析级别 + 通道下拉复用国网新一代控件（`_hdc10_parse_level` / `_hdc10_channel`）；查询页新增 `_create_hdc10_lookup_content`（报文 ID/端口/消息类型映射）；校验注册 `_run_validation` 11 → HDC10Validator；批量解析复用 `_strip_gw_new_gen_prefix` 前缀剥离与 `_get_gw_new_gen_summary` 摘要
-- **新一代载波协议(索引9)增强**：通道自动识别 PLC/HRF（`channel="auto"`）、无线单跳 MAC 帧（版本2/表12）、切频操作目标按 Option+信道号解析、批量摘要 `0x` 前缀崩溃修复
-- **易用性**：协议选择持久化、全表格 Ctrl+滚轮缩放（ZoomableTableWidget）、校验结果展开/收缩 + 结果表全屏、GUI 按钮风格统一；国网新一代信标帧无 PBH 修复；DLT645 数据长度一致性校验增强
-- **版本 bump**：`APP_VERSION` → 1.13.0，`BUILD_DATE` → 2026-08-14，`CHANGELOG` 新增 1.13.0 条目；文档（README/AGENTS.md/CLAUDE.md）同步至 12 种协议
-
-涉及文件：
-- 新增：`hdc10_parser.py`、`hdc10_mme_parser.py`、`validator/hdc10_validator.py`、`test_hdc10.py`
-- 修改：`main_gui.py`、`README.md`、`AGENTS.md`、`CLAUDE.md`、`南网协议解析工具.spec`
-
----
-
-**上一次（2026-08-11）：DLT645 数据域长度一致性校验增强**
-
-变更：
-- **DLT645 解析器新增数据长度一致性校验**（`dlt645_parser.py`）：声明值与实际帧长不匹配时，`valid=False`，fields 插入 `⚠ 数据长度错误` 行，但仍尽力解析所有可见字段（地址/控制码/DI/数据内容/校验和正常显示），不返回空白结果
-- **DLT645 校验器数据长度项改为一致性校验**（`validator/dlt645_validator.py`）：从只检查 >200 字节上限告警改为先校验声明值与实际帧长是否一致，不一致标记 FAIL
-- 确立容错显示原则：字段声明与实际不一致时，不得静默截断也不得直接返回空白，必须标红提示 + 尽力解析
-
-涉及文件：
-- 修改：`dlt645_parser.py`、`validator/dlt645_validator.py`、`README.md`、`AGENTS.md`
-
----
-
-**上一次（2026-08-04 前后）：TCP 流量监控 + 系统集成 + 1.11.x 功能**
-
-变更：
-- **新增「TCP 流量监控」标签页**（`monitor/tcp_monitor.py`，TCPMonitorWidget）：基于 scapy 的 TCP 抓包、流列表、双向流重组与南网新一代 / 国网新一代自动解析
-- **新增 Windows 系统集成**（`system_integration/`）：系统托盘、全局热键、剪贴板报文自动检测、Notepad++ 集成、单实例、命令行解析、文件右键菜单与开机自启
-- **剪贴板报文自动检测**：任意软件复制 hex 报文自动弹提示框，支持协议 / 解析级别 / PB 帧类型选择与 `ED..EE` 监控头剥离
-- **解析弹窗与命令行增强**：热键 / 命令行 / 文件右键共用解析弹窗，新增 `--clipboard`，解析动作不弹出主窗口
-- **新增表格右键复制与 Ctrl+C**：单帧 / 批量 / 监控 / TCP 监控等表格可复制选中行或全部
-- **国网新一代 MME 管理消息解析持续完善**（`gw_new_gen_mme_parser.py`）：MMTYPE 2 字节小端，0x0008 按发现列表处理，覆盖关联、代理变更、网络冲突、无线信道冲突、过零 NTB、网络诊断等消息
-- **监控器日志路径显示与浏览**（`monitor_widget.py`）：CSV 记录后可打开日志目录
-- **重写 `README.md`**：按中文技术文档规范补全 1.9.x / 1.10 / 1.11 功能、TCP 监控、实时监控器、多端入口与当前项目结构
-- **恢复并更新 `AGENTS.md`**：保留 Trellis 管理块，补齐 1.9.0~1.9.5 变更日志、当前解析级别、MME/HDC 说明与 TCP 监控注意事项
-
-涉及文件：
-- 新增：`monitor/tcp_monitor.py`
-- 修改：`main_gui.py`、`monitor_widget.py`、`gw_new_gen_parser.py`、`gw_new_gen_mme_parser.py`、`README.md`、`AGENTS.md`
-
----
-
-**上一次（2026-07-31）：新增主题与字体设置**
-
-变更：
-- **新增「主题与字体设置」**（`theme_settings.py`，ThemeSettingsDialog）：主题下拉 5 套内置主题（默认浅色/Fusion经典/Fusion暗色/Windows原生/WindowsVista原生），切换即时预览；字体族（QFontComboBox 系统字体列表）+ 字号（QSpinBox 8~24pt）
-- **全局样式表升级为应用级**：原 `MainWindow.apply_styles` 的浅色 QSS 迁入 `theme_settings.py:LIGHT_QSS` 并在 `main()` 通过 `ThemeManager.apply_from_file(app)` 应用，QMessageBox/文件对话框等所有弹窗统一跟随主题
-- **新增 Fusion 暗色主题**（`DARK_QSS`）：完整覆盖按钮/表格/菜单/滚动条/下拉框/复选框等全部控件配色
-- **字体设置持久化**：`config.json` 新增 `ui` 段（`theme`/`font_family`/`font_size`），`_save_app_config`/`_load_app_config` 读写；`ThemeManager.load_from_config`/`to_config` 封装
-- **暗色主题动态控件适配**：`_restyle_for_theme` + `_make_stats_label`/`_batch_count_style`/`_batch_status_style`/`_serial_status_style`/`_serial_refresh_style` 辅助方法，统计标签/串口状态/批量状态/刷新按钮随主题重设
-
-涉及文件：
-- 新增：`theme_settings.py`、`test_theme_settings.py`
-- 修改：`main_gui.py`（主题/字体应用、菜单入口、配置持久化、动态控件适配）、`AGENTS.md`
-
----
-
-**上一次（2026-07-29，commit `f8d92ff`）：新增报文工具标签页 + 国网新一代修复**
-
-变更：
-- **新增「报文工具」标签页**（`message_tool_widget.py`，MessageToolWidget）：提供协议报文处理常用工具，包括 ASCII/HEX 双向转换、DLT645 偏移（±0x33H）、字节逆序、报文↔Pn/Fn 转换、CRC-16/24/32 校验和计算、HEX↔bitstring 转换等
-- **修复国网新一代双模协议支持双击深度解析**（`main_gui.py`）：修复双击表格行无法触发深度解析的问题
-- **修复国网新一代解析器 MSDU 定位**（`gw_new_gen_parser.py`）：跳过 HCS(3B)+物理块头(1B)，正确定位 MSDU 起始
-- **添加 `parse_command_payload` 入口函数**（`gw_new_gen_cmd_payloads.py`）：修复 ImportError
-
-涉及文件：
-- 新增：`message_tool_widget.py`（377 行）
-- 修改：`main_gui.py`（+9 行）、`gw_new_gen_parser.py`（+18/-11 行）、`gw_new_gen_cmd_payloads.py`（+46 行）
-
----
-
-**上一次（2026-07-16，commit `6e6e8ac`）：新增 NiceGUI Web 版本 + 报文对比增强 + 增强导出功能**
-
-变更：
-- **新增 NiceGUI Web 版本**（`web_app.py` + `web/` 目录）：基于 NiceGUI 框架的浏览器解析器，支持完整 11 种协议解析，支持单帧/批量/报文对比/组帧/预设/查询/测试计划/档案/拓扑等标签页，集成串口通信（SerialAdapter），暗色主题自定义 CSS，健康检查端点 `/health`
-- **报文对比增强**（`diff_widget.py`）：新增差异人话解读（自然语言描述业务含义）、配置选项（忽略校验和/序列号、仅显示差异）、导出对比报告功能
-- **增强导出功能**（`enhanced_export.py`）：Excel 增强导出（支持协议元数据、字节高亮样式、分 Sheet 导出），CSV/TXT/JSON 多格式导出
-- **TUI 版本优化**（`tui_app.py`）：优化批量解析摘要显示，修复协议切换时的界面刷新问题
-- **Web 布局调整**（`web/main_page.py`、`web/tabs/single_parse.py`、`web/components/parse_table.py`）：固定高度 + 内容滚动，避免顶栏重叠；CSG 控制条仅在协议 9 下显示
-- `test_plan_widget.py`：功能增强（+421 行）
-- **新增国网新一代双模通信互联互通协议（索引10）**：`gw_new_gen_parser.py` (GWNewGenParser) + `validator/gw_new_gen_validator.py`，复用新一代载波解析框架
-
-涉及文件：
-- 新增：`web_app.py`、`web/` 目录（`main_page.py`、`tabs/`、`components/`、`adapters/`、`styles/custom.css`、`protocol_registry.py`、`frame_extractor.py`）、`enhanced_export.py`、`gw_new_gen_parser.py`、`validator/gw_new_gen_validator.py`、`docs/superpowers/specs/2026-07-15-nicegui-web-version-design.md`、`docs/superpowers/plans/2026-07-15-nicegui-web-version-plan.md`
-- 修改：`main_gui.py`、`test_plan_widget.py`、`config.json`、`test_plan.json`、`diff_widget.py`、`tui_app.py`
-
-依赖：`nicegui`（Web 版）、`pyserial`（Web 版串口）、`textual`（TUI 版，可选），`pip install nicegui pyserial textual`
-
----
-
-**上一次（2026-07-06，commit `087d03e`）：新增协议感知报文对比功能模块 + TUI 版本**
-
-变更：
-- 新增 `diff_widget.py`（DiffWidget）：报文对比标签页，支持双报文输入、字节级对比（字段感知对齐+差异高亮）、字段级语义对比（偏移/长度/值/差异类型）、差异人话解读、导出对比报告
-- 新增 `frame_diff_engine.py`（FrameDiffEngine）：协议感知帧对比引擎，支持完整对比流程和结果结构化
-- 新增 `tui_app.py`（936行）+ `tui_app.tcss`：基于 Textual 的终端图形化解析器，支持 9 种协议的解析、批量多帧解析+摘要、协议一致性校验
-- 新增 `test_diff_engine.py`（对比引擎测试）、`_tui_smoke_test.py`（TUI 冒烟测试）、`docs/_gen_diff_mockup.py`（对比 UI 原型生成）
-- `main_gui.py`（+23 行）：导入并集成 DiffWidget 标签页
-- `test_plan_widget.py`（+421 行）：功能增强
-- `config.json`：串口端口号改为 COM4
-
-涉及文件：
-- 新增：`diff_widget.py`、`frame_diff_engine.py`、`tui_app.py`、`tui_app.tcss`、`test_diff_engine.py`、`_tui_smoke_test.py`、`docs/_gen_diff_mockup.py`、`docs/diff_mockup.html`、`docs/diff_mockup.png`
-- 修改：`main_gui.py`、`test_plan_widget.py`、`config.json`、`test_plan.json`
-
-依赖：`textual`（TUI 版本，`pip install textual`），可选
-
----
-
-**上一次（2026-07-04）：新增 DLMS-APDU(国网) 协议选项，协议索引重编号**
-
-变更：
-- `main_gui.py`：下拉框插入"DLMS-APDU(国网)"（索引3），"HDLC/DLMS"重命名为"HDLC/国网DLMS"
-- `main_gui.py`：所有索引 3~8 硬编码位置顺延为 4~9，共 10 种协议
-- 新协议复用 HDLCParser.parse_apdu_to_table，无需新增解析器文件
-- 校验器、帧提取、方向提取、字节剔除、摘要生成等均已同步更新索引
-
-涉及文件：
-- 修改：`main_gui.py`、`AGENTS.md`
-
-验证：GUI 手动检查各协议切换、解析、查询页正常（待执行）
-
----
-
-**上一次（2026-06-21）：SACK解析 + 增强批量摘要业务内容**
-
-修复1：SACK帧字节12被公共代码误解析为"短网络标识高位"，实际应为"扩展帧类型(4b) + 标准版本号(4b)"。
-修复2：SACK帧仅FC头16字节无载荷，auto模式将FC头误当MSDU数据继续解析导致"解析失败"。
-增强3：`_extract_csg_core_content` 按帧类型+业务标识提取关键业务内容，批量摘要不再只显示"业务标识:确认"。
-
-修复：
-- `csg_new_gen_parser.py` `_parse_mpdu_sack`：返回值从 `offset + 1` 修正为 `offset + 11`（不再消费字节12）
-- `csg_new_gen_parser.py` `_parse_mpdu_frame` 字节12：增加 `delimiter_type == 2` 分支，SACK帧正确解析扩展帧类型
-- `csg_new_gen_parser.py` `parse_to_table`：auto模式增加SACK早期返回（`elif delimiter_type == 2: return table_data`），避免将FC头误当MSDU
-- 删除 `_parse_mpdu_sack` 中冗余的字节12读取（避免重复条目）
-- `main_gui.py` `_extract_csg_core_content`：重写为按帧类型分支提取（确认/否认/数据传输/命令帧各有专属提取逻辑）
-
-验证：全部 26 项测试通过（18 基础 + 6 摘要 + 1 批量 + 1 SACK 专项）
-
----
-
-**上一次（2026-06-18，待提交）：修复新一代载波协议(索引8)批量解析误将时间戳/测试标记行解析为伪帧的问题**
-
-涉及文件：
-- 新增：`csg_new_gen_parser.py`、`csg_new_gen_cmd_payloads.py`、`validator/csg_new_gen_validator.py`、`convert_docx_to_md.py`
-- 新增测试：`test_csg_new_gen.py`、`test_mac_*.py`、`test_msdu_debug.py`、`test_user_frame.py`、`test_full_debug.py`、`test_len_debug.py`
-- 新增协议文档：`南网新一代20260226校对/`（6 部分 .md + .docx）
-- 修改：`main_gui.py`（协议索引8、解析级别下拉、业务标识查询页、validator 注册）、`validator/__init__.py`、`dl_t698_45_frame_gen.py`、`dl_t698_45_frame_schema.py`、`frame_gen_widget.py`
-
-**上一次（2026-05-23，commit `5987370`）：新增 DLT698.45-2017 协议支持**
-- 新增 6 个 `dl_t698_45_*.py` 模块、`validator/dl_t698_45_validator.py`、`test_dl_t698_45.py`、`test_oad_enrichment.py`
-- GUI 集成协议索引 7、组帧 schema、OI/类抽取脚本
+- **新增 uTools 风格「快捷解析小窗」**：全局热键（默认 Ctrl+Alt+X）唤出无边框圆角置顶悬浮面板；粘贴/输入报文实时（300ms 防抖）解析——协议下拉自动识别可手动切换、帧长、校验✓/✗徽章、完整字段树；剪贴板合法 hex 唤出即自动填入；Esc/再按热键/失焦隐藏；「完整视图」转原大弹窗、「复制结果」复制 TSV
+- 新增 `system_integration/quick_parse_panel.py`（哑组件，clean/parse/validate/open_full/主题回调由 MainWindow 注入，不 import 解析器）；设置面板热键提示文案更新；spec hiddenimports 补 quick_parse_panel
+- 新增 `test/test_quick_parse_panel.py`（初版 29 项）
 
 ---
 
@@ -1206,11 +764,11 @@ python test/test_web_frame_gen_utils.py # Reflex Web 版组帧纯逻辑
 
 接手项目时按以下顺序操作：
 
-- [ ] 通读本文件（§1~§9 是核心，§10~§11 是最新动态），并按 `.trellis/workflow.md` 判断当前阶段
+- [ ] 通读本文件（§1~§9 是核心，§10 是最近版本摘要），并按 `.trellis/workflow.md` 判断当前阶段
 - [ ] 如修改代码，先读取 `.trellis/spec/` 中对应层级的规范
 - [ ] `python main_gui.py` 启动 GUI，逐个协议切下拉框，确认能跑
 - [ ] 查 `git log --oneline -20` 了解最近提交
 - [ ] 查 `git status` 了解未提交改动
 - [ ] 根据**要修改的协议**，按 §5 找到对应 parser 和参考文档
 - [ ] 修改前查 §8 陷阱，修改后按 §9 原则自检
-- [ ] 完成后同步更新 `main_gui.py:CHANGELOG`、本文件 §10、§11 与 `README.md`
+- [ ] 完成后同步更新 `main_gui.py:CHANGELOG` 与 `README.md`
