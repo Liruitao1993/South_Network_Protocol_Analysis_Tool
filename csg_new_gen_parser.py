@@ -183,6 +183,23 @@ class CSGNewGenParser:
     PROTOCOL_NAME = "新一代载波协议 (通感一体化)"
     PROTOCOL_VERSION = "1.0"
 
+    # 测试装置工装板控制协议（《通信控制协议V1.1》，可能封装在 ED..EE 数据域中）
+    TEST_DEVICE_CMD_NAMES = {
+        0x01: "设置印制板控制单元地址",
+        0x02: "模块上下电/8762A连接方式",
+        0x03: "设置引脚状态/衰减器A",
+        0x04: "设置220V电源/衰减器B",
+        0x05: "衰减器C",
+    }
+    TEST_DEVICE_CCO_MODULE_NAMES = {
+        0x01: "三相表模块",
+        0x02: "CCO2模块",
+        0x03: "CCO1模块",
+        0x04: "STA2模块",
+        0x05: "STA1模块",
+        0x06: "STA3模块",
+    }
+
     # ── 公共工具函数 ──
 
     @staticmethod
@@ -233,6 +250,378 @@ class CSGNewGenParser:
         return (value >> start) & mask
 
     @staticmethod
+    def _hex_space(data: bytes) -> str:
+        return " ".join(f"{b:02X}" for b in data)
+
+    def _parse_test_device_control(self, data: bytes, base_offset: int = 0) -> Optional[list]:
+        """解析测试装置工装板控制协议。"""
+        if not data or data[0] not in (0x05, 0xFE):
+            return None
+
+        pos = 0
+        while pos < len(data) and data[pos] == 0xFE:
+            pos += 1
+        if pos >= len(data) or data[pos] != 0x05 or pos > 4:
+            return None
+
+        if pos + 13 == len(data) and data[pos + 10:pos + 13] == b"\xAA\x0D\x0A":
+            checksum = data[pos + 9]
+            calc_checksum = sum(data[pos + 1:pos + 9]) & 0xFF
+            address = data[pos + 1]
+            command = data[pos + 2]
+            if (address in (0x00, 0x01)
+                    and checksum == calc_checksum
+                    and self._is_valid_function_board_payload(command, data[pos + 3:pos + 9])):
+                return self._build_test_device_rows(
+                    data[pos:pos + 13], base_offset + pos, "function")
+
+        if pos + 10 == len(data):
+            checksum = data[pos + 9]
+            calc_checksum = sum(data[pos + 1:pos + 9]) & 0xFF
+            address = data[pos + 1]
+            command = data[pos + 2]
+            if (address in (0x00, 0x01)
+                    and checksum == calc_checksum
+                    and self._is_valid_fixture_board_payload(command, data[pos + 3:pos + 9])):
+                return self._build_test_device_rows(
+                    data[pos:pos + 10], base_offset + pos, "fixture")
+
+        return None
+
+    @staticmethod
+    def _is_valid_fixture_board_payload(command: int, payload: bytes) -> bool:
+        if len(payload) != 6:
+            return False
+        if command == 0x02:
+            return payload[3:6] == b"\x00\x00\x00"
+        if command == 0x03:
+            return payload[2:6] == b"\x00\x00\x00\x00"
+        if command == 0x04:
+            return payload[0] in (0x00, 0x01) and payload[1:6] == b"\x00\x00\x00\x00\x00"
+        return False
+
+    @staticmethod
+    def _is_valid_function_board_payload(command: int, payload: bytes) -> bool:
+        if len(payload) != 6:
+            return False
+        if command == 0x01:
+            return payload[1:6] == b"\x00\x00\x00\x00\x00"
+        if command == 0x02:
+            return all(b in (0x00, 0x01) for b in payload[:4]) and payload[4:6] == b"\x00\x00"
+        if command in (0x03, 0x04, 0x05):
+            return payload[0] <= 127 and payload[1:6] == b"\x00\x00\x00\x00\x00"
+        return False
+
+    def _build_test_device_rows(self, frame: bytes, base: int, board_type: str) -> list:
+        address = frame[1]
+        command = frame[2]
+        payload = frame[3:9]
+        checksum = frame[9]
+        calc_checksum = sum(frame[1:9]) & 0xFF
+
+        if board_type == "function":
+            title = "── 测试装置功能驱动板控制协议 ──"
+            board_desc = "射频信号切换/衰减控制（9600 8N1，AA 0D 0A 结尾）"
+        else:
+            title = "── 测试装置工装板控制协议 ──"
+            board_desc = "CCO/STA 仓工装板控制（FE...05 起始，地址+命令+6字节数据+校验）"
+
+        rows = [(title, "", "", board_desc, base, base + len(frame) - 1)]
+
+        if frame[0] == 0xFE:
+            preamble_end = frame.find(0x05)
+            if preamble_end < 0:
+                preamble_end = 0
+            rows.append((
+                "起始字符", self._hex_space(frame[:preamble_end]),
+                f"{preamble_end}字节", "0xFE 前导",
+                base, base + preamble_end - 1))
+            hdr_base = base + preamble_end
+        else:
+            preamble_end = 0
+            hdr_base = base
+
+        rows.append((
+            "帧头", f"0x{frame[preamble_end]:02X}", "05",
+            "数据帧开始", hdr_base, hdr_base))
+        rows.append((
+            "地址", f"0x{address:02X}", str(address),
+            "00=广播预留，01=工装板默认地址",
+            hdr_base + 1, hdr_base + 1))
+
+        cmd_name = self.TEST_DEVICE_CMD_NAMES.get(command, f"未知命令(0x{command:02X})")
+        rows.append((
+            "命令码", f"0x{command:02X}", cmd_name,
+            "测试装置通信控制协议 V1.1",
+            hdr_base + 2, hdr_base + 2))
+
+        data_base = hdr_base + 3
+        if board_type == "function":
+            rows.extend(self._build_function_board_command_rows(command, payload, data_base))
+        else:
+            rows.extend(self._build_fixture_board_command_rows(command, payload, data_base))
+
+        rows.append((
+            "校验和", f"0x{checksum:02X}",
+            "✓ 正确" if checksum == calc_checksum else f"✗ 错误(应为0x{calc_checksum:02X})",
+            "地址+命令码+6字节数据累加和取低8位",
+            hdr_base + 9, hdr_base + 9))
+
+        if board_type == "function":
+            rows.append((
+                "结束符", self._hex_space(frame[10:13]), "AA 0D 0A",
+                "功能驱动板固定结束符",
+                hdr_base + 10, hdr_base + 12))
+
+        return rows
+
+    def _build_function_board_command_rows(self, command: int, payload: bytes, base: int) -> list:
+        rows = []
+        for i, value in enumerate(payload):
+            rows.append((
+                f"数据项字节{i + 1}", f"0x{value:02X}", str(value),
+                "6字节固定数据域", base + i, base + i))
+
+        if command == 0x01:
+            rows.append((
+                "印制板控制单元地址", f"0x{payload[0]:02X}", str(payload[0]),
+                "D0 表示印制板地址；返回原报文作为应答", base, base))
+        elif command == 0x02:
+            labels = ["8762-1", "8762-2", "8762-3", "8762-4"]
+            values = []
+            for idx, label in enumerate(labels):
+                value = payload[idx]
+                port = "B端" if value == 1 else "A端" if value == 0 else f"未知(0x{value:02X})"
+                values.append(f"{label}={port}")
+            rows.append((
+                "8762A连接方式", self._hex_space(payload[:4]),
+                "；".join(values),
+                "0x00=接入A端，0x01=接入B端；字节5~6保留为0",
+                base, base + 5))
+        elif command in (0x03, 0x04, 0x05):
+            attenuator = {0x03: "A", 0x04: "B", 0x05: "C"}[command]
+            value = payload[0]
+            rows.append((
+                f"衰减器{attenuator}衰减值", f"0x{value:02X}",
+                f"{value} dB" if value <= 127 else "超出范围(0~127dB)",
+                f"设置{attenuator}相衰减器，1dB 步进；字节2~6保留为0",
+                base, base))
+        else:
+            rows.append((
+                "数据域", self._hex_space(payload), f"{len(payload)}字节",
+                "未识别功能驱动板命令，显示原始数据", base, base + 5))
+        return rows
+
+    def _build_fixture_board_command_rows(self, command: int, payload: bytes, base: int) -> list:
+        rows = []
+        for i, value in enumerate(payload):
+            rows.append((
+                f"数据项字节{i + 1}", f"0x{value:02X}", str(value),
+                "6字节固定数据域", base + i, base + i))
+
+        if command == 0x02:
+            cco_like = (payload[0] & 0xF8) != 0 or payload[1] == payload[2] == 0
+            sta_like = (payload[0] & 0x07) != 0 or payload[1] != 0 or payload[2] != 0
+            if cco_like and not sta_like:
+                rows.extend(self._build_cco_power_rows(payload, base))
+            elif sta_like and not cco_like:
+                rows.extend(self._build_sta_power_rows(payload, base))
+            else:
+                rows.append((
+                    "模块电源状态", self._hex_space(payload[:3]),
+                    "CCO/STA 仓型无法仅凭报文唯一判定",
+                    "CCO仓使用高6位；STA仓使用低20位小端位图",
+                    base, base + 2))
+                rows.extend(self._build_cco_power_rows(payload, base, "CCO仓解释/"))
+                rows.extend(self._build_sta_power_rows(payload, base, "STA仓解释/"))
+        elif command == 0x03:
+            rows.extend(self._build_cco_pin_rows(payload, base))
+            rows.extend(self._build_sta_pin_rows(payload, base))
+        elif command == 0x04:
+            if payload[0] == 1:
+                state = "连接状态"
+            elif payload[0] == 0:
+                state = "断开状态"
+            else:
+                state = f"未知(0x{payload[0]:02X})"
+            rows.append((
+                "工装板220V电源状态", f"0x{payload[0]:02X}", state,
+                "仅互操作6号屏蔽箱（CCO工装板）有效；字节2~6保留为0",
+                base, base))
+        else:
+            rows.append((
+                "数据域", self._hex_space(payload), f"{len(payload)}字节",
+                "未识别工装板命令，显示原始数据", base, base + 5))
+        return rows
+
+    def _build_cco_power_rows(self, payload: bytes, base: int, prefix: str = "") -> list:
+        power_bits = [
+            (7, "STA1模块"), (6, "STA2模块"), (5, "CCO1模块"),
+            (4, "CCO2模块"), (3, "三相表模块"), (2, "STA3模块"),
+        ]
+        states = [f"{name}={'上电' if payload[0] & (1 << bit) else '断电'}"
+                  for bit, name in power_bits]
+        return [(
+            f"{prefix}CCO仓模块电源状态", f"0x{payload[0]:02X}",
+            "；".join(states),
+            "bit7=STA1, bit6=STA2, bit5=CCO1, bit4=CCO2, bit3=三相表, bit2=STA3；bit1/bit0保留",
+            base, base + 2)]
+
+    def _build_sta_power_rows(self, payload: bytes, base: int, prefix: str = "") -> list:
+        bitmap = int.from_bytes(payload[:3], "little") & 0x0FFFFF
+        on_nodes = [str(i) for i in range(1, 21) if bitmap & (1 << (i - 1))]
+        off_count = 20 - len(on_nodes)
+        parsed = f"上电:{','.join(on_nodes) if on_nodes else '无'}；断电:{off_count}个"
+        return [(
+            f"{prefix}STA仓模块电源位图", self._hex_space(payload[:3]), parsed,
+            "20位小端位图：bit0~bit19分别对应1~20号STA，1=上电，0=断电",
+            base, base + 2)]
+
+    def _build_cco_pin_rows(self, payload: bytes, base: int) -> list:
+        module_name = self.TEST_DEVICE_CCO_MODULE_NAMES.get(
+            payload[0], f"未知模块(0x{payload[0]:02X})")
+        states = [
+            f"RST={'高电平' if payload[1] & 0x01 else '低电平'}",
+            f"EVT={'高电平' if payload[1] & 0x02 else '低电平'}",
+            f"SET={'高电平' if payload[1] & 0x04 else '低电平'}",
+        ]
+        return [(
+            "CCO仓引脚控制", self._hex_space(payload[:2]),
+            f"{module_name}；" + "；".join(states),
+            "数据字节1=模块类型，数据字节2 bit0/1/2=RST/EVT/SET，0=低电平，1=高电平",
+            base, base + 1)]
+
+    def _build_sta_pin_rows(self, payload: bytes, base: int) -> list:
+        if payload[0] > 0x13:
+            node_name = f"未知STA编号(0x{payload[0]:02X})"
+        else:
+            node_name = f"STA{payload[0] + 1}"
+        states = [
+            f"RST={'高电平' if payload[1] & 0x01 else '低电平'}",
+            f"EVENT={'高电平' if payload[1] & 0x02 else '低电平'}",
+        ]
+        return [(
+            "STA仓引脚控制", self._hex_space(payload[:2]),
+            f"{node_name}；" + "；".join(states),
+            "数据字节1=STA编号(0x00~0x13对应1~20号)，数据字节2 bit0/1=RST/EVENT",
+            base, base + 1)]
+
+    @staticmethod
+    def _plc2_channel_name(ch: int) -> str:
+        names = {0x01: "HPLC", 0x02: "RF", 0x03: "HPLC+RF", 0x20: "PLC2.0 OFDMA"}
+        if ch in names:
+            return names[ch]
+        if 0x10 <= ch <= 0x1C:
+            return f"PLC2.0 MIMO(0x{ch:02X})"
+        return f"保留(0x{ch:02X})"
+
+    def _parse_ed_wrapper(self, frame_bytes: bytes, parse_level: str = "auto",
+                          pb_frame_type: str = "sof",
+                          channel: str = "auto") -> Optional[list]:
+        """解析完整 ED..EE PLC2.0 监控包装，并继续解析其中业务数据。"""
+        n = len(frame_bytes)
+        if n < 8 or frame_bytes[0] != 0xED:
+            return None
+
+        def fail(reason: str) -> list:
+            return [("❌ 解析失败", "", "", f"ED 监控帧错误：{reason}", 0, n - 1)]
+
+        frame_len = int.from_bytes(frame_bytes[1:3], "little")
+        if frame_len < 4 or frame_len > 4096:
+            return fail(f"帧长字段非法(0x{frame_len:04X})")
+        total = frame_len + 4
+        if total > n:
+            return fail(f"报文不完整，声明{total}字节，实际{n}字节")
+        if frame_bytes[5] != 0xEF:
+            return fail("缺少数据域起始符 EF")
+        if frame_bytes[total - 1] != 0xEE:
+            return fail("缺少结束符 EE")
+
+        ctrl1 = frame_bytes[3]
+        ctrl2 = frame_bytes[4]
+        data_len = frame_len - 4
+        data_start = 6
+        data = frame_bytes[data_start:data_start + data_len]
+        cs_offset = data_start + data_len
+        calc_cs = sum(frame_bytes[:cs_offset]) & 0xFF
+        cs = frame_bytes[cs_offset]
+        cs_txt = "✓ 正确" if cs == calc_cs else ("保留(0xFF)" if cs == 0xFF else "✗ 错误")
+
+        ctrl1_name = {0x00: "数据报文", 0x01: "控制报文"}.get(
+            ctrl1, f"保留(0x{ctrl1:02X})")
+        ctrl2_name = {
+            0x01: "FC数据", 0x02: "FC+Payload数据", 0x03: "Payload数据",
+            0x04: "发送完成", 0x05: "选择确认帧发送完成",
+            0x06: "RF和HPLC同时发送FC+Payload", 0x07: "FC+Payload数据",
+            0x08: "UL-OFDMA帧(DL-OFDMA的SACK帧)",
+        }.get(ctrl2, f"保留(0x{ctrl2:02X})")
+
+        rows = [
+            ("── PLC2.0 监控包装头 ──", "", "", "ED..EE 监控设备附加信息（不属于业务帧）", None, None),
+            ("起始符(ED)", f"0x{frame_bytes[0]:02X}", "ED", "PLC2.0 收发机包装起始标识", 0, 0),
+            ("帧长", self._hex_space(frame_bytes[1:3]), f"{frame_len} 字节",
+             "控制域1+控制域2+EF+数据域+CS(小端)", 1, 2),
+            ("控制域1", f"0x{ctrl1:02X}", ctrl1_name,
+             "0x00-数据报文 0x01-控制报文", 3, 3),
+            ("控制域2", f"0x{ctrl2:02X}", ctrl2_name, "报文子类型", 4, 4),
+            ("数据域起始符(EF)", f"0x{frame_bytes[5]:02X}", "EF",
+             "数据域起始标识", 5, 5),
+            ("数据域长度", str(data_len), f"{data_len} 字节",
+             f"字节 {data_start}~{cs_offset - 1}", data_start, cs_offset - 1),
+        ]
+
+        if ctrl1 == 0x00 and ctrl2 in (0x01, 0x02, 0x03) and data_len >= 9:
+            ch = data[0]
+            ts = int.from_bytes(data[1:5], "little")
+            pb_cnt = data[5]
+            flag6 = data[6]
+            pb_len = int.from_bytes(data[7:9], "little")
+            business = data[9:]
+            business_offset = data_start + 9
+            rows.extend([
+                ("物理信道", f"0x{ch:02X}", self._plc2_channel_name(ch),
+                 "0x01-HPLC 0x02-RF 0x03-HPLC+RF 0x10~0x1C-MIMO 0x20-OFDMA",
+                 data_start, data_start),
+                ("时间戳", f"0x{ts:08X}", str(ts),
+                 "HW→PC 接收开始时间(小端)", data_start + 1, data_start + 4),
+                ("物理块个数", str(pb_cnt), str(pb_cnt), None,
+                 data_start + 5, data_start + 5),
+                ("Payload CRC", f"0x{flag6:02X}",
+                 "错误" if ctrl2 == 0x02 and flag6 == 1 else "正确/保留",
+                 "ctrl2=0x02时: 0-正确 1-错误；其余保留",
+                 data_start + 6, data_start + 6),
+                ("单个物理块长度", str(pb_len), f"{pb_len} 字节(小端)", None,
+                 data_start + 7, data_start + 8),
+            ])
+        else:
+            business = data
+            business_offset = data_start
+
+        rows.extend([
+            ("校验(CS)", f"0x{cs:02X}", cs_txt,
+             "ED..数据域末所有字节求和取低8bit", cs_offset, cs_offset),
+            ("结束符(EE)", f"0x{frame_bytes[total - 1]:02X}", "EE",
+             "PLC2.0 包装结束标识", total - 1, total - 1),
+            ("── 业务帧 ──", "", "",
+             "以下为 ED 数据域解析结果", business_offset, cs_offset - 1),
+        ])
+
+        if business:
+            business_table = self.parse_to_table(
+                business, parse_level=parse_level,
+                pb_frame_type=pb_frame_type, channel=channel)
+            for row in business_table:
+                if len(row) >= 6 and row[4] is not None and row[5] is not None:
+                    row = (row[0], row[1], row[2], row[3],
+                           row[4] + business_offset, row[5] + business_offset)
+                rows.append(row)
+        else:
+            rows.append(("业务数据", "", "空", "ED 控制报文或空数据报文",
+                         business_offset, cs_offset - 1))
+
+        return rows
+
+    @staticmethod
     def _crc32_ieee(data: bytes) -> int:
         """CRC-32 (IEEE 802.3): poly=0x104C11DB7, init=0, rev=True, xorOut=0xFFFFFFFF"""
         return _crc32_func(data)
@@ -255,13 +644,18 @@ class CSGNewGenParser:
         4. 仅应用层报文 (报文端口号 + 报文标识符 + ...)
         5. 裸级联聚合帧 (无FC无PB头, 2字节级联头+MAC帧重复)
         6. pb_only 物理块输入 (PB头 + MAC帧 + PBCS)
-        7. mac_only 仅MAC帧输入 (PB头4B + MAC帧，去除PBH后解析)
+        7. mac_only 仅MAC帧输入 (输入即MAC帧，不含PBH，从字节0直接解析)
 
         Args:
             channel: "plc" (载波), "hrf" (高速无线) 或 "auto" (MPDU级输入自动判别)
         """
         self._channel = channel
         self._detected_channel = None
+        # 每帧重置状态, 避免上一帧的 _pb_size / _cmt_index / _pb_count 残留
+        self._pb_size = None
+        self._cmt_index = 4
+        self._std_version = 1
+        self._pb_count = 1
         table_data = []
         frame_len = len(frame_bytes)
         self._aggregated = False
@@ -269,6 +663,21 @@ class CSGNewGenParser:
         if frame_len < 2:
             table_data.append(("❌ 解析失败", "", "", "帧长度不足（<2字节）", None, None))
             return table_data
+
+        # ED..EE 包装中的测试装置控制协议不是载波 MPDU/MAC 业务帧，优先识别。
+        test_control_rows = self._parse_test_device_control(frame_bytes)
+        if test_control_rows is not None:
+            return test_control_rows
+
+        if frame_bytes[0] == 0xED:
+            ed_rows = self._parse_ed_wrapper(
+                frame_bytes,
+                parse_level=parse_level,
+                pb_frame_type=pb_frame_type,
+                channel=channel,
+            )
+            if ed_rows is not None:
+                return ed_rows
 
         # ── 通道自动识别：仅 MPDU 级输入（接入指示=1）按 FC 可变区域结构判别 PLC/HRF ──
         if channel == "auto" and ((frame_bytes[0] >> 3) & 0x01) == 1:
@@ -319,7 +728,7 @@ class CSGNewGenParser:
             offset, mac_data, msdu_payload = self._parse_pb_block(
                 frame_bytes, 0, table_data, frame_len)
         elif parse_level == "mac_only":
-            # 仅MAC帧模式：输入 = PBH(4B) + MAC帧数据（SOF帧）
+            # 仅MAC帧模式：输入即MAC帧数据（不含PBH），从字节0直接解析
             # 信标帧无PBH，输入即信标载荷
             self._delimiter_type = {"sof": 1, "beacon": 0, "sack": 2, "net": 3}.get(pb_frame_type, 1)
             self._cmt_index = 4
@@ -341,45 +750,10 @@ class CSGNewGenParser:
                 return table_data
 
             table_data.append(("解析模式", "", "仅MAC帧",
-                               "去除4字节物理块头(PBH)后解析MAC帧", None, None, False))
-            pb_hdr_len = 4
-            if frame_len < pb_hdr_len:
-                table_data.append(("❌ 解析失败", "", "",
-                                   f"数据不足PBH（需{pb_hdr_len}字节，实际{frame_len}字节）",
-                                   None, None))
-                return table_data
-            pb_data = frame_bytes[0:pb_hdr_len]
-            pb_seq = int.from_bytes(pb_data[0:2], 'little')
-            pb_agg_flag = pb_data[2] & 0x01
-            pb_agg_desc = "物理块中有多个MAC帧" if pb_agg_flag else "物理块中只有一个MAC帧"
-            table_data.append(("物理块头(PBH)",
-                               ' '.join(f'{b:02X}' for b in pb_data),
-                               f"序列号:{pb_seq}, 聚合标志:{pb_agg_flag}",
-                               f"PBH: {pb_agg_desc}（4字节，将被去除）",
-                               0, pb_hdr_len - 1))
-            table_data.append(("  序列号",
-                               ' '.join(f'{b:02X}' for b in pb_data[0:2]),
-                               str(pb_seq),
-                               "MPDU载荷中物理块的序号",
-                               0, 1))
-            table_data.append(("  聚合标志",
-                               f"0b{pb_agg_flag}",
-                               str(pb_agg_flag),
-                               pb_agg_desc,
-                               2, 2))
-            pb_reserved = ((pb_data[2] >> 1) & 0x7F) | (pb_data[3] << 7)
-            table_data.append(("  保留",
-                               f"0x{pb_reserved:04X}",
-                               str(pb_reserved),
-                               "保留",
-                               2, 3))
-            # MAC帧从PBH之后开始
-            mac_start = pb_hdr_len
-            mac_bytes = frame_bytes[mac_start:]
-            if not mac_bytes:
-                table_data.append(("❌ 解析失败", "", "",
-                                   "PBH之后无MAC帧数据", None, None))
-                return table_data
+                               "输入即MAC帧（不含物理块头），从字节0直接解析", None, None, False))
+            # MAC帧从字节0开始（输入不含PBH）
+            mac_start = 0
+            mac_bytes = frame_bytes
             offset, mac_table = self._parse_mac_frame(mac_bytes, base_offset=mac_start)
             table_data.extend(mac_table)
             # 设置msdu_payload供后续_parse_msdu_payload处理
@@ -777,6 +1151,9 @@ class CSGNewGenParser:
         26:16,27:16
     }
 
+    # ISAC-PLC Bitloading模式(表23 字节6 bit1-2)物理块大小码: 0:136 1:520 2:72 3:264
+    ISAC_BL_PB_SIZE_MAP = {0: 136, 1: 520, 2: 72, 3: 264}
+
     # HRF（高速无线）MCS 表（表43）
     HRF_MCS_TABLE = {
         0: {"diversity": 4, "modulation": "BPSK", "code_rate": "1/2"},
@@ -828,7 +1205,8 @@ class CSGNewGenParser:
         if pb_count < 1:
             pb_count = 1
         is_hrf = getattr(self, '_channel', 'plc') == 'hrf'
-        if is_hrf and hasattr(self, '_pb_size') and isinstance(self._pb_size, int):
+        # HRF 无线 / ISAC Bitloading 模式: FC 可变区域显式给出PB大小, 优先使用
+        if hasattr(self, '_pb_size') and isinstance(self._pb_size, int):
             pb_total_size = self._pb_size
         else:
             pb_total_size = self._get_pb_size(
@@ -1412,18 +1790,28 @@ class CSGNewGenParser:
             table.append(("TF扩展频段", f"0b{tf_ext}", str(tf_ext),
                          "扩展到0.7~12M" if tf_ext else "与PL相同", offset + 4, offset + 4))
 
-            # Bitloading/TMI
+            # 字节6(表23): bit0=Bitloading标识, bit1-5=TMI编号(Bitloading=0时)/物理块大小码(Bitloading=1时)
+            # 物理块大小码仅2bit(bit1-2)有效: 0:136 1:520 2:72 3:264 (表23 注)
             b6 = frame_bytes[offset + 5]
             bitloading = b6 & 0x01
             tmi = (b6 >> 1) & 0x1F
-            self._cmt_index = tmi
+            pb_size_code = (b6 >> 1) & 0x03  # Bitloading=1 时低2bit为PB大小码
+            table.append(("Bitloading标识", f"0b{bitloading}", str(bitloading),
+                         "使用Bitloading" if bitloading else "使用TMI",
+                         offset + 5, offset + 5))
             if bitloading:
-                pb_size = self.ISAC_PB_MAP.get(tmi, 136)
-                table.append(("Bitloading/PB大小", f"0x{tmi:X}", str(tmi),
-                             f"PB={pb_size}字节", offset + 5, offset + 5))
+                pb_size = CSGNewGenParser.ISAC_BL_PB_SIZE_MAP.get(pb_size_code, 136)
+                # Bitloading模式: 物理块大小不查TMI/ROBO表, 用本字段显式指定, 供PB解析使用
+                self._pb_size = pb_size
+                table.append(("物理块大小码", f"0x{pb_size_code:X}", str(pb_size_code),
+                             f"Bitloading模式PB={pb_size}字节 (0:136 1:520 2:72 3:264)",
+                             offset + 5, offset + 5))
             else:
+                self._cmt_index = tmi
+                pb_size = self._get_pb_size(tmi, 2)
                 table.append(("TMI编号", f"0x{tmi:02X}", str(tmi),
-                             f"TMI={tmi}", offset + 5, offset + 5))
+                             f"TMI={tmi} (表13 ROBO模式), PB={pb_size}字节",
+                             offset + 5, offset + 5))
 
             # 帧长(12b): byte8[0:7] + byte9[0:3]
             b8 = frame_bytes[offset + 7]

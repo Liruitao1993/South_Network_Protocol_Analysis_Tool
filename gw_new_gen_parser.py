@@ -282,13 +282,15 @@ class GWNewGenParser:
         """
         if _CRC24_MPDU_FUN is not None:
             return _CRC24_MPDU_FUN(data)
-        # 无crcmod时的等价实现(反射模式)
+        # 无crcmod时的等价实现(反射模式): 反射多项式 = 0x800063 的 24 位位反转 0xC60001
+        # (旧代码误用 25 位 0x1800063, bit24 反馈进低位致结果错误,
+        #  未装 crcmod 时 FCCS 校验失败、完整 MPDU 被误判)
         crc = 0
         for b in data:
             crc ^= b
             for _ in range(8):
                 if crc & 1:
-                    crc = (crc >> 1) ^ 0x1800063
+                    crc = (crc >> 1) ^ 0xC60001
                 else:
                     crc >>= 1
         return crc & 0xFFFFFF

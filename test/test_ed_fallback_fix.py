@@ -56,6 +56,8 @@ USER_FRAME = bytes.fromhex(USER_FRAME_HEX)
 print("1. 前置：头解析器对不完整帧返回失败")
 from main_gui import MainWindow
 w = MainWindow()
+w.current_protocol = 9
+w.csg_channel_combo.setCurrentIndex(0)  # 自动识别，避免本机配置残留为 HRF 影响 PLC 用例
 rows, business, off = w._parse_ed_monitor_header(USER_FRAME)
 check("不完整帧返回 None", rows is None and business is None,
       f"len={len(USER_FRAME)} 声明整包={(USER_FRAME[1]|USER_FRAME[2]<<8)+4}")
@@ -122,6 +124,25 @@ ok = (len(w.batch_results) == 1
       and w.batch_results[0]["_status"] == "成功"
       and "FC+Payload" in w.batch_results[0]["摘要"])
 check("完整 ED 帧批量解析成功", ok,
+      w.batch_results[0]["摘要"] if w.batch_results else "无结果")
+
+# ED 控制报文中携带测试装置通信控制协议：应交给协议9解析器展开
+ctrl_payload = bytes.fromhex("05010280000000000083")
+ctrl_body = bytes([0x01, 0x10, 0xEF]) + ctrl_payload
+ctrl_len = len(ctrl_body) + 1
+ctrl_head = bytes([0xED, ctrl_len & 0xFF, ctrl_len >> 8]) + ctrl_body
+ctrl_ed = ctrl_head + bytes([sum(ctrl_head) & 0xFF, 0xEE])
+w.batch_input.setPlainText(ctrl_ed.hex().upper())
+w.parse_batch()
+ctrl_rows = w.batch_results[0]["_table_data"] if w.batch_results else []
+ctrl_ok = (
+    len(w.batch_results) == 1
+    and w.batch_results[0]["_status"] == "成功"
+    and any("PLC2.0" in str(r[0]) for r in ctrl_rows)
+    and any("CCO仓模块电源状态" in str(r[0]) and "STA1模块=上电" in str(r[2])
+            for r in ctrl_rows)
+)
+check("ED 测试装置控制帧批量解析成功", ctrl_ok,
       w.batch_results[0]["摘要"] if w.batch_results else "无结果")
 
 # ── 5. 解析弹窗（热键/命令行/右键菜单共用路径） ──

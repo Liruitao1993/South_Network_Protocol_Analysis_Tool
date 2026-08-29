@@ -149,6 +149,7 @@ class DLT69845FrameGenerator:
         oi_val = 0
         attr_val = 2
         data_bytes_val = b""
+        idx_val = 0
 
         for name, val in field_values.items():
             if name == "PIID":
@@ -159,6 +160,8 @@ class DLT69845FrameGenerator:
                 attr_val = int(val) & 0xFF
             elif name == "方法标识":
                 attr_val = int(val) & 0xFF  # reuse same logic
+            elif name == "索引":
+                idx_val = int(val) & 0xFF
             elif name == "数据内容":
                 raw = str(val).replace(" ", "").strip()
                 data_bytes_val = bytes.fromhex(raw) if raw else b""
@@ -204,11 +207,17 @@ class DLT69845FrameGenerator:
             if apdu_type == "GET-Request" and sub_type == "get_normal_list":
                 apdu_body += body  # OAD list already assembled
             else:
-                # OAD = OI(2B, big) + 属性标识(1B, 低5位=属性号, 高3位=属性特征) + 元素索引(1B=0x00)
-                oad = _struct.pack(">H", oi_val) + _struct.pack("B", attr_val & 0x1F) + b'\x00'
+                # OAD = OI(2B, big) + 属性标识(1B, 低5位=属性号, 高3位=属性特征) + 元素索引(1B，索引字段可配置)
+                oad = _struct.pack(">H", oi_val) + _struct.pack("B", attr_val & 0x1F) + _struct.pack("B", idx_val & 0xFF)
                 apdu_body += oad
                 if data_bytes_val:
                     apdu_body += data_bytes_val
+            # 自定义数据内容（原始hex）追加到数据域
+            custom_val = field_values.get("自定义数据内容")
+            if custom_val:
+                raw = str(custom_val).replace(" ", "").strip()
+                if raw:
+                    apdu_body += bytes.fromhex(raw)
             apdu = apdu_header + apdu_body
             # GET-Request Normal/Record/Signature 需要在 APDU 末尾加时间标签
             if apdu_type == "GET-Request" and sub_type in ("get_normal", "get_record", "get_normal_list"):

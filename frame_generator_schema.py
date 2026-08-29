@@ -765,4 +765,70 @@ DI_FIELD_SCHEMA: Dict[Tuple[int, int, int, int], Dict[str, Any]] = {
         "fields": []
     },
 
+    # ==================== 本地通信模块接口协议（13 计量自动化终端本地通信模块接口协议.md）====================
+
+    # 设置即插即用功能开关 (E8 02 04 A0)
+    (0xE8, 0x02, 0x04, 0xA0): {
+        "name": '设置即插即用功能开关',
+        "direction": "down",
+        "doc": '<b>DI编码</b>：E8 02 04 A0<br>\n<b>命令名称</b>：设置即插即用功能开关<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据标识内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>即插即用功能开关</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td></tr></table>\n\n即插即用功能开关：0关闭，1开启。\n',
+        "fields": [{'name': '即插即用功能开关', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 1, 'description': '0=关闭即插即用功能，1=开启即插即用功能'}]
+    },
+
+    # 添加黑名单节点 (E8 02 04 A1)
+    (0xE8, 0x02, 0x04, 0xA1): {
+        "name": '添加黑名单节点',
+        "direction": "down",
+        "doc": '<b>DI编码</b>：E8 02 04 A1<br>\n<b>命令名称</b>：添加黑名单节点<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据标识内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>黑名单节点的数量n</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>黑名单节点1地址</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>6</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>……</td><td style=\'text-align: center; word-wrap: break-word;\'>……</td><td style=\'text-align: center; word-wrap: break-word;\'>……</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>黑名单节点n地址</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>6</td></tr></table>\n',
+        "fields": [{'name': '黑名单节点数量', 'type': 'uint8', 'length': 1, 'required': True, 'default': 1, 'description': '黑名单节点数量（自动计算，无需手动填写）'}, {'name': '黑名单节点列表', 'type': 'list', 'count_field': '黑名单节点数量', 'required': True, 'item_fields': [{'name': '黑名单节点地址', 'type': 'bytes', 'length': 6, 'reverse': True, 'default': '000000000000', 'description': '6字节地址，低字节在前存储'}], 'description': '黑名单节点地址列表，数量由上一字段决定'}]
+    },
+
+    # 删除黑名单节点 (E8 02 04 A2)
+    (0xE8, 0x02, 0x04, 0xA2): {
+        "name": '删除黑名单节点',
+        "direction": "down",
+        "doc": '<b>DI编码</b>：E8 02 04 A2<br>\n<b>命令名称</b>：删除黑名单节点<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据标识内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>黑名单节点的数量n</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>黑名单节点1地址</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>6</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>……</td><td style=\'text-align: center; word-wrap: break-word;\'>……</td><td style=\'text-align: center; word-wrap: break-word;\'>……</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>黑名单节点n地址</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>6</td></tr></table>\n',
+        "fields": [{'name': '黑名单节点数量', 'type': 'uint8', 'length': 1, 'required': True, 'default': 1, 'description': '黑名单节点数量（自动计算，无需手动填写）'}, {'name': '黑名单节点列表', 'type': 'list', 'count_field': '黑名单节点数量', 'required': True, 'item_fields': [{'name': '黑名单节点地址', 'type': 'bytes', 'length': 6, 'reverse': True, 'default': '000000000000', 'description': '6字节地址，低字节在前存储'}], 'description': '黑名单节点地址列表，数量由上一字段决定'}]
+    },
+
+    # 设置CCO时钟 (E8 02 04 A3)
+    (0xE8, 0x02, 0x04, 0xA3): {
+        "name": '设置CCO时钟',
+        "direction": "down",
+        "doc": '<b>DI编码</b>：E8 02 04 A3<br>\n<b>命令名称</b>：设置CCO时钟<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据标识内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>当前时间—秒</td><td style=\'text-align: center; word-wrap: break-word;\'>BCD</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>当前时间—分</td><td style=\'text-align: center; word-wrap: break-word;\'>BCD</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>当前时间—时</td><td style=\'text-align: center; word-wrap: break-word;\'>BCD</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>当前时间—日</td><td style=\'text-align: center; word-wrap: break-word;\'>BCD</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>当前时间—月</td><td style=\'text-align: center; word-wrap: break-word;\'>BCD</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>当前时间—年（低字节）</td><td style=\'text-align: center; word-wrap: break-word;\'>BCD</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr></table>\n\n设置CCO时钟与E8 06 06 01请求集中器时间内容一致。\n',
+        "fields": [{'name': '当前时间-秒', 'type': 'bcd', 'length': 1, 'required': True, 'default': '00', 'description': 'BCD码秒，如59填59'}, {'name': '当前时间-分', 'type': 'bcd', 'length': 1, 'required': True, 'default': '30', 'description': 'BCD码分'}, {'name': '当前时间-时', 'type': 'bcd', 'length': 1, 'required': True, 'default': '12', 'description': 'BCD码时'}, {'name': '当前时间-日', 'type': 'bcd', 'length': 1, 'required': True, 'default': '26', 'description': 'BCD码日'}, {'name': '当前时间-月', 'type': 'bcd', 'length': 1, 'required': True, 'default': '08', 'description': 'BCD码月'}, {'name': '当前时间-年', 'type': 'bcd', 'length': 1, 'required': True, 'default': '25', 'description': 'BCD码年（低字节），如2025年填25'}]
+    },
+
+    # 批量查询模块特征信息 (E8 03 03 15)
+    (0xE8, 0x03, 0x03, 0x15): {
+        "name": '批量查询模块特征信息',
+        "direction": "down",
+        "doc": '<b>DI编码</b>：E8 03 03 15<br>\n<b>命令名称</b>：批量查询模块特征信息<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>节点起始序号</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>节点数量</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr></table>\n\na）节点起始序号m：序号从0开始，0表示CCO，1表示第1个从节点，以此类推。\n\nb）节点数量n：查询第m,m+1，……，m+n-1个节点，n大于0。\n',
+        "fields": [{'name': '节点起始序号', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '节点起始序号，从0开始，0表示CCO'}, {'name': '节点数量', 'type': 'uint8', 'length': 1, 'required': True, 'default': 1, 'description': '查询节点数量，n>0'}]
+    },
+
+    # 查询指定模块特征信息 (E8 03 03 16)
+    (0xE8, 0x03, 0x03, 0x16): {
+        "name": '查询指定模块特征信息',
+        "direction": "down",
+        "doc": '<b>DI编码</b>：E8 03 03 16<br>\n<b>命令名称</b>：查询指定模块特征信息<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>本次查询从节点数量n</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>从节点1地址</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>6</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>……</td><td style=\'text-align: center; word-wrap: break-word;\'>……</td><td style=\'text-align: center; word-wrap: break-word;\'>……</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>从节点n地址</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>6</td></tr></table>\n\na）从节点数量n需满足：0<n≤16。\n\nb）请求地址为CCO主节点地址时返回CCO支持状态。\n',
+        "fields": [{'name': '本次查询从节点数量', 'type': 'uint8', 'length': 1, 'required': True, 'default': 1, 'description': '本次查询从节点数量，0<n≤16（自动计算，无需手动填写）'}, {'name': '从节点地址列表', 'type': 'list', 'count_field': '本次查询从节点数量', 'required': True, 'item_fields': [{'name': '从节点地址', 'type': 'bytes', 'length': 6, 'reverse': True, 'default': '000000000000', 'description': '6字节地址，低字节在前存储'}], 'description': '待查询从节点地址列表，数量由上一字段决定'}]
+    },
+
+    # 查询即插即用功能开关 (E8 03 03 A0)
+    (0xE8, 0x03, 0x03, 0xA0): {
+        "name": '查询即插即用功能开关',
+        "direction": "down",
+        "doc": '<b>DI编码</b>：E8 03 03 A0<br>\n<b>命令名称</b>：查询即插即用功能开关<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n无数据标识内容。\n',
+        "fields": []
+    },
+
+    # 查询黑名单节点信息 (E8 03 03 A1)
+    (0xE8, 0x03, 0x03, 0xA1): {
+        "name": '查询黑名单节点信息',
+        "direction": "down",
+        "doc": '<b>DI编码</b>：E8 03 03 A1<br>\n<b>命令名称</b>：查询黑名单节点信息<br>\n<b>传输方向</b>：下行（集中器 → 模块）<br><br>\n<table border=1 style=\'margin: auto; word-wrap: break-word;\'><tr><td style=\'text-align: center; word-wrap: break-word;\'>数据内容</td><td style=\'text-align: center; word-wrap: break-word;\'>数据格式</td><td style=\'text-align: center; word-wrap: break-word;\'>字节数</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>从节点起始序号</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>2</td></tr><tr><td style=\'text-align: center; word-wrap: break-word;\'>从节点数量</td><td style=\'text-align: center; word-wrap: break-word;\'>BIN</td><td style=\'text-align: center; word-wrap: break-word;\'>1</td></tr></table>\n\na）黑名单节点起始序号m：表示在黑名单节点列表中的第m个黑名单节点，序号从0开始。\n\nb）黑名单节点数量n：查询第m,m+1，……，m+n-1个黑名单节点，n≥1。\n',
+        "fields": [{'name': '从节点起始序号', 'type': 'uint16', 'length': 2, 'required': True, 'endian': 'little', 'default': 0, 'description': '黑名单节点起始序号，从0开始'}, {'name': '从节点数量', 'type': 'uint8', 'length': 1, 'required': True, 'default': 1, 'description': '查询黑名单节点数量，n≥1'}]
+    },
+
 }

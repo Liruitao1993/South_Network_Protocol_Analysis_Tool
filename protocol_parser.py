@@ -560,6 +560,14 @@ class ProtocolFrameParser:
         (0xE8, 0x03, 0x03, 0x0F): "查询多余节点的台区识别结果",
         (0xE8, 0x04, 0x03, 0x0E): "返回查询表档案的台区识别结果",
         (0xE8, 0x04, 0x03, 0x0F): "返回查询多余节点的台区识别结果",
+        (0xE8, 0x03, 0x03, 0x15): "批量查询模块特征信息",
+        (0xE8, 0x04, 0x03, 0x15): "批量返回查询模块特征信息",
+        (0xE8, 0x03, 0x03, 0x16): "查询指定模块特征信息",
+        (0xE8, 0x04, 0x03, 0x16): "返回查询指定模块特征信息",
+        (0xE8, 0x03, 0x03, 0xA0): "查询即插即用功能开关",
+        (0xE8, 0x04, 0x03, 0xA0): "返回查询即插即用功能开关",
+        (0xE8, 0x03, 0x03, 0xA1): "查询黑名单节点信息",
+        (0xE8, 0x04, 0x03, 0xA1): "返回查询黑名单节点信息",
 
         # AFN=04H 写参数
         (0xE8, 0x02, 0x04, 0x01): "设置主节点地址",
@@ -569,6 +577,10 @@ class ProtocolFrameParser:
         (0xE8, 0x02, 0x04, 0x05): "激活从节点主动注册",
         (0xE8, 0x02, 0x04, 0x06): "终止从节点主动注册",
         (0xE8, 0x02, 0x04, 0x07): "添加从节点通信地址映射表",
+        (0xE8, 0x02, 0x04, 0xA0): "设置即插即用功能开关",
+        (0xE8, 0x02, 0x04, 0xA1): "添加黑名单节点",
+        (0xE8, 0x02, 0x04, 0xA2): "删除黑名单节点",
+        (0xE8, 0x02, 0x04, 0xA3): "设置CCO时钟",
 
         # AFN=05H 上报信息
         (0xE8, 0x05, 0x05, 0x01): "上报任务数据",
@@ -577,6 +589,9 @@ class ProtocolFrameParser:
         (0xE8, 0x05, 0x05, 0x04): "上报从节点主动注册结束",
         (0xE8, 0x05, 0x05, 0x05): "上报任务状态",
         (0xE8, 0x05, 0x05, 0x06): "上报电能表数据",
+        (0xE8, 0x05, 0x05, 0x11): "上报组合多帧任务数据",
+        (0xE8, 0x05, 0x05, 0x12): "上报从节点事件扩展",
+        (0xE8, 0x05, 0x05, 0xA0): "上报未识别节点信息",
 
         # AFN=06H 请求信息
         (0xE8, 0x06, 0x06, 0x01): "请求集中器时间",
@@ -1092,6 +1107,14 @@ class ProtocolFrameParser:
             (0xE8, 0x03, 0x03, 0x0D): self._parse_batch_query_phase_data,           # 批量查询从节点相位信息
             (0xE8, 0x03, 0x03, 0x0E): self._parse_query_region_identify_data,       # 查询表档案的台区识别结果
             (0xE8, 0x03, 0x03, 0x0F): self._parse_query_extra_node_region_data,     # 查询多余节点的台区识别结果
+            (0xE8, 0x03, 0x03, 0x15): self._parse_batch_query_module_feature_data,   # 批量查询模块特征信息（LCMI）
+            (0xE8, 0x04, 0x03, 0x15): self._parse_batch_return_module_feature_data,  # 批量返回查询模块特征信息（LCMI）
+            (0xE8, 0x03, 0x03, 0x16): self._parse_query_module_feature_data,         # 查询指定模块特征信息（LCMI）
+            (0xE8, 0x04, 0x03, 0x16): self._parse_return_module_feature_data,        # 返回查询指定模块特征信息（LCMI）
+            (0xE8, 0x03, 0x03, 0xA0): self._parse_query_pnp_switch_data,             # 查询即插即用功能开关（LCMI）
+            (0xE8, 0x04, 0x03, 0xA0): self._parse_return_pnp_switch_data,            # 返回查询即插即用功能开关（LCMI）
+            (0xE8, 0x03, 0x03, 0xA1): self._parse_query_blacklist_data,              # 查询黑名单节点信息（LCMI）
+            (0xE8, 0x04, 0x03, 0xA1): self._parse_return_blacklist_data,             # 返回查询黑名单节点信息（LCMI）
 
             # AFN=04H 写参数
             (0xE8, 0x02, 0x04, 0x01): self._parse_set_master_node_addr_data,       # 设置主节点地址
@@ -1101,6 +1124,10 @@ class ProtocolFrameParser:
             (0xE8, 0x02, 0x04, 0x05): self._parse_activate_slave_reg_data,          # 激活从节点主动注册
             (0xE8, 0x02, 0x04, 0x06): self._parse_terminate_slave_reg_data,         # 终止从节点主动注册
             (0xE8, 0x02, 0x04, 0x07): self._parse_add_mapping_table_data,           # 添加从节点通信地址映射表
+            (0xE8, 0x02, 0x04, 0xA0): self._parse_set_pnp_switch_data,              # 设置即插即用功能开关（LCMI）
+            (0xE8, 0x02, 0x04, 0xA1): self._parse_add_blacklist_node_data,          # 添加黑名单节点（LCMI）
+            (0xE8, 0x02, 0x04, 0xA2): self._parse_delete_blacklist_node_data,       # 删除黑名单节点（LCMI）
+            (0xE8, 0x02, 0x04, 0xA3): self._parse_set_cco_time_data,                # 设置CCO时钟（LCMI）
 
             # AFN=05H 上报信息
             (0xE8, 0x05, 0x05, 0x01): self._parse_report_task_data,                 # 上报任务数据
@@ -1109,6 +1136,9 @@ class ProtocolFrameParser:
             (0xE8, 0x05, 0x05, 0x04): self._parse_report_reg_end_data,              # 上报从节点主动注册结束
             (0xE8, 0x05, 0x05, 0x05): self._parse_report_task_status_data,          # 上报任务状态
             (0xE8, 0x05, 0x05, 0x06): self._parse_report_meter_data,                 # 上报电能表数据
+            (0xE8, 0x05, 0x05, 0x11): self._parse_report_combined_frame_task_data,   # 上报组合多帧任务数据（LCMI）
+            (0xE8, 0x05, 0x05, 0x12): self._parse_report_slave_event_ext_data,       # 上报从节点事件扩展（LCMI）
+            (0xE8, 0x05, 0x05, 0xA0): self._parse_report_unknown_node_data,          # 上报未识别节点信息（LCMI）
 
             # AFN=06H 请求信息
             (0xE8, 0x06, 0x06, 0x01): self._parse_request_time_data,                # 请求集中器时间
@@ -1261,7 +1291,8 @@ class ProtocolFrameParser:
 
         南网格式：任务ID(2B) + 任务模式字(1B) + 超时时间(2B) + 报文长度(1B) + 报文内容(LB)
         PLUZ格式：任务ID(2B) + 任务模式字(1B) + 超时时间(2B) + 报文长度(2B) + 报文内容(LB)
-        任务模式字: D7=任务响应标识, D6=转发标识(PLUZ扩展), D5~D4=保留, D3=保留, D2~D0=任务优先级
+        任务模式字: D7=任务响应标识, D6=转发标识(PLUZ扩展), D4=组合多帧标志(新文档), D2~D0=任务优先级
+        （新文档定义任务优先级为D3~D0共4位，此处维持低3位提取以兼容存量帧）
         转发标识=1时，报文内容第一位为业务代码：00H=透传, 01H=精准对时, 02H=DLMS报文
         """
         if len(data) < 6:
@@ -1273,6 +1304,7 @@ class ProtocolFrameParser:
 
         resp_flag = (mode >> 7) & 0x01
         fwd_flag = (mode >> 6) & 0x01
+        multi_frame_flag = (mode >> 4) & 0x01
         priority = mode & 0x07
 
         # 自动检测报文长度字段：南网1字节 vs PLUZ 2字节
@@ -1297,10 +1329,12 @@ class ProtocolFrameParser:
         mode_desc = {
             "原始值": f"0x{mode:02X}",
             "任务响应标识": "需要数据返回" if resp_flag == 1 else "不需要数据返回",
-            "任务优先级": f"{priority}（{'最高' if priority == 0 else '最低' if priority == 3 else str(priority)}）"
+            "组合多帧标志": "组合多帧任务数据" if multi_frame_flag == 1 else "普通任务数据",
+            "任务优先级": f"{priority}（{'最高' if priority == 0 else '最低' if priority == 3 else str(priority)}）",
+            "说明": "优先级按现有低3位(D2~D0)显示，新文档定义为D3~D0共4位"
         }
         if fwd_flag:
-            mode_desc["转发标识"] = "需要转发给通信模块"
+            mode_desc["转发标识"] = "需要转发给通信模块（PLUZ扩展）"
 
         result = {
             "任务ID": {"原始值": data[0:2].hex().upper(), "十进制": task_id},
@@ -1370,7 +1404,29 @@ class ProtocolFrameParser:
         }
 
     def _parse_return_incomplete_task_list_data(self, data: bytes) -> Dict[str, Any]:
-        """解析返回查询未完成任务列表数据内容"""
+        """解析返回查询未完成任务列表数据内容（E8 04 02 04）
+
+        新文档格式：本次上报的任务数量n(2B BIN 小端) + 任务ID(2B×n)
+        PLUZ格式：总任务数(2B) + 返回任务数(1B) + 任务ID(2B×n)
+        双格式自动检测：前2B小端值n满足 2+2*n==len(data) 时按新文档格式，否则回退PLUZ格式
+        """
+        if len(data) >= 2:
+            new_count = int.from_bytes(data[0:2], 'little')
+            if 2 + 2 * new_count == len(data):
+                result = {
+                    "本次上报的任务数量": {"原始值": data[0:2].hex().upper(), "十进制": new_count},
+                    "任务列表": []
+                }
+                pos = 2
+                for i in range(new_count):
+                    task_id = int.from_bytes(data[pos:pos+2], 'little')
+                    result["任务列表"].append({
+                        "序号": i + 1,
+                        "任务ID": {"原始值": data[pos:pos+2].hex().upper(), "十进制": task_id}
+                    })
+                    pos += 2
+                return result
+
         if len(data) < 4:
             return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
         total_count = int.from_bytes(data[0:2], 'little')
@@ -1461,7 +1517,9 @@ class ProtocolFrameParser:
         """解析添加多播任务数据内容（E8 02 02 07）
 
         格式：任务ID(2B) + 任务模式字(1B) + 从节点数量(2B)
-              + 从节点地址(6B×n) + 超时时间(2B) + 报文长度(1B) + 报文内容(LB)
+              + 从节点地址(6B×n) + 超时时间(2B) + 报文长度 + 报文内容(LB)
+        任务模式字：D7=任务响应标识, D4=组合多帧标志, D2~D0=任务优先级
+        报文长度：组合多帧标志=0时为1字节，=1时为2字节（新文档定义）
         注：从节点数量=0xFFFF表示向所有从模块传输，此时无从节点地址域
         """
         if len(data) < 5:
@@ -1472,6 +1530,7 @@ class ProtocolFrameParser:
         node_count = int.from_bytes(data[3:5], 'little')
 
         resp_flag = (mode >> 7) & 0x01
+        multi_frame_flag = (mode >> 4) & 0x01
         priority = mode & 0x07
 
         result = {
@@ -1479,6 +1538,7 @@ class ProtocolFrameParser:
             "任务模式字": {
                 "原始值": f"0x{mode:02X}",
                 "任务响应标识": "需要数据返回" if resp_flag == 1 else "不需要数据返回",
+                "组合多帧标志": "组合多帧任务数据" if multi_frame_flag == 1 else "普通任务数据",
                 "任务优先级": str(priority)
             },
             "从节点数量": {
@@ -1504,11 +1564,16 @@ class ProtocolFrameParser:
             result["超时时间"] = {"原始值": data[pos:pos+2].hex().upper(), "十进制": timeout, "单位": "秒"}
             pos += 2
 
-        # 报文长度 + 报文内容
+        # 报文长度 + 报文内容（组合多帧标志D4=1时报文长度为2字节，否则1字节）
         if pos < len(data):
-            msg_len = data[pos]
-            result["报文长度"] = {"原始值": f"0x{msg_len:02X}", "十进制": msg_len}
-            pos += 1
+            if multi_frame_flag and pos + 2 <= len(data):
+                msg_len = int.from_bytes(data[pos:pos+2], 'little')
+                result["报文长度"] = {"原始值": data[pos:pos+2].hex().upper(), "十进制": msg_len}
+                pos += 2
+            else:
+                msg_len = data[pos]
+                result["报文长度"] = {"原始值": f"0x{msg_len:02X}", "十进制": msg_len}
+                pos += 1
             if pos < len(data):
                 end = min(pos + msg_len, len(data))
                 result["报文内容"] = data[pos:end].hex().upper()
@@ -1516,18 +1581,28 @@ class ProtocolFrameParser:
         return result
 
     def _parse_start_task_data(self, data: bytes) -> Dict[str, Any]:
-        """解析启动任务数据内容"""
+        """解析启动任务数据内容（E8 02 02 08）
+
+        新文档定义无数据标识内容；PLUZ扩展帧携带任务ID(2B 小端)，兼容解析
+        """
+        if len(data) == 0:
+            return {"说明": "启动任务命令，无数据内容"}
         if len(data) < 2:
-            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足，无法解析任务ID"}
         task_id = int.from_bytes(data[0:2], 'little')  # 任务 ID: 2 字节 (小端序)
         return {
             "任务ID": {"原始值": data[0:2].hex().upper(), "十进制": task_id}
         }
 
     def _parse_pause_task_data(self, data: bytes) -> Dict[str, Any]:
-        """解析暂停任务数据内容"""
+        """解析暂停任务数据内容（E8 02 02 09）
+
+        新文档定义无数据标识内容；PLUZ扩展帧携带任务ID(2B 小端)，兼容解析
+        """
+        if len(data) == 0:
+            return {"说明": "暂停任务命令，无数据内容"}
         if len(data) < 2:
-            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足，无法解析任务ID"}
         task_id = int.from_bytes(data[0:2], 'little')  # 任务 ID: 2 字节 (小端序)
         return {
             "任务ID": {"原始值": data[0:2].hex().upper(), "十进制": task_id}
@@ -4435,6 +4510,342 @@ class ProtocolFrameParser:
             }
         else:
             return {"原始数据": data.hex().upper(), "说明": f"数据长度异常（期望1字节下行或4字节上行，实际{len(data)}字节）"}
+
+    # ==================== 本地通信模块接口协议（13 计量自动化终端本地通信模块接口协议.md）====================
+
+    def _parse_set_pnp_switch_data(self, data: bytes) -> Dict[str, Any]:
+        """解析设置即插即用功能开关数据内容（E8 02 04 A0）
+
+        格式：即插即用功能开关(2B BIN 小端)，0=关闭，1=开启
+        """
+        if len(data) < 2:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足，期望2字节即插即用功能开关"}
+        switch = int.from_bytes(data[0:2], 'little')
+        return {
+            "即插即用功能开关": {
+                "原始值": data[0:2].hex().upper(),
+                "十进制": switch,
+                "说明": "开启" if switch == 1 else "关闭" if switch == 0 else f"保留({switch})"
+            }
+        }
+
+    def _parse_add_blacklist_node_data(self, data: bytes) -> Dict[str, Any]:
+        """解析添加黑名单节点数据内容（E8 02 04 A1）
+
+        格式：黑名单节点数量n(1B BIN) + 黑名单节点地址(6B×n)
+        """
+        if len(data) < 1:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        node_count = data[0]
+        result = {
+            "黑名单节点数量": {"原始值": f"0x{node_count:02X}", "十进制": node_count}
+        }
+        pos = 1
+        nodes = []
+        for i in range(node_count):
+            if pos + 6 > len(data):
+                break
+            nodes.append({
+                "序号": i + 1,
+                "黑名单节点地址": {"原始值": data[pos:pos+6].hex().upper(), "解析值": data[pos:pos+6][::-1].hex().upper()}
+            })
+            pos += 6
+        result["黑名单节点列表"] = nodes
+        return result
+
+    def _parse_delete_blacklist_node_data(self, data: bytes) -> Dict[str, Any]:
+        """解析删除黑名单节点数据内容（E8 02 04 A2）
+
+        格式：黑名单节点数量n(1B BIN) + 黑名单节点地址(6B×n)
+        """
+        if len(data) < 1:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        node_count = data[0]
+        result = {
+            "黑名单节点数量": {"原始值": f"0x{node_count:02X}", "十进制": node_count}
+        }
+        pos = 1
+        nodes = []
+        for i in range(node_count):
+            if pos + 6 > len(data):
+                break
+            nodes.append({
+                "序号": i + 1,
+                "黑名单节点地址": {"原始值": data[pos:pos+6].hex().upper(), "解析值": data[pos:pos+6][::-1].hex().upper()}
+            })
+            pos += 6
+        result["黑名单节点列表"] = nodes
+        return result
+
+    def _parse_set_cco_time_data(self, data: bytes) -> Dict[str, Any]:
+        """解析设置CCO时钟数据内容（E8 02 04 A3）
+
+        格式：6字节BCD时间（秒分时日月年），与请求集中器时间(E8 06 06 01)内容一致
+        """
+        if len(data) < 6:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足，期望6字节BCD时间"}
+        sec = self._bcd_to_str(data[0])
+        minute = self._bcd_to_str(data[1])
+        hour = self._bcd_to_str(data[2])
+        day = self._bcd_to_str(data[3])
+        month = self._bcd_to_str(data[4])
+        year = self._bcd_to_str(data[5])
+        return {
+            "当前时间-秒": {"原始值": f"0x{data[0]:02X}", "BCD": sec},
+            "当前时间-分": {"原始值": f"0x{data[1]:02X}", "BCD": minute},
+            "当前时间-时": {"原始值": f"0x{data[2]:02X}", "BCD": hour},
+            "当前时间-日": {"原始值": f"0x{data[3]:02X}", "BCD": day},
+            "当前时间-月": {"原始值": f"0x{data[4]:02X}", "BCD": month},
+            "当前时间-年": {"原始值": f"0x{data[5]:02X}", "BCD": f"20{year}"},
+            "时间": f"20{year}-{month}-{day} {hour}:{minute}:{sec}"
+        }
+
+    def _parse_batch_query_module_feature_data(self, data: bytes) -> Dict[str, Any]:
+        """解析批量查询模块特征信息数据内容（E8 03 03 15）
+
+        格式：节点起始序号(2B BIN 小端) + 节点数量(1B BIN)
+        """
+        if len(data) < 3:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        return {
+            "节点起始序号": {"原始值": data[0:2].hex().upper(), "十进制": int.from_bytes(data[0:2], 'little')},
+            "节点数量": {"原始值": f"0x{data[2]:02X}", "十进制": data[2]}
+        }
+
+    def _parse_query_module_feature_data(self, data: bytes) -> Dict[str, Any]:
+        """解析查询指定模块特征信息数据内容（E8 03 03 16）
+
+        格式：本次查询从节点数量n(1B BIN) + 从节点地址(6B×n)，0<n≤16
+        """
+        if len(data) < 1:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        node_count = data[0]
+        result = {
+            "本次查询从节点数量": {"原始值": f"0x{node_count:02X}", "十进制": node_count}
+        }
+        pos = 1
+        nodes = []
+        for i in range(node_count):
+            if pos + 6 > len(data):
+                break
+            nodes.append({
+                "序号": i + 1,
+                "从节点地址": {"原始值": data[pos:pos+6].hex().upper(), "解析值": data[pos:pos+6][::-1].hex().upper()}
+            })
+            pos += 6
+        result["从节点地址列表"] = nodes
+        return result
+
+    def _parse_query_pnp_switch_data(self, data: bytes) -> Dict[str, Any]:
+        """解析查询即插即用功能开关数据内容（E8 03 03 A0）
+
+        文档定义无数据标识内容
+        """
+        return {"说明": "查询即插即用功能开关命令，无数据内容"}
+
+    def _parse_query_blacklist_data(self, data: bytes) -> Dict[str, Any]:
+        """解析查询黑名单节点信息数据内容（E8 03 03 A1）
+
+        格式：从节点起始序号(2B BIN 小端) + 从节点数量(1B BIN)
+        """
+        if len(data) < 3:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        return {
+            "从节点起始序号": {"原始值": data[0:2].hex().upper(), "十进制": int.from_bytes(data[0:2], 'little')},
+            "从节点数量": {"原始值": f"0x{data[2]:02X}", "十进制": data[2]}
+        }
+
+    @staticmethod
+    def _parse_module_feature_info(info: bytes) -> Dict[str, Any]:
+        """解析模块特征信息(8B)：保留7B + 特征字节1B
+
+        特征字节位定义：D1=载波多帧支持，D0=数据有效标志（0=节点离线，数据无效），D7~D2保留
+        """
+        feature_byte = info[7]
+        multi_frame = (feature_byte >> 1) & 0x01
+        valid = feature_byte & 0x01
+        return {
+            "原始值": info.hex().upper(),
+            "保留": info[0:7].hex().upper(),
+            "特征字节": f"0x{feature_byte:02X}",
+            "载波多帧支持": "支持" if multi_frame else "不支持",
+            "数据有效标志": "数据有效" if valid else "节点离线，数据无效"
+        }
+
+    def _parse_batch_return_module_feature_data(self, data: bytes) -> Dict[str, Any]:
+        """解析批量返回查询模块特征信息数据内容（E8 04 03 15）
+
+        格式：节点总数量(2B BIN 小端) + 本次应答的节点数量n(1B BIN)
+              + n×(节点地址6B + 模块特征信息8B)
+        """
+        if len(data) < 3:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        total_count = int.from_bytes(data[0:2], 'little')
+        return_count = data[2]
+        result = {
+            "节点总数量": {"原始值": data[0:2].hex().upper(), "十进制": total_count},
+            "本次应答的节点数量": {"原始值": f"0x{return_count:02X}", "十进制": return_count},
+            "节点列表": []
+        }
+        pos = 3
+        for i in range(return_count):
+            if pos + 14 > len(data):
+                break
+            result["节点列表"].append({
+                "序号": i + 1,
+                "节点地址": {"原始值": data[pos:pos+6].hex().upper(), "解析值": data[pos:pos+6][::-1].hex().upper()},
+                "模块特征信息": self._parse_module_feature_info(data[pos+6:pos+14])
+            })
+            pos += 14
+        return result
+
+    def _parse_return_module_feature_data(self, data: bytes) -> Dict[str, Any]:
+        """解析返回查询指定模块特征信息数据内容（E8 04 03 16）
+
+        格式：本次应答的节点数量n(1B BIN) + n×(节点地址6B + 模块特征信息8B)
+        """
+        if len(data) < 1:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        return_count = data[0]
+        result = {
+            "本次应答的节点数量": {"原始值": f"0x{return_count:02X}", "十进制": return_count},
+            "节点列表": []
+        }
+        pos = 1
+        for i in range(return_count):
+            if pos + 14 > len(data):
+                break
+            result["节点列表"].append({
+                "序号": i + 1,
+                "节点地址": {"原始值": data[pos:pos+6].hex().upper(), "解析值": data[pos:pos+6][::-1].hex().upper()},
+                "模块特征信息": self._parse_module_feature_info(data[pos+6:pos+14])
+            })
+            pos += 14
+        return result
+
+    def _parse_return_pnp_switch_data(self, data: bytes) -> Dict[str, Any]:
+        """解析返回查询即插即用功能开关数据内容（E8 04 03 A0）
+
+        格式：即采功能开关(2B BIN 小端)，0=关闭即插即用功能，1=开启即插即用功能
+        """
+        if len(data) < 2:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        switch = int.from_bytes(data[0:2], 'little')
+        return {
+            "即采功能开关": {
+                "原始值": data[0:2].hex().upper(),
+                "十进制": switch,
+                "说明": "开启即插即用功能" if switch == 1 else "关闭即插即用功能" if switch == 0 else f"保留({switch})"
+            }
+        }
+
+    def _parse_return_blacklist_data(self, data: bytes) -> Dict[str, Any]:
+        """解析返回查询黑名单节点信息数据内容（E8 04 03 A1）
+
+        格式：黑名单节点总数量(2B BIN 小端) + 本次应答的黑名单节点数量n(1B BIN)
+              + 黑名单节点地址(6B×n)
+        """
+        if len(data) < 3:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        total_count = int.from_bytes(data[0:2], 'little')
+        return_count = data[2]
+        result = {
+            "黑名单节点总数量": {"原始值": data[0:2].hex().upper(), "十进制": total_count},
+            "本次应答的黑名单节点数量": {"原始值": f"0x{return_count:02X}", "十进制": return_count},
+            "黑名单节点列表": []
+        }
+        pos = 3
+        for i in range(return_count):
+            if pos + 6 > len(data):
+                break
+            result["黑名单节点列表"].append({
+                "序号": i + 1,
+                "黑名单节点地址": {"原始值": data[pos:pos+6].hex().upper(), "解析值": data[pos:pos+6][::-1].hex().upper()}
+            })
+            pos += 6
+        return result
+
+    def _parse_report_unknown_node_data(self, data: bytes) -> Dict[str, Any]:
+        """解析上报未识别节点信息数据内容（E8 05 05 A0）
+
+        格式：上报未识别节点的数量n(1B BIN，n≥1) + 未识别节点地址(6B×n)
+        """
+        if len(data) < 1:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        node_count = data[0]
+        result = {
+            "上报未识别节点数量": {"原始值": f"0x{node_count:02X}", "十进制": node_count}
+        }
+        pos = 1
+        nodes = []
+        for i in range(node_count):
+            if pos + 6 > len(data):
+                break
+            nodes.append({
+                "序号": i + 1,
+                "未识别节点地址": {"原始值": data[pos:pos+6].hex().upper(), "解析值": data[pos:pos+6][::-1].hex().upper()}
+            })
+            pos += 6
+        result["未识别节点列表"] = nodes
+        return result
+
+    def _parse_report_combined_frame_task_data(self, data: bytes) -> Dict[str, Any]:
+        """解析上报组合多帧任务数据内容（E8 05 05 11）
+
+        格式：任务ID(2B BIN 小端) + 报文长度(2B BIN 小端) + 报文内容
+        组合多帧内容：[报文长度D11~D0, D15~D12保留](2B 小端) + 报文内容(LB)，逐项重复
+        """
+        if len(data) < 4:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        task_id = int.from_bytes(data[0:2], 'little')
+        msg_len = int.from_bytes(data[2:4], 'little')
+        result = {
+            "任务ID": {"原始值": data[0:2].hex().upper(), "十进制": task_id},
+            "报文长度": {"原始值": data[2:4].hex().upper(), "十进制": msg_len}
+        }
+        if len(data) >= 4 + msg_len:
+            content = data[4:4 + msg_len]
+        else:
+            content = data[4:]
+        result["报文内容"] = content.hex().upper()
+
+        # 深度解析组合多帧内容
+        sub_frames = []
+        pos = 0
+        index = 1
+        while pos + 2 <= len(content):
+            header = int.from_bytes(content[pos:pos+2], 'little')
+            sub_len = header & 0x0FFF
+            pos += 2
+            sub_frames.append({
+                "序号": index,
+                "报文长度": sub_len,
+                "报文内容": content[pos:pos + sub_len].hex().upper()
+            })
+            pos += sub_len
+            index += 1
+            if sub_len == 0:
+                break
+        result["组合多帧列表"] = sub_frames
+        return result
+
+    def _parse_report_slave_event_ext_data(self, data: bytes) -> Dict[str, Any]:
+        """解析上报从节点事件扩展数据内容（E8 05 05 12）
+
+        格式：报文长度L(2B BIN 小端) + 报文内容(LB)
+        """
+        if len(data) < 2:
+            return {"原始数据": data.hex().upper(), "说明": "数据长度不足"}
+        msg_len = int.from_bytes(data[0:2], 'little')
+        result = {
+            "报文长度": {"原始值": data[0:2].hex().upper(), "十进制": msg_len}
+        }
+        if len(data) >= 2 + msg_len:
+            content = data[2:2 + msg_len]
+        else:
+            content = data[2:]
+        result["报文内容"] = content.hex().upper()
+        return result
 
     def _calculate_checksum(self, data: bytes) -> int:
         """计算校验和"""

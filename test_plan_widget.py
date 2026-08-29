@@ -29,7 +29,7 @@ from PySide6.QtGui import (
     QSyntaxHighlighter, QTextCharFormat, QBrush
 )
 
-from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu, ZoomableTableWidget
+from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu, ZoomableTableWidget, set_btn, set_btn_icon
 from app_paths import data_path
 
 try:
@@ -1307,9 +1307,7 @@ class AddTestItemDialog(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         ok_btn = QPushButton("确定")
-        ok_btn.setStyleSheet(
-            "QPushButton { background-color: #4CAF50; color: white; border-radius: 4px; padding: 4px 16px; font-weight: bold; }"
-        )
+        set_btn(ok_btn, "success")
         ok_btn.clicked.connect(self._on_ok)
         btn_layout.addWidget(ok_btn)
         cancel_btn = QPushButton("取消")
@@ -1470,21 +1468,25 @@ class TestPlanWidget(QWidget):
 
         self.btn_add = QPushButton("添加")
         self.btn_add.setToolTip("手动添加测试项")
+        set_btn_icon(self.btn_add, "add")
         self.btn_add.clicked.connect(self._on_add_item)
         toolbar.addWidget(self.btn_add)
 
         self.btn_del = QPushButton("删除")
         self.btn_del.setToolTip("删除选中的测试项")
+        set_btn_icon(self.btn_del, "delete")
         self.btn_del.clicked.connect(self._on_delete_item)
         toolbar.addWidget(self.btn_del)
 
         self.btn_up = QPushButton("上移")
         self.btn_up.setToolTip("将选中项上移")
+        set_btn_icon(self.btn_up, "up")
         self.btn_up.clicked.connect(self._on_move_up)
         toolbar.addWidget(self.btn_up)
 
         self.btn_down = QPushButton("下移")
         self.btn_down.setToolTip("将选中项下移")
+        set_btn_icon(self.btn_down, "down")
         self.btn_down.clicked.connect(self._on_move_down)
         toolbar.addWidget(self.btn_down)
 
@@ -1493,9 +1495,8 @@ class TestPlanWidget(QWidget):
         self.btn_clear_bg = QPushButton("清空后台")
         self.btn_clear_bg.setToolTip("清除所有后台监听项的匹配计数和状态")
         self.btn_clear_bg.clicked.connect(self._on_clear_background)
-        self.btn_clear_bg.setStyleSheet(
-            "QPushButton { background-color: #FF9800; color: white; border-radius: 3px; padding: 3px 10px; }"
-        )
+        set_btn(self.btn_clear_bg, "warning")
+        set_btn_icon(self.btn_clear_bg, "clear")
         toolbar.addWidget(self.btn_clear_bg)
 
         toolbar.addSpacing(8)
@@ -1509,22 +1510,21 @@ class TestPlanWidget(QWidget):
 
         self.btn_edit_item = QPushButton("编辑选中")
         self.btn_edit_item.setToolTip("编辑当前选中行的测试项")
+        set_btn_icon(self.btn_edit_item, "edit")
         self.btn_edit_item.clicked.connect(self._on_edit_item)
         toolbar.addWidget(self.btn_edit_item)
 
         toolbar.addSpacing(12)
 
         self.btn_start = QPushButton("开始测试")
-        self.btn_start.setStyleSheet(
-            "QPushButton { background-color: #4CAF50; color: white; border-radius: 3px; padding: 4px 14px; font-weight: bold; }"
-        )
+        set_btn(self.btn_start, "success")
+        set_btn_icon(self.btn_start, "play")
         self.btn_start.clicked.connect(self._on_start_test)
         toolbar.addWidget(self.btn_start)
 
         self.btn_stop = QPushButton("停止测试")
-        self.btn_stop.setStyleSheet(
-            "QPushButton { background-color: #f44336; color: white; border-radius: 3px; padding: 4px 14px; font-weight: bold; }"
-        )
+        set_btn(self.btn_stop, "danger")
+        set_btn_icon(self.btn_stop, "stop")
         self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self._on_stop_test)
         toolbar.addWidget(self.btn_stop)
@@ -1544,25 +1544,27 @@ class TestPlanWidget(QWidget):
 
         self.btn_export = QPushButton("导出")
         self.btn_export.setToolTip("导出帧列表到 JSON")
+        set_btn_icon(self.btn_export, "export")
         self.btn_export.clicked.connect(self._on_export)
         toolbar.addWidget(self.btn_export)
 
         self.btn_import = QPushButton("导入")
         self.btn_import.setToolTip("从 JSON 导入帧列表")
+        set_btn_icon(self.btn_import, "open_file")
         self.btn_import.clicked.connect(self._on_import)
         toolbar.addWidget(self.btn_import)
 
         self.btn_clear_results = QPushButton("清空结果")
         self.btn_clear_results.setToolTip("清空所有测试结果和状态")
+        set_btn_icon(self.btn_clear_results, "clear")
         self.btn_clear_results.clicked.connect(self._on_clear_results)
         toolbar.addWidget(self.btn_clear_results)
 
         self.btn_export_report = QPushButton("导出报告")
         self.btn_export_report.setToolTip("导出 Excel 测试报告")
         self.btn_export_report.clicked.connect(self._on_export_report)
-        self.btn_export_report.setStyleSheet(
-            "QPushButton { background-color: #2196F3; color: white; border-radius: 3px; padding: 4px 12px; font-weight: bold; }"
-        )
+        set_btn(self.btn_export_report, "primary")
+        set_btn_icon(self.btn_export_report, "export")
         toolbar.addWidget(self.btn_export_report)
 
         main_layout.addLayout(toolbar)
@@ -1593,7 +1595,7 @@ class TestPlanWidget(QWidget):
         self.table.setColumnWidth(0, 40)
         self.table.setColumnWidth(1, 120)
         self.table.setColumnWidth(2, 180)
-        self.table.setColumnWidth(3, 50)
+        self.table.setColumnWidth(3, 60)
         self.table.setColumnWidth(4, 50)
         self.table.setColumnWidth(5, 60)
         self.table.setColumnWidth(6, 70)
@@ -1703,19 +1705,13 @@ class TestPlanWidget(QWidget):
             # 操作按钮
             if is_lua:
                 send_btn = QPushButton("Lua")
-                send_btn.setStyleSheet(
-                    "QPushButton { background-color: #9C27B0; color: white; border-radius: 2px; padding: 1px 4px; font-size: 11px; }"
-                )
+                set_btn(send_btn, "accent", "sm")
             elif persistent:
                 send_btn = QPushButton("后台")
-                send_btn.setStyleSheet(
-                    "QPushButton { background-color: #4CAF50; color: white; border-radius: 2px; padding: 1px 4px; font-size: 11px; }"
-                )
+                set_btn(send_btn, "success", "sm")
             else:
                 send_btn = QPushButton("发送" if item.get("send_enabled", True) else "等待")
-                send_btn.setStyleSheet(
-                    "QPushButton { background-color: #2196F3; color: white; border-radius: 2px; padding: 1px 4px; font-size: 11px; }"
-                )
+                set_btn(send_btn, "primary", "sm")
             send_btn.clicked.connect(lambda checked=False, r=row: self._on_send_single(r))
             self.table.setCellWidget(row, 3, send_btn)
             # 发送（使用复选框项）

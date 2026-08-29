@@ -1,0 +1,9 @@
+{
+ "meter_count": 1,
+ "energy_increase": true,
+ "auto_freeze_time": true,
+ "mac_enabled": true,
+ "blacklist": [],
+ "whitelist": [],
+ "leak_window": null
+}

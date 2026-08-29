@@ -310,6 +310,11 @@ if _HAS_QT:
         def __init__(self, client: LLMAPIClient, chunker: LLMChunker,
                      prompt: str, content: str, parent=None):
             super().__init__(parent)
+            try:
+                import thread_registry
+                thread_registry.track(self, "LLMWorker")
+            except Exception:
+                pass
             self.client = client
             self.chunker = chunker
             self.prompt = prompt

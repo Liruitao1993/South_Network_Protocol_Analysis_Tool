@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QFont, QColor, QKeySequence, QShortcut, QGuiApplication
-from gui_utils import ZoomableTableWidget
+from gui_utils import ZoomableTableWidget, set_btn
 
 
 class FrameMonitorWidget(QWidget):
@@ -77,10 +77,12 @@ class FrameMonitorWidget(QWidget):
         toolbar.addWidget(self._filter_combo)
 
         self._clear_btn = QPushButton("清空历史")
+        set_btn(self._clear_btn, "secondary")
         self._clear_btn.clicked.connect(self._on_clear_history)
         toolbar.addWidget(self._clear_btn)
 
         self._export_btn = QPushButton("导出历史")
+        set_btn(self._export_btn, "secondary")
         self._export_btn.clicked.connect(self._on_export_history)
         toolbar.addWidget(self._export_btn)
 
@@ -174,10 +176,7 @@ class FrameMonitorWidget(QWidget):
         self._add_to_test_btn = QPushButton("添加到测试方案")
         self._add_to_test_btn.setEnabled(False)
         self._add_to_test_btn.clicked.connect(self._on_add_to_test_plan)
-        self._add_to_test_btn.setStyleSheet(
-            "QPushButton { background-color: #4CAF50; color: white; border-radius: 3px; padding: 4px 12px; }"
-            "QPushButton:disabled { background-color: #cccccc; }"
-        )
+        set_btn(self._add_to_test_btn, "success")
         bottom_layout.addWidget(self._add_to_test_btn)
 
         self._copy_hex_btn = QPushButton("复制HEX")
@@ -188,10 +187,7 @@ class FrameMonitorWidget(QWidget):
         self._verify_btn = QPushButton("校验选中帧")
         self._verify_btn.setEnabled(False)
         self._verify_btn.clicked.connect(self._on_verify_selected)
-        self._verify_btn.setStyleSheet(
-            "QPushButton { background-color: #2196F3; color: white; border-radius: 3px; padding: 4px 12px; }"
-            "QPushButton:disabled { background-color: #cccccc; }"
-        )
+        set_btn(self._verify_btn, "primary")
         bottom_layout.addWidget(self._verify_btn)
 
         bottom_layout.addStretch()

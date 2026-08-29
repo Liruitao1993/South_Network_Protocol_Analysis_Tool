@@ -19,7 +19,7 @@ from PySide6.QtGui import QFont, QColor
 from gui_utils import ZoomableTableWidget
 
 
-def _style_action_btn(btn: QPushButton, height: int = 28, min_width: int = 0):
+def _style_action_btn(btn: QPushButton, height: int = 24, min_width: int = 0):
     """统一操作按钮尺寸。"""
     btn.setMinimumHeight(height)
     if min_width:
@@ -154,6 +154,11 @@ class _TestThread(QThread):
 
     def __init__(self, endpoint: str, api_key: str, model: str):
         super().__init__()
+        try:
+            import thread_registry
+            thread_registry.track(self, "LLMAPITestThread")
+        except Exception:
+            pass
         self.endpoint = endpoint
         self.api_key = api_key
         self.model = model

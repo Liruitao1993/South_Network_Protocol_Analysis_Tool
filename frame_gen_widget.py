@@ -17,6 +17,7 @@ from PySide6.QtCore import Qt, QTimer, Signal, QRegularExpression
 from PySide6.QtGui import QFont, QKeyEvent, QIntValidator, QRegularExpressionValidator
 
 from send_frame_lib import ProtocolFrameGenerator
+from gui_utils import set_btn, set_btn_icon
 from frame_generator_schema import DI_FIELD_SCHEMA
 from protocol_parser import ProtocolFrameParser
 from gdw_send_frame_lib import GDWFrameGenerator
@@ -135,11 +136,8 @@ class FrameGenWidget(QWidget):
         cmd_layout.addWidget(self.afn_fn_combo)
 
         self.cmd_help_btn = QPushButton("命令说明")
-        self.cmd_help_btn.setStyleSheet(
-            "QPushButton { background-color: #FF9800; color: white; "
-            "border-radius: 3px; padding: 2px 10px; font-weight: bold; }"
-            "QPushButton:disabled { background-color: #cccccc; }"
-        )
+        set_btn(self.cmd_help_btn, "warning", "sm")
+        set_btn_icon(self.cmd_help_btn, "help")
         self.cmd_help_btn.setEnabled(False)
         self.cmd_help_btn.clicked.connect(self._on_cmd_help_clicked)
         cmd_layout.addWidget(self.cmd_help_btn)
@@ -440,10 +438,8 @@ class FrameGenWidget(QWidget):
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(6)
         self.generate_btn = QPushButton("生成帧")
-        self.generate_btn.setStyleSheet(
-            "QPushButton { background-color: #4CAF50; color: white; "
-            "border-radius: 4px; padding: 2px 14px; font-weight: bold; }"
-        )
+        set_btn(self.generate_btn, "success")
+        set_btn_icon(self.generate_btn, "apply")
         self.generate_btn.clicked.connect(self._on_generate)
         btn_layout.addWidget(self.generate_btn)
         btn_layout.addStretch()
@@ -465,36 +461,26 @@ class FrameGenWidget(QWidget):
         serial_btn_layout = QHBoxLayout()
         serial_btn_layout.setSpacing(6)
         self.send_serial_btn = QPushButton("发送到串口")
-        self.send_serial_btn.setStyleSheet(
-            "QPushButton { background-color: #2196F3; color: white; "
-            "border-radius: 4px; padding: 2px 12px; font-weight: bold; }"
-            "QPushButton:disabled { background-color: #cccccc; }"
-        )
+        set_btn(self.send_serial_btn, "primary")
+        set_btn_icon(self.send_serial_btn, "play")
         self.send_serial_btn.clicked.connect(self._on_send_to_serial)
         serial_btn_layout.addWidget(self.send_serial_btn)
 
         self.add_preset_btn = QPushButton("添加到预设")
-        self.add_preset_btn.setStyleSheet(
-            "QPushButton { background-color: #FF9800; color: white; "
-            "border-radius: 4px; padding: 2px 12px; font-weight: bold; }"
-            "QPushButton:disabled { background-color: #cccccc; }"
-        )
+        set_btn(self.add_preset_btn, "warning")
+        set_btn_icon(self.add_preset_btn, "add")
         self.add_preset_btn.clicked.connect(self._on_add_to_preset_clicked)
         serial_btn_layout.addWidget(self.add_preset_btn)
 
         self.add_test_plan_btn = QPushButton("添加到测试方案")
-        self.add_test_plan_btn.setStyleSheet(
-            "QPushButton { background-color: #9C27B0; color: white; "
-            "border-radius: 4px; padding: 2px 12px; font-weight: bold; }"
-            "QPushButton:disabled { background-color: #cccccc; }"
-        )
+        set_btn(self.add_test_plan_btn, "accent")
+        set_btn_icon(self.add_test_plan_btn, "add")
         self.add_test_plan_btn.clicked.connect(self._on_add_to_test_plan_clicked)
         serial_btn_layout.addWidget(self.add_test_plan_btn)
 
         self.clear_log_btn = QPushButton("清空日志")
-        self.clear_log_btn.setStyleSheet(
-            "QPushButton { padding: 2px 12px; }"
-        )
+        set_btn(self.clear_log_btn, "secondary")
+        set_btn_icon(self.clear_log_btn, "clear")
         self.clear_log_btn.clicked.connect(self._on_clear_serial_log)
         serial_btn_layout.addWidget(self.clear_log_btn)
         serial_btn_layout.addStretch()
@@ -576,9 +562,8 @@ class FrameGenWidget(QWidget):
         # 清空响应解析按钮
         resp_btn_layout = QHBoxLayout()
         self.clear_resp_btn = QPushButton("清空响应解析")
-        self.clear_resp_btn.setStyleSheet(
-            "QPushButton { padding: 2px 12px; }"
-        )
+        set_btn(self.clear_resp_btn, "secondary")
+        set_btn_icon(self.clear_resp_btn, "clear")
         self.clear_resp_btn.clicked.connect(self._on_clear_response_table)
         resp_btn_layout.addWidget(self.clear_resp_btn)
         resp_btn_layout.addStretch()
@@ -851,17 +836,13 @@ class FrameGenWidget(QWidget):
         gen_row = QHBoxLayout()
         gen_row.setSpacing(6)
         self.eb_gen_btn = QPushButton("生成帧")
-        self.eb_gen_btn.setStyleSheet(
-            "QPushButton { background-color: #2196F3; color: white; "
-            "border-radius: 4px; padding: 2px 14px; font-weight: bold; }"
-        )
+        set_btn(self.eb_gen_btn, "primary")
+        set_btn_icon(self.eb_gen_btn, "apply")
         self.eb_gen_btn.clicked.connect(self._gen_eb_frame)
         gen_row.addWidget(self.eb_gen_btn)
         self.eb_apply_btn = QPushButton("填入报文内容字段")
-        self.eb_apply_btn.setStyleSheet(
-            "QPushButton { background-color: #4CAF50; color: white; "
-            "border-radius: 4px; padding: 2px 14px; font-weight: bold; }"
-        )
+        set_btn(self.eb_apply_btn, "success")
+        set_btn_icon(self.eb_apply_btn, "apply")
         self.eb_apply_btn.clicked.connect(self._apply_eb_to_content)
         gen_row.addWidget(self.eb_apply_btn)
         self.eb_gen_msg = QLabel("")
@@ -1623,6 +1604,30 @@ class FrameGenWidget(QWidget):
                     self._field_widgets[field["name"]] = {"widget": oi_edit}
                     layout.addStretch()
                     self._form_layout.addWidget(container)
+                elif ftype == "piid":
+                    # PIID = 服务优先级(D7) + 服务序号(D6-D0)，拆成两个子输入
+                    container = QWidget()
+                    layout = QHBoxLayout(container)
+                    layout.setContentsMargins(4, 2, 4, 2)
+                    label = QLabel(field.get("name", "PIID") + "  [服务优先级D7 + 服务序号D6-D0]")
+                    label.setMinimumWidth(180)
+                    label.setToolTip(field.get("desc", ""))
+                    layout.addWidget(label)
+                    layout.addWidget(QLabel("优先级:"))
+                    priority_combo = QComboBox()
+                    priority_combo.addItem("0-普通", 0)
+                    priority_combo.addItem("1-高优先级", 1)
+                    priority_combo.currentIndexChanged.connect(self._schedule_realtime_update)
+                    layout.addWidget(priority_combo)
+                    layout.addWidget(QLabel("序号:"))
+                    seq_edit = QLineEdit(str(field.get("default", 1)))
+                    seq_edit.setFixedWidth(50)
+                    seq_edit.textChanged.connect(self._schedule_realtime_update)
+                    layout.addWidget(seq_edit)
+                    self._field_widgets[f"{field['name']}_优先级"] = {"widget": priority_combo}
+                    self._field_widgets[f"{field['name']}_序号"] = {"widget": seq_edit}
+                    layout.addStretch()
+                    self._form_layout.addWidget(container)
                 elif ftype == "oad_list":
                     # OAD列表：一个大文本框
                     container = QWidget()
@@ -1845,24 +1850,15 @@ class FrameGenWidget(QWidget):
         # 操作按钮
         if t in self.COMPOUND_TYPES:
             add_btn = QPushButton("+")
-            add_btn.setFixedSize(28, 24)
-            add_btn.setStyleSheet(
-                "QPushButton { color: #000; background: #fff; border: 1px solid #ccc; "
-                "border-radius: 3px; font-weight: bold; font-size: 14px; }"
-                "QPushButton:hover { background: #f0f0f0; }"
-            )
+            set_btn(add_btn, "secondary", "sm")
+            add_btn.setFixedWidth(28)
             add_btn.clicked.connect(lambda checked=False, it=item: self._on_add_axdr_child(it))
             row_layout.addWidget(add_btn)
 
         del_btn = QPushButton("删")
-        del_btn.setFixedSize(28, 24)
+        del_btn.setFixedWidth(28)
         del_btn.setToolTip("删除此项")
-        del_btn.setStyleSheet(
-            "QPushButton { color: #fff; background: #e74c3c; border: 1px solid #c0392b; "
-            "border-radius: 3px; font-weight: bold; font-size: 11px; }"
-            "QPushButton:hover { background: #c0392b; }"
-            "QToolTip { background-color: white; color: black; border: 1px solid #ccc; }"
-        )
+        set_btn(del_btn, "danger", "sm")
         del_btn.clicked.connect(lambda checked=False, it=item: self._on_del_axdr_item(it))
         row_layout.addWidget(del_btn)
 
@@ -2751,6 +2747,24 @@ class FrameGenWidget(QWidget):
                     values[name] = widget.text().strip()
                 else:
                     values[name] = widget.text().strip()
+
+        # dlt698: 由 PIID 子输入合成 PIID 字节（优先级D7+序号D6-D0），并收集自定义数据内容
+        if self.protocol_mode == "dlt698" and not self._custom_mode:
+            prio_w = self._field_widgets.get("PIID_优先级", {}).get("widget")
+            seq_w = self._field_widgets.get("PIID_序号", {}).get("widget")
+            if prio_w is not None and seq_w is not None:
+                try:
+                    prio = int(prio_w.currentData() or 0) & 0x01
+                    seq = int(seq_w.text().strip() or 1) & 0x7F
+                    values["PIID"] = (prio << 7) | seq
+                except ValueError:
+                    values["PIID"] = 1
+            custom_w = self._field_widgets.get("自定义数据内容", {}).get("widget")
+            if custom_w is not None:
+                custom_text = custom_w.text().strip()
+                if custom_text:
+                    values["自定义数据内容"] = custom_text
+            # 索引字段由 schema 处理，无需特殊合成
 
         return values
 

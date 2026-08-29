@@ -1,8 +1,76 @@
-"""GUI通用工具：中文右键菜单、可缩放表格等"""
+"""GUI通用工具：中文右键菜单、可缩放表格、按钮图标等"""
 
-from PySide6.QtWidgets import QLineEdit, QTextEdit, QTableWidget
-from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QLineEdit, QTextEdit, QTableWidget, QPushButton, QStyle
+from PySide6.QtCore import Qt, QSize
 from typing import Optional
+
+
+# 按钮图标映射：icon_key -> Qt 内置标准图标（QStyle.StandardPixmap）。
+# 全部用 Qt 内置标准图标，零额外资源、跨平台稳定、随系统主题/高 DPI 自动适配。
+_STANDARD_ICON_MAP = {
+    "open": QStyle.StandardPixmap.SP_DirOpenIcon,               # 打开/载入/浏览
+    "save": QStyle.StandardPixmap.SP_DialogSaveButton,          # 保存/导出
+    "export": QStyle.StandardPixmap.SP_DialogSaveButton,        # 导出（别名字，语义清晰）
+    "open_file": QStyle.StandardPixmap.SP_DialogOpenButton,     # 打开文件
+    "add": QStyle.StandardPixmap.SP_FileDialogNewFolder,        # 添加/新增
+    "apply": QStyle.StandardPixmap.SP_DialogApplyButton,        # 应用/确定/生成/注册
+    "ok": QStyle.StandardPixmap.SP_DialogOkButton,              # 确定
+    "cancel": QStyle.StandardPixmap.SP_DialogCancelButton,      # 取消/关闭
+    "up": QStyle.StandardPixmap.SP_ArrowUp,                  # 上移
+    "down": QStyle.StandardPixmap.SP_ArrowDown,              # 下移
+    "edit": QStyle.StandardPixmap.SP_FileDialogListView,     # 编辑（QStyle 无铅笔图标，用文档+横线隐喻）
+    "refresh": QStyle.StandardPixmap.SP_BrowserReload,          # 刷新/交换/重载
+    "delete": QStyle.StandardPixmap.SP_TrashIcon,               # 删除/清除/移除
+    "clear": QStyle.StandardPixmap.SP_LineEditClearButton,      # 清空
+    "play": QStyle.StandardPixmap.SP_MediaPlay,                 # 解析/发送/开始/运行/校验
+    "stop": QStyle.StandardPixmap.SP_MediaStop,                 # 停止/关闭
+    "pause": QStyle.StandardPixmap.SP_MediaPause,               # 暂停
+    "copy": QStyle.StandardPixmap.SP_FileDialogContentsView,    # 复制/查询/搜索/定位
+    "help": QStyle.StandardPixmap.SP_MessageBoxInformation,     # 帮助/说明
+    "warning": QStyle.StandardPixmap.SP_MessageBoxWarning,      # 警告类
+}
+
+
+# 默认图标尺寸（逻辑像素，随系统高 DPI 自动缩放）
+_BTN_ICON_SIZE = 16
+
+
+def set_btn_icon(btn: QPushButton, icon_key: str, icon_only: bool = False) -> QPushButton:
+    """为按钮添加 Qt 内置标准图标（图标 + 文字并存）。
+
+    - icon_key: _STANDARD_ICON_MAP 中的键；未知键静默跳过（不崩溃）。
+    - icon_only: 为 True 时隐藏文字仅显示图标（默认 False 保留文字）。
+    图标尺寸固定 _BTN_ICON_SIZE，随系统高 DPI 自动适配；颜色随系统主题。
+    """
+    pix = _STANDARD_ICON_MAP.get(icon_key)
+    if pix is None:
+        return btn
+    icon = btn.style().standardIcon(pix)
+    btn.setIcon(icon)
+    btn.setIconSize(QSize(_BTN_ICON_SIZE, _BTN_ICON_SIZE))
+    if icon_only:
+        btn.setText("")
+        btn.setToolTip(btn.toolTip() or btn.text())
+    return btn
+
+
+def set_btn(btn: QPushButton, kind: str = "primary", size: Optional[str] = None) -> QPushButton:
+    """统一按钮风格：设语义类（btnKind）与尺寸（btnSize），形状/颜色/状态全由主题 QSS 接管。
+
+    - kind: primary(主蓝) / success(绿) / danger(红) / warning(橙) / accent(紫)
+            / secondary(次要灰) / ghost(透明图标按钮)
+    - size: None(默认 min-h26) / "sm"(22) / "lg"(30)
+    行内不要再写 border-radius/padding/background/字号，否则会切断 QSS 伪状态。
+    """
+    btn.setProperty("btnKind", kind)
+    if size:
+        btn.setProperty("btnSize", size)
+    # 动态属性变更后需 unpolish/polish 让属性选择器重新匹配
+    style = btn.style()
+    if style is not None:
+        style.unpolish(btn)
+        style.polish(btn)
+    return btn
 
 
 class ZoomableTableWidget(QTableWidget):

@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QColor
-from gui_utils import setup_chinese_context_menu, ZoomableTableWidget
+from gui_utils import setup_chinese_context_menu, ZoomableTableWidget, set_btn
 
 
 def create_search_bar(parent, placeholder="输入关键词搜索...", on_text_changed=None):
@@ -94,10 +94,12 @@ def create_di_lookup_page(parent, parser):
     # 按钮栏
     btn_layout = QHBoxLayout()
     add_btn = QPushButton("添加自定义DI")
+    set_btn(add_btn, "primary")
     add_btn.clicked.connect(lambda: QMessageBox.information(parent, "提示", "添加自定义DI功能待实现"))
     btn_layout.addWidget(add_btn)
 
     del_btn = QPushButton("删除选中自定义DI")
+    set_btn(del_btn, "danger")
     del_btn.clicked.connect(lambda: QMessageBox.information(parent, "提示", "删除自定义DI功能待实现"))
     btn_layout.addWidget(del_btn)
 

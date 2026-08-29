@@ -21,15 +21,30 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QFont, QKeySequence, QShortcut, QGuiApplication
-from gui_utils import ZoomableTableWidget
+from gui_utils import ZoomableTableWidget, set_btn, set_btn_icon
 from app_paths import app_data_dir
+import thread_registry
 
-# scapy 可选依赖
-try:
+# scapy 可选依赖 — 用 find_spec 轻量探测是否安装；scapy.all 首次导入耗时数秒，
+# 禁止在模块级/GUI 线程导入，实际符号由 _load_scapy() 在后台线程惰性加载
+import importlib.util
+
+SCAPY_AVAILABLE = importlib.util.find_spec("scapy") is not None
+_SCAPY_LOADED = False
+
+sniff = IP = TCP = get_if_list = get_if_addr = None
+
+
+def _load_scapy():
+    """惰性加载 scapy 符号（首次导入很慢，切勿在 GUI 主线程调用）"""
+    global _SCAPY_LOADED, sniff, IP, TCP, get_if_list, get_if_addr
+    if not SCAPY_AVAILABLE:
+        return False
+    if _SCAPY_LOADED:
+        return True
     from scapy.all import sniff, IP, TCP, get_if_list, get_if_addr
-    SCAPY_AVAILABLE = True
-except ImportError:
-    SCAPY_AVAILABLE = False
+    _SCAPY_LOADED = True
+    return True
 
 
 # ── 流重组器 ──────────────────────────────────────────────
@@ -268,6 +283,7 @@ class PacketSniffer(QThread):
 
     def __init__(self, iface: str, bpf_filter: str = ""):
         super().__init__()
+        thread_registry.track(self, "PacketSniffer")
         self._iface = iface
         self._bpf = bpf_filter
         self._running = False
@@ -279,6 +295,9 @@ class PacketSniffer(QThread):
 
         self._running = True
         try:
+            if not _load_scapy():
+                self.error_occurred.emit("scapy 加载失败")
+                return
             # 用 timeout=1 循环抓包，确保 stop() 能在 1 秒内响应
             # 直接 stop_filter 在无流量时会一直阻塞
             while self._running:
@@ -309,6 +328,34 @@ class PacketSniffer(QThread):
         self._running = False
 
 
+class IfaceListWorker(QThread):
+    """后台枚举网卡列表（scapy 导入 + get_if_list 均耗时数秒，禁止主线程执行）"""
+
+    result_ready = Signal(list)  # [(显示名, iface)]
+    failed = Signal(str)
+
+    def __init__(self):
+        super().__init__()
+        thread_registry.track(self, "IfaceListWorker")
+
+    def run(self):
+        try:
+            if not _load_scapy():
+                self.failed.emit("scapy 未安装，请先 pip install scapy")
+                return
+            items = []
+            for iface in get_if_list():
+                try:
+                    addr = get_if_addr(iface)
+                except Exception:
+                    addr = ""
+                display = f"{iface}" + (f" ({addr})" if addr else "")
+                items.append((display, iface))
+            self.result_ready.emit(items)
+        except Exception as e:
+            self.failed.emit(str(e))
+
+
 # ── 主 Widget ────────────────────────────────────────────
 
 class TCPMonitorWidget(QWidget):
@@ -335,6 +382,7 @@ class TCPMonitorWidget(QWidget):
         self._loaded_flows = None
 
         self._build_ui()
+        self._iface_worker = None
         self._refresh_interfaces()
 
         # UI 节流定时器（100ms 批量刷新）
@@ -367,6 +415,8 @@ class TCPMonitorWidget(QWidget):
         toolbar.addWidget(self.iface_combo)
 
         refresh_btn = QPushButton("刷新")
+        set_btn(refresh_btn, "secondary")
+        set_btn_icon(refresh_btn, "refresh")
         refresh_btn.clicked.connect(self._refresh_interfaces)
         toolbar.addWidget(refresh_btn)
 
@@ -389,19 +439,20 @@ class TCPMonitorWidget(QWidget):
         toolbar.addWidget(self.filter_edit, 1)
 
         self.start_btn = QPushButton("开始抓包")
-        self.start_btn.setStyleSheet(
-            "QPushButton { background-color: #4CAF50; color: white; border-radius: 3px; padding: 4px 14px; }"
-            "QPushButton:hover { background-color: #45a049; }"
-            "QPushButton:disabled { background-color: #cccccc; }"
-        )
+        set_btn(self.start_btn, "success")
+        set_btn_icon(self.start_btn, "play")
         self.start_btn.clicked.connect(self._toggle_capture)
         toolbar.addWidget(self.start_btn)
 
         clear_btn = QPushButton("清空")
+        set_btn(clear_btn, "secondary")
+        set_btn_icon(clear_btn, "clear")
         clear_btn.clicked.connect(self._clear_all)
         toolbar.addWidget(clear_btn)
 
         self.pause_btn = QPushButton("暂停刷新")
+        set_btn(self.pause_btn, "secondary")
+        set_btn_icon(self.pause_btn, "pause")
         self.pause_btn.setCheckable(True)
         self.pause_btn.clicked.connect(self._toggle_pause)
         toolbar.addWidget(self.pause_btn)
@@ -473,11 +524,15 @@ class TCPMonitorWidget(QWidget):
         frame_toolbar.setSpacing(6)
         self.csv_record_btn = QPushButton("开始记录")
         self.csv_record_btn.setCheckable(True)
+        set_btn(self.csv_record_btn, "success")
+        set_btn_icon(self.csv_record_btn, "save")
         self.csv_record_btn.toggled.connect(self._on_csv_record_toggled)
         self.csv_record_btn.setFixedWidth(80)
         frame_toolbar.addWidget(self.csv_record_btn)
 
         load_btn = QPushButton("加载记录")
+        set_btn(load_btn, "secondary")
+        set_btn_icon(load_btn, "open_file")
         load_btn.clicked.connect(self._load_csv_recording)
         load_btn.setFixedWidth(80)
         frame_toolbar.addWidget(load_btn)
@@ -610,25 +665,37 @@ class TCPMonitorWidget(QWidget):
     # ── 网卡管理 ──────────────────────────────────────
 
     def _refresh_interfaces(self):
-        """刷新网卡列表"""
+        """刷新网卡列表（后台线程执行，避免阻塞 GUI）"""
         self.iface_combo.clear()
         if not SCAPY_AVAILABLE:
             return
-        try:
-            ifaces = get_if_list()
-            for iface in ifaces:
-                try:
-                    addr = get_if_addr(iface)
-                except Exception:
-                    addr = ""
-                display = f"{iface}" + (f" ({addr})" if addr else "")
-                self.iface_combo.addItem(display, iface)
-            if not ifaces:
-                self.status_label.setText("未找到可用网卡")
-                self.start_btn.setEnabled(False)
-        except Exception as e:
-            self.status_label.setText(f"获取网卡失败: {e}")
+        if self._iface_worker is not None and self._iface_worker.isRunning():
+            return
+        self.status_label.setText("正在加载网卡列表…")
+        self.status_label.setStyleSheet("color: #888;")
+        self.start_btn.setEnabled(False)
+        self._iface_worker = IfaceListWorker()
+        self._iface_worker.result_ready.connect(self._on_ifaces_loaded)
+        self._iface_worker.failed.connect(self._on_ifaces_failed)
+        self._iface_worker.start()
+
+    def _on_ifaces_loaded(self, items):
+        self.iface_combo.clear()
+        for display, iface in items:
+            self.iface_combo.addItem(display, iface)
+        if items:
+            self.status_label.setText("就绪")
+            self.status_label.setStyleSheet("color: #888;")
+            self.start_btn.setEnabled(True)
+        else:
+            self.status_label.setText("未找到可用网卡")
+            self.status_label.setStyleSheet("color: #f44336;")
             self.start_btn.setEnabled(False)
+
+    def _on_ifaces_failed(self, msg):
+        self.status_label.setText(f"获取网卡失败: {msg}")
+        self.status_label.setStyleSheet("color: #f44336;")
+        self.start_btn.setEnabled(False)
 
     # ── 抓包控制 ──────────────────────────────────────
 
@@ -663,10 +730,7 @@ class TCPMonitorWidget(QWidget):
         self._sniffer.start()
 
         self.start_btn.setText("停止抓包")
-        self.start_btn.setStyleSheet(
-            "QPushButton { background-color: #f44336; color: white; border-radius: 3px; padding: 4px 14px; }"
-            "QPushButton:hover { background-color: #d32f2f; }"
-        )
+        set_btn(self.start_btn, "danger")
         self.iface_combo.setEnabled(False)
         self.filter_edit.setEnabled(False)
         self.status_label.setText("抓包中…")
@@ -678,13 +742,19 @@ class TCPMonitorWidget(QWidget):
             self._sniffer.stop()
             self._sniffer.wait(2000)
 
+    def cleanup(self):
+        """关闭时统一回收：停 UI 刷新定时器与抓包线程。"""
+        try:
+            self._ui_timer.stop()
+        except Exception:
+            pass
+        if self._iface_worker is not None and self._iface_worker.isRunning():
+            self._iface_worker.wait(3000)
+        self._stop_capture()
+
     def _on_sniffer_finished(self):
         self.start_btn.setText("开始抓包")
-        self.start_btn.setStyleSheet(
-            "QPushButton { background-color: #4CAF50; color: white; border-radius: 3px; padding: 4px 14px; }"
-            "QPushButton:hover { background-color: #45a049; }"
-            "QPushButton:disabled { background-color: #cccccc; }"
-        )
+        set_btn(self.start_btn, "success")
         self.iface_combo.setEnabled(True)
         self.filter_edit.setEnabled(True)
         self.status_label.setText(f"已停止（共 {len(self._reassembler.all_flows)} 条流）")
@@ -1004,9 +1074,11 @@ class TCPMonitorWidget(QWidget):
         if checked:
             self._start_csv_recording()
             self.csv_record_btn.setText("停止记录")
+            set_btn(self.csv_record_btn, "danger")
         else:
             self._stop_csv_recording()
             self.csv_record_btn.setText("开始记录")
+            set_btn(self.csv_record_btn, "success")
 
     def _start_csv_recording(self):
         """开始 CSV 记录"""

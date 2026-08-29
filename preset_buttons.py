@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
-from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu
+from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu, set_btn
 from app_paths import data_path
 
 
@@ -153,10 +153,7 @@ class AddPresetDialog(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         ok_btn = QPushButton("确定")
-        ok_btn.setStyleSheet(
-            "QPushButton { background-color: #4CAF50; color: white; "
-            "border-radius: 4px; padding: 4px 16px; font-weight: bold; }"
-        )
+        set_btn(ok_btn, "success")
         ok_btn.clicked.connect(self._on_ok)
         cancel_btn = QPushButton("取消")
         cancel_btn.clicked.connect(self.reject)
@@ -335,14 +332,8 @@ class PresetButtonWidget(QWidget):
                 if cmd.get("frame_hex"):
                     tooltip_lines.append(f"\n报文: {cmd['frame_hex']}")
                 btn.setToolTip("\n".join(tooltip_lines))
-                btn.setMinimumHeight(28)
                 # 不设置固定宽度，让按钮根据文字自适应
-                btn.setStyleSheet(
-                    "QPushButton { background-color: #2196F3; color: white; "
-                    "border-radius: 4px; padding: 3px 10px; font-weight: bold; }"
-                    "QPushButton:hover { background-color: #1976D2; }"
-                    "QPushButton:pressed { background-color: #0D47A1; }"
-                )
+                set_btn(btn, "primary")
                 btn.clicked.connect(
                     lambda checked=False, c=cmd: self._on_button_clicked(c)
                 )

@@ -57,7 +57,7 @@ DLT69845_FIELD_SCHEMA: Dict[Tuple[str, str], Dict[str, Any]] = {
             "<b>控制域</b>：DIR=0, PRM=1, 功能码=1 (链路管理)"
         ),
         "fields": [
-            {"name": "PIID", "type": "uint8", "length": 1, "default": 1, "desc": "服务序号"},
+            {"name": "PIID", "type": "piid", "length": 1, "default": 1, "desc": "PIID = 服务优先级(bit7) + 服务序号(bit6-0)"},
             {"name": "请求类型", "type": "uint8", "length": 1, "default": 0, "desc": "0=登录, 1=心跳, 2=退出登录"},
             {"name": "心跳周期", "type": "uint16", "length": 2, "endian": "little", "default": 0, "desc": "心跳周期(秒)"},
         ],
@@ -72,7 +72,7 @@ DLT69845_FIELD_SCHEMA: Dict[Tuple[str, str], Dict[str, Any]] = {
             "<b>控制域</b>：DIR=0, PRM=1, 功能码=3 (用户数据)"
         ),
         "fields": [
-            {"name": "PIID", "type": "uint8", "length": 1, "default": 1, "desc": "服务序号"},
+            {"name": "PIID", "type": "piid", "length": 1, "default": 1, "desc": "PIID = 服务优先级(bit7) + 服务序号(bit6-0)"},
             {"name": "期望安全参数", "type": "uint8", "length": 1, "default": 0, "desc": "0=明文, 1=密文, 2=密文+MAC"},
             {"name": "客户机APDU最大长度", "type": "uint16", "length": 2, "endian": "little", "default": 1024, "desc": "宣告自身APDU最大长度"},
             {"name": "期望帧最大窗口尺寸", "type": "uint8", "length": 1, "default": 1, "desc": "收发双方一次允许不确认的帧总数"},
@@ -90,7 +90,7 @@ DLT69845_FIELD_SCHEMA: Dict[Tuple[str, str], Dict[str, Any]] = {
             "<b>控制域</b>：DIR=0, PRM=1, 功能码=3 (用户数据)"
         ),
         "fields": [
-            {"name": "PIID", "type": "uint8", "length": 1, "default": 1, "desc": "服务序号"},
+            {"name": "PIID", "type": "piid", "length": 1, "default": 1, "desc": "PIID = 服务优先级(bit7) + 服务序号(bit6-0)"},
             {"name": "断开原因", "type": "uint8", "length": 1, "default": 0, "desc": "0=正常断开, 1=异常断开"},
         ],
     },
@@ -107,9 +107,10 @@ DLT69845_FIELD_SCHEMA: Dict[Tuple[str, str], Dict[str, Any]] = {
             "<b>OAD</b> = OI[2B] + 属性标识[1B] = 含标识及属性的对象属性描述符"
         ),
         "fields": [
-            {"name": "PIID", "type": "uint8", "length": 1, "default": 1, "desc": "服务序号"},
+            {"name": "PIID", "type": "piid", "length": 1, "default": 1, "desc": "PIID = 服务优先级(bit7) + 服务序号(bit6-0)"},
             {"name": "OI", "type": "oi", "length": 2, "default": 0x0000, "desc": "对象标识 (2字节小端序)"},
             {"name": "属性标识", "type": "uint8", "length": 1, "default": 2, "desc": "对象属性标识"},
+           {"name": "索引", "type": "uint8", "length": 1, "default": 0, "desc": "元素索引 (OAD字节4, 0=无)"},
         ],
     },
 
@@ -123,7 +124,7 @@ DLT69845_FIELD_SCHEMA: Dict[Tuple[str, str], Dict[str, Any]] = {
             "格式：05 02 [PIID] [Count] [[OI][属性标识]]..."
         ),
         "fields": [
-            {"name": "PIID", "type": "uint8", "length": 1, "default": 1, "desc": "服务序号"},
+            {"name": "PIID", "type": "piid", "length": 1, "default": 1, "desc": "PIID = 服务优先级(bit7) + 服务序号(bit6-0)"},
             {"name": "OAD项数", "type": "uint8", "length": 1, "default": 1, "desc": "OAD数量（自动根据下方列表计算）"},
             {"name": "OAD列表", "type": "oad_list", "length": 1, "default": "00000000", "desc": "多个OAD，每个4字节(OI2B+属性标识1B+索引1B)，十六进制空格分隔"},
         ],
@@ -139,9 +140,10 @@ DLT69845_FIELD_SCHEMA: Dict[Tuple[str, str], Dict[str, Any]] = {
             "格式：06 01 [PIID] [OAD] [数据内容]"
         ),
         "fields": [
-            {"name": "PIID", "type": "uint8", "length": 1, "default": 1, "desc": "服务序号"},
+            {"name": "PIID", "type": "piid", "length": 1, "default": 1, "desc": "PIID = 服务优先级(bit7) + 服务序号(bit6-0)"},
             {"name": "OI", "type": "oi", "length": 2, "default": 0x0000, "desc": "对象标识 (2字节小端序)"},
             {"name": "属性标识", "type": "uint8", "length": 1, "default": 2, "desc": "对象属性标识"},
+           {"name": "索引", "type": "uint8", "length": 1, "default": 0, "desc": "元素索引 (OAD字节4, 0=无)"},
             {"name": "数据内容", "type": "bytes", "length": 1, "default": "", "desc": "要设置的数据值 (十六进制)"},
         ],
     },
@@ -156,7 +158,7 @@ DLT69845_FIELD_SCHEMA: Dict[Tuple[str, str], Dict[str, Any]] = {
             "格式：07 01 [PIID] [OMD] [参数(可选)]"
         ),
         "fields": [
-            {"name": "PIID", "type": "uint8", "length": 1, "default": 1, "desc": "服务序号"},
+            {"name": "PIID", "type": "piid", "length": 1, "default": 1, "desc": "PIID = 服务优先级(bit7) + 服务序号(bit6-0)"},
             {"name": "OI", "type": "oi", "length": 2, "default": 0x0000, "desc": "对象标识 (2字节小端序)"},
             {"name": "方法标识", "type": "uint8", "length": 1, "default": 1, "desc": "对象方法标识"},
             {"name": "参数", "type": "bytes", "length": 1, "default": "", "desc": "方法参数 (十六进制, 可选)"},
@@ -172,7 +174,7 @@ DLT69845_FIELD_SCHEMA: Dict[Tuple[str, str], Dict[str, Any]] = {
             "<b>控制域</b>：DIR=0, PRM=1, 功能码=3 (用户数据)"
         ),
         "fields": [
-            {"name": "PIID", "type": "uint8", "length": 1, "default": 1, "desc": "服务序号"},
+            {"name": "PIID", "type": "piid", "length": 1, "default": 1, "desc": "PIID = 服务优先级(bit7) + 服务序号(bit6-0)"},
             {"name": "代理服务器地址(SA)", "type": "bytes", "length": 1, "default": "0100000000", "desc": "目标服务器地址 (含地址特征字节)"},
             {"name": "代理客户机地址(CA)", "type": "uint8", "length": 1, "default": 0, "desc": "代理客户机地址"},
             {"name": "代理APDU", "type": "bytes", "length": 1, "default": "0501", "desc": "代理转发的APDU (十六进制)"},
@@ -188,7 +190,7 @@ DLT69845_FIELD_SCHEMA: Dict[Tuple[str, str], Dict[str, Any]] = {
             "<b>控制域</b>：DIR=0, PRM=1, 功能码=3 (用户数据)"
         ),
         "fields": [
-            {"name": "PIID", "type": "uint8", "length": 1, "default": 1, "desc": "服务序号"},
+            {"name": "PIID", "type": "piid", "length": 1, "default": 1, "desc": "PIID = 服务优先级(bit7) + 服务序号(bit6-0)"},
             {"name": "安全参数", "type": "bytes", "length": 1, "default": "", "desc": "安全认证参数 (十六进制)"},
         ],
     },

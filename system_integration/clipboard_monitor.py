@@ -77,8 +77,12 @@ class ClipboardMonitor(QObject):
     def stop(self):
         clip = QGuiApplication.clipboard()
         if clip is not None:
+            # Qt 对未连接的信号 disconnect 会发 RuntimeWarning（不是 Exception），统一忽略
+            import warnings
             try:
-                clip.dataChanged.disconnect(self._on_data_changed)
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    clip.dataChanged.disconnect(self._on_data_changed)
             except Exception:
                 pass
 

@@ -187,19 +187,26 @@ MSG_ID_NAMES = {
 # ── CRC 工具 ──────────────────────────────────────────────────────
 
 def _crc24(data: bytes) -> int:
-    """CRC-24 (poly 0x800063, 反射模式, init=0, xorOut=0)"""
+    """CRC-24 (poly 0x800063, 反射模式, init=0, xorOut=0)
+
+    纯 Python 回退与 crcmod.mkCrcFun(0x1800063, initCrc=0, rev=True, xorOut=0)
+    结果一致(4000 组随机数据 + 真实帧 FCCS 双重验证)。反射算法须用多项式
+    0x800063 的 24 位位反转值 0xC60001；旧代码 `0x800063 >> 1` 因 >> 优先级
+    高于 ^ 实际等价于 0x400031, 结果错误——未安装 crcmod 时 FCCS/PBCS 校验
+    全部失败, _detect_fc 会把信标帧误判为无 FC 的裸 MAC 帧。
+    """
     if _CRC24_FUN is not None:
         return _CRC24_FUN(data)
-    # 纯Python回退
+    # 纯Python回退: 反射多项式 = 0x800063 的 24 位位反转
     crc = 0
     for b in data:
         crc ^= b
         for _ in range(8):
             if crc & 1:
-                crc = (crc >> 1) ^ 0x800063 >> 1  # TODO: 验证
+                crc = (crc >> 1) ^ 0xC60001
             else:
                 crc >>= 1
-    return crc
+    return crc & 0xFFFFFF
 
 
 def _crc32(data: bytes) -> int:

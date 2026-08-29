@@ -106,6 +106,12 @@ def strip_csg_new_gen_prefix(text: str, parse_level: str = "auto") -> str:
                 out_lines.append(hex_clean)
             continue
 
+        # PLC2.0/测试装置 ED..EE 包装帧交给 CSGNewGenParser 统一解析；
+        # 不能按 FC 起始特征扫描，否则控制类 ED 数据会被整行丢弃。
+        if hex_clean.startswith("ED"):
+            out_lines.append(hex_clean)
+            continue
+
         if parse_level == "pb_only":
             pass  # 直接保留
         elif parse_level == "app":
@@ -401,6 +407,34 @@ def get_csg_new_gen_summary(table_data: List) -> str:
     first_field = str(table_data[0][0]) if table_data[0] else ""
     if "❌" in first_field or "失败" in first_field:
         return str(table_data[0][3]) if len(table_data[0]) >= 4 else "解析失败"
+
+    # ED 包装 / 测试装置控制协议
+    if "PLC2.0" in first_field:
+        ctrl1 = _find_field(table_data, "控制域1")
+        ctrl2 = _find_field(table_data, "控制域2")
+        parts = ["ED监控包装"]
+        if ctrl1:
+            parts.append(str(ctrl1[2]))
+        if ctrl2:
+            parts.append(str(ctrl2[2]))
+        for key in ("CCO仓模块电源状态", "STA仓模块电源位图", "工装板220V电源状态",
+                    "CCO仓引脚控制", "STA仓引脚控制", "衰减器A衰减值",
+                    "衰减器B衰减值", "衰减器C衰减值", "8762A连接方式"):
+            row = _find_field(table_data, key)
+            if row:
+                parts.append(str(row[2]))
+                return " | ".join(parts)
+        return " | ".join(parts)
+
+    if "测试装置" in first_field:
+        cmd_row = _find_field(table_data, "命令码")
+        for key in ("CCO仓模块电源状态", "STA仓模块电源位图", "工装板220V电源状态",
+                    "CCO仓引脚控制", "STA仓引脚控制", "衰减器A衰减值",
+                    "衰减器B衰减值", "衰减器C衰减值", "8762A连接方式"):
+            row = _find_field(table_data, key)
+            if row:
+                return f"测试装置控制 | {cmd_row[2] if cmd_row else ''} | {row[2]}".strip(" |")
+        return f"测试装置控制 | {cmd_row[2]}" if cmd_row else "测试装置控制"
 
     # MMTYPE（网络管理消息）
     mmtype_row = _find_field(table_data, "MMTYPE")

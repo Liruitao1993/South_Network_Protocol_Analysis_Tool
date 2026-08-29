@@ -15,6 +15,8 @@ import serial.tools.list_ports
 
 from PySide6.QtCore import QThread, Signal
 
+import thread_registry
+
 
 class SerialWorker(QThread):
     """串口后台工作线程"""
@@ -28,6 +30,7 @@ class SerialWorker(QThread):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        thread_registry.track(self, "SerialWorker")
         self._ser: Optional[serial.Serial] = None
         self._port: str = ""
         self._baudrate: int = 9600

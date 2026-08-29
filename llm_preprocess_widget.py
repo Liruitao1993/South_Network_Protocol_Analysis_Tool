@@ -48,7 +48,7 @@ class LLMPreprocessWidget(QWidget):
 
     # ── UI 构建 ─────────────────────────────────────────
 
-    def _make_btn(self, text: str = "", min_height: int = 28,
+    def _make_btn(self, text: str = "", min_height: int = 24,
                   min_width: int = 0, max_width: int = 0) -> QPushButton:
         """创建统一风格的按钮。"""
         btn = QPushButton(text)

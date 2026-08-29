@@ -25,6 +25,7 @@ from gdw_send_frame_lib import GDWFrameGenerator
 from protocol_parser import ProtocolFrameParser
 from gdw10376_parser import GDW10376Parser
 from topology_graph import TopologyGraph
+from gui_utils import set_btn, set_btn_icon
 
 
 @dataclass
@@ -123,7 +124,6 @@ class TopoNodeItem(QGraphicsEllipseItem):
         msg.setStyleSheet(
             "QMessageBox { background-color: #FFFFFF; }"
             "QLabel { color: #000000; font-size: 13px; }"
-            "QPushButton { background-color: #F0F0F0; color: #000000; }"
         )
         n = self.node
         detail = (
@@ -411,10 +411,14 @@ class TopologyWidget(QWidget):
         toolbar.setSpacing(6)
 
         self.query_btn = QPushButton("查询拓扑")
+        set_btn(self.query_btn, "primary")
+        set_btn_icon(self.query_btn, "search")
         self.query_btn.clicked.connect(self._on_query)
         toolbar.addWidget(self.query_btn)
 
         self.clear_btn = QPushButton("清除拓扑")
+        set_btn(self.clear_btn, "secondary")
+        set_btn_icon(self.clear_btn, "clear")
         self.clear_btn.clicked.connect(self._on_clear)
         toolbar.addWidget(self.clear_btn)
 
@@ -433,6 +437,8 @@ class TopologyWidget(QWidget):
         toolbar.addWidget(self.gdw_mode_combo)
 
         self.export_btn = QPushButton("导出拓扑(JSON)")
+        set_btn(self.export_btn, "secondary")
+        set_btn_icon(self.export_btn, "export")
         self.export_btn.clicked.connect(self._on_export)
         toolbar.addWidget(self.export_btn)
 
@@ -505,10 +511,14 @@ class TopologyWidget(QWidget):
         search_group_layout.addWidget(self.search_role)
 
         self.search_btn = QPushButton("定位")
+        set_btn(self.search_btn, "primary")
+        set_btn_icon(self.search_btn, "search")
         self.search_btn.clicked.connect(self._on_search_node)
         search_group_layout.addWidget(self.search_btn)
 
         self.clear_search_btn = QPushButton("清除")
+        set_btn(self.clear_search_btn, "secondary")
+        set_btn_icon(self.clear_search_btn, "clear")
         self.clear_search_btn.clicked.connect(self._on_clear_search)
         search_group_layout.addWidget(self.clear_search_btn)
 

@@ -24,7 +24,7 @@ from protocol_parser import ProtocolFrameParser
 from gdw10376_parser import GDW10376Parser
 from dlt645_parser import DLT645Parser
 from lme_info_entry_parser import parse_lme_info_entries, format_lme_info_summary
-from gui_utils import ZoomableTableWidget
+from gui_utils import ZoomableTableWidget, set_btn_icon
 from app_paths import data_path
 
 ARCHIVE_FILE = str(data_path("archive_data.json"))
@@ -433,24 +433,29 @@ class ArchiveWidget(QWidget):
         archive_layout.setContentsMargins(6, 4, 6, 4)
 
         self.add_node_btn = QPushButton("添加从节点")
+        set_btn_icon(self.add_node_btn, "add")
         self.add_node_btn.clicked.connect(self._on_add_nodes)
         archive_layout.addWidget(self.add_node_btn)
 
         self.del_node_btn = QPushButton("删除从节点")
+        set_btn_icon(self.del_node_btn, "delete")
         self.del_node_btn.clicked.connect(self._on_delete_nodes)
         archive_layout.addWidget(self.del_node_btn)
 
         self.init_archive_btn = QPushButton("参数初始化")
+        set_btn_icon(self.init_archive_btn, "settings")
         self.init_archive_btn.clicked.connect(self._on_init_archive)
         archive_layout.addWidget(self.init_archive_btn)
 
         archive_layout.addWidget(QLabel("|"))
 
         self.export_archive_btn = QPushButton("导出档案")
+        set_btn_icon(self.export_archive_btn, "export")
         self.export_archive_btn.clicked.connect(self._on_export_archive)
         archive_layout.addWidget(self.export_archive_btn)
 
         self.import_archive_btn = QPushButton("导入档案")
+        set_btn_icon(self.import_archive_btn, "open_file")
         self.import_archive_btn.clicked.connect(self._on_import_archive)
         archive_layout.addWidget(self.import_archive_btn)
 
@@ -463,28 +468,34 @@ class ArchiveWidget(QWidget):
         query_layout.setContentsMargins(6, 4, 6, 4)
 
         self.query_count_btn = QPushButton("查询从节点数量")
+        set_btn_icon(self.query_count_btn, "search")
         self.query_count_btn.clicked.connect(self._on_query_node_count)
         query_layout.addWidget(self.query_count_btn)
 
         self.query_info_btn = QPushButton("查询从节点信息")
+        set_btn_icon(self.query_info_btn, "search")
         self.query_info_btn.clicked.connect(self._on_query_node_info)
         query_layout.addWidget(self.query_info_btn)
 
         self.query_version_btn = QPushButton("查询从节点版本")
+        set_btn_icon(self.query_version_btn, "search")
         self.query_version_btn.clicked.connect(self._on_query_node_version)
         query_layout.addWidget(self.query_version_btn)
 
         self.query_version_detail_btn = QPushButton("查询从节点详细版本")
+        set_btn_icon(self.query_version_detail_btn, "search")
         self.query_version_detail_btn.clicked.connect(self._on_query_node_version_detail)
         query_layout.addWidget(self.query_version_detail_btn)
 
         query_layout.addWidget(QLabel("|"))
 
         self.copy_test_btn = QPushButton("点抄测试")
+        set_btn_icon(self.copy_test_btn, "down")
         self.copy_test_btn.clicked.connect(self._on_copy_test)
         query_layout.addWidget(self.copy_test_btn)
 
         self.concurrent_copy_btn = QPushButton("并发抄表")
+        set_btn_icon(self.concurrent_copy_btn, "down")
         self.concurrent_copy_btn.clicked.connect(self._on_concurrent_copy)
         query_layout.addWidget(self.concurrent_copy_btn)
 
@@ -497,14 +508,17 @@ class ArchiveWidget(QWidget):
         task_layout.setContentsMargins(6, 4, 6, 4)
 
         self.init_task_btn = QPushButton("初始化任务")
+        set_btn_icon(self.init_task_btn, "apply")
         self.init_task_btn.clicked.connect(self._on_init_task)
         task_layout.addWidget(self.init_task_btn)
 
         self.start_task_btn = QPushButton("启动任务")
+        set_btn_icon(self.start_task_btn, "play")
         self.start_task_btn.clicked.connect(self._on_start_task)
         task_layout.addWidget(self.start_task_btn)
 
         self.pause_task_btn = QPushButton("暂停任务")
+        set_btn_icon(self.pause_task_btn, "pause")
         self.pause_task_btn.clicked.connect(self._on_pause_task)
         task_layout.addWidget(self.pause_task_btn)
 

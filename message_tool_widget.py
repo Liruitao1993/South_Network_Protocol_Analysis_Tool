@@ -107,7 +107,7 @@ class MessageToolWidget(QWidget):
         self.endian_combo = QComboBox()
         self.endian_combo.addItems(["小端(低字节在前)", "大端(高字节在前)"])
         self.endian_combo.setCurrentIndex(0)          # 默认小端，对齐本项目 9/11 协议小端惯例
-        self.endian_combo.setFixedHeight(28)          # 与 _btn 高度一致
+        self.endian_combo.setMinimumHeight(24)          # 与 _btn 高度一致
         self.endian_combo.setToolTip("HEX→十进制 时按此字节序解释字节序列")
         ext_grid.addWidget(self.endian_combo, row, 0)
         ext_grid.addWidget(self._btn("HEX→十进制", self._hex_to_decimal), row, 1)
@@ -127,7 +127,7 @@ class MessageToolWidget(QWidget):
     def _btn(self, text: str, slot) -> QPushButton:
         btn = QPushButton(text)
         btn.clicked.connect(slot)
-        btn.setFixedHeight(28)
+        btn.setMinimumHeight(24)
         return btn
 
     def _parse_hex(self) -> list[int] | None:

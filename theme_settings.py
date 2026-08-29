@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from PySide6.QtGui import QColor, QFont
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QColorDialog, QDialog, QFileDialog, QFontComboBox,
     QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QSlider, QSpinBox,
@@ -728,12 +729,37 @@ GLASS_QSS = """
     * {
         color: #1f2937;
     }
+    /* 注意：基础 QWidget 不能用 transparent。
+       WA_TranslucentBackground 下，transparent 会让 Qt 跳过背景擦除，
+       半透明子控件重绘/切 tab/滚动时旧像素残留，产生“重影/拖影”。
+       用极低 alpha 的白色：强制每帧背景填充（擦除旧像素），视觉几乎不增加不透度，
+       同时不造成多层白底叠加致死白（alpha=6 可忽略）。
+       真正的“表面”由 QMainWindow/QDialog/QGroupBox/输入控件/表格各自显式上色。 */
     QWidget {
-        background-color: rgba(255, 255, 255, 150);
+        background-color: rgba(255, 255, 255, 6);
         color: #1f2937;
     }
     QMainWindow {
         background-color: rgba(240, 245, 255, 110);
+    }
+    /* 内容承载面给近不透明背景：stack 页/滚动区切换时旧内容不残留重影 */
+    QStackedWidget, QScrollArea, QMdiArea {
+        background-color: rgba(248, 250, 255, 200);
+    }
+    /* tab/stack 的每个子页面必须近不透明：
+       切页时新页面只画 alpha 6 盖不住 backing store 里旧页像素 → 重影。
+       直接子页面给实底，彻底擦除旧内容。 */
+    QStackedWidget > QWidget {
+        background-color: rgba(248, 250, 255, 245);
+    }
+    /* 内部容器/视口透明：Fusion 风格会给这些容器上实底色，与外层表面叠加产生白块。
+       只选容器本身（单类选择器），不选后代——否则会覆盖子控件自己的按钮/输入框样式。 */
+    QSplitter, QSplitterHandle {
+        background-color: transparent;
+    }
+    QTableCornerButton::section {
+        background-color: transparent;
+        border: none;
     }
 
     /* ========== 对话框 / 弹窗 ========== */
@@ -916,12 +942,12 @@ GLASS_QSS = """
         font-size: 9pt;
     }
     QTableWidget::item:!alternate {
-        background-color: rgba(255, 255, 255, 40);
+        background-color: rgba(255, 255, 255, 200);
         color: #1f2937;
         padding: 2px 4px;
     }
     QTableWidget::item:alternate {
-        background-color: rgba(219, 234, 254, 100);
+        background-color: rgba(219, 234, 254, 215);
         color: #1f2937;
         padding: 2px 4px;
     }
@@ -948,7 +974,8 @@ GLASS_QSS = """
     QTabWidget::pane {
         border: 1px solid rgba(180, 200, 235, 180);
         border-radius: 6px;
-        background-color: rgba(255, 255, 255, 110);
+        /* 近不透明：切 tab 时旧页内容不残留重影，同时仍透出玻璃质感 */
+        background-color: rgba(248, 250, 255, 215);
     }
     QTabBar::tab {
         padding: 3px 10px;
@@ -1191,6 +1218,132 @@ VISTA_INPUT_QSS = """
 
 
 # ---------------------------------------------------------------------------
+# 统一按钮风格（所有主题共用结构，颜色按调色板注入）
+# ---------------------------------------------------------------------------
+# 形状统一：圆角 4px、padding 4px 12px、bold、无边框；
+# 颜色由 btnKind 动态属性区分（primary/success/danger/warning/accent/secondary/ghost），
+# 每个语义类都带 normal/hover/pressed/disabled，换主题自动跟随。
+def build_button_qss(p: Dict[str, str]) -> str:
+    """生成统一按钮 QSS。
+
+    p 为调色板，需提供各语义色的 normal/hover/pressed，以及 disabled 底色/字色、
+    ghost hover 底色、文字色、边框色。
+    """
+    return f"""
+    /* ===== 统一按钮基础形状（紧凑：文字饱满居中，不截断） ===== */
+    QPushButton {{
+        border: none;
+        border-radius: 4px;
+        padding: 3px 10px;
+        font-weight: bold;
+        color: {p['text']};
+        background-color: {p['primary']};
+        min-height: 22px;
+        min-width: 48px;
+    }}
+    QPushButton:hover {{ background-color: {p['primary_h']}; }}
+    QPushButton:pressed {{ background-color: {p['primary_p']}; }}
+    QPushButton:disabled {{
+        background-color: {p['dis_bg']};
+        color: {p['dis_text']};
+    }}
+
+    /* ===== 语义色 ===== */
+    QPushButton[btnKind="primary"] {{ background-color: {p['primary']}; }}
+    QPushButton[btnKind="primary"]:hover {{ background-color: {p['primary_h']}; }}
+    QPushButton[btnKind="primary"]:pressed {{ background-color: {p['primary_p']}; }}
+
+    QPushButton[btnKind="success"] {{ background-color: {p['success']}; }}
+    QPushButton[btnKind="success"]:hover {{ background-color: {p['success_h']}; }}
+    QPushButton[btnKind="success"]:pressed {{ background-color: {p['success_p']}; }}
+
+    QPushButton[btnKind="danger"] {{ background-color: {p['danger']}; }}
+    QPushButton[btnKind="danger"]:hover {{ background-color: {p['danger_h']}; }}
+    QPushButton[btnKind="danger"]:pressed {{ background-color: {p['danger_p']}; }}
+
+    QPushButton[btnKind="warning"] {{ background-color: {p['warning']}; }}
+    QPushButton[btnKind="warning"]:hover {{ background-color: {p['warning_h']}; }}
+    QPushButton[btnKind="warning"]:pressed {{ background-color: {p['warning_p']}; }}
+
+    QPushButton[btnKind="accent"] {{ background-color: {p['accent']}; }}
+    QPushButton[btnKind="accent"]:hover {{ background-color: {p['accent_h']}; }}
+    QPushButton[btnKind="accent"]:pressed {{ background-color: {p['accent_p']}; }}
+
+    QPushButton[btnKind="secondary"] {{
+        background-color: {p['secondary']};
+        color: {p['text']};
+    }}
+    QPushButton[btnKind="secondary"]:hover {{ background-color: {p['secondary_h']}; }}
+    QPushButton[btnKind="secondary"]:pressed {{ background-color: {p['secondary_p']}; }}
+
+    QPushButton[btnKind="ghost"] {{
+        background-color: transparent;
+        color: {p['text']};
+        border: none;
+        min-width: 0;
+    }}
+    QPushButton[btnKind="ghost"]:hover {{ background-color: {p['ghost_h']}; }}
+    QPushButton[btnKind="ghost"]:pressed {{ background-color: {p['ghost_p']}; }}
+
+    /* ===== 尺寸 ===== */
+    QPushButton[btnSize="sm"] {{ min-height: 18px; min-width: 0; padding: 1px 6px; }}
+    QPushButton[btnSize="lg"] {{ min-height: 24px; padding: 3px 12px; }}
+
+    /* 对话框主按钮：略宽以显主次，但不臃肿 */
+    QMessageBox QPushButton, QInputDialog QPushButton {{
+        min-width: 72px;
+        padding: 4px 14px;
+    }}
+"""
+
+
+BUTTON_PALETTE_LIGHT = {
+    "text": "#ffffff",
+    "primary": "#2196F3", "primary_h": "#1976D2", "primary_p": "#0D47A1",
+    "success": "#4CAF50", "success_h": "#43A047", "success_p": "#2E7D32",
+    "danger": "#f44336", "danger_h": "#d32f2f", "danger_p": "#b71c1c",
+    "warning": "#FF9800", "warning_h": "#F57C00", "warning_p": "#E65100",
+    "accent": "#9C27B0", "accent_h": "#8E24AA", "accent_p": "#6A1B9A",
+    "secondary": "#6b7280", "secondary_h": "#4b5563", "secondary_p": "#374151",
+    "ghost_h": "rgba(0,0,0,30)", "ghost_p": "rgba(0,0,0,50)",
+    "dis_bg": "#cccccc", "dis_text": "#888888",
+}
+
+BUTTON_PALETTE_DARK = {
+    "text": "#ffffff",
+    "primary": "#42a5f5", "primary_h": "#1e88e5", "primary_p": "#1565c0",
+    "success": "#66bb6a", "success_h": "#4caf50", "success_p": "#388e3c",
+    "danger": "#ef5350", "danger_h": "#e53935", "danger_p": "#c62828",
+    "warning": "#ffa726", "warning_h": "#fb8c00", "warning_p": "#ef6c00",
+    "accent": "#ab47bc", "accent_h": "#9c27b0", "accent_p": "#7b1fa2",
+    "secondary": "#4b5563", "secondary_h": "#374151", "secondary_p": "#1f2937",
+    "ghost_h": "rgba(255,255,255,30)", "ghost_p": "rgba(255,255,255,50)",
+    "dis_bg": "#444444", "dis_text": "#888888",
+}
+
+BUTTON_PALETTE_GLASS = {
+    "text": "#ffffff",
+    "primary": "rgba(59,130,246,215)", "primary_h": "rgba(37,99,235,230)", "primary_p": "rgba(29,78,216,240)",
+    "success": "rgba(76,175,80,215)", "success_h": "rgba(67,160,71,230)", "success_p": "rgba(46,125,50,240)",
+    "danger": "rgba(239,68,68,220)", "danger_h": "rgba(220,38,38,235)", "danger_p": "rgba(185,28,28,240)",
+    "warning": "rgba(245,158,11,220)", "warning_h": "rgba(217,119,6,235)", "warning_p": "rgba(180,83,9,240)",
+    "accent": "rgba(147,51,234,215)", "accent_h": "rgba(126,34,206,230)", "accent_p": "rgba(107,33,168,240)",
+    "secondary": "rgba(100,116,139,220)", "secondary_h": "rgba(75,85,99,235)", "secondary_p": "rgba(55,65,81,240)",
+    "ghost_h": "rgba(0,0,0,25)", "ghost_p": "rgba(0,0,0,45)",
+    "dis_bg": "rgba(203,213,225,180)", "dis_text": "#64748b",
+}
+
+
+def button_qss_for_theme(theme_id: str) -> str:
+    """按主题 id 返回统一按钮 QSS。fusion/vista 用浅色调色板。"""
+    if theme_id == "dark":
+        return build_button_qss(BUTTON_PALETTE_DARK)
+    if theme_id == "glass":
+        return build_button_qss(BUTTON_PALETTE_GLASS)
+    return build_button_qss(BUTTON_PALETTE_LIGHT)
+
+
+# ---------------------------------------------------------------------------
 # 主题注册表
 # ---------------------------------------------------------------------------
 # style: QStyleFactory 可创建的风格名；qss: 附加样式表（None = 纯原生风格）
@@ -1304,14 +1457,47 @@ def _set_windows_acrylic(win_id: int, enabled: bool, tint: str = "#f0f5ff") -> b
 
 
 def _apply_glass_blur(app: QApplication, enabled: bool, tint: str = "#f0f5ff") -> None:
-    """毛玻璃主题开关：对所有顶级窗口启用/关闭亚克力模糊与透明背景。"""
+    """毛玻璃主题开关：对所有顶级窗口启用/关闭亚克力模糊与透明背景。
+
+    关闭时必须显式把 AccentState 设回 0（禁用）并关闭 WA_TranslucentBackground，
+    否则切到非玻璃主题会残留透明合成，导致重影。
+    """
     from PySide6.QtCore import Qt
     for w in app.topLevelWidgets():
         try:
             if not w.isWindow() or not w.winId():
                 continue
-            ok = _set_windows_acrylic(int(w.winId()), enabled, tint)
-            w.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, enabled and ok)
+            _set_windows_acrylic(int(w.winId()), enabled, tint)
+            # 切换时强制关闭再按需要开启，避免属性残留
+            w.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+            if enabled:
+                ok = _set_windows_acrylic(int(w.winId()), True, tint)
+                w.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, ok)
+            # 非透明主题下，强制不透明底色并重绘，擦除残留像素
+            if not enabled:
+                w.setAutoFillBackground(True)
+                w.update()
+                w.repaint()
+        except RuntimeError:
+            pass
+        except Exception:
+            pass
+
+
+def _apply_window_opacity(app: QApplication, opacity_0_100: int) -> None:
+    """设置所有顶级窗口不透明度（0~100），用于非毛玻璃主题的全局透明度。
+
+    100 = 完全不透明；低于 100 用 setWindowOpacity 做窗口级透明合成，
+    不开启 WA_TranslucentBackground（那种透明会因不擦背景而重影）。
+    """
+    try:
+        op = max(10, min(100, int(opacity_0_100))) / 100.0
+    except (TypeError, ValueError):
+        op = 1.0
+    for w in app.topLevelWidgets():
+        try:
+            if w.isWindow():
+                w.setWindowOpacity(op)
         except RuntimeError:
             pass
         except Exception:
@@ -1347,8 +1533,10 @@ class ThemeManager:
               glass: Optional[Dict] = None) -> None:
         """将主题与字体应用到 QApplication（全局生效）
 
-        glass: 毛玻璃参数 {"opacity": 0~100, "bg_image": 路径, "tint": "#rrggbb"}，
-        仅毛玻璃主题生效，缺省项用 GLASS_DEFAULTS。
+        glass: 毛玻璃参数 {"opacity": 0~100, "bg_image": 路径, "tint": "#rrggbb"}。
+        - 毛玻璃主题：opacity 缩放 QSS 半透明 alpha，并启用亚克力模糊 + WA_TranslucentBackground。
+        - 其它主题：opacity 作为窗口不透明度（setWindowOpacity），窗口本身保持不透明合成，
+          避免切换自毛玻璃后残留 WA_TranslucentBackground 导致重影。
         """
         theme_id = theme_id or ThemeManager.DEFAULT_THEME_ID
         font_family = font_family or ThemeManager.DEFAULT_FONT_FAMILY
@@ -1360,16 +1548,24 @@ class ThemeManager:
             app.setStyle(style)
         qss = theme["qss"] or ""
         g = {**GLASS_DEFAULTS, **(glass or {})}
-        if theme.get("win_blur"):
+        is_glass = bool(theme.get("win_blur"))
+        if is_glass:
             try:
                 qss = build_glass_qss(g["opacity"], g["tint"], g["bg_image"])
             except Exception:
                 qss = theme["qss"] or ""
+        # 统一按钮风格追加在末尾：同特异性下后出现的规则胜出，
+        # 覆盖各主题旧的 QPushButton 块，保证圆角/形状/语义色在所有主题一致。
+        qss = qss + "\n" + button_qss_for_theme(theme_id)
         app.setStyleSheet(qss)
         app.setFont(QFont(font_family, font_size))
-        # 毛玻璃主题：启用 Windows 亚克力模糊；其他主题恢复不透明
+        # 透明度全局生效：
+        # - 毛玻璃：opacity 缩放 QSS alpha + 亚克力模糊，窗口透明合成。
+        # - 其它主题：setWindowOpacity 做 OS 级整窗透明（不依赖 WA_TranslucentBackground，
+        #   不产生“不擦背景”的重影）；切离玻璃时 _apply_glass_blur 会关闭亚克力与透明属性。
         try:
-            _apply_glass_blur(app, bool(theme.get("win_blur")), g["tint"])
+            _apply_glass_blur(app, is_glass, g["tint"])
+            _apply_window_opacity(app, 100 if is_glass else g["opacity"])
         except Exception:
             pass
         # QSS font-size 不反映到 widget.font()，表格缩放基准需按新样式重置
@@ -1469,15 +1665,20 @@ class ThemeSettingsDialog(QDialog):
         self.theme_desc.setWordWrap(True)
         layout.addWidget(self.theme_desc)
 
-        # ---- 毛玻璃选项（仅毛玻璃主题显示）----
-        self.glass_group = QGroupBox("毛玻璃选项")
+        # ---- 透明度与毛玻璃选项 ----
+        # 透明度全局生效：毛玻璃主题缩放 QSS 半透明 alpha + 亚克力；
+        # 其它主题通过 setWindowOpacity 实现窗口透明。玻璃颜色/背景图仅玻璃主题显示。
+        self.glass_group = QGroupBox("透明度与毛玻璃")
         g_layout = QVBoxLayout(self.glass_group)
         g_layout.setSpacing(6)
 
         op_row = QHBoxLayout()
         op_row.addWidget(QLabel("透明度"))
-        self.glass_opacity_slider = QSlider()
+        self.glass_opacity_slider = QSlider(Qt.Orientation.Horizontal)
         self.glass_opacity_slider.setRange(0, 100)
+        self.glass_opacity_slider.setMinimumHeight(22)
+        self.glass_opacity_slider.setSingleStep(1)
+        self.glass_opacity_slider.setPageStep(10)
         try:
             self.glass_opacity_slider.setValue(int(self._orig_glass.get("opacity", 60)))
         except (TypeError, ValueError):
@@ -1489,30 +1690,37 @@ class ThemeSettingsDialog(QDialog):
         op_row.addWidget(self.glass_opacity_lbl)
         g_layout.addLayout(op_row)
 
-        tint_row = QHBoxLayout()
-        tint_row.addWidget(QLabel("玻璃颜色"))
+        self.tint_row = QHBoxLayout()
+        self.tint_row.addWidget(QLabel("玻璃颜色"))
         self.glass_tint_btn = QPushButton("选择颜色…")
         self.glass_tint_btn.clicked.connect(self._pick_glass_tint)
-        tint_row.addWidget(self.glass_tint_btn)
-        tint_row.addStretch()
-        g_layout.addLayout(tint_row)
+        self.tint_row.addWidget(self.glass_tint_btn)
+        self.tint_row.addStretch()
+        g_layout.addLayout(self.tint_row)
 
-        bg_row = QHBoxLayout()
-        bg_row.addWidget(QLabel("背景图"))
+        self.bg_row = QHBoxLayout()
+        self.bg_row.addWidget(QLabel("背景图"))
         self.glass_bg_edit = QLineEdit(str(self._orig_glass.get("bg_image", "") or ""))
         self.glass_bg_edit.setPlaceholderText("留空则使用玻璃颜色")
         self.glass_bg_edit.textChanged.connect(self._apply_preview)
-        bg_row.addWidget(self.glass_bg_edit, 1)
+        self.bg_row.addWidget(self.glass_bg_edit, 1)
         bg_browse = QPushButton("浏览…")
         bg_browse.clicked.connect(self._pick_glass_bg)
-        bg_row.addWidget(bg_browse)
+        self.bg_row.addWidget(bg_browse)
         bg_clear = QPushButton("清除")
         bg_clear.clicked.connect(lambda: self.glass_bg_edit.setText(""))
-        bg_row.addWidget(bg_clear)
-        g_layout.addLayout(bg_row)
+        self.bg_row.addWidget(bg_clear)
+        g_layout.addLayout(self.bg_row)
 
         self._sync_glass_widgets()
         layout.addWidget(self.glass_group)
+
+        # 透明度拖动防抖：拖动期间延迟合并预览，避免逐像素全量重建 QSS 卡顿
+        from PySide6.QtCore import QTimer
+        self._opacity_preview_timer = QTimer(self)
+        self._opacity_preview_timer.setSingleShot(True)
+        self._opacity_preview_timer.setInterval(60)
+        self._opacity_preview_timer.timeout.connect(self._apply_preview)
 
         # ---- 字体 ----
         font_title = QLabel("字体")
@@ -1567,19 +1775,31 @@ class ThemeSettingsDialog(QDialog):
         return bool(get_theme(self.theme_combo.currentData()).get("win_blur"))
 
     def _sync_glass_widgets(self) -> None:
-        """毛玻璃选项仅在毛玻璃主题下可见；同步透明度标签与颜色按钮色块"""
-        self.glass_group.setVisible(self._is_glass_selected())
+        """透明度全局可用；玻璃颜色/背景图仅毛玻璃主题显示。"""
+        is_glass = self._is_glass_selected()
         self.glass_opacity_lbl.setText(f"{self.glass_opacity_slider.value()}%")
         self.glass_tint_btn.setStyleSheet(
             f"background-color: {self._glass_tint}; color: #1f2937;")
+        # 玻璃专属行显隐
+        glass_only = [self.tint_row, self.bg_row]
+        for row in glass_only:
+            for i in range(row.count()):
+                w = row.itemAt(i).widget()
+                if w is not None:
+                    w.setVisible(is_glass)
 
     def _on_theme_index_changed(self, *_):
         self._sync_glass_widgets()
         self._apply_preview()
 
     def _on_glass_opacity_changed(self, *_):
+        """透明度变化（键盘/点击/松手）：立即刷新标签并应用预览。
+        拖动过程中 valueChanged 也会触发，此时交给防抖定时器，避免逐像素重建 QSS。"""
         self.glass_opacity_lbl.setText(f"{self.glass_opacity_slider.value()}%")
-        self._apply_preview()
+        if self.glass_opacity_slider.isSliderDown():
+            self._opacity_preview_timer.start()
+        else:
+            self._apply_preview()
 
     def _pick_glass_tint(self):
         color = QColorDialog.getColor(QColor(self._glass_tint), self, "选择玻璃颜色")

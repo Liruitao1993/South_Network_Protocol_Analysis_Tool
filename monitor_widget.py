@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
     QTextEdit, QFileDialog, QMessageBox, QHeaderView, QAbstractItemView,
     QLineEdit, QMenu,
 )
-from gui_utils import ZoomableTableWidget
+from gui_utils import ZoomableTableWidget, set_btn_icon
 from app_paths import app_data_dir
 
 
@@ -138,14 +138,17 @@ class RealtimeMonitorWidget(QWidget):
 
         self.pause_btn = QPushButton("暂停接收")
         self.pause_btn.setCheckable(True)
+        set_btn_icon(self.pause_btn, "pause")
         self.pause_btn.toggled.connect(self._on_pause_toggled)
         toolbar.addWidget(self.pause_btn)
 
         clear_btn = QPushButton("清空")
+        set_btn_icon(clear_btn, "clear")
         clear_btn.clicked.connect(self.clear_frames)
         toolbar.addWidget(clear_btn)
 
         export_btn = QPushButton("导出")
+        set_btn_icon(export_btn, "export")
         export_btn.clicked.connect(self._export_csv)
         toolbar.addWidget(export_btn)
 

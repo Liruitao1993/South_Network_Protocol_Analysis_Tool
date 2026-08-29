@@ -527,6 +527,49 @@ def test_compact_beacon_real():
     print("[OK] 精简信标载荷表73解析通过")
 
 
+def test_isac_sof_bitloading_pb_size():
+    """ISAC-PLC SOF 数据帧: Bitloading标识=1 时字节6低2bit为物理块大小码(表23)。
+    实帧: 29 01 20 00 04 5B 01 00 F0 00 00 00 20 6A 8F 56
+    字节6(FC可变区域相对)=0x01: Bitloading=1, PB大小码=0 -> 136字节。
+    旧实现误用表13 ROBO映射(0->520)且两字段合并显示。
+    """
+    parser = CSGNewGenParser()
+    frame = bytes.fromhex("29012000045B0100F0000000206A8F56")
+    table = parser.parse_to_table(frame)
+
+    bl = find_field(table, "Bitloading标识")
+    assert bl is not None, "缺少 Bitloading标识 字段"
+    assert bl[2] == "1" and "使用Bitloading" in bl[3], f"Bitloading标识错误: {bl}"
+
+    pb = find_field(table, "物理块大小码")
+    assert pb is not None, "缺少 物理块大小码 字段"
+    assert pb[1] == "0x0" and "136字节" in pb[3], f"物理块大小码错误: {pb}"
+
+    # 不应再出现旧的合并字段名
+    assert not find_field(table, "Bitloading/PB大小"), "旧合并字段名仍存在"
+    # PB 大小已存入 _pb_size 供后续 PB 解析使用(不再走 TMI/ROBO 表)
+    assert getattr(parser, "_pb_size", None) == 136, "_pb_size 未按 Bitloading 码设置"
+    print("[OK] ISAC SOF Bitloading物理块大小解析通过")
+
+
+def test_isac_sof_tmi_mode():
+    """ISAC SOF 数据帧: Bitloading标识=0 时字节6为TMI编号(表13 ROBO模式)。
+    构造字节6=0x00 -> TMI=0 (PB=520)。
+    """
+    parser = CSGNewGenParser()
+    frame = bytearray.fromhex("29012000045B0100F0000000206A8F56")
+    frame[6] = 0x00  # 字节6: bit0=0(TMI模式), bit1-5=TMI编号=0
+    # 帧长域等其它字段不变; FCS不校验FC表23字段本身
+    table = parser.parse_to_table(bytes(frame))
+
+    bl = find_field(table, "Bitloading标识")
+    assert bl is not None and bl[2] == "0" and "使用TMI" in bl[3], f"Bitloading标识错误: {bl}"
+    tmi = find_field(table, "TMI编号")
+    assert tmi is not None and tmi[1] == "0x00" and "520" in tmi[3], f"TMI编号错误: {tmi}"
+    assert not find_field(table, "物理块大小码"), "TMI模式不应出现物理块大小码字段"
+    print("[OK] ISAC SOF TMI模式解析通过")
+
+
 def main():
     print("=" * 50)
     print("新一代载波协议解析器测试")
@@ -554,6 +597,8 @@ def main():
     test_net_frame_real()
     test_aggregated_frame_app_layer()
     test_compact_beacon_real()
+    test_isac_sof_bitloading_pb_size()
+    test_isac_sof_tmi_mode()
     print("=" * 50)
     print("[OK] 全部测试通过")
 
