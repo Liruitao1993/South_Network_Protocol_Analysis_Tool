@@ -12,6 +12,8 @@ import threading
 
 from PySide6.QtCore import QThread, Signal
 
+import thread_registry
+
 # Windows 常量
 WM_HOTKEY = 0x0312
 MOD_ALT = 0x0001
@@ -64,6 +66,7 @@ class GlobalHotkeyThread(QThread):
 
     def __init__(self, vk: int, modifiers: int, parent=None):
         super().__init__(parent)
+        thread_registry.track(self, "GlobalHotkeyThread")
         self._vk = vk
         self._modifiers = modifiers
         self._id = 1

@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 from system_integration import registry_menu
 
 from app_paths import data_path
+from gui_utils import set_btn
 
 CONFIG_PATH = data_path("config.json")
 
@@ -112,7 +113,7 @@ class SystemIntegrationSettings(QWidget):
         hotkey_row.addStretch()
         box_layout.addLayout(hotkey_row)
 
-        hotkey_hint = QLabel("热键可跨任意软件使用：复制报文后按热键直接解析弹出结果")
+        hotkey_hint = QLabel("热键可跨任意软件使用：复制报文后按热键唤出快捷解析小窗，输入/粘贴即实时解析（Esc 或点外部关闭）")
         hotkey_hint.setStyleSheet("color: gray;")
         box_layout.addWidget(hotkey_hint)
 
@@ -133,7 +134,9 @@ class SystemIntegrationSettings(QWidget):
         menu_row = QHBoxLayout()
         self.menu_status_label = QLabel("未注册")
         self.register_menu_btn = QPushButton("注册文件右键菜单")
+        set_btn(self.register_menu_btn, "success")
         self.unregister_menu_btn = QPushButton("取消注册")
+        set_btn(self.unregister_menu_btn, "secondary")
         menu_row.addWidget(self.menu_status_label)
         menu_row.addStretch()
         menu_row.addWidget(self.register_menu_btn)
@@ -148,7 +151,9 @@ class SystemIntegrationSettings(QWidget):
         npp_row = QHBoxLayout()
         self.npp_status_label = QLabel("未注册")
         self.register_npp_btn = QPushButton("注册 Notepad++ 集成")
+        set_btn(self.register_npp_btn, "success")
         self.unregister_npp_btn = QPushButton("取消注册")
+        set_btn(self.unregister_npp_btn, "secondary")
         npp_row.addWidget(self.npp_status_label)
         npp_row.addStretch()
         npp_row.addWidget(self.register_npp_btn)
