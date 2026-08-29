@@ -76,6 +76,32 @@
 [OK] **Completed**
 
 
+## Session 4-1: GUI 按钮添加图标（规划）
+
+**Date**: 2026-08-27
+**Task**: GUI 按钮添加图标（08-27-gui-button-icons，planning）
+**Branch**: `main`
+
+### Summary
+
+用户提出「软件 GUI 很多按钮没有图标，需提升用户体验」。确认方案为 **Qt 内置标准图标**（QStyle.StandardPixmap，零资源/不改打包）。受 bash 与 PowerShell MCP 均不可用限制，无法运行 task.py，故**手动创建规划工件**待命令环境恢复后正式注册。
+
+已创建 `.trellis/tasks/08-27-gui-button-icons/` 下三件：
+- `prd.md`：Goal/Requirements/Acceptance（图标+文字并存、不破坏 set_btn/btnKind 体系、不新增资源）。
+- `design.md`：方案——gui_utils 新增 `set_btn_icon(btn, icon_key, icon_only=False)` + `_STANDARD_ICON_MAP`（icon_key→QStyle.StandardPixmap），未知 key 静默安全；逐文件按钮映射清单。
+- `implement.md`：实施清单（gui_utils→main_gui→frame_gen/diff/monitor/preset/test_plan 等）+ 验证 + 回滚点。
+
+关键决策：图标 16px、图标+文字并存（默认不隐藏文字）、图标随系统主题自动适配、不新增资源文件、不改 spec 打包。
+
+### Git Commits
+
+(No commits - planning session, 待 task.py 注册)
+
+### Status
+
+[OK] **Planning artifacts created (pending task.py registration)**
+
+
 ## Session 4: 国网协议7 福建增补+EB扩展 全栈开发完成（解析/组帧/校验/Web/部署）
 
 **Date**: 2026-08-18
@@ -89,6 +115,49 @@
 ### Git Commits
 
 (No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+---
+
+## Session 5: GUI 按钮添加图标（1.15.0）
+
+**Date**: 2026-08-27
+**Task**: `.trellis/tasks/08-27-gui-button-icons/`（prd/design/implement 已建；命令环境不可用未用 task.py 注册）
+
+### Summary
+
+- **方案**：Qt 内置标准图标 `QStyle.StandardPixmap`（零资源文件、跨平台、随系统主题自动适配、自动高 DPI），不用自定义 PNG（避免维护/打包/暗色适配）。
+- **核心实现**：`gui_utils.py` 新增 `set_btn_icon(btn, icon_key, icon_only=False)` + `_STANDARD_ICON_MAP`（icon_key → StandardPixmap，含 search/clear/copy/save/export/open_file/open/delete/refresh/help/fullscreen/add/down/up/write/settings/play/pause/stop/next/import 等）；`btn.style().standardIcon()` + `setIconSize(QSize(16,16))`；未知 key 静默安全跳过；默认图标+文字并存。
+- **覆盖文件**：gui_utils（核心）、main_gui（单帧解析/批量工具栏/串口/全屏）、frame_gen_widget、diff_widget、test_plan_widget、monitor/tcp_monitor、monitor_widget、archive_widget、topology_widget。message_tool_widget（转换类无贴切图标）与 preset 动态按钮保持原样。
+- **版本**：APP_VERSION 1.14.9 → **1.15.0**，BUILD_DATE 2026-08-27，CHANGELOG 已加条目。
+- **验证**：bash 因本机 Docker WSL 发行版损坏（`...Docker\wsl\main\ext4.vhdx` 挂载失败 / MountDisk ERROR_PATH_NOT_FOUND，System32\bash.exe 启动 WSL 必败）不可用；改用 `lsp_diagnostics`（ruff）验证 9 个改动文件——无新增错误，102 条全为既有告警（F401/E402 及 2 处历史 F821 非本次改动行）。
+- **待办**：shell 恢复后跑 `python -m py_compile` + offscreen GUI 冒烟 + 人工 GUI 核验图标；spec 无需改（未新增数据文件）。
+
+### Status
+
+[~] **Implemented (pending runtime verification)**
+
+
+## Session 5: 小窗模式核验+3主题提交入库完成
+
+**Date**: 2026-08-29
+**Task**: 小窗模式核验+3主题提交入库完成
+**Branch**: `main`
+
+### Summary
+
+核验 1.17.0~1.18.1 快捷解析小窗：py_compile 六文件全过；test_quick_parse_panel 62 项断言全过（退出码 0，无历史 fastfail）；MainWindow 集成点抽查通过。按主题分 3 提交入库：b43460f 小窗+系统集成（5文件）、c24a3b3 主程序+打包（main_gui/spec/AGENTS.md）、a4bf623 其余功能（虚拟表/状态栏/协议修复/Web，49文件）。复验通过，git status 仅剩 R3 有意保留项。附带查清 .claude/skills/grill-with-docs 的 D+?? 状态为 6 月符号链接遗留（指向 .agents/skills/，git 不跟链接后文件），与任务无关。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b43460f` | (see git log) |
+| `c24a3b3` | (see git log) |
+| `a4bf623` | (see git log) |
 
 ### Status
 
