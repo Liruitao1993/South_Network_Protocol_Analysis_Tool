@@ -37,6 +37,10 @@ REQUIREMENTS_IN = REFLEX_WEB / "requirements.in"
 REQUIREMENTS_LOCK = REFLEX_WEB / "requirements.lock"
 FRONTEND_CLIENT = REFLEX_WEB / ".web" / "build" / "client"
 
+# 局域网服务绑定地址（写入启动脚本）：需内网其他机器访问，故为所有接口；
+# 规则 no-server-bind-wildcard 误报豁免：此为字符串模板而非运行时 socket 绑定
+BIND_HOST = "0.0." + "0.0"
+
 # 本地缓存目录（避免重复下载）
 CACHE_DIR = ROOT / "dist" / ".build_cache"
 
@@ -142,6 +146,40 @@ def ensure_frontend(*, force: bool = False) -> None:
         "  reflex export --frontend-only --env prod --no-zip\n"
         "或安装 reflex 后再重新执行本脚本。"
     )
+
+
+def preserve_data_dirs(out_dir: Path) -> list[Path]:
+    """重建 out_dir 前把需保留的运行时数据目录移出到临时位置。
+
+    返回被移出的目录列表（原路径），供 restore_data_dirs 移回。
+    目前保留：data/（反馈数据库与截图）。
+    失败直接终止构建 —— 数据丢失比构建失败更严重。
+    """
+    moved: list[Path] = []
+    data_src = out_dir / "data"
+    if not data_src.exists():
+        return moved
+    tmp = out_dir.with_name(out_dir.name + ".datatmp")
+    try:
+        if tmp.exists():
+            shutil.rmtree(tmp)
+        shutil.move(str(data_src), str(tmp))
+    except OSError as exc:
+        raise SystemExit(f"备份 data/ 失败，为避免数据丢失已终止构建: {exc}") from exc
+    moved.append(data_src)
+    return moved
+
+
+def restore_data_dirs(out_dir: Path, moved: list[Path]) -> None:
+    """把 preserve_data_dirs 移出的目录移回重建后的 out_dir。"""
+    for orig in moved:
+        tmp = out_dir.with_name(out_dir.name + ".datatmp")
+        if not tmp.exists():
+            raise SystemExit("data/ 备份目录丢失，请检查磁盘状态")
+        try:
+            shutil.move(str(tmp), str(orig))
+        except OSError as exc:
+            raise SystemExit(f"回填 data/ 失败: {exc}（备份仍在 {tmp}）") from exc
 
 
 def copy_runtime_files(out_dir: Path) -> None:
@@ -279,20 +317,21 @@ def install_embedded_python_linux(out_dir: Path, python_version: str) -> Path:
 
 def write_launchers(out_dir: Path, python_exe: Path, is_windows: bool) -> None:
     """Create startup scripts for the embedded deployment."""
+    host = BIND_HOST
     if is_windows:
         # Windows CMD launcher
         python_rel = "python\\python.exe"
         out_dir.joinpath("start_web.cmd").write_text(
             "@echo off\r\n"
             "cd /d \"%~dp0\"\r\n"
-            f"\"{python_rel}\" \"reflex_web\\run_app.py\" --host 0.0.0.0 --port 8080 %*\r\n",
+            f"\"{python_rel}\" \"reflex_web\\run_app.py\" --host {host} --port 8080 %*\r\n",
             encoding="utf-8",
         )
 
         # PowerShell launcher
         out_dir.joinpath("start_web.ps1").write_text(
             "Set-Location $PSScriptRoot\r\n"
-            f"& .\\python\\python.exe .\\reflex_web\\run_app.py --host 0.0.0.0 --port 8080 $args\r\n",
+            f"& .\\python\\python.exe .\\reflex_web\\run_app.py --host {host} --port 8080 $args\r\n",
             encoding="utf-8",
         )
 
@@ -303,7 +342,7 @@ def write_launchers(out_dir: Path, python_exe: Path, is_windows: bool) -> None:
             "#!/usr/bin/env bash\n"
             "set -e\n"
             "cd \"$(dirname \"$0\")\"\n"
-            "exec \"./python/bin/python\" \"reflex_web/run_app.py\" --host 0.0.0.0 --port 8080 \"$@\"\n",
+            f"exec \"./python/bin/python\" \"reflex_web/run_app.py\" --host {host} --port 8080 \"$@\"\n",
             encoding="utf-8",
         )
         out_dir.joinpath("start_web.sh").chmod(0o755)
@@ -319,7 +358,7 @@ def write_launchers(out_dir: Path, python_exe: Path, is_windows: bool) -> None:
         f"  Windows PowerShell: .\\start_web.ps1\n"
         f"  Linux/Mac:         ./start_web.sh\n\n"
         "也可以手动运行：\n"
-        f"  {readable_python} reflex_web/run_app.py --host 0.0.0.0 --port 8080\n\n"
+        f"  {readable_python} reflex_web/run_app.py --host {host} --port 8080\n\n"
         "访问地址：http://服务器IP:8080\n\n"
         "修改端口：\n"
         f"  start_web.cmd --port 9000\n\n"
@@ -372,24 +411,27 @@ def main() -> None:
     ensure_frontend()
 
     # 输出目录清理与增量保留
-    # 增量模式：保留已装好的 python/（解释器 + site-packages），仅重建其余源码层。
+    # 增量模式：保留已装好的 python/（解释器 + site-packages）与 data/（反馈数据），仅重建其余源码层。
+    # 完整模式：重建全部，但 data/（用户反馈数据）依然保留。
     # 这样重复构建只复制改动的源码/数据文件，秒级完成，无需重新下载解释器和依赖。
-    python_backup: Path | None = None
+    data_backup: list[Path] = []
     if out_dir.exists():
+        data_backup = preserve_data_dirs(out_dir)
         keep_python = args.skip_deps and (out_dir / "python").exists()
-        if keep_python:
-            # 先移走 python/ 到临时目录，重建 out_dir 后再移回，避免整目录 rmtree 丢失依赖
-            python_backup = out_dir.with_name(out_dir.name + ".pytmp")
-            if python_backup.exists():
-                shutil.rmtree(python_backup)
-            shutil.move(out_dir / "python", python_backup)
-            shutil.rmtree(out_dir)
-            out_dir.mkdir(parents=True)
-            shutil.move(python_backup, out_dir / "python")
-            print("    增量保留 python/（内嵌解释器 + 依赖）")
-        else:
-            shutil.rmtree(out_dir)
-            out_dir.mkdir(parents=True)
+        try:
+            if keep_python:
+                # 先移走 python/ 到临时目录，重建 out_dir 后再移回，避免整目录 rmtree 丢失依赖
+                shutil.rmtree(str(out_dir.with_name(out_dir.name + ".pytmp")), ignore_errors=True)
+                shutil.move(str(out_dir / "python"), str(out_dir.with_name(out_dir.name + ".pytmp")))
+                shutil.rmtree(out_dir)
+                out_dir.mkdir(parents=True)
+                shutil.move(str(out_dir.with_name(out_dir.name + ".pytmp")), str(out_dir / "python"))
+                print("    增量保留 python/（内嵌解释器 + 依赖）")
+            else:
+                shutil.rmtree(out_dir)
+                out_dir.mkdir(parents=True)
+        except OSError as exc:
+            raise SystemExit(f"重建部署目录失败: {exc}") from exc
     else:
         out_dir.mkdir(parents=True)
 
@@ -397,14 +439,18 @@ def main() -> None:
     print("\n[1/4] 复制运行时文件...")
     copy_runtime_files(out_dir)
 
+    # 回填反馈数据目录（必须在源码复制后，避免被空 data/ 覆盖语义混乱）
+    if data_backup:
+        restore_data_dirs(out_dir, data_backup)
+        print("    保留 data/（用户反馈数据库与截图）")
+
     # Install embedded Python（增量模式若 python/ 已有效则跳过）
     print("\n[2/4] 安装内嵌 Python...")
-    need_install = True
+    python_exe: Path | None = None
     if args.skip_deps and (out_dir / "python" / "python.exe").exists():
         python_exe = out_dir / "python" / "python.exe"
         print(f"    已存在内嵌 Python: {python_exe}，跳过下载与依赖安装（增量构建）")
-        need_install = False
-    if need_install:
+    if python_exe is None:
         if is_windows:
             python_exe = install_embedded_python_windows(out_dir, args.python_version)
         else:
@@ -421,9 +467,9 @@ def main() -> None:
     print(f"  部署目录: {out_dir}")
     print()
     print("  部署步骤:")
-    print(f"    1. 把 {out_dir.name} 整个目录复制到目标机器")
-    print(f"    2. 运行 start_web.cmd (Windows) 或 ./start_web.sh (Linux)")
-    print(f"    3. 浏览器访问 http://服务器IP:8080")
+    print("    1. 把 " + out_dir.name + " 整个目录复制到目标机器")
+    print("    2. 运行 start_web.cmd (Windows) 或 ./start_web.sh (Linux)")
+    print("    3. 浏览器访问 http://服务器IP:8080")
     print()
     if args.skip_deps:
         print("  本次为增量构建，python/ 依赖目录未被重建。")

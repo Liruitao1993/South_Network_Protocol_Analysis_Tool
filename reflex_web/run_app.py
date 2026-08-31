@@ -259,6 +259,39 @@ def main():
         })
         await send({"type": "http.response.body", "body": body, "more_body": False})
 
+    # ===== 反馈截图路由 =====
+    # /fbimg/fb_xxx.png → data/uploads/feedback/ 目录的截图（内联展示）
+    # /api/fbimg/fb_xxx.png → 同 /fbimg/（开发模式 Vite 代理 /api/* 用）
+    async def _serve_fbimg(scope, receive, send, path: str):
+        """服务 data/uploads/feedback/ 目录下的反馈截图（/fbimg/ 前缀路由）"""
+        from urllib.parse import unquote
+        import mimetypes
+
+        # 截图目录: reflex_web/data/uploads/feedback/（resource_dir 是 reflex_web/）
+        fb_dir = (resource_dir / "data" / "uploads" / "feedback").resolve()
+        if path.startswith("/api/fbimg/"):
+            filename = unquote(path[len("/api/fbimg/"):])
+        else:
+            filename = unquote(path[len("/fbimg/"):])
+        # 防目录穿越：仅允许纯文件名
+        if not filename or ".." in filename or "/" in filename or "\\" in filename:
+            await _send_download_error(send, 404, "Invalid filename")
+            return
+        file_path = (fb_dir / filename).resolve()
+        if not file_path.is_relative_to(fb_dir) or not file_path.exists():
+            await _send_download_error(send, 404, "File not found")
+            return
+        mime, _ = mimetypes.guess_type(str(file_path))
+        content_type = mime or "application/octet-stream"
+        data = file_path.read_bytes()
+        headers = [
+            (b"content-type", content_type.encode("latin-1")),
+            (b"content-length", str(len(data)).encode()),
+            (b"content-disposition", b"inline"),
+        ]
+        await send({"type": "http.response.start", "status": 200, "headers": headers})
+        await send({"type": "http.response.body", "body": data, "more_body": False})
+
     async def env_rewrite_middleware(scope, receive, send):
         if scope["type"] != "http":
             return await asgi_app(scope, receive, send)
@@ -271,6 +304,12 @@ def main():
         # /api/download/xxx → 同 /download/（开发模式 Vite 代理 /api/* 用）
         if path.startswith("/download/") or path.startswith("/api/download/"):
             return await _serve_download(scope, receive, send, path)
+
+        # ===== 反馈截图路由 =====
+        # /fbimg/fb_xxx.png → data/uploads/feedback/ 目录的截图
+        # /api/fbimg/fb_xxx.png → 同 /fbimg/
+        if path.startswith("/fbimg/") or path.startswith("/api/fbimg/"):
+            return await _serve_fbimg(scope, receive, send, path)
 
         # 获取请求的 host 和 scheme
         host = None

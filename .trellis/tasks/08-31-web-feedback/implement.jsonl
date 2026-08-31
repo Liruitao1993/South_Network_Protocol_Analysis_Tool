@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "前端层规范入口（Web 版页面/State 开发需遵循）"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "质量规范：测试与校验要求"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复用现有 header/上传/口令机制，避免重复造轮子"}
+{"file": ".trellis/tasks/08-31-web-feedback/research/web-internals.md", "reason": "本任务研究笔记：Reflex 上传/ASGI 路由/部署脚本现状结论"}

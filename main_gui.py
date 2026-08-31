@@ -88,10 +88,29 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.18.1"
-BUILD_DATE = "2026-08-28"  # 编译日期，每次打包前更新
+APP_VERSION = "1.19.0"
+BUILD_DATE = "2026-08-31"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    (
+        "1.19.0",
+        "2026-08-31",
+        [
+            "Reflex Web 版新增『问题反馈』页面（/feedback）：问题类型/涉及协议下拉、问题描述（必填 ≤2000 字）、联系方式（选填 ≤100 字）、截图上传（≤3 张 jpg/png/webp 单张 ≤5MB，魔数+扩展名+大小三重服务端校验，文件名服务端重生成防路径穿越）；导航栏新增『问题反馈』入口。新增 /feedback-admin 反馈管理页（复用发布管理 AdminConfig 口令）：时间倒序分页列表（每页 20 条）、详情弹窗（截图内联预览 /fbimg/ 路由）、状态流转（待处理/已确认/已修复/已忽略）、删除（记录与截图文件同步清理）",
+            "反馈数据 SQLite 持久化：新增 reflex_web/reflex_web/feedback_model.py（FeedbackItem rx.Model + FeedbackStore 单例，check_same_thread=False 适配 Reflex 多线程）；数据落在 reflex_web/data/feedback.db + data/uploads/feedback/（与 downloads/ 同级策略，已加 .gitignore）。核心约束——重新部署不丢数据：build_embedded_deploy.py（增量 --skip-deps 与完整模式）与 build_offline_deploy.py 重建部署目录时把 data/ 移出再回填；备份/回填失败立即终止构建而非静默继续。新增 /fbimg/（+ /api/fbimg/）截图路由：生产 run_app.py ASGI 中间件 + 开发 Starlette 路由双实现，防穿越 + 仅服务 data/uploads/feedback/；依赖新增 sqlmodel（requirements.in + lock 已同步，Reflex 0.9.8 rx.Model 默认不装数据库依赖）",
+            "新增 test/test_web_feedback.py（49 项断言）：截图保存校验（png/jpeg/webp 魔数、非法扩展、超大、空内容、穿越文件名拒绝）/ 防穿越清理（../、路径分隔符、非 fb_* 文件名拒绝）/ FeedbackStore CRUD（分页/待处理统计/状态流转/删除返回截图名）/ 部署脚本 data/ 保留往返（offline+embedded）/ 四文件编译验证；test_web_frame_gen_utils 回归 63 项通过",
+        ],
+    ),
+    (
+        "1.18.2",
+        "2026-08-29",
+        [
+            "快捷小窗首次唤出『大高个』修复：空态窗口高约 200px、宽仅 520px——根因一是 QTextEdit 默认 sizeHint 高约 192px，空态解除限高后 _fit_height 直接采信把窗口撑高；二是 _DEFAULT_WIDTH=720 只用于居中计算从未真正 resize，构造期窗口停在最小宽 520。修复：空态 _fit_height 收口为单行输入条高度 66px（右下角拖拽拉高不受影响，清空/重新唤出时回落单行）；首次唤出（用户未调整过几何时）宽度取 _DEFAULT_WIDTH=720。四场景探针验证：空态唤出 720×66、剪贴板预填展开 720×390、清空收回 66px、拖高后收回仍收口",
+            "快捷小窗空态『宽灰边』修复：用户反馈空态输入框四周有一圈很宽的灰色毛玻璃边——根因是外层 12px 投影边距 + 面板 16/14/16/12 内边距在空态依然生效，这些透明留白被亚克力染色后视觉上成了输入框的粗边框；改为边距随形态动态切换——空态收窄为 6px 外层光晕 + 2px 内边距（输入框距窗口边缘仅 8px，原 28px），展开态恢复原边距供毛玻璃卡片与投影使用；顺手清理 _restyle 中两个未使用的 fg 变量（ruff F841）。test_quick_parse_panel 新增 4 项边距断言（空态 6/2px、展开 12/16px 恢复、双向切换），共 66 项全过",
+            "快捷小窗三项缺陷修复（代码评审发现）：① _ever_activated 属性误删初始化——changeEvent 失焦分支读取该属性，若首个 ActivationChange 事件到达时窗口未激活（唤出瞬间其他窗口持有焦点）会抛 AttributeError，已在 __init__ 恢复初始化；② 底部键位提示承诺『Enter 打开』但从未实现（焦点在输入框时 Enter 只插入换行）——给输入框装事件过滤器，Enter/Return 触发『在主窗口打开』，Shift+Enter 保留换行，提示文案同步改为『在主窗口打开 Enter』与按钮行为一致；③ 协议 9/10 ED 包装帧校验口径与解析不一致——_quick_panel_parse 剥离 ED 监控头后解析，但 _quick_panel_validate 仍拿带包装原帧校验导致『解析成功、徽章恒为校验失败』，现校验同样先剥离再校验（剥离失败回退原帧）。test_quick_parse_panel 扩至 81 项断言（_ever_activated 回归/Enter 三场景/ED 口径四场景），并修正 12 节热键断言逻辑（_open_full 已隐藏小窗后单次热键必然重新唤出）",
+            "快捷小窗预填协议改为『自动识别优先』：此前唤出时把协议下拉同步到主窗体当前协议并用 _suppress_detect 屏蔽本轮 detect_protocol，导致主窗体停在国网(7)时粘贴新一代载波(9)/南网(0) 帧会被锁在 7 误解析。现移除 _suppress_detect：_prefill_clipboard 同步主窗协议仅作兜底，_do_parse 中只要用户未手动选过协议就跑 detect_protocol，识别得出即切换、识别不出（返回 None）才保持主窗协议；_on_text_changed/_on_proto_manually_changed 中对应清标志逻辑一并删除。test_quick_parse_panel 新增 12c 两项断言（南网帧识别为 0 不锁主窗 7 / 不可识别帧兜底保持 7），共 84 项全过",
+        ],
+    ),
     (
         "1.18.1",
         "2026-08-28",
@@ -3077,6 +3096,11 @@ class MainWindow(QMainWindow):
                 self.monitor_tab.set_protocol(
                     parser, self._get_monitor_summary, wrapper_format=wrapper
                 )
+
+        # 协议切换时把当前协议同步到快捷解析小窗（小窗存在时）
+        # set_protocol_index 静默切下拉；不重解析，由用户后续输入触发
+        if getattr(self, "_quick_panel", None) is not None:
+            self._quick_panel.set_protocol_index(index)
 
         # 持久化协议选择（UI 全部就绪后才写盘，避免构造期触发保存）
         if getattr(self, "_ui_ready", False):
@@ -6428,6 +6452,7 @@ class MainWindow(QMainWindow):
                 validate_fn=self._quick_panel_validate,
                 open_full_fn=self._quick_panel_open_full,
                 is_dark_fn=self._is_dark_theme,
+                main_protocol_fn=lambda: self.protocol_combo.currentIndex(),
             )
         self._quick_panel.toggle_panel()
 
@@ -6496,14 +6521,37 @@ class MainWindow(QMainWindow):
             validator = self._quick_validators.get(idx)
             if validator is None:
                 return None, ""
-            result = validator.verify(frame_bytes)
+            verify_bytes = frame_bytes
+            # 与 _quick_panel_parse 口径对齐：9/10 协议 ED 包装帧先剥离监控头再校验，
+            # 否则 validator 不识别 ED 包装导致「解析成功但徽章恒为校验失败」
+            if idx in (9, 10) and frame_bytes and frame_bytes[0] == 0xED:
+                try:
+                    _rows, business, _offset = self._parse_ed_monitor_header(
+                        frame_bytes
+                    )
+                    if business:
+                        verify_bytes = business
+                except Exception:
+                    pass
+            result = validator.verify(verify_bytes)
             return bool(result.valid), result.summary()
         except Exception:
             return None, ""
 
     def _quick_panel_open_full(self, frame_bytes: bytes, idx: int):
-        """快捷小窗「完整视图」回调：打开现有大解析弹窗。"""
-        self._parse_and_show_dialog(frame_bytes, idx)
+        """快捷小窗「在主窗口打开」：把当前帧送入主程序单帧解析页。
+
+        同步主窗体协议下拉到小窗选中协议、切到单帧解析 tab、触发解析，
+        并隐藏小窗（避免遮挡主程序）。语义与 _send_frame_to_single_parse 一致。
+        """
+        hex_str = " ".join(f"{b:02X}" for b in frame_bytes)
+        self.single_input.setPlainText(hex_str)
+        if 0 <= idx < self.protocol_combo.count() and self.protocol_combo.currentIndex() != idx:
+            self.protocol_combo.setCurrentIndex(idx)
+        self.tab_widget.setCurrentIndex(0)
+        self.parse_single()
+        if self._quick_panel is not None:
+            self._quick_panel.hide()
 
     def _parse_and_show_dialog(self, frame_bytes: bytes, initial_protocol: int = None):
         """解析字节并弹出结果对话框（热键/命令行/文件右键共用）

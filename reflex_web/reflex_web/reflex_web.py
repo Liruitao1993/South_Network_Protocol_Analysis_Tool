@@ -3387,6 +3387,14 @@ def header() -> rx.Component:
                     width="320px",
                     class_name="app-header-select",
                 ),
+                # 问题反馈入口
+                rx.el.a(
+                    rx.hstack(rx.icon("message_square_heart", size=14), "问题反馈", spacing="1"),
+                    href="/feedback",
+                    class_name="app-header-btn",
+                    data_testid="nav-feedback",
+                    style={"text_decoration": "none", "color": "white"},
+                ),
                 # 版本徽章
                 rx.badge("v1.13.0", color_scheme="blue", variant="soft", size="2"),
                 # 管理员登录/登出按钮
@@ -6400,6 +6408,734 @@ def download_tab() -> rx.Component:
 
 
 # ═══════════════════════════════════════════════════════════════
+# 问题反馈（用户提交 + 管理页）
+# ═══════════════════════════════════════════════════════════════
+
+FEEDBACK_PROTOCOL_OPTIONS = [
+    "不确定",
+    "南网协议",
+    "PLC RF协议",
+    "HDLC/国网DLMS",
+    "DLMS-APDU(国网)",
+    "DLMS Wrapper裸报文",
+    "DLMS-APDU裸报文",
+    "DLT645-2007 电表协议",
+    "国网协议",
+    "698.45协议",
+    "新一代载波协议",
+    "国网新一代双模",
+    "HDC 1.0 双模",
+]
+FEEDBACK_PAGE_SIZE = 20
+
+
+class FeedbackState(rx.State):
+    """问题反馈：用户提交表单 + 管理页状态（独立于主 State）"""
+
+    # ── 提交表单 ──
+    fb_type: str = "功能异常"
+    fb_protocol: str = "不确定"
+    fb_desc: str = ""
+    fb_contact: str = ""
+    fb_files: List[str] = []          # 已选截图文件名（展示用）
+    # 后端专用：暂存上传的截图字节（下划线前缀 → 不发送到前端），提交时统一落盘
+    _fb_pending_data: List[bytes] = []
+    fb_msg: str = ""
+    fb_msg_type: str = "info"         # info/success/error
+
+    # ── 管理页 ──
+    fa_logged: bool = False
+    fa_password: str = ""
+    fa_msg: str = ""
+    fa_items: List[Dict[str, Any]] = []
+    fa_total: int = 0
+    fa_page: int = 0                  # 0-based 页号
+    fa_detail_open: bool = False
+    fa_detail: Dict[str, Any] = {}
+
+    # ── 提交表单事件 ──
+
+    def set_fb_type(self, value: str):
+        self.fb_type = value
+
+    def set_fb_protocol(self, value: str):
+        self.fb_protocol = value
+
+    def set_fb_desc(self, value: str):
+        self.fb_desc = value
+
+    def set_fb_contact(self, value: str):
+        self.fb_contact = value
+
+    async def handle_fb_files(self, files: List[rx.UploadFile]):
+        """截图选择暂存：字节存后端 _fb_pending_data，提交时才落盘"""
+        if not files:
+            return
+        if len(files) > 3:
+            self.fb_msg = "最多上传 3 张截图"
+            self.fb_msg_type = "error"
+            return
+        names = []
+        datas = []
+        total = 0
+        for f in files:
+            data = await f.read()
+            total += len(data)
+            if len(data) > 5 * 1024 * 1024:
+                self.fb_msg = f"截图 {getattr(f, 'filename', '') or '文件'} 超过 5MB"
+                self.fb_msg_type = "error"
+                self.fb_files = []
+                self._fb_pending_data = []
+                return
+            names.append(getattr(f, "filename", None) or getattr(f, "name", None) or "截图")
+            datas.append(data)
+        self.fb_files = names
+        self._fb_pending_data = datas
+        self.fb_msg = f"已选择 {len(names)} 张截图（共 {total // 1024} KB），点击提交后上传"
+        self.fb_msg_type = "info"
+
+    def clear_fb_files(self):
+        self.fb_files = []
+        self._fb_pending_data = []
+        if self.fb_msg_type != "error":
+            self.fb_msg = ""
+
+    async def submit_feedback(self):
+        """提交反馈：服务端校验 → 截图落盘 → 写库 → 清空表单"""
+        from . import feedback_model as fm
+
+        desc = (self.fb_desc or "").strip()
+        contact = (self.fb_contact or "").strip()
+        if not desc:
+            self.fb_msg = "请填写问题描述"
+            self.fb_msg_type = "error"
+            return
+        if len(desc) > fm.MAX_DESC_LEN:
+            self.fb_msg = f"问题描述不能超过 {fm.MAX_DESC_LEN} 字（当前 {len(desc)} 字）"
+            self.fb_msg_type = "error"
+            return
+        if len(contact) > fm.MAX_CONTACT_LEN:
+            self.fb_msg = f"联系方式不能超过 {fm.MAX_CONTACT_LEN} 字"
+            self.fb_msg_type = "error"
+            return
+        if self.fb_type not in fm.ISSUE_TYPES:
+            self.fb_msg = "请选择有效的问题类型"
+            self.fb_msg_type = "error"
+            return
+
+        saved_names = []
+        try:
+            for i, data in enumerate(self._fb_pending_data):
+                orig = self.fb_files[i] if i < len(self.fb_files) else ""
+                saved_names.append(fm.save_screenshot(data, orig))
+        except ValueError as e:
+            fm.delete_screenshots(saved_names)
+            self.fb_msg = f"截图保存失败: {e}"
+            self.fb_msg_type = "error"
+            return
+        except Exception as e:
+            fm.delete_screenshots(saved_names)
+            self.fb_msg = f"截图上传异常: {e}"
+            self.fb_msg_type = "error"
+            return
+
+        try:
+            item = fm.FeedbackItem(
+                created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                issue_type=self.fb_type,
+                protocol=self.fb_protocol,
+                description=desc,
+                contact=contact,
+                screenshots=";".join(saved_names),
+                status="待处理",
+            )
+            fm.FeedbackStore.instance().add(item)
+        except Exception as e:
+            fm.delete_screenshots(saved_names)
+            self.fb_msg = f"保存失败: {e}"
+            self.fb_msg_type = "error"
+            return
+
+        # 成功：清空表单
+        saved = len(saved_names)
+        self.fb_desc = ""
+        self.fb_contact = ""
+        self.fb_files = []
+        self._fb_pending_data = []
+        self.fb_msg = ("反馈提交成功，感谢您的支持！" + (f"（含 {saved} 张截图）" if saved else ""))
+        self.fb_msg_type = "success"
+
+    # ── 管理页事件 ──
+
+    def set_fa_password(self, value: str):
+        self.fa_password = value
+
+    def fa_login_on_key(self, key: str, info: dict = None):
+        """密码输入框回车触发登录"""
+        if key == "Enter":
+            self.fa_login()
+
+    def fa_login(self):
+        """反馈管理页登录（复用 AdminConfig 口令）"""
+        from .admin_release import AdminConfig
+        here = Path(__file__).resolve()
+        config_path = here.parent.parent / "admin_config.json"
+        if not config_path.exists():
+            config_path = here.parent / "admin_config.json"
+        try:
+            cfg = AdminConfig(config_path)
+        except Exception as e:
+            self.fa_msg = f"配置加载失败: {e}"
+            return
+        if cfg.verify_password(self.fa_password):
+            self.fa_logged = True
+            self.fa_password = ""
+            self.fa_msg = ""
+            self.fa_load()
+        else:
+            self.fa_msg = "密码错误"
+
+    def fa_logout(self):
+        self.fa_logged = False
+        self.fa_password = ""
+        self.fa_msg = ""
+        self.fa_items = []
+        self.fa_total = 0
+        self.fa_page = 0
+        self.fa_detail_open = False
+
+    def fa_load(self):
+        """加载当前页反馈列表"""
+        from . import feedback_model as fm
+        try:
+            items, total = fm.FeedbackStore.instance().list_all(
+                offset=self.fa_page * FEEDBACK_PAGE_SIZE, limit=FEEDBACK_PAGE_SIZE
+            )
+            self.fa_items = [
+                {
+                    "id": int(it.id),
+                    "created_at": it.created_at,
+                    "issue_type": it.issue_type,
+                    "protocol": it.protocol,
+                    "description": it.description,
+                    "contact": it.contact,
+                    "screenshots": it.screenshots,
+                    "status": it.status,
+                }
+                for it in items
+            ]
+            self.fa_total = total
+        except Exception as e:
+            self.fa_msg = f"加载失败: {e}"
+
+    def fa_first_page(self):
+        self.fa_page = 0
+        self.fa_load()
+
+    def fa_prev_page(self):
+        if self.fa_page > 0:
+            self.fa_page -= 1
+        self.fa_load()
+
+    def fa_next_page(self):
+        if (self.fa_page + 1) * FEEDBACK_PAGE_SIZE < self.fa_total:
+            self.fa_page += 1
+        self.fa_load()
+
+    def fa_open_detail(self, item: Dict[str, Any]):
+        self.fa_detail = item
+        self.fa_detail_open = True
+
+    def fa_close_detail(self):
+        self.fa_detail_open = False
+
+    def fa_set_status(self, status: str):
+        """修改详情对应反馈的状态"""
+        from . import feedback_model as fm
+        item_id = self.fa_detail.get("id")
+        if item_id is None:
+            return
+        if fm.FeedbackStore.instance().update_status(int(item_id), status):
+            self.fa_detail = {**self.fa_detail, "status": status}
+            self.fa_load()
+
+    def fa_delete_current(self):
+        """删除详情对应反馈（含截图文件）"""
+        from . import feedback_model as fm
+        item_id = self.fa_detail.get("id")
+        if item_id is None:
+            return
+        names = fm.FeedbackStore.instance().delete(int(item_id))
+        removed = fm.delete_screenshots(names)
+        self.fa_detail_open = False
+        self.fa_msg = f"已删除反馈 #{item_id}" + (f"（清理 {removed} 张截图）" if removed else "")
+        # 若当前页删空则回退一页
+        if self.fa_items and len(self.fa_items) == 1 and self.fa_page > 0:
+            self.fa_page -= 1
+        self.fa_load()
+
+
+class FeedbackUploads(rx.State):
+    """保留空占位（历史遗留命名空间，无状态）"""
+
+
+# ── 反馈页面组件 ──
+
+def _fb_msg_banner() -> rx.Component:
+    """反馈表单消息提示条"""
+    return rx.cond(
+        FeedbackState.fb_msg != "",
+        rx.hstack(
+            rx.icon(
+                rx.cond(FeedbackState.fb_msg_type == "error", "circle_alert", "circle_check"),
+                size=16,
+                color=rx.cond(FeedbackState.fb_msg_type == "error", "#dc2626", "#16a34a"),
+            ),
+            rx.text(
+                FeedbackState.fb_msg,
+                size="2",
+                color=rx.cond(FeedbackState.fb_msg_type == "error", "#dc2626", "#15803d"),
+            ),
+            spacing="2",
+            padding="8px 12px",
+            border_radius="8px",
+            background=rx.cond(
+                FeedbackState.fb_msg_type == "error",
+                "#fef2f2",
+                "#f0fdf4",
+            ),
+            width="100%",
+        ),
+    )
+
+
+def feedback_page() -> rx.Component:
+    """问题反馈提交页（用户侧，无需登录）"""
+    return rx.box(
+        rx.el.style(GLOBAL_CSS),
+        header(),
+        rx.box(
+            rx.vstack(
+                # 页面标题
+                rx.hstack(
+                    rx.icon("message_square_heart", size=24, color="#2563eb"),
+                    rx.heading("问题反馈", size="5", font_weight="bold"),
+                    spacing="2",
+                    margin_bottom="4px",
+                ),
+                rx.text(
+                    "使用中遇到问题或有改进建议，请在此反馈。我们会尽快处理。",
+                    size="2",
+                    color="#64748b",
+                    margin_bottom="12px",
+                ),
+                # 表单卡片
+                rx.card(
+                    rx.vstack(
+                        rx.hstack(
+                            rx.vstack(
+                                rx.text("问题类型", size="2", font_weight="medium"),
+                                rx.select(
+                                    ["功能异常", "解析错误", "界面体验", "新功能建议", "其他"],
+                                    value=FeedbackState.fb_type,
+                                    on_change=FeedbackState.set_fb_type,
+                                    width="200px",
+                                    data_testid="fb-type",
+                                ),
+                                spacing="1",
+                                align="start",
+                            ),
+                            rx.vstack(
+                                rx.text("涉及协议", size="2", font_weight="medium"),
+                                rx.select(
+                                    FEEDBACK_PROTOCOL_OPTIONS,
+                                    value=FeedbackState.fb_protocol,
+                                    on_change=FeedbackState.set_fb_protocol,
+                                    width="260px",
+                                    data_testid="fb-protocol",
+                                ),
+                                spacing="1",
+                                align="start",
+                            ),
+                            spacing="6",
+                            wrap="wrap",
+                            width="100%",
+                        ),
+                        rx.vstack(
+                            rx.hstack(
+                                rx.text("问题描述", size="2", font_weight="medium"),
+                                rx.badge("必填", color_scheme="red", variant="soft", size="1"),
+                                rx.spacer(),
+                                rx.text(
+                                    f"{FeedbackState.fb_desc.length()} / 2000",
+                                    size="1",
+                                    color="#94a3b8",
+                                ),
+                                spacing="2",
+                                width="100%",
+                            ),
+                            rx.text_area(
+                                placeholder="请描述遇到的问题：什么操作、预期结果、实际结果（可附报文样例）",
+                                value=FeedbackState.fb_desc,
+                                on_change=FeedbackState.set_fb_desc,
+                                min_height="120px",
+                                width="100%",
+                                data_testid="fb-desc",
+                            ),
+                            spacing="1",
+                            align="start",
+                            width="100%",
+                        ),
+                        rx.vstack(
+                            rx.text("联系方式（选填）", size="2", font_weight="medium"),
+                            rx.input(
+                                placeholder="如 QQ / 微信 / 邮箱，方便我们回访",
+                                value=FeedbackState.fb_contact,
+                                on_change=FeedbackState.set_fb_contact,
+                                width="320px",
+                                max_length=100,
+                                data_testid="fb-contact",
+                            ),
+                            spacing="1",
+                            align="start",
+                        ),
+                        # 截图上传
+                        rx.vstack(
+                            rx.text("截图（选填，最多 3 张，jpg/png/webp，单张 ≤5MB）", size="2", font_weight="medium"),
+                            rx.upload(
+                                rx.hstack(
+                                    rx.icon("image_up", size=20, color="#2563eb"),
+                                    rx.text("拖拽截图到此处，或点击选择", size="2"),
+                                    spacing="2",
+                                    align="center",
+                                ),
+                                on_drop=FeedbackState.handle_fb_files,
+                                multiple=True,
+                                max_files=3,
+                                accept={"image/png": [".png"], "image/jpeg": [".jpg", ".jpeg"], "image/webp": [".webp"]},
+                                max_size=5 * 1024 * 1024,
+                                class_name="rounded-lg border-2 border-dashed border-blue-300 bg-blue-50/50 p-4 w-full hover:border-blue-500 transition-colors",
+                                data_testid="fb-upload",
+                            ),
+                            rx.cond(
+                                FeedbackState.fb_files.length() > 0,
+                                rx.hstack(
+                                    rx.icon("paperclip", size=14, color="#64748b"),
+                                    rx.text(
+                                        "已选 " + FeedbackState.fb_files.length().to_string() + " 张截图",
+                                        size="1",
+                                        color="#64748b",
+                                    ),
+                                    rx.button(
+                                        "清除",
+                                        size="1",
+                                        variant="soft",
+                                        color_scheme="gray",
+                                        on_click=FeedbackState.clear_fb_files,
+                                    ),
+                                    spacing="2",
+                                ),
+                            ),
+                            spacing="2",
+                            align="start",
+                            width="100%",
+                        ),
+                        _fb_msg_banner(),
+                        rx.hstack(
+                            rx.spacer(),
+                            rx.button(
+                                rx.hstack(rx.icon("send", size=16), "提交反馈", spacing="2"),
+                                on_click=FeedbackState.submit_feedback,
+                                color_scheme="blue",
+                                size="2",
+                                data_testid="fb-submit",
+                            ),
+                            width="100%",
+                        ),
+                        spacing="4",
+                        width="100%",
+                    ),
+                    max_width="760px",
+                    width="100%",
+                ),
+                spacing="2",
+                width="100%",
+                max_width="760px",
+            ),
+            class_name="app-container",
+            width="100%",
+        ),
+        background="#f1f5f9",
+        min_height="100vh",
+    )
+
+
+def _fa_status_badge(status: str) -> rx.Component:
+    """状态徽章配色"""
+    return rx.match(
+        status,
+        ("待处理", rx.badge("待处理", color_scheme="orange", variant="soft", size="1")),
+        ("已确认", rx.badge("已确认", color_scheme="blue", variant="soft", size="1")),
+        ("已修复", rx.badge("已修复", color_scheme="green", variant="soft", size="1")),
+        ("已忽略", rx.badge("已忽略", color_scheme="gray", variant="soft", size="1")),
+        rx.badge(status, color_scheme="gray", variant="soft", size="1"),
+    )
+
+
+def _fa_item_row(item: Dict[str, Any]) -> rx.Component:
+    """反馈列表行（vstack 卡片行，点击打开详情）"""
+    return rx.card(
+        rx.hstack(
+            rx.vstack(
+                rx.hstack(
+                    _fa_status_badge(item["status"]),
+                    rx.badge(item["issue_type"], color_scheme="purple", variant="soft", size="1"),
+                    rx.text(item["protocol"], size="1", color="#64748b"),
+                    spacing="2",
+                ),
+                rx.text(
+                    item["description"],
+                    size="2",
+                    color="#334155",
+                    no_of_lines=2,
+                    width="100%",
+                ),
+                rx.hstack(
+                    rx.text("#" + item["id"].to_string(), size="1", color="#94a3b8"),
+                    rx.text(item["created_at"], size="1", color="#94a3b8"),
+                    spacing="3",
+                ),
+                spacing="1",
+                align="start",
+                flex="1",
+            ),
+            rx.icon("chevron_right", size=18, color="#94a3b8"),
+            spacing="3",
+            align="center",
+            width="100%",
+            cursor="pointer",
+            on_click=lambda: FeedbackState.fa_open_detail(item),
+        ),
+        width="100%",
+        padding="12px 16px",
+    )
+
+
+def _fa_detail_dialog() -> rx.Component:
+    """反馈详情弹窗：完整信息 + 截图预览 + 状态/删除操作
+
+    注：fa_detail 空时字段用 rx.cond 包裹或空串 fallback —— 详情弹窗仅在
+    fa_open_detail 设置后打开，实际打开时字段必有值；这里用
+    rx.cond(FeedbackState.fa_detail_open, ...) 已在外层 root open 控制，
+    内部直接用 safe getter var（空 dict 取值返回空串）。
+    """
+    d = FeedbackState.fa_detail
+    return rx.dialog.root(
+        rx.dialog.content(
+            rx.dialog.title("反馈详情"),
+            rx.vstack(
+                rx.hstack(
+                    _fa_status_badge(d["status"]),
+                    rx.badge(
+                        d["issue_type"],
+                        color_scheme="purple", variant="soft", size="1",
+                    ),
+                    rx.text(
+                        d["protocol"],
+                        size="2", color="#64748b",
+                    ),
+                    spacing="2",
+                ),
+                rx.text(
+                    "#" + d["id"].to_string()
+                    + "  ·  " + d["created_at"].to_string(),
+                    size="1", color="#94a3b8",
+                ),
+                rx.text(
+                    d["description"],
+                    size="2",
+                    color="#0f172a",
+                    style={"white_space": "pre-wrap"},
+                    width="100%",
+                ),
+                rx.cond(
+                    d["contact"] != "",
+                    rx.text(
+                        "联系方式: " + d["contact"].to_string(),
+                        size="2", color="#475569",
+                    ),
+                ),
+                # 截图预览
+                rx.cond(
+                    d["screenshots"].to(str) != "",
+                    rx.vstack(
+                        rx.text("截图", size="2", font_weight="medium"),
+                        rx.foreach(
+                            d["screenshots"].to(str).split(";"),
+                            lambda name: rx.cond(
+                                name != "",
+                                rx.image(
+                                    src="/fbimg/" + name,
+                                    max_height="320px",
+                                    max_width="100%",
+                                    border_radius="8px",
+                                    border="1px solid #e2e8f0",
+                                ),
+                            ),
+                        ),
+                        spacing="2",
+                        align="start",
+                    ),
+                ),
+                # 状态操作
+                rx.hstack(
+                    rx.text("标记状态:", size="2", color="#64748b"),
+                    rx.button("已确认", size="1", variant="soft", color_scheme="blue",
+                              on_click=lambda: FeedbackState.fa_set_status("已确认")),
+                    rx.button("已修复", size="1", variant="soft", color_scheme="green",
+                              on_click=lambda: FeedbackState.fa_set_status("已修复")),
+                    rx.button("已忽略", size="1", variant="soft", color_scheme="gray",
+                              on_click=lambda: FeedbackState.fa_set_status("已忽略")),
+                    rx.spacer(),
+                    rx.button(
+                        rx.hstack(rx.icon("trash_2", size=14), "删除", spacing="1"),
+                        size="1", variant="soft", color_scheme="red",
+                        on_click=FeedbackState.fa_delete_current,
+                    ),
+                    spacing="2",
+                    width="100%",
+                ),
+                rx.dialog.close(
+                    rx.hstack(
+                        rx.spacer(),
+                        rx.button("关闭", variant="soft", size="2"),
+                        spacing="2",
+                    ),
+                    top="auto",
+                ),
+                spacing="3",
+                width="100%",
+            ),
+            max_width="680px",
+            max_height="80vh",
+            style={"overflow_y": "auto"},
+        ),
+        open=FeedbackState.fa_detail_open,
+    )
+
+
+def feedback_admin_page() -> rx.Component:
+    """反馈管理页（口令保护）"""
+    return rx.box(
+        rx.el.style(GLOBAL_CSS),
+        header(),
+        rx.box(
+            rx.vstack(
+                rx.hstack(
+                    rx.icon("inbox", size=24, color="#2563eb"),
+                    rx.heading("反馈管理", size="5", font_weight="bold"),
+                    rx.spacer(),
+                    rx.cond(
+                        FeedbackState.fa_logged,
+                        rx.button("退出", size="1", variant="soft", color_scheme="gray",
+                                  on_click=FeedbackState.fa_logout),
+                    ),
+                    spacing="2",
+                    width="100%",
+                ),
+                rx.cond(
+                    FeedbackState.fa_msg != "",
+                    rx.text(FeedbackState.fa_msg, size="2", color="#64748b"),
+                ),
+                rx.cond(
+                    ~FeedbackState.fa_logged,
+                    # 登录卡
+                    rx.card(
+                        rx.vstack(
+                            rx.icon("lock", size=28, color="#94a3b8"),
+                            rx.heading("管理员登录", size="4"),
+                            rx.text("输入管理员密码查看用户反馈", size="2", color="#64748b"),
+                            rx.input(
+                                type="password",
+                                placeholder="管理员密码",
+                                value=FeedbackState.fa_password,
+                                on_change=FeedbackState.set_fa_password,
+                                width="260px",
+                                on_key_down=FeedbackState.fa_login_on_key,
+                            ),
+                            rx.cond(
+                                FeedbackState.fa_msg != "",
+                                rx.text(FeedbackState.fa_msg, size="1", color="red"),
+                            ),
+                            rx.button("登录", on_click=FeedbackState.fa_login,
+                                      color_scheme="blue", width="260px"),
+                            spacing="3",
+                            align="center",
+                        ),
+                        max_width="400px",
+                        width="100%",
+                    ),
+                    # 列表
+                    rx.vstack(
+                        rx.cond(
+                            FeedbackState.fa_total > 0,
+                            rx.vstack(
+                                rx.foreach(FeedbackState.fa_items, _fa_item_row),
+                                spacing="2",
+                                width="100%",
+                            ),
+                            rx.vstack(
+                                rx.icon("inbox", size=36, color="#cbd5e1"),
+                                rx.text("暂无反馈", size="3", color="#94a3b8"),
+                                spacing="2",
+                                align="center",
+                                padding="48px 0",
+                                width="100%",
+                            ),
+                        ),
+                        # 分页
+                        rx.cond(
+                            FeedbackState.fa_total > 20,
+                            rx.hstack(
+                                rx.button("« 首页", size="1", variant="soft",
+                                          on_click=FeedbackState.fa_first_page,
+                                          disabled=FeedbackState.fa_page == 0),
+                                rx.button("‹ 上一页", size="1", variant="soft",
+                                          on_click=FeedbackState.fa_prev_page,
+                                          disabled=FeedbackState.fa_page == 0),
+                                rx.text(
+                                    "第 " + (FeedbackState.fa_page + 1).to_string()
+                                    + " 页 / 共 "
+                                    + (((FeedbackState.fa_total + 19) // 20).to_string())
+                                    + " 页（" + FeedbackState.fa_total.to_string() + " 条）",
+                                    size="1", color="#64748b",
+                                ),
+                                rx.button("下一页 ›", size="1", variant="soft",
+                                          on_click=FeedbackState.fa_next_page,
+                                          disabled=(FeedbackState.fa_page + 1) * 20 >= FeedbackState.fa_total),
+                                spacing="2",
+                                align="center",
+                            ),
+                        ),
+                        spacing="3",
+                        width="100%",
+                        max_width="860px",
+                    ),
+                ),
+                spacing="3",
+                width="100%",
+                max_width="860px",
+            ),
+            class_name="app-container",
+            width="100%",
+        ),
+        _fa_detail_dialog(),
+        background="#f1f5f9",
+        min_height="100vh",
+    )
+
+
+# ═══════════════════════════════════════════════════════════════
 # 管理员登录对话框
 # ═══════════════════════════════════════════════════════════════
 
@@ -7563,6 +8299,8 @@ app = rx.App(
 )
 
 app.add_page(index, route="/", title="多协议解析平台")
+app.add_page(feedback_page, route="/feedback", title="问题反馈 - 多协议解析平台")
+app.add_page(feedback_admin_page, route="/feedback-admin", title="反馈管理 - 多协议解析平台")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -7638,3 +8376,46 @@ async def _dev_download_handler(request):
 from starlette.routing import Route
 app._api.routes.insert(0, Route("/download/{path:path}", _dev_download_handler, methods=["GET"]))
 app._api.routes.insert(0, Route("/api/download/{path:path}", _dev_download_handler, methods=["GET"]))
+
+
+def _get_fbimg_dir() -> Path:
+    """反馈截图目录 reflex_web/data/uploads/feedback/"""
+    try:
+        from . import feedback_model
+        return feedback_model.uploads_dir()
+    except Exception:
+        return Path(__file__).resolve().parent.parent / "data" / "uploads" / "feedback"
+
+
+async def _dev_fbimg_handler(request):
+    """Starlette 路由：开发模式下提供 /fbimg/ 反馈截图
+
+    生产模式（run_app.py）由 ASGI 中间件 _serve_fbimg 提供。
+    """
+    from starlette.responses import FileResponse, PlainTextResponse
+    from urllib.parse import unquote
+    import mimetypes
+
+    path = request.path_params.get("path", "")
+    filename = unquote(path)
+
+    # 防目录穿越：仅允许纯文件名
+    if not filename or ".." in filename or "/" in filename or "\\" in filename:
+        return PlainTextResponse("Invalid filename", status_code=404)
+
+    fb_dir = _get_fbimg_dir().resolve()
+    file_path = (fb_dir / filename).resolve()
+    try:
+        file_path.relative_to(fb_dir)
+    except ValueError:
+        return PlainTextResponse("Invalid filename", status_code=404)
+
+    if not file_path.exists() or not file_path.is_file():
+        return PlainTextResponse("File not found", status_code=404)
+
+    mime, _ = mimetypes.guess_type(str(file_path))
+    return FileResponse(str(file_path), media_type=mime or "application/octet-stream")
+
+
+app._api.routes.insert(0, Route("/fbimg/{path:path}", _dev_fbimg_handler, methods=["GET"]))
+app._api.routes.insert(0, Route("/api/fbimg/{path:path}", _dev_fbimg_handler, methods=["GET"]))

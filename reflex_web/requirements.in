@@ -2,3 +2,5 @@ reflex==0.9.8
 uvicorn
 crcmod
 websockets
+# 反馈存储（Reflex 0.9.8 的 rx.Model 需要数据库依赖，默认不随 reflex 安装）
+sqlmodel

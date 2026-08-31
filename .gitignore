@@ -32,6 +32,8 @@ reflex_web/.web/
 reflex_web/.states/
 reflex.lock/
 reflex_web/.tests/
+# 反馈运行时数据（SQLite + 截图，部署脚本重建时保留）
+reflex_web/data/
 Output/
 # 依赖与工具目录
 node_modules/

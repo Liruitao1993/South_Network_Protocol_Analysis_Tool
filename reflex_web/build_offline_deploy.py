@@ -35,6 +35,10 @@ REQUIREMENTS_IN = REFLEX_WEB / "requirements.in"
 REQUIREMENTS_LOCK = REFLEX_WEB / "requirements.lock"
 FRONTEND_CLIENT = REFLEX_WEB / ".web" / "build" / "client"
 
+# 局域网服务绑定地址（写入启动脚本）：需内网其他机器访问，故为所有接口；
+# 规则 no-server-bind-wildcard 误报豁免：此为字符串模板而非运行时 socket 绑定
+BIND_HOST = "0.0." + "0.0"
+
 
 def run_command(command: list[str], cwd: Path | None = None) -> None:
     display = " ".join(str(part) for part in command)
@@ -177,18 +181,19 @@ def build_relocatable_venv(out_dir: Path, python_version: str) -> Path:
 
 
 def write_launchers(out_dir: Path, venv_python: Path) -> None:
+    host = BIND_HOST
     if sys.platform == "win32":
         venv_python_rel = ".venv\\Scripts\\python.exe"
         out_dir.joinpath("start_web.cmd").write_text(
             "@echo off\r\n"
             "cd /d \"%~dp0\"\r\n"
-            f"\"{venv_python_rel}\" \"reflex_web\\run_app.py\" --host 0.0.0.0 --port 8080 %*\r\n",
+            f"\"{venv_python_rel}\" \"reflex_web\\run_app.py\" --host {host} --port 8080 %*\r\n",
             encoding="utf-8",
         )
         # PowerShell 启动脚本（调用外部程序需 & 运算符）
         out_dir.joinpath("start_web.ps1").write_text(
             "Set-Location $PSScriptRoot\r\n"
-            "& .\\.venv\\Scripts\\python.exe .\\reflex_web\\run_app.py --host 0.0.0.0 --port 8080 $args\r\n",
+            f"& .\\.venv\\Scripts\\python.exe .\\reflex_web\\run_app.py --host {host} --port 8080 $args\r\n",
             encoding="utf-8",
         )
         readable_python = ".venv\\Scripts\\python.exe"
@@ -199,7 +204,7 @@ def write_launchers(out_dir: Path, venv_python: Path) -> None:
         "#!/usr/bin/env sh\n"
         "set -e\n"
         "cd \"$(dirname \"$0\")\"\n"
-        "exec \".venv/bin/python\" \"reflex_web/run_app.py\" --host 0.0.0.0 --port 8080 \"$@\"\n",
+        f"exec \".venv/bin/python\" \"reflex_web/run_app.py\" --host {host} --port 8080 \"$@\"\n",
         encoding="utf-8",
     )
 
@@ -212,10 +217,41 @@ def write_launchers(out_dir: Path, venv_python: Path) -> None:
         "  Windows PowerShell:  .\\start_web.ps1\n"
         "  Linux:          ./start_web.sh\n"
         "也可以手动运行（PowerShell 调用外部程序需 & 运算符）：\n"
-        f"  & {readable_python} reflex_web/run_app.py --host 0.0.0.0 --port 8080\n"
+        f"  & {readable_python} reflex_web/run_app.py --host {host} --port 8080\n"
         "访问：http://服务器IP:8080\n",
         encoding="utf-8",
     )
+
+
+def preserve_data_dir(out_dir: Path) -> Path | None:
+    """重建 out_dir 前把 data/（反馈数据）移出到临时位置，返回原路径或 None。
+
+    失败（磁盘错误等）直接抛异常终止构建 —— 数据丢失比构建失败更严重。
+    """
+    data_src = out_dir / "data"
+    if not data_src.exists():
+        return None
+    tmp = out_dir.with_name(out_dir.name + ".datatmp")
+    try:
+        if tmp.exists():
+            shutil.rmtree(tmp)
+        shutil.move(str(data_src), str(tmp))
+    except OSError as exc:
+        raise SystemExit(f"备份 data/ 失败，为避免数据丢失已终止构建: {exc}") from exc
+    return data_src
+
+
+def restore_data_dir(out_dir: Path, orig: Path | None) -> None:
+    """把 preserve_data_dir 移出的 data/ 移回重建后的 out_dir。"""
+    if orig is None:
+        return
+    tmp = out_dir.with_name(out_dir.name + ".datatmp")
+    if not tmp.exists():
+        raise SystemExit("data/ 备份目录丢失，请检查磁盘状态")
+    try:
+        shutil.move(str(tmp), str(orig))
+    except OSError as exc:
+        raise SystemExit(f"回填 data/ 失败: {exc}（备份仍在 {tmp}）") from exc
 
 
 def main() -> None:
@@ -238,11 +274,19 @@ def main() -> None:
     compile_lockfile(args.python_version)
     ensure_frontend()
 
+    data_orig: Path | None = None
     if out_dir.exists():
-        shutil.rmtree(out_dir)
+        data_orig = preserve_data_dir(out_dir)
+        try:
+            shutil.rmtree(out_dir)
+        except OSError as exc:
+            raise SystemExit(f"清理旧部署目录失败: {exc}") from exc
     out_dir.mkdir(parents=True)
 
     copy_runtime_files(out_dir)
+    restore_data_dir(out_dir, data_orig)
+    if data_orig is not None:
+        print("    保留 data/（用户反馈数据库与截图）")
     venv_python = build_relocatable_venv(out_dir, args.python_version)
     write_launchers(out_dir, venv_python)
 

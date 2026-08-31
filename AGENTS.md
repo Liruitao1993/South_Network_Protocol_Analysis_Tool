@@ -94,7 +94,7 @@ python main_gui.py --clipboard
 - `pip install lupa`（测试方案 Lua 脚本引擎，**1.8.1 新增**，未安装时静默降级为不可用）
 - `pip install scapy`（TCP 流量监控，Windows 需另装 npcap，未就绪时标签页提示但不影响其他功能）
 - `pip install reflex`（Reflex Web 版，实验性）
-- Reflex Web 在线/离线依赖以 `reflex_web/requirements.in` + `reflex_web/requirements.lock` 为准，至少包含 `reflex`、`uvicorn`、`crcmod`、`websockets`
+- Reflex Web 在线/离线依赖以 `reflex_web/requirements.in` + `reflex_web/requirements.lock` 为准，至少包含 `reflex`、`uvicorn`、`crcmod`、`websockets`、`sqlmodel`（问题反馈存储，**1.19.0 新增**；Reflex 0.9.8 的 rx.Model 需要数据库依赖，默认不随 reflex 安装）
 
 **运行环境注意：**
 
@@ -294,6 +294,10 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 │   │   ├── quick_parse_panel.py     #   uTools 风格快捷解析小窗（热键唤出/实时解析卡片，1.17.0 起）
 │   │   └── system_settings.py       #   系统集成设置面板与 config.json "system" 段
 │   └── reflex_web/                 # Reflex Web 版（实验性，run_app.py + reflex_web_exe.spec）
+│       ├── reflex_web/reflex_web.py  #   Reflex 单文件应用（含 /feedback 问题反馈页，1.19.0 起）
+│       ├── reflex_web/feedback_model.py #   反馈存储层：FeedbackItem(rx.Model/SQLite) + 截图保存/防穿越
+│       ├── reflex_web/admin_release.py  #   管理员口令（admin_config.json）+ 发布管理（反馈管理页复用口令）
+│       └── data/                   #   反馈运行时数据（feedback.db + uploads/feedback/，gitignore，部署重建时保留）
 │
 ├── 验证引擎 validator/ ── BaseValidator + 各协议 validator，统一 ValidationResult
 │   ├── __init__.py                 # 导出所有 validator
@@ -629,6 +633,7 @@ python test/test_monitor_plc2_deframe.py # 南网新一代 ED..EE 解帧
 python test/test_monitor_strip.py   # 监控报文头尾剔除
 python test/test_theme_settings.py  # 主题与字体设置
 python test/test_web_frame_gen_utils.py # Reflex Web 版组帧纯逻辑
+python test/test_web_feedback.py        # Web 版问题反馈（存储层/截图校验/防穿越/部署 data/ 保留，1.19.0 起）
 
 # 调试用临时脚本（可清理）：test_mac_*.py / test_msdu_debug.py / test_user_frame.py / test_full_debug.py / test_len_debug.py
 ```
