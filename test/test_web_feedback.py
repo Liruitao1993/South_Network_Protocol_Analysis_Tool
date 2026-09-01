@@ -12,6 +12,7 @@
 运行（项目根）：
     python test/test_web_feedback.py
 """
+
 import os
 import py_compile
 import shutil
@@ -54,6 +55,7 @@ WEBP_MAGIC = b"RIFF\x24\x00\x00\x00WEBPVP8 "
 
 # ── save_screenshot ──────────────────────────────────────────
 
+
 def test_save_screenshot():
     print("test_save_screenshot:")
     name = fm.save_screenshot(PNG_MAGIC + b"x" * 8 * 100, "screen shot 1.PNG")
@@ -70,6 +72,7 @@ def test_save_screenshot():
 
     # 文件名格式：fb_YYYYmmdd_HHMMSS_<8hex>.<ext>
     import re
+
     check(
         "filename matches fb_* pattern",
         bool(re.match(r"^fb_\d{8}_\d{6}_[0-9a-f]{8}\.(png|jpe?g|webp)$", name)),
@@ -129,11 +132,15 @@ def test_save_screenshot_rejects():
 
 # ── delete_screenshots ───────────────────────────────────────
 
+
 def test_delete_screenshots():
     print("test_delete_screenshots:")
     n1 = fm.save_screenshot(PNG_MAGIC + b"x" * 8, "a.png")
     n2 = fm.save_screenshot(PNG_MAGIC + b"x" * 8, "b.png")
-    check("two files saved", (fm.uploads_dir() / n1).is_file() and (fm.uploads_dir() / n2).is_file())
+    check(
+        "two files saved",
+        (fm.uploads_dir() / n1).is_file() and (fm.uploads_dir() / n2).is_file(),
+    )
 
     removed = fm.delete_screenshots([n1])
     check("delete one", removed == 1 and not (fm.uploads_dir() / n1).is_file())
@@ -150,6 +157,7 @@ def test_delete_screenshots():
 
 
 # ── FeedbackStore CRUD ──────────────────────────────────────
+
 
 def test_store_crud():
     print("test_store_crud:")
@@ -175,8 +183,10 @@ def test_store_crud():
 
     items_p1, _ = store.list_all(offset=0, limit=2)
     items_p2, _ = store.list_all(offset=2, limit=2)
-    check("pagination slices", len(items_p1) == 2 and len(items_p2) == 2
-          and items_p1[0].id != items_p2[0].id)
+    check(
+        "pagination slices",
+        len(items_p1) == 2 and len(items_p2) == 2 and items_p1[0].id != items_p2[0].id,
+    )
 
     check("count_pending 5", store.count_pending() == 5)
     check("update_status valid", store.update_status(ids[0], "已修复"))
@@ -191,8 +201,13 @@ def test_store_crud():
     # 删除含截图的记录 → 返回截图名列表
     shot = fm.save_screenshot(PNG_MAGIC + b"x" * 8, "del.png")
     item = fm.FeedbackItem(
-        created_at="2026-08-31 11:00:00", issue_type="其他", protocol="698.45协议",
-        description="带截图", contact="", screenshots=shot, status="待处理",
+        created_at="2026-08-31 11:00:00",
+        issue_type="其他",
+        protocol="698.45协议",
+        description="带截图",
+        contact="",
+        screenshots=shot,
+        status="待处理",
     )
     fid = store.add(item)
     names = store.delete(fid)
@@ -205,6 +220,7 @@ def test_store_crud():
 
 
 # ── 部署脚本 data/ 保留 ─────────────────────────────────────
+
 
 def test_deploy_preserve():
     print("test_deploy_preserve:")
@@ -225,8 +241,10 @@ def test_deploy_preserve():
     out.mkdir()
     bod.restore_data_dir(out, moved)
     check("offline restores db", (out / "data" / "feedback.db").read_text() == "OLD_DB")
-    check("offline restores screenshot",
-          (out / "data" / "uploads" / "feedback" / "fb_1.png").is_file())
+    check(
+        "offline restores screenshot",
+        (out / "data" / "uploads" / "feedback" / "fb_1.png").is_file(),
+    )
 
     # embedded
     moved2 = bed.preserve_data_dirs(out)
@@ -234,7 +252,9 @@ def test_deploy_preserve():
     shutil.rmtree(out)
     out.mkdir()
     bed.restore_data_dirs(out, moved2)
-    check("embedded restores db", (out / "data" / "feedback.db").read_text() == "OLD_DB")
+    check(
+        "embedded restores db", (out / "data" / "feedback.db").read_text() == "OLD_DB"
+    )
 
     # 无 data/ 场景
     fresh = base / "fresh_out"
@@ -248,10 +268,15 @@ def test_deploy_preserve():
 
 # ── run_app.py / 模块编译验证 ────────────────────────────────
 
+
 def test_compile():
     print("test_compile:")
-    for f in ["reflex_web/run_app.py", "reflex_web/reflex_web/feedback_model.py",
-              "reflex_web/build_embedded_deploy.py", "reflex_web/build_offline_deploy.py"]:
+    for f in [
+        "reflex_web/run_app.py",
+        "reflex_web/reflex_web/feedback_model.py",
+        "reflex_web/build_embedded_deploy.py",
+        "reflex_web/build_offline_deploy.py",
+    ]:
         try:
             py_compile.compile(str(ROOT / f), doraise=True)
             check(f"{f} compiles", True)
@@ -270,7 +295,7 @@ def main():
     finally:
         shutil.rmtree(_TMP, ignore_errors=True)
         os.environ.pop("FEEDBACK_DATA_DIR", None)
-    print(f"\n{'='*40}")
+    print(f"\n{'=' * 40}")
     print(f"PASS: {PASS}  FAIL: {FAIL}")
     sys.exit(1 if FAIL else 0)
 

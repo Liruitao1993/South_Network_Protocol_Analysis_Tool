@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """多协议解析平台 - Reflex Web 完整版
 
 包含功能：
@@ -8,12 +7,15 @@
 - 报文对比
 - 查询 (DI/AFN/OBIS/命令字)
 """
-import reflex as rx
-from typing import List, Dict, Any, Optional, Tuple
-import sys
-import re
+
 import json
+import re
+import sys
+from datetime import datetime
 from pathlib import Path
+from typing import Any
+
+import reflex as rx
 
 # 添加项目根目录到路径
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -21,10 +23,10 @@ sys.path.insert(0, str(ROOT))
 
 from . import web_utils
 
-
 # ═══════════════════════════════════════════════════════════════
 # 状态管理
 # ═══════════════════════════════════════════════════════════════
+
 
 class State(rx.State):
     """全局应用状态"""
@@ -44,14 +46,14 @@ class State(rx.State):
 
     # ── 单帧解析 ─────────────────────────────────────────────
     frame_hex: str = ""
-    parse_result: List[Dict[str, Any]] = []
+    parse_result: list[dict[str, Any]] = []
     verify_result: str = ""
 
     # ── 批量解析 ─────────────────────────────────────────────
     batch_input: str = ""
-    batch_results: List[Dict[str, Any]] = []
+    batch_results: list[dict[str, Any]] = []
     batch_selected_idx: int = -1
-    batch_detail_rows: List[Dict[str, Any]] = []
+    batch_detail_rows: list[dict[str, Any]] = []
     batch_detail_hex: str = ""
     # 文件拖拽上传信息
     batch_upload_name: str = ""
@@ -68,20 +70,20 @@ class State(rx.State):
     batch_pp_commands: str = ""
     batch_pp_last_result: str = ""
     # 预设命令列表
-    pp_preset_options: List[Dict[str, str]] = []
+    pp_preset_options: list[dict[str, str]] = []
     # ── 批量解析：后端专用数据（单下划线前缀 → 不发送到前端）──
     # 上传文件内容：大文件（可达50MB）只存后端，避免 WebSocket 同步卡死
     _batch_file_content: str = ""
     # 全部帧的解析结果（完整数据存后端，前端只显示摘要列表）
-    _batch_all_results: List[Dict[str, Any]] = []
+    _batch_all_results: list[dict[str, Any]] = []
 
     # ── 组帧 ─────────────────────────────────────────────────
     gen_di_key: str = ""
     gen_afn_fn: str = ""
     gen_dlt698_apdu: str = ""
     gen_dlt698_sub: str = ""
-    gen_fields: Dict[str, str] = {}
-    gen_field_schema: List[Dict[str, Any]] = []
+    gen_fields: dict[str, str] = {}
+    gen_field_schema: list[dict[str, Any]] = []
     gen_src_addr: str = "000000000000"
     gen_dst_addr: str = "000000000000"
     gen_seq: int = 0
@@ -92,20 +94,32 @@ class State(rx.State):
     gen_preview: str = ""
     # 组帧模式（predefined | custom | axdr）与编辑器状态
     gen_mode: str = "predefined"
-    gen_field_values: List[str] = []                      # [字段索引] 简单字段原始值，位置对齐
-    gen_list_rows: List[List[List[str]]] = []             # [字段索引][行][item] 位置对齐
-    gen_sub_fields: List[List[str]] = []                  # [字段索引][子字段索引] 位置对齐
+    gen_field_values: list[str] = []  # [字段索引] 简单字段原始值，位置对齐
+    gen_list_rows: list[list[list[str]]] = []  # [字段索引][行][item] 位置对齐
+    gen_sub_fields: list[list[str]] = []  # [字段索引][子字段索引] 位置对齐
     # 渲染模型（全部 str 类型，供 Reflex foreach）
-    gen_field_meta: List[Dict[str, str]] = []             # [i] = {name,type,default,description,has_sub,has_list,ftype}
-    gen_field_enum: List[List[Dict[str, str]]] = []       # [i] = [{value,label}] enum 选项
-    gen_field_items: List[List[Dict[str, str]]] = []      # [i] = [{name,type,default}] list 的 item_fields
-    gen_field_items_enum: List[List[List[Dict[str, str]]]] = []  # [i][item] = enum 选项
-    gen_field_subs: List[List[Dict[str, str]]] = []       # [i] = [{name,type,default}] sub_fields
-    gen_field_subs_enum: List[List[List[Dict[str, str]]]] = []   # [i][sub] = enum 选项
-    gen_axdr_fixed: Dict[str, str] = {}                   # 698.45 A-XDR 固定字段（PIID/OI/属性/索引等）
-    gen_custom_templates: List[Dict[str, Any]] = []       # [{name,length,ftype,endian,display,reverse,value}]
-    gen_axdr_items: List[Dict[str, Any]] = []             # A-XDR 树 [{tag,type,length,value,children}]
-    gen_preview_rows: List[Dict[str, str]] = []           # 实时回读预览 [{field,raw,parsed,comment}]
+    gen_field_meta: list[
+        dict[str, str]
+    ] = []  # [i] = {name,type,default,description,has_sub,has_list,ftype}
+    gen_field_enum: list[list[dict[str, str]]] = []  # [i] = [{value,label}] enum 选项
+    gen_field_items: list[
+        list[dict[str, str]]
+    ] = []  # [i] = [{name,type,default}] list 的 item_fields
+    gen_field_items_enum: list[list[list[dict[str, str]]]] = []  # [i][item] = enum 选项
+    gen_field_subs: list[
+        list[dict[str, str]]
+    ] = []  # [i] = [{name,type,default}] sub_fields
+    gen_field_subs_enum: list[list[list[dict[str, str]]]] = []  # [i][sub] = enum 选项
+    gen_axdr_fixed: dict[str, str] = {}  # 698.45 A-XDR 固定字段（PIID/OI/属性/索引等）
+    gen_custom_templates: list[
+        dict[str, Any]
+    ] = []  # [{name,length,ftype,endian,display,reverse,value}]
+    gen_axdr_items: list[
+        dict[str, Any]
+    ] = []  # A-XDR 树 [{tag,type,length,value,children}]
+    gen_preview_rows: list[
+        dict[str, str]
+    ] = []  # 实时回读预览 [{field,raw,parsed,comment}]
     # 698.45 SA/控制字段
     gen_dlt698_addr_type: int = 0
     gen_dlt698_logic_addr: int = 0
@@ -116,77 +130,81 @@ class State(rx.State):
     gen_dlt698_func: int = 3
     # 国网中继地址（逗号分隔）与预设按钮
     gen_gdw_relay_addrs_text: str = ""
-    gen_preset_buttons: List[Dict[str, str]] = []         # [{name,group,frame_hex,id,description}]
-    gen_preset_groups: List[str] = []
+    gen_preset_buttons: list[
+        dict[str, str]
+    ] = []  # [{name,group,frame_hex,id,description}]
+    gen_preset_groups: list[str] = []
     # 预设命令管理（保存表单/搜索/编辑）
-    gen_preset_name: str = ""          # 添加到预设-名称
-    gen_preset_group: str = ""         # 添加到预设-分组
-    gen_preset_search: str = ""        # 预设搜索过滤词
-    gen_preset_edit_id: str = ""       # 正在编辑的预设按钮 id（空=未编辑）
-    gen_preset_edit_name: str = ""     # 编辑-名称
-    gen_preset_edit_group: str = ""    # 编辑-分组
+    gen_preset_name: str = ""  # 添加到预设-名称
+    gen_preset_group: str = ""  # 添加到预设-分组
+    gen_preset_search: str = ""  # 预设搜索过滤词
+    gen_preset_edit_id: str = ""  # 正在编辑的预设按钮 id（空=未编辑）
+    gen_preset_edit_name: str = ""  # 编辑-名称
+    gen_preset_edit_group: str = ""  # 编辑-分组
     # DI/AFN 选项列表
-    di_options: List[Dict[str, str]] = []
-    afn_fn_options: List[Dict[str, str]] = []
-    dlt698_apdu_options: List[str] = []
-    dlt698_all_options: List[Dict[str, str]] = []  # dict 版本（供可搜索下拉）
-    dlt698_sub_options: List[Dict[str, str]] = []
+    di_options: list[dict[str, str]] = []
+    afn_fn_options: list[dict[str, str]] = []
+    dlt698_apdu_options: list[str] = []
+    dlt698_all_options: list[dict[str, str]] = []  # dict 版本（供可搜索下拉）
+    dlt698_sub_options: list[dict[str, str]] = []
     # 可搜索下拉：搜索词 + 过滤结果 + 展开标志
-    gen_di_search: str = ""               # DI 搜索过滤词
-    di_filtered: List[Dict[str, str]] = []   # DI 过滤结果
-    gen_di_open: bool = False             # DI 选项列表展开（输入框聚焦时）
-    gen_afn_search: str = ""              # AFN+Fn 搜索过滤词
-    afn_filtered: List[Dict[str, str]] = []  # AFN+Fn 过滤结果
-    gen_afn_open: bool = False            # AFN+Fn 选项列表展开
-    gen_dlt698_search: str = ""           # 698.45 APDU 搜索过滤词
-    dlt698_filtered: List[Dict[str, str]] = []  # 698.45 APDU 过滤结果
-    gen_dlt698_open: bool = False         # 698.45 APDU 选项列表展开
+    gen_di_search: str = ""  # DI 搜索过滤词
+    di_filtered: list[dict[str, str]] = []  # DI 过滤结果
+    gen_di_open: bool = False  # DI 选项列表展开（输入框聚焦时）
+    gen_afn_search: str = ""  # AFN+Fn 搜索过滤词
+    afn_filtered: list[dict[str, str]] = []  # AFN+Fn 过滤结果
+    gen_afn_open: bool = False  # AFN+Fn 选项列表展开
+    gen_dlt698_search: str = ""  # 698.45 APDU 搜索过滤词
+    dlt698_filtered: list[dict[str, str]] = []  # 698.45 APDU 过滤结果
+    gen_dlt698_open: bool = False  # 698.45 APDU 选项列表展开
     # 已选完整标签（代码+名称，供"已选"提示展示）
     gen_di_selected_label: str = ""
     gen_afn_selected_label: str = ""
     # ── EB 数据标识 645 帧生成器（协议7 透明转发/事件上报报文内容辅助）──
-    eb_di_options: List[Dict[str, str]] = []      # [{value,label,name}] 全部 EB 数据标识
-    gen_eb_di: str = ""                           # 选中的 EB 数据标识（如 EB030002）
-    gen_eb_di_label: str = ""                     # 选中 EB 的完整标签
-    gen_eb_ctrl: str = "91"                       # 645 控制码（十六进制字符串）
-    gen_eb_addr: str = "000000000000"             # 645 地址域 A0~A5（12 位 hex）
-    gen_eb_data: str = ""                         # 数据内容 hex
-    gen_eb_frame: str = ""                        # 生成的 645 帧 hex
-    gen_eb_msg: str = ""                          # 生成提示
-    gen_eb_msg_type: str = "info"                 # success/error/info
+    eb_di_options: list[dict[str, str]] = []  # [{value,label,name}] 全部 EB 数据标识
+    gen_eb_di: str = ""  # 选中的 EB 数据标识（如 EB030002）
+    gen_eb_di_label: str = ""  # 选中 EB 的完整标签
+    gen_eb_ctrl: str = "91"  # 645 控制码（十六进制字符串）
+    gen_eb_addr: str = "000000000000"  # 645 地址域 A0~A5（12 位 hex）
+    gen_eb_data: str = ""  # 数据内容 hex
+    gen_eb_frame: str = ""  # 生成的 645 帧 hex
+    gen_eb_msg: str = ""  # 生成提示
+    gen_eb_msg_type: str = "info"  # success/error/info
     # ── EB 数据标识 698.45 承载 ──
-    gen_eb_format: str = "645"                    # 645 / 698
-    gen_eb_698_service: str = "SET-Request"       # 698 服务类型
-    gen_eb_698_data: str = ""                     # 698 数据内容 hex
+    gen_eb_format: str = "645"  # 645 / 698
+    gen_eb_698_service: str = "SET-Request"  # 698 服务类型
+    gen_eb_698_data: str = ""  # 698 数据内容 hex
     # 698 链路层头部配置（完整帧 68 L C SA CA HCS APDU FCS 16）
-    gen_eb_addr_type: int = 0                     # SA 地址类型 (0单/1通配/2组/3广播)
-    gen_eb_logic_addr: int = 0                    # SA 逻辑地址
-    gen_eb_addr_len: int = 6                      # SA 地址长度
-    gen_eb_sa_raw: str = "000000000000"           # SA 地址 hex
-    gen_eb_ca: str = "0"                          # CA 客户机地址
-    gen_eb_dir: str = "0"                         # 控制域 DIR (0下行/1上行)
-    gen_eb_prm: str = "1"                         # 控制域 PRM
-    gen_eb_func: str = "3"                        # 控制域功能码 (1链路/3用户数据)
+    gen_eb_addr_type: int = 0  # SA 地址类型 (0单/1通配/2组/3广播)
+    gen_eb_logic_addr: int = 0  # SA 逻辑地址
+    gen_eb_addr_len: int = 6  # SA 地址长度
+    gen_eb_sa_raw: str = "000000000000"  # SA 地址 hex
+    gen_eb_ca: str = "0"  # CA 客户机地址
+    gen_eb_dir: str = "0"  # 控制域 DIR (0下行/1上行)
+    gen_eb_prm: str = "1"  # 控制域 PRM
+    gen_eb_func: str = "3"  # 控制域功能码 (1链路/3用户数据)
     # 698 对象配置（OAD/OMD 属性/方法/索引 + PIID + 单多对象）
-    gen_eb_piid: str = "0"                        # PIID 服务序号
-    gen_eb_choice: str = "list"                   # one=单对象 / list=多对象
-    gen_eb_oi: str = ""                           # 自定义 OI（hex，空=EB标识前2字节）
-    gen_eb_attr_no: str = ""                      # 属性编号（空=EB标识第3字节）
-    gen_eb_attr_feat: str = "0"                   # 属性特征
-    gen_eb_index: str = ""                        # 元素索引（空=EB标识第4字节）
-    gen_eb_method: str = ""                       # 方法标识（ACTION，空=EB标识第3字节）
-    gen_eb_mode: str = "0"                        # 操作模式（ACTION）
+    gen_eb_piid: str = "0"  # PIID 服务序号
+    gen_eb_choice: str = "list"  # one=单对象 / list=多对象
+    gen_eb_oi: str = ""  # 自定义 OI（hex，空=EB标识前2字节）
+    gen_eb_attr_no: str = ""  # 属性编号（空=EB标识第3字节）
+    gen_eb_attr_feat: str = "0"  # 属性特征
+    gen_eb_index: str = ""  # 元素索引（空=EB标识第4字节）
+    gen_eb_method: str = ""  # 方法标识（ACTION，空=EB标识第3字节）
+    gen_eb_mode: str = "0"  # 操作模式（ACTION）
     # ── EB 数据项字段表单（选 OAD 后按字段配置数据内容）──
-    eb_di_fields: List[Dict[str, str]] = []       # [{name,type,length,note,has_enum,has_list}]
-    eb_di_field_enum: List[List[Dict[str, str]]] = []  # [i] enum 选项
-    eb_di_field_vals: List[str] = []              # [i] 字段值（位置对齐）
-    eb_di_field_list: List[List[List[str]]] = []  # [i] list 字段行（[行][列]）
-    eb_di_field_list_meta: List[List[Dict[str, str]]] = []  # [i] list item_fields meta
-    eb_di_field_use: bool = False                 # 当前 OAD 是否用字段表单
-    eb_698_use_field: bool = True                 # 698 模式是否用字段表单组装数据
+    eb_di_fields: list[
+        dict[str, str]
+    ] = []  # [{name,type,length,note,has_enum,has_list}]
+    eb_di_field_enum: list[list[dict[str, str]]] = []  # [i] enum 选项
+    eb_di_field_vals: list[str] = []  # [i] 字段值（位置对齐）
+    eb_di_field_list: list[list[list[str]]] = []  # [i] list 字段行（[行][列]）
+    eb_di_field_list_meta: list[list[dict[str, str]]] = []  # [i] list item_fields meta
+    eb_di_field_use: bool = False  # 当前 OAD 是否用字段表单
+    eb_698_use_field: bool = True  # 698 模式是否用字段表单组装数据
     gen_dlt698_selected_label: str = ""
     # 国网信息域配置
-    gen_gdw_info: Dict[str, str] = {
+    gen_gdw_info: dict[str, str] = {
         "通信方式": "3",
         "路由标识": "0",
         "附属节点标识": "0",
@@ -207,66 +225,69 @@ class State(rx.State):
     diff_ignore_checksum: bool = False
     diff_ignore_sequence: bool = False
     diff_only_diff: bool = False
-    diff_byte_rows: List[Dict[str, Any]] = []   # 字节级对比行
-    diff_field_rows: List[Dict[str, Any]] = []  # 字段级对比行
-    diff_explanations: List[str] = []           # 差异说明
-    diff_stats: Dict[str, Any] = {}             # 统计信息
+    diff_byte_rows: list[dict[str, Any]] = []  # 字节级对比行
+    diff_field_rows: list[dict[str, Any]] = []  # 字段级对比行
+    diff_explanations: list[str] = []  # 差异说明
+    diff_stats: dict[str, Any] = {}  # 统计信息
 
     # ── 查询 ─────────────────────────────────────────────────
     lookup_query: str = ""
-    lookup_results: List[Dict[str, Any]] = []
-    lookup_columns: List[str] = ["DI3", "DI2", "DI1", "DI0", "AFN", "中文含义"]
+    lookup_results: list[dict[str, Any]] = []
+    lookup_columns: list[str] = ["DI3", "DI2", "DI1", "DI0", "AFN", "中文含义"]
     lookup_title: str = "DI 查询"
 
     # ── 客户端下载 ────────────────────────────────────────────
-    download_exe_available: bool = False          # downloads/ 目录是否有 exe
-    download_exe_name: str = ""                   # exe 文件名
-    download_image_available: bool = False        # downloads/ 目录是否有截图
-    download_image_data_url: str = ""             # 截图 base64 data URL
-    download_readme_available: bool = False       # downloads/ 目录是否有 README
-    download_readme_text: str = ""                # README 内容
-    download_msg: str = ""                        # 提示信息
-    download_version: str = ""                    # 当前版本号（从 version.json 读取）
-    download_version_notes: str = ""              # 当前版本更新说明
-    download_version_date: str = ""               # 当前版本发布日期
-    download_version_url: str = ""                # 当前版本下载地址（从 version.json 读取）
-    download_history: List[Dict[str, str]] = []   # 历史版本列表（公开版）
+    download_exe_available: bool = False  # downloads/ 目录是否有 exe
+    download_exe_name: str = ""  # exe 文件名
+    download_image_available: bool = False  # downloads/ 目录是否有截图
+    download_image_data_url: str = ""  # 截图 base64 data URL
+    download_readme_available: bool = False  # downloads/ 目录是否有 README
+    download_readme_text: str = ""  # README 内容
+    download_msg: str = ""  # 提示信息
+    download_version: str = ""  # 当前版本号（从 version.json 读取）
+    download_version_notes: str = ""  # 当前版本更新说明
+    download_version_date: str = ""  # 当前版本发布日期
+    download_version_url: str = ""  # 当前版本下载地址（从 version.json 读取）
+    download_history: list[dict[str, str]] = []  # 历史版本列表（公开版）
 
     # ── 管理员发布管理 ────────────────────────────────────────
-    admin_logged_in: bool = False                 # 是否已登录
-    admin_show_login_dialog: bool = False         # 登录对话框显示
-    admin_password_input: str = ""                # 登录密码输入
-    admin_is_default_pwd: bool = False            # 是否默认密码
-    admin_change_old: str = ""                    # 修改密码-原密码
-    admin_change_new: str = ""                    # 修改密码-新密码
-    admin_change_confirm: str = ""                # 修改密码-确认
-    admin_msg: str = ""                           # 管理员操作提示
+    admin_logged_in: bool = False  # 是否已登录
+    admin_show_login_dialog: bool = False  # 登录对话框显示
+    admin_password_input: str = ""  # 登录密码输入
+    admin_is_default_pwd: bool = False  # 是否默认密码
+    admin_change_old: str = ""  # 修改密码-原密码
+    admin_change_new: str = ""  # 修改密码-新密码
+    admin_change_confirm: str = ""  # 修改密码-确认
+    admin_msg: str = ""  # 管理员操作提示
 
-    release_version: str = ""                     # 发布版本号
-    release_notes: str = ""                       # 更新说明
-    release_url: str = ""                         # 下载地址
-    release_status: str = ""                      # 发布状态/结果消息
-    release_status_type: str = "info"            # 状态类型: info / success / error
-    release_progress: int = 0                     # SHA-256 计算进度
-    release_publishing: bool = False              # 正在发布中
-    release_show_success_dialog: bool = False     # 发布成功弹窗
-    release_success_info: Dict[str, str] = {       # 发布成功信息（弹窗用）
-        "version": "", "size_mb": "", "exe_name": "", "sha256": "",
+    release_version: str = ""  # 发布版本号
+    release_notes: str = ""  # 更新说明
+    release_url: str = ""  # 下载地址
+    release_status: str = ""  # 发布状态/结果消息
+    release_status_type: str = "info"  # 状态类型: info / success / error
+    release_progress: int = 0  # SHA-256 计算进度
+    release_publishing: bool = False  # 正在发布中
+    release_show_success_dialog: bool = False  # 发布成功弹窗
+    release_success_info: dict[str, str] = {  # 发布成功信息（弹窗用）
+        "version": "",
+        "size_mb": "",
+        "exe_name": "",
+        "sha256": "",
     }
-    release_current: Dict[str, str] = {}          # 当前版本信息字典
-    release_history: List[Dict[str, str]] = []    # 历史版本列表
-    release_upload_name: str = ""                 # 已上传文件名（前端显示）
-    release_upload_size_mb: float = 0.0           # 已上传文件大小（前端显示）
-    release_screenshot_uploaded: bool = False      # 是否已上传截图
-    release_readme_text: str = ""                  # README 内容（来自上传文件或已有文件）
-    release_readme_name: str = ""                  # 已上传 README 文件名（前端显示）
+    release_current: dict[str, str] = {}  # 当前版本信息字典
+    release_history: list[dict[str, str]] = []  # 历史版本列表
+    release_upload_name: str = ""  # 已上传文件名（前端显示）
+    release_upload_size_mb: float = 0.0  # 已上传文件大小（前端显示）
+    release_screenshot_uploaded: bool = False  # 是否已上传截图
+    release_readme_text: str = ""  # README 内容（来自上传文件或已有文件）
+    release_readme_name: str = ""  # 已上传 README 文件名（前端显示）
     # 后端数据（不发送到前端）
-    _release_screenshot_data: bytes = b""          # 截图二进制（后端）
+    _release_screenshot_data: bytes = b""  # 截图二进制（后端）
 
     # 后端单例/数据（不发送到前端）
     _release_mgr: Any = None
     _admin_cfg: Any = None
-    _release_exe_data: bytes = b""                # 上传的 exe 内容（后端存）
+    _release_exe_data: bytes = b""  # 上传的 exe 内容（后端存）
 
     # ── 报文工具 ─────────────────────────────────────────────
     tool_input: str = ""
@@ -281,7 +302,7 @@ class State(rx.State):
     active_tab: str = "single"
 
     # 协议列表（label 带索引号，对齐 PySide6 版下拉）
-    PROTOCOL_OPTIONS: List[Dict[str, str]] = [
+    PROTOCOL_OPTIONS: list[dict[str, str]] = [
         {"label": "[0] 南网协议 (Q/CSG1209021-2019)", "value": "0"},
         {"label": "[1] PLC RF协议 (万胜海外 V1_04)", "value": "1"},
         {"label": "[2] HDLC/国网DLMS (IEC 62056-46)", "value": "2"},
@@ -382,9 +403,11 @@ class State(rx.State):
         p = self.current_protocol
         if p == 0:
             from protocol_parser import ProtocolFrameParser
+
             return ProtocolFrameParser()
         elif p == 1:
             from plc_rf_parser import PLCRFProtocolParser
+
             return PLCRFProtocolParser()
         elif p in (2, 3, 4, 5):
             from hdlc_parser import HDLCParser
@@ -402,6 +425,7 @@ class State(rx.State):
                         return self.hdlc_parser.parse_apdu_to_table(data)
 
                 return APDUParserWeb(HDLCParser())
+
             # p == 4：DLMS Wrapper 裸报文，直接解析 Wrapper+APDU（对齐桌面版 WrapperParser）
             class WrapperParserWeb:
                 def __init__(self, hdlc_parser):
@@ -413,24 +437,31 @@ class State(rx.State):
             return WrapperParserWeb(HDLCParser())
         elif p == 6:
             from dlt645_parser import DLT645Parser
+
             return DLT645Parser()
         elif p == 7:
             from gdw10376_parser import GDW10376Parser
+
             return GDW10376Parser()
         elif p == 8:
             from dl_t698_45_parser import DLT69845Parser
+
             return DLT69845Parser()
         elif p == 9:
             from csg_new_gen_parser import CSGNewGenParser
+
             return CSGNewGenParser()
         elif p == 10:
             from gw_new_gen_parser import GWNewGenParser
+
             return GWNewGenParser()
         elif p == 11:
             from hdc10_parser import HDC10Parser
+
             return HDC10Parser()
         else:
             from protocol_parser import ProtocolFrameParser
+
             return ProtocolFrameParser()
 
     def _safe_parse_to_table(self, parser, frame_bytes, **kwargs):
@@ -459,7 +490,9 @@ class State(rx.State):
                     byte_start, byte_end = 10, 13
                     di_code = dlt645_result.get("di_code", "")
                     di_desc = dlt645_result.get("di_desc", "")
-                    parsed_value = f"{di_code} ({di_desc})" if di_code and di_desc else di_code
+                    parsed_value = (
+                        f"{di_code} ({di_desc})" if di_code and di_desc else di_code
+                    )
                 elif "数据内容" in field:
                     byte_start, byte_end = 14, 10 + data_len - 1
                 elif "数据域" in field:
@@ -476,16 +509,30 @@ class State(rx.State):
         """获取校验器"""
         try:
             from validator import (
-                NWValidator, PLCRFValidator, HDLCValidator,
-                DLT645Validator, GDWValidator, DLT69845Validator, CSGNewGenValidator,
+                CSGNewGenValidator,
+                DLT645Validator,
+                DLT69845Validator,
+                GDWValidator,
+                HDLCValidator,
+                NWValidator,
+                PLCRFValidator,
             )
             from validator.gw_new_gen_validator import GWNewGenValidator
             from validator.hdc10_validator import HDC10Validator
+
             validators = {
-                0: NWValidator, 1: PLCRFValidator,
-                2: HDLCValidator, 3: HDLCValidator, 4: HDLCValidator, 5: HDLCValidator,
-                6: DLT645Validator, 7: GDWValidator, 8: DLT69845Validator, 9: CSGNewGenValidator,
-                10: GWNewGenValidator, 11: HDC10Validator,
+                0: NWValidator,
+                1: PLCRFValidator,
+                2: HDLCValidator,
+                3: HDLCValidator,
+                4: HDLCValidator,
+                5: HDLCValidator,
+                6: DLT645Validator,
+                7: GDWValidator,
+                8: DLT69845Validator,
+                9: CSGNewGenValidator,
+                10: GWNewGenValidator,
+                11: HDC10Validator,
             }
             return validators.get(p, NWValidator)()
         except ImportError:
@@ -501,10 +548,9 @@ class State(rx.State):
           - 0x 前缀: 0x68 0x11 0x01 或 0x68,0x11,0x01
           - 混合分隔: 68, 11 - 01. 01
         """
-        import re
         # 先处理 0x/0X 前缀，避免 0x 被误清洗导致字节对齐错误
-        text = re.sub(r'0[xX]([0-9A-Fa-f])', r'\1', hex_str)
-        cleaned = re.sub(r'[^0-9A-Fa-f]', '', text).upper()
+        text = re.sub(r"0[xX]([0-9A-Fa-f])", r"\1", hex_str)
+        cleaned = re.sub(r"[^0-9A-Fa-f]", "", text).upper()
         if len(cleaned) % 2 != 0:
             cleaned = cleaned[:-1]
         if not cleaned:
@@ -550,10 +596,10 @@ class State(rx.State):
             # 新一代载波/国网新一代/HDC 1.0 需要 parse_level
             if self.current_protocol == 9:
                 result = parser.parse_to_table(
-                            frame_bytes,
-                            parse_level=self.csg_parse_level,
-                            pb_frame_type=self.csg_pb_frame_type,
-                        )
+                    frame_bytes,
+                    parse_level=self.csg_parse_level,
+                    pb_frame_type=self.csg_pb_frame_type,
+                )
             elif self.current_protocol == 10:
                 result = parser.parse_to_table(
                     frame_bytes,
@@ -579,20 +625,24 @@ class State(rx.State):
                     stripped = field_name.lstrip()
                     if stripped != field_name:
                         indent_level = (len(field_name) - len(stripped)) // 2
-                        prefix = "　" * (indent_level - 1) + "└ " if indent_level > 0 else ""
+                        prefix = (
+                            "　" * (indent_level - 1) + "└ " if indent_level > 0 else ""
+                        )
                         display_field = prefix + stripped
                     else:
                         display_field = field_name
 
-                    self.parse_result.append({
-                        "id": idx,
-                        "field": display_field,
-                        "raw": str(row[1]) if row[1] else "",
-                        "parsed": str(row[2]) if row[2] else "",
-                        "comment": str(row[3]) if row[3] else "",
-                        "is_child": indent_level > 0,
-                        "indent": indent_level,
-                    })
+                    self.parse_result.append(
+                        {
+                            "id": idx,
+                            "field": display_field,
+                            "raw": str(row[1]) if row[1] else "",
+                            "parsed": str(row[2]) if row[2] else "",
+                            "comment": str(row[3]) if row[3] else "",
+                            "is_child": indent_level > 0,
+                            "indent": indent_level,
+                        }
+                    )
 
             self.message = f"解析成功，共 {len(self.parse_result)} 个字段"
             self.message_type = "success"
@@ -601,6 +651,7 @@ class State(rx.State):
             self.message = f"解析失败: {str(e)}"
             self.message_type = "error"
             import traceback
+
             traceback.print_exc()
         finally:
             self.is_loading = False
@@ -624,8 +675,16 @@ class State(rx.State):
             result = validator.verify(frame_bytes)
             lines = [f"[{'通过' if result.valid else '失败'}] {result.summary()}"]
             for check in result.checks:
-                icon = "✅" if check.level.value == "pass" else "❌" if check.level.value == "fail" else "⚠️"
-                lines.append(f"  {icon} {check.name}: 期望={check.expected}, 实际={check.actual} - {check.message}")
+                icon = (
+                    "✅"
+                    if check.level.value == "pass"
+                    else "❌"
+                    if check.level.value == "fail"
+                    else "⚠️"
+                )
+                lines.append(
+                    f"  {icon} {check.name}: 期望={check.expected}, 实际={check.actual} - {check.message}"
+                )
             if result.warnings:
                 for w in result.warnings:
                     lines.append(f"  ⚠️ {w}")
@@ -654,7 +713,7 @@ class State(rx.State):
     def set_batch_input(self, value: str):
         self.batch_input = value
 
-    async def handle_batch_upload(self, files: List[rx.UploadFile]):
+    async def handle_batch_upload(self, files: list[rx.UploadFile]):
         """处理拖拽/选择上传的日志文件
 
         大文件（可达50MB）内容只存后端（_batch_file_content），
@@ -671,7 +730,9 @@ class State(rx.State):
                 text = data.decode("utf-8", errors="replace")
                 parts.append(text)
                 total_size += len(data)
-                names.append(getattr(f, "filename", None) or getattr(f, "name", None) or "文件")
+                names.append(
+                    getattr(f, "filename", None) or getattr(f, "name", None) or "文件"
+                )
             content = "\n".join(parts).strip("\n")
             # 只存后端，不同步前端
             self._batch_file_content = content
@@ -686,7 +747,11 @@ class State(rx.State):
             self.message = (
                 f"已加载 {self.batch_upload_name}（{size_mb:.1f} MB，{self.batch_file_lines} 行）"
                 + "\n文件内容已保存到服务器端，点击「批量解析」即可处理。"
-                + ("\n⚠️ 文件较大，解析可能需要一些时间，请耐心等待" if size_mb > 5 else "")
+                + (
+                    "\n⚠️ 文件较大，解析可能需要一些时间，请耐心等待"
+                    if size_mb > 5
+                    else ""
+                )
             )
             self.message_type = "success"
         except Exception as e:
@@ -737,12 +802,15 @@ class State(rx.State):
         self._batch_all_results = []
 
         try:
-            from .web_utils import (
-                strip_csg_new_gen_prefix, strip_gw_new_gen_prefix,
-                extract_frames_for_protocol, get_frame_summary,
-                clean_hex_input,
-            )
             import re
+
+            from .web_utils import (
+                clean_hex_input,
+                extract_frames_for_protocol,
+                get_frame_summary,
+                strip_csg_new_gen_prefix,
+                strip_gw_new_gen_prefix,
+            )
 
             # 输入源：文件内容优先
             input_text = self._batch_file_content if has_file else self.batch_input
@@ -751,7 +819,9 @@ class State(rx.State):
             if self.batch_pp_commands.strip():
                 try:
                     import shlex
+
                     from pp_cli import parse_and_run
+
                     cmds = shlex.split(self.batch_pp_commands)
                     input_text = parse_and_run(input_text, cmds)
                     self.batch_pp_last_result = f"预处理完成（{' '.join(cmds)}）：{len(input_text.splitlines())} 行"
@@ -798,7 +868,7 @@ class State(rx.State):
 
             for idx, frame_hex in enumerate(frame_hexes):
                 try:
-                    clean = re.sub(r'[^0-9A-Fa-f]', '', frame_hex).upper()
+                    clean = re.sub(r"[^0-9A-Fa-f]", "", frame_hex).upper()
                     if len(clean) % 2 != 0:
                         clean = clean[:-1]
                     frame_bytes = bytes.fromhex(clean)
@@ -825,38 +895,48 @@ class State(rx.State):
                     else:
                         result = self._safe_parse_to_table(parser, frame_bytes)
 
-                    status = "成功" if result and (not result[0] or "❌" not in str(result[0][0])) else "失败"
+                    status = (
+                        "成功"
+                        if result and (not result[0] or "❌" not in str(result[0][0]))
+                        else "失败"
+                    )
                     proto_name = get_frame_summary(result, self.current_protocol)
 
-                    all_results.append({
-                        "id": idx,
-                        "frame_bytes": frame_bytes,
-                        "result": result,
-                        "status": status,
-                        "proto": proto_name,
-                        "summary": proto_name[:120],
-                        "len": len(frame_bytes),
-                    })
+                    all_results.append(
+                        {
+                            "id": idx,
+                            "frame_bytes": frame_bytes,
+                            "result": result,
+                            "status": status,
+                            "proto": proto_name,
+                            "summary": proto_name[:120],
+                            "len": len(frame_bytes),
+                        }
+                    )
                 except Exception as ex:
-                    all_results.append({
-                        "id": idx,
-                        "frame_bytes": b"",
-                        "result": [],
-                        "status": "错误",
-                        "proto": "解析错误",
-                        "summary": str(ex)[:100],
-                        "len": 0,
-                    })
+                    all_results.append(
+                        {
+                            "id": idx,
+                            "frame_bytes": b"",
+                            "result": [],
+                            "status": "错误",
+                            "proto": "解析错误",
+                            "summary": str(ex)[:100],
+                            "len": 0,
+                        }
+                    )
 
                 # 前端只保留摘要行（限显示上限），避免大结果同步卡死
                 if len(display_results) < self.batch_display_limit:
-                    display_results.append({
-                        "id": all_results[-1]["id"],
-                        "status": all_results[-1]["status"],
-                        "proto": all_results[-1]["proto"],
-                        "summary": all_results[-1]["summary"],
-                        "len": all_results[-1]["len"],
-                    })
+                    display_results.append(
+                        {
+                            "id": all_results[-1]["id"],
+                            "status": all_results[-1]["status"],
+                            "proto": all_results[-1]["proto"],
+                            "summary": all_results[-1]["summary"],
+                            "len": all_results[-1]["len"],
+                        }
+                    )
 
                 # 每块 yield：让出事件循环 + 向前端发送进度 delta
                 self.batch_progress = idx + 1
@@ -880,6 +960,7 @@ class State(rx.State):
             self.message = f"批量解析失败: {str(e)}"
             self.message_type = "error"
             import traceback
+
             traceback.print_exc()
         finally:
             self.is_loading = False
@@ -920,12 +1001,14 @@ class State(rx.State):
                 is_child = row[6] if len(row) > 6 else False
                 if is_child:
                     field = "  └ " + field
-                self.batch_detail_rows.append({
-                    "field": field,
-                    "raw": raw,
-                    "parsed": parsed,
-                    "comment": comment,
-                })
+                self.batch_detail_rows.append(
+                    {
+                        "field": field,
+                        "raw": raw,
+                        "parsed": parsed,
+                        "comment": comment,
+                    }
+                )
 
     def select_batch_by_index(self, index: int):
         """通过索引选择（用于 rx.foreach 回调）"""
@@ -989,7 +1072,9 @@ class State(rx.State):
             return
         try:
             import shlex
+
             from pp_cli import parse_and_run
+
             source = self._batch_file_content if has_file else self.batch_input
             cmds = shlex.split(self.batch_pp_commands)
             result = parse_and_run(source, cmds)
@@ -1000,7 +1085,9 @@ class State(rx.State):
                 self.batch_pp_last_result = f"预处理完成（{' '.join(cmds)}）：{self.batch_file_lines} 行（已保存到服务器端）"
             else:
                 self.batch_input = result
-                self.batch_pp_last_result = f"预处理完成（{' '.join(cmds)}）：{len(result.splitlines())} 行"
+                self.batch_pp_last_result = (
+                    f"预处理完成（{' '.join(cmds)}）：{len(result.splitlines())} 行"
+                )
             self.message = "预处理完成"
             self.message_type = "success"
         except Exception as e:
@@ -1020,6 +1107,7 @@ class State(rx.State):
             self.message_type = "warning"
             return
         from .web_utils import export_frames_to_json
+
         data = export_frames_to_json(self._batch_all_results)
         return rx.download(
             data=data,
@@ -1033,12 +1121,12 @@ class State(rx.State):
             self.message_type = "warning"
             return
         from .web_utils import export_frames_to_csv
+
         data = export_frames_to_csv(self._batch_all_results)
         return rx.download(
             data=data,
             filename="batch_parse_result.csv",
         )
-
 
     def _reset_gen_editor(self):
         """重置组帧编辑器状态（命令切换时调用）"""
@@ -1072,7 +1160,8 @@ class State(rx.State):
             self.di_filtered = []
             return
         self.di_filtered = [
-            o for o in self.di_options
+            o
+            for o in self.di_options
             if kw in o["value"].lower() or kw in o["label"].lower()
         ]
 
@@ -1112,7 +1201,8 @@ class State(rx.State):
             self.afn_filtered = []
             return
         self.afn_filtered = [
-            o for o in self.afn_fn_options
+            o
+            for o in self.afn_fn_options
             if kw in o["value"].lower() or kw in o["label"].lower()
         ]
 
@@ -1202,16 +1292,19 @@ class State(rx.State):
         """加载全部 EB 数据标识选项（gdw_eb_di_lookup）"""
         try:
             from gdw_eb_di_lookup import get_eb_di_lookup
+
             data = get_eb_di_lookup().get_all()
         except Exception:
             data = {}
         options = []
         for code, info in sorted(data.items()):
-            options.append({
-                "value": code,
-                "label": f"{code} {info.get('名称', '')}",
-                "name": info.get("名称", ""),
-            })
+            options.append(
+                {
+                    "value": code,
+                    "label": f"{code} {info.get('名称', '')}",
+                    "name": info.get("名称", ""),
+                }
+            )
         self.eb_di_options = options
 
     def set_eb_di(self, value: str):
@@ -1233,6 +1326,7 @@ class State(rx.State):
         self.eb_di_field_use = False
         try:
             from gdw_eb_di_fields import EB_DI_FIELDS
+
             info = EB_DI_FIELDS.get(di_code)
             if not info:
                 return
@@ -1240,28 +1334,39 @@ class State(rx.State):
             self.eb_di_field_use = True
             for f in fields:
                 ftype = f.get("type", "hex")
-                self.eb_di_fields.append({
-                    "name": f.get("name", ""),
-                    "type": ftype,
-                    "length": str(f.get("length", "")),
-                    "note": str(f.get("note", "")),
-                    "has_enum": "1" if ftype == "enum" else "0",
-                    "has_list": "1" if ftype == "list" else "0",
-                    "default": str(f.get("default", "")),
-                })
+                self.eb_di_fields.append(
+                    {
+                        "name": f.get("name", ""),
+                        "type": ftype,
+                        "length": str(f.get("length", "")),
+                        "note": str(f.get("note", "")),
+                        "has_enum": "1" if ftype == "enum" else "0",
+                        "has_list": "1" if ftype == "list" else "0",
+                        "default": str(f.get("default", "")),
+                    }
+                )
                 if ftype == "enum":
                     self.eb_di_field_enum.append(
-                        [{"value": str(k), "label": v} for k, v in f.get("enum_map", {}).items()])
+                        [
+                            {"value": str(k), "label": v}
+                            for k, v in f.get("enum_map", {}).items()
+                        ]
+                    )
                 else:
                     self.eb_di_field_enum.append([])
                 self.eb_di_field_vals.append(str(f.get("default", "")))
                 if ftype == "list":
                     self.eb_di_field_list.append([])
-                    self.eb_di_field_list_meta.append([
-                        {"name": it.get("name", ""), "type": it.get("type", "hex"),
-                         "length": str(it.get("length", ""))}
-                        for it in f.get("item_fields", [])
-                    ])
+                    self.eb_di_field_list_meta.append(
+                        [
+                            {
+                                "name": it.get("name", ""),
+                                "type": it.get("type", "hex"),
+                                "length": str(it.get("length", "")),
+                            }
+                            for it in f.get("item_fields", [])
+                        ]
+                    )
                 else:
                     self.eb_di_field_list.append([])
                     self.eb_di_field_list_meta.append([])
@@ -1284,7 +1389,11 @@ class State(rx.State):
         except (ValueError, TypeError):
             return
         if 0 <= fi < len(self.eb_di_field_list):
-            meta = self.eb_di_field_list_meta[fi] if fi < len(self.eb_di_field_list_meta) else []
+            meta = (
+                self.eb_di_field_list_meta[fi]
+                if fi < len(self.eb_di_field_list_meta)
+                else []
+            )
             row = ["" for _ in meta]
             rows = list(self.eb_di_field_list[fi])
             rows.append(row)
@@ -1302,9 +1411,10 @@ class State(rx.State):
                 rows[row_idx][col_idx] = value
             self.eb_di_field_list[fi] = rows
 
-    def _collect_eb_field_values(self) -> Dict[str, Any]:
+    def _collect_eb_field_values(self) -> dict[str, Any]:
         """从字段表单收集 {字段名: 值}"""
         from gdw_eb_di_fields import EB_DI_FIELDS
+
         info = EB_DI_FIELDS.get(self.gen_eb_di, {})
         fields = info.get("fields", [])
         values = {}
@@ -1313,15 +1423,23 @@ class State(rx.State):
             ftype = f.get("type", "hex")
             if ftype == "list":
                 items = []
-                for row in self.eb_di_field_list[i] if i < len(self.eb_di_field_list) else []:
+                for row in (
+                    self.eb_di_field_list[i] if i < len(self.eb_di_field_list) else []
+                ):
                     item = {}
-                    meta = self.eb_di_field_list_meta[i] if i < len(self.eb_di_field_list_meta) else []
+                    meta = (
+                        self.eb_di_field_list_meta[i]
+                        if i < len(self.eb_di_field_list_meta)
+                        else []
+                    )
                     for j, it in enumerate(meta):
                         item[it["name"]] = row[j] if j < len(row) else ""
                     items.append(item)
                 values[fname] = items
             else:
-                values[fname] = self.eb_di_field_vals[i] if i < len(self.eb_di_field_vals) else ""
+                values[fname] = (
+                    self.eb_di_field_vals[i] if i < len(self.eb_di_field_vals) else ""
+                )
         return values
 
     def set_eb_ctrl(self, value: str):
@@ -1351,16 +1469,22 @@ class State(rx.State):
         self.gen_eb_698_data = value
 
     def set_eb_addr_type(self, value: str):
-        try: self.gen_eb_addr_type = int(value)
-        except (ValueError, TypeError): pass
+        try:
+            self.gen_eb_addr_type = int(value)
+        except (ValueError, TypeError):
+            pass
 
     def set_eb_logic_addr(self, value: str):
-        try: self.gen_eb_logic_addr = int(value)
-        except (ValueError, TypeError): pass
+        try:
+            self.gen_eb_logic_addr = int(value)
+        except (ValueError, TypeError):
+            pass
 
     def set_eb_addr_len(self, value: str):
-        try: self.gen_eb_addr_len = int(value)
-        except (ValueError, TypeError): pass
+        try:
+            self.gen_eb_addr_len = int(value)
+        except (ValueError, TypeError):
+            pass
 
     def set_eb_sa_raw(self, value: str):
         self.gen_eb_sa_raw = value
@@ -1379,7 +1503,7 @@ class State(rx.State):
 
     def set_eb_698_use_field(self, value: str):
         """切换 698 数据内容来源（字段表单 / 自由 hex）"""
-        self.eb_698_use_field = (value == "1")
+        self.eb_698_use_field = value == "1"
 
     def set_eb_piid(self, value: str):
         self.gen_eb_piid = value
@@ -1415,6 +1539,7 @@ class State(rx.State):
             return self._gen_eb_698_frame()
         try:
             from gdw_eb_di_lookup import get_eb_di_lookup
+
             lookup = get_eb_di_lookup()
         except Exception:
             lookup = None
@@ -1425,10 +1550,14 @@ class State(rx.State):
             return
         try:
             ctrl = int(self.gen_eb_ctrl, 16)
-            data_bytes = bytes.fromhex(self.gen_eb_data.replace(" ", "")) if self.gen_eb_data.strip() else b""
+            data_bytes = (
+                bytes.fromhex(self.gen_eb_data.replace(" ", ""))
+                if self.gen_eb_data.strip()
+                else b""
+            )
             addr_bytes = bytes.fromhex(self.gen_eb_addr.replace(" ", ""))
             if len(addr_bytes) != 6:
-                addr_bytes = addr_bytes[:6].ljust(6, b'\x00')
+                addr_bytes = addr_bytes[:6].ljust(6, b"\x00")
         except ValueError:
             self.gen_eb_msg = "控制码/地址/数据内容格式错误（应为十六进制）"
             self.gen_eb_msg_type = "error"
@@ -1454,6 +1583,7 @@ class State(rx.State):
         """生成 EB 数据标识 698.45 完整帧（附件1 V3.42 698 承载格式）"""
         try:
             from gdw_eb_di_lookup import get_eb_di_lookup
+
             lookup = get_eb_di_lookup()
         except Exception:
             lookup = None
@@ -1463,8 +1593,9 @@ class State(rx.State):
             self.gen_eb_msg_type = "error"
             return
         try:
-            from frame_gen_utils import build_eb_698_frame, build_dlt698_sa
-            from gdw_eb_di_fields import encode_eb_di_data, EB_DI_FIELDS
+            from gdw_eb_di_fields import EB_DI_FIELDS, encode_eb_di_data
+
+            from frame_gen_utils import build_dlt698_sa, build_eb_698_frame
 
             # 数据内容：优先用字段表单组装，否则用自由 hex
             data_hex = self.gen_eb_698_data
@@ -1477,14 +1608,23 @@ class State(rx.State):
                     data_hex = self.gen_eb_698_data
 
             # 完整帧头部配置（SA 由地址类型/逻辑地址/长度/hex 组装）
-            sa = build_dlt698_sa(
-                self.gen_eb_addr_type, self.gen_eb_logic_addr,
-                self.gen_eb_addr_len, self.gen_eb_sa_raw,
-            ) if hasattr(self, 'gen_eb_addr_type') else None
+            sa = (
+                build_dlt698_sa(
+                    self.gen_eb_addr_type,
+                    self.gen_eb_logic_addr,
+                    self.gen_eb_addr_len,
+                    self.gen_eb_sa_raw,
+                )
+                if hasattr(self, "gen_eb_addr_type")
+                else None
+            )
 
             frame = build_eb_698_frame(
-                di, self.gen_eb_698_service, data_hex,
-                sa=sa, ca=int(self.gen_eb_ca or 0),
+                di,
+                self.gen_eb_698_service,
+                data_hex,
+                sa=sa,
+                ca=int(self.gen_eb_ca or 0),
                 dir_bit=int(self.gen_eb_dir or 0),
                 prm_bit=int(self.gen_eb_prm or 1),
                 func_code=int(self.gen_eb_func or 3),
@@ -1508,7 +1648,7 @@ class State(rx.State):
         self.gen_eb_frame = frame_hex
         info = lookup.get(di) if lookup else None
         name = info.get("名称", "") if info else ""
-        self.gen_eb_msg = f"已生成 {di} {name} 698 完整帧（{self.gen_eb_698_service}，{len(frame) if isinstance(frame, bytes) else len(frame_hex)//2} 字节，含 68 链路层封装），点击「填入报文内容」写入透明转发字段"
+        self.gen_eb_msg = f"已生成 {di} {name} 698 完整帧（{self.gen_eb_698_service}，{len(frame) if isinstance(frame, bytes) else len(frame_hex) // 2} 字节，含 68 链路层封装），点击「填入报文内容」写入透明转发字段"
         self.gen_eb_msg_type = "success"
 
     def apply_eb_frame_to_content(self):
@@ -1543,7 +1683,9 @@ class State(rx.State):
             fi, si = int(fi), int(si)
         except (ValueError, TypeError):
             return
-        if 0 <= fi < len(self.gen_sub_fields) and 0 <= si < len(self.gen_sub_fields[fi]):
+        if 0 <= fi < len(self.gen_sub_fields) and 0 <= si < len(
+            self.gen_sub_fields[fi]
+        ):
             self.gen_sub_fields[fi][si] = value
         self._update_gen_preview()
 
@@ -1559,7 +1701,9 @@ class State(rx.State):
             return
         if 0 <= fi < len(self.gen_field_schema):
             field = self.gen_field_schema[fi]
-            defaults = [str(it.get("default", "")) for it in field.get("item_fields", [])]
+            defaults = [
+                str(it.get("default", "")) for it in field.get("item_fields", [])
+            ]
             rows = list(self.gen_list_rows[fi]) if fi < len(self.gen_list_rows) else []
             rows.append(defaults)
             while len(self.gen_list_rows) <= fi:
@@ -1573,7 +1717,9 @@ class State(rx.State):
             fi, row_idx = int(fi), int(row_idx)
         except (ValueError, TypeError):
             return
-        if 0 <= fi < len(self.gen_list_rows) and 0 <= row_idx < len(self.gen_list_rows[fi]):
+        if 0 <= fi < len(self.gen_list_rows) and 0 <= row_idx < len(
+            self.gen_list_rows[fi]
+        ):
             rows = list(self.gen_list_rows[fi])
             rows.pop(row_idx)
             self.gen_list_rows[fi] = rows
@@ -1585,15 +1731,16 @@ class State(rx.State):
             fi, row_idx, item_idx = int(fi), int(row_idx), int(item_idx)
         except (ValueError, TypeError):
             return
-        if (0 <= fi < len(self.gen_list_rows)
-                and 0 <= row_idx < len(self.gen_list_rows[fi])
-                and 0 <= item_idx < len(self.gen_list_rows[fi][row_idx])):
+        if (
+            0 <= fi < len(self.gen_list_rows)
+            and 0 <= row_idx < len(self.gen_list_rows[fi])
+            and 0 <= item_idx < len(self.gen_list_rows[fi][row_idx])
+        ):
             rows = list(self.gen_list_rows[fi])
             rows[row_idx] = list(rows[row_idx])
             rows[row_idx][item_idx] = value
             self.gen_list_rows[fi] = rows
         self._update_gen_preview()
-
 
     def set_gen_axdr_fixed(self, key: str, value: str):
         """设置 698.45 A-XDR 固定字段（PIID/OI/属性/索引等）"""
@@ -1602,10 +1749,17 @@ class State(rx.State):
 
     def add_gen_custom_template(self):
         """自定义模板添加一行"""
-        self.gen_custom_templates.append({
-            "name": "", "length": 1, "ftype": "bytes",
-            "endian": "little", "display": "hex", "reverse": False, "value": "",
-        })
+        self.gen_custom_templates.append(
+            {
+                "name": "",
+                "length": 1,
+                "ftype": "bytes",
+                "endian": "little",
+                "display": "hex",
+                "reverse": False,
+                "value": "",
+            }
+        )
 
     def remove_gen_custom_template(self, idx: int):
         """自定义模板删除一行"""
@@ -1631,7 +1785,13 @@ class State(rx.State):
 
     def add_gen_axdr_item(self, parent_idx: str = ""):
         """A-XDR 添加一项（parent_idx 为点分路径，空表示根级）"""
-        new_item = {"type": "unsigned", "tag": 0x11, "length": 0, "value": 0, "children": []}
+        new_item = {
+            "type": "unsigned",
+            "tag": 0x11,
+            "length": 0,
+            "value": 0,
+            "children": [],
+        }
         if not parent_idx:
             self.gen_axdr_items.append(new_item)
             return
@@ -1670,7 +1830,8 @@ class State(rx.State):
             else:
                 return
         if key == "type":
-            from frame_gen_utils import TYPE_TO_TAG, COMPOUND_TYPES
+            from frame_gen_utils import COMPOUND_TYPES, TYPE_TO_TAG
+
             target["type"] = value
             target["tag"] = TYPE_TO_TAG.get(value, target.get("tag", 0x11))
             if value in COMPOUND_TYPES:
@@ -1751,6 +1912,7 @@ class State(rx.State):
         """加载 DI 选项"""
         try:
             from send_frame_lib import ProtocolFrameGenerator
+
             gen = ProtocolFrameGenerator()
             options = []
             for di_key in gen.get_supported_di_keys():
@@ -1758,7 +1920,9 @@ class State(rx.State):
                 key_hex = f"{di3:02X}{di2:02X}{di1:02X}{di0:02X}"
                 schema = gen.get_di_schema(di_key)
                 name = schema.get("name", key_hex) if schema else key_hex
-                options.append({"label": f"{key_hex} - {name}", "value": key_hex, "name": name})
+                options.append(
+                    {"label": f"{key_hex} - {name}", "value": key_hex, "name": name}
+                )
             self.di_options = sorted(options, key=lambda x: x["value"])
         except Exception:
             self.di_options = []
@@ -1767,6 +1931,7 @@ class State(rx.State):
         """加载 AFN+Fn 选项"""
         try:
             from gdw_send_frame_lib import GDWFrameGenerator
+
             gen = GDWFrameGenerator()
             options = []
             for afn, fn, name in gen.get_supported_afn_fn():
@@ -1780,9 +1945,11 @@ class State(rx.State):
         """加载 698.45 APDU 类型选项"""
         try:
             from dl_t698_45_frame_schema import APDU_TYPE_LIST
+
             self.dlt698_apdu_options = [item[1] for item in APDU_TYPE_LIST]
             self.dlt698_all_options = [
-                {"value": item[1], "label": item[1], "name": item[1]} for item in APDU_TYPE_LIST
+                {"value": item[1], "label": item[1], "name": item[1]}
+                for item in APDU_TYPE_LIST
             ]
         except ImportError:
             self.dlt698_apdu_options = []
@@ -1795,20 +1962,24 @@ class State(rx.State):
             return
         try:
             from dl_t698_45_frame_schema import (
-                GET_REQUEST_LIST, SET_REQUEST_LIST, ACTION_REQUEST_LIST,
+                ACTION_REQUEST_LIST,
+                GET_REQUEST_LIST,
+                SET_REQUEST_LIST,
             )
+
             sub_lists = {
                 "GET-Request": GET_REQUEST_LIST,
                 "SET-Request": SET_REQUEST_LIST,
                 "ACTION-Request": ACTION_REQUEST_LIST,
             }
             sub_list = sub_lists.get(self.gen_dlt698_apdu, [])
-            self.dlt698_sub_options = [{"label": name, "value": key} for key, name in sub_list]
+            self.dlt698_sub_options = [
+                {"label": name, "value": key} for key, name in sub_list
+            ]
         except ImportError:
             self.dlt698_sub_options = []
 
-
-    def _convert_enum_map(self, enum_map: Any) -> List[Dict[str, str]]:
+    def _convert_enum_map(self, enum_map: Any) -> list[dict[str, str]]:
         """把 enum_map 字典转为 Reflex 可遍历的 [{value,label}] 列表。
 
         GUI 中 enum_map 是 {int/str: 中文名} 字典；Reflex `rx.foreach` 只能遍历列表，
@@ -1822,13 +1993,17 @@ class State(rx.State):
                 val = int(k)
             except (ValueError, TypeError):
                 val = 0
-            items.append({
-                "value": str(k),
-                "label": f"{text} (0x{val:02X})",
-            })
+            items.append(
+                {
+                    "value": str(k),
+                    "label": f"{text} (0x{val:02X})",
+                }
+            )
         return items
 
-    def _fill_gen_field_schema(self, fields: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _fill_gen_field_schema(
+        self, fields: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         """将源字段 dict 整体拷贝到 gen_field_schema，保留全部元信息。
 
         - `default`/`description` 转字符串供输入框绑定
@@ -1882,47 +2057,65 @@ class State(rx.State):
             self.gen_field_values.append(str(f.get("default", "")))
             # 子字段默认值
             if "sub_fields" in f:
-                self.gen_sub_fields.append([str(s.get("default", "")) for s in f.get("sub_fields", [])])
+                self.gen_sub_fields.append(
+                    [str(s.get("default", "")) for s in f.get("sub_fields", [])]
+                )
             else:
                 self.gen_sub_fields.append([])
             # 列表行（空）
             self.gen_list_rows.append([])
             # —— 渲染模型 ——
-            self.gen_field_meta.append({
-                "name": f.get("name", ""),
-                "type": f.get("type", "bytes"),
-                "default": str(f.get("default", "")),
-                "description": str(f.get("description", "")),
-                "has_sub": "1" if "sub_fields" in f else "0",
-                "has_list": "1" if f.get("type") == "list" else "0",
-            })
+            self.gen_field_meta.append(
+                {
+                    "name": f.get("name", ""),
+                    "type": f.get("type", "bytes"),
+                    "default": str(f.get("default", "")),
+                    "description": str(f.get("description", "")),
+                    "has_sub": "1" if "sub_fields" in f else "0",
+                    "has_list": "1" if f.get("type") == "list" else "0",
+                }
+            )
             # enum 选项
             self.gen_field_enum.append(
-                [dict(o) for o in f.get("enum_map", [])] if f.get("type") == "enum" else []
+                [dict(o) for o in f.get("enum_map", [])]
+                if f.get("type") == "enum"
+                else []
             )
             # item_fields（list）
             item_fields = f.get("item_fields", [])
             items_meta = []
             items_enum = []
             for it in item_fields:
-                items_meta.append({
-                    "name": it.get("name", ""),
-                    "type": it.get("type", "bytes"),
-                    "default": str(it.get("default", "")),
-                })
-                items_enum.append([dict(o) for o in it.get("enum_map", [])] if it.get("type") == "enum" else [])
+                items_meta.append(
+                    {
+                        "name": it.get("name", ""),
+                        "type": it.get("type", "bytes"),
+                        "default": str(it.get("default", "")),
+                    }
+                )
+                items_enum.append(
+                    [dict(o) for o in it.get("enum_map", [])]
+                    if it.get("type") == "enum"
+                    else []
+                )
             self.gen_field_items.append(items_meta)
             self.gen_field_items_enum.append(items_enum)
             # sub_fields
             subs_meta = []
             subs_enum = []
             for s in f.get("sub_fields", []):
-                subs_meta.append({
-                    "name": s.get("name", ""),
-                    "type": s.get("type", "bytes"),
-                    "default": str(s.get("default", "")),
-                })
-                subs_enum.append([dict(o) for o in s.get("enum_map", [])] if s.get("type") == "enum" else [])
+                subs_meta.append(
+                    {
+                        "name": s.get("name", ""),
+                        "type": s.get("type", "bytes"),
+                        "default": str(s.get("default", "")),
+                    }
+                )
+                subs_enum.append(
+                    [dict(o) for o in s.get("enum_map", [])]
+                    if s.get("type") == "enum"
+                    else []
+                )
             self.gen_field_subs.append(subs_meta)
             self.gen_field_subs_enum.append(subs_enum)
 
@@ -1933,9 +2126,15 @@ class State(rx.State):
             return
         try:
             from send_frame_lib import ProtocolFrameGenerator
+
             gen = ProtocolFrameGenerator()
             key = self.gen_di_key
-            di_key = (int(key[0:2], 16), int(key[2:4], 16), int(key[4:6], 16), int(key[6:8], 16))
+            di_key = (
+                int(key[0:2], 16),
+                int(key[2:4], 16),
+                int(key[4:6], 16),
+                int(key[6:8], 16),
+            )
             schema = gen.get_di_schema(di_key)
             if schema and "fields" in schema:
                 self.gen_field_schema = self._fill_gen_field_schema(schema["fields"])
@@ -1952,6 +2151,7 @@ class State(rx.State):
             return
         try:
             from gdw_send_frame_lib import GDWFrameGenerator
+
             gen = GDWFrameGenerator()
             afn = int(self.gen_afn_fn[0:2], 16)
             fn = int(self.gen_afn_fn[2:4], 16)
@@ -1971,6 +2171,7 @@ class State(rx.State):
             return
         try:
             from dl_t698_45_frame_schema import DLT69845_FIELD_SCHEMA
+
             key = (self.gen_dlt698_apdu, self.gen_dlt698_sub)
             schema = DLT69845_FIELD_SCHEMA.get(key, {})
             fields = schema.get("fields", [])
@@ -1995,9 +2196,7 @@ class State(rx.State):
                 return bytes.fromhex(clean) if clean else b""
             except ValueError:
                 return b""
-        elif field_type == "ascii":
-            return value
-        elif field_type == "bcd":
+        elif field_type == "ascii" or field_type == "bcd":
             return value
         elif field_type == "enum":
             try:
@@ -2041,7 +2240,11 @@ class State(rx.State):
         if self.gen_field_schema:
             parts.append(f"\n数据字段 ({len(self.gen_field_schema)}个):")
             for i, f in enumerate(self.gen_field_schema):
-                val = self.gen_field_values[i] if i < len(self.gen_field_values) else f.get("default", "")
+                val = (
+                    self.gen_field_values[i]
+                    if i < len(self.gen_field_values)
+                    else f.get("default", "")
+                )
                 parts.append(f"  {f['name']}: {val}")
 
         self.gen_preview = "\n".join(parts) if parts else "请选择命令类型"
@@ -2073,19 +2276,23 @@ class State(rx.State):
                 stripped = field_name.lstrip()
                 if stripped != field_name:
                     indent_level = (len(field_name) - len(stripped)) // 2
-                    prefix = "　" * (indent_level - 1) + "└ " if indent_level > 0 else ""
+                    prefix = (
+                        "　" * (indent_level - 1) + "└ " if indent_level > 0 else ""
+                    )
                     display_field = prefix + stripped
                 else:
                     display_field = field_name
-                rows.append({
-                    "id": idx,
-                    "field": display_field,
-                    "raw": str(row[1]) if row[1] else "",
-                    "parsed": str(row[2]) if row[2] else "",
-                    "comment": str(row[3]) if row[3] else "",
-                    "is_child": indent_level > 0,
-                    "indent": indent_level,
-                })
+                rows.append(
+                    {
+                        "id": idx,
+                        "field": display_field,
+                        "raw": str(row[1]) if row[1] else "",
+                        "parsed": str(row[2]) if row[2] else "",
+                        "comment": str(row[3]) if row[3] else "",
+                        "is_child": indent_level > 0,
+                        "indent": indent_level,
+                    }
+                )
             self.gen_preview_rows = rows
         except Exception:
             self.gen_preview_rows = []
@@ -2100,11 +2307,18 @@ class State(rx.State):
         if p == 0:  # 南网
             if not self.gen_di_key:
                 raise ValueError("请先选择 DI")
-            from frame_gen_utils import collect_field_values, generate_custom_data
             from send_frame_lib import ProtocolFrameGenerator
+
+            from frame_gen_utils import collect_field_values, generate_custom_data
+
             gen = ProtocolFrameGenerator()
             key = self.gen_di_key
-            di_key = (int(key[0:2], 16), int(key[2:4], 16), int(key[4:6], 16), int(key[6:8], 16))
+            di_key = (
+                int(key[0:2], 16),
+                int(key[2:4], 16),
+                int(key[4:6], 16),
+                int(key[6:8], 16),
+            )
 
             src_text = self.gen_src_addr.strip().replace(" ", "")
             dst_text = self.gen_dst_addr.strip().replace(" ", "")
@@ -2120,14 +2334,23 @@ class State(rx.State):
                 data = generate_custom_data(self.gen_custom_templates)
                 di3, di2, di1, di0 = di_key
                 return gen._build_frame(
-                    di3, di2, di1, di0,
-                    src_addr=src, dst_addr=dst, data=data,
-                    dir_flag=self.gen_dir, prm=self.gen_prm, add_flag=1,
+                    di3,
+                    di2,
+                    di1,
+                    di0,
+                    src_addr=src,
+                    dst_addr=dst,
+                    data=data,
+                    dir_flag=self.gen_dir,
+                    prm=self.gen_prm,
+                    add_flag=1,
                 )
             schema = gen.get_di_schema(di_key)
             field_values = collect_field_values(
                 schema.get("fields", []) if schema else [],
-                self.gen_field_values, self.gen_list_rows, self.gen_sub_fields,
+                self.gen_field_values,
+                self.gen_list_rows,
+                self.gen_sub_fields,
             )
             return gen.generate_frame(
                 di_key=di_key,
@@ -2142,8 +2365,10 @@ class State(rx.State):
         if p == 7:  # 国网
             if not self.gen_afn_fn:
                 raise ValueError("请先选择 AFN+Fn")
-            from frame_gen_utils import collect_field_values
             from gdw_send_frame_lib import GDWFrameGenerator
+
+            from frame_gen_utils import collect_field_values
+
             gen = GDWFrameGenerator()
             afn = int(self.gen_afn_fn[0:2], 16)
             fn = int(self.gen_afn_fn[2:4], 16)
@@ -2151,7 +2376,9 @@ class State(rx.State):
             schema = gen.get_schema(afn, fn)
             field_values = collect_field_values(
                 schema.get("fields", []) if schema else [],
-                self.gen_field_values, self.gen_list_rows, self.gen_sub_fields,
+                self.gen_field_values,
+                self.gen_list_rows,
+                self.gen_sub_fields,
             )
 
             info_config = {
@@ -2171,7 +2398,9 @@ class State(rx.State):
                 "报文序列号": int(self.gen_gdw_info.get("报文序列号", "0")),
             }
 
-            relay_addrs = [a.strip() for a in self.gen_gdw_relay_addrs_text.split(",") if a.strip()]
+            relay_addrs = [
+                a.strip() for a in self.gen_gdw_relay_addrs_text.split(",") if a.strip()
+            ]
             return gen.generate_frame(
                 afn=afn,
                 fn=fn,
@@ -2185,12 +2414,16 @@ class State(rx.State):
         if p == 8:  # 698.45
             if not self.gen_dlt698_apdu:
                 raise ValueError("请先选择 APDU 类型")
-            from frame_gen_utils import (
-                collect_field_values, build_dlt698_sa,
-                build_dlt698_axdr_apdu, encode_axdr_items,
-            )
             from dl_t698_45_frame_gen import DLT69845FrameGenerator
             from dl_t698_45_frame_schema import DLT69845_FIELD_SCHEMA
+
+            from frame_gen_utils import (
+                build_dlt698_axdr_apdu,
+                build_dlt698_sa,
+                collect_field_values,
+                encode_axdr_items,
+            )
+
             gen = DLT69845FrameGenerator()
 
             apdu_type = self.gen_dlt698_apdu
@@ -2199,8 +2432,10 @@ class State(rx.State):
             schema = DLT69845_FIELD_SCHEMA.get(schema_key, {})
 
             sa = build_dlt698_sa(
-                self.gen_dlt698_addr_type, self.gen_dlt698_logic_addr,
-                self.gen_dlt698_addr_len, self.gen_dlt698_sa_raw,
+                self.gen_dlt698_addr_type,
+                self.gen_dlt698_logic_addr,
+                self.gen_dlt698_addr_len,
+                self.gen_dlt698_sa_raw,
             )
             if not sa:
                 raise ValueError("请输入有效的SA地址")
@@ -2209,30 +2444,41 @@ class State(rx.State):
             if self.gen_mode == "axdr":
                 axdr_data = encode_axdr_items(self.gen_axdr_items)
                 field_values = collect_field_values(
-                    schema.get("fields", []), self.gen_field_values,
-                    self.gen_list_rows, self.gen_sub_fields,
+                    schema.get("fields", []),
+                    self.gen_field_values,
+                    self.gen_list_rows,
+                    self.gen_sub_fields,
                 )
                 priority = int(self.gen_axdr_fixed.get("PIID_优先级", 0) or 0) & 0x01
                 seq = int(self.gen_axdr_fixed.get("PIID_序号", 1) or 1) & 0x7F
                 piid = (priority << 7) | seq
                 oi_hex = self.gen_axdr_fixed.get("OI", "0000")
                 apdu = build_dlt698_axdr_apdu(
-                    apdu_type, sub_type, piid, oi_hex,
-                    field_values, axdr_data,
+                    apdu_type,
+                    sub_type,
+                    piid,
+                    oi_hex,
+                    field_values,
+                    axdr_data,
                     is_custom=(apdu_type == "_custom_"),
                 )
                 return gen._assemble_frame(
-                    sa, ca,
+                    sa,
+                    ca,
                     gen.build_control(
-                        dir_bit=self.gen_dir, prm_bit=self.gen_prm,
-                        seg_bit=self.gen_dlt698_seg, sc_bit=self.gen_dlt698_sc,
+                        dir_bit=self.gen_dir,
+                        prm_bit=self.gen_prm,
+                        seg_bit=self.gen_dlt698_seg,
+                        sc_bit=self.gen_dlt698_sc,
                         func_code=self.gen_dlt698_func,
                     ),
                     apdu,
                 )
             field_values = collect_field_values(
-                schema.get("fields", []), self.gen_field_values,
-                self.gen_list_rows, self.gen_sub_fields,
+                schema.get("fields", []),
+                self.gen_field_values,
+                self.gen_list_rows,
+                self.gen_sub_fields,
             )
             return gen.generate_frame(
                 apdu_type=apdu_type,
@@ -2259,7 +2505,9 @@ class State(rx.State):
         try:
             frame_bytes = self._build_frame_bytes()
             self.gen_result_hex = " ".join(f"{b:02X}" for b in frame_bytes)
-            self.gen_result = f"生成成功！共 {len(frame_bytes)} 字节\n\n{self.gen_result_hex}"
+            self.gen_result = (
+                f"生成成功！共 {len(frame_bytes)} 字节\n\n{self.gen_result_hex}"
+            )
             self._refresh_gen_preview()
             self.message = "组帧完成"
             self.message_type = "success"
@@ -2270,6 +2518,7 @@ class State(rx.State):
             self.message = f"组帧失败: {str(e)}"
             self.message_type = "error"
             import traceback
+
             traceback.print_exc()
         finally:
             self.is_loading = False
@@ -2279,12 +2528,14 @@ class State(rx.State):
         if self.gen_result_hex:
             # 在 Reflex 中，复制可以通过 rx.set_clipboard 或前端 JS 实现
             pass
+
     # ── 预设命令按钮 ─────────────────────────────────────────
     def _load_preset_buttons(self):
         """加载预设按钮（协议 0 读 NW_command.json，协议 7 读 GW_command.json）"""
         try:
             import json as _json
             from pathlib import Path
+
             p = self.current_protocol
             if p not in (0, 7):
                 self.gen_preset_buttons = []
@@ -2301,13 +2552,15 @@ class State(rx.State):
             buttons = []
             groups = []
             for c in commands:
-                buttons.append({
-                    "name": c.get("button_name", ""),
-                    "group": c.get("group_name", "其他"),
-                    "frame_hex": c.get("frame_hex", ""),
-                    "id": c.get("id", ""),
-                    "description": c.get("description", ""),
-                })
+                buttons.append(
+                    {
+                        "name": c.get("button_name", ""),
+                        "group": c.get("group_name", "其他"),
+                        "frame_hex": c.get("frame_hex", ""),
+                        "id": c.get("id", ""),
+                        "description": c.get("description", ""),
+                    }
+                )
                 g = c.get("group_name", "其他")
                 if g not in groups:
                     groups.append(g)
@@ -2341,6 +2594,7 @@ class State(rx.State):
             import json as _json
             import uuid
             from pathlib import Path
+
             p = self.current_protocol
             if p not in (0, 7):
                 self.message = "当前协议不支持预设命令"
@@ -2363,7 +2617,9 @@ class State(rx.State):
             }
             commands.append(new_cmd)
             data["commands"] = commands
-            path.write_text(_json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            path.write_text(
+                _json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
             self.gen_preset_name = ""
             self.gen_preset_group = ""
             self._load_preset_buttons()
@@ -2414,6 +2670,7 @@ class State(rx.State):
         try:
             import json as _json
             from pathlib import Path
+
             p = self.current_protocol
             if p not in (0, 7):
                 return
@@ -2429,7 +2686,9 @@ class State(rx.State):
                     c["group_name"] = self.gen_preset_edit_group.strip() or "常用查询"
                     break
             data["commands"] = commands
-            path.write_text(_json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            path.write_text(
+                _json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
             self.gen_preset_edit_id = ""
             self._load_preset_buttons()
             self.message = "预设命令已更新"
@@ -2445,6 +2704,7 @@ class State(rx.State):
         try:
             import json as _json
             from pathlib import Path
+
             p = self.current_protocol
             if p not in (0, 7):
                 return
@@ -2456,7 +2716,9 @@ class State(rx.State):
             commands = data.get("commands", []) if isinstance(data, dict) else []
             commands = [c for c in commands if c.get("id") != cmd_id]
             data["commands"] = commands
-            path.write_text(_json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            path.write_text(
+                _json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
             if self.gen_preset_edit_id == cmd_id:
                 self.gen_preset_edit_id = ""
             self._load_preset_buttons()
@@ -2510,89 +2772,95 @@ class State(rx.State):
                 ignore_sequence=self.diff_ignore_sequence,
             )
 
-            if not result.get('success', False):
+            if not result.get("success", False):
                 self.message = f"对比失败: {result.get('error', '未知错误')}"
                 self.message_type = "error"
                 return
 
             # 字节级对比行（按字段分组）
             byte_rows = []
-            for field_group in result.get('byte_diff', []):
-                field_name = field_group.get('field_name', '')
-                status = field_group.get('status', 'same')
+            for field_group in result.get("byte_diff", []):
+                field_name = field_group.get("field_name", "")
+                status = field_group.get("status", "same")
                 # 过滤：仅显示差异模式
-                if self.diff_only_diff and status == 'same':
+                if self.diff_only_diff and status == "same":
                     continue
                 # 字段标题行
-                byte_rows.append({
-                    "is_field_header": True,
-                    "field_name": field_name,
-                    "status": status,
-                    "offset": "",
-                    "left": "",
-                    "right": "",
-                })
+                byte_rows.append(
+                    {
+                        "is_field_header": True,
+                        "field_name": field_name,
+                        "status": status,
+                        "offset": "",
+                        "left": "",
+                        "right": "",
+                    }
+                )
                 # 逐字节行（每行 8 字节）
-                details = field_group.get('byte_details', [])
+                details = field_group.get("byte_details", [])
                 for i in range(0, len(details), 8):
-                    chunk = details[i:i+8]
-                    offset = chunk[0].get('offset', 0) if chunk else 0
+                    chunk = details[i : i + 8]
+                    offset = chunk[0].get("offset", 0) if chunk else 0
                     left_hex = " ".join(
-                        f"{d['byte_a']:02X}" if d.get('byte_a') is not None else "  "
+                        f"{d['byte_a']:02X}" if d.get("byte_a") is not None else "  "
                         for d in chunk
                     )
                     right_hex = " ".join(
-                        f"{d['byte_b']:02X}" if d.get('byte_b') is not None else "  "
+                        f"{d['byte_b']:02X}" if d.get("byte_b") is not None else "  "
                         for d in chunk
                     )
                     row_status = "same"
-                    if any(d.get('status') == 'modified' for d in chunk):
+                    if any(d.get("status") == "modified" for d in chunk):
                         row_status = "modified"
-                    elif any(d.get('status') == 'added' for d in chunk):
+                    elif any(d.get("status") == "added" for d in chunk):
                         row_status = "added"
-                    elif any(d.get('status') == 'removed' for d in chunk):
+                    elif any(d.get("status") == "removed" for d in chunk):
                         row_status = "removed"
-                    byte_rows.append({
-                        "is_field_header": False,
-                        "field_name": "",
-                        "status": row_status,
-                        "offset": f"0x{offset:04X}",
-                        "left": left_hex,
-                        "right": right_hex,
-                    })
+                    byte_rows.append(
+                        {
+                            "is_field_header": False,
+                            "field_name": "",
+                            "status": row_status,
+                            "offset": f"0x{offset:04X}",
+                            "left": left_hex,
+                            "right": right_hex,
+                        }
+                    )
             self.diff_byte_rows = byte_rows
 
             # 字段级对比行
             field_rows = []
-            for f in result.get('field_diff', []):
-                diff_type = f.get('diff_type', '相同')
+            for f in result.get("field_diff", []):
+                diff_type = f.get("diff_type", "相同")
                 # 仅显示差异模式
-                if self.diff_only_diff and diff_type == '相同':
+                if self.diff_only_diff and diff_type == "相同":
                     continue
-                field_rows.append({
-                    "field_name": f.get('field_name', ''),
-                    "offset_a": str(f.get('offset_a', -1)),
-                    "offset_b": str(f.get('offset_b', -1)),
-                    "offset_display": f"{f.get('offset_a', -1)}/{f.get('offset_b', -1)}",
-                    "length_a": str(f.get('length_a', 0)),
-                    "length_b": str(f.get('length_b', 0)),
-                    "length_display": f"{f.get('length_a', 0)}/{f.get('length_b', 0)}",
-                    "value_a": str(f.get('value_a', '')),
-                    "value_b": str(f.get('value_b', '')),
-                    "diff_type": diff_type,
-                })
+                field_rows.append(
+                    {
+                        "field_name": f.get("field_name", ""),
+                        "offset_a": str(f.get("offset_a", -1)),
+                        "offset_b": str(f.get("offset_b", -1)),
+                        "offset_display": f"{f.get('offset_a', -1)}/{f.get('offset_b', -1)}",
+                        "length_a": str(f.get("length_a", 0)),
+                        "length_b": str(f.get("length_b", 0)),
+                        "length_display": f"{f.get('length_a', 0)}/{f.get('length_b', 0)}",
+                        "value_a": str(f.get("value_a", "")),
+                        "value_b": str(f.get("value_b", "")),
+                        "diff_type": diff_type,
+                    }
+                )
             self.diff_field_rows = field_rows
 
             # 差异说明
-            self.diff_explanations = result.get('explanation', [])
+            self.diff_explanations = result.get("explanation", [])
 
             # 统计信息
-            stats = result.get('stats', {})
+            stats = result.get("stats", {})
             self.diff_stats = stats
 
-            field_modified = stats.get('field_modified', 0)
-            field_added = stats.get('field_added', 0)
-            field_removed = stats.get('field_removed', 0)
+            field_modified = stats.get("field_modified", 0)
+            field_added = stats.get("field_added", 0)
+            field_removed = stats.get("field_removed", 0)
             total = field_modified + field_added + field_removed
             if total == 0:
                 self.message = "对比完成，两报文完全一致"
@@ -2605,6 +2873,7 @@ class State(rx.State):
             self.message = f"对比失败: {str(e)}"
             self.message_type = "error"
             import traceback
+
             traceback.print_exc()
         finally:
             self.is_loading = False
@@ -2629,7 +2898,7 @@ class State(rx.State):
         self.lookup_results = []
 
         try:
-            from .lookup_utils import get_query_config, get_lookup_data, _is_eb_query
+            from .lookup_utils import _is_eb_query, get_lookup_data, get_query_config
 
             if _is_eb_query(self.current_protocol, self.lookup_query):
                 # EB 数据标识查询（协议7）：动态切换标题与列
@@ -2650,6 +2919,7 @@ class State(rx.State):
             self.message = f"查询失败: {str(e)}"
             self.message_type = "error"
             import traceback
+
             traceback.print_exc()
         finally:
             self.is_loading = False
@@ -2657,14 +2927,15 @@ class State(rx.State):
     def load_lookup_default(self):
         """加载默认查询数据（切换到查询页时自动加载）"""
         try:
-            from .lookup_utils import get_query_config, get_lookup_data, _is_eb_query
+            from .lookup_utils import get_lookup_data, get_query_config
+
             config = get_query_config(self.current_protocol)
             self.lookup_title = config["title"]
             self.lookup_columns = config["columns"]
             # 只加载前 100 条避免页面太大
             results = get_lookup_data(self.current_protocol, "")
             self.lookup_results = results[:100]
-        except Exception as e:
+        except Exception:
             self.lookup_results = []
             self.lookup_title = "查询"
             self.lookup_columns = []
@@ -2683,6 +2954,9 @@ class State(rx.State):
             self.load_eb_di_options()
         if tab == "download":
             self.load_download_info()
+        # 注：feedback tab 的列表加载由 Tab 按钮 on_click 事件链同时触发
+        # FeedbackState.fa_load —— Reflex 中主 State 的事件不能携带其他
+        # State 的 delta，直接在这里调 FeedbackState.fa_load() 前端收不到。
         if tab == "release":
             self.load_release_info()
 
@@ -2691,6 +2965,7 @@ class State(rx.State):
         """扫描 downloads/ 目录，获取 exe 与截图信息"""
         try:
             from pathlib import Path
+
             # 部署目录: reflex_web/downloads/（开发时相对 reflex_web 包）
             here = Path(__file__).resolve()
             downloads_dir = here.parent.parent / "downloads"  # reflex_web/downloads/
@@ -2708,6 +2983,7 @@ class State(rx.State):
                 if vj.exists():
                     try:
                         import json as _json
+
                         vj_data = _json.loads(vj.read_text(encoding="utf-8"))
                     except Exception:
                         pass
@@ -2741,6 +3017,7 @@ class State(rx.State):
                     self.download_image_available = True
                     try:
                         import base64
+
                         img_data = ss_file.read_bytes()
                         self.download_image_data_url = f"data:image/png;base64,{base64.b64encode(img_data).decode('ascii')}"
                     except Exception:
@@ -2750,7 +3027,9 @@ class State(rx.State):
                     readme_file = downloads_dir / readme_name
                     if readme_file.exists():
                         try:
-                            self.download_readme_text = readme_file.read_text(encoding="utf-8")
+                            self.download_readme_text = readme_file.read_text(
+                                encoding="utf-8"
+                            )
                             self.download_readme_available = True
                         except Exception:
                             pass
@@ -2764,6 +3043,7 @@ class State(rx.State):
                         # 用 exe 的修改时间作发布日期
                         if primary_exe is not None:
                             import time as _time
+
                             self.download_version_date = _time.strftime(
                                 "%Y-%m-%d", _time.localtime(primary_exe.stat().st_mtime)
                             )
@@ -2773,6 +3053,7 @@ class State(rx.State):
                 archive_dir = downloads_dir / "archive"
                 if archive_dir.exists():
                     import time as _time
+
                     hist = []
                     for f in sorted(archive_dir.glob("*.exe")):
                         if f.is_file():
@@ -2780,13 +3061,20 @@ class State(rx.State):
                                 "%Y-%m-%d", _time.localtime(f.stat().st_mtime)
                             )
                             size_mb = round(f.stat().st_size / 1024 / 1024, 2)
-                            hist.append({
-                                "version": f.stem,
-                                "date": mtime,
-                                "size_mb": str(size_mb),
-                            })
+                            hist.append(
+                                {
+                                    "version": f.stem,
+                                    "date": mtime,
+                                    "size_mb": str(size_mb),
+                                }
+                            )
                     # 新版本在上
-                    hist.sort(key=lambda x: [int(p) for p in x["version"].split(".") if p.isdigit()], reverse=True)
+                    hist.sort(
+                        key=lambda x: [
+                            int(p) for p in x["version"].split(".") if p.isdigit()
+                        ],
+                        reverse=True,
+                    )
                     self.download_history = hist
                 self.download_msg = ""
             else:
@@ -2805,6 +3093,7 @@ class State(rx.State):
             self.download_msg = "客户端 exe 未就绪"
             return
         import urllib.parse
+
         # 如果 version.json 里配置了下载地址，直接跳转
         if self.download_version_url:
             url = self.download_version_url
@@ -2824,6 +3113,7 @@ class State(rx.State):
             return self._release_mgr
         try:
             from .admin_release import ReleaseManager
+
             here = Path(__file__).resolve()
             downloads_dir = here.parent.parent / "downloads"
             if not downloads_dir.exists():
@@ -2840,6 +3130,7 @@ class State(rx.State):
             return self._admin_cfg
         try:
             from .admin_release import AdminConfig
+
             here = Path(__file__).resolve()
             config_dir = here.parent.parent
             if not (config_dir / "downloads").exists():
@@ -2868,7 +3159,7 @@ class State(rx.State):
     def set_release_notes(self, value: str):
         self.release_notes = value
 
-    async def handle_screenshot_upload(self, files: List[rx.UploadFile]):
+    async def handle_screenshot_upload(self, files: list[rx.UploadFile]):
         """处理上传的软件界面截图"""
         if not self.admin_logged_in:
             return
@@ -2888,11 +3179,13 @@ class State(rx.State):
                 return
             self._release_screenshot_data = data
             self.release_screenshot_uploaded = True
-            self.release_status = f"截图已上传（{len(data) // 1024} KB），发布时一起更新"
+            self.release_status = (
+                f"截图已上传（{len(data) // 1024} KB），发布时一起更新"
+            )
         except Exception as e:
             self.release_status = f"截图上传失败: {e}"
 
-    async def handle_readme_upload(self, files: List[rx.UploadFile]):
+    async def handle_readme_upload(self, files: list[rx.UploadFile]):
         """处理上传的 README 文本文件"""
         if not self.admin_logged_in:
             return
@@ -2916,7 +3209,9 @@ class State(rx.State):
                 text = data.decode("gbk", errors="replace")
             self.release_readme_text = text
             self.release_readme_name = name
-            self.release_status = f"README 已加载（{name}，{len(text)} 字符），发布时一起更新"
+            self.release_status = (
+                f"README 已加载（{name}，{len(text)} 字符），发布时一起更新"
+            )
             self.release_status_type = "success"
         except Exception as e:
             self.release_status = f"README 上传失败: {e}"
@@ -3005,9 +3300,11 @@ class State(rx.State):
                 self.release_url = cur.url.replace("/downloads/", "/download/")
             # 如果还是空的，自动生成一个下载地址
             if not self.release_url:
-                import reflex as rx
                 import socket
                 from urllib.parse import quote
+
+                import reflex as rx
+
                 try:
                     config = rx.config.get_config()
                     backend_port = getattr(config, "backend_port", 8000)
@@ -3020,7 +3317,9 @@ class State(rx.State):
                     except Exception:
                         host_ip = "127.0.0.1"
                     exe_name = self.release_upload_name or "南网协议解析工具.exe"
-                    self.release_url = f"http://{host_ip}:{backend_port}/download/{quote(exe_name)}"
+                    self.release_url = (
+                        f"http://{host_ip}:{backend_port}/download/{quote(exe_name)}"
+                    )
                 except Exception:
                     pass
             # 读取 README 内容（供编辑）
@@ -3047,6 +3346,7 @@ class State(rx.State):
         if not host:
             return
         from urllib.parse import quote
+
         import reflex as rx
 
         exe_name = self.release_upload_name or "南网协议解析工具.exe"
@@ -3060,20 +3360,21 @@ class State(rx.State):
             # 如果 host 里的端口是前端端口，替换成后端端口
             if frontend_port and backend_port and frontend_port != backend_port:
                 import re
-                host_with_backend = re.sub(
-                    r":\d+$", f":{backend_port}", host
-                )
+
+                host_with_backend = re.sub(r":\d+$", f":{backend_port}", host)
                 if host_with_backend == host:
                     # host 里没有端口号，补上后端端口
                     host_with_backend = f"{host}:{backend_port}"
-                self.release_url = f"http://{host_with_backend}/download/{quote(exe_name)}"
+                self.release_url = (
+                    f"http://{host_with_backend}/download/{quote(exe_name)}"
+                )
                 return
         except Exception:
             pass
 
         self.release_url = f"http://{host}/download/{quote(exe_name)}"
 
-    async def handle_release_upload(self, files: List[rx.UploadFile]):
+    async def handle_release_upload(self, files: list[rx.UploadFile]):
         """处理上传的 exe 文件（内容存后端）"""
         if not self.admin_logged_in:
             return
@@ -3082,7 +3383,9 @@ class State(rx.State):
         try:
             f = files[0]
             data = await f.read()
-            name = getattr(f, "filename", None) or getattr(f, "name", None) or "未知文件"
+            name = (
+                getattr(f, "filename", None) or getattr(f, "name", None) or "未知文件"
+            )
 
             # 校验 PE 头
             if len(data) < 2 or data[:2] != b"MZ":
@@ -3109,12 +3412,13 @@ class State(rx.State):
         - 如果 URL 是其他格式，保持不变
         """
         from urllib.parse import quote
-        import re
 
         if not self.release_url:
             # URL 为空，自动生成
-            import reflex as rx
             import socket
+
+            import reflex as rx
+
             try:
                 config = rx.config.get_config()
                 backend_port = getattr(config, "backend_port", 8000)
@@ -3125,7 +3429,9 @@ class State(rx.State):
                     s.close()
                 except Exception:
                     host_ip = "127.0.0.1"
-                self.release_url = f"http://{host_ip}:{backend_port}/download/{quote(name)}"
+                self.release_url = (
+                    f"http://{host_ip}:{backend_port}/download/{quote(name)}"
+                )
             except Exception:
                 self.release_url = f"/download/{quote(name)}"
             return
@@ -3175,6 +3481,7 @@ class State(rx.State):
         self.release_show_success_dialog = False
 
         try:
+
             def progress_cb(p):
                 self.release_progress = int(p)
 
@@ -3208,9 +3515,7 @@ class State(rx.State):
             if self.release_readme_text.strip():
                 try:
                     readme_path = mgr.downloads_dir / "client_readme.md"
-                    readme_path.write_text(
-                        self.release_readme_text, encoding="utf-8"
-                    )
+                    readme_path.write_text(self.release_readme_text, encoding="utf-8")
                     status_parts.append("README 已更新")
                 except Exception as re:
                     status_parts.append(f"README 保存失败: {re}")
@@ -3228,10 +3533,18 @@ class State(rx.State):
 
             # 填充成功信息（弹窗用）
             self.release_success_info = {
-                "version": self.release_current.get("version", "") if isinstance(self.release_current, dict) else "",
-                "size_mb": self.release_current.get("size_mb", "") if isinstance(self.release_current, dict) else "",
-                "exe_name": self.release_current.get("exe_name", "") if isinstance(self.release_current, dict) else "",
-                "sha256": self.release_current.get("sha256", "") if isinstance(self.release_current, dict) else "",
+                "version": self.release_current.get("version", "")
+                if isinstance(self.release_current, dict)
+                else "",
+                "size_mb": self.release_current.get("size_mb", "")
+                if isinstance(self.release_current, dict)
+                else "",
+                "exe_name": self.release_current.get("exe_name", "")
+                if isinstance(self.release_current, dict)
+                else "",
+                "sha256": self.release_current.get("sha256", "")
+                if isinstance(self.release_current, dict)
+                else "",
             }
 
             # 最终状态
@@ -3265,8 +3578,12 @@ class State(rx.State):
         if mgr is None:
             return
         # 确认提示由前端处理，这里直接执行
-        url = self.release_url or (self.release_current.get("url", "") if self.release_current else "")
-        exe_name = self.release_current.get("exe_name", "") if self.release_current else ""
+        url = self.release_url or (
+            self.release_current.get("url", "") if self.release_current else ""
+        )
+        exe_name = (
+            self.release_current.get("exe_name", "") if self.release_current else ""
+        )
         ok, msg = mgr.rollback(version, download_url=url, exe_name=exe_name)
         self.release_status = msg
         self.release_status_type = "success" if ok else "error"
@@ -3340,8 +3657,15 @@ class State(rx.State):
 # 组件定义
 # ═══════════════════════════════════════════════════════════════
 
-def header() -> rx.Component:
-    """顶部导航栏"""
+
+def header(show_parse_controls: bool = True) -> rx.Component:
+    """顶部导航栏
+
+    Args:
+        show_parse_controls: 主页 True（显示协议选择器 + 登录弹窗入口）；
+            独立页面（/feedback 等）传 False，协议选择器换成「返回主页」链接，
+            管理员按钮直接跳转主页（弹窗组件只挂在主页）。
+    """
     return rx.box(
         rx.box(
             rx.hstack(
@@ -3361,35 +3685,65 @@ def header() -> rx.Component:
                         },
                     ),
                     rx.vstack(
-                        rx.heading("多协议解析平台", size="3", color="white", font_weight="bold"),
-                        rx.text("电力通信协议解析 · 支持 12 种协议", size="1", color="rgba(255,255,255,0.72)"),
+                        rx.heading(
+                            "多协议解析平台",
+                            size="3",
+                            color="white",
+                            font_weight="bold",
+                        ),
+                        rx.text(
+                            "电力通信协议解析 · 支持 12 种协议",
+                            size="1",
+                            color="rgba(255,255,255,0.72)",
+                        ),
                         spacing="0",
                     ),
                     spacing="3",
                 ),
                 rx.spacer(),
-                # 协议选择器（索引号对齐 PySide6 版）
-                rx.el.select(
-                    rx.el.option("[0] 南网协议 (Q/CSG1209021-2019)", value="0"),
-                    rx.el.option("[1] PLC RF协议 (万胜海外 V1_04)", value="1"),
-                    rx.el.option("[2] HDLC/国网DLMS (IEC 62056-46)", value="2"),
-                    rx.el.option("[3] DLMS-APDU(国网)", value="3"),
-                    rx.el.option("[4] DLMS Wrapper裸报文", value="4"),
-                    rx.el.option("[5] DLMS-APDU裸报文", value="5"),
-                    rx.el.option("[6] DLT645-2007 电表协议", value="6"),
-                    rx.el.option("[7] 国网协议 (Q/GDW 10376.2-2024)", value="7"),
-                    rx.el.option("[8] 698.45协议 (DL/T 698.45-2017)", value="8"),
-                    rx.el.option("[9] 新一代载波协议 (通感一体化)", value="9"),
-                    rx.el.option("[10] 国网新一代双模通信互联互通", value="10"),
-                    rx.el.option("[11] HDC 1.0 双模互联互通 (Q/GDW 12087.42-2020)", value="11"),
-                    default_value="0",
-                    on_change=State.set_protocol,
-                    width="320px",
-                    class_name="app-header-select",
+                # 主页：协议选择器；独立页面：返回主页链接
+                rx.cond(
+                    show_parse_controls,
+                    rx.el.select(
+                        rx.el.option("[0] 南网协议 (Q/CSG1209021-2019)", value="0"),
+                        rx.el.option("[1] PLC RF协议 (万胜海外 V1_04)", value="1"),
+                        rx.el.option("[2] HDLC/国网DLMS (IEC 62056-46)", value="2"),
+                        rx.el.option("[3] DLMS-APDU(国网)", value="3"),
+                        rx.el.option("[4] DLMS Wrapper裸报文", value="4"),
+                        rx.el.option("[5] DLMS-APDU裸报文", value="5"),
+                        rx.el.option("[6] DLT645-2007 电表协议", value="6"),
+                        rx.el.option("[7] 国网协议 (Q/GDW 10376.2-2024)", value="7"),
+                        rx.el.option("[8] 698.45协议 (DL/T 698.45-2017)", value="8"),
+                        rx.el.option("[9] 新一代载波协议 (通感一体化)", value="9"),
+                        rx.el.option("[10] 国网新一代双模通信互联互通", value="10"),
+                        rx.el.option(
+                            "[11] HDC 1.0 双模互联互通 (Q/GDW 12087.42-2020)",
+                            value="11",
+                        ),
+                        default_value="0",
+                        on_change=State.set_protocol,
+                        width="320px",
+                        class_name="app-header-select",
+                    ),
+                    rx.el.a(
+                        rx.hstack(
+                            rx.icon("home", size=14),
+                            "返回主页",
+                            spacing="1",
+                        ),
+                        href="/",
+                        class_name="app-header-btn",
+                        data_testid="nav-home",
+                        style={"text_decoration": "none", "color": "white"},
+                    ),
                 ),
                 # 问题反馈入口
                 rx.el.a(
-                    rx.hstack(rx.icon("message_square_heart", size=14), "问题反馈", spacing="1"),
+                    rx.hstack(
+                        rx.icon("message_square_heart", size=14),
+                        "问题反馈",
+                        spacing="1",
+                    ),
                     href="/feedback",
                     class_name="app-header-btn",
                     data_testid="nav-feedback",
@@ -3397,7 +3751,7 @@ def header() -> rx.Component:
                 ),
                 # 版本徽章
                 rx.badge("v1.13.0", color_scheme="blue", variant="soft", size="2"),
-                # 管理员登录/登出按钮
+                # 管理员登录/登出按钮（主页开弹窗；独立页面跳回主页弹窗位置）
                 rx.cond(
                     State.admin_logged_in,
                     rx.el.button(
@@ -3406,11 +3760,25 @@ def header() -> rx.Component:
                         class_name="app-header-btn",
                         data_testid="btn-logout",
                     ),
-                    rx.el.button(
-                        rx.hstack(rx.icon("shield", size=14), "管理员登录", spacing="1"),
-                        on_click=State.toggle_login_dialog,
-                        class_name="app-header-btn",
-                        data_testid="btn-login",
+                    rx.cond(
+                        show_parse_controls,
+                        rx.el.button(
+                            rx.hstack(
+                                rx.icon("shield", size=14), "管理员登录", spacing="1"
+                            ),
+                            on_click=State.toggle_login_dialog,
+                            class_name="app-header-btn",
+                            data_testid="btn-login",
+                        ),
+                        rx.el.a(
+                            rx.hstack(
+                                rx.icon("shield", size=14), "管理员登录", spacing="1"
+                            ),
+                            href="/",
+                            class_name="app-header-btn",
+                            data_testid="btn-login-home",
+                            style={"text_decoration": "none", "color": "white"},
+                        ),
                     ),
                 ),
                 # 状态指示
@@ -3443,7 +3811,9 @@ def header() -> rx.Component:
 def newgen_controls() -> rx.Component:
     """新一代载波/国网新一代/HDC 1.0 控制条（协议9/10/11显示）"""
     return rx.cond(
-        (State.current_protocol == 9) | (State.current_protocol == 10) | (State.current_protocol == 11),
+        (State.current_protocol == 9)
+        | (State.current_protocol == 10)
+        | (State.current_protocol == 11),
         rx.card(
             rx.hstack(
                 rx.icon("sliders_horizontal", size=18, color="#2563eb"),
@@ -3564,14 +3934,22 @@ def message_banner() -> rx.Component:
         rx.callout(
             State.message,
             icon=rx.cond(
-                State.message_type == "success", "check_circle",
-                rx.cond(State.message_type == "error", "x_circle",
-                rx.cond(State.message_type == "warning", "alert_triangle", "info"))
+                State.message_type == "success",
+                "check_circle",
+                rx.cond(
+                    State.message_type == "error",
+                    "x_circle",
+                    rx.cond(State.message_type == "warning", "alert_triangle", "info"),
+                ),
             ),
             color_scheme=rx.cond(
-                State.message_type == "success", "green",
-                rx.cond(State.message_type == "error", "red",
-                rx.cond(State.message_type == "warning", "amber", "blue"))
+                State.message_type == "success",
+                "green",
+                rx.cond(
+                    State.message_type == "error",
+                    "red",
+                    rx.cond(State.message_type == "warning", "amber", "blue"),
+                ),
             ),
             size="1",
             width="100%",
@@ -3583,6 +3961,7 @@ def message_banner() -> rx.Component:
 # ═══════════════════════════════════════════════════════════════
 # 单帧解析 Tab
 # ═══════════════════════════════════════════════════════════════
+
 
 def single_parse_tab() -> rx.Component:
     """单帧解析"""
@@ -3606,7 +3985,11 @@ def single_parse_tab() -> rx.Component:
                 ),
                 rx.hstack(
                     rx.button(
-                        rx.cond(State.is_loading, rx.spinner(size="1"), rx.icon("play", size=16)),
+                        rx.cond(
+                            State.is_loading,
+                            rx.spinner(size="1"),
+                            rx.icon("play", size=16),
+                        ),
                         "解析报文",
                         on_click=State.parse_frame,
                         loading=State.is_loading,
@@ -3645,7 +4028,11 @@ def single_parse_tab() -> rx.Component:
                         rx.icon("table", size=20, color="#2563eb"),
                         rx.heading("解析结果", size="3", font_weight="semibold"),
                         rx.spacer(),
-                        rx.badge(f"{State.parse_result.length()} 条", color_scheme="blue", variant="soft"),
+                        rx.badge(
+                            f"{State.parse_result.length()} 条",
+                            color_scheme="blue",
+                            variant="soft",
+                        ),
                         spacing="2",
                     ),
                     rx.cond(
@@ -3663,11 +4050,19 @@ def single_parse_tab() -> rx.Component:
                                 rx.foreach(
                                     State.parse_result,
                                     lambda row: rx.table.row(
-                                        rx.table.cell(row["field"], font_weight="medium"),
-                                        rx.table.cell(rx.code(row["raw"], variant="soft")),
+                                        rx.table.cell(
+                                            row["field"], font_weight="medium"
+                                        ),
+                                        rx.table.cell(
+                                            rx.code(row["raw"], variant="soft")
+                                        ),
                                         rx.table.cell(row["parsed"]),
-                                        rx.table.cell(rx.text(row["comment"], size="1", color="gray")),
-                                    )
+                                        rx.table.cell(
+                                            rx.text(
+                                                row["comment"], size="1", color="gray"
+                                            )
+                                        ),
+                                    ),
                                 )
                             ),
                             variant="surface",
@@ -3699,11 +4094,20 @@ def single_parse_tab() -> rx.Component:
                     ),
                     rx.cond(
                         State.verify_result != "",
-                        rx.text(State.verify_result, font_family="monospace", font_size="12px", white_space="pre-wrap"),
+                        rx.text(
+                            State.verify_result,
+                            font_family="monospace",
+                            font_size="12px",
+                            white_space="pre-wrap",
+                        ),
                         rx.center(
                             rx.vstack(
                                 rx.icon("shield", size=48, color="#9ca3af"),
-                                rx.text("点击「校验报文」进行协议一致性校验", color="#6b7280", size="2"),
+                                rx.text(
+                                    "点击「校验报文」进行协议一致性校验",
+                                    color="#6b7280",
+                                    size="2",
+                                ),
                                 spacing="2",
                                 padding="8",
                             ),
@@ -3727,6 +4131,7 @@ def single_parse_tab() -> rx.Component:
 # 批量解析 Tab
 # ═══════════════════════════════════════════════════════════════
 
+
 def batch_parse_tab() -> rx.Component:
     """批量解析"""
     return rx.vstack(
@@ -3745,11 +4150,19 @@ def batch_parse_tab() -> rx.Component:
                     rx.vstack(
                         rx.hstack(
                             rx.icon("upload", size=20, color="#2563eb"),
-                            rx.text("将日志文件拖拽到此处，或点击选择文件", size="2", font_weight="medium"),
+                            rx.text(
+                                "将日志文件拖拽到此处，或点击选择文件",
+                                size="2",
+                                font_weight="medium",
+                            ),
                             spacing="2",
                             align="center",
                         ),
-                        rx.text("支持 .log / .txt / 纯文本文件；大文件会自动分块解析", size="1", color="gray"),
+                        rx.text(
+                            "支持 .log / .txt / 纯文本文件；大文件会自动分块解析",
+                            size="1",
+                            color="gray",
+                        ),
                         spacing="1",
                         align="center",
                         justify="center",
@@ -3769,9 +4182,14 @@ def batch_parse_tab() -> rx.Component:
                             rx.vstack(
                                 rx.text(
                                     f"{State.batch_upload_name}（{round(State.batch_upload_size / (1024 * 1024), 2)} MB，{State.batch_file_lines} 行）",
-                                    size="1", font_weight="medium",
+                                    size="1",
+                                    font_weight="medium",
                                 ),
-                                rx.text("文件内容已保存在服务器端（不加载到页面），点击「批量解析」即可处理", size="1", color="gray"),
+                                rx.text(
+                                    "文件内容已保存在服务器端（不加载到页面），点击「批量解析」即可处理",
+                                    size="1",
+                                    color="gray",
+                                ),
                                 spacing="0",
                             ),
                             rx.spacer(),
@@ -3806,19 +4224,32 @@ def batch_parse_tab() -> rx.Component:
                     rx.vstack(
                         rx.hstack(
                             rx.icon("wand", size=16, color="#7c3aed"),
-                            rx.text("预处理（命令链）", size="2", font_weight="semibold"),
+                            rx.text(
+                                "预处理（命令链）", size="2", font_weight="semibold"
+                            ),
                             rx.spacer(),
-                            rx.text("支持: find / excluding / replace / head / tail / skip / hex_extract / tcp_extract / merge_payloads / dedup",
-                                    size="1", color="gray"),
+                            rx.text(
+                                "支持: find / excluding / replace / head / tail / skip / hex_extract / tcp_extract / merge_payloads / dedup",
+                                size="1",
+                                color="gray",
+                            ),
                             spacing="2",
                             align="center",
                         ),
                         rx.hstack(
                             rx.el.select(
                                 rx.el.option("-- 选择预设 --", value="__custom__"),
-                                rx.el.option("提取 tcp data 帧", value="find tcp data: tcp_extract"),
-                                rx.el.option("提取监控日志帧", value="find > 接收机 Has Get hex_extract"),
-                                rx.el.option("合并跨行 payload", value="merge_payloads"),
+                                rx.el.option(
+                                    "提取 tcp data 帧",
+                                    value="find tcp data: tcp_extract",
+                                ),
+                                rx.el.option(
+                                    "提取监控日志帧",
+                                    value="find > 接收机 Has Get hex_extract",
+                                ),
+                                rx.el.option(
+                                    "合并跨行 payload", value="merge_payloads"
+                                ),
                                 rx.el.option("提取最长 hex 序列", value="hex_extract"),
                                 rx.el.option("去重复行", value="dedup"),
                                 rx.el.option("过滤含 60F0 的行", value="find 60F0"),
@@ -3856,7 +4287,9 @@ def batch_parse_tab() -> rx.Component:
                         ),
                         rx.cond(
                             State.batch_pp_last_result != "",
-                            rx.text(State.batch_pp_last_result, size="1", color="violet"),
+                            rx.text(
+                                State.batch_pp_last_result, size="1", color="violet"
+                            ),
                         ),
                         spacing="2",
                         width="100%",
@@ -3867,7 +4300,11 @@ def batch_parse_tab() -> rx.Component:
                 ),
                 rx.hstack(
                     rx.button(
-                        rx.cond(State.is_loading, rx.spinner(size="1"), rx.icon("play", size=16)),
+                        rx.cond(
+                            State.is_loading,
+                            rx.spinner(size="1"),
+                            rx.icon("play", size=16),
+                        ),
                         "批量解析",
                         on_click=State.parse_batch,
                         loading=State.is_loading,
@@ -3899,12 +4336,15 @@ def batch_parse_tab() -> rx.Component:
                         size="2",
                     ),
                     rx.spacer(),
-                    rx.text(f"共 {State.batch_results.length()} 帧", size="1", color="gray"),
+                    rx.text(
+                        f"共 {State.batch_results.length()} 帧", size="1", color="gray"
+                    ),
                     spacing="3",
                 ),
                 # ── 解析进度条 ──
                 rx.cond(
-                    (State.batch_total > 0) & (State.batch_progress < State.batch_total),
+                    (State.batch_total > 0)
+                    & (State.batch_progress < State.batch_total),
                     rx.hstack(
                         rx.progress(
                             value=State.batch_progress,
@@ -3915,7 +4355,9 @@ def batch_parse_tab() -> rx.Component:
                         ),
                         rx.text(
                             f"{State.batch_progress} / {State.batch_total}",
-                            size="1", color="gray", white_space="nowrap",
+                            size="1",
+                            color="gray",
+                            white_space="nowrap",
                         ),
                         spacing="2",
                         width="100%",
@@ -3943,35 +4385,65 @@ def batch_parse_tab() -> rx.Component:
                             rx.scroll_area(
                                 rx.vstack(
                                     rx.foreach(
-                                        State.batch_results[: State.batch_display_limit],
+                                        State.batch_results[
+                                            : State.batch_display_limit
+                                        ],
                                         lambda item, idx: rx.card(
                                             rx.hstack(
                                                 rx.badge(
                                                     item["status"],
-                                                    color_scheme=rx.cond(item["status"] == "成功", "green",
-                                                        rx.cond(item["status"] == "失败", "red", "amber")),
+                                                    color_scheme=rx.cond(
+                                                        item["status"] == "成功",
+                                                        "green",
+                                                        rx.cond(
+                                                            item["status"] == "失败",
+                                                            "red",
+                                                            "amber",
+                                                        ),
+                                                    ),
                                                     variant="soft",
                                                     size="1",
                                                 ),
-                                                rx.text("#" + (idx + 1).to_string(), size="1", font_weight="bold"),
-                                                rx.text(item["len"].to_string() + "B", size="1", color="gray"),
-                                                rx.text(item["proto"], size="1", font_weight="medium"),
+                                                rx.text(
+                                                    "#" + (idx + 1).to_string(),
+                                                    size="1",
+                                                    font_weight="bold",
+                                                ),
+                                                rx.text(
+                                                    item["len"].to_string() + "B",
+                                                    size="1",
+                                                    color="gray",
+                                                ),
+                                                rx.text(
+                                                    item["proto"],
+                                                    size="1",
+                                                    font_weight="medium",
+                                                ),
                                                 rx.spacer(),
                                                 spacing="2",
                                                 align="center",
                                             ),
-                                            rx.text(item["summary"], size="1", color="gray", no_of_lines=2),
+                                            rx.text(
+                                                item["summary"],
+                                                size="1",
+                                                color="gray",
+                                                no_of_lines=2,
+                                            ),
                                             padding="2",
                                             width="100%",
                                             cursor="pointer",
-                                            _hover={"background": "rgba(37, 99, 235, 0.05)"},
+                                            _hover={
+                                                "background": "rgba(37, 99, 235, 0.05)"
+                                            },
                                             style=rx.cond(
                                                 State.batch_selected_idx == item["id"],
                                                 {"border": "2px solid #2563eb"},
                                                 {},
                                             ),
-                                            on_click=lambda: State.select_batch_by_index(idx),
-                                        )
+                                            on_click=lambda: State.select_batch_by_index(
+                                                idx
+                                            ),
+                                        ),
                                     ),
                                     spacing="1",
                                     width="100%",
@@ -3984,7 +4456,9 @@ def batch_parse_tab() -> rx.Component:
                                 State.batch_total_frames > State.batch_display_limit,
                                 rx.text(
                                     f"仅显示前 {State.batch_display_limit} 条，共 {State.batch_total_frames} 帧（导出包含全部）",
-                                    size="1", color="amber", font_weight="medium",
+                                    size="1",
+                                    color="amber",
+                                    font_weight="medium",
                                 ),
                             ),
                             spacing="1",
@@ -4017,8 +4491,15 @@ def batch_parse_tab() -> rx.Component:
                     rx.cond(
                         State.batch_detail_hex != "",
                         rx.box(
-                            rx.text("原始帧:", size="1", font_weight="medium", color="gray"),
-                            rx.code(State.batch_detail_hex, variant="soft", font_family="monospace", font_size="11px"),
+                            rx.text(
+                                "原始帧:", size="1", font_weight="medium", color="gray"
+                            ),
+                            rx.code(
+                                State.batch_detail_hex,
+                                variant="soft",
+                                font_family="monospace",
+                                font_size="11px",
+                            ),
                             padding="2",
                             background="rgba(37, 99, 235, 0.05)",
                             border_radius="6px",
@@ -4032,21 +4513,42 @@ def batch_parse_tab() -> rx.Component:
                             rx.table.root(
                                 rx.table.header(
                                     rx.table.row(
-                                        rx.table.column_header_cell("字段", width="30%"),
-                                        rx.table.column_header_cell("原始值", width="20%"),
-                                        rx.table.column_header_cell("解析值", width="20%"),
-                                        rx.table.column_header_cell("说明", width="30%"),
+                                        rx.table.column_header_cell(
+                                            "字段", width="30%"
+                                        ),
+                                        rx.table.column_header_cell(
+                                            "原始值", width="20%"
+                                        ),
+                                        rx.table.column_header_cell(
+                                            "解析值", width="20%"
+                                        ),
+                                        rx.table.column_header_cell(
+                                            "说明", width="30%"
+                                        ),
                                     )
                                 ),
                                 rx.table.body(
                                     rx.foreach(
                                         State.batch_detail_rows,
                                         lambda row: rx.table.row(
-                                            rx.table.cell(row["field"], font_weight="medium", size="1"),
-                                            rx.table.cell(rx.code(row["raw"], variant="soft"), size="1"),
+                                            rx.table.cell(
+                                                row["field"],
+                                                font_weight="medium",
+                                                size="1",
+                                            ),
+                                            rx.table.cell(
+                                                rx.code(row["raw"], variant="soft"),
+                                                size="1",
+                                            ),
                                             rx.table.cell(row["parsed"], size="1"),
-                                            rx.table.cell(rx.text(row["comment"], size="1", color="gray")),
-                                        )
+                                            rx.table.cell(
+                                                rx.text(
+                                                    row["comment"],
+                                                    size="1",
+                                                    color="gray",
+                                                )
+                                            ),
+                                        ),
                                     )
                                 ),
                                 variant="surface",
@@ -4058,7 +4560,11 @@ def batch_parse_tab() -> rx.Component:
                         rx.center(
                             rx.vstack(
                                 rx.icon("mouse_pointer", size=48, color="#9ca3af"),
-                                rx.text("点击左侧摘要行查看详细解析", color="#6b7280", size="2"),
+                                rx.text(
+                                    "点击左侧摘要行查看详细解析",
+                                    color="#6b7280",
+                                    size="2",
+                                ),
                                 spacing="2",
                                 padding="8",
                             ),
@@ -4083,11 +4589,16 @@ def batch_parse_tab() -> rx.Component:
 # 组帧 Tab
 # ═══════════════════════════════════════════════════════════════
 
+
 def _oi_options() -> list:
     """698.45 OI 预设选项（供 oi 字段下拉）"""
     try:
         from dl_t698_45_frame_schema import OI_PRESET_LIST
-        return [{"value": f"0x{v:04X}", "label": f"{name} (0x{v:04X})"} for v, name in OI_PRESET_LIST]
+
+        return [
+            {"value": f"0x{v:04X}", "label": f"{name} (0x{v:04X})"}
+            for v, name in OI_PRESET_LIST
+        ]
     except Exception:
         return []
 
@@ -4095,7 +4606,12 @@ def _oi_options() -> list:
 def _axdr_type_options() -> list:
     """A-XDR 类型下拉选项"""
     from frame_gen_utils import A_XDR_TYPE_LIST
-    return [{"value": name, "label": f"{desc} (0x{tag:02X})"} for name, tag, desc in A_XDR_TYPE_LIST]
+
+    return [
+        {"value": name, "label": f"{desc} (0x{tag:02X})"}
+        for name, tag, desc in A_XDR_TYPE_LIST
+    ]
+
 
 def _is_compound(t) -> bool:
     """A-XDR 复合类型判断（返回 Var 布尔，供 rx.cond）"""
@@ -4106,10 +4622,16 @@ def _is_var_len(t) -> bool:
     """A-XDR 变长类型判断（返回 Var 布尔，供 rx.cond）"""
     return rx.match(
         t,
-        ("array", True), ("structure", True), ("octet-string", True),
-        ("visible-string", True), ("UTF8-string", True), ("bit-string", True),
+        ("array", True),
+        ("structure", True),
+        ("octet-string", True),
+        ("visible-string", True),
+        ("UTF8-string", True),
+        ("bit-string", True),
         False,
     )
+
+
 def _searchable_select(
     label: str,
     search_query: Any,
@@ -4198,9 +4720,16 @@ def _searchable_select(
     )
 
 
-def _field_input(f: Any = None, name: str = "", ftype: str = "bytes", default: str = "",
-                 enum_map: Any = None, on_change=None, placeholder: str = "",
-                 monospace: bool = True) -> rx.Component:
+def _field_input(
+    f: Any = None,
+    name: str = "",
+    ftype: str = "bytes",
+    default: str = "",
+    enum_map: Any = None,
+    on_change=None,
+    placeholder: str = "",
+    monospace: bool = True,
+) -> rx.Component:
     """按字段类型渲染单个输入控件（用于顶层字段与列表项字段）。"""
     if ftype == "enum":
         opts = enum_map or []
@@ -4249,7 +4778,9 @@ def frame_gen_tab() -> rx.Component:
     # ── 模式选择（predefined / custom / axdr）──
     def mode_selector() -> rx.Component:
         return rx.cond(
-            (State.current_protocol == 0) | (State.current_protocol == 7) | (State.current_protocol == 8),
+            (State.current_protocol == 0)
+            | (State.current_protocol == 7)
+            | (State.current_protocol == 8),
             rx.card(
                 rx.vstack(
                     rx.hstack(
@@ -4262,22 +4793,54 @@ def frame_gen_tab() -> rx.Component:
                             State.current_protocol == 8,
                             # 698.45：predefined / axdr（custom 禁用，对齐 GUI :644）
                             rx.hstack(
-                                rx.button("预定字段", on_click=lambda: State.set_gen_mode("predefined"),
-                                          color_scheme=rx.cond(State.gen_mode == "predefined", "blue", "gray"),
-                                          variant=rx.cond(State.gen_mode == "predefined", "solid", "soft"), size="2"),
-                                rx.button("A-XDR", on_click=lambda: State.set_gen_mode("axdr"),
-                                          color_scheme=rx.cond(State.gen_mode == "axdr", "purple", "gray"),
-                                          variant=rx.cond(State.gen_mode == "axdr", "solid", "soft"), size="2"),
+                                rx.button(
+                                    "预定字段",
+                                    on_click=lambda: State.set_gen_mode("predefined"),
+                                    color_scheme=rx.cond(
+                                        State.gen_mode == "predefined", "blue", "gray"
+                                    ),
+                                    variant=rx.cond(
+                                        State.gen_mode == "predefined", "solid", "soft"
+                                    ),
+                                    size="2",
+                                ),
+                                rx.button(
+                                    "A-XDR",
+                                    on_click=lambda: State.set_gen_mode("axdr"),
+                                    color_scheme=rx.cond(
+                                        State.gen_mode == "axdr", "purple", "gray"
+                                    ),
+                                    variant=rx.cond(
+                                        State.gen_mode == "axdr", "solid", "soft"
+                                    ),
+                                    size="2",
+                                ),
                                 spacing="2",
                             ),
                             # 南网/国网：predefined / custom
                             rx.hstack(
-                                rx.button("预定字段", on_click=lambda: State.set_gen_mode("predefined"),
-                                          color_scheme=rx.cond(State.gen_mode == "predefined", "blue", "gray"),
-                                          variant=rx.cond(State.gen_mode == "predefined", "solid", "soft"), size="2"),
-                                rx.button("自定义模板", on_click=lambda: State.set_gen_mode("custom"),
-                                          color_scheme=rx.cond(State.gen_mode == "custom", "orange", "gray"),
-                                          variant=rx.cond(State.gen_mode == "custom", "solid", "soft"), size="2"),
+                                rx.button(
+                                    "预定字段",
+                                    on_click=lambda: State.set_gen_mode("predefined"),
+                                    color_scheme=rx.cond(
+                                        State.gen_mode == "predefined", "blue", "gray"
+                                    ),
+                                    variant=rx.cond(
+                                        State.gen_mode == "predefined", "solid", "soft"
+                                    ),
+                                    size="2",
+                                ),
+                                rx.button(
+                                    "自定义模板",
+                                    on_click=lambda: State.set_gen_mode("custom"),
+                                    color_scheme=rx.cond(
+                                        State.gen_mode == "custom", "orange", "gray"
+                                    ),
+                                    variant=rx.cond(
+                                        State.gen_mode == "custom", "solid", "soft"
+                                    ),
+                                    size="2",
+                                ),
                                 spacing="2",
                             ),
                         ),
@@ -4314,43 +4877,63 @@ def frame_gen_tab() -> rx.Component:
                         rx.foreach(
                             State.gen_preset_groups,
                             lambda g: rx.vstack(
-                                rx.text(g, size="2", font_weight="semibold", color="gray"),
+                                rx.text(
+                                    g, size="2", font_weight="semibold", color="gray"
+                                ),
                                 rx.flex(
                                     rx.foreach(
                                         State.gen_preset_buttons,
                                         lambda b: rx.cond(
-                                            (b["group"] == g) & (
-                                                b["name"].contains(State.gen_preset_search)
-                                                | b["group"].contains(State.gen_preset_search)
+                                            (b["group"] == g)
+                                            & (
+                                                b["name"].contains(
+                                                    State.gen_preset_search
+                                                )
+                                                | b["group"].contains(
+                                                    State.gen_preset_search
+                                                )
                                             ),
                                             rx.hstack(
                                                 rx.button(
                                                     b["name"],
-                                                    on_click=lambda: State.apply_preset(b["frame_hex"]),
-                                                    variant="outline", size="1",
+                                                    on_click=lambda: State.apply_preset(
+                                                        b["frame_hex"]
+                                                    ),
+                                                    variant="outline",
+                                                    size="1",
                                                 ),
                                                 rx.cond(
                                                     State.gen_preset_edit_id == b["id"],
                                                     rx.hstack(
                                                         rx.input(
                                                             value=State.gen_preset_edit_name,
-                                                            on_change=lambda v: State.set_gen_preset_edit_field("name", v),
-                                                            size="1", width="120px", placeholder="名称",
+                                                            on_change=lambda v: State.set_gen_preset_edit_field(
+                                                                "name", v
+                                                            ),
+                                                            size="1",
+                                                            width="120px",
+                                                            placeholder="名称",
                                                         ),
                                                         rx.input(
                                                             value=State.gen_preset_edit_group,
-                                                            on_change=lambda v: State.set_gen_preset_edit_field("group", v),
-                                                            size="1", width="110px", placeholder="分组",
+                                                            on_change=lambda v: State.set_gen_preset_edit_field(
+                                                                "group", v
+                                                            ),
+                                                            size="1",
+                                                            width="110px",
+                                                            placeholder="分组",
                                                         ),
                                                         rx.button(
                                                             "保存",
                                                             on_click=State.save_preset_edit,
-                                                            size="1", color_scheme="green",
+                                                            size="1",
+                                                            color_scheme="green",
                                                         ),
                                                         rx.button(
                                                             "取消",
                                                             on_click=State.cancel_edit_preset,
-                                                            size="1", variant="ghost",
+                                                            size="1",
+                                                            variant="ghost",
                                                         ),
                                                         spacing="1",
                                                         align="center",
@@ -4358,13 +4941,20 @@ def frame_gen_tab() -> rx.Component:
                                                     rx.hstack(
                                                         rx.button(
                                                             rx.icon("pencil", size=12),
-                                                            on_click=lambda: State.start_edit_preset(b["id"]),
-                                                            variant="ghost", size="1",
+                                                            on_click=lambda: State.start_edit_preset(
+                                                                b["id"]
+                                                            ),
+                                                            variant="ghost",
+                                                            size="1",
                                                         ),
                                                         rx.button(
                                                             rx.icon("trash", size=12),
-                                                            on_click=lambda: State.remove_preset(b["id"]),
-                                                            variant="ghost", size="1", color_scheme="red",
+                                                            on_click=lambda: State.remove_preset(
+                                                                b["id"]
+                                                            ),
+                                                            variant="ghost",
+                                                            size="1",
+                                                            color_scheme="red",
                                                         ),
                                                         spacing="1",
                                                         align="center",
@@ -4387,14 +4977,18 @@ def frame_gen_tab() -> rx.Component:
                         rx.text("添加到预设:", size="2", font_weight="medium"),
                         rx.input(
                             value=State.gen_preset_name,
-                            on_change=lambda v: State.set_gen_preset_save_field("name", v),
+                            on_change=lambda v: State.set_gen_preset_save_field(
+                                "name", v
+                            ),
                             placeholder="命令名称",
                             size="1",
                             width="150px",
                         ),
                         rx.input(
                             value=State.gen_preset_group,
-                            on_change=lambda v: State.set_gen_preset_save_field("group", v),
+                            on_change=lambda v: State.set_gen_preset_save_field(
+                                "group", v
+                            ),
                             placeholder="分组(默认常用查询)",
                             size="1",
                             width="170px",
@@ -4422,13 +5016,18 @@ def frame_gen_tab() -> rx.Component:
             rx.vstack(
                 rx.hstack(
                     rx.icon("layers", size=18, color="#2563eb"),
-                    rx.heading("EB 数据标识 帧生成器", size="2", font_weight="semibold"),
-                    rx.text("（附件1 本地通信模块扩展协议 V3.42）", size="1", color="gray"),
+                    rx.heading(
+                        "EB 数据标识 帧生成器", size="2", font_weight="semibold"
+                    ),
+                    rx.text(
+                        "（附件1 本地通信模块扩展协议 V3.42）", size="1", color="gray"
+                    ),
                     spacing="2",
                 ),
                 rx.text(
                     "用于填充 52H-F1 透明转发 / 56H-F2 事件上报的「报文内容」字段：选择 EB 数据标识后自动生成完整帧（645 或 698.45），一键填入。",
-                    size="1", color="gray",
+                    size="1",
+                    color="gray",
                 ),
                 rx.hstack(
                     rx.vstack(
@@ -4487,7 +5086,11 @@ def frame_gen_tab() -> rx.Component:
                                 width="100%",
                             ),
                             rx.vstack(
-                                rx.text("地址域 A0~A5 (hex):", size="1", font_weight="medium"),
+                                rx.text(
+                                    "地址域 A0~A5 (hex):",
+                                    size="1",
+                                    font_weight="medium",
+                                ),
                                 rx.input(
                                     value=State.gen_eb_addr,
                                     on_change=State.set_eb_addr,
@@ -4503,7 +5106,11 @@ def frame_gen_tab() -> rx.Component:
                             width="100%",
                         ),
                         rx.vstack(
-                            rx.text("数据内容 (hex，可留空):", size="1", font_weight="medium"),
+                            rx.text(
+                                "数据内容 (hex，可留空):",
+                                size="1",
+                                font_weight="medium",
+                            ),
                             rx.input(
                                 value=State.gen_eb_data,
                                 on_change=State.set_eb_data,
@@ -4526,7 +5133,9 @@ def frame_gen_tab() -> rx.Component:
                         # 数据内容来源切换
                         rx.hstack(
                             rx.vstack(
-                                rx.text("数据内容来源:", size="1", font_weight="medium"),
+                                rx.text(
+                                    "数据内容来源:", size="1", font_weight="medium"
+                                ),
                                 rx.el.select(
                                     rx.el.option("按字段配置（推荐）", value="1"),
                                     rx.el.option("直接填 hex", value="0"),
@@ -4539,16 +5148,37 @@ def frame_gen_tab() -> rx.Component:
                                 width="100%",
                             ),
                             rx.vstack(
-                                rx.text("698 服务类型:", size="1", font_weight="medium"),
+                                rx.text(
+                                    "698 服务类型:", size="1", font_weight="medium"
+                                ),
                                 rx.el.select(
-                                    rx.el.option("GET-Request 读取", value="GET-Request"),
-                                    rx.el.option("GET-Response 读响应", value="GET-Response"),
-                                    rx.el.option("SET-Request 设置/配置", value="SET-Request"),
-                                    rx.el.option("SET-Response 写确认", value="SET-Response"),
-                                    rx.el.option("ACTION-Request 操作", value="ACTION-Request"),
-                                    rx.el.option("ACTION-Response 操作响应", value="ACTION-Response"),
-                                    rx.el.option("REPORT-Notification 主动上报", value="REPORT-Notification"),
-                                    rx.el.option("REPORT-Response 上报确认", value="REPORT-Response"),
+                                    rx.el.option(
+                                        "GET-Request 读取", value="GET-Request"
+                                    ),
+                                    rx.el.option(
+                                        "GET-Response 读响应", value="GET-Response"
+                                    ),
+                                    rx.el.option(
+                                        "SET-Request 设置/配置", value="SET-Request"
+                                    ),
+                                    rx.el.option(
+                                        "SET-Response 写确认", value="SET-Response"
+                                    ),
+                                    rx.el.option(
+                                        "ACTION-Request 操作", value="ACTION-Request"
+                                    ),
+                                    rx.el.option(
+                                        "ACTION-Response 操作响应",
+                                        value="ACTION-Response",
+                                    ),
+                                    rx.el.option(
+                                        "REPORT-Notification 主动上报",
+                                        value="REPORT-Notification",
+                                    ),
+                                    rx.el.option(
+                                        "REPORT-Response 上报确认",
+                                        value="REPORT-Response",
+                                    ),
                                     default_value="SET-Request",
                                     on_change=State.set_eb_698_service,
                                     class_name="w-full rounded border border-gray-300 px-3 py-1.5",
@@ -4563,24 +5193,42 @@ def frame_gen_tab() -> rx.Component:
                         ),
                         # ── 按字段配置数据内容 ──
                         rx.cond(
-                            State.eb_698_use_field & (State.eb_di_field_use) & (State.gen_eb_di != ""),
+                            State.eb_698_use_field
+                            & (State.eb_di_field_use)
+                            & (State.gen_eb_di != ""),
                             rx.vstack(
-                                rx.text("数据内容字段（按附件1 V3.42 定义）:", size="1", font_weight="medium"),
+                                rx.text(
+                                    "数据内容字段（按附件1 V3.42 定义）:",
+                                    size="1",
+                                    font_weight="medium",
+                                ),
                                 rx.foreach(
                                     State.eb_di_fields,
                                     lambda f, i: rx.vstack(
                                         rx.hstack(
-                                            rx.text(f["name"], size="1", font_weight="medium", width="200px"),
+                                            rx.text(
+                                                f["name"],
+                                                size="1",
+                                                font_weight="medium",
+                                                width="200px",
+                                            ),
                                             rx.cond(
                                                 f["has_enum"] == "1",
                                                 rx.el.select(
-                                                    rx.el.option("-- 选择 --", value=""),
+                                                    rx.el.option(
+                                                        "-- 选择 --", value=""
+                                                    ),
                                                     rx.foreach(
                                                         State.eb_di_field_enum[i],
-                                                        lambda o: rx.el.option(o["label"], value=o["value"]),
+                                                        lambda o: rx.el.option(
+                                                            o["label"], value=o["value"]
+                                                        ),
                                                     ),
-                                                    default_value=State.eb_di_field_vals[i],
-                                                    on_change=lambda val, idx=i: State.set_eb_field(idx, val),
+                                                    default_value=State.eb_di_field_vals[
+                                                        i
+                                                    ],
+                                                    on_change=lambda val,
+                                                    idx=i: State.set_eb_field(idx, val),
                                                     class_name="flex-1 rounded border border-gray-300 px-3 py-1.5",
                                                     size="1",
                                                 ),
@@ -4591,11 +5239,26 @@ def frame_gen_tab() -> rx.Component:
                                                             State.eb_di_field_list[i],
                                                             lambda row, r: rx.hstack(
                                                                 rx.foreach(
-                                                                    State.eb_di_field_list_meta[i],
-                                                                    lambda it, c: rx.input(
-                                                                        value=row[c].to(str),
-                                                                        on_change=lambda val, fi=i, rr=r, cc=c: State.set_eb_list_cell(fi, rr, cc, val),
-                                                                        placeholder=it["name"],
+                                                                    State.eb_di_field_list_meta[
+                                                                        i
+                                                                    ],
+                                                                    lambda it,
+                                                                    c: rx.input(
+                                                                        value=row[c].to(
+                                                                            str
+                                                                        ),
+                                                                        on_change=lambda val,
+                                                                        fi=i,
+                                                                        rr=r,
+                                                                        cc=c: State.set_eb_list_cell(
+                                                                            fi,
+                                                                            rr,
+                                                                            cc,
+                                                                            val,
+                                                                        ),
+                                                                        placeholder=it[
+                                                                            "name"
+                                                                        ],
                                                                         font_family="monospace",
                                                                         size="1",
                                                                         width="140px",
@@ -4606,15 +5269,22 @@ def frame_gen_tab() -> rx.Component:
                                                         ),
                                                         rx.button(
                                                             "添加一行",
-                                                            on_click=lambda fi=i: State.add_eb_list_row(fi),
+                                                            on_click=lambda fi=i: State.add_eb_list_row(
+                                                                fi
+                                                            ),
                                                             size="1",
                                                             variant="soft",
                                                         ),
                                                         spacing="1",
                                                     ),
                                                     rx.input(
-                                                        value=State.eb_di_field_vals[i].to(str),
-                                                        on_change=lambda val, idx=i: State.set_eb_field(idx, val),
+                                                        value=State.eb_di_field_vals[
+                                                            i
+                                                        ].to(str),
+                                                        on_change=lambda val,
+                                                        idx=i: State.set_eb_field(
+                                                            idx, val
+                                                        ),
                                                         placeholder=f["note"],
                                                         font_family="monospace",
                                                         size="1",
@@ -4637,7 +5307,11 @@ def frame_gen_tab() -> rx.Component:
                         rx.cond(
                             ~State.eb_698_use_field,
                             rx.vstack(
-                                rx.text("数据内容 (hex，A-XDR octet-string):", size="1", font_weight="medium"),
+                                rx.text(
+                                    "数据内容 (hex，A-XDR octet-string):",
+                                    size="1",
+                                    font_weight="medium",
+                                ),
                                 rx.input(
                                     value=State.gen_eb_698_data,
                                     on_change=State.set_eb_698_data,
@@ -4651,7 +5325,11 @@ def frame_gen_tab() -> rx.Component:
                             ),
                         ),
                         # ── 链路层头部配置 ──
-                        rx.text("698.45 链路层头部（完整帧 68 L C SA CA HCS APDU FCS 16）:", size="1", font_weight="medium"),
+                        rx.text(
+                            "698.45 链路层头部（完整帧 68 L C SA CA HCS APDU FCS 16）:",
+                            size="1",
+                            font_weight="medium",
+                        ),
                         rx.hstack(
                             rx.vstack(
                                 rx.text("SA 地址类型:", size="1", font_weight="medium"),
@@ -4681,7 +5359,9 @@ def frame_gen_tab() -> rx.Component:
                                 width="100%",
                             ),
                             rx.vstack(
-                                rx.text("SA 地址 (hex):", size="1", font_weight="medium"),
+                                rx.text(
+                                    "SA 地址 (hex):", size="1", font_weight="medium"
+                                ),
                                 rx.input(
                                     value=State.gen_eb_sa_raw,
                                     on_change=State.set_eb_sa_raw,
@@ -4693,7 +5373,9 @@ def frame_gen_tab() -> rx.Component:
                                 width="100%",
                             ),
                             rx.vstack(
-                                rx.text("CA 客户机地址:", size="1", font_weight="medium"),
+                                rx.text(
+                                    "CA 客户机地址:", size="1", font_weight="medium"
+                                ),
                                 rx.input(
                                     value=State.gen_eb_ca,
                                     on_change=State.set_eb_ca,
@@ -4753,7 +5435,11 @@ def frame_gen_tab() -> rx.Component:
                             width="100%",
                         ),
                         # ── 对象配置（OAD/OMD 属性/方法/索引 + PIID + 单多对象）──
-                        rx.text("698 对象配置（OAD=OI+属性编号+属性特征+元素索引，ACTION 用 OMD=OI+方法标识+操作模式）:", size="1", font_weight="medium"),
+                        rx.text(
+                            "698 对象配置（OAD=OI+属性编号+属性特征+元素索引，ACTION 用 OMD=OI+方法标识+操作模式）:",
+                            size="1",
+                            font_weight="medium",
+                        ),
                         rx.hstack(
                             rx.vstack(
                                 rx.text("对象个数:", size="1", font_weight="medium"),
@@ -4769,7 +5455,9 @@ def frame_gen_tab() -> rx.Component:
                                 width="100%",
                             ),
                             rx.vstack(
-                                rx.text("PIID 服务序号:", size="1", font_weight="medium"),
+                                rx.text(
+                                    "PIID 服务序号:", size="1", font_weight="medium"
+                                ),
                                 rx.input(
                                     value=State.gen_eb_piid,
                                     on_change=State.set_eb_piid,
@@ -4781,7 +5469,11 @@ def frame_gen_tab() -> rx.Component:
                                 width="100%",
                             ),
                             rx.vstack(
-                                rx.text("OI (hex, 空=EB标识):", size="1", font_weight="medium"),
+                                rx.text(
+                                    "OI (hex, 空=EB标识):",
+                                    size="1",
+                                    font_weight="medium",
+                                ),
                                 rx.input(
                                     value=State.gen_eb_oi,
                                     on_change=State.set_eb_oi,
@@ -4801,7 +5493,11 @@ def frame_gen_tab() -> rx.Component:
                             # ACTION: 方法标识 + 操作模式
                             rx.hstack(
                                 rx.vstack(
-                                    rx.text("方法标识(空=EB标识):", size="1", font_weight="medium"),
+                                    rx.text(
+                                        "方法标识(空=EB标识):",
+                                        size="1",
+                                        font_weight="medium",
+                                    ),
                                     rx.input(
                                         value=State.gen_eb_method,
                                         on_change=State.set_eb_method,
@@ -4813,7 +5509,9 @@ def frame_gen_tab() -> rx.Component:
                                     width="100%",
                                 ),
                                 rx.vstack(
-                                    rx.text("操作模式:", size="1", font_weight="medium"),
+                                    rx.text(
+                                        "操作模式:", size="1", font_weight="medium"
+                                    ),
                                     rx.input(
                                         value=State.gen_eb_mode,
                                         on_change=State.set_eb_mode,
@@ -4831,7 +5529,11 @@ def frame_gen_tab() -> rx.Component:
                             # GET/SET: 属性编号 + 属性特征 + 元素索引
                             rx.hstack(
                                 rx.vstack(
-                                    rx.text("属性编号(空=EB标识):", size="1", font_weight="medium"),
+                                    rx.text(
+                                        "属性编号(空=EB标识):",
+                                        size="1",
+                                        font_weight="medium",
+                                    ),
                                     rx.input(
                                         value=State.gen_eb_attr_no,
                                         on_change=State.set_eb_attr_no,
@@ -4843,7 +5545,9 @@ def frame_gen_tab() -> rx.Component:
                                     width="100%",
                                 ),
                                 rx.vstack(
-                                    rx.text("属性特征:", size="1", font_weight="medium"),
+                                    rx.text(
+                                        "属性特征:", size="1", font_weight="medium"
+                                    ),
                                     rx.input(
                                         value=State.gen_eb_attr_feat,
                                         on_change=State.set_eb_attr_feat,
@@ -4855,7 +5559,11 @@ def frame_gen_tab() -> rx.Component:
                                     width="100%",
                                 ),
                                 rx.vstack(
-                                    rx.text("元素索引(空=EB标识):", size="1", font_weight="medium"),
+                                    rx.text(
+                                        "元素索引(空=EB标识):",
+                                        size="1",
+                                        font_weight="medium",
+                                    ),
                                     rx.input(
                                         value=State.gen_eb_index,
                                         on_change=State.set_eb_index,
@@ -4873,7 +5581,8 @@ def frame_gen_tab() -> rx.Component:
                         ),
                         rx.text(
                             "OAD 默认 = EB 数据标识原样（如 EB030002 → OI=EB03, 属性=00, 索引=02）；可自定义属性/方法/索引。",
-                            size="1", color="gray",
+                            size="1",
+                            color="gray",
                         ),
                         spacing="3",
                         width="100%",
@@ -4898,7 +5607,9 @@ def frame_gen_tab() -> rx.Component:
                     State.gen_eb_msg != "",
                     rx.text(
                         State.gen_eb_msg,
-                        color_scheme=rx.cond(State.gen_eb_msg_type == "error", "red", "green"),
+                        color_scheme=rx.cond(
+                            State.gen_eb_msg_type == "error", "red", "green"
+                        ),
                         size="1",
                     ),
                 ),
@@ -4907,7 +5618,12 @@ def frame_gen_tab() -> rx.Component:
                     rx.vstack(
                         rx.text("生成的帧:", size="1", font_weight="medium"),
                         rx.scroll_area(
-                            rx.text(State.gen_eb_frame, font_family="monospace", font_size="12px", white_space="pre-wrap"),
+                            rx.text(
+                                State.gen_eb_frame,
+                                font_family="monospace",
+                                font_size="12px",
+                                white_space="pre-wrap",
+                            ),
                             max_height="80px",
                             width="100%",
                         ),
@@ -4938,7 +5654,12 @@ def frame_gen_tab() -> rx.Component:
                             lambda f, i: rx.vstack(
                                 rx.hstack(
                                     rx.text(f["name"], size="1", font_weight="medium"),
-                                    rx.badge(f["type"], variant="soft", size="1", color_scheme="gray"),
+                                    rx.badge(
+                                        f["type"],
+                                        variant="soft",
+                                        size="1",
+                                        color_scheme="gray",
+                                    ),
                                     spacing="1",
                                 ),
                                 rx.cond(
@@ -4950,7 +5671,10 @@ def frame_gen_tab() -> rx.Component:
                                         _simple_field_editor(i),
                                     ),
                                 ),
-                                rx.cond(f["description"] != "", rx.text(f["description"], size="1", color="gray")),
+                                rx.cond(
+                                    f["description"] != "",
+                                    rx.text(f["description"], size="1", color="gray"),
+                                ),
                                 spacing="1",
                             ),
                         ),
@@ -4964,13 +5688,17 @@ def frame_gen_tab() -> rx.Component:
                 width="100%",
             ),
         )
+
     # 简单字段编辑器（uint/enum/bytes/ascii/bcd/oi/oad_list），i = 字段索引
     def _simple_field_editor(i: int) -> rx.Component:
         return rx.cond(
             State.gen_field_meta[i]["type"] == "enum",
             rx.el.select(
                 rx.el.option("请选择", value=""),
-                rx.foreach(State.gen_field_enum[i], lambda o: rx.el.option(o["label"], value=o["value"])),
+                rx.foreach(
+                    State.gen_field_enum[i],
+                    lambda o: rx.el.option(o["label"], value=o["value"]),
+                ),
                 default_value=State.gen_field_meta[i]["default"],
                 on_change=lambda val, idx=i: State.set_gen_field(idx, val),
                 class_name="w-full rounded border border-gray-300 px-3 py-1.5",
@@ -4980,7 +5708,10 @@ def frame_gen_tab() -> rx.Component:
                 State.gen_field_meta[i]["type"] == "oi",
                 rx.el.select(
                     rx.el.option("-- 选择OI --", value=""),
-                    rx.foreach(_oi_options(), lambda o: rx.el.option(o["label"], value=o["value"])),
+                    rx.foreach(
+                        _oi_options(),
+                        lambda o: rx.el.option(o["label"], value=o["value"]),
+                    ),
                     default_value=State.gen_field_meta[i]["default"],
                     on_change=lambda val, idx=i: State.set_gen_field(idx, val),
                     class_name="w-full rounded border border-gray-300 px-3 py-1.5",
@@ -5034,15 +5765,24 @@ def frame_gen_tab() -> rx.Component:
                             s["type"] == "enum",
                             rx.el.select(
                                 rx.el.option("请选择", value=""),
-                                rx.foreach(State.gen_field_subs_enum[i][j], lambda o: rx.el.option(o["label"], value=o["value"])),
+                                rx.foreach(
+                                    State.gen_field_subs_enum[i][j],
+                                    lambda o: rx.el.option(
+                                        o["label"], value=o["value"]
+                                    ),
+                                ),
                                 default_value=s["default"],
-                                on_change=lambda val, fi=i, si=j: State.set_gen_sub_field(fi, si, val),
+                                on_change=lambda val,
+                                fi=i,
+                                si=j: State.set_gen_sub_field(fi, si, val),
                                 class_name="w-full rounded border border-gray-300 px-3 py-1.5",
                                 size="1",
                             ),
                             rx.input(
                                 value=State.gen_sub_fields[i][j].to(str),
-                                on_change=lambda val, fi=i, si=j: State.set_gen_sub_field(fi, si, val),
+                                on_change=lambda val,
+                                fi=i,
+                                si=j: State.set_gen_sub_field(fi, si, val),
                                 placeholder=s["default"],
                                 font_family="monospace",
                                 size="1",
@@ -5070,15 +5810,26 @@ def frame_gen_tab() -> rx.Component:
                                 it["type"] == "enum",
                                 rx.el.select(
                                     rx.el.option("请选择", value=""),
-                                    rx.foreach(State.gen_field_items_enum[i][j], lambda o: rx.el.option(o["label"], value=o["value"])),
+                                    rx.foreach(
+                                        State.gen_field_items_enum[i][j],
+                                        lambda o: rx.el.option(
+                                            o["label"], value=o["value"]
+                                        ),
+                                    ),
                                     default_value=it["default"],
-                                    on_change=lambda val, fi=i, ri=r, ji=j: State.set_gen_list_item(fi, ri, ji, val),
+                                    on_change=lambda val,
+                                    fi=i,
+                                    ri=r,
+                                    ji=j: State.set_gen_list_item(fi, ri, ji, val),
                                     class_name="w-full rounded border border-gray-300 px-3 py-1.5",
                                     size="1",
                                 ),
                                 rx.input(
                                     value=State.gen_list_rows[i][r][j].to(str),
-                                    on_change=lambda val, fi=i, ri=r, ji=j: State.set_gen_list_item(fi, ri, ji, val),
+                                    on_change=lambda val,
+                                    fi=i,
+                                    ri=r,
+                                    ji=j: State.set_gen_list_item(fi, ri, ji, val),
                                     placeholder=it["default"],
                                     font_family="monospace",
                                     size="1",
@@ -5112,6 +5863,7 @@ def frame_gen_tab() -> rx.Component:
             spacing="2",
             width="100%",
         )
+
     # ── 自定义模板编辑器 ──
     def custom_template_editor() -> rx.Component:
         return rx.cond(
@@ -5128,14 +5880,18 @@ def frame_gen_tab() -> rx.Component:
                         lambda tpl, i: rx.hstack(
                             rx.input(
                                 value=tpl["name"].to(str),
-                                on_change=lambda val, idx=i: State.set_gen_custom_template(idx, "name", val),
+                                on_change=lambda val,
+                                idx=i: State.set_gen_custom_template(idx, "name", val),
                                 placeholder="名称",
                                 size="1",
                                 width="15%",
                             ),
                             rx.input(
                                 value=tpl["length"].to_string(),
-                                on_change=lambda val, idx=i: State.set_gen_custom_template(idx, "length", val),
+                                on_change=lambda val,
+                                idx=i: State.set_gen_custom_template(
+                                    idx, "length", val
+                                ),
                                 placeholder="长度",
                                 size="1",
                                 width="8%",
@@ -5148,7 +5904,8 @@ def frame_gen_tab() -> rx.Component:
                                 rx.el.option("uint32", value="uint32"),
                                 rx.el.option("checksum", value="checksum"),
                                 default_value=tpl["ftype"],
-                                on_change=lambda val, idx=i: State.set_gen_custom_template(idx, "ftype", val),
+                                on_change=lambda val,
+                                idx=i: State.set_gen_custom_template(idx, "ftype", val),
                                 class_name="app-select",
                                 size="1",
                                 width="12%",
@@ -5157,7 +5914,10 @@ def frame_gen_tab() -> rx.Component:
                                 rx.el.option("little", value="little"),
                                 rx.el.option("big", value="big"),
                                 default_value=tpl["endian"],
-                                on_change=lambda val, idx=i: State.set_gen_custom_template(idx, "endian", val),
+                                on_change=lambda val,
+                                idx=i: State.set_gen_custom_template(
+                                    idx, "endian", val
+                                ),
                                 class_name="app-select",
                                 size="1",
                                 width="10%",
@@ -5166,14 +5926,18 @@ def frame_gen_tab() -> rx.Component:
                                 rx.el.option("hex", value="hex"),
                                 rx.el.option("dec", value="dec"),
                                 default_value=tpl["display"],
-                                on_change=lambda val, idx=i: State.set_gen_custom_template(idx, "display", val),
+                                on_change=lambda val,
+                                idx=i: State.set_gen_custom_template(
+                                    idx, "display", val
+                                ),
                                 class_name="app-select",
                                 size="1",
                                 width="10%",
                             ),
                             rx.input(
                                 value=tpl["value"].to(str),
-                                on_change=lambda val, idx=i: State.set_gen_custom_template(idx, "value", val),
+                                on_change=lambda val,
+                                idx=i: State.set_gen_custom_template(idx, "value", val),
                                 placeholder="值",
                                 font_family="monospace",
                                 size="1",
@@ -5215,14 +5979,18 @@ def frame_gen_tab() -> rx.Component:
                         lambda o: rx.el.option(o["label"], value=o["value"]),
                     ),
                     default_value=item["type"],
-                    on_change=lambda val, idx=i: State.set_gen_axdr_item(idx.to_string(), "type", val),
+                    on_change=lambda val, idx=i: State.set_gen_axdr_item(
+                        idx.to_string(), "type", val
+                    ),
                     class_name="app-select",
                     size="1",
                     width="180px",
                 ),
                 rx.input(
                     value=item["value"].to(str),
-                    on_change=lambda val, idx=i: State.set_gen_axdr_item(idx.to_string(), "value", val),
+                    on_change=lambda val, idx=i: State.set_gen_axdr_item(
+                        idx.to_string(), "value", val
+                    ),
                     placeholder="值",
                     font_family="monospace",
                     size="1",
@@ -5232,7 +6000,9 @@ def frame_gen_tab() -> rx.Component:
                     _is_var_len(item["type"]),
                     rx.input(
                         value=item["length"].to_string(),
-                        on_change=lambda val, idx=i: State.set_gen_axdr_item(idx.to_string(), "length", val),
+                        on_change=lambda val, idx=i: State.set_gen_axdr_item(
+                            idx.to_string(), "length", val
+                        ),
                         placeholder="长度/个数",
                         size="1",
                         width="70px",
@@ -5268,7 +6038,9 @@ def frame_gen_tab() -> rx.Component:
                 rx.vstack(
                     rx.hstack(
                         rx.icon("braces", size=18, color="#7c3aed"),
-                        rx.heading("A-XDR 数据编辑器", size="3", font_weight="semibold"),
+                        rx.heading(
+                            "A-XDR 数据编辑器", size="3", font_weight="semibold"
+                        ),
                         spacing="2",
                     ),
                     rx.grid(
@@ -5278,7 +6050,9 @@ def frame_gen_tab() -> rx.Component:
                                 rx.el.option("0-普通", value="0"),
                                 rx.el.option("1-高优先级", value="1"),
                                 default_value="0",
-                                on_change=lambda v: State.set_gen_axdr_fixed("PIID_优先级", v),
+                                on_change=lambda v: State.set_gen_axdr_fixed(
+                                    "PIID_优先级", v
+                                ),
                                 class_name="app-select",
                                 size="1",
                             ),
@@ -5288,7 +6062,9 @@ def frame_gen_tab() -> rx.Component:
                             rx.text("服务序号:", size="1", font_weight="medium"),
                             rx.input(
                                 value=State.gen_axdr_fixed["PIID_序号"].to(str),
-                                on_change=lambda v: State.set_gen_axdr_fixed("PIID_序号", v),
+                                on_change=lambda v: State.set_gen_axdr_fixed(
+                                    "PIID_序号", v
+                                ),
                                 size="1",
                                 type="number",
                             ),
@@ -5311,7 +6087,9 @@ def frame_gen_tab() -> rx.Component:
                                 rx.text("方法标识:", size="1", font_weight="medium"),
                                 rx.input(
                                     value=State.gen_axdr_fixed["方法标识"].to(str),
-                                    on_change=lambda v: State.set_gen_axdr_fixed("方法标识", v),
+                                    on_change=lambda v: State.set_gen_axdr_fixed(
+                                        "方法标识", v
+                                    ),
                                     size="1",
                                     type="number",
                                 ),
@@ -5321,7 +6099,9 @@ def frame_gen_tab() -> rx.Component:
                                 rx.text("属性标识:", size="1", font_weight="medium"),
                                 rx.input(
                                     value=State.gen_axdr_fixed["属性标识"].to(str),
-                                    on_change=lambda v: State.set_gen_axdr_fixed("属性标识", v),
+                                    on_change=lambda v: State.set_gen_axdr_fixed(
+                                        "属性标识", v
+                                    ),
                                     size="1",
                                     type="number",
                                 ),
@@ -5334,7 +6114,9 @@ def frame_gen_tab() -> rx.Component:
                                 rx.text("操作模式:", size="1", font_weight="medium"),
                                 rx.input(
                                     value=State.gen_axdr_fixed["操作模式"].to(str),
-                                    on_change=lambda v: State.set_gen_axdr_fixed("操作模式", v),
+                                    on_change=lambda v: State.set_gen_axdr_fixed(
+                                        "操作模式", v
+                                    ),
                                     size="1",
                                     type="number",
                                 ),
@@ -5344,7 +6126,9 @@ def frame_gen_tab() -> rx.Component:
                                 rx.text("索引:", size="1", font_weight="medium"),
                                 rx.input(
                                     value=State.gen_axdr_fixed["索引"].to(str),
-                                    on_change=lambda v: State.set_gen_axdr_fixed("索引", v),
+                                    on_change=lambda v: State.set_gen_axdr_fixed(
+                                        "索引", v
+                                    ),
                                     size="1",
                                     type="number",
                                 ),
@@ -5389,7 +6173,9 @@ def frame_gen_tab() -> rx.Component:
                                 rx.el.option("组地址(1)", value="1"),
                                 rx.el.option("广播地址(3)", value="3"),
                                 default_value="0",
-                                on_change=lambda v: State.set_gen_dlt698_sa("addr_type", v),
+                                on_change=lambda v: State.set_gen_dlt698_sa(
+                                    "addr_type", v
+                                ),
                                 class_name="app-select",
                                 size="1",
                             ),
@@ -5403,7 +6189,9 @@ def frame_gen_tab() -> rx.Component:
                                 rx.el.option("2", value="2"),
                                 rx.el.option("3", value="3"),
                                 default_value="0",
-                                on_change=lambda v: State.set_gen_dlt698_sa("logic_addr", v),
+                                on_change=lambda v: State.set_gen_dlt698_sa(
+                                    "logic_addr", v
+                                ),
                                 class_name="app-select",
                                 size="1",
                             ),
@@ -5414,7 +6202,9 @@ def frame_gen_tab() -> rx.Component:
                             rx.input(
                                 type="number",
                                 value=State.gen_dlt698_addr_len.to_string(),
-                                on_change=lambda v: State.set_gen_dlt698_sa("addr_len", v),
+                                on_change=lambda v: State.set_gen_dlt698_sa(
+                                    "addr_len", v
+                                ),
                                 size="1",
                                 placeholder="0=自动6字节",
                             ),
@@ -5424,7 +6214,9 @@ def frame_gen_tab() -> rx.Component:
                             rx.text("SA (HEX):", size="1", font_weight="medium"),
                             rx.input(
                                 value=State.gen_dlt698_sa_raw,
-                                on_change=lambda v: State.set_gen_dlt698_sa("sa_raw", v),
+                                on_change=lambda v: State.set_gen_dlt698_sa(
+                                    "sa_raw", v
+                                ),
                                 placeholder="010203040506",
                                 font_family="monospace",
                                 size="1",
@@ -5530,8 +6322,10 @@ def frame_gen_tab() -> rx.Component:
                                     rx.table.cell(row["field"], font_weight="medium"),
                                     rx.table.cell(rx.code(row["raw"], variant="soft")),
                                     rx.table.cell(row["parsed"]),
-                                    rx.table.cell(rx.text(row["comment"], size="1", color="gray")),
-                                )
+                                    rx.table.cell(
+                                        rx.text(row["comment"], size="1", color="gray")
+                                    ),
+                                ),
                             )
                         ),
                         variant="surface",
@@ -5576,7 +6370,8 @@ def frame_gen_tab() -> rx.Component:
                                 rx.text(name, size="1", font_weight="medium"),
                                 rx.input(
                                     value=State.gen_gdw_info[name].to(str),
-                                    on_change=lambda val, n=name: State.set_gen_gdw_info(n, val),
+                                    on_change=lambda val,
+                                    n=name: State.set_gen_gdw_info(n, val),
                                     default_value=default,
                                     size="1",
                                     type="number",
@@ -5607,9 +6402,13 @@ def frame_gen_tab() -> rx.Component:
                     rx.heading("选择命令", size="3", font_weight="semibold"),
                     rx.spacer(),
                     rx.cond(
-                        (State.current_protocol == 0) | (State.current_protocol == 7) | (State.current_protocol == 8),
+                        (State.current_protocol == 0)
+                        | (State.current_protocol == 7)
+                        | (State.current_protocol == 8),
                         rx.badge("支持组帧", color_scheme="green", variant="soft"),
-                        rx.badge("当前协议暂不支持组帧", color_scheme="gray", variant="soft"),
+                        rx.badge(
+                            "当前协议暂不支持组帧", color_scheme="gray", variant="soft"
+                        ),
                     ),
                     spacing="2",
                 ),
@@ -5670,12 +6469,19 @@ def frame_gen_tab() -> rx.Component:
                         rx.cond(
                             State.gen_dlt698_apdu != "",
                             rx.hstack(
-                                rx.text("子类型:", size="2", font_weight="medium", width="60px"),
+                                rx.text(
+                                    "子类型:",
+                                    size="2",
+                                    font_weight="medium",
+                                    width="60px",
+                                ),
                                 rx.el.select(
                                     rx.el.option("请选择子类型", value=""),
                                     rx.foreach(
                                         State.dlt698_sub_options,
-                                        lambda opt: rx.el.option(opt["label"], value=opt["value"])
+                                        lambda opt: rx.el.option(
+                                            opt["label"], value=opt["value"]
+                                        ),
                                     ),
                                     default_value="",
                                     on_change=State.set_gen_dlt698_sub,
@@ -5799,7 +6605,12 @@ def frame_gen_tab() -> rx.Component:
                         spacing="2",
                     ),
                     rx.scroll_area(
-                        rx.text(State.gen_preview, font_family="monospace", font_size="12px", white_space="pre-wrap"),
+                        rx.text(
+                            State.gen_preview,
+                            font_family="monospace",
+                            font_size="12px",
+                            white_space="pre-wrap",
+                        ),
                         height="200px",
                         width="100%",
                     ),
@@ -5819,7 +6630,12 @@ def frame_gen_tab() -> rx.Component:
                     rx.cond(
                         State.gen_result != "",
                         rx.scroll_area(
-                            rx.text(State.gen_result, font_family="monospace", font_size="12px", white_space="pre-wrap"),
+                            rx.text(
+                                State.gen_result,
+                                font_family="monospace",
+                                font_size="12px",
+                                white_space="pre-wrap",
+                            ),
                             height="200px",
                             padding="2",
                             background="rgba(5, 150, 105, 0.05)",
@@ -5829,7 +6645,9 @@ def frame_gen_tab() -> rx.Component:
                         rx.center(
                             rx.vstack(
                                 rx.icon("building", size=48, color="#9ca3af"),
-                                rx.text("点击「生成帧」查看结果", color="#6b7280", size="2"),
+                                rx.text(
+                                    "点击「生成帧」查看结果", color="#6b7280", size="2"
+                                ),
                                 spacing="2",
                                 padding="8",
                             ),
@@ -5850,7 +6668,9 @@ def frame_gen_tab() -> rx.Component:
         # 操作按钮
         rx.hstack(
             rx.button(
-                rx.cond(State.is_loading, rx.spinner(size="1"), rx.icon("play", size=16)),
+                rx.cond(
+                    State.is_loading, rx.spinner(size="1"), rx.icon("play", size=16)
+                ),
                 "生成帧",
                 on_click=State.generate_frame,
                 loading=State.is_loading,
@@ -5871,7 +6691,10 @@ def frame_gen_tab() -> rx.Component:
         spacing="4",
         width="100%",
     )
+
+
 # ═══════════════════════════════════════════════════════════════
+
 
 def diff_tab() -> rx.Component:
     """报文对比（协议感知，字段级+字节级+差异说明）"""
@@ -5926,7 +6749,11 @@ def diff_tab() -> rx.Component:
         # 操作按钮 + 选项
         rx.hstack(
             rx.button(
-                rx.cond(State.is_loading, rx.spinner(size="1"), rx.icon("git_compare", size=16)),
+                rx.cond(
+                    State.is_loading,
+                    rx.spinner(size="1"),
+                    rx.icon("git_compare", size=16),
+                ),
                 "开始对比",
                 on_click=State.compare_frames,
                 loading=State.is_loading,
@@ -5977,7 +6804,9 @@ def diff_tab() -> rx.Component:
                         rx.foreach(
                             State.diff_explanations,
                             lambda exp: rx.hstack(
-                                rx.icon("info", size=14, color="#f59e0b", flex_shrink="0"),
+                                rx.icon(
+                                    "info", size=14, color="#f59e0b", flex_shrink="0"
+                                ),
                                 rx.text(exp, size="2"),
                                 spacing="2",
                                 padding_x="2",
@@ -6018,31 +6847,56 @@ def diff_tab() -> rx.Component:
                             rx.table.header(
                                 rx.table.row(
                                     rx.table.column_header_cell("字段名", width="22%"),
-                                    rx.table.column_header_cell("偏移(A/B)", width="12%"),
-                                    rx.table.column_header_cell("长度(A/B)", width="12%"),
+                                    rx.table.column_header_cell(
+                                        "偏移(A/B)", width="12%"
+                                    ),
+                                    rx.table.column_header_cell(
+                                        "长度(A/B)", width="12%"
+                                    ),
                                     rx.table.column_header_cell("报文A值", width="22%"),
                                     rx.table.column_header_cell("报文B值", width="22%"),
-                                    rx.table.column_header_cell("差异类型", width="10%"),
+                                    rx.table.column_header_cell(
+                                        "差异类型", width="10%"
+                                    ),
                                 )
                             ),
                             rx.table.body(
                                 rx.foreach(
                                     State.diff_field_rows,
                                     lambda row: rx.table.row(
-                                        rx.table.cell(row["field_name"], font_weight="medium"),
-                                        rx.table.cell(rx.code(row["offset_display"], variant="soft")),
-                                        rx.table.cell(rx.code(row["length_display"], variant="soft")),
-                                        rx.table.cell(rx.code(row["value_a"], variant="soft"), font_size="11px"),
-                                        rx.table.cell(rx.code(row["value_b"], variant="soft"), font_size="11px"),
+                                        rx.table.cell(
+                                            row["field_name"], font_weight="medium"
+                                        ),
+                                        rx.table.cell(
+                                            rx.code(
+                                                row["offset_display"], variant="soft"
+                                            )
+                                        ),
+                                        rx.table.cell(
+                                            rx.code(
+                                                row["length_display"], variant="soft"
+                                            )
+                                        ),
+                                        rx.table.cell(
+                                            rx.code(row["value_a"], variant="soft"),
+                                            font_size="11px",
+                                        ),
+                                        rx.table.cell(
+                                            rx.code(row["value_b"], variant="soft"),
+                                            font_size="11px",
+                                        ),
                                         rx.table.cell(
                                             rx.badge(
                                                 row["diff_type"],
                                                 color_scheme=rx.cond(
-                                                    row["diff_type"] == "相同", "green",
+                                                    row["diff_type"] == "相同",
+                                                    "green",
                                                     rx.cond(
-                                                        row["diff_type"] == "修改", "red",
+                                                        row["diff_type"] == "修改",
+                                                        "red",
                                                         rx.cond(
-                                                            row["diff_type"] == "A独有", "gray",
+                                                            row["diff_type"] == "A独有",
+                                                            "gray",
                                                             "amber",
                                                         ),
                                                     ),
@@ -6068,7 +6922,11 @@ def diff_tab() -> rx.Component:
                     rx.center(
                         rx.vstack(
                             rx.icon("git_compare", size=40, color="#9ca3af"),
-                            rx.text("点击「开始对比」查看字段级差异", color="#6b7280", size="2"),
+                            rx.text(
+                                "点击「开始对比」查看字段级差异",
+                                color="#6b7280",
+                                size="2",
+                            ),
                             spacing="2",
                             padding="6",
                         ),
@@ -6085,7 +6943,9 @@ def diff_tab() -> rx.Component:
             rx.vstack(
                 rx.hstack(
                     rx.icon("binary", size=18, color="#2563eb"),
-                    rx.heading("字节级对比 (按字段分组)", size="3", font_weight="semibold"),
+                    rx.heading(
+                        "字节级对比 (按字段分组)", size="3", font_weight="semibold"
+                    ),
                     rx.spacer(),
                     rx.badge(
                         f"{State.diff_byte_rows.length()} 行",
@@ -6101,8 +6961,12 @@ def diff_tab() -> rx.Component:
                             rx.table.header(
                                 rx.table.row(
                                     rx.table.column_header_cell("偏移", width="12%"),
-                                    rx.table.column_header_cell("报文 A (HEX)", width="38%"),
-                                    rx.table.column_header_cell("报文 B (HEX)", width="38%"),
+                                    rx.table.column_header_cell(
+                                        "报文 A (HEX)", width="38%"
+                                    ),
+                                    rx.table.column_header_cell(
+                                        "报文 B (HEX)", width="38%"
+                                    ),
                                     rx.table.column_header_cell("状态", width="12%"),
                                 )
                             ),
@@ -6113,7 +6977,11 @@ def diff_tab() -> rx.Component:
                                         row["is_field_header"],
                                         rx.table.row(
                                             rx.table.cell(
-                                                rx.text(row["field_name"], font_weight="bold", size="1"),
+                                                rx.text(
+                                                    row["field_name"],
+                                                    font_weight="bold",
+                                                    size="1",
+                                                ),
                                                 col_span=4,
                                                 background=rx.cond(
                                                     row["status"] == "same",
@@ -6131,27 +6999,46 @@ def diff_tab() -> rx.Component:
                                             ),
                                         ),
                                         rx.table.row(
-                                            rx.table.cell(rx.code(row["offset"], variant="soft"), font_size="11px"),
-                                            rx.table.cell(rx.code(row["left"], variant="soft"), font_family="monospace", font_size="11px"),
-                                            rx.table.cell(rx.code(row["right"], variant="soft"), font_family="monospace", font_size="11px"),
+                                            rx.table.cell(
+                                                rx.code(row["offset"], variant="soft"),
+                                                font_size="11px",
+                                            ),
+                                            rx.table.cell(
+                                                rx.code(row["left"], variant="soft"),
+                                                font_family="monospace",
+                                                font_size="11px",
+                                            ),
+                                            rx.table.cell(
+                                                rx.code(row["right"], variant="soft"),
+                                                font_family="monospace",
+                                                font_size="11px",
+                                            ),
                                             rx.table.cell(
                                                 rx.badge(
                                                     rx.cond(
-                                                        row["status"] == "same", "=",
+                                                        row["status"] == "same",
+                                                        "=",
                                                         rx.cond(
-                                                            row["status"] == "modified", "≠",
+                                                            row["status"] == "modified",
+                                                            "≠",
                                                             rx.cond(
-                                                                row["status"] == "added", "+",
+                                                                row["status"]
+                                                                == "added",
+                                                                "+",
                                                                 "-",
                                                             ),
                                                         ),
                                                     ),
                                                     color_scheme=rx.cond(
-                                                        row["status"] == "same", "green",
+                                                        row["status"] == "same",
+                                                        "green",
                                                         rx.cond(
-                                                            row["status"] == "modified", "red",
+                                                            row["status"] == "modified",
+                                                            "red",
                                                             rx.cond(
-                                                                row["status"] == "added", "amber",
+                                                                row["status"]
+                                                                == "added",
+                                                                "amber",
                                                                 "gray",
                                                             ),
                                                         ),
@@ -6162,7 +7049,9 @@ def diff_tab() -> rx.Component:
                                             ),
                                             style=rx.cond(
                                                 row["status"] != "same",
-                                                {"background": "rgba(220, 38, 38, 0.03)"},
+                                                {
+                                                    "background": "rgba(220, 38, 38, 0.03)"
+                                                },
                                                 {},
                                             ),
                                         ),
@@ -6178,7 +7067,11 @@ def diff_tab() -> rx.Component:
                     rx.center(
                         rx.vstack(
                             rx.icon("binary", size=40, color="#9ca3af"),
-                            rx.text("点击「开始对比」查看字节级差异", color="#6b7280", size="2"),
+                            rx.text(
+                                "点击「开始对比」查看字节级差异",
+                                color="#6b7280",
+                                size="2",
+                            ),
                             spacing="2",
                             padding="6",
                         ),
@@ -6198,6 +7091,7 @@ def diff_tab() -> rx.Component:
 # ═══════════════════════════════════════════════════════════════
 # 客户端下载 Tab
 # ═══════════════════════════════════════════════════════════════
+
 
 def download_tab() -> rx.Component:
     """客户端下载（GUI 版 exe 下载）"""
@@ -6227,14 +7121,22 @@ def download_tab() -> rx.Component:
                     rx.cond(
                         State.download_exe_available,
                         rx.button(
-                            rx.hstack(rx.icon("download", size=18), rx.text("下载客户端 (exe)"), spacing="2"),
+                            rx.hstack(
+                                rx.icon("download", size=18),
+                                rx.text("下载客户端 (exe)"),
+                                spacing="2",
+                            ),
                             on_click=State.download_client,
                             color_scheme="blue",
                             size="3",
                             cursor="pointer",
                         ),
                         rx.button(
-                            rx.hstack(rx.icon("download", size=18), rx.text("客户端 exe 未就绪"), spacing="2"),
+                            rx.hstack(
+                                rx.icon("download", size=18),
+                                rx.text("客户端 exe 未就绪"),
+                                spacing="2",
+                            ),
                             disabled=True,
                             color_scheme="gray",
                             size="3",
@@ -6265,7 +7167,12 @@ def download_tab() -> rx.Component:
                         rx.icon("info", size=20, color="#2563eb"),
                         rx.heading("当前版本", size="3", font_weight="bold"),
                         rx.spacer(),
-                        rx.badge(State.download_version, color_scheme="blue", variant="soft", size="2"),
+                        rx.badge(
+                            State.download_version,
+                            color_scheme="blue",
+                            variant="soft",
+                            size="2",
+                        ),
                         spacing="2",
                         width="100%",
                     ),
@@ -6325,7 +7232,9 @@ def download_tab() -> rx.Component:
                             rx.foreach(
                                 State.download_history,
                                 lambda item: rx.table.row(
-                                    rx.table.cell(item["version"], font_weight="medium"),
+                                    rx.table.cell(
+                                        item["version"], font_weight="medium"
+                                    ),
                                     rx.table.cell(item["date"], size="1"),
                                     rx.table.cell(item["size_mb"] + " MB", size="1"),
                                     rx.table.cell(
@@ -6383,7 +7292,9 @@ def download_tab() -> rx.Component:
                 rx.vstack(
                     rx.hstack(
                         rx.icon("file_text", size=18, color="#2563eb"),
-                        rx.heading("客户端说明 (README)", size="3", font_weight="semibold"),
+                        rx.heading(
+                            "客户端说明 (README)", size="3", font_weight="semibold"
+                        ),
                         spacing="2",
                     ),
                     rx.scroll_area(
@@ -6429,29 +7340,34 @@ FEEDBACK_PROTOCOL_OPTIONS = [
 FEEDBACK_PAGE_SIZE = 20
 
 
-class FeedbackState(rx.State):
-    """问题反馈：用户提交表单 + 管理页状态（独立于主 State）"""
+class FeedbackState(State):
+    """问题反馈：用户提交表单 + 列表查看（Tab 页）+ 管理操作（仅登录后）
+
+    权限分层：列表/详情所有人可见；修改状态/删除仅管理员。
+    继承主 State（Reflex 子 State）：直接通过 self 访问父类的
+    admin_logged_in 登录态（跨 State 实例属性不可互访，唯有继承可行）。
+    """
 
     # ── 提交表单 ──
     fb_type: str = "功能异常"
     fb_protocol: str = "不确定"
     fb_desc: str = ""
     fb_contact: str = ""
-    fb_files: List[str] = []          # 已选截图文件名（展示用）
+    fb_files: list[str] = []  # 已选截图文件名（展示用）
     # 后端专用：暂存上传的截图字节（下划线前缀 → 不发送到前端），提交时统一落盘
-    _fb_pending_data: List[bytes] = []
+    _fb_pending_data: list[bytes] = []
     fb_msg: str = ""
-    fb_msg_type: str = "info"         # info/success/error
+    fb_msg_type: str = "info"  # info/success/error
 
-    # ── 管理页 ──
-    fa_logged: bool = False
-    fa_password: str = ""
-    fa_msg: str = ""
-    fa_items: List[Dict[str, Any]] = []
+    # ── 反馈列表（Tab 页，所有人可见）──
+    fa_items: list[dict[str, Any]] = []
     fa_total: int = 0
-    fa_page: int = 0                  # 0-based 页号
+    fa_page: int = 0  # 0-based 页号
+    fa_msg: str = ""
     fa_detail_open: bool = False
-    fa_detail: Dict[str, Any] = {}
+    fa_detail: dict[str, Any] = {}
+    # 详情内状态操作提示（区分于 fa_msg 列表加载提示）
+    fa_detail_msg: str = ""
 
     # ── 提交表单事件 ──
 
@@ -6467,7 +7383,7 @@ class FeedbackState(rx.State):
     def set_fb_contact(self, value: str):
         self.fb_contact = value
 
-    async def handle_fb_files(self, files: List[rx.UploadFile]):
+    async def handle_fb_files(self, files: list[rx.UploadFile]):
         """截图选择暂存：字节存后端 _fb_pending_data，提交时才落盘"""
         if not files:
             return
@@ -6487,11 +7403,15 @@ class FeedbackState(rx.State):
                 self.fb_files = []
                 self._fb_pending_data = []
                 return
-            names.append(getattr(f, "filename", None) or getattr(f, "name", None) or "截图")
+            names.append(
+                getattr(f, "filename", None) or getattr(f, "name", None) or "截图"
+            )
             datas.append(data)
         self.fb_files = names
         self._fb_pending_data = datas
-        self.fb_msg = f"已选择 {len(names)} 张截图（共 {total // 1024} KB），点击提交后上传"
+        self.fb_msg = (
+            f"已选择 {len(names)} 张截图（共 {total // 1024} KB），点击提交后上传"
+        )
         self.fb_msg_type = "info"
 
     def clear_fb_files(self):
@@ -6511,7 +7431,9 @@ class FeedbackState(rx.State):
             self.fb_msg_type = "error"
             return
         if len(desc) > fm.MAX_DESC_LEN:
-            self.fb_msg = f"问题描述不能超过 {fm.MAX_DESC_LEN} 字（当前 {len(desc)} 字）"
+            self.fb_msg = (
+                f"问题描述不能超过 {fm.MAX_DESC_LEN} 字（当前 {len(desc)} 字）"
+            )
             self.fb_msg_type = "error"
             return
         if len(contact) > fm.MAX_CONTACT_LEN:
@@ -6548,6 +7470,7 @@ class FeedbackState(rx.State):
                 contact=contact,
                 screenshots=";".join(saved_names),
                 status="待处理",
+                source="web",
             )
             fm.FeedbackStore.instance().add(item)
         except Exception as e:
@@ -6562,51 +7485,17 @@ class FeedbackState(rx.State):
         self.fb_contact = ""
         self.fb_files = []
         self._fb_pending_data = []
-        self.fb_msg = ("反馈提交成功，感谢您的支持！" + (f"（含 {saved} 张截图）" if saved else ""))
+        self.fb_msg = "反馈提交成功，感谢您的支持！" + (
+            f"（含 {saved} 张截图）" if saved else ""
+        )
         self.fb_msg_type = "success"
 
-    # ── 管理页事件 ──
-
-    def set_fa_password(self, value: str):
-        self.fa_password = value
-
-    def fa_login_on_key(self, key: str, info: dict = None):
-        """密码输入框回车触发登录"""
-        if key == "Enter":
-            self.fa_login()
-
-    def fa_login(self):
-        """反馈管理页登录（复用 AdminConfig 口令）"""
-        from .admin_release import AdminConfig
-        here = Path(__file__).resolve()
-        config_path = here.parent.parent / "admin_config.json"
-        if not config_path.exists():
-            config_path = here.parent / "admin_config.json"
-        try:
-            cfg = AdminConfig(config_path)
-        except Exception as e:
-            self.fa_msg = f"配置加载失败: {e}"
-            return
-        if cfg.verify_password(self.fa_password):
-            self.fa_logged = True
-            self.fa_password = ""
-            self.fa_msg = ""
-            self.fa_load()
-        else:
-            self.fa_msg = "密码错误"
-
-    def fa_logout(self):
-        self.fa_logged = False
-        self.fa_password = ""
-        self.fa_msg = ""
-        self.fa_items = []
-        self.fa_total = 0
-        self.fa_page = 0
-        self.fa_detail_open = False
+    # ── 列表 / 管理事件 ──
 
     def fa_load(self):
-        """加载当前页反馈列表"""
+        """加载当前页反馈列表（切到列表 Tab 时自动调用）"""
         from . import feedback_model as fm
+
         try:
             items, total = fm.FeedbackStore.instance().list_all(
                 offset=self.fa_page * FEEDBACK_PAGE_SIZE, limit=FEEDBACK_PAGE_SIZE
@@ -6621,6 +7510,8 @@ class FeedbackState(rx.State):
                     "contact": it.contact,
                     "screenshots": it.screenshots,
                     "status": it.status,
+                    "source": getattr(it, "source", "web") or "web",
+                    "sys_info": getattr(it, "sys_info", "") or "",
                 }
                 for it in items
             ]
@@ -6642,33 +7533,53 @@ class FeedbackState(rx.State):
             self.fa_page += 1
         self.fa_load()
 
-    def fa_open_detail(self, item: Dict[str, Any]):
+    def fa_open_detail(self, item: dict[str, Any]):
         self.fa_detail = item
+        self.fa_detail_msg = ""
         self.fa_detail_open = True
 
     def fa_close_detail(self):
         self.fa_detail_open = False
 
+    def fa_on_open_change(self, is_open: bool):
+        """弹窗 open 状态变化（点遮罩/Esc 时 Radix 发出 False，同步回 State）"""
+        if not is_open:
+            self.fa_detail_open = False
+
     def fa_set_status(self, status: str):
-        """修改详情对应反馈的状态"""
+        """修改详情对应反馈的状态（仅管理员：UI 上按钮仅登录后渲染，此处双保险校验）"""
         from . import feedback_model as fm
+
+        if not self.admin_logged_in:
+            self.fa_detail_msg = "需要管理员登录后才能修改状态"
+            return
         item_id = self.fa_detail.get("id")
         if item_id is None:
             return
         if fm.FeedbackStore.instance().update_status(int(item_id), status):
             self.fa_detail = {**self.fa_detail, "status": status}
+            self.fa_detail_msg = f"已标记为「{status}」"
             self.fa_load()
+        else:
+            self.fa_detail_msg = "状态修改失败"
 
     def fa_delete_current(self):
-        """删除详情对应反馈（含截图文件）"""
+        """删除详情对应反馈含截图文件（仅管理员）"""
         from . import feedback_model as fm
+
+        if not self.admin_logged_in:
+            self.fa_detail_msg = "需要管理员登录后才能删除"
+            return
         item_id = self.fa_detail.get("id")
         if item_id is None:
             return
         names = fm.FeedbackStore.instance().delete(int(item_id))
         removed = fm.delete_screenshots(names)
         self.fa_detail_open = False
-        self.fa_msg = f"已删除反馈 #{item_id}" + (f"（清理 {removed} 张截图）" if removed else "")
+        self.fa_detail_msg = ""
+        self.fa_msg = f"已删除反馈 #{item_id}" + (
+            f"（清理 {removed} 张截图）" if removed else ""
+        )
         # 若当前页删空则回退一页
         if self.fa_items and len(self.fa_items) == 1 and self.fa_page > 0:
             self.fa_page -= 1
@@ -6681,20 +7592,27 @@ class FeedbackUploads(rx.State):
 
 # ── 反馈页面组件 ──
 
+
 def _fb_msg_banner() -> rx.Component:
     """反馈表单消息提示条"""
     return rx.cond(
         FeedbackState.fb_msg != "",
         rx.hstack(
             rx.icon(
-                rx.cond(FeedbackState.fb_msg_type == "error", "circle_alert", "circle_check"),
+                rx.cond(
+                    FeedbackState.fb_msg_type == "error", "circle_alert", "circle_check"
+                ),
                 size=16,
-                color=rx.cond(FeedbackState.fb_msg_type == "error", "#dc2626", "#16a34a"),
+                color=rx.cond(
+                    FeedbackState.fb_msg_type == "error", "#dc2626", "#16a34a"
+                ),
             ),
             rx.text(
                 FeedbackState.fb_msg,
                 size="2",
-                color=rx.cond(FeedbackState.fb_msg_type == "error", "#dc2626", "#15803d"),
+                color=rx.cond(
+                    FeedbackState.fb_msg_type == "error", "#dc2626", "#15803d"
+                ),
             ),
             spacing="2",
             padding="8px 12px",
@@ -6713,7 +7631,7 @@ def feedback_page() -> rx.Component:
     """问题反馈提交页（用户侧，无需登录）"""
     return rx.box(
         rx.el.style(GLOBAL_CSS),
-        header(),
+        header(show_parse_controls=False),
         rx.box(
             rx.vstack(
                 # 页面标题
@@ -6736,7 +7654,13 @@ def feedback_page() -> rx.Component:
                             rx.vstack(
                                 rx.text("问题类型", size="2", font_weight="medium"),
                                 rx.select(
-                                    ["功能异常", "解析错误", "界面体验", "新功能建议", "其他"],
+                                    [
+                                        "功能异常",
+                                        "解析错误",
+                                        "界面体验",
+                                        "新功能建议",
+                                        "其他",
+                                    ],
                                     value=FeedbackState.fb_type,
                                     on_change=FeedbackState.set_fb_type,
                                     width="200px",
@@ -6764,7 +7688,9 @@ def feedback_page() -> rx.Component:
                         rx.vstack(
                             rx.hstack(
                                 rx.text("问题描述", size="2", font_weight="medium"),
-                                rx.badge("必填", color_scheme="red", variant="soft", size="1"),
+                                rx.badge(
+                                    "必填", color_scheme="red", variant="soft", size="1"
+                                ),
                                 rx.spacer(),
                                 rx.text(
                                     f"{FeedbackState.fb_desc.length()} / 2000",
@@ -6801,7 +7727,11 @@ def feedback_page() -> rx.Component:
                         ),
                         # 截图上传
                         rx.vstack(
-                            rx.text("截图（选填，最多 3 张，jpg/png/webp，单张 ≤5MB）", size="2", font_weight="medium"),
+                            rx.text(
+                                "截图（选填，最多 3 张，jpg/png/webp，单张 ≤5MB）",
+                                size="2",
+                                font_weight="medium",
+                            ),
                             rx.upload(
                                 rx.hstack(
                                     rx.icon("image_up", size=20, color="#2563eb"),
@@ -6812,7 +7742,11 @@ def feedback_page() -> rx.Component:
                                 on_drop=FeedbackState.handle_fb_files,
                                 multiple=True,
                                 max_files=3,
-                                accept={"image/png": [".png"], "image/jpeg": [".jpg", ".jpeg"], "image/webp": [".webp"]},
+                                accept={
+                                    "image/png": [".png"],
+                                    "image/jpeg": [".jpg", ".jpeg"],
+                                    "image/webp": [".webp"],
+                                },
                                 max_size=5 * 1024 * 1024,
                                 class_name="rounded-lg border-2 border-dashed border-blue-300 bg-blue-50/50 p-4 w-full hover:border-blue-500 transition-colors",
                                 data_testid="fb-upload",
@@ -6822,7 +7756,9 @@ def feedback_page() -> rx.Component:
                                 rx.hstack(
                                     rx.icon("paperclip", size=14, color="#64748b"),
                                     rx.text(
-                                        "已选 " + FeedbackState.fb_files.length().to_string() + " 张截图",
+                                        "已选 "
+                                        + FeedbackState.fb_files.length().to_string()
+                                        + " 张截图",
                                         size="1",
                                         color="#64748b",
                                     ),
@@ -6844,7 +7780,9 @@ def feedback_page() -> rx.Component:
                         rx.hstack(
                             rx.spacer(),
                             rx.button(
-                                rx.hstack(rx.icon("send", size=16), "提交反馈", spacing="2"),
+                                rx.hstack(
+                                    rx.icon("send", size=16), "提交反馈", spacing="2"
+                                ),
                                 on_click=FeedbackState.submit_feedback,
                                 color_scheme="blue",
                                 size="2",
@@ -6882,15 +7820,25 @@ def _fa_status_badge(status: str) -> rx.Component:
     )
 
 
-def _fa_item_row(item: Dict[str, Any]) -> rx.Component:
+def _fa_item_row(item: dict[str, Any]) -> rx.Component:
     """反馈列表行（vstack 卡片行，点击打开详情）"""
     return rx.card(
         rx.hstack(
             rx.vstack(
                 rx.hstack(
                     _fa_status_badge(item["status"]),
-                    rx.badge(item["issue_type"], color_scheme="purple", variant="soft", size="1"),
+                    rx.badge(
+                        item["issue_type"],
+                        color_scheme="purple",
+                        variant="soft",
+                        size="1",
+                    ),
                     rx.text(item["protocol"], size="1", color="#64748b"),
+                    # 桌面端 GUI 提交标记（Web 表单提交 source=web，不显示）
+                    rx.cond(
+                        item.get("source", "web") == "gui",
+                        rx.badge("桌面端", color_scheme="cyan", variant="solid", size="1"),
+                    ),
                     spacing="2",
                 ),
                 rx.text(
@@ -6938,18 +7886,21 @@ def _fa_detail_dialog() -> rx.Component:
                     _fa_status_badge(d["status"]),
                     rx.badge(
                         d["issue_type"],
-                        color_scheme="purple", variant="soft", size="1",
+                        color_scheme="purple",
+                        variant="soft",
+                        size="1",
                     ),
                     rx.text(
                         d["protocol"],
-                        size="2", color="#64748b",
+                        size="2",
+                        color="#64748b",
                     ),
                     spacing="2",
                 ),
                 rx.text(
-                    "#" + d["id"].to_string()
-                    + "  ·  " + d["created_at"].to_string(),
-                    size="1", color="#94a3b8",
+                    "#" + d["id"].to_string() + "  ·  " + d["created_at"].to_string(),
+                    size="1",
+                    color="#94a3b8",
                 ),
                 rx.text(
                     d["description"],
@@ -6962,7 +7913,27 @@ def _fa_detail_dialog() -> rx.Component:
                     d["contact"] != "",
                     rx.text(
                         "联系方式: " + d["contact"].to_string(),
-                        size="2", color="#475569",
+                        size="2",
+                        color="#475569",
+                    ),
+                ),
+                # GUI 桌面端提交的环境信息（Web 表单提交无此字段）
+                rx.cond(
+                    (d.get("source", "web") == "gui") & (d.get("sys_info", "") != ""),
+                    rx.vstack(
+                        rx.text("客户端环境", size="2", font_weight="medium", color="#475569"),
+                        rx.code(
+                            d.get("sys_info", "").to(str),
+                            size="1",
+                            white_space="pre-wrap",
+                            width="100%",
+                            background="#f1f5f9",
+                            padding="8px",
+                            border_radius="6px",
+                        ),
+                        spacing="1",
+                        align="start",
+                        width="100%",
                     ),
                 ),
                 # 截图预览
@@ -6987,28 +7958,73 @@ def _fa_detail_dialog() -> rx.Component:
                         align="start",
                     ),
                 ),
-                # 状态操作
-                rx.hstack(
-                    rx.text("标记状态:", size="2", color="#64748b"),
-                    rx.button("已确认", size="1", variant="soft", color_scheme="blue",
-                              on_click=lambda: FeedbackState.fa_set_status("已确认")),
-                    rx.button("已修复", size="1", variant="soft", color_scheme="green",
-                              on_click=lambda: FeedbackState.fa_set_status("已修复")),
-                    rx.button("已忽略", size="1", variant="soft", color_scheme="gray",
-                              on_click=lambda: FeedbackState.fa_set_status("已忽略")),
-                    rx.spacer(),
-                    rx.button(
-                        rx.hstack(rx.icon("trash_2", size=14), "删除", spacing="1"),
-                        size="1", variant="soft", color_scheme="red",
-                        on_click=FeedbackState.fa_delete_current,
+                # 详情内提示（状态修改结果等）
+                rx.cond(
+                    FeedbackState.fa_detail_msg != "",
+                    rx.text(
+                        FeedbackState.fa_detail_msg,
+                        size="2",
+                        color=rx.cond(
+                            FeedbackState.fa_detail_msg.contains("需要管理员"),
+                            "#dc2626",
+                            "#15803d",
+                        ),
                     ),
-                    spacing="2",
-                    width="100%",
+                ),
+                # 状态操作（仅管理员登录后可见；未登录用户只读）
+                rx.cond(
+                    State.admin_logged_in,
+                    rx.hstack(
+                        rx.text("标记状态:", size="2", color="#64748b"),
+                        rx.button(
+                            "已确认",
+                            size="1",
+                            variant="soft",
+                            color_scheme="blue",
+                            on_click=lambda: FeedbackState.fa_set_status("已确认"),
+                        ),
+                        rx.button(
+                            "已修复",
+                            size="1",
+                            variant="soft",
+                            color_scheme="green",
+                            on_click=lambda: FeedbackState.fa_set_status("已修复"),
+                        ),
+                        rx.button(
+                            "已忽略",
+                            size="1",
+                            variant="soft",
+                            color_scheme="gray",
+                            on_click=lambda: FeedbackState.fa_set_status("已忽略"),
+                        ),
+                        rx.spacer(),
+                        rx.button(
+                            rx.hstack(rx.icon("trash_2", size=14), "删除", spacing="1"),
+                            size="1",
+                            variant="soft",
+                            color_scheme="red",
+                            on_click=FeedbackState.fa_delete_current,
+                        ),
+                        spacing="2",
+                        width="100%",
+                    ),
+                    rx.hstack(
+                        rx.icon("info", size=14, color="#94a3b8"),
+                        rx.text(
+                            "管理员登录后可修改状态或删除", size="1", color="#94a3b8"
+                        ),
+                        spacing="1",
+                    ),
                 ),
                 rx.dialog.close(
                     rx.hstack(
                         rx.spacer(),
-                        rx.button("关闭", variant="soft", size="2"),
+                        rx.button(
+                            "关闭",
+                            variant="soft",
+                            size="2",
+                            on_click=FeedbackState.fa_close_detail,
+                        ),
                         spacing="2",
                     ),
                     top="auto",
@@ -7021,115 +8037,165 @@ def _fa_detail_dialog() -> rx.Component:
             style={"overflow_y": "auto"},
         ),
         open=FeedbackState.fa_detail_open,
+        # 点遮罩/Esc 关闭：受控弹窗必须显式同步 State，
+        # 否则 Radix 内部关闭请求不会改 fa_detail_open，弹窗永远关不掉
+        on_open_change=FeedbackState.fa_on_open_change,
+    )
+
+
+def feedback_list_tab() -> rx.Component:
+    """问题反馈列表 Tab（主页内，所有人可见；管理操作仅登录后）"""
+    return rx.vstack(
+        rx.hstack(
+            rx.icon("message_square_heart", size=20, color="#2563eb"),
+            rx.heading("问题反馈", size="4", font_weight="bold"),
+            rx.spacer(),
+            rx.el.a(
+                rx.hstack(rx.icon("send", size=14), "我要反馈", spacing="1"),
+                href="/feedback",
+                class_name="app-header-btn",
+                style={
+                    "text_decoration": "none",
+                    "color": "white",
+                    "background": "linear-gradient(135deg, #2563eb, #3b82f6)",
+                    "padding": "6px 14px",
+                    "border_radius": "8px",
+                    "font_size": "13px",
+                },
+                data_testid="tab-feedback-submit",
+            ),
+            spacing="2",
+            width="100%",
+        ),
+        rx.cond(
+            State.admin_logged_in,
+            rx.badge(
+                "管理员模式：可修改状态/删除",
+                color_scheme="blue",
+                variant="soft",
+                size="1",
+            ),
+            rx.badge(
+                "查看模式：管理员登录后可处理反馈",
+                color_scheme="gray",
+                variant="soft",
+                size="1",
+            ),
+        ),
+        rx.cond(
+            FeedbackState.fa_msg != "",
+            rx.text(FeedbackState.fa_msg, size="2", color="#64748b"),
+        ),
+        rx.cond(
+            FeedbackState.fa_total > 0,
+            rx.vstack(
+                rx.foreach(FeedbackState.fa_items, _fa_item_row),
+                spacing="2",
+                width="100%",
+            ),
+            rx.vstack(
+                rx.icon("inbox", size=36, color="#cbd5e1"),
+                rx.text(
+                    "暂无反馈，点击右上角「我要反馈」提交第一条",
+                    size="3",
+                    color="#94a3b8",
+                ),
+                spacing="2",
+                align="center",
+                padding="48px 0",
+                width="100%",
+            ),
+        ),
+        # 分页
+        rx.cond(
+            FeedbackState.fa_total > 20,
+            rx.hstack(
+                rx.button(
+                    "« 首页",
+                    size="1",
+                    variant="soft",
+                    on_click=FeedbackState.fa_first_page,
+                    disabled=FeedbackState.fa_page == 0,
+                ),
+                rx.button(
+                    "‹ 上一页",
+                    size="1",
+                    variant="soft",
+                    on_click=FeedbackState.fa_prev_page,
+                    disabled=FeedbackState.fa_page == 0,
+                ),
+                rx.text(
+                    "第 "
+                    + (FeedbackState.fa_page + 1).to_string()
+                    + " 页 / 共 "
+                    + (((FeedbackState.fa_total + 19) // 20).to_string())
+                    + " 页（"
+                    + FeedbackState.fa_total.to_string()
+                    + " 条）",
+                    size="1",
+                    color="#64748b",
+                ),
+                rx.button(
+                    "下一页 ›",
+                    size="1",
+                    variant="soft",
+                    on_click=FeedbackState.fa_next_page,
+                    disabled=(FeedbackState.fa_page + 1) * 20 >= FeedbackState.fa_total,
+                ),
+                spacing="2",
+                align="center",
+            ),
+        ),
+        _fa_detail_dialog(),
+        spacing="3",
+        width="100%",
+        max_width="1000px",
     )
 
 
 def feedback_admin_page() -> rx.Component:
-    """反馈管理页（口令保护）"""
+    """反馈管理页（历史入口，现列表已迁至主页「问题反馈」Tab，此页保留链接兼容）"""
     return rx.box(
         rx.el.style(GLOBAL_CSS),
-        header(),
+        header(show_parse_controls=False),
         rx.box(
             rx.vstack(
                 rx.hstack(
                     rx.icon("inbox", size=24, color="#2563eb"),
                     rx.heading("反馈管理", size="5", font_weight="bold"),
-                    rx.spacer(),
-                    rx.cond(
-                        FeedbackState.fa_logged,
-                        rx.button("退出", size="1", variant="soft", color_scheme="gray",
-                                  on_click=FeedbackState.fa_logout),
-                    ),
                     spacing="2",
-                    width="100%",
                 ),
-                rx.cond(
-                    FeedbackState.fa_msg != "",
-                    rx.text(FeedbackState.fa_msg, size="2", color="#64748b"),
+                rx.text(
+                    "反馈列表已迁移至主页「问题反馈」标签页（与发布管理同级）。",
+                    size="2",
+                    color="#64748b",
                 ),
-                rx.cond(
-                    ~FeedbackState.fa_logged,
-                    # 登录卡
-                    rx.card(
-                        rx.vstack(
-                            rx.icon("lock", size=28, color="#94a3b8"),
-                            rx.heading("管理员登录", size="4"),
-                            rx.text("输入管理员密码查看用户反馈", size="2", color="#64748b"),
-                            rx.input(
-                                type="password",
-                                placeholder="管理员密码",
-                                value=FeedbackState.fa_password,
-                                on_change=FeedbackState.set_fa_password,
-                                width="260px",
-                                on_key_down=FeedbackState.fa_login_on_key,
-                            ),
-                            rx.cond(
-                                FeedbackState.fa_msg != "",
-                                rx.text(FeedbackState.fa_msg, size="1", color="red"),
-                            ),
-                            rx.button("登录", on_click=FeedbackState.fa_login,
-                                      color_scheme="blue", width="260px"),
-                            spacing="3",
-                            align="center",
-                        ),
-                        max_width="400px",
-                        width="100%",
+                rx.text(
+                    "在该标签页中所有人可查看反馈列表与状态；管理员登录后可修改状态/删除。",
+                    size="2",
+                    color="#64748b",
+                ),
+                rx.el.a(
+                    rx.hstack(
+                        rx.icon("home", size=16), "前往主页 · 问题反馈", spacing="2"
                     ),
-                    # 列表
-                    rx.vstack(
-                        rx.cond(
-                            FeedbackState.fa_total > 0,
-                            rx.vstack(
-                                rx.foreach(FeedbackState.fa_items, _fa_item_row),
-                                spacing="2",
-                                width="100%",
-                            ),
-                            rx.vstack(
-                                rx.icon("inbox", size=36, color="#cbd5e1"),
-                                rx.text("暂无反馈", size="3", color="#94a3b8"),
-                                spacing="2",
-                                align="center",
-                                padding="48px 0",
-                                width="100%",
-                            ),
-                        ),
-                        # 分页
-                        rx.cond(
-                            FeedbackState.fa_total > 20,
-                            rx.hstack(
-                                rx.button("« 首页", size="1", variant="soft",
-                                          on_click=FeedbackState.fa_first_page,
-                                          disabled=FeedbackState.fa_page == 0),
-                                rx.button("‹ 上一页", size="1", variant="soft",
-                                          on_click=FeedbackState.fa_prev_page,
-                                          disabled=FeedbackState.fa_page == 0),
-                                rx.text(
-                                    "第 " + (FeedbackState.fa_page + 1).to_string()
-                                    + " 页 / 共 "
-                                    + (((FeedbackState.fa_total + 19) // 20).to_string())
-                                    + " 页（" + FeedbackState.fa_total.to_string() + " 条）",
-                                    size="1", color="#64748b",
-                                ),
-                                rx.button("下一页 ›", size="1", variant="soft",
-                                          on_click=FeedbackState.fa_next_page,
-                                          disabled=(FeedbackState.fa_page + 1) * 20 >= FeedbackState.fa_total),
-                                spacing="2",
-                                align="center",
-                            ),
-                        ),
-                        spacing="3",
-                        width="100%",
-                        max_width="860px",
-                    ),
+                    href="/",
+                    style={
+                        "text_decoration": "none",
+                        "color": "white",
+                        "background": "linear-gradient(135deg, #2563eb, #3b82f6)",
+                        "padding": "10px 20px",
+                        "border_radius": "10px",
+                        "font_weight": "medium",
+                    },
                 ),
                 spacing="3",
-                width="100%",
-                max_width="860px",
+                align="start",
+                max_width="640px",
             ),
             class_name="app-container",
             width="100%",
         ),
-        _fa_detail_dialog(),
         background="#f1f5f9",
         min_height="100vh",
     )
@@ -7139,6 +8205,7 @@ def feedback_admin_page() -> rx.Component:
 # 管理员登录对话框
 # ═══════════════════════════════════════════════════════════════
 
+
 def admin_login_dialog() -> rx.Component:
     """管理员登录对话框（模态）"""
     return rx.cond(
@@ -7146,9 +8213,7 @@ def admin_login_dialog() -> rx.Component:
         rx.dialog.root(
             rx.dialog.content(
                 rx.dialog.title("管理员登录"),
-                rx.dialog.description(
-                    "输入管理员密码以访问发布管理功能。"
-                ),
+                rx.dialog.description("输入管理员密码以访问发布管理功能。"),
                 rx.vstack(
                     rx.input(
                         type="password",
@@ -7195,6 +8260,7 @@ def admin_login_dialog() -> rx.Component:
 # 发布管理 Tab
 # ═══════════════════════════════════════════════════════════════
 
+
 def release_tab() -> rx.Component:
     """发布管理页面（管理员登录后可见）"""
     return rx.vstack(
@@ -7214,7 +8280,9 @@ def release_tab() -> rx.Component:
                     ),
                     rx.cond(
                         State.admin_is_default_pwd,
-                        rx.badge("使用默认密码，请修改", color_scheme="red", variant="soft"),
+                        rx.badge(
+                            "使用默认密码，请修改", color_scheme="red", variant="soft"
+                        ),
                     ),
                     spacing="2",
                     width="100%",
@@ -7223,38 +8291,91 @@ def release_tab() -> rx.Component:
                     State.release_current != {},
                     rx.vstack(
                         rx.hstack(
-                            rx.text("版本号:", font_weight="medium", width="100px", color="gray"),
-                            rx.text(State.release_current["version"], size="2", font_weight="semibold"),
+                            rx.text(
+                                "版本号:",
+                                font_weight="medium",
+                                width="100px",
+                                color="gray",
+                            ),
+                            rx.text(
+                                State.release_current["version"],
+                                size="2",
+                                font_weight="semibold",
+                            ),
                             width="100%",
                         ),
                         rx.hstack(
-                            rx.text("文件名:", font_weight="medium", width="100px", color="gray"),
+                            rx.text(
+                                "文件名:",
+                                font_weight="medium",
+                                width="100px",
+                                color="gray",
+                            ),
                             rx.text(State.release_current["exe_name"], size="2"),
                             width="100%",
                         ),
                         rx.hstack(
-                            rx.text("大小:", font_weight="medium", width="100px", color="gray"),
+                            rx.text(
+                                "大小:",
+                                font_weight="medium",
+                                width="100px",
+                                color="gray",
+                            ),
                             rx.text(State.release_current["size_mb"] + " MB", size="2"),
                             width="100%",
                         ),
                         rx.hstack(
-                            rx.text("发布时间:", font_weight="medium", width="100px", color="gray"),
+                            rx.text(
+                                "发布时间:",
+                                font_weight="medium",
+                                width="100px",
+                                color="gray",
+                            ),
                             rx.text(State.release_current["published_at"], size="2"),
                             width="100%",
                         ),
                         rx.hstack(
-                            rx.text("下载地址:", font_weight="medium", width="100px", color="gray"),
-                            rx.text(State.release_current["url"], size="1", color="blue", word_break="break-all"),
+                            rx.text(
+                                "下载地址:",
+                                font_weight="medium",
+                                width="100px",
+                                color="gray",
+                            ),
+                            rx.text(
+                                State.release_current["url"],
+                                size="1",
+                                color="blue",
+                                word_break="break-all",
+                            ),
                             width="100%",
                         ),
                         rx.hstack(
-                            rx.text("SHA-256:", font_weight="medium", width="100px", color="gray"),
-                            rx.code(State.release_current["sha256"], size="1", word_break="break-all"),
+                            rx.text(
+                                "SHA-256:",
+                                font_weight="medium",
+                                width="100px",
+                                color="gray",
+                            ),
+                            rx.code(
+                                State.release_current["sha256"],
+                                size="1",
+                                word_break="break-all",
+                            ),
                             width="100%",
                         ),
                         rx.hstack(
-                            rx.text("更新说明:", font_weight="medium", width="100px", color="gray", align_self="flex-start"),
-                            rx.text(State.release_current["notes"], size="2", white_space="pre-wrap"),
+                            rx.text(
+                                "更新说明:",
+                                font_weight="medium",
+                                width="100px",
+                                color="gray",
+                                align_self="flex-start",
+                            ),
+                            rx.text(
+                                State.release_current["notes"],
+                                size="2",
+                                white_space="pre-wrap",
+                            ),
                             width="100%",
                         ),
                         spacing="2",
@@ -7282,7 +8403,11 @@ def release_tab() -> rx.Component:
                     rx.upload(
                         rx.vstack(
                             rx.icon("upload", size=32, color="#94a3b8"),
-                            rx.text("拖拽 exe 到此处，或点击选择文件", size="2", color="gray"),
+                            rx.text(
+                                "拖拽 exe 到此处，或点击选择文件",
+                                size="2",
+                                color="gray",
+                            ),
                             rx.text("支持 .exe，最大 500MB", size="1", color="#94a3b8"),
                             spacing="2",
                             align="center",
@@ -7311,8 +8436,16 @@ def release_tab() -> rx.Component:
                         State.release_upload_name != "",
                         rx.hstack(
                             rx.icon("file_check", size=18, color="#16a34a"),
-                            rx.text(State.release_upload_name, size="2", font_weight="medium"),
-                            rx.text(f"（{State.release_upload_size_mb} MB）", size="1", color="gray"),
+                            rx.text(
+                                State.release_upload_name,
+                                size="2",
+                                font_weight="medium",
+                            ),
+                            rx.text(
+                                f"（{State.release_upload_size_mb} MB）",
+                                size="1",
+                                color="gray",
+                            ),
                             spacing="2",
                             align="center",
                         ),
@@ -7368,8 +8501,12 @@ def release_tab() -> rx.Component:
                     rx.upload(
                         rx.vstack(
                             rx.icon("image", size=24, color="#94a3b8"),
-                            rx.text("拖拽截图到此处，或点击选择", size="2", color="gray"),
-                            rx.text("支持 png/jpg/jpeg/gif/webp", size="1", color="#94a3b8"),
+                            rx.text(
+                                "拖拽截图到此处，或点击选择", size="2", color="gray"
+                            ),
+                            rx.text(
+                                "支持 png/jpg/jpeg/gif/webp", size="1", color="#94a3b8"
+                            ),
                             spacing="1",
                             align="center",
                             justify="center",
@@ -7391,7 +8528,9 @@ def release_tab() -> rx.Component:
                         State.release_screenshot_uploaded,
                         rx.hstack(
                             rx.icon("check_check", size=16, color="#16a34a"),
-                            rx.text("截图已上传，发布时一起更新", size="1", color="#16a34a"),
+                            rx.text(
+                                "截图已上传，发布时一起更新", size="1", color="#16a34a"
+                            ),
                             spacing="1",
                         ),
                     ),
@@ -7409,8 +8548,16 @@ def release_tab() -> rx.Component:
                     rx.upload(
                         rx.vstack(
                             rx.icon("file-text", size=24, color="#94a3b8"),
-                            rx.text("拖拽 README 文件到此处，或点击选择", size="2", color="gray"),
-                            rx.text("支持 md/markdown/txt 文本文件", size="1", color="#94a3b8"),
+                            rx.text(
+                                "拖拽 README 文件到此处，或点击选择",
+                                size="2",
+                                color="gray",
+                            ),
+                            rx.text(
+                                "支持 md/markdown/txt 文本文件",
+                                size="1",
+                                color="#94a3b8",
+                            ),
                             spacing="1",
                             align="center",
                             justify="center",
@@ -7433,7 +8580,11 @@ def release_tab() -> rx.Component:
                         State.release_readme_name != "",
                         rx.hstack(
                             rx.icon("check_check", size=16, color="#16a34a"),
-                            rx.text(f"已加载 {State.release_readme_name}，发布时一起更新", size="1", color="#16a34a"),
+                            rx.text(
+                                f"已加载 {State.release_readme_name}，发布时一起更新",
+                                size="1",
+                                color="#16a34a",
+                            ),
                             spacing="1",
                         ),
                     ),
@@ -7450,7 +8601,11 @@ def release_tab() -> rx.Component:
                     State.release_publishing,
                     rx.vstack(
                         rx.progress(value=State.release_progress, width="100%"),
-                        rx.text(f"SHA-256 计算中... {State.release_progress}%", size="1", color="gray"),
+                        rx.text(
+                            f"SHA-256 计算中... {State.release_progress}%",
+                            size="1",
+                            color="gray",
+                        ),
                         spacing="1",
                         width="100%",
                     ),
@@ -7461,7 +8616,12 @@ def release_tab() -> rx.Component:
                     rx.vstack(
                         rx.cond(
                             State.release_status_type == "success",
-                            rx.text(State.release_status, size="2", color="green", font_weight="semibold"),
+                            rx.text(
+                                State.release_status,
+                                size="2",
+                                color="green",
+                                font_weight="semibold",
+                            ),
                         ),
                         rx.cond(
                             State.release_status_type == "error",
@@ -7579,7 +8739,9 @@ def release_tab() -> rx.Component:
                             rx.foreach(
                                 State.release_history,
                                 lambda item: rx.table.row(
-                                    rx.table.cell(item["version"], font_weight="medium"),
+                                    rx.table.cell(
+                                        item["version"], font_weight="medium"
+                                    ),
                                     rx.table.cell(item["size_mb"] + " MB"),
                                     rx.table.cell(item["archived_at"], size="1"),
                                     rx.table.cell(
@@ -7589,14 +8751,18 @@ def release_tab() -> rx.Component:
                                                 size="1",
                                                 variant="soft",
                                                 color_scheme="amber",
-                                                on_click=lambda: State.rollback_version(item["version"]),
+                                                on_click=lambda: State.rollback_version(
+                                                    item["version"]
+                                                ),
                                             ),
                                             rx.button(
                                                 "删除",
                                                 size="1",
                                                 variant="soft",
                                                 color_scheme="red",
-                                                on_click=lambda: State.delete_history_version(item["version"]),
+                                                on_click=lambda: State.delete_history_version(
+                                                    item["version"]
+                                                ),
                                             ),
                                             spacing="2",
                                         ),
@@ -7686,6 +8852,7 @@ def release_tab() -> rx.Component:
 # 查询 Tab
 # ═══════════════════════════════════════════════════════════════
 
+
 def lookup_tab() -> rx.Component:
     """查询（根据当前协议自动切换查询类型）"""
     return rx.vstack(
@@ -7695,7 +8862,11 @@ def lookup_tab() -> rx.Component:
                     rx.icon("search", size=20, color="#2563eb"),
                     rx.heading(State.lookup_title, size="3", font_weight="semibold"),
                     rx.spacer(),
-                    rx.badge(f"{State.lookup_results.length()} 条", color_scheme="blue", variant="soft"),
+                    rx.badge(
+                        f"{State.lookup_results.length()} 条",
+                        color_scheme="blue",
+                        variant="soft",
+                    ),
                     spacing="2",
                 ),
                 rx.hstack(
@@ -7716,7 +8887,11 @@ def lookup_tab() -> rx.Component:
                     ),
                     spacing="3",
                 ),
-                rx.text("提示：切换协议会自动切换查询类型（DI/AFN/OBIS/OI/业务标识等）", size="1", color="gray"),
+                rx.text(
+                    "提示：切换协议会自动切换查询类型（DI/AFN/OBIS/OI/业务标识等）",
+                    size="1",
+                    color="gray",
+                ),
                 spacing="3",
                 width="100%",
             ),
@@ -7748,7 +8923,7 @@ def lookup_tab() -> rx.Component:
                                                 font_size="12px",
                                             ),
                                         )
-                                    )
+                                    ),
                                 )
                             ),
                             variant="surface",
@@ -7760,7 +8935,11 @@ def lookup_tab() -> rx.Component:
                     rx.center(
                         rx.vstack(
                             rx.icon("search", size=48, color="#9ca3af"),
-                            rx.text("点击「搜索」或切换协议查看查询数据", color="#6b7280", size="2"),
+                            rx.text(
+                                "点击「搜索」或切换协议查看查询数据",
+                                color="#6b7280",
+                                size="2",
+                            ),
                             spacing="2",
                             padding="8",
                         ),
@@ -7780,6 +8959,7 @@ def lookup_tab() -> rx.Component:
 # ═══════════════════════════════════════════════════════════════
 # 报文工具 Tab
 # ═══════════════════════════════════════════════════════════════
+
 
 def message_tool_tab() -> rx.Component:
     """报文工具（对齐 GUI 版功能）"""
@@ -8139,7 +9319,12 @@ body {
   background: #ffffff;
   border-radius: 12px 12px 0 0;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  /* 仅横向滚动（窄屏时）；纵向必须 hidden —— overflow-x:auto 会让
+     overflow-y 的 visible 变 auto，Tab 按钮高度略超容器时右侧
+     会出现一条无意义的垂直滚动条 */
   overflow-x: auto;
+  overflow-y: hidden;
+  align-items: stretch;
   padding: 0 8px;
 }
 .app-tab {
@@ -8189,43 +9374,63 @@ def index() -> rx.Component:
                 rx.el.button(
                     rx.hstack(rx.icon("file_input", size=16), "单帧解析", spacing="1"),
                     on_click=lambda: State.set_tab("single"),
-                    class_name=rx.cond(State.active_tab == "single", "app-tab app-tab-active", "app-tab"),
+                    class_name=rx.cond(
+                        State.active_tab == "single",
+                        "app-tab app-tab-active",
+                        "app-tab",
+                    ),
                     data_testid="tab-single",
                 ),
                 rx.el.button(
                     rx.hstack(rx.icon("list", size=16), "批量解析", spacing="1"),
                     on_click=lambda: State.set_tab("batch"),
-                    class_name=rx.cond(State.active_tab == "batch", "app-tab app-tab-active", "app-tab"),
+                    class_name=rx.cond(
+                        State.active_tab == "batch", "app-tab app-tab-active", "app-tab"
+                    ),
                     data_testid="tab-batch",
                 ),
                 rx.el.button(
                     rx.hstack(rx.icon("square_pen", size=16), "协议组帧", spacing="1"),
                     on_click=lambda: State.set_tab("frame"),
-                    class_name=rx.cond(State.active_tab == "frame", "app-tab app-tab-active", "app-tab"),
+                    class_name=rx.cond(
+                        State.active_tab == "frame", "app-tab app-tab-active", "app-tab"
+                    ),
                     data_testid="tab-frame",
                 ),
                 rx.el.button(
                     rx.hstack(rx.icon("git_compare", size=16), "报文对比", spacing="1"),
                     on_click=lambda: State.set_tab("diff"),
-                    class_name=rx.cond(State.active_tab == "diff", "app-tab app-tab-active", "app-tab"),
+                    class_name=rx.cond(
+                        State.active_tab == "diff", "app-tab app-tab-active", "app-tab"
+                    ),
                     data_testid="tab-diff",
                 ),
                 rx.el.button(
                     rx.hstack(rx.icon("search", size=16), "查询", spacing="1"),
                     on_click=lambda: State.set_tab("lookup"),
-                    class_name=rx.cond(State.active_tab == "lookup", "app-tab app-tab-active", "app-tab"),
+                    class_name=rx.cond(
+                        State.active_tab == "lookup",
+                        "app-tab app-tab-active",
+                        "app-tab",
+                    ),
                     data_testid="tab-lookup",
                 ),
                 rx.el.button(
                     rx.hstack(rx.icon("wrench", size=16), "报文工具", spacing="1"),
                     on_click=lambda: State.set_tab("tool"),
-                    class_name=rx.cond(State.active_tab == "tool", "app-tab app-tab-active", "app-tab"),
+                    class_name=rx.cond(
+                        State.active_tab == "tool", "app-tab app-tab-active", "app-tab"
+                    ),
                     data_testid="tab-tool",
                 ),
                 rx.el.button(
                     rx.hstack(rx.icon("download", size=16), "客户端下载", spacing="1"),
                     on_click=lambda: State.set_tab("download"),
-                    class_name=rx.cond(State.active_tab == "download", "app-tab app-tab-active", "app-tab"),
+                    class_name=rx.cond(
+                        State.active_tab == "download",
+                        "app-tab app-tab-active",
+                        "app-tab",
+                    ),
                     data_testid="tab-download",
                 ),
                 # 发布管理 tab（仅登录后显示）
@@ -8234,9 +9439,34 @@ def index() -> rx.Component:
                     rx.el.button(
                         rx.hstack(rx.icon("rocket", size=16), "发布管理", spacing="1"),
                         on_click=lambda: State.set_tab("release"),
-                        class_name=rx.cond(State.active_tab == "release", "app-tab app-tab-active", "app-tab"),
+                        class_name=rx.cond(
+                            State.active_tab == "release",
+                            "app-tab app-tab-active",
+                            "app-tab",
+                        ),
                         data_testid="tab-release",
                     ),
+                ),
+                # 问题反馈列表 tab（所有人可见；管理操作仅登录后）
+                # on_click 事件链：主 State 切 tab + FeedbackState 拉取列表 ——
+                # Reflex 中各 State 的 delta 随各自事件推送，主 State 事件内
+                # 直接改 FeedbackState 前端收不到，故必须双事件触发
+                rx.el.button(
+                    rx.hstack(
+                        rx.icon("message_square_heart", size=16),
+                        "问题反馈",
+                        spacing="1",
+                    ),
+                    on_click=[
+                        lambda: State.set_tab("feedback"),
+                        FeedbackState.fa_load,
+                    ],
+                    class_name=rx.cond(
+                        State.active_tab == "feedback",
+                        "app-tab app-tab-active",
+                        "app-tab",
+                    ),
+                    data_testid="tab-feedback",
                 ),
                 class_name="app-tabbar",
                 width="100%",
@@ -8261,9 +9491,13 @@ def index() -> rx.Component:
                                     State.active_tab == "download",
                                     download_tab(),
                                     rx.cond(
-                                        State.active_tab == "release",
-                                        release_tab(),
-                                        lookup_tab(),
+                                        State.active_tab == "feedback",
+                                        feedback_list_tab(),
+                                        rx.cond(
+                                            State.active_tab == "release",
+                                            release_tab(),
+                                            lookup_tab(),
+                                        ),
                                     ),
                                 ),
                             ),
@@ -8300,12 +9534,15 @@ app = rx.App(
 
 app.add_page(index, route="/", title="多协议解析平台")
 app.add_page(feedback_page, route="/feedback", title="问题反馈 - 多协议解析平台")
-app.add_page(feedback_admin_page, route="/feedback-admin", title="反馈管理 - 多协议解析平台")
+app.add_page(
+    feedback_admin_page, route="/feedback-admin", title="反馈管理 - 多协议解析平台"
+)
 
 
 # ═══════════════════════════════════════════════════════════════
 # 开发模式下载路由（生产模式由 run_app.py 的 ASGI 中间件提供）
 # ═══════════════════════════════════════════════════════════════
+
 
 def _get_downloads_dir() -> Path:
     """获取 downloads 目录路径"""
@@ -8321,9 +9558,10 @@ async def _dev_download_handler(request):
 
     生产模式（run_app.py）由 ASGI 中间件 _serve_download 提供。
     """
-    from starlette.responses import FileResponse, PlainTextResponse
-    from urllib.parse import unquote
     import mimetypes
+    from urllib.parse import unquote
+
+    from starlette.responses import FileResponse, PlainTextResponse
 
     path = request.path_params.get("path", "")
     filename = unquote(path)
@@ -8354,6 +9592,7 @@ async def _dev_download_handler(request):
     # exe 强制下载
     if file_path.suffix.lower() == ".exe":
         from urllib.parse import quote
+
         ascii_name = file_path.name.encode("ascii", "ignore").decode("ascii")
         if ascii_name == file_path.name:
             disp = f'attachment; filename="{file_path.name}"'
@@ -8374,14 +9613,20 @@ async def _dev_download_handler(request):
 #   /download/       —— 生产模式（run_app.py 中间件）直连
 #   /api/download/   —— 开发模式 Vite 会把 /api/* 代理到后端
 from starlette.routing import Route
-app._api.routes.insert(0, Route("/download/{path:path}", _dev_download_handler, methods=["GET"]))
-app._api.routes.insert(0, Route("/api/download/{path:path}", _dev_download_handler, methods=["GET"]))
+
+app._api.routes.insert(
+    0, Route("/download/{path:path}", _dev_download_handler, methods=["GET"])
+)
+app._api.routes.insert(
+    0, Route("/api/download/{path:path}", _dev_download_handler, methods=["GET"])
+)
 
 
 def _get_fbimg_dir() -> Path:
     """反馈截图目录 reflex_web/data/uploads/feedback/"""
     try:
         from . import feedback_model
+
         return feedback_model.uploads_dir()
     except Exception:
         return Path(__file__).resolve().parent.parent / "data" / "uploads" / "feedback"
@@ -8392,9 +9637,10 @@ async def _dev_fbimg_handler(request):
 
     生产模式（run_app.py）由 ASGI 中间件 _serve_fbimg 提供。
     """
-    from starlette.responses import FileResponse, PlainTextResponse
-    from urllib.parse import unquote
     import mimetypes
+    from urllib.parse import unquote
+
+    from starlette.responses import FileResponse, PlainTextResponse
 
     path = request.path_params.get("path", "")
     filename = unquote(path)
@@ -8417,5 +9663,132 @@ async def _dev_fbimg_handler(request):
     return FileResponse(str(file_path), media_type=mime or "application/octet-stream")
 
 
-app._api.routes.insert(0, Route("/fbimg/{path:path}", _dev_fbimg_handler, methods=["GET"]))
-app._api.routes.insert(0, Route("/api/fbimg/{path:path}", _dev_fbimg_handler, methods=["GET"]))
+app._api.routes.insert(
+    0, Route("/fbimg/{path:path}", _dev_fbimg_handler, methods=["GET"])
+)
+app._api.routes.insert(
+    0, Route("/api/fbimg/{path:path}", _dev_fbimg_handler, methods=["GET"])
+)
+
+
+# ═══════════════════════════════════════════════════════════════
+# 反馈提交 HTTP API（GUI 客户端等外部调用，dev 模式路由；
+# 生产模式由 run_app.py 中间件提供同名 /api/feedback 分支）
+# ═══════════════════════════════════════════════════════════════
+
+# 简单滑动窗口频率限制：{ip: [timestamps]}，60 秒内最多 5 条
+_FEEDBACK_RATE: dict = {}
+_FEEDBACK_RATE_WINDOW = 60.0
+_FEEDBACK_RATE_MAX = 5
+
+
+def _feedback_rate_check(ip: str) -> bool:
+    """True=允许提交；False=超频（60s 窗口内第 6 条起拒绝）。"""
+    import time as _time
+
+    now = _time.time()
+    bucket = [t for t in _FEEDBACK_RATE.get(ip, []) if now - t < _FEEDBACK_RATE_WINDOW]
+    if len(bucket) >= _FEEDBACK_RATE_MAX:
+        _FEEDBACK_RATE[ip] = bucket
+        return False
+    bucket.append(now)
+    _FEEDBACK_RATE[ip] = bucket
+    return True
+
+
+def _feedback_json_response(payload: dict, status: int = 200, request=None):
+    """JSON 响应（CORS 反射 Origin；GUI Qt 网络栈不校验 CORS，浏览器调试需要）。
+
+    反射 Origin 而非通配 *：接口无凭据（无 cookie/登录态），任意源反射
+    等价于 * 且通过 no-wildcard-cors 规则；无 Origin（Qt/curl）时不带头。
+    """
+    import json as _json
+
+    from starlette.responses import Response
+
+    headers = {}
+    origin = request.headers.get("origin") if request is not None else ""
+    if origin:
+        headers["Access-Control-Allow-Origin"] = origin
+    return Response(
+        content=_json.dumps(payload, ensure_ascii=False),
+        status_code=status,
+        media_type="application/json; charset=utf-8",
+        headers=headers,
+    )
+
+
+async def _dev_feedback_api_handler(request):
+    """Starlette 路由：POST /api/feedback（dev 模式）。
+
+    生产模式（run_app.py）由 ASGI 中间件 _handle_feedback_api 提供，
+    两者共用 feedback_model.submit_from_api 纯逻辑。
+    """
+    from . import feedback_model as fm
+
+    if request.method == "OPTIONS":
+        return _feedback_json_response({}, 204, request)
+
+    ip = request.client.host if request.client else "unknown"
+    if not _feedback_rate_check(ip):
+        return _feedback_json_response(
+            {"ok": False, "error": "提交过于频繁，请稍后再试"}, 429, request
+        )
+
+    try:
+        form = await request.form()
+    except Exception as e:
+        return _feedback_json_response(
+            {"ok": False, "error": f"请求体解析失败: {e}"}, 400, request
+        )
+
+    fields = {
+        "issue_type": form.get("issue_type", ""),
+        "protocol": form.get("protocol", ""),
+        "description": form.get("description", ""),
+        "contact": form.get("contact", ""),
+        "sys_info": form.get("sys_info", ""),
+        "source": form.get("source", "gui"),
+    }
+    files = []
+    for key in ("screenshots", "screenshot"):
+        for up in form.getlist(key):
+            data = await up.read()
+            name = getattr(up, "filename", None) or "shot.png"
+            files.append((name, data))
+
+    ok, result, status = fm.submit_from_api(fields, files)
+    if ok:
+        return _feedback_json_response({"ok": True, "id": int(result)}, status, request)
+    return _feedback_json_response({"ok": False, "error": str(result)}, status, request)
+
+
+async def _dev_feedback_config_handler(request):
+    """GET /api/feedback/config：GUI 拉取字段约束（失败不阻塞 GUI 提交）。"""
+    from . import feedback_model as fm
+
+    return _feedback_json_response(
+        {
+            "ok": True,
+            "issue_types": fm.ISSUE_TYPES,
+            "max_desc_len": fm.MAX_DESC_LEN,
+            "max_contact_len": fm.MAX_CONTACT_LEN,
+            "max_screenshots": fm.MAX_SCREENSHOTS,
+            "max_size_mb": fm.MAX_SCREENSHOT_SIZE // (1024 * 1024),
+        }
+    )
+
+
+from starlette.routing import Route as _FbRoute
+
+app._api.routes.insert(
+    0,
+    _FbRoute(
+        "/api/feedback",
+        _dev_feedback_api_handler,
+        methods=["POST", "OPTIONS"],
+    ),
+)
+app._api.routes.insert(
+    0, _FbRoute("/api/feedback/config", _dev_feedback_config_handler, methods=["GET"])
+)

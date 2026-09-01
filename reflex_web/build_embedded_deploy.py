@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """Build a self-contained deployment folder with embedded Python runtime.
 
 This script creates a deployment directory that includes:
@@ -20,15 +19,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import io
-import os
 import shutil
 import subprocess
 import sys
+import urllib.request
 import zipfile
 from pathlib import Path
-import urllib.request
-
 
 ROOT = Path(__file__).resolve().parents[1]
 REFLEX_WEB = ROOT / "reflex_web"
@@ -54,7 +50,9 @@ PYTHON_EMBED_URLS = {
 GET_PIP_URL = "https://bootstrap.pypa.io/get-pip.py"
 
 
-def run_command(command: list[str], cwd: Path | None = None, check: bool = True) -> subprocess.CompletedProcess:
+def run_command(
+    command: list[str], cwd: Path | None = None, check: bool = True
+) -> subprocess.CompletedProcess:
     display = " ".join(str(part) for part in command)
     print(f"==> {display}")
     return subprocess.run(command, cwd=cwd, check=check)
@@ -89,16 +87,25 @@ def compile_lockfile(python_version: str) -> None:
         raise SystemExit(f"缺少依赖清单: {REQUIREMENTS_IN}")
     # 若 lock 已存在且比 in 新，说明依赖清单未变，直接复用无需重新编译
     # （增量构建场景依赖几乎不动，省掉每次 uv pip compile 的秒~分钟级开销）
-    if REQUIREMENTS_LOCK.exists() and REQUIREMENTS_LOCK.stat().st_mtime >= REQUIREMENTS_IN.stat().st_mtime:
+    if (
+        REQUIREMENTS_LOCK.exists()
+        and REQUIREMENTS_LOCK.stat().st_mtime >= REQUIREMENTS_IN.stat().st_mtime
+    ):
         print(f"==> 依赖锁文件已是最新: {REQUIREMENTS_LOCK.name}，跳过重新编译")
         return
-    run_command([
-        "uv", "pip", "compile",
-        str(REQUIREMENTS_IN),
-        "-o", str(REQUIREMENTS_LOCK),
-        "--python", python_version,
-        "--no-annotate",
-    ])
+    run_command(
+        [
+            "uv",
+            "pip",
+            "compile",
+            str(REQUIREMENTS_IN),
+            "-o",
+            str(REQUIREMENTS_LOCK),
+            "--python",
+            python_version,
+            "--no-annotate",
+        ]
+    )
 
 
 def _frontend_sources() -> list[Path]:
@@ -122,7 +129,11 @@ def _frontend_sources() -> list[Path]:
 def ensure_frontend(*, force: bool = False) -> None:
     if not force and FRONTEND_CLIENT.exists():
         newest_src = _frontend_sources()
-        newest_src = max(newest_src, key=lambda p: p.stat().st_mtime, default=None) if newest_src else None
+        newest_src = (
+            max(newest_src, key=lambda p: p.stat().st_mtime, default=None)
+            if newest_src
+            else None
+        )
         newest_ts = newest_src.stat().st_mtime if newest_src else 0
         newest_client_ts = max(
             (p.stat().st_mtime for p in FRONTEND_CLIENT.rglob("*") if p.is_file()),
@@ -199,7 +210,11 @@ def copy_runtime_files(out_dir: Path) -> None:
     # Copy reflex_web directory (excluding build artifacts)
     web_dest = out_dir / "reflex_web"
     _BASE_IGNORE = {
-        "__pycache__", ".states", ".tests", "tests", "reflex.lock",
+        "__pycache__",
+        ".states",
+        ".tests",
+        "tests",
+        "reflex.lock",
         "uploaded_files",
     }
 
@@ -226,7 +241,9 @@ def install_embedded_python_windows(out_dir: Path, python_version: str) -> Path:
     # Download embeddable package
     url = PYTHON_EMBED_URLS.get(python_version)
     if not url:
-        raise SystemExit(f"不支持的 Python 版本: {python_version}。支持: {list(PYTHON_EMBED_URLS.keys())}")
+        raise SystemExit(
+            f"不支持的 Python 版本: {python_version}。支持: {list(PYTHON_EMBED_URLS.keys())}"
+        )
 
     zip_path = python_dir / "python-embed.zip"
     download_file(url, zip_path)
@@ -256,18 +273,31 @@ def install_embedded_python_windows(out_dir: Path, python_version: str) -> Path:
 
     # Install setuptools and wheel first (needed for building crcmod from source)
     print("==> 安装 setuptools + wheel...")
-    run_command([
-        str(python_exe), "-m", "pip", "install", "setuptools", "wheel",
-        "--no-warn-script-location",
-    ])
+    run_command(
+        [
+            str(python_exe),
+            "-m",
+            "pip",
+            "install",
+            "setuptools",
+            "wheel",
+            "--no-warn-script-location",
+        ]
+    )
 
     # Install dependencies from lock file
     print("==> 安装依赖...")
-    run_command([
-        str(python_exe), "-m", "pip", "install",
-        "-r", str(REQUIREMENTS_LOCK),
-        "--no-warn-script-location",
-    ])
+    run_command(
+        [
+            str(python_exe),
+            "-m",
+            "pip",
+            "install",
+            "-r",
+            str(REQUIREMENTS_LOCK),
+            "--no-warn-script-location",
+        ]
+    )
 
     # Clean up pip and setuptools to save space (optional)
     # run_command([str(python_exe), "-m", "pip", "uninstall", "-y", "pip", "setuptools"])
@@ -282,10 +312,16 @@ def install_embedded_python_linux(out_dir: Path, python_version: str) -> Path:
 
     # Use UV to install Python into the directory
     print(f"==> 使用 UV 安装 Python {python_version}...")
-    run_command([
-        "uv", "python", "install", python_version,
-        "--install-dir", str(python_dir),
-    ])
+    run_command(
+        [
+            "uv",
+            "python",
+            "install",
+            python_version,
+            "--install-dir",
+            str(python_dir),
+        ]
+    )
 
     # Find the installed Python executable
     python_bin = python_dir / "bin" / "python"
@@ -306,11 +342,17 @@ def install_embedded_python_linux(out_dir: Path, python_version: str) -> Path:
 
     # Install dependencies
     print("==> 安装依赖...")
-    run_command([
-        str(python_bin), "-m", "pip", "install",
-        "-r", str(REQUIREMENTS_LOCK),
-        "--no-warn-script-location",
-    ])
+    run_command(
+        [
+            str(python_bin),
+            "-m",
+            "pip",
+            "install",
+            "-r",
+            str(REQUIREMENTS_LOCK),
+            "--no-warn-script-location",
+        ]
+    )
 
     return python_bin
 
@@ -323,8 +365,8 @@ def write_launchers(out_dir: Path, python_exe: Path, is_windows: bool) -> None:
         python_rel = "python\\python.exe"
         out_dir.joinpath("start_web.cmd").write_text(
             "@echo off\r\n"
-            "cd /d \"%~dp0\"\r\n"
-            f"\"{python_rel}\" \"reflex_web\\run_app.py\" --host {host} --port 8080 %*\r\n",
+            'cd /d "%~dp0"\r\n'
+            f'"{python_rel}" "reflex_web\\run_app.py" --host {host} --port 8080 %*\r\n',
             encoding="utf-8",
         )
 
@@ -341,8 +383,8 @@ def write_launchers(out_dir: Path, python_exe: Path, is_windows: bool) -> None:
         out_dir.joinpath("start_web.sh").write_text(
             "#!/usr/bin/env bash\n"
             "set -e\n"
-            "cd \"$(dirname \"$0\")\"\n"
-            f"exec \"./python/bin/python\" \"reflex_web/run_app.py\" --host {host} --port 8080 \"$@\"\n",
+            'cd "$(dirname "$0")"\n'
+            f'exec "./python/bin/python" "reflex_web/run_app.py" --host {host} --port 8080 "$@"\n',
             encoding="utf-8",
         )
         out_dir.joinpath("start_web.sh").chmod(0o755)
@@ -370,7 +412,9 @@ def write_launchers(out_dir: Path, python_exe: Path, is_windows: bool) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Build embedded Python deployment for Reflex Web")
+    parser = argparse.ArgumentParser(
+        description="Build embedded Python deployment for Reflex Web"
+    )
     parser.add_argument(
         "--python-version",
         default="3.12",
@@ -387,7 +431,7 @@ def main() -> None:
         "--skip-deps",
         action="store_true",
         help="增量构建：复用已有内嵌 Python 解释器与 site-packages 依赖，"
-             "只刷新源码与数据文件（大幅缩短重复构建时间）",
+        "只刷新源码与数据文件（大幅缩短重复构建时间）",
     )
     args = parser.parse_args()
 
@@ -421,11 +465,19 @@ def main() -> None:
         try:
             if keep_python:
                 # 先移走 python/ 到临时目录，重建 out_dir 后再移回，避免整目录 rmtree 丢失依赖
-                shutil.rmtree(str(out_dir.with_name(out_dir.name + ".pytmp")), ignore_errors=True)
-                shutil.move(str(out_dir / "python"), str(out_dir.with_name(out_dir.name + ".pytmp")))
+                shutil.rmtree(
+                    str(out_dir.with_name(out_dir.name + ".pytmp")), ignore_errors=True
+                )
+                shutil.move(
+                    str(out_dir / "python"),
+                    str(out_dir.with_name(out_dir.name + ".pytmp")),
+                )
                 shutil.rmtree(out_dir)
                 out_dir.mkdir(parents=True)
-                shutil.move(str(out_dir.with_name(out_dir.name + ".pytmp")), str(out_dir / "python"))
+                shutil.move(
+                    str(out_dir.with_name(out_dir.name + ".pytmp")),
+                    str(out_dir / "python"),
+                )
                 print("    增量保留 python/（内嵌解释器 + 依赖）")
             else:
                 shutil.rmtree(out_dir)

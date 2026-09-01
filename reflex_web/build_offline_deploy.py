@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """Build a relocatable UV deployment folder for the Reflex Web app.
 
 This script is intended to run on a machine that has network access and UV
@@ -26,7 +25,6 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-
 
 ROOT = Path(__file__).resolve().parents[1]
 REFLEX_WEB = ROOT / "reflex_web"
@@ -57,17 +55,19 @@ def check_uv(python_version: str) -> None:
 def compile_lockfile(python_version: str) -> None:
     if not REQUIREMENTS_IN.exists():
         raise SystemExit(f"缺少依赖清单: {REQUIREMENTS_IN}")
-    run_command([
-        "uv",
-        "pip",
-        "compile",
-        str(REQUIREMENTS_IN),
-        "-o",
-        str(REQUIREMENTS_LOCK),
-        "--python",
-        python_version,
-        "--no-annotate",
-    ])
+    run_command(
+        [
+            "uv",
+            "pip",
+            "compile",
+            str(REQUIREMENTS_IN),
+            "-o",
+            str(REQUIREMENTS_LOCK),
+            "--python",
+            python_version,
+            "--no-annotate",
+        ]
+    )
 
 
 def _frontend_sources() -> list[Path]:
@@ -91,7 +91,11 @@ def _frontend_sources() -> list[Path]:
 def ensure_frontend(*, force: bool = False) -> None:
     if not force and FRONTEND_CLIENT.exists():
         newest_src = _frontend_sources()
-        newest_src = max(newest_src, key=lambda p: p.stat().st_mtime, default=None) if newest_src else None
+        newest_src = (
+            max(newest_src, key=lambda p: p.stat().st_mtime, default=None)
+            if newest_src
+            else None
+        )
         newest_ts = newest_src.stat().st_mtime if newest_src else 0
         newest_client_ts = max(
             (p.stat().st_mtime for p in FRONTEND_CLIENT.rglob("*") if p.is_file()),
@@ -131,7 +135,11 @@ def copy_runtime_files(out_dir: Path) -> None:
     web_dest = out_dir / "reflex_web"
 
     _BASE_IGNORE = {
-        "__pycache__", ".states", ".tests", "tests", "reflex.lock",
+        "__pycache__",
+        ".states",
+        ".tests",
+        "tests",
+        "reflex.lock",
         "uploaded_files",
     }
 
@@ -158,25 +166,31 @@ def copy_runtime_files(out_dir: Path) -> None:
 
 def build_relocatable_venv(out_dir: Path, python_version: str) -> Path:
     venv_dir = out_dir / ".venv"
-    run_command([
-        "uv",
-        "venv",
-        "--relocatable",
-        "--python",
-        python_version,
-        str(venv_dir),
-    ])
+    run_command(
+        [
+            "uv",
+            "venv",
+            "--relocatable",
+            "--python",
+            python_version,
+            str(venv_dir),
+        ]
+    )
 
-    venv_python = venv_dir / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
-    run_command([
-        "uv",
-        "pip",
-        "install",
-        "--python",
-        str(venv_python),
-        "-r",
-        str(REQUIREMENTS_LOCK),
-    ])
+    venv_python = venv_dir / (
+        "Scripts/python.exe" if sys.platform == "win32" else "bin/python"
+    )
+    run_command(
+        [
+            "uv",
+            "pip",
+            "install",
+            "--python",
+            str(venv_python),
+            "-r",
+            str(REQUIREMENTS_LOCK),
+        ]
+    )
     return venv_python
 
 
@@ -186,8 +200,8 @@ def write_launchers(out_dir: Path, venv_python: Path) -> None:
         venv_python_rel = ".venv\\Scripts\\python.exe"
         out_dir.joinpath("start_web.cmd").write_text(
             "@echo off\r\n"
-            "cd /d \"%~dp0\"\r\n"
-            f"\"{venv_python_rel}\" \"reflex_web\\run_app.py\" --host {host} --port 8080 %*\r\n",
+            'cd /d "%~dp0"\r\n'
+            f'"{venv_python_rel}" "reflex_web\\run_app.py" --host {host} --port 8080 %*\r\n',
             encoding="utf-8",
         )
         # PowerShell 启动脚本（调用外部程序需 & 运算符）
@@ -203,8 +217,8 @@ def write_launchers(out_dir: Path, venv_python: Path) -> None:
     out_dir.joinpath("start_web.sh").write_text(
         "#!/usr/bin/env sh\n"
         "set -e\n"
-        "cd \"$(dirname \"$0\")\"\n"
-        f"exec \".venv/bin/python\" \"reflex_web/run_app.py\" --host {host} --port 8080 \"$@\"\n",
+        'cd "$(dirname "$0")"\n'
+        f'exec ".venv/bin/python" "reflex_web/run_app.py" --host {host} --port 8080 "$@"\n',
         encoding="utf-8",
     )
 
@@ -255,7 +269,9 @@ def restore_data_dir(out_dir: Path, orig: Path | None) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Build a relocatable UV offline deployment folder")
+    parser = argparse.ArgumentParser(
+        description="Build a relocatable UV offline deployment folder"
+    )
     parser.add_argument(
         "--python-version",
         default="3.12",

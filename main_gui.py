@@ -88,10 +88,22 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.19.0"
-BUILD_DATE = "2026-08-31"  # 编译日期，每次打包前更新
+APP_VERSION = "1.20.0"
+BUILD_DATE = "2026-09-01"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    (
+        "1.20.0",
+        "2026-09-01",
+        [
+            "GUI 客户端新增『问题反馈』（帮助菜单）：新文件 feedback_dialog.py（QDialog），问题类型/涉及协议下拉、描述（≤2000 字实时计数）、联系方式、截图（≤3 张）；QNetworkAccessManager 异步 multipart 提交（零新依赖，20 秒超时），成功后可一键在浏览器打开反馈页；自动收集环境信息（版本/OS/Python/机器名/当前协议）随 sys_info 字段提交",
+            "Reflex Web 服务端开放反馈提交 API：POST /api/feedback（multipart，dev Starlette Route + 生产 run_app.py ASGI 中间件双实现，共用 feedback_model.submit_from_api 纯函数）与 GET /api/feedback/config（GUI 拉取字段约束）；滑动窗口频率限制（60 秒 5 条/IP，进程内计数）；CORS 反射 Origin（无凭据接口，Qt 不校验）；GUI 与 Web 页面提交共用同一 feedback.db，反馈列表为桌面端来源记录显示『桌面端』徽章、详情弹窗展示客户端环境信息",
+            "feedback_model 扩展：FeedbackItem 新增 source（web/gui 来源）与 sys_info（客户端环境信息）列，FeedbackStore 首次打开旧库自动 PRAGMA+ALTER TABLE 迁移（历史记录默认 source=web）；新增 submit_from_api（字段/截图全套校验+失败回滚已存文件）、parse_multipart（二进制安全手工解析，生产中间件用）、FeedbackRateLimiter（可注入窗口/上限）、api_config 纯函数",
+            "反馈服务器地址可配置：config.json 新增 \"feedback\" 段（server_url，默认 http://127.0.0.1:8000），对话框内可修改并持久化；部署后把地址改为 Web 服务器实际地址即可",
+            "测试：新增 test_feedback_api.py（31 项：提交/校验/截图回滚/multipart 解析/频率限制/旧库迁移/config）与 test_feedback_dialog.py（30 项：URL 规范化/config 读写/字段校验/sys_info/offscreen 对话框冒烟/截图增删/提交拦截）；回归 test_web_feedback 49 项、test_web_frame_gen_utils 63 项全过；真机端到端 curl 提交 → source=gui 落库验证",
+            "同批修复（上轮 1.19.0 验收发现）：reflex_web.py 缺 datetime import 致 Web 端提交报错；顶栏在独立页改为『返回主页』+管理员按钮跳回主页（弹窗组件仅挂主页）；Tab 栏 overflow-y hidden 消除多余垂直滚动条；反馈列表 Tab 改双事件链触发（Reflex 跨 State delta 不随主 State 事件推送）；详情弹窗关闭按钮显式绑 State + on_open_change 同步（受控弹窗）；FeedbackState 改继承主 State 使 admin_logged_in 可访问（修复管理员删除报 AttributeError）",
+        ],
+    ),
     (
         "1.19.0",
         "2026-08-31",
@@ -5655,8 +5667,29 @@ class MainWindow(QMainWindow):
         check_act = help_menu.addAction("检查更新(&C)")
         check_act.triggered.connect(self._check_update_manual)
 
+        feedback_act = help_menu.addAction("问题反馈(&F)...")
+        feedback_act.triggered.connect(self._show_feedback_dialog)
+
         about_action = help_menu.addAction("关于(&A)")
         about_action.triggered.connect(self._show_about_dialog)
+
+    # ==================== 问题反馈 ====================
+    def _show_feedback_dialog(self):
+        """帮助菜单「问题反馈」：打开桌面端反馈对话框（提交到 Web 反馈服务器，
+        与 Web 页面共用同一个 feedback.db）。懒 import 保持主程序启动轻量。"""
+        try:
+            from feedback_dialog import FeedbackDialog, set_config_path
+
+            set_config_path(self._config_path)
+            dlg = FeedbackDialog(
+                parent=self,
+                app_version=APP_VERSION,
+                build_date=BUILD_DATE,
+                protocol_name=self.protocol_combo.currentText(),
+            )
+            dlg.exec()
+        except Exception as e:  # noqa: BLE001 - 反馈功能不应影响主程序
+            QMessageBox.critical(self, "问题反馈", f"反馈功能打开失败：{e}")
 
     # ==================== 自动更新 ====================
     def _load_update_settings(self):
@@ -6546,7 +6579,10 @@ class MainWindow(QMainWindow):
         """
         hex_str = " ".join(f"{b:02X}" for b in frame_bytes)
         self.single_input.setPlainText(hex_str)
-        if 0 <= idx < self.protocol_combo.count() and self.protocol_combo.currentIndex() != idx:
+        if (
+            0 <= idx < self.protocol_combo.count()
+            and self.protocol_combo.currentIndex() != idx
+        ):
             self.protocol_combo.setCurrentIndex(idx)
         self.tab_widget.setCurrentIndex(0)
         self.parse_single()

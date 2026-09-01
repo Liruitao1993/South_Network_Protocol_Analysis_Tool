@@ -85,6 +85,8 @@ python reflex_web/run_app.py
 
 **问题反馈**：导航栏「问题反馈」入口（`/feedback`）——用户提交问题类型/涉及协议/描述/联系方式/截图（≤3 张）；管理员通过 `/feedback-admin`（复用发布管理口令）查看/标记状态/删除。数据存 `reflex_web/data/`（SQLite + 截图），**重新部署自动保留**，备份只需拷贝该目录。
 
+**桌面端问题反馈（1.20.0 起）**：GUI 客户端「帮助 → 问题反馈(F)...」打开反馈对话框，提交到 Web 服务端 `POST /api/feedback`，与网页反馈**共用同一个数据库**——主页「问题反馈」Tab 统一查看，桌面端来源的记录带「桌面端」徽章并附客户端环境信息。反馈服务器地址在对话框内可改（默认 `http://127.0.0.1:8000`，持久化到 `config.json` 的 `feedback.server_url`）。
+
 ### 部署到目标机器
 
 有两种方式将 Reflex Web 版部署到没有 Python 环境的目标机器：
@@ -102,9 +104,11 @@ python reflex_web/build_embedded_deploy.py --python-version 3.12
 
 **日常迭代构建（推荐）：** 源码/依赖几乎不动时，用增量模式只刷新源码层，复用已有内嵌 Python 与依赖，
 避免每次重新下载解释器 + 重装依赖（完整耗时 10+ 分钟 → 增量约 1 分钟）：
+
 ```bash
 python reflex_web/build_embedded_deploy.py --skip-deps
 ```
+
 仅首次构建、改依赖或换 Python 版本时才需要去掉 `--skip-deps` 完整重建。
 
 **方式二：UV 虚拟环境（需要目标机器有 Python）**

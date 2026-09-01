@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 南网协议解析工具 - Reflex Web 版启动器（用于 PyInstaller 打包 exe）
 
@@ -11,18 +10,18 @@
 用法：
     run_app.exe --port 8080 --host 0.0.0.0
 """
+
+import argparse
 import os
 import sys
-import argparse
-import tempfile
-import shutil
 from pathlib import Path
 
 
 def _get_resource_dir() -> Path:
     """获取资源根目录（PyInstaller 打包后为 sys._MEIPASS，开发时为脚本所在目录）"""
-    if hasattr(sys, "_MEIPASS"):
-        return Path(sys._MEIPASS)
+    meipass = getattr(sys, "_MEIPASS", None)  # PyInstaller 注入，pyright 不认识
+    if meipass:
+        return Path(meipass)
     # 开发模式：脚本在 reflex_web/ 目录下
     return Path(__file__).resolve().parent
 
@@ -57,7 +56,9 @@ def _setup_frontend_static(resource_dir: Path) -> Path:
 def main():
     parser = argparse.ArgumentParser(description="南网协议解析工具 - Reflex Web 版")
     parser.add_argument("--port", type=int, default=8080, help="监听端口（默认 8080）")
-    parser.add_argument("--host", type=str, default="0.0.0.0", help="监听地址（默认 0.0.0.0）")
+    parser.add_argument(
+        "--host", type=str, default="0.0.0.0", help="监听地址（默认 0.0.0.0）"
+    )
     args = parser.parse_args()
 
     # 获取资源目录
@@ -102,12 +103,14 @@ def main():
     # （目标服务器没有 Node.js，会导致 FileNotFoundError: Bun or npm not found）
     try:
         from reflex.utils import js_runtimes
+
         js_runtimes.install_frontend_packages = lambda *a, **kw: None
     except Exception:
         pass
     # 也 patch App._get_frontend_packages 作为双重保险
     try:
         from reflex.app import App
+
         App._get_frontend_packages = lambda self, *a, **kw: None
     except Exception:
         pass
@@ -132,6 +135,7 @@ def main():
     # 具体取决于编译时 --backend-port），部署时端口又是动态的（--port 参数且 host 是服务器 IP）。
     # 因此用正则匹配 localhost:任意端口 动态替换为实际访问的 host:port，不依赖编译期的端口号。
     import re as _re
+
     _LOCALHOST_RE = _re.compile(r"localhost:\d+")
     _LOCALHOST_HTTP_RE = _re.compile(r"http://localhost:\d+")
     _LOCALHOST_WS_RE = _re.compile(r"ws://localhost:\d+")
@@ -182,15 +186,26 @@ def main():
         # 我们改了响应体（端口替换），绝不能让它被浏览器/代理缓存——否则用户会拿到
         # 缓存的、含旧硬编码端口（如 localhost:8002）的 env.js。直接清掉缓存相关头。
         new_headers = []
-        skip = {b"content-length", b"etag", b"last-modified", b"cache-control",
-                b"expires", b"pragma", b"age", b"max-age", b"vary:accept-encoding"}
+        skip = {
+            b"content-length",
+            b"etag",
+            b"last-modified",
+            b"cache-control",
+            b"expires",
+            b"pragma",
+            b"age",
+            b"max-age",
+            b"vary:accept-encoding",
+        }
         for k, v in headers_list:
             kl = k.lower()
             if kl == b"content-length":
                 new_headers.append((k, str(len(new_body)).encode()))
             elif kl not in skip:
                 new_headers.append((k, v))
-        new_headers.append((b"cache-control", b"no-store, no-cache, must-revalidate, max-age=0"))
+        new_headers.append(
+            (b"cache-control", b"no-store, no-cache, must-revalidate, max-age=0")
+        )
         new_headers.append((b"pragma", b"no-cache"))
         new_headers.append((b"expires", b"0"))
 
@@ -204,9 +219,9 @@ def main():
         downloads_dir = resource_dir / "downloads"
         # 支持 /download/ 和 /api/download/ 两种前缀
         if path.startswith("/api/download/"):
-            filename = unquote(path[len("/api/download/"):])
+            filename = unquote(path[len("/api/download/") :])
         else:
-            filename = unquote(path[len("/download/"):])
+            filename = unquote(path[len("/download/") :])
         # 防目录穿越
         if not filename or ".." in filename or "/" in filename or "\\" in filename:
             await _send_download_error(send, 404, "Invalid filename")
@@ -216,11 +231,15 @@ def main():
             await _send_download_error(send, 403, "Forbidden")
             return
         file_path = (downloads_dir / filename).resolve()
-        if not file_path.is_relative_to(downloads_dir.resolve()) or not file_path.exists():
+        if (
+            not file_path.is_relative_to(downloads_dir.resolve())
+            or not file_path.exists()
+        ):
             await _send_download_error(send, 404, f"File not found: {filename}")
             return
 
         import mimetypes
+
         mime, _ = mimetypes.guess_type(str(file_path))
         content_type = mime or "application/octet-stream"
         # README.md 显式用 markdown 类型
@@ -231,6 +250,7 @@ def main():
             content_type = "application/octet-stream"
             # 中文文件名用 RFC 5987 filename* 编码，ASCII 文件名直接放 filename
             from urllib.parse import quote
+
             ascii_name = file_path.name.encode("ascii", "ignore").decode("ascii")
             if ascii_name == file_path.name:
                 disposition = f'attachment; filename="{file_path.name}"'
@@ -252,11 +272,16 @@ def main():
 
     async def _send_download_error(send, status: int, message: str):
         body = message.encode("utf-8")
-        await send({
-            "type": "http.response.start",
-            "status": status,
-            "headers": [(b"content-type", b"text/plain; charset=utf-8"), (b"content-length", str(len(body)).encode())],
-        })
+        await send(
+            {
+                "type": "http.response.start",
+                "status": status,
+                "headers": [
+                    (b"content-type", b"text/plain; charset=utf-8"),
+                    (b"content-length", str(len(body)).encode()),
+                ],
+            }
+        )
         await send({"type": "http.response.body", "body": body, "more_body": False})
 
     # ===== 反馈截图路由 =====
@@ -264,15 +289,15 @@ def main():
     # /api/fbimg/fb_xxx.png → 同 /fbimg/（开发模式 Vite 代理 /api/* 用）
     async def _serve_fbimg(scope, receive, send, path: str):
         """服务 data/uploads/feedback/ 目录下的反馈截图（/fbimg/ 前缀路由）"""
-        from urllib.parse import unquote
         import mimetypes
+        from urllib.parse import unquote
 
         # 截图目录: reflex_web/data/uploads/feedback/（resource_dir 是 reflex_web/）
         fb_dir = (resource_dir / "data" / "uploads" / "feedback").resolve()
         if path.startswith("/api/fbimg/"):
-            filename = unquote(path[len("/api/fbimg/"):])
+            filename = unquote(path[len("/api/fbimg/") :])
         else:
-            filename = unquote(path[len("/fbimg/"):])
+            filename = unquote(path[len("/fbimg/") :])
         # 防目录穿越：仅允许纯文件名
         if not filename or ".." in filename or "/" in filename or "\\" in filename:
             await _send_download_error(send, 404, "Invalid filename")
@@ -292,6 +317,103 @@ def main():
         await send({"type": "http.response.start", "status": 200, "headers": headers})
         await send({"type": "http.response.body", "body": data, "more_body": False})
 
+    # ===== 反馈提交 API（生产模式 ASGI 实现；开发模式由 reflex_web.py Starlette 路由提供）=====
+    async def _send_fb_json(send, status: int, body: dict, origin: str = ""):
+        """发送 JSON 响应（UTF-8 + CORS 反射 Origin）。
+
+        反射而非通配 *：接口无凭据，任意源反射等价 * 且通过 lint 规则；
+        无 Origin（Qt/curl 直接调用）时不带 CORS 头。
+        """
+        import json as _json
+
+        payload = _json.dumps(body, ensure_ascii=False).encode("utf-8")
+        headers = [
+            (b"content-type", b"application/json; charset=utf-8"),
+            (b"content-length", str(len(payload)).encode()),
+            (b"access-control-allow-methods", b"POST, GET, OPTIONS"),
+            (b"access-control-allow-headers", b"content-type"),
+        ]
+        if origin:
+            headers.append(
+                (b"access-control-allow-origin", origin.encode("latin-1"))
+            )
+        await send({"type": "http.response.start", "status": status, "headers": headers})
+        await send({"type": "http.response.body", "body": payload, "more_body": False})
+
+    async def _handle_feedback_api(scope, receive, send, path: str):
+        """POST /api/feedback（GUI 客户端 multipart 提交）与 GET /api/feedback/config。
+
+        生产环境无 Starlette 请求对象，手工收 body + 解析 multipart；
+        核心逻辑复用 reflex_web.feedback_model.submit_from_api，与开发模式一致。
+        """
+        method = scope.get("method", "GET")
+        if method == "OPTIONS":
+            await _send_fb_json(send, 204, {})
+            return
+
+        try:
+            from reflex_web import feedback_model as fm
+        except Exception as exc:  # noqa: BLE001
+            await _send_fb_json(send, 500, {"ok": False, "error": f"反馈模块不可用: {exc}"})
+            return
+
+        # GET：字段约束配置
+        if path.endswith("/config") or method == "GET":
+            await _send_fb_json(send, 200, fm.api_config())
+            return
+
+        # POST：频率限制（按客户端 IP 滑动窗口）
+        client = scope.get("client") or ("unknown", 0)
+        client_ip = client[0] if client else "unknown"
+        if not fm.rate_limiter().check(client_ip):
+            await _send_fb_json(
+                send, 429, {"ok": False, "error": "提交过于频繁，请稍后再试"}
+            )
+            return
+
+        # 收集请求体（可能分块）
+        body_chunks = []
+        while True:
+            message = await receive()
+            if message.get("type") != "http.request":
+                break
+            body_chunks.append(message.get("body", b""))
+            if not message.get("more_body", False):
+                break
+        body = b"".join(body_chunks)
+
+        # 从 Content-Type 取 multipart boundary
+        boundary = None
+        for k, v in scope.get("headers", []):
+            if k == b"content-type":
+                ct = v.decode("latin-1")
+                for part in ct.split(";"):
+                    part = part.strip()
+                    if part.startswith("boundary="):
+                        boundary = part[len("boundary=") :].strip('"').encode("latin-1")
+                break
+        if not boundary:
+            await _send_fb_json(
+                send, 400, {"ok": False, "error": "请求格式错误（需要 multipart/form-data）"}
+            )
+            return
+
+        try:
+            fields, files = fm.parse_multipart(body, boundary)
+            fields.setdefault("source", "gui")
+            ok, result, http_status = fm.submit_from_api(fields, files)
+        except Exception as exc:  # noqa: BLE001
+            await _send_fb_json(
+                send, 500, {"ok": False, "error": f"服务器处理失败: {exc}"}
+            )
+            return
+        if ok:
+            await _send_fb_json(send, 200, {"ok": True, "id": result})
+        else:
+            await _send_fb_json(
+                send, http_status, {"ok": False, "error": str(result)}
+            )
+
     async def env_rewrite_middleware(scope, receive, send):
         if scope["type"] != "http":
             return await asgi_app(scope, receive, send)
@@ -310,6 +432,12 @@ def main():
         # /api/fbimg/fb_xxx.png → 同 /fbimg/
         if path.startswith("/fbimg/") or path.startswith("/api/fbimg/"):
             return await _serve_fbimg(scope, receive, send, path)
+
+        # ===== 反馈提交 API（GUI 客户端等外部调用，1.20.0 起） =====
+        # POST /api/feedback（multipart 表单 + 截图）→ 写入共享 feedback.db
+        # GET  /api/feedback/config → 字段约束（GUI 拉取限制参数）
+        if path == "/api/feedback" or path == "/api/feedback/config":
+            return await _handle_feedback_api(scope, receive, send, path)
 
         # 获取请求的 host 和 scheme
         host = None
@@ -340,16 +468,20 @@ def main():
                         bytes(response_body), response_headers, host, scheme
                     )
                     # 重新发送
-                    await send({
-                        "type": "http.response.start",
-                        "status": response_status,
-                        "headers": new_headers,
-                    })
-                    await send({
-                        "type": "http.response.body",
-                        "body": new_body,
-                        "more_body": False,
-                    })
+                    await send(
+                        {
+                            "type": "http.response.start",
+                            "status": response_status,
+                            "headers": new_headers,
+                        }
+                    )
+                    await send(
+                        {
+                            "type": "http.response.body",
+                            "body": new_body,
+                            "more_body": False,
+                        }
+                    )
                 # more_body=True 时继续累积，不发送
             else:
                 await send(message)
@@ -360,7 +492,7 @@ def main():
     print("=" * 60)
     print("  南网协议解析工具 - Reflex Web 版")
     print(f"  访问地址: http://{args.host}:{args.port}")
-    print(f"  局域网设备可通过服务器 IP 访问")
+    print("  局域网设备可通过服务器 IP 访问")
     print("=" * 60)
     print()
 
