@@ -55,6 +55,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import app_icons
 import proc_stats
 import thread_registry
 from app_paths import app_data_dir, data_path
@@ -1035,6 +1036,10 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(
             f"协议解析工具 v{APP_VERSION} ({BUILD_DATE}) - 作者: liruitao"
         )
+        # 窗口/任务栏图标（托盘另用同文件，见 sys_tray）
+        _app_icon = Path(__file__).parent / "app_icon.ico"
+        if _app_icon.exists():
+            self.setWindowIcon(QIcon(str(_app_icon)))
 
         # 协议选择：0=南网协议，1=PLC RF协议，2=HDLC/国网DLMS，3=DLMS-APDU(国网)，4=Wrapper，5=APDU，6=DLT645，7=国网协议，8=698.45，9=新一代载波协议(通感一体化)
         self.current_protocol = 0
@@ -1384,8 +1389,7 @@ class MainWindow(QMainWindow):
         serial_layout.addWidget(self.serial_port_combo)
 
         self.serial_refresh_btn = QPushButton()
-        _icon_dir = pathlib.Path(__file__).parent / "icons"
-        self.serial_refresh_btn.setIcon(QIcon(str(_icon_dir / "refresh.svg")))
+        self.serial_refresh_btn.setIcon(app_icons.load_icon("refresh-cw"))
         self.serial_refresh_btn.setToolTip("刷新串口列表")
         self.serial_refresh_btn.setMaximumWidth(30)
         self.serial_refresh_btn.setMinimumHeight(24)
@@ -1453,18 +1457,26 @@ class MainWindow(QMainWindow):
         self._refresh_serial_ports()
         self._load_serial_config()
 
-        # 选项卡
+        # 选项卡（图标为 Lucide 线性图标，颜色随亮/暗主题自适应，见 app_icons.py）
         self.tab_widget = QTabWidget()
-        self.tab_widget.addTab(self.create_single_parse_tab(), "单帧解析")
+        self.tab_widget.addTab(
+            self.create_single_parse_tab(),
+            app_icons.load_icon("terminal"),
+            "单帧解析",
+        )
         # 查询页面根据协议动态创建
         self.protocol_lookup_tab = QWidget()
         self.protocol_lookup_tab_layout = QVBoxLayout(self.protocol_lookup_tab)
-        self.tab_widget.addTab(self.protocol_lookup_tab, "查询")
-        self.tab_widget.addTab(self.create_batch_parse_tab(), "批量解析")
+        self.tab_widget.addTab(
+            self.protocol_lookup_tab, app_icons.load_icon("search"), "查询"
+        )
+        self.tab_widget.addTab(
+            self.create_batch_parse_tab(), app_icons.load_icon("files"), "批量解析"
+        )
         # 协议组帧页面（南网和国网协议支持）
         self._frame_gen_placeholder = QWidget()
         self._frame_gen_tab_index = self.tab_widget.addTab(
-            self._frame_gen_placeholder, "协议组帧"
+            self._frame_gen_placeholder, app_icons.load_icon("wrench"), "协议组帧"
         )
         # 预设命令页面（传入配置文件路径）
         self.preset_tab = PresetButtonWidget(
@@ -1472,7 +1484,9 @@ class MainWindow(QMainWindow):
             gw_path=self._file_paths.get("gw_command"),
         )
         self.preset_tab.set_serial_worker(self.serial_worker)
-        self._preset_tab_index = self.tab_widget.addTab(self.preset_tab, "预设命令")
+        self._preset_tab_index = self.tab_widget.addTab(
+            self.preset_tab, app_icons.load_icon("bookmark"), "预设命令"
+        )
         self.preset_tab.button_clicked.connect(self._on_preset_button_clicked)
         # 测试方案页面（传入配置文件路径）
         self.test_plan_tab = TestPlanWidget(
@@ -1480,33 +1494,37 @@ class MainWindow(QMainWindow):
         )
         self.test_plan_tab.set_serial_worker(self.serial_worker)
         self._test_plan_tab_index = self.tab_widget.addTab(
-            self.test_plan_tab, "测试方案"
+            self.test_plan_tab, app_icons.load_icon("clipboard-list"), "测试方案"
         )
         # 档案管理页面（南网和国网协议支持）
         self._archive_placeholder = QWidget()
         self._archive_tab_index = self.tab_widget.addTab(
-            self._archive_placeholder, "档案管理"
+            self._archive_placeholder, app_icons.load_icon("archive"), "档案管理"
         )
 
         # 拓扑信息页面（南网和国网协议支持）
         self._topology_placeholder = QWidget()
         self._topology_tab_index = self.tab_widget.addTab(
-            self._topology_placeholder, "拓扑信息"
+            self._topology_placeholder, app_icons.load_icon("network"), "拓扑信息"
         )
 
         # 报文对比页面
         self.diff_tab = DiffWidget()
         self.diff_tab.restyle_for_theme(self._is_dark_theme())
-        self._diff_tab_index = self.tab_widget.addTab(self.diff_tab, "报文对比")
+        self._diff_tab_index = self.tab_widget.addTab(
+            self.diff_tab, app_icons.load_icon("file-diff"), "报文对比"
+        )
 
         # 报文工具页面（所有协议可见）
         self.message_tool_tab = MessageToolWidget()
-        self.tab_widget.addTab(self.message_tool_tab, "报文工具")
+        self.tab_widget.addTab(
+            self.message_tool_tab, app_icons.load_icon("toolbox"), "报文工具"
+        )
 
         # 虚拟表（协议8 从站模拟器）
         self.virtual_meter_tab = VirtualMeterWidget()
         self._virtual_meter_tab_index = self.tab_widget.addTab(
-            self.virtual_meter_tab, "虚拟表"
+            self.virtual_meter_tab, app_icons.load_icon("gauge"), "虚拟表"
         )
         self.virtual_meter_tab.parse_requested.connect(
             self._on_virtual_meter_send_to_parser
@@ -1516,14 +1534,16 @@ class MainWindow(QMainWindow):
         # TCP 流量监控器页面（始终可见）
         self._tcp_monitor_placeholder = QWidget()
         self._tcp_monitor_tab_index = self.tab_widget.addTab(
-            self._tcp_monitor_placeholder, "TCP监控"
+            self._tcp_monitor_placeholder, app_icons.load_icon("radar"), "TCP监控"
         )
 
         # 实时监控器页面（南网新一代(9)/国网新一代(10) 专用，默认隐藏）
         self.monitor_tab = RealtimeMonitorWidget()
         self.monitor_tab.set_serial_worker(self.serial_worker)
         self.monitor_tab.set_send_to_single_handler(self._send_frame_to_single_parse)
-        self._monitor_tab_index = self.tab_widget.addTab(self.monitor_tab, "监控器")
+        self._monitor_tab_index = self.tab_widget.addTab(
+            self.monitor_tab, app_icons.load_icon("activity"), "监控器"
+        )
         self.tab_widget.setTabVisible(self._monitor_tab_index, False)
 
         main_layout.addWidget(self.tab_widget, 1)
