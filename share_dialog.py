@@ -150,6 +150,9 @@ class ShareDialog(QDialog):
         self.setMinimumWidth(520)
         self._nam = QNetworkAccessManager(self)
         self._reply: QNetworkReply | None = None
+        # 服务端返回的分享页 URL（dev 前后端分端口时与 API 地址不同端口）；
+        # 空则兜底 server_url + /share（旧服务端无 share_url 字段）
+        self._share_url = ""
         self._frame_hex = (frame_hex or "").strip()
         self._app_version = app_version
         self.server_url = fd.load_feedback_server_url()
@@ -234,7 +237,9 @@ class ShareDialog(QDialog):
         return f
 
     def _open_share_page(self):
-        QDesktopServices.openUrl(QUrl(self.server_url + "/share"))
+        # 优先用服务端下发的分享页 URL（dev 模式指向前端端口）；旧服务端兜底
+        url = self._share_url or (self.server_url + "/share")
+        QDesktopServices.openUrl(QUrl(url))
 
     def _on_save_server(self):
         url = self.server_edit.text()
@@ -298,6 +303,10 @@ class ShareDialog(QDialog):
             if status == 200 and resp.get("ok"):
                 save_last_sharer(self.sharer_edit.text())
                 sid = resp.get("id", "?")
+                # 服务端按自身部署模式给出浏览器可访问的页面地址
+                self._share_url = str(resp.get("share_url") or "") or (
+                    self.server_url + "/share"
+                )
                 self.status_label.setText(f"分享成功（#{sid}）")
                 self._browser_btn.setVisible(True)
                 ret = QMessageBox.information(

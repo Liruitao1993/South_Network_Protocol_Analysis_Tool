@@ -10455,7 +10455,27 @@ async def _dev_frameshare_api_handler(request):
 
     ok, result, status = sm.submit_share(fields)
     if ok:
-        return _feedback_json_response({"ok": True, "id": int(result)}, status, request)
+        # 分享页 URL：dev 前后端分端口（页面在前端端口），prod 单端口同源。
+        # GUI 成功后用此 URL 开浏览器，不能用 API 地址直接拼 /share。
+        import os as _os
+
+        mounted = _os.environ.get("__REFLEX_MOUNT_FRONTEND_COMPILED_APP") == "true"
+        frontend_port = None
+        if not mounted:
+            import reflex as _rx
+
+            frontend_port = getattr(_rx.config.get_config(), "frontend_port", None)
+        share_url = sm.share_page_url(
+            request.headers.get("host", ""),
+            request.url.scheme,
+            frontend_port,
+            mounted,
+        )
+        return _feedback_json_response(
+            {"ok": True, "id": int(result), "share_url": share_url},
+            status,
+            request,
+        )
     return _feedback_json_response({"ok": False, "error": str(result)}, status, request)
 
 

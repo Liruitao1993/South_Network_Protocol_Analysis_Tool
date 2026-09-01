@@ -179,6 +179,35 @@ def share_config() -> dict:
     }
 
 
+def share_page_url(
+    host: str,
+    scheme: str = "http",
+    frontend_port: int | None = None,
+    mounted: bool = False,
+) -> str:
+    """根据请求 Host 拼浏览器可访问的 /share 页 URL。
+
+    GUI 提交到后端 API 地址，但页面在前端服务上：
+    - mounted=True（prod，run_app.py 单端口挂载前后端）：前后端同源，
+      直接用请求 Host。
+    - mounted=False（dev，``reflex run`` 前后端分端口）：GUI 直连后端，
+      Host 带的是后端端口（如 8000），页面在前端端口（如 3000），
+      把 Host 末尾端口替换为 frontend_port；Host 无端口时补上。
+    Host 缺失时返回相对路径 "/share"（同源兜底）。
+    """
+    if not host:
+        return "/share"
+    if not mounted and frontend_port:
+        m = re.search(r":(\d+)$", host)
+        if m:
+            # 已是前端端口（如经 Vite 代理提交）则保持不变
+            if int(m.group(1)) != frontend_port:
+                host = host[: m.start()] + f":{frontend_port}"
+        else:
+            host = f"{host}:{frontend_port}"
+    return f"{scheme or 'http'}://{host}/share"
+
+
 def _item_dict(item: ShareItem) -> dict:
     """ORM → 前端 dict（Reflex State 列表用）。"""
     return {

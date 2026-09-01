@@ -179,6 +179,49 @@ def test_config_api():
           and cfg.get("max_frame_bytes") == 2048)
 
 
+def test_share_page_url():
+    print("test_share_page_url:")
+    # dev 模式：Host 是后端端口 → 替换为前端端口
+    check(
+        "dev swap backend->frontend",
+        sm.share_page_url("127.0.0.1:8000", "http", 3000, False)
+        == "http://127.0.0.1:3000/share",
+    )
+    check(
+        "dev lan ip swap",
+        sm.share_page_url("192.168.1.10:8000", "http", 3000, False)
+        == "http://192.168.1.10:3000/share",
+    )
+    check(
+        "dev host without port appended",
+        sm.share_page_url("localhost", "http", 3000, False)
+        == "http://localhost:3000/share",
+    )
+    check(
+        "dev already frontend port noop",
+        sm.share_page_url("localhost:3000", "http", 3000, False)
+        == "http://localhost:3000/share",
+    )
+    # prod 模式（单端口挂载）：同源不动，忽略 frontend_port
+    check(
+        "prod same origin",
+        sm.share_page_url("10.0.0.1:8080", "http", None, True)
+        == "http://10.0.0.1:8080/share",
+    )
+    check(
+        "prod ignores frontend port",
+        sm.share_page_url("10.0.0.1:8080", "http", 3000, True)
+        == "http://10.0.0.1:8080/share",
+    )
+    # 兜底
+    check("empty host relative", sm.share_page_url("", "http", 3000, False) == "/share")
+    check(
+        "scheme passthrough",
+        sm.share_page_url("host:8000", "https", 3000, False)
+        == "https://host:3000/share",
+    )
+
+
 # ── GUI 侧（share_dialog 纯逻辑 + offscreen 冒烟）───────────
 
 
@@ -243,6 +286,18 @@ def test_gui_dialog_smoke():
         dlg.sharer_edit.setText("")
         dlg._on_submit()
         check("empty sharer blocked locally", "分享人" in dlg.status_label.text())
+        # 分享页 URL：默认兜底 server_url + /share；服务端下发后用 share_url
+        opened = []
+        sd.QDesktopServices.openUrl = lambda u: opened.append(u.toString())
+        dlg._share_url = ""
+        dlg._open_share_page()
+        check(
+            "fallback open server_url/share",
+            bool(opened) and opened[-1].endswith("/share"),
+        )
+        dlg._share_url = "http://127.0.0.1:3000/share"
+        dlg._open_share_page()
+        check("use server share_url", opened[-1] == "http://127.0.0.1:3000/share")
         dlg.close()
     except Exception as e:  # noqa: BLE001 - 无显示环境时跳过
         print(f"  [SKIP] dialog smoke skipped: {type(e).__name__}: {e}")
@@ -254,6 +309,7 @@ def main():
         test_submit()
         test_store()
         test_config_api()
+        test_share_page_url()
         test_gui_payload_and_validate()
         test_gui_config_roundtrip()
         test_gui_dialog_smoke()
