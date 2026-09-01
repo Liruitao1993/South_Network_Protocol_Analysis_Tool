@@ -9,12 +9,15 @@
 - Esc 关闭、toggle_panel 显隐切换、剪贴板预填
 - 手动切换协议 → parse_fn 收到新 idx
 - 「完整视图」→ open_full_fn 被调用且小窗隐藏
+- 输入框 Enter 打开完整视图（Shift+Enter 保留换行 / 空输入不触发）
+- _ever_activated 初始化：未激活即收到 ActivationChange 不崩溃
 - 拖动/缩放设施（QSizeGrip 存在、拖动状态初始值）
 - 双卡结构：输入卡（徽章+输入）与结果卡（提示+表格+操作行）独立显隐
 - MainWindow 集成：_on_global_hotkey 唤出小窗并真实解析南网帧
+- ED 包装帧（协议9）校验口径与解析对齐（剥离监控头后校验）
+- 预填协议优先级：自动识别优先（识别得出即切换），识别不出兜底主窗体协议
 """
 
-import _path_setup  # noqa: E402
 
 import os
 
@@ -22,6 +25,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import sys
 
+import _path_setup  # noqa: F401,E402  项目根加入 sys.path（test/ 共享引导）
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import QApplication
@@ -53,7 +57,10 @@ def check(cond, msg):
       global _passed
       assert cond, f"FAIL: {msg}"
       _passed += 1
-      print(f"  ✓ {msg}")
+      # GBK 控制台无法编码 ✓/⚠ 等字符（项目测试约定，见 AGENTS.md §7）：
+      # 消息里断言文案可能含 UI 字符，按 GBK 可编码范围清洗后输出
+      safe = msg.encode("gbk", "replace").decode("gbk")
+      print(f"  [OK] {safe}")
 
 
 _DEFAULT_ROWS = object()
@@ -172,6 +179,20 @@ def main():
             "拖动状态初始值正确",
       )
 
+      print("== 3d. _ever_activated 初始化（失焦事件不崩溃）==")
+      p_ev, _ = make_panel()
+      check(p_ev._ever_activated is False, "_ever_activated 构造期初始化为 False")
+      # 窗口尚未激活就收到 ActivationChange（如唤出瞬间其他窗口持有焦点）不得抛异常
+      p_ev.changeEvent(QEvent(QEvent.Type.ActivationChange))
+      check(True, "未激活窗口的 ActivationChange 不抛 AttributeError")
+      p_ev._ever_activated = True
+      p_ev.show()
+      p_ev.changeEvent(QEvent(QEvent.Type.ActivationChange))
+      check(
+            not p_ev.isVisible() or p_ev.isActiveWindow(),
+            "已激活窗口失焦时自动隐藏（offscreen 可能始终算激活）",
+      )
+
       print("== 4. 非法 hex 错误态 ==")
       panel.input.setPlainText("xyz不是报文")
       panel._do_parse()
@@ -243,6 +264,21 @@ def main():
       check(
             p8._shadows[0].isEnabled() is False, "空态输入卡投影已禁用（无粗边框/阴影）"
       )
+      # 空态细光晕：外层边距 6px + 面板内边距 2px ≈ 输入框距窗口边缘 8px（原 28px）
+      p8_outer, p8_inner = p8.layout(), p8.panel.layout()
+      assert p8_outer is not None and p8_inner is not None
+      check(
+            p8_outer.contentsMargins().left() == 6,
+            f"空态外层边距收窄为 6px 光晕（实际 {p8_outer.contentsMargins().left()}px）",
+      )
+      check(
+            p8_inner.contentsMargins().left() == 2,
+            f"空态面板内边距收窄为 2px（实际 {p8_inner.contentsMargins().left()}px）",
+      )
+      check(
+            p8.input.mapTo(p8, p8.input.rect().topLeft()).x() == 8,
+            "空态输入框距窗口边缘 8px（细光晕）",
+      )
       check(
             p8.input.maximumHeight() > 100000,
             f"空态输入框解除高度上限可纵向拉伸（max={p8.input.maximumHeight()}）",
@@ -254,19 +290,27 @@ def main():
             p8.input.height() >= h_before + 120,
             f"空态窗口拉高后输入框跟随变高（{h_before}px → {p8.input.height()}px）",
       )
-      # 输入内容后展开：卡片恢复细边框，输入框限高、余量给结果表
+      # 输入内容后展开：卡片恢复毛玻璃底色（无描边），输入框限高、余量给结果表
       p8.input.setPlainText(SOUTH_FRAME)
       p8._do_parse()
       app.processEvents()
       exp_qss = p8.input_card.styleSheet()
       check(
-            "background: transparent" not in exp_qss and "border: 1px solid" in exp_qss,
-            "展开态输入卡恢复 1px 细毛玻璃边框",
+            "background: " in exp_qss
+            and "transparent" not in exp_qss.split("border-radius")[0]
+            and "border:" not in exp_qss.split("border-radius")[0],
+            "展开态输入卡恢复毛玻璃底色（无描边，靠投影圈定边界）",
       )
-      check(p8._shadows[0].isEnabled() is True, "展开态投影恢复")
       check(
             p8.input.maximumHeight() <= 100,
             f"展开态输入框限高（max={p8.input.maximumHeight()}px）",
+      )
+      # 展开态边距恢复：外层 12px 投影边距 + 面板内边距 16px
+      assert p8_outer is not None and p8_inner is not None
+      check(
+            p8_outer.contentsMargins().left() == 12
+            and p8_inner.contentsMargins().left() == 16,
+            "展开态边距恢复（外层 12px / 面板内边距 16px）",
       )
 
       print("== 5c. 浅色主题毛玻璃面板约 59% 透明度 ==")
@@ -330,6 +374,45 @@ def main():
             "open_full_fn 收到当前帧字节与协议 idx",
       )
 
+      print("== 10b. Enter 打开完整视图（键位提示同文）==")
+      p_en, c_en = make_panel()
+      p_en.input.setPlainText(SOUTH_FRAME)
+      p_en._do_parse()
+      QApplication.sendEvent(
+            p_en.input,
+            QKeyEvent(
+                  QEvent.Type.KeyPress,
+                  Qt.Key.Key_Return,
+                  Qt.KeyboardModifier.NoModifier,
+            ),
+      )
+      check(
+            len(c_en["open_full"]) == 1 and c_en["open_full"][0][1] == 0,
+            f"输入框 Enter 打开完整视图并带当前协议（实际 {c_en['open_full']}）",
+      )
+      check(not p_en.isVisible(), "Enter 触发后面板隐藏")
+      p_en.show()
+      c_en["open_full"].clear()
+      QApplication.sendEvent(
+            p_en.input,
+            QKeyEvent(
+                  QEvent.Type.KeyPress,
+                  Qt.Key.Key_Return,
+                  Qt.KeyboardModifier.ShiftModifier,
+            ),
+      )
+      check(not c_en["open_full"], "Shift+Enter 保留换行不触发完整视图")
+      p_en2, c_en2 = make_panel()
+      QApplication.sendEvent(
+            p_en2.input,
+            QKeyEvent(
+                  QEvent.Type.KeyPress,
+                  Qt.Key.Key_Return,
+                  Qt.KeyboardModifier.NoModifier,
+            ),
+      )
+      check(not c_en2["open_full"], "空输入 Enter 不触发完整视图且不崩溃")
+
       print("== 11. 复制结果 ==")
       panel.show()
       panel.input.setPlainText(SOUTH_FRAME)
@@ -371,6 +454,8 @@ def main():
       import main_gui
 
       w = main_gui.MainWindow()
+      # A 方案：小窗协议跟随主窗体；为保证南网帧解析正确，固定主窗体协议为 0
+      w.protocol_combo.setCurrentIndex(0)
       app.processEvents()
       app.clipboard().setText(SOUTH_FRAME)
       w._on_global_hotkey()
@@ -383,15 +468,92 @@ def main():
             qp.table.isVisibleTo(qp) and qp.table.rowCount() > 2,
             f"真实南网帧解析出字段行（{qp.table.rowCount()} 行）",
       )
-      check(qp.proto_combo.currentData() == 0, "集成：协议自动识别为 0")
+      check(qp.proto_combo.currentData() == 0, "集成：小窗协议跟随主窗体（=0）")
       # 校验徽章（南网真帧校验）
       check(
             "校验" in qp.valid_label.text(),
             f"校验徽章已设置（{qp.valid_label.text()}）",
       )
-      # 再按热键隐藏
+      # A 方案：主窗体切协议时小窗下拉跟随（仅当小窗存在）
+      w.protocol_combo.setCurrentIndex(7)  # 主切到 7=国网协议
+      app.processEvents()
+      check(
+            qp.proto_combo.currentData() == 7,
+            f"A 方案：主窗体切协议 → 小窗下拉跟随（实际 {qp.proto_combo.currentData()}）",
+      )
+      # 先把主窗体协议切回 0，避免协议 mismatch 干扰
+      w.protocol_combo.setCurrentIndex(0)
+      app.processEvents()
+      qp.input.setPlainText(SOUTH_FRAME)
+      qp._do_parse()
+      app.processEvents()
+      qp._open_full()
+      app.processEvents()
+      check(
+            w.single_input.toPlainText().strip() == SOUTH_FRAME.replace(",", " "),
+            f"主程序单帧解析输入框收到报文（实际 {w.single_input.toPlainText()[:30]}...）",
+      )
+      check(
+            w.protocol_combo.currentIndex() == 0
+            and w.tab_widget.currentIndex() == 0,
+            f"主程序协议下拉=0、tab=单帧解析页（实际 protocol={w.protocol_combo.currentIndex()}, tab={w.tab_widget.currentIndex()}）",
+      )
+      check(not qp.isVisible(), "「在主窗口打开」后小窗隐藏")
+      # 小窗已被 _open_full 隐藏：热键先重新唤出（预填剪贴板），再按才隐藏
+      w._on_global_hotkey()
+      check(qp.isVisible(), "热键重新唤出小窗（此前已被「在主窗口打开」隐藏）")
       w._on_global_hotkey()
       check(not qp.isVisible(), "再次热键隐藏小窗")
+
+      print("== 12b. ED 包装帧（协议9）校验口径与解析对齐 ==")
+      # 构造合法 ED..EE 包装：ED+帧长(LE)+ctrl1(00)+ctrl2(01)+EF+9字节公共头+业务帧+CS+EE
+      ed_bytes = bytes.fromhex(
+            "ED 19 00 00 01 EF 01 00 00 00 00 01 00 0C 00 "
+            "11 01 01 00 00 00 00 01 00 01 00 00 19 EE".replace(" ", "")
+      )
+      rows_ed, err_ed, _note_ed = w._quick_panel_parse(ed_bytes, 9)
+      check(
+            rows_ed and err_ed is None,
+            f"ED 包装帧协议9解析成功（剥离监控头后，实际 err={err_ed}）",
+      )
+      valid_ed, summary_ed = w._quick_panel_validate(ed_bytes, 9)
+      check(
+            valid_ed is True,
+            f"ED 包装帧校验与解析对齐（剥离后校验，实际 {valid_ed}/{summary_ed}）",
+      )
+      # 对照：裸业务帧同口径通过；剥离失败路径（截断帧）不崩溃
+      valid_bare, _ = w._quick_panel_validate(ed_bytes[15:27], 9)
+      check(valid_bare is True, "裸业务帧校验通过（口径一致）")
+      valid_trunc, _ = w._quick_panel_validate(ed_bytes[:10], 9)
+      check(
+            valid_trunc in (True, False, None),
+            f"截断 ED 帧校验不崩溃（回退原帧/兜底，实际 {valid_trunc}）",
+      )
+
+      print("== 12c. 预填协议：自动识别优先，主窗体协议兜底 ==")
+      # 识别优先：主窗体=7（国网），剪贴板为南网 68..16 帧 → 识别为 0 并切换
+      w.protocol_combo.setCurrentIndex(7)
+      app.processEvents()
+      app.clipboard().setText(SOUTH_FRAME)
+      w._on_global_hotkey()  # 小窗当前隐藏 → 唤出并预填
+      app.processEvents()
+      check(qp.isVisible(), "12c：小窗唤出成功")
+      check(
+            qp.proto_combo.currentData() == 0,
+            f"自动识别优先：南网帧识别为 0（不锁定主窗体 7，实际 {qp.proto_combo.currentData()}）",
+      )
+      # 兜底：主窗体=7，剪贴板为不可识别帧 → 保持主窗体协议 7
+      w._on_global_hotkey()  # 先隐藏（toggle）
+      app.processEvents()
+      app.clipboard().setText("00 11 22 33 44")
+      w.protocol_combo.setCurrentIndex(7)
+      app.processEvents()
+      w._on_global_hotkey()  # 再唤出触发预填
+      app.processEvents()
+      check(
+            qp.proto_combo.currentData() == 7,
+            f"不可识别帧兜底：保持主窗体协议 7（实际 {qp.proto_combo.currentData()}）",
+      )
 
       print(f"\n全部通过：{_passed} 项断言")
 

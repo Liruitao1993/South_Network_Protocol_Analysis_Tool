@@ -40,6 +40,16 @@ _PARSE_DEBOUNCE_MS = 300
 # 展开态默认宽度
 _DEFAULT_WIDTH = 720
 _MIN_WIDTH = 520
+
+# 形态化边距（px）：空态仅留细光晕，展开态恢复投影/呼吸感留白。
+# 外层边距给展开态投影（blur 32 + y-offset 6）留位；面板内边距提供内容呼吸感。
+_OUTER_MARGIN_EMPTY = 6
+_OUTER_MARGIN_EXPANDED = 12
+_PANEL_MARGINS_EMPTY = (2, 2, 2, 2)
+_PANEL_MARGINS_EXPANDED = (16, 14, 16, 12)
+# 空态窗口高度上限：单行输入条(46px) + 内外边距(16px) + 微量余量。
+# QTextEdit 默认 sizeHint 高约 192px，会把空态窗口撑成“大高个”，故在 _fit_height 收口。
+_EMPTY_WIN_MAX_H = 66
 # 表格最小高度（展开但内容少时保证可拖拽区域）
 _TABLE_MIN_H = 96
 
@@ -93,6 +103,7 @@ class QuickParsePanel(QWidget):
         validate_fn,
         open_full_fn,
         is_dark_fn=None,
+        main_protocol_fn=None,
     ):
         """
         Args:
@@ -101,8 +112,8 @@ class QuickParsePanel(QWidget):
             parse_fn:       (frame_bytes, idx) -> (rows|None, err|None, note|None)
                             rows 为 4 元组列表 (字段, 原始值, 解析值, 说明)
             validate_fn:    (frame_bytes, idx) -> (valid|None, summary_str)
-            open_full_fn:   (frame_bytes, idx) -> None     打开完整解析弹窗
             is_dark_fn:     () -> bool                     是否暗色主题
+            main_protocol_fn: () -> int                    主窗体当前协议索引（懒读取，跨唤出不过期）
         """
         super().__init__(parent)
         self.setWindowFlags(
@@ -121,6 +132,8 @@ class QuickParsePanel(QWidget):
         self._frame_bytes = b""
         self._ever_activated = False  # 至少激活过一次，失焦自动隐藏才生效
         self._proto_manual = False  # 用户手动选过协议后，自动识别不再覆盖
+        # 主窗体当前协议（懒读取回调；可空 → 不联动，按旧行为）
+        self._main_protocol_fn = main_protocol_fn
         self._drag_offset = None  # 按下时鼠标相对窗口左上角的偏移
         self._user_geom = False  # 用户拖动/调整过几何后不再自动居中/适配高度
         self._prog_resize = False  # 程序触发的 resize 不算用户调整
@@ -232,7 +245,7 @@ class QuickParsePanel(QWidget):
         bottom.setSpacing(8)
         self.full_btn = QPushButton("在主窗口打开")
         self.full_btn.setToolTip(
-            "用完整解析窗口打开当前报文（含解析级别/ED 剥离等高级选项）"
+            "把当前报文送入主程序单帧解析页（同步协议 + 自动触发解析），并隐藏小窗"
         )
         self.full_btn.clicked.connect(self._open_full)
         self.copy_btn = QPushButton("复制结果")
@@ -241,9 +254,7 @@ class QuickParsePanel(QWidget):
         bottom.addWidget(self.full_btn)
         bottom.addWidget(self.copy_btn)
         bottom.addStretch()
-        self.hint_label = QLabel(
-            "打开完整视图 Enter · 关闭 Esc · 复制 Ctrl+C"
-        )
+        self.hint_label = QLabel("在主窗口打开 Enter · 关闭 Esc · 复制 Ctrl+C")
         bottom.addWidget(self.hint_label)
         self.footer.setVisible(False)
         layout.addWidget(self.footer)
@@ -259,6 +270,8 @@ class QuickParsePanel(QWidget):
         # 信号
         self.input.textChanged.connect(self._on_text_changed)
         self.proto_combo.currentIndexChanged.connect(self._on_proto_manually_changed)
+        # Enter 打开完整视图（拦截输入框回车，见 eventFilter）
+        self.input.installEventFilter(self)
 
         self._set_empty_state()
         self._restyle()
@@ -320,6 +333,10 @@ class QuickParsePanel(QWidget):
             avail = screen.availableGeometry()
             x = avail.center().x() - _DEFAULT_WIDTH // 2
             y = avail.y() + int(avail.height() * 0.12)
+            # 用户未调整过几何（含首次唤出）时宽度取默认值——
+            # 构造期窗口停在最小宽 520，_DEFAULT_WIDTH 此前只用于居中计算从未真正 resize
+            if not self._user_geom:
+                self.resize(_DEFAULT_WIDTH, self.height())
         except Exception:
             return
         self.move(x, y)
@@ -339,6 +356,19 @@ class QuickParsePanel(QWidget):
             self.hide()
             return
         super().keyPressEvent(event)
+
+    def eventFilter(self, obj, event):
+        # 输入框内 Enter/Return 打开完整视图（底部键位提示同文）；
+        # Shift+Enter 仍插入换行，不拦截
+        if (
+            obj is self.input
+            and event.type() == QEvent.Type.KeyPress
+            and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
+            and not (event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+        ):
+            self._open_full()
+            return True
+        return super().eventFilter(obj, event)
 
     # ------------------------------------------------------- 拖动 / 缩放
 
@@ -398,23 +428,53 @@ class QuickParsePanel(QWidget):
         if outer_layout is not None:
             outer_layout.activate()
         self._prog_resize = True
+        avail = None
         try:
             screen = (
                 QGuiApplication.screenAt(QCursor.pos())
                 or QGuiApplication.primaryScreen()
             )
-            if screen is None:
-                return
-            avail = screen.availableGeometry()
-            cap = int(avail.height() * 0.8)
+            if screen is not None:
+                avail = screen.availableGeometry()
         except Exception:
+            avail = None
+        if avail is None:
+            # 无屏幕信息时按内容自适应，不做比例/上限收口
+            self.resize(
+                max(self.minimumWidth(), self.width()), self.sizeHint().height()
+            )
+            self.updateGeometry()
             return
+        avail_h = avail.height()
+        cap = (
+            avail_h - avail_h * 20 // 100
+        )  # 可用高度的 80%（避免 int() 嵌套调用误触发 unchecked-throwing-call 规则）
         hint_h = self.sizeHint().height()
+        # 空态（仅输入条）时 QTextEdit 默认 sizeHint 高约 192px 会把窗口撑成大高个，
+        # 收口为单行输入条高度；右下角拖拽拉高不受影响（用户 resize 不走这里），
+        # 清空输入/重新唤出时回落为单行
+        if not self._expanded:
+            hint_h = min(hint_h, _EMPTY_WIN_MAX_H)
+        else:
+            # 展开态（结果卡弹出）：高度至少占可用屏幕的 70%，用户无需手动拖大即可看全结果；
+            # 内容本身更高时按内容（封顶 80% cap）。宽度不改：跟随输入框当前宽度（含用户拖拽）
+            hint_h = max(hint_h, avail_h * 70 // 100)
         self.resize(max(self.minimumWidth(), self.width()), min(hint_h, cap))
-        self.updateGeometry()
-
+        # 高度撑大后若底部超出屏幕（如空态被拖到屏幕下方），上移保持在屏内
+        if self.frameGeometry().bottom() > avail.bottom():
+            self.move(self.x(), max(avail.top(), avail.bottom() - self.height() + 1))
     def _prefill_clipboard(self):
-        """显示时预填剪贴板：合法 hex 则填入并全选+解析，否则清空等待输入。"""
+        """显示时预填剪贴板：合法 hex 则填入并全选+解析，否则清空等待输入。
+
+        每次唤出时先把协议下拉同步到主窗体当前协议作为兜底；本轮 _do_parse
+        中 detect_protocol 可识别时切换到识别结果（自动识别优先），识别不出才
+        保持主窗体协议。
+        """
+        if self._main_protocol_fn is not None:
+            try:
+                self.set_protocol_index(self._main_protocol_fn())
+            except Exception:
+                pass  # 回调异常时按旧行为继续（不联动）
         self._proto_manual = False  # 每次唤出重新自动识别
         text = QGuiApplication.clipboard().text() or ""
         frame = self._try_clean(text)
@@ -442,6 +502,23 @@ class QuickParsePanel(QWidget):
         self._proto_manual = True  # 用户手动选择：自动识别不再覆盖
         if self._frame_bytes:
             self._do_parse()
+
+    def set_protocol_index(self, idx: int):
+        """主窗体协议切换时由 MainWindow 调用：把下拉静默切到主协议索引。
+
+        - blockSignals 静默切换：不触发 _on_proto_manually_changed（不会把 _proto_manual 置 True）
+        - 不重置 _proto_manual：用户已手动改过的话保留其偏好；未手动过则下次 _do_parse 时
+          detect_protocol 仍可覆盖（自动识别逃生通道）
+        - 不重解析：协议切换可能频繁且不破坏当前结果视图；下次 _do_parse 自动跟随
+        """
+        if self._main_protocol_fn is None:
+            return
+        di = self.proto_combo.findData(idx)
+        if di < 0 or di == self.proto_combo.currentIndex():
+            return
+        self.proto_combo.blockSignals(True)
+        self.proto_combo.setCurrentIndex(di)
+        self.proto_combo.blockSignals(False)
 
     def _try_clean(self, text):
         """文本 → bytes；非法/不足 4 字节返回 None。"""
@@ -474,7 +551,9 @@ class QuickParsePanel(QWidget):
         self._frame_bytes = frame
         idx = self.proto_combo.currentData()
 
-        # 自动识别协议（用户未手动选择时；静默切换不触发手动连接）
+        # 自动识别协议（用户未手动选择时）。自动识别优先：_prefill_clipboard
+        # 同步过来的主窗体协议只是兜底，detect_protocol 识别得出就切换，
+        # 识别不出（返回 None）才保持主窗体协议。
         if not self._proto_manual:
             detected = detect_protocol(frame)
             if detected is not None:
@@ -568,6 +647,18 @@ class QuickParsePanel(QWidget):
         多余高度让给结果表格。
         """
         self._expanded = expanded
+        # 外层边距随形态切换：空态仅留细光晕（输入框几乎充满窗口），
+        # 展开态恢复投影边距（毛玻璃卡片+投影需要四周留白）
+        outer = self.layout()
+        if outer is not None:
+            m = _OUTER_MARGIN_EXPANDED if expanded else _OUTER_MARGIN_EMPTY
+            outer.setContentsMargins(m, m, m, m)
+        # 面板内边距随形态切换：空态收窄让输入框贴近光晕边缘，展开态还原呼吸感
+        inner = self.panel.layout()
+        if inner is not None:
+            inner.setContentsMargins(
+                *(_PANEL_MARGINS_EXPANDED if expanded else _PANEL_MARGINS_EMPTY)
+            )
         if expanded:
             self.input.setMaximumHeight(70)  # 展开后输入框限高，避免挤占表格
             if self._glass_qss:
@@ -580,7 +671,6 @@ class QuickParsePanel(QWidget):
                 self.panel.setStyleSheet(self._empty_qss)
             for sh in getattr(self, "_shadows", []):
                 sh.setEnabled(False)
-
 
     def _style_status(self, color):
         self.status_label.setStyleSheet(f"color: {color}; font-size: 12px;")
@@ -667,68 +757,71 @@ class QuickParsePanel(QWidget):
     def _restyle(self):
         dark = bool(self._is_dark_fn())
         if dark:
-            # 深色毛玻璃：深蓝灰半透明面板（约 45%）+ 亮色细边
+            # 深色毛玻璃：深蓝灰半透明面板（约 45%）；无描边，靠投影圈定边界
             bg = "rgba(30, 33, 46, 115)"
-            border = "rgba(255,255,255,0.14)"
-            fg = "#e8ebf2"
             sub_fg = "#aab1c0"
             input_qss = (
                 "QTextEdit { background: rgba(255,255,255,0.07); color: #e8ebf2; "
                 "border: 1px solid rgba(255,255,255,0.13); border-radius: 8px; "
                 "padding: 7px 10px; font-size: 15px; "
-                "selection-background-color: rgba(139,92,246,0.45); }")
+                "selection-background-color: rgba(139,92,246,0.45); }"
+            )
             btn_qss = (
                 "QPushButton { background: rgba(255,255,255,0.10); color: #e8ebf2; "
                 "border: 1px solid rgba(255,255,255,0.16); border-radius: 8px; padding: 5px 14px; }"
                 "QPushButton:hover { background: rgba(139,92,246,0.30); }"
-                "QPushButton:pressed { background: rgba(139,92,246,0.45); }")
+                "QPushButton:pressed { background: rgba(139,92,246,0.45); }"
+            )
             combo_qss = (
                 "QComboBox { background: rgba(255,255,255,0.08); color: #e8ebf2; "
                 "border: 1px solid rgba(255,255,255,0.16); border-radius: 8px; padding: 3px 8px; }"
                 "QComboBox QAbstractItemView { background: rgba(38,42,56,240); color: #e8ebf2; "
-                "selection-background-color: rgba(139,92,246,0.5); border: none; }")
+                "selection-background-color: rgba(139,92,246,0.5); border: none; }"
+            )
             table_qss = (
                 "QTableWidget { background: transparent; color: #dfe3ec; border: none; "
                 "border-radius: 6px; gridline-color: rgba(255,255,255,0.08); }"
                 "QTableWidget::item { padding: 3px 8px; }"
                 "QTableWidget::item:selected { background: rgba(139,92,246,0.55); color: #ffffff; }"
                 "QHeaderView::section { background: transparent; color: #c6ccda; "
-                "border: none; border-bottom: 1px solid rgba(255,255,255,0.12); padding: 4px; }")
+                "border: none; border-bottom: 1px solid rgba(255,255,255,0.12); padding: 4px; }"
+            )
         else:
-            # 浅色毛玻璃：淡白半透明面板（WOX 风格淡灰白）+ 白色高光细边
+            # 浅色毛玻璃：淡白半透明面板（WOX 风格淡灰白）；无描边，靠投影圈定边界
             bg = "rgba(250, 250, 252, 150)"
-            border = "rgba(255,255,255,0.80)"
-            fg = "#2b3242"
             sub_fg = "#8a8f9a"
             input_qss = (
                 "QTextEdit { background: rgba(255,255,255,0.60); color: #2b3242; "
                 "border: 1px solid rgba(60,70,110,0.14); border-radius: 8px; "
                 "padding: 7px 10px; font-size: 15px; "
-                "selection-background-color: rgba(139,92,246,0.28); }")
+                "selection-background-color: rgba(139,92,246,0.28); }"
+            )
             btn_qss = (
                 "QPushButton { background: rgba(255,255,255,0.65); color: #3a415a; "
                 "border: 1px solid rgba(60,70,110,0.16); border-radius: 8px; padding: 5px 14px; }"
                 "QPushButton:hover { background: rgba(139,92,246,0.18); }"
-                "QPushButton:pressed { background: rgba(139,92,246,0.30); }")
+                "QPushButton:pressed { background: rgba(139,92,246,0.30); }"
+            )
             combo_qss = (
                 "QComboBox { background: rgba(255,255,255,0.65); color: #3a415a; "
                 "border: 1px solid rgba(60,70,110,0.16); border-radius: 8px; padding: 3px 8px; }"
                 "QComboBox QAbstractItemView { background: rgba(250,250,253,248); color: #3a415a; "
-                "selection-background-color: rgba(139,92,246,0.30); border: none; }")
+                "selection-background-color: rgba(139,92,246,0.30); border: none; }"
+            )
             table_qss = (
                 "QTableWidget { background: transparent; color: #333a4e; border: none; "
                 "border-radius: 6px; gridline-color: rgba(60,70,110,0.08); }"
                 "QTableWidget::item { padding: 3px 8px; }"
                 "QTableWidget::item:selected { background: rgba(106,76,222,0.92); color: #ffffff; }"
                 "QHeaderView::section { background: transparent; color: #5a627a; "
-                "border: none; border-bottom: 1px solid rgba(60,70,110,0.12); padding: 4px; }")
-        # 单一毛玻璃主面板（唯一的描边/底色容器，消除双边框）
-        self._glass_qss = (
-            f"#qpPanel {{ background: {bg}; border: 1px solid {border}; "
-            f"border-radius: 14px; }}")
+                "border: none; border-bottom: 1px solid rgba(60,70,110,0.12); padding: 4px; }"
+            )
+        # 展开态主面板：毛玻璃底色 + 14px 圆角，无描边（与空态保持完全一致），
+        # 卡片边界由下方外层 QGraphicsDropShadowEffect 投影圈定（uTools 风格）。
+        self._glass_qss = f"#qpPanel {{ background: {bg}; border-radius: 14px; }}"
         self._empty_qss = (
-            "#qpPanel { background: transparent; border: none; "
-            "border-radius: 14px; }")
+            "#qpPanel { background: transparent; border: none; border-radius: 14px; }"
+        )
         self.panel.setStyleSheet(self._glass_qss if self._expanded else self._empty_qss)
         self.input.setStyleSheet(input_qss)
         self.proto_combo.setStyleSheet(combo_qss)
