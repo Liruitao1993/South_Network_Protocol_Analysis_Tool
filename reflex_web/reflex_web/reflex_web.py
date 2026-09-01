@@ -3749,6 +3749,19 @@ def header(show_parse_controls: bool = True) -> rx.Component:
                     data_testid="nav-feedback",
                     style={"text_decoration": "none", "color": "white"},
                 ),
+                # 作者博客外链（CSDN，新标签页打开）
+                rx.el.a(
+                    rx.hstack(
+                        rx.icon("book_open", size=14),
+                        "作者博客",
+                        spacing="1",
+                    ),
+                    href="https://blog.csdn.net/liruitao1993?type=blog",
+                    class_name="app-header-btn",
+                    data_testid="nav-blog",
+                    is_external=True,
+                    style={"text_decoration": "none", "color": "white"},
+                ),
                 # 版本徽章
                 rx.badge("v1.13.0", color_scheme="blue", variant="soft", size="2"),
                 # 管理员登录/登出按钮（主页开弹窗；独立页面跳回主页弹窗位置）
@@ -7837,7 +7850,9 @@ def _fa_item_row(item: dict[str, Any]) -> rx.Component:
                     # 桌面端 GUI 提交标记（Web 表单提交 source=web，不显示）
                     rx.cond(
                         item.get("source", "web") == "gui",
-                        rx.badge("桌面端", color_scheme="cyan", variant="solid", size="1"),
+                        rx.badge(
+                            "桌面端", color_scheme="cyan", variant="solid", size="1"
+                        ),
                     ),
                     spacing="2",
                 ),
@@ -7921,7 +7936,12 @@ def _fa_detail_dialog() -> rx.Component:
                 rx.cond(
                     (d.get("source", "web") == "gui") & (d.get("sys_info", "") != ""),
                     rx.vstack(
-                        rx.text("客户端环境", size="2", font_weight="medium", color="#475569"),
+                        rx.text(
+                            "客户端环境",
+                            size="2",
+                            font_weight="medium",
+                            color="#475569",
+                        ),
                         rx.code(
                             d.get("sys_info", "").to(str),
                             size="1",
