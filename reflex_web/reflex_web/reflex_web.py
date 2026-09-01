@@ -21,6 +21,7 @@ import reflex as rx
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
+from . import share_model as sm  # noqa: F401  顶部导入：构建期完成 rx.Model 元数据注册
 from . import web_utils
 
 # ═══════════════════════════════════════════════════════════════
@@ -48,6 +49,9 @@ class State(rx.State):
     frame_hex: str = ""
     parse_result: list[dict[str, Any]] = []
     verify_result: str = ""
+    # 最近一次成功解析的报文与协议名（供「分享此帧」带入表单）
+    last_parsed_hex: str = ""
+    last_protocol_name: str = ""
 
     # ── 批量解析 ─────────────────────────────────────────────
     batch_input: str = ""
@@ -646,6 +650,13 @@ class State(rx.State):
 
             self.message = f"解析成功，共 {len(self.parse_result)} 个字段"
             self.message_type = "success"
+            # 缓存本次解析的报文与协议名（供「分享此帧」使用）
+            self.last_parsed_hex = " ".join(f"{b:02X}" for b in frame_bytes)
+            self.last_protocol_name = str(
+                self.PROTOCOL_OPTIONS[self.current_protocol]["label"]
+                if 0 <= self.current_protocol < len(self.PROTOCOL_OPTIONS)
+                else "不确定"
+            )
 
         except Exception as e:
             self.message = f"解析失败: {str(e)}"
@@ -3762,6 +3773,18 @@ def header(show_parse_controls: bool = True) -> rx.Component:
                     is_external=True,
                     style={"text_decoration": "none", "color": "white"},
                 ),
+                # 报文分享页入口
+                rx.el.a(
+                    rx.hstack(
+                        rx.icon("share_2", size=14),
+                        "报文分享",
+                        spacing="1",
+                    ),
+                    href="/share",
+                    class_name="app-header-btn",
+                    data_testid="nav-share",
+                    style={"text_decoration": "none", "color": "white"},
+                ),
                 # 版本徽章
                 rx.badge("v1.13.0", color_scheme="blue", variant="soft", size="2"),
                 # 管理员登录/登出按钮（主页开弹窗；独立页面跳回主页弹窗位置）
@@ -4016,6 +4039,16 @@ def single_parse_tab() -> rx.Component:
                         variant="outline",
                         color_scheme="cyan",
                         size="2",
+                    ),
+                    rx.button(
+                        rx.icon("share_2", size=16),
+                        "分享此帧",
+                        on_click=ShareState.sf_open_dialog,
+                        variant="outline",
+                        color_scheme="teal",
+                        size="2",
+                        disabled=State.last_parsed_hex == "",
+                        data_testid="btn-share-frame",
                     ),
                     rx.button(
                         rx.icon("eraser", size=16),
@@ -7599,6 +7632,136 @@ class FeedbackState(State):
         self.fa_load()
 
 
+class ShareState(rx.State):
+    """报文分享：列表/搜索（/share 页，所有人可见）+ 提交表单（主页弹窗）
+
+    独立 State（不继承主 State）：分享页无管理操作，不需 admin_logged_in；
+    主页「分享此帧」弹窗内的协议下拉用主 State 的 PROTOCOL_OPTIONS 只读
+    渲染（Var 跨 State 读是允许的，仅写入受限），提交走本 State 事件。
+    """
+
+    # ── 列表（/share 页）──
+    sh_items: list[dict[str, Any]] = []
+    sh_page: int = 1
+    sh_pages: int = 1
+    sh_total: int = 0
+    sh_keyword: str = ""
+    sh_msg: str = ""
+    sh_detail_open: bool = False
+    sh_detail: dict[str, Any] = {}
+
+    # ── 提交表单（主页弹窗）──
+    sf_open: bool = False
+    sf_hex: str = ""
+    sf_protocol: str = ""
+    sf_sharer: str = ""
+    sf_note: str = ""
+    sf_msg: str = ""
+    sf_msg_type: str = "info"
+
+    # ── 列表事件 ──
+
+    def sh_load(self):
+        """加载当前页分享列表（页面上 on_load 或翻页时调用）"""
+
+        try:
+            items, total, pages = sm.ShareStore.instance().list_page(
+                self.sh_page, sm.PER_PAGE, self.sh_keyword
+            )
+            self.sh_items = items
+            self.sh_total = total
+            self.sh_pages = pages
+            self.sh_page = min(self.sh_page, pages)
+        except Exception as e:
+            self.sh_msg = f"加载失败: {e}"
+
+    def set_sh_keyword(self, value: str):
+        """搜索词变化：重置到第 1 页并重新加载（rx.input on_change 触发）"""
+        self.sh_keyword = value
+        self.sh_page = 1
+        self.sh_load()
+
+    def sh_next(self):
+        if self.sh_page < self.sh_pages:
+            self.sh_page += 1
+        self.sh_load()
+
+    def sh_prev(self):
+        if self.sh_page > 1:
+            self.sh_page -= 1
+        self.sh_load()
+
+    def sh_open_detail(self, item: dict[str, Any]):
+        self.sh_detail = item
+        self.sh_detail_open = True
+
+    def sh_close_detail(self):
+        self.sh_detail_open = False
+
+    def sh_on_open_change(self, is_open: bool):
+        if not is_open:
+            self.sh_detail_open = False
+
+    def copy_detail_hex(self):
+        return rx.set_clipboard(self.sh_detail.get("frame_hex", ""))
+
+    # ── 提交表单事件（主页弹窗）──
+
+    def sf_open_dialog(self):
+        """打开分享表单（主页「分享此帧」按钮：从主 State 读最近解析缓存）"""
+        if not self.last_parsed_hex.strip():
+            self.sf_msg = "请先解析一个报文再分享"
+            self.sf_msg_type = "error"
+            self.sf_open = True
+            return
+        self.sf_hex = self.last_parsed_hex
+        self.sf_protocol = self.last_protocol_name
+        self.sf_sharer = ""
+        self.sf_note = ""
+        self.sf_msg = ""
+        self.sf_open = True
+
+    def set_sf_sharer(self, value: str):
+        self.sf_sharer = value
+
+    def set_sf_note(self, value: str):
+        self.sf_note = value
+
+    def set_sf_protocol(self, value: str):
+        self.sf_protocol = value
+
+    def sf_close(self):
+        self.sf_open = False
+
+    def sf_on_open_change(self, is_open: bool):
+        if not is_open:
+            self.sf_open = False
+
+    async def sf_submit(self):
+        """提交分享（source=web）：服务端校验 + 落库"""
+
+        if not (self.sf_sharer or "").strip():
+            self.sf_msg = "请填写分享人"
+            self.sf_msg_type = "error"
+            return
+        ok, result, status = sm.submit_share(
+            {
+                "frame_hex": self.sf_hex,
+                "protocol": self.sf_protocol,
+                "sharer": self.sf_sharer,
+                "note": self.sf_note,
+                "source": "web",
+            }
+        )
+        if ok:
+            self.sf_open = False
+            self.sf_msg = f"分享成功（#{int(result)}），可在「报文分享」页查看"
+            self.sf_msg_type = "success"
+        else:
+            self.sf_msg = str(result)
+            self.sf_msg_type = "error"
+
+
 class FeedbackUploads(rx.State):
     """保留空占位（历史遗留命名空间，无状态）"""
 
@@ -8212,6 +8375,416 @@ def feedback_admin_page() -> rx.Component:
                 spacing="3",
                 align="start",
                 max_width="640px",
+            ),
+            class_name="app-container",
+            width="100%",
+        ),
+        background="#f1f5f9",
+        min_height="100vh",
+    )
+
+
+# ═══════════════════════════════════════════════════════════════
+# 报文分享（列表页 /share + 主页分享表单弹窗）
+# ═══════════════════════════════════════════════════════════════
+
+
+def _sh_source_badge(source: str) -> rx.Component:
+    """来源徽章：gui → 青色「桌面端」；web 不显示（与反馈列表口径一致）"""
+    return rx.cond(
+        source == "gui",
+        rx.badge("桌面端", color_scheme="cyan", variant="solid", size="1"),
+    )
+
+
+def _sh_item_card(item: dict[str, Any]) -> rx.Component:
+    """分享列表卡片（点击开详情）"""
+    return rx.card(
+        rx.hstack(
+            rx.vstack(
+                rx.hstack(
+                    rx.badge(
+                        item["protocol"],
+                        color_scheme="purple",
+                        variant="soft",
+                        size="1",
+                    ),
+                    _sh_source_badge(item.get("source", "web")),
+                    rx.text(
+                        "分享人: ",
+                        size="1",
+                        color="#475569",
+                        font_weight="medium",
+                    ),
+                    rx.text(
+                        item["sharer"],
+                        size="1",
+                        color="#475569",
+                        font_weight="medium",
+                    ),
+                    spacing="2",
+                ),
+                rx.code(
+                    item["frame_hex"],
+                    size="1",
+                    font_family="monospace",
+                    style={
+                        "white_space": "nowrap",
+                        "overflow": "hidden",
+                        "text_overflow": "ellipsis",
+                        "max_width": "100%",
+                        "display": "block",
+                    },
+                ),
+                rx.hstack(
+                    rx.cond(
+                        item.get("note", "") != "",
+                        rx.text(item["note"], size="1", color="#64748b"),
+                    ),
+                    rx.text(
+                        "#",
+                        size="1",
+                        color="#94a3b8",
+                    ),
+                    rx.text(
+                        str(item.get("id", "")),
+                        size="1",
+                        color="#94a3b8",
+                    ),
+                    rx.text("·", size="1", color="#94a3b8"),
+                    rx.text(
+                        item["created_at"],
+                        size="1",
+                        color="#94a3b8",
+                    ),
+                    spacing="3",
+                ),
+                spacing="1",
+                align="start",
+                flex="1",
+            ),
+            rx.icon("chevron_right", size=18, color="#94a3b8"),
+            spacing="3",
+            align="center",
+            width="100%",
+            cursor="pointer",
+            on_click=lambda: ShareState.sh_open_detail(item),
+        ),
+        width="100%",
+        padding="12px 16px",
+    )
+
+
+def _sh_detail_dialog() -> rx.Component:
+    """分享详情弹窗：完整 hex + 复制 + 协议信息"""
+    d = ShareState.sh_detail
+    return rx.dialog.root(
+        rx.dialog.content(
+            rx.dialog.title("报文分享详情"),
+            rx.vstack(
+                rx.hstack(
+                    rx.badge(
+                        d["protocol"], color_scheme="purple", variant="soft", size="1"
+                    ),
+                    _sh_source_badge(d.get("source", "web")),
+                    rx.text("#", size="1", color="#94a3b8"),
+                    rx.text(d["id"].to_string(), size="1", color="#94a3b8"),
+                    rx.text("·", size="1", color="#94a3b8"),
+                    rx.text(d["created_at"], size="1", color="#94a3b8"),
+                    spacing="2",
+                ),
+                rx.hstack(
+                    rx.text("分享人:", size="2", font_weight="medium"),
+                    rx.text(d["sharer"], size="2", font_weight="medium"),
+                    spacing="2",
+                ),
+                rx.cond(
+                    d.get("note", "") != "",
+                    rx.text(
+                        d["note"],
+                        size="2",
+                        color="#334155",
+                        style={"white_space": "pre-wrap"},
+                        width="100%",
+                    ),
+                ),
+                rx.vstack(
+                    rx.hstack(
+                        rx.text(
+                            "报文:", size="2", font_weight="medium"
+                        ),
+                        rx.spacer(),
+                        rx.button(
+                            rx.hstack(rx.icon("copy", size=14), "复制", spacing="1"),
+                            size="1",
+                            variant="soft",
+                            on_click=ShareState.copy_detail_hex,
+                        ),
+                        spacing="2",
+                        width="100%",
+                    ),
+                    rx.code(
+                        d["frame_hex"],
+                        size="1",
+                        font_family="monospace",
+                        style={
+                            "white_space": "pre-wrap",
+                            "word_break": "break-all",
+                            "width": "100%",
+                            "padding": "8px",
+                            "background": "#f1f5f9",
+                            "border_radius": "6px",
+                        },
+                    ),
+                    spacing="1",
+                    align="start",
+                    width="100%",
+                ),
+                rx.dialog.close(
+                    rx.hstack(
+                        rx.spacer(),
+                        rx.button(
+                            "关闭",
+                            variant="soft",
+                            size="2",
+                            on_click=ShareState.sh_close_detail,
+                        ),
+                        spacing="2",
+                    ),
+                    top="auto",
+                ),
+                spacing="3",
+                width="100%",
+            ),
+            max_width="760px",
+            max_height="80vh",
+            style={"overflow_y": "auto"},
+        ),
+        open=ShareState.sh_detail_open,
+        on_open_change=ShareState.sh_on_open_change,
+    )
+
+
+def _share_submit_dialog() -> rx.Component:
+    """主页「分享此帧」表单弹窗（受控三件套）"""
+    return rx.dialog.root(
+        rx.dialog.content(
+            rx.dialog.title("分享此帧"),
+            rx.dialog.description("分享后所有用户可在「报文分享」页查看与搜索。"),
+            rx.vstack(
+                rx.vstack(
+                    rx.text("报文", size="2", font_weight="medium"),
+                    rx.code(
+                        ShareState.sf_hex,
+                        size="1",
+                        font_family="monospace",
+                        style={
+                            "white_space": "pre-wrap",
+                            "word_break": "break-all",
+                            "width": "100%",
+                            "padding": "8px",
+                            "background": "#f1f5f9",
+                            "border_radius": "6px",
+                            "max_height": "120px",
+                            "overflow_y": "auto",
+                        },
+                    ),
+                    spacing="1",
+                    align="start",
+                    width="100%",
+                ),
+                rx.vstack(
+                    rx.text("协议", size="2", font_weight="medium"),
+                    rx.select(
+                        FEEDBACK_PROTOCOL_OPTIONS,
+                        value=ShareState.sf_protocol,
+                        on_change=ShareState.set_sf_protocol,
+                        width="100%",
+                        data_testid="sf-protocol",
+                    ),
+                    spacing="1",
+                    align="start",
+                    width="100%",
+                ),
+                rx.vstack(
+                    rx.hstack(
+                        rx.text("分享人", size="2", font_weight="medium"),
+                        rx.badge("必填", color_scheme="red", variant="soft", size="1"),
+                        spacing="2",
+                    ),
+                    rx.input(
+                        placeholder="你的名字/昵称（≤50 字）",
+                        value=ShareState.sf_sharer,
+                        on_change=ShareState.set_sf_sharer,
+                        max_length=50,
+                        width="100%",
+                        data_testid="sf-sharer",
+                    ),
+                    spacing="1",
+                    align="start",
+                    width="100%",
+                ),
+                rx.vstack(
+                    rx.text("说明（选填，≤500 字）", size="2", font_weight="medium"),
+                    rx.text_area(
+                        placeholder="这帧报文的用途/场景，方便他人理解",
+                        value=ShareState.sf_note,
+                        on_change=ShareState.set_sf_note,
+                        min_height="80px",
+                        width="100%",
+                        data_testid="sf-note",
+                    ),
+                    spacing="1",
+                    align="start",
+                    width="100%",
+                ),
+                rx.cond(
+                    ShareState.sf_msg != "",
+                    rx.text(
+                        ShareState.sf_msg,
+                        size="2",
+                        color=rx.cond(
+                            ShareState.sf_msg_type == "error", "#dc2626", "#15803d"
+                        ),
+                    ),
+                ),
+                rx.hstack(
+                    rx.spacer(),
+                    rx.button(
+                        "取消", variant="soft", size="2", on_click=ShareState.sf_close
+                    ),
+                    rx.button(
+                        rx.hstack(rx.icon("share_2", size=14), "分享", spacing="1"),
+                        on_click=ShareState.sf_submit,
+                        color_scheme="teal",
+                        size="2",
+                        data_testid="sf-submit",
+                    ),
+                    spacing="2",
+                ),
+                spacing="3",
+                width="100%",
+            ),
+            max_width="620px",
+            max_height="85vh",
+            style={"overflow_y": "auto"},
+        ),
+        open=ShareState.sf_open,
+        on_open_change=ShareState.sf_on_open_change,
+    )
+
+
+def share_page() -> rx.Component:
+    """报文分享页（所有人可浏览/搜索；提交入口在主页单帧解析）"""
+    return rx.box(
+        rx.el.style(GLOBAL_CSS),
+        header(show_parse_controls=False),
+        rx.box(
+            rx.vstack(
+                rx.hstack(
+                    rx.icon("share_2", size=24, color="#2563eb"),
+                    rx.heading("报文分享", size="5", font_weight="bold"),
+                    rx.badge(
+                        ShareState.sh_total.to_string() + " 条",
+                        color_scheme="blue",
+                        variant="soft",
+                        size="2",
+                    ),
+                    spacing="2",
+                ),
+                rx.text(
+                    "在主页单帧解析后点击「分享此帧」，即可把有价值的命令帧分享到这里，供所有人查阅。",
+                    size="2",
+                    color="#64748b",
+                ),
+                # 搜索框
+                rx.hstack(
+                    rx.input(
+                        placeholder="搜索：报文 hex（支持连续无空格）/ 协议 / 分享人 / 说明",
+                        value=ShareState.sh_keyword,
+                        on_change=ShareState.set_sh_keyword,
+                        width="420px",
+                        data_testid="sh-search",
+                    ),
+                    rx.el.a(
+                        rx.hstack(rx.icon("home", size=14), "去解析并分享", spacing="1"),
+                        href="/",
+                        class_name="app-header-btn",
+                        style={
+                            "text_decoration": "none",
+                            "color": "white",
+                            "background": "linear-gradient(135deg, #2563eb, #3b82f6)",
+                        },
+                    ),
+                    spacing="3",
+                    wrap="wrap",
+                ),
+                rx.cond(
+                    ShareState.sh_msg != "",
+                    rx.text(ShareState.sh_msg, size="2", color="#dc2626"),
+                ),
+                # 列表
+                rx.cond(
+                    ShareState.sh_total > 0,
+                    rx.vstack(
+                        rx.foreach(ShareState.sh_items, _sh_item_card),
+                        spacing="2",
+                        width="100%",
+                    ),
+                    rx.vstack(
+                        rx.icon("inbox", size=36, color="#cbd5e1"),
+                        rx.text(
+                            rx.cond(
+                                ShareState.sh_keyword != "",
+                                "没有匹配的分享记录，换个关键词试试",
+                                "暂无分享，去主页解析报文后点击「分享此帧」",
+                            ),
+                            size="3",
+                            color="#94a3b8",
+                        ),
+                        spacing="2",
+                        align="center",
+                        padding="48px 0",
+                        width="100%",
+                    ),
+                ),
+                # 分页
+                rx.cond(
+                    ShareState.sh_pages > 1,
+                    rx.hstack(
+                        rx.button(
+                            "‹ 上一页",
+                            size="1",
+                            variant="soft",
+                            on_click=ShareState.sh_prev,
+                            disabled=ShareState.sh_page <= 1,
+                        ),
+                        rx.text(
+                            "第 "
+                            + ShareState.sh_page.to_string()
+                            + " / "
+                            + ShareState.sh_pages.to_string()
+                            + " 页（"
+                            + ShareState.sh_total.to_string()
+                            + " 条）",
+                            size="1",
+                            color="#64748b",
+                        ),
+                        rx.button(
+                            "下一页 ›",
+                            size="1",
+                            variant="soft",
+                            on_click=ShareState.sh_next,
+                            disabled=ShareState.sh_page >= ShareState.sh_pages,
+                        ),
+                        spacing="2",
+                        align="center",
+                    ),
+                ),
+                _sh_detail_dialog(),
+                spacing="3",
+                width="100%",
+                max_width="1000px",
             ),
             class_name="app-container",
             width="100%",
@@ -9530,6 +10103,8 @@ def index() -> rx.Component:
         ),
         # 管理员登录对话框
         admin_login_dialog(),
+        # 分享此帧弹窗（单帧解析结果区按钮触发）
+        _share_submit_dialog(),
         background="#f1f5f9",
         min_height="100vh",
     )
@@ -9557,6 +10132,7 @@ app.add_page(feedback_page, route="/feedback", title="问题反馈 - 多协议�
 app.add_page(
     feedback_admin_page, route="/feedback-admin", title="反馈管理 - 多协议解析平台"
 )
+app.add_page(share_page, route="/share", title="报文分享 - 多协议解析平台")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -9811,4 +10387,96 @@ app._api.routes.insert(
 )
 app._api.routes.insert(
     0, _FbRoute("/api/feedback/config", _dev_feedback_config_handler, methods=["GET"])
+)
+
+
+# ═══════════════════════════════════════════════════════════════
+# 报文分享 HTTP API（GUI 客户端等外部调用，dev 模式路由；
+# 生产模式由 run_app.py 中间件提供同名 /api/frameshare 分支）
+# ═══════════════════════════════════════════════════════════════
+
+# 滑动窗口频率限制：60 秒内同 IP 最多 10 条（分享比反馈高频，放宽）
+_SHARE_RATE: dict = {}
+_SHARE_RATE_WINDOW = 60.0
+_SHARE_RATE_MAX = 10
+
+
+def _share_rate_check(ip: str) -> bool:
+    import time as _time
+
+    now = _time.time()
+    bucket = [t for t in _SHARE_RATE.get(ip, []) if now - t < _SHARE_RATE_WINDOW]
+    if len(bucket) >= _SHARE_RATE_MAX:
+        _SHARE_RATE[ip] = bucket
+        return False
+    bucket.append(now)
+    _SHARE_RATE[ip] = bucket
+    return True
+
+
+async def _dev_frameshare_api_handler(request):
+    """POST /api/frameshare（dev 模式，JSON body）。
+
+    生产模式（run_app.py）由 ASGI 中间件 _handle_frameshare_api 提供，
+    两者共用 share_model.submit_share 纯逻辑。
+    """
+    import json as _json
+
+    from . import share_model as sm
+
+    if request.method == "OPTIONS":
+        return _feedback_json_response({}, 204, request)
+
+    ip = request.client.host if request.client else "unknown"
+    if not _share_rate_check(ip):
+        return _feedback_json_response(
+            {"ok": False, "error": "分享过于频繁，请稍后再试"}, 429, request
+        )
+
+    try:
+        body = await request.body()
+        if len(body) > 64 * 1024:
+            return _feedback_json_response(
+                {"ok": False, "error": "请求体过大"}, 413, request
+            )
+        fields = _json.loads(body.decode("utf-8"))
+        if not isinstance(fields, dict):
+            return _feedback_json_response(
+                {"ok": False, "error": "JSON 对象格式错误"}, 400, request
+            )
+    except _json.JSONDecodeError:
+        return _feedback_json_response(
+            {"ok": False, "error": "JSON 解析失败"}, 400, request
+        )
+    except Exception as e:
+        return _feedback_json_response(
+            {"ok": False, "error": f"请求体读取失败: {e}"}, 400, request
+        )
+
+    ok, result, status = sm.submit_share(fields)
+    if ok:
+        return _feedback_json_response({"ok": True, "id": int(result)}, status, request)
+    return _feedback_json_response({"ok": False, "error": str(result)}, status, request)
+
+
+async def _dev_frameshare_config_handler(request):
+    """GET /api/frameshare/config：GUI 拉取字段约束。"""
+    from . import share_model as sm
+
+    return _feedback_json_response(sm.share_config())
+
+
+app._api.routes.insert(
+    0,
+    _FbRoute(
+        "/api/frameshare",
+        _dev_frameshare_api_handler,
+        methods=["POST", "OPTIONS"],
+    ),
+)
+app._api.routes.insert(
+    0,
+    _FbRoute(
+        "/api/frameshare/config", _dev_frameshare_config_handler, methods=["GET"]
+    ),
 )

@@ -88,10 +88,21 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.20.0"
-BUILD_DATE = "2026-09-01"  # 编译日期，每次打包前更新
+APP_VERSION = "1.21.0"
+BUILD_DATE = "2026-09-01"  # 编译日期，每次打包前更新  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    (
+        "1.21.0",
+        "2026-09-01",
+        [
+            "新增「报文分享」功能（Web /share 页面 + GUI 单帧解析「分享此帧」，共享 frameshare.db）：用户单帧解析后可把有价值的命令帧分享到服务端——记录 原始报文（服务端 normalize 规范存储）+ 协议 + 分享人（必填≤50）+ 说明（选填≤500）+ 来源（web/gui），所有人可在 /share 页浏览（时间倒序分页每页20条）与搜索（报文 hex 支持连续无空格输入自动匹配空格存储格式/协议/分享人/说明），点开详情可复制完整 hex",
+            "Web 端：新增 ShareState + /share 独立页面（导航栏「报文分享」入口）+ 主页单帧解析「分享此帧」弹窗（State 缓存最近解析的报文与协议名，解析成功后可分享，sharer 必填、协议下拉预选当前协议）；详情弹窗受控三件套（关闭按钮/on_open_change 同步）；新 API POST /api/frameshare（JSON，dev Starlette Route + 生产 run_app.py 中间件双实现共用 share_model.submit_share）与 GET /api/frameshare/config（约束下发），频率限制 60s/10条/IP，CORS 反射 Origin",
+            "GUI 端：新增 share_dialog.py（ShareDialog）——只读报文展示/协议下拉（自动映射当前协议索引到短名）/分享人（记住上次输入到 config.json share.last_sharer）/说明（预填 GUI 版本+OS+Python 环境）/服务器地址复用 feedback.server_url（同一服务器）；QtNetwork 异步 JSON POST（20s 超时，零新增依赖），成功后可一键在浏览器打开 /share；main_gui.py 单帧解析按钮行新增「分享此帧」（未解析时提示先解析）",
+            "share_model.py（新）：ShareItem(rx.Model) + ShareStore 单例（独立 frameshare.db，FRAMESHARE_DATA_DIR 环境变量供测试重定向，部署脚本 data/ 整体保留策略天然覆盖）+ normalize_hex（hex 清洗规范存储）+ submit_share 纯函数（字段/协议白名单/hex 边界 2~2048B 全套校验）+ list_page 分页搜索；修复：share_model 移至 reflex_web.py 顶部 import（此前仅 API 请求时懒加载，rx.Model 元数据在请求线程注册导致 dev 后端事件循环假死——POST 一次成功后服务无响应，TestClient 无法复现、TestClient 隔离验证定位）",
+            "测试：新增 test_frame_share.py（57 项：normalize_hex 边界/submit_share 校验分支/Store 分页搜索含无空格 hex 匹配/config 下发/GUI payload 构造与 validate_fields 分支/last_sharer config 往返/offscreen 对话框冒烟）；回归 test_web_feedback 49、test_feedback_api 31、test_feedback_dialog 30、test_web_frame_gen_utils 63、test_quick_parse_panel 84 项全过；真机 e2e POST 序列（合法 gui/web/非法 hex/空分享人/非法协议）全部按预期返回且服务保持存活",
+        ],
+    ),
     (
         "1.20.0",
         "2026-09-01",
@@ -99,7 +110,7 @@ CHANGELOG = [
             "GUI 客户端新增『问题反馈』（帮助菜单）：新文件 feedback_dialog.py（QDialog），问题类型/涉及协议下拉、描述（≤2000 字实时计数）、联系方式、截图（≤3 张）；QNetworkAccessManager 异步 multipart 提交（零新依赖，20 秒超时），成功后可一键在浏览器打开反馈页；自动收集环境信息（版本/OS/Python/机器名/当前协议）随 sys_info 字段提交",
             "Reflex Web 服务端开放反馈提交 API：POST /api/feedback（multipart，dev Starlette Route + 生产 run_app.py ASGI 中间件双实现，共用 feedback_model.submit_from_api 纯函数）与 GET /api/feedback/config（GUI 拉取字段约束）；滑动窗口频率限制（60 秒 5 条/IP，进程内计数）；CORS 反射 Origin（无凭据接口，Qt 不校验）；GUI 与 Web 页面提交共用同一 feedback.db，反馈列表为桌面端来源记录显示『桌面端』徽章、详情弹窗展示客户端环境信息",
             "feedback_model 扩展：FeedbackItem 新增 source（web/gui 来源）与 sys_info（客户端环境信息）列，FeedbackStore 首次打开旧库自动 PRAGMA+ALTER TABLE 迁移（历史记录默认 source=web）；新增 submit_from_api（字段/截图全套校验+失败回滚已存文件）、parse_multipart（二进制安全手工解析，生产中间件用）、FeedbackRateLimiter（可注入窗口/上限）、api_config 纯函数",
-            "反馈服务器地址可配置：config.json 新增 \"feedback\" 段（server_url，默认 http://127.0.0.1:8000），对话框内可修改并持久化；部署后把地址改为 Web 服务器实际地址即可",
+            '反馈服务器地址可配置：config.json 新增 "feedback" 段（server_url，默认 http://127.0.0.1:8000），对话框内可修改并持久化；部署后把地址改为 Web 服务器实际地址即可',
             "测试：新增 test_feedback_api.py（31 项：提交/校验/截图回滚/multipart 解析/频率限制/旧库迁移/config）与 test_feedback_dialog.py（30 项：URL 规范化/config 读写/字段校验/sys_info/offscreen 对话框冒烟/截图增删/提交拦截）；回归 test_web_feedback 49 项、test_web_frame_gen_utils 63 项全过；真机端到端 curl 提交 → source=gui 落库验证",
             "同批修复（上轮 1.19.0 验收发现）：reflex_web.py 缺 datetime import 致 Web 端提交报错；顶栏在独立页改为『返回主页』+管理员按钮跳回主页（弹窗组件仅挂主页）；Tab 栏 overflow-y hidden 消除多余垂直滚动条；反馈列表 Tab 改双事件链触发（Reflex 跨 State delta 不随主 State 事件推送）；详情弹窗关闭按钮显式绑 State + on_open_change 同步（受控弹窗）；FeedbackState 改继承主 State 使 admin_logged_in 可访问（修复管理员删除报 AttributeError）",
         ],
@@ -1574,6 +1585,15 @@ class MainWindow(QMainWindow):
         set_btn_icon(self.add_to_test_btn, "apply")
         self.add_to_test_btn.clicked.connect(self._add_parsed_to_test_plan)
         btn_layout.addWidget(self.add_to_test_btn)
+
+        self.share_frame_btn = QPushButton("分享此帧")
+        self.share_frame_btn.setToolTip(
+            "把当前解析的报文分享到 Web 服务端（所有人可在「报文分享」页查看）"
+        )
+        set_btn(self.share_frame_btn, "warning", "lg")
+        set_btn_icon(self.share_frame_btn, "share")
+        self.share_frame_btn.clicked.connect(self._show_share_dialog)
+        btn_layout.addWidget(self.share_frame_btn)
 
         clear_btn = QPushButton("清空")
         set_btn(clear_btn, "secondary", "lg")
@@ -5690,6 +5710,37 @@ class MainWindow(QMainWindow):
             dlg.exec()
         except Exception as e:  # noqa: BLE001 - 反馈功能不应影响主程序
             QMessageBox.critical(self, "问题反馈", f"反馈功能打开失败：{e}")
+
+    def _show_share_dialog(self):
+        """单帧解析页「分享此帧」：把最近解析的报文分享到 Web 服务端
+        （与 Web /share 页共享 frameshare.db）。懒 import 保持启动轻量。"""
+        if not getattr(self, "current_result", None) or not self._last_parsed_hex:
+            QMessageBox.information(self, "分享", "请先解析一个报文，再点击分享！")
+            return
+        try:
+            from share_dialog import ShareDialog
+            from share_dialog import fd as _fd
+
+            _fd.set_config_path(self._config_path)
+            # 主窗口协议名（如 "[0] 南网协议 (Q/CSG1209021-2019)"）→ 对话框内
+            # 下拉为短名（"南网协议"），按索引映射
+            short_names = {
+                0: "南网协议", 1: "PLC RF协议", 2: "HDLC/国网DLMS",
+                3: "DLMS-APDU(国网)", 4: "DLMS Wrapper裸报文",
+                5: "DLMS-APDU裸报文", 6: "DLT645-2007 电表协议",
+                7: "国网协议", 8: "698.45协议", 9: "新一代载波协议",
+                10: "国网新一代双模", 11: "HDC 1.0 双模",
+            }
+            proto = short_names.get(self.current_protocol, "不确定")
+            dlg = ShareDialog(
+                parent=self,
+                frame_hex=self._last_parsed_hex,
+                protocol_name=proto,
+                app_version=APP_VERSION,
+            )
+            dlg.exec()
+        except Exception as e:  # noqa: BLE001 - 分享功能不应影响主程序
+            QMessageBox.critical(self, "分享", f"分享功能打开失败：{e}")
 
     # ==================== 自动更新 ====================
     def _load_update_settings(self):
