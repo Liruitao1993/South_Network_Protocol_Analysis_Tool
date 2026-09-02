@@ -1,4 +1,3 @@
-import pathlib
 
 """
 南网协议解析工具 - PySide6 GUI版
@@ -1563,6 +1562,19 @@ class MainWindow(QMainWindow):
         self._restore_saved_protocol()
         self._ui_ready = True  # UI 构造完成，此后协议切换才写盘
 
+        # 分隔条拖动/尺寸变化后，子控件旧位置可能残留像素（Windows DWM 合成
+        # 下半透明样式控件不保证擦除），强制父容器重绘消除分隔区域重影。
+        for sp in self.findChildren(QSplitter):
+            def _force_parent_rep(_a=None, _b=None, s=sp):
+                p = s.parentWidget()
+                if p is not None:
+                    p.update()
+
+            try:
+                sp.splitterMoved.connect(_force_parent_rep)
+            except Exception:
+                pass
+
     def _restore_saved_protocol(self):
         """启动时恢复上次选择的协议索引（config parse.protocol）"""
         saved = getattr(self, "_saved_protocol", 0)
@@ -2688,6 +2700,7 @@ class MainWindow(QMainWindow):
             s = self._proc_stats.sample()
         except Exception:
             self._cpu_mem_lbl.setText("CPU: --  内存: --")
+            self.statusBar().update()
             return
         cpu_txt = "--" if s.cpu_pct is None else f"{s.cpu_pct:.1f}%"
         mem_txt = "--" if s.mem_mb is None else f"{s.mem_mb:.0f} MB"
@@ -2707,6 +2720,8 @@ class MainWindow(QMainWindow):
             f"内存占用：{mem_txt}（当前工作集）\n"
             f"内存峰值：{peak_txt}"
         )
+        # 文本长度变化触发状态栏布局重排，Windows 合成层下旧矩形可能残留（重影）
+        self.statusBar().update()
 
     def _build_thread_detail_menu(self) -> tuple:
         """构建线程明细 QMenu（纯构建，不弹模态，便于测试）。
@@ -5885,6 +5900,7 @@ class MainWindow(QMainWindow):
         if not latest:
             self._pending_update = None
             lbl.hide()
+            self.statusBar().update()
             return
         self._pending_update = latest
         remote = latest.get("version", "?")
@@ -5897,6 +5913,7 @@ class MainWindow(QMainWindow):
         )
         lbl.setStyleSheet(self._update_status_style())
         lbl.show()
+        self.statusBar().update()
 
     def _update_status_style(self):
         """状态栏更新提示样式：绿色加粗醒目显示（暗色主题用亮绿）。"""

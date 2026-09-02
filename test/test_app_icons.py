@@ -75,8 +75,12 @@ def main():
     from PySide6.QtGui import QColor, QIcon, QPalette
     from PySide6.QtWidgets import QApplication
 
+    from PySide6.QtWidgets import QMainWindow
+
     app = QApplication.instance() or QApplication([])
     import app_icons
+
+    app_icons.set_theme_color(None)  # 先清主题覆盖，单独验证 palette 链
 
     print("load_icon basic:")
     icon = app_icons.load_icon("terminal")
@@ -96,12 +100,17 @@ def main():
         print("   missing:", missing_list)
 
     print("rendering (light palette):")
-    pal_light = app.style().standardPalette()
+    # 取色链：pixmap 回退路径读活动窗口 palette（QSS polish 写在 widget 上，
+    # 而非 app palette——系统深色模式下 app palette 会被带偏）
+    win = QMainWindow()
+    win.show()
+    app.processEvents()
+    pal_light = win.palette()
     pal_light.setColor(QPalette.ColorGroup.Normal, QPalette.ColorRole.ButtonText,
                        QColor("#1f2937"))
     pal_light.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText,
                        QColor("#9ca3af"))
-    app.setPalette(pal_light)
+    win.setPalette(pal_light)
     px = _render_pixels(icon, QIcon.Mode.Normal)
     check("normal mode has pixels", len(px) > 50)
     # 抽样像素颜色接近目标深色（抗锯齿允许容差）
@@ -119,7 +128,7 @@ def main():
     pal_dark = QPalette(pal_light)
     pal_dark.setColor(QPalette.ColorGroup.Normal, QPalette.ColorRole.ButtonText,
                       QColor("#e5e7eb"))
-    app.setPalette(pal_dark)
+    win.setPalette(pal_dark)
     px2 = _render_pixels(icon, QIcon.Mode.Normal)
     check("dark mode has pixels", len(px2) > 50)
     r2, g2, b2, _ = px2[len(px2) // 2]
@@ -127,6 +136,36 @@ def main():
         "dark color ~ #e5e7eb (light)",
         r2 > 0xC0 and g2 > 0xC0 and b2 > 0xC0,
     )
+
+    print("theme color override:")
+    # 深色主题下发浅色：即使 app palette 是黑的（系统深色模式/回退链错位），
+    # 图标也必须是浅色
+    black_pal = app.style().standardPalette()
+    black_pal.setColor(
+        QPalette.ColorGroup.Normal, QPalette.ColorRole.ButtonText, QColor("#000000")
+    )
+    app.setPalette(black_pal)
+    app_icons.set_theme_color("#e0e0e0")
+    px_theme = _render_pixels(app_icons.load_icon("activity"), QIcon.Mode.Normal)
+    rt, gt, bt, _ = px_theme[len(px_theme) // 2]
+    check("dark theme override renders light", rt > 0xC0 and gt > 0xC0 and bt > 0xC0)
+    # 清除覆盖 → 回退 palette 链（活动窗口 palette：置黑后应渲染深色）
+    fb_pal = QPalette(win.palette())
+    fb_pal.setColor(
+        QPalette.ColorGroup.Normal, QPalette.ColorRole.ButtonText, QColor("#000000")
+    )
+    win.setPalette(fb_pal)
+    app_icons.set_theme_color(None)
+    px_fb = _render_pixels(app_icons.load_icon("activity"), QIcon.Mode.Normal)
+    rf, gf, bf, _ = px_fb[len(px_fb) // 2]
+    check("override cleared falls back to palette", rf < 0x60 and gf < 0x60)
+    # 浅色主题下发深色
+    app_icons.set_theme_color("#1f2937")
+    px_lt = _render_pixels(app_icons.load_icon("activity"), QIcon.Mode.Normal)
+    rl, gl, bl, _ = px_lt[len(px_lt) // 2]
+    check("light theme override renders dark", rl < 0x60 and gl < 0x70)
+    app_icons.set_theme_color(None)
+    win.close()
 
     print(f"\n{'=' * 40}")
     print(f"PASS: {PASS}  FAIL: {FAIL}")

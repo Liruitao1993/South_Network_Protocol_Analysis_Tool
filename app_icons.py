@@ -22,9 +22,9 @@ import functools
 from pathlib import Path
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QIcon, QIconEngine, QPainter, QPalette, QPixmap
+from PySide6.QtGui import QColor, QIcon, QIconEngine, QPainter, QPalette, QPixmap
 from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 
 _ICONS_DIR = Path(__file__).resolve().parent / "icons" / "lucide"
 
@@ -32,6 +32,19 @@ _ICONS_DIR = Path(__file__).resolve().parent / "icons" / "lucide"
 _svg_cache: dict[str, bytes | None] = {}
 # (name, #rrggbb) → 渲染器
 _renderer_cache: dict[tuple[str, str], QSvgRenderer] = {}
+
+# 主题前景色覆盖：由 ThemeManager.apply 设置。
+# QSS 主题（default/dark/glass 等）里 QTabBar 等控件图标走 QIconEngine.pixmap
+# 通道，取不到控件自身 palette（QSS 颜色只 polish 进控件），由主题直接下发
+# 颜色最可靠；None = 不覆盖（原生 Fusion/Windows 样式跟随系统与组件 palette，
+# 系统深色模式下 Fusion palette 自带浅色前景）。
+_theme_color: str | None = None
+
+
+def set_theme_color(hex_color: str | None) -> None:
+    """设置当前主题下图标前景色（'#rrggbb'）；None 清除覆盖回到 palette 取色。"""
+    global _theme_color
+    _theme_color = hex_color or None
 
 
 def _svg_bytes(name: str) -> bytes | None:
@@ -68,17 +81,39 @@ class _LucideIconEngine(QIconEngine):
         super().__init__()
         self._name = name
 
-    def _color(self, mode: QIcon.Mode):
+    @staticmethod
+    def _palette_for(painter: QPainter) -> QPalette:
+        """取色优先级：绘制目标 widget 的 palette → 活动窗口 palette → app palette。
+
+        必须用 widget/窗口 palette 而不是 QApplication.palette()：主题颜色由
+        QSS 经 QStyleSheetStyle polish 写入各 widget palette（浅色主题黑字、
+        深色 QSS 浅字）；app 级 palette 还会被系统深色模式（Fusion 样式）
+        带偏，导致浅底白图标不可见。
+        """
+        dev = painter.device()
+        if isinstance(dev, QWidget):
+            return dev.palette()
+        win = QApplication.activeWindow()
+        if win is not None:
+            return win.palette()
         app = QApplication.instance()
-        pal = app.palette() if app is not None else QPalette()
+        if app is not None:
+            return app.palette()
+        return QPalette()
+
+    def _color(self, painter: QPainter, mode: QIcon.Mode):
+        pal = self._palette_for(painter)
         if mode == QIcon.Mode.Disabled:
             return pal.color(
                 QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText
             )
+        # 主题下发的前景色（QSS 主题下比 palette 链可靠，见 set_theme_color）
+        if _theme_color:
+            return QColor(_theme_color)
         return pal.color(QPalette.ColorGroup.Normal, QPalette.ColorRole.ButtonText)
 
     def paint(self, painter: QPainter, rect, mode, state):  # noqa: ANN001
-        renderer = _renderer(self._name, self._color(mode).name())
+        renderer = _renderer(self._name, self._color(painter, mode).name())
         if renderer is not None:
             painter.save()
             renderer.render(painter, QRectF(rect))

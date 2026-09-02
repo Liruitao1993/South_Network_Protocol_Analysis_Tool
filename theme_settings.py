@@ -1559,6 +1559,21 @@ class ThemeManager:
         qss = qss + "\n" + button_qss_for_theme(theme_id)
         app.setStyleSheet(qss)
         app.setFont(QFont(font_family, font_size))
+        # 图标前景色：QSS 主题显式下发（标签页等图标经 QIconEngine.pixmap
+        # 通道渲染，拿不到 QSS polish 后的控件 palette）；原生样式主题
+        # （fusion/windows 无 QSS）传 None，跟随系统与组件 palette，
+        # 系统深色模式下 Fusion 前景自动为浅色。
+        try:
+            import app_icons
+
+            if is_dark(theme_id):
+                app_icons.set_theme_color("#e0e0e0")
+            elif theme.get("win_blur") or (theme.get("qss") or "").strip():
+                app_icons.set_theme_color("#1f2937")
+            else:
+                app_icons.set_theme_color(None)
+        except Exception:
+            pass
         # 透明度全局生效：
         # - 毛玻璃：opacity 缩放 QSS alpha + 亚克力模糊，窗口透明合成。
         # - 其它主题：setWindowOpacity 做 OS 级整窗透明（不依赖 WA_TranslucentBackground，
