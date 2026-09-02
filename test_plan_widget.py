@@ -15,25 +15,47 @@ import re
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Any
 
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox,
-    QComboBox, QSpinBox, QMessageBox, QFileDialog, QTextEdit,
-    QDialog, QLineEdit, QGroupBox, QMenu, QPlainTextEdit
-)
-from PySide6.QtCore import Qt, Signal, QTimer, QObject
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import (
-    QFont, QColor, QTextCursor, QKeySequence,
-    QSyntaxHighlighter, QTextCharFormat, QBrush
+    QBrush,
+    QColor,
+    QFont,
+    QSyntaxHighlighter,
+    QTextCharFormat,
+    QTextCursor,
+)
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMenu,
+    QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
+    QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
 
-from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu, ZoomableTableWidget, set_btn, set_btn_icon
 from app_paths import data_path
+from gui_utils import (
+    ZoomableTableWidget,
+    set_btn,
+    set_btn_icon,
+)
 
 try:
-    from lua_script_engine import LuaScriptEngine, LUA_TEMPLATES
+    from lua_script_engine import LUA_TEMPLATES, LuaScriptEngine
     LUA_AVAILABLE = True
 except ImportError:
     LUA_AVAILABLE = False
@@ -116,7 +138,6 @@ class VimHandler(QObject):
     def eventFilter(self, obj, event):
         """事件过滤器，拦截键盘事件"""
         from PySide6.QtCore import QEvent
-        from PySide6.QtGui import QKeyEvent
 
         if obj != self._editor:
             return False
@@ -463,9 +484,9 @@ def _calc_crc16(data: bytes) -> int:
     return fcs ^ 0xFFFF
 
 
-def _split_bracket_params(content: str) -> List[str]:
+def _split_bracket_params(content: str) -> list[str]:
     """按逗号分割标记参数，支持引号包裹"""
-    parts: List[str] = []
+    parts: list[str] = []
     current = ""
     in_quote = False
     quote_char = None
@@ -489,7 +510,7 @@ def _split_bracket_params(content: str) -> List[str]:
     return parts
 
 
-def _parse_byte_range(range_str: str, total: int) -> Tuple[int, int]:
+def _parse_byte_range(range_str: str, total: int) -> tuple[int, int]:
     """解析字节范围（1-based索引，支持负数倒数）"""
     if ":" in range_str:
         start_str, end_str = range_str.split(":", 1)
@@ -503,7 +524,7 @@ def _parse_byte_range(range_str: str, total: int) -> Tuple[int, int]:
     return max(0, start), min(total, end)
 
 
-def _fill_time(params: List[str]) -> str:
+def _fill_time(params: list[str]) -> str:
     """填充系统时间（BCD码）"""
     byte_count = int(params[1])
     fmt = params[2].strip('"\'')
@@ -536,7 +557,7 @@ def _fill_time(params: List[str]) -> str:
     return result
 
 
-def _calc_checksum(frame_hex: str, match_start: int, match_end: int, params: List[str]) -> str:
+def _calc_checksum(frame_hex: str, match_start: int, match_end: int, params: list[str]) -> str:
     """计算校验并返回 HEX 字符串"""
     algo = params[0].strip('"\'')
     size = int(params[1])
@@ -549,9 +570,7 @@ def _calc_checksum(frame_hex: str, match_start: int, match_end: int, params: Lis
     def _ph_repl(m: Any) -> str:
         p = _split_bracket_params(m.group(1))
         a = p[0].strip('"\'')
-        if a in ("CS", "CRC16"):
-            s = int(p[1]) if len(p) > 1 else 0
-        elif a == "time":
+        if a in ("CS", "CRC16") or a == "time":
             s = int(p[1]) if len(p) > 1 else 0
         else:
             s = 0
@@ -640,7 +659,7 @@ class LuaSyntaxHighlighter(QSyntaxHighlighter):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._rules: List[Tuple['re.Pattern', QTextCharFormat]] = []
+        self._rules: list[tuple[re.Pattern, QTextCharFormat]] = []
         self._build_rules()
 
     # ---- 格式工厂 ----
@@ -1103,7 +1122,7 @@ class LuaCodeEditor(QPlainTextEdit):
                     extra.append(sel)
         self.setExtraSelections(extra)
 
-    def _find_matching_bracket(self, doc, pos: int, ch: str) -> Optional[int]:
+    def _find_matching_bracket(self, doc, pos: int, ch: str) -> int | None:
         """在文档中查找 pos 处括号的配对位置"""
         if ch in self._BRACKET_PAIRS:
             # 向右查找
@@ -1150,17 +1169,17 @@ class _LineNumberArea(QWidget):
 class AddTestItemDialog(QDialog):
     """添加/编辑测试项对话框"""
 
-    def __init__(self, item: Dict[str, Any] = None, parent=None):
+    def __init__(self, item: dict[str, Any] = None, parent=None):
         super().__init__(parent)
         self._edit_mode = item is not None
         self.setWindowTitle("编辑测试项" if self._edit_mode else "添加测试项")
         self.setMinimumWidth(480)
-        self._result: Optional[Dict[str, Any]] = None
+        self._result: dict[str, Any] | None = None
         self._init_ui(item or {})
         self._apply_nature()
 
     @staticmethod
-    def _derive_nature(item: Dict[str, Any]) -> str:
+    def _derive_nature(item: dict[str, Any]) -> str:
         """从 item 字段推导性质"""
         if item.get("is_lua_script", False):
             return "Lua脚本"
@@ -1200,7 +1219,7 @@ class AddTestItemDialog(QDialog):
         if not send:
             self.timeout_spin.setValue(600000)
 
-    def _init_ui(self, data: Dict[str, Any]):
+    def _init_ui(self, data: dict[str, Any]):
         nature = self._derive_nature(data)
         # Lua 脚本内容（编辑模式）
         self._lua_script = data.get("script", "")
@@ -1427,7 +1446,7 @@ class AddTestItemDialog(QDialog):
         }
         self.accept()
 
-    def get_result(self) -> Optional[Dict[str, Any]]:
+    def get_result(self) -> dict[str, Any] | None:
         return self._result
 
 
@@ -1437,10 +1456,10 @@ class TestPlanWidget(QWidget):
     # 当帧被添加到测试方案时发出（供外部日志或联动）
     item_added = Signal(str, str)  # name, frame_hex
 
-    def __init__(self, parent=None, file_path: Optional[Path] = None):
+    def __init__(self, parent=None, file_path: Path | None = None):
         super().__init__(parent)
         self._file_path = file_path or TEST_PLAN_PATH
-        self._items: List[Dict[str, Any]] = []
+        self._items: list[dict[str, Any]] = []
         self._serial_worker = None
         self._current_test_index: int = -1
         self._testing: bool = False
@@ -1448,9 +1467,9 @@ class TestPlanWidget(QWidget):
         self._wait_timer: QTimer = None
         self._waiting_for_response: bool = False
         self._any_frame_received: bool = False
-        self._test_start_time: Optional[datetime] = None  # 测试开始时间
-        self._test_end_time: Optional[datetime] = None    # 测试结束时间
-        self._test_vars: Dict[str, Any] = {}              # Lua 脚本共享变量
+        self._test_start_time: datetime | None = None  # 测试开始时间
+        self._test_end_time: datetime | None = None    # 测试结束时间
+        self._test_vars: dict[str, Any] = {}              # Lua 脚本共享变量
         self._lua_engine = None                           # 当前运行的 Lua 引擎
         self.setup_ui()
 
@@ -1766,15 +1785,13 @@ class TestPlanWidget(QWidget):
             result_item.setFlags(result_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self._set_result_style(result_item, result_text)
             self.table.setItem(row, 9, result_item)
-            # 超时
-            spin = QSpinBox()
-            spin.setRange(100, 600000)
-            spin.setValue(item.get("timeout_ms", 2000))
-            spin.setSingleStep(1000)
+            # 超时(ms)：纯文本直接填写，避免 SpinBox 上下箭头遮挡数字
+            timeout_item = QTableWidgetItem(str(item.get("timeout_ms", 2000)))
             if persistent:
-                spin.setEnabled(False)
-            spin.valueChanged.connect(lambda val, r=row: self._on_timeout_changed(r, val))
-            self.table.setCellWidget(row, 10, spin)
+                timeout_item.setFlags(timeout_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            else:
+                timeout_item.setFlags(timeout_item.flags() | Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 10, timeout_item)
             # 响应帧（保留原始内容，方便查看标记）
             resp_item = QTableWidgetItem(item.get("response_frame", ""))
             resp_item.setFlags(resp_item.flags() | Qt.ItemFlag.ItemIsEditable)
@@ -1828,6 +1845,19 @@ class TestPlanWidget(QWidget):
             self._items[row]["match_enabled"] = (item.checkState() == Qt.CheckState.Checked)
         elif col == 7:
             self._items[row]["match_rule"] = item.text().replace(" ", "")
+        elif col == 10:
+            # 超时(ms)：必须为 100–600000 的整数，非法输入还原旧值
+            try:
+                val = int(item.text().strip())
+            except ValueError:
+                val = None
+            if val is not None and 100 <= val <= 600000:
+                self._items[row]["timeout_ms"] = val
+            else:
+                self.table.blockSignals(True)
+                item.setText(str(self._items[row].get("timeout_ms", 2000)))
+                self.table.blockSignals(False)
+                return
         elif col == 11:
             self._items[row]["response_frame"] = item.text().replace(" ", "")
         self._auto_save()
@@ -1835,11 +1865,6 @@ class TestPlanWidget(QWidget):
     def _on_match_mode_changed(self, row: int, text: str):
         if 0 <= row < len(self._items):
             self._items[row]["match_mode"] = text
-            self._auto_save()
-
-    def _on_timeout_changed(self, row: int, val: int):
-        if 0 <= row < len(self._items):
-            self._items[row]["timeout_ms"] = val
             self._auto_save()
 
     # ------------------------------------------------------------------
@@ -1978,7 +2003,7 @@ class TestPlanWidget(QWidget):
         if not path:
             return
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             if not isinstance(data, list):
                 QMessageBox.warning(self, "导入失败", "文件格式错误：应为 JSON 数组")
@@ -2159,7 +2184,7 @@ class TestPlanWidget(QWidget):
         self._log("=" * 40)
         self._update_bg_status()
 
-    def _run_single_test(self, row: int, item: Dict[str, Any], sequential: bool = False):
+    def _run_single_test(self, row: int, item: dict[str, Any], sequential: bool = False):
         item["status"] = "测试中"
         item["test_result"] = "未测"
         self._refresh_table_row(row)
@@ -2210,7 +2235,7 @@ class TestPlanWidget(QWidget):
             self._current_test_index += 1
             self._execute_next()
 
-    def _run_lua_script(self, row: int, item: Dict[str, Any]):
+    def _run_lua_script(self, row: int, item: dict[str, Any]):
         """在子线程中执行 Lua 脚本"""
         if not LUA_AVAILABLE:
             self._log(f"[{row + 1}] Lua错误 -> lupa 库未安装，请运行: pip install lupa")
@@ -2257,7 +2282,7 @@ class TestPlanWidget(QWidget):
         """Lua 脚本超时"""
         if self._lua_engine:
             self._lua_engine.request_stop()
-            self._log(f"[Lua超时] 脚本执行超过最大时间，已请求停止")
+            self._log("[Lua超时] 脚本执行超过最大时间，已请求停止")
 
     def _on_lua_finished(self, row: int, success: bool, result: str):
         """Lua 脚本执行完成回调"""
@@ -2530,7 +2555,7 @@ class TestPlanWidget(QWidget):
     # ------------------------------------------------------------------
     # 自动持久化
     # ------------------------------------------------------------------
-    def set_file_path(self, file_path: Optional[Path] = None):
+    def set_file_path(self, file_path: Path | None = None):
         """动态更新配置文件路径并重新加载"""
         self._file_path = file_path or TEST_PLAN_PATH
         self._items.clear()
@@ -2566,7 +2591,7 @@ class TestPlanWidget(QWidget):
         if not self._file_path.exists():
             return
         try:
-            with open(self._file_path, "r", encoding="utf-8") as f:
+            with open(self._file_path, encoding="utf-8") as f:
                 data = json.load(f)
             if not isinstance(data, list):
                 return

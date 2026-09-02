@@ -1774,15 +1774,13 @@ class TestPlanWidget(QWidget):
             result_item.setFlags(result_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self._set_result_style(result_item, result_text)
             self.table.setItem(row, 9, result_item)
-            # 超时
-            spin = QSpinBox()
-            spin.setRange(100, 600000)
-            spin.setValue(item.get("timeout_ms", 2000))
-            spin.setSingleStep(1000)
+            # 超时(ms)：纯文本直接填写，避免 SpinBox 上下箭头遮挡数字
+            timeout_item = QTableWidgetItem(str(item.get("timeout_ms", 2000)))
             if persistent:
-                spin.setEnabled(False)
-            spin.valueChanged.connect(lambda val, r=row: self._on_timeout_changed(r, val))
-            self.table.setCellWidget(row, 10, spin)
+                timeout_item.setFlags(timeout_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            else:
+                timeout_item.setFlags(timeout_item.flags() | Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 10, timeout_item)
             # 响应帧（保留原始内容，方便查看标记）
             resp_item = QTableWidgetItem(item.get("response_frame", ""))
             resp_item.setFlags(resp_item.flags() | Qt.ItemFlag.ItemIsEditable)
@@ -1836,6 +1834,19 @@ class TestPlanWidget(QWidget):
             self._items[row]["match_enabled"] = (item.checkState() == Qt.CheckState.Checked)
         elif col == 7:
             self._items[row]["match_rule"] = item.text().replace(" ", "")
+        elif col == 10:
+            # 超时(ms)：必须为 100–600000 的整数，非法输入还原旧值
+            try:
+                val = int(item.text().strip())
+            except ValueError:
+                val = None
+            if val is not None and 100 <= val <= 600000:
+                self._items[row]["timeout_ms"] = val
+            else:
+                self.table.blockSignals(True)
+                item.setText(str(self._items[row].get("timeout_ms", 2000)))
+                self.table.blockSignals(False)
+                return
         elif col == 11:
             self._items[row]["response_frame"] = item.text().replace(" ", "")
         self._auto_save()
@@ -1843,11 +1854,6 @@ class TestPlanWidget(QWidget):
     def _on_match_mode_changed(self, row: int, text: str):
         if 0 <= row < len(self._items):
             self._items[row]["match_mode"] = text
-            self._auto_save()
-
-    def _on_timeout_changed(self, row: int, val: int):
-        if 0 <= row < len(self._items):
-            self._items[row]["timeout_ms"] = val
             self._auto_save()
 
     # ------------------------------------------------------------------
