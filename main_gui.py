@@ -2915,8 +2915,9 @@ class MainWindow(QMainWindow):
 
     def _replace_lazy_tab(self, old_widget, index, new_widget):
         title = self.tab_widget.tabText(index)
+        icon = self.tab_widget.tabIcon(index)
         self.tab_widget.removeTab(index)
-        self.tab_widget.insertTab(index, new_widget, title)
+        self.tab_widget.insertTab(index, new_widget, icon, title)
         if self.tab_widget.currentIndex() != index:
             self._lazy_tab_guard = True
             try:
