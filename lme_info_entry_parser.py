@@ -42,9 +42,9 @@ LME_INFO_ENTRIES: Dict[int, Dict[int, Tuple[str, int, str, Optional[str]]]] = {
     },
     1: {  # 程序信息
         1: ("编译时间", 1, "20", "compile_time"),
-        2: ("程序总版本", 2, "2", "bin_ver"),
+        2: ("模块生产时间", 3, "2", "bcd"),
         3: ("总工程版本", 2, "2", "bin_ver"),
-        4: ("boot版本", 2, "2", "bin_ver"),
+        4: ("boot程序版本", 2, "2", "bin_ver"),
         5: ("芯片程序版本", 2, "2", "bin_ver"),
         6: ("驱动层版本", 2, "2", "bin_ver"),
         7: ("载波接口层版本", 2, "2", "bin_ver"),
@@ -79,8 +79,8 @@ LME_INFO_ENTRIES: Dict[int, Dict[int, Tuple[str, int, str, Optional[str]]]] = {
         16: ("模块MAC地址", 2, "6", "hex"),
         17: ("模块资产编码", 2, "32", "hex"),
         18: ("模块备案信息", 2, "30", "hex"),
-        20: ("过零检测信息", 2, "13", "bin"),
-        21: ("NTB采样信息", 2, "12", "bin"),
+        20: ("过零检测信息", 2, "13", "zero_cross_info"),
+        21: ("NTB采样信息", 2, "12", "ntb_info"),
         22: ("载波接收信息", 2, "2", "bin"),
         23: ("无线接收信息", 2, "2", "bin"),
         24: ("USB频偏信息", 2, "6", "bin"),
@@ -89,8 +89,12 @@ LME_INFO_ENTRIES: Dict[int, Dict[int, Tuple[str, int, str, Optional[str]]]] = {
     },
     3: {  # 网络信息
         1: ("节点网络信息", 2, "27", "bin"),
-        2: ("软件信息组", 2, "3", "bin"),
-        3: ("硬件信息组", 2, "31", "bin"),
+        2: ("软件信息组", 2, "3", "sw_info_group"),
+        3: ("硬件信息组", 2, "31", "hw_info_group"),
+    },
+    7: {  # OTP信息（现场固件复用分类3信息组结构，官方上位机同结构解码）
+        1: ("硬件信息组", 2, "31", "hw_info_group"),
+        2: ("软件信息组", 2, "3", "sw_info_group"),
     },
     4: {  # 运行信息
         1: ("复位计数", 2, "2", "u16"),
@@ -297,6 +301,18 @@ def _format_value(data: bytes, fmt: str) -> str:
             return str(data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24))
         return str(sum((data[i] << (8 * i)) for i in range(len(data)))) if data else "0"
 
+    if fmt == "sw_info_group":
+        return _fmt_sw_info_group(data)
+
+    if fmt == "hw_info_group":
+        return _fmt_hw_info_group(data)
+
+    if fmt == "ntb_info":
+        return _fmt_ntb_info(data)
+
+    if fmt == "zero_cross_info":
+        return _fmt_zero_cross_info(data)
+
     if fmt == "module_type":
         return MODULE_TYPE_MAP.get(data[0], f"未知({data[0]})") if data else "未知"
 
@@ -414,29 +430,83 @@ def _format_semantic(category_id: int, data_id: int, entry_data: bytes) -> Optio
         ctrl = "断开" if entry_data[0] & 1 else "闭合"
         fb = "断路" if entry_data[1] & 1 else "通路"
         return f"控制:{ctrl}；反馈检测:{fb}"
-    # 过零检测信息：1B标志(b0~2下降沿A/B/C，b3~5上升沿A/B/C) + 6×u16
-    if category_id == 2 and data_id == 20 and len(entry_data) >= 1:
-        flag = entry_data[0]
-        edges = ["下降沿", "上升沿"]
-        phases = ["A", "B", "C"]
-        flag_parts = []
-        for e in range(2):
-            for p in range(3):
-                bit = e * 3 + p
-                if flag & (1 << bit):
-                    flag_parts.append(f"{phases[p]}相{edges[e]}有过零")
-        lines = ["过零标志=0x%02X（%s）" % (flag, "，".join(flag_parts) if flag_parts else "无过零")]
-        if len(entry_data) >= 13:
-            idx = 1
-            for p in range(3):
-                freq = int.from_bytes(entry_data[idx:idx + 2], "little"); idx += 2
-                duty = int.from_bytes(entry_data[idx:idx + 2], "little"); idx += 2
-                lines.append(f"{phases[p]}相(下降沿) 频率 {freq * 0.01:.2f}Hz 占空比 {duty * 0.1:.1f}%")
-        return "；".join(lines)
     # 组网完成标识
     if category_id == 5 and data_id == 6 and entry_data:
         return NETWORK_DONE_MAP.get(entry_data[0], f"备用({entry_data[0]})")
     return None
+
+
+def _fmt_sw_info_group(b: bytes) -> str:
+    """软件信息组（3B，OTP）：B0应用省份 B1应用方案 B2模块类型"""
+    if len(b) < 3:
+        return b.hex().upper()
+    prov = PROVINCE_MAP.get(b[0], f"备用({b[0]})")
+    scheme = "双模" if b[1] == 1 else f"单模/其他({b[1]})"
+    mtype = MODULE_TYPE_MAP.get(b[2], f"未知({b[2]})")
+    return f"应用省份:{b[0]}({prov})；应用方案:{b[1]}({scheme})；模块类型:{b[2]}({mtype})"
+
+
+def _fmt_hw_info_group(b: bytes) -> str:
+    """硬件信息组（31B，OTP）：芯片型号/Flash/电容/过零电路/天线/PA/特征电流/射频开关/硬件编码"""
+    if len(b) < 11:
+        return b.hex().upper()
+    chip = CHIP_TYPE_MAP.get(b[0], f"未知({b[0]})")
+    parts = [
+        f"芯片型号:{b[0]}({chip})",
+        f"Flash型号及容量:{b[1:5].hex().upper()}",
+        f"电容容量:{b[5]}",
+        f"过零电路类型:{b[6]}",
+        f"天线类型:{b[7]}",
+        f"载波PA功放型号:{b[8]}",
+        f"特征电流拓扑类型:{b[9]}",
+        f"无线射频开关类型:{b[10]}",
+    ]
+    code = b[11:31].decode("ascii", errors="replace").rstrip("\x00 ").strip()
+    if code:
+        parts.append(f'硬件编码:"{code}"')
+    return "；".join(parts)
+
+
+def _fmt_ntb_info(b: bytes) -> str:
+    """NTB采样信息（12B）：采样偏差补偿u16/补偿方向1B/保留1B/评估计数偏差u32/本地时钟计数修正u32"""
+    if len(b) < 12:
+        return b.hex().upper()
+    direction = "加快本地时间计数" if b[2] == 1 else ("减慢本地时间计数" if b[2] == 0 else f"未知({b[2]})")
+    return "；".join([
+        f"采样偏差补偿:{int.from_bytes(b[0:2], 'little')}",
+        f"本地误差补偿方向:{b[2]}({direction})",
+        f"保留:0x{b[3]:02X}",
+        f"评估计数偏差:{int.from_bytes(b[4:8], 'little')}",
+        f"本地时钟计数修正:{int.from_bytes(b[8:12], 'little')}",
+    ])
+
+
+def _fmt_zero_cross_info(b: bytes) -> str:
+    """过零检测信息：1B标志(b0~2下降沿A/B/C，b3~5上升沿A/B/C) + N×(频率u16,占空比u16)
+
+    STA为13B（下降沿ABC 3对）；CCO变体25B（下降沿+上升沿共6对，手册4.1注：上升沿CCO时有此项）。
+    """
+    if len(b) < 1:
+        return b.hex().upper()
+    flag = b[0]
+    phases = ["A", "B", "C"]
+    flag_parts = []
+    for e, edge in enumerate(["下降沿", "上升沿"]):
+        for p in range(3):
+            if flag & (1 << (e * 3 + p)):
+                flag_parts.append(f"{phases[p]}相{edge}有过零")
+    lines = ["过零标志=0x%02X（%s）" % (flag, "，".join(flag_parts) if flag_parts else "无过零")]
+    pair_count = min((len(b) - 1) // 4, 6)
+    idx = 1
+    for i in range(pair_count):
+        edge = "下降沿" if i < 3 else "上升沿"
+        ph = phases[i % 3]
+        freq = int.from_bytes(b[idx:idx + 2], "little"); idx += 2
+        duty = int.from_bytes(b[idx:idx + 2], "little"); idx += 2
+        lines.append(f"{ph}相({edge}) 频率 {freq * 0.01:.2f}Hz 占空比 {duty * 0.1:.2f}%")
+    if pair_count < 6:
+        lines.append("（仅下降沿数据，上升沿为CCO扩展项）")
+    return "；".join(lines)
 
 
 def _parse_dual_tlv_rows(data: bytes, with_value: bool, include_info_byte: bool = True
@@ -483,7 +553,9 @@ def _parse_dual_tlv_rows(data: bytes, with_value: bool, include_info_byte: bool 
 
         name = _entry_display_name(category_id, data_id)
         enc_name = ENCODING_NAMES.get(encoding, f"未知编码({encoding})")
-        vendor_note = "，厂商扩展分类手册未定义语义" if category_id >= 6 else ""
+        known = data_id in LME_INFO_ENTRIES.get(category_id, {})
+        vendor_note = ("，厂商扩展分类手册未定义语义"
+                       if category_id >= 6 and not known else "")
         desc = f"分类{category_id}/数据{data_id}，{enc_name}，{length}字节{vendor_note}"
         row_name = f"  └ 条目{entry_count + 1} {name}"
 

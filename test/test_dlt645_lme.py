@@ -176,11 +176,17 @@ def test_dlt645_lme():
     check("标准帧 走数据内容行", any("数据内容" == n for n in field_map(r7)))
 
     # ========== 8. 真实抓包帧结构回归（双模STA应答 M=17） ==========
+    # 硬件信息组31B：B0芯片型号=4, B1~4 Flash=42590002, B5电容=1, B6过零电路=1,
+    # B7天线=1, B8 PA=1, B9特征电流=0, B10射频开关=0, B11~30硬件编码ASCII
+    hw_group = bytes([0x04]) + bytes.fromhex("42590002") + bytes([1, 1, 1, 1, 0, 0]) \
+        + b"LSX830A-GPR001C-D2" + b"\x00" * 2
+    hw_group = hw_group[:31].ljust(31, b"\x00")
     d8 = bytearray([0x01, 0xDD, 0x00, 0xFF, 0x00, 0x11])          # DI + 条目信息0 + M=17
-    d8 += tlv_header(2, 7, 2, 3) + bytes([0x00, 0x00, 0x03])       # 分类7/数据2（未知）
-    d8 += tlv_header(1, 7, 2, 31) + (b"MODEL-LS830AM-GPR01" + b"\x00" * 12)[:31]
+    d8 += tlv_header(2, 7, 2, 3) + bytes([0x00, 0x00, 0x03])       # 分类7/数据2=软件信息组
+    d8 += tlv_header(1, 7, 2, 31) + hw_group                       # 分类7/数据1=硬件信息组
+    d8 += tlv_header(60, 7, 2, 2) + bytes([0xAB, 0xCD])            # 分类7未知条目（厂商扩展）
     d8 += tlv_header(1, 0, 1, 2) + bytes([0x48, 0x4C])             # [基本信息]外部厂商代码 -> LH
-    for _ in range(14):                                            # 其余14条：[运行信息]复位计数
+    for _ in range(13):                                            # 其余13条：[运行信息]复位计数
         d8 += tlv_header(1, 4, 2, 2) + bytes([0x00, 0x00])
     r8 = DLT645Parser.parse(build_frame(bytes(d8), ctrl=0x91))
     check("真实结构帧 帧合法", r8["valid"], r8.get("error"))
@@ -189,18 +195,54 @@ def test_dlt645_lme():
     check("真实结构帧 M=17", fm8.get("条目数 M", ("",))[0] == "17", str(fm8.get("条目数 M")))
     val8 = " ".join(v[0] for v in fm8.values())
     check("真实结构帧 含厂商LH", "LH" in val8, val8[:300])
-    check("真实结构帧 未知分类7条目不崩溃", "分类7" in " ".join(fm8.keys()), str(list(fm8)[:4]))
-    # 厂商扩展条目智能解码：内嵌ASCII型号应被挖出
-    cat7_vals = " ".join(v[0] for k, v in fm8.items() if "分类7" in k)
-    check("分类7/数据1 挖出ASCII型号", "MODEL-LS830AM-GPR01" in cat7_vals, cat7_vals[:200])
-    cat7_desc = " ".join(v[1] for k, v in fm8.items() if "分类7" in k)
-    check("分类7 说明标注厂商扩展", "厂商扩展" in cat7_desc, cat7_desc[:200])
-    # 纯二进制短数据附小端/大端数值
-    check("分类7/数据2 数值解读", "小端 196608" in cat7_vals and "大端 3" in cat7_vals, cat7_vals[:200])
+    # 分类7 OTP信息组结构化解码
+    check("分类7/数据1=硬件信息组",
+          any("硬件信息组" in k for k in fm8), str(list(fm8)[:5]))
+    check("硬件信息组 含硬件编码",
+          '硬件编码:"LSX830A-GPR001C-D2"' in val8, val8[:400])
+    check("硬件信息组 含芯片型号/Flash",
+          "芯片型号:4" in val8 and "Flash型号及容量:42590002" in val8, val8[:400])
+    check("分类7/数据2=软件信息组",
+          "模块类型:3" in val8 and "电表通信单元" in val8, val8[:400])
+    # 分类7未知条目仍标注厂商扩展
+    unknown_rows = [v for k, v in fm8.items() if "数据60" in k]
+    check("分类7未知条目 标注厂商扩展",
+          unknown_rows and "厂商扩展" in unknown_rows[0][1], str(unknown_rows))
+    # 分类7已定义条目不标厂商扩展
+    hw_desc = [v[1] for k, v in fm8.items() if "硬件信息组" in k]
+    check("硬件信息组 不误标厂商扩展", hw_desc and "厂商扩展" not in hw_desc[0], str(hw_desc))
     old = parse_lme_info_entries(r8["data"])
     check("旧接口 2元组且>=15条", all(len(t) == 2 for t in old) and len(old) >= 15, f"{len(old)} entries")
     check("旧接口 含外部厂商代码=LH",
           any(n == "外部厂商代码" and v == "LH" for n, v in old), str(old[:5]))
+
+    # ========== 8b. 过零检测信息 + NTB采样信息 结构化解码 ==========
+    # STA变体13B：flag + 下降沿ABC 3对
+    zc13 = bytes([0x01]) + (4996).to_bytes(2, "little") + (4).to_bytes(2, "little") + bytes(8)
+    assert len(zc13) == 13
+    # CCO变体25B：下降沿ABC + 上升沿ABC 共6对（A相50Hz/50%，其余0）
+    zc25 = bytes([0xFF])
+    zc25 += (5000).to_bytes(2, "little") + (500).to_bytes(2, "little")  # A下降
+    zc25 += bytes(8)                                                    # B/C下降
+    zc25 += (5000).to_bytes(2, "little") + (500).to_bytes(2, "little")  # A上升
+    zc25 += bytes(8)                                                    # B/C上升
+    assert len(zc25) == 25
+    ntb = (100).to_bytes(2, "little") + bytes([1, 0]) + (7).to_bytes(4, "little") + (9).to_bytes(4, "little")
+    assert len(ntb) == 12
+    d8b = bytearray([0x01, 0xDD, 0x00, 0xFF, 0x00, 0x03])
+    d8b += tlv_header(20, 2, 2, 13) + zc13
+    d8b += tlv_header(22, 2, 2, 25) + zc25   # 未知数据ID，长度25走过零解码？仅验证25B分支
+    d8b += tlv_header(21, 2, 2, 12) + ntb
+    r8b = DLT645Parser.parse(build_frame(bytes(d8b), ctrl=0x91))
+    val8b = " ".join(v[0] for v in field_map(r8b).values())
+    check("过零信息 下降沿49.96Hz", "A相(下降沿) 频率 49.96Hz" in val8b, val8b[:400])
+    check("过零信息 STA标注仅下降沿", "仅下降沿数据" in val8b, val8b[:400])
+    check("NTB采样 字段展开", "采样偏差补偿:100" in val8b and "评估计数偏差:7" in val8b
+          and "本地时钟计数修正:9" in val8b and "加快本地时间计数" in val8b, val8b[:400])
+    # 25B 过零解码器单元验证（CCO变体含上升沿）
+    from lme_info_entry_parser import _fmt_zero_cross_info
+    zc25_decoded = _fmt_zero_cross_info(zc25)
+    check("过零信息 CCO变体含上升沿", "A相(上升沿) 频率 50.00Hz" in zc25_decoded, zc25_decoded[:300])
 
     # ========== 9. validator LME超长豁免 ==========
     from validator.dlt645_validator import DLT645Validator
