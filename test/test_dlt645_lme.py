@@ -198,12 +198,16 @@ def test_dlt645_lme():
     # 分类7 OTP信息组结构化解码
     check("分类7/数据1=硬件信息组",
           any("硬件信息组" in k for k in fm8), str(list(fm8)[:5]))
-    check("硬件信息组 含硬件编码",
-          '硬件编码:"LSX830A-GPR001C-D2"' in val8, val8[:400])
-    check("硬件信息组 含芯片型号/Flash",
-          "芯片型号:4" in val8 and "Flash型号及容量:42590002" in val8, val8[:400])
-    check("分类7/数据2=软件信息组",
-          "模块类型:3" in val8 and "电表通信单元" in val8, val8[:400])
+    # 竖排：子字段各占一行（key=子字段名，value=解析值）
+    keys8 = " ".join(fm8.keys())
+    check("硬件信息组 竖排子行",
+          "芯片型号" in keys8 and "硬件编码" in keys8 and "载波PA功放型号" in keys8, keys8[:300])
+    check("硬件编码 值", '"LSX830A-GPR001C-D2"' in val8, val8[:400])
+    check("芯片型号/Flash 值",
+          "LME3960C" in val8 and "42590002" in val8, val8[:400])
+    check("软件信息组 竖排 模块类型3=电表通信单元",
+          "3（电表通信单元）" in val8, val8[:400])
+    check("父行提示展开子字段", "展开 9 个子字段" in val8, val8[:200])
     # 分类7未知条目仍标注厂商扩展
     unknown_rows = [v for k, v in fm8.items() if "数据60" in k]
     check("分类7未知条目 标注厂商扩展",
@@ -234,15 +238,24 @@ def test_dlt645_lme():
     d8b += tlv_header(22, 2, 2, 25) + zc25   # 未知数据ID，长度25走过零解码？仅验证25B分支
     d8b += tlv_header(21, 2, 2, 12) + ntb
     r8b = DLT645Parser.parse(build_frame(bytes(d8b), ctrl=0x91))
-    val8b = " ".join(v[0] for v in field_map(r8b).values())
-    check("过零信息 下降沿49.96Hz", "A相(下降沿) 频率 49.96Hz" in val8b, val8b[:400])
+    fm8b = field_map(r8b)
+    keys8b = " ".join(fm8b.keys())
+    val8b = " ".join(v[0] for v in fm8b.values())
+    check("过零信息 竖排子行",
+          "A相(下降沿)过零检测频率" in keys8b and "A相(下降沿)过零检测占空比" in keys8b, keys8b[:300])
+    check("过零信息 下降沿49.96Hz", "49.96 Hz" in val8b, val8b[:400])
     check("过零信息 STA标注仅下降沿", "仅下降沿数据" in val8b, val8b[:400])
-    check("NTB采样 字段展开", "采样偏差补偿:100" in val8b and "评估计数偏差:7" in val8b
-          and "本地时钟计数修正:9" in val8b and "加快本地时间计数" in val8b, val8b[:400])
+    check("NTB采样 竖排子行",
+          "采样偏差补偿" in keys8b and "评估计数偏差" in keys8b
+          and "本地时钟计数修正" in keys8b and "本地误差补偿方向" in keys8b, keys8b[:300])
+    check("NTB采样 值正确",
+          "100" in val8b and "加快本地时间计数" in val8b, val8b[:400])
     # 25B 过零解码器单元验证（CCO变体含上升沿）
     from lme_info_entry_parser import _fmt_zero_cross_info
     zc25_decoded = _fmt_zero_cross_info(zc25)
-    check("过零信息 CCO变体含上升沿", "A相(上升沿) 频率 50.00Hz" in zc25_decoded, zc25_decoded[:300])
+    check("过零信息 CCO变体含上升沿",
+          "A相(上升沿)过零检测频率:50.00 Hz" in zc25_decoded
+          and "仅下降沿" not in zc25_decoded, zc25_decoded[:300])
 
     # ========== 9. validator LME超长豁免 ==========
     from validator.dlt645_validator import DLT645Validator

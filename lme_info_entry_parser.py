@@ -436,58 +436,59 @@ def _format_semantic(category_id: int, data_id: int, entry_data: bytes) -> Optio
     return None
 
 
-def _fmt_sw_info_group(b: bytes) -> str:
-    """软件信息组（3B，OTP）：B0应用省份 B1应用方案 B2模块类型"""
+def _decode_sw_info_group(b: bytes) -> List[Tuple[str, bytes, str]]:
+    """软件信息组（3B，OTP）：B0应用省份 B1应用方案 B2模块类型 → 子字段列表"""
     if len(b) < 3:
-        return b.hex().upper()
+        return []
     prov = PROVINCE_MAP.get(b[0], f"备用({b[0]})")
     scheme = "双模" if b[1] == 1 else f"单模/其他({b[1]})"
     mtype = MODULE_TYPE_MAP.get(b[2], f"未知({b[2]})")
-    return f"应用省份:{b[0]}({prov})；应用方案:{b[1]}({scheme})；模块类型:{b[2]}({mtype})"
+    return [
+        ("应用省份", b[0:1], f"{b[0]}（{prov}）"),
+        ("应用方案", b[1:2], f"{b[1]}（{scheme}）"),
+        ("模块类型", b[2:3], f"{b[2]}（{mtype}）"),
+    ]
 
 
-def _fmt_hw_info_group(b: bytes) -> str:
-    """硬件信息组（31B，OTP）：芯片型号/Flash/电容/过零电路/天线/PA/特征电流/射频开关/硬件编码"""
+def _decode_hw_info_group(b: bytes) -> List[Tuple[str, bytes, str]]:
+    """硬件信息组（31B，OTP）→ 子字段列表"""
     if len(b) < 11:
-        return b.hex().upper()
+        return []
     chip = CHIP_TYPE_MAP.get(b[0], f"未知({b[0]})")
-    parts = [
-        f"芯片型号:{b[0]}({chip})",
-        f"Flash型号及容量:{b[1:5].hex().upper()}",
-        f"电容容量:{b[5]}",
-        f"过零电路类型:{b[6]}",
-        f"天线类型:{b[7]}",
-        f"载波PA功放型号:{b[8]}",
-        f"特征电流拓扑类型:{b[9]}",
-        f"无线射频开关类型:{b[10]}",
+    subs = [
+        ("芯片型号", b[0:1], f"{b[0]}（{chip}）"),
+        ("Flash型号及容量", b[1:5], b[1:5].hex().upper()),
+        ("电容容量", b[5:6], str(b[5])),
+        ("过零电路类型", b[6:7], str(b[6])),
+        ("天线类型", b[7:8], str(b[7])),
+        ("载波PA功放型号", b[8:9], str(b[8])),
+        ("特征电流拓扑类型", b[9:10], str(b[9])),
+        ("无线射频开关类型", b[10:11], str(b[10])),
     ]
     code = b[11:31].decode("ascii", errors="replace").rstrip("\x00 ").strip()
     if code:
-        parts.append(f'硬件编码:"{code}"')
-    return "；".join(parts)
+        subs.append(("硬件编码", b[11:31], f'"{code}"'))
+    return subs
 
 
-def _fmt_ntb_info(b: bytes) -> str:
-    """NTB采样信息（12B）：采样偏差补偿u16/补偿方向1B/保留1B/评估计数偏差u32/本地时钟计数修正u32"""
+def _decode_ntb_info(b: bytes) -> List[Tuple[str, bytes, str]]:
+    """NTB采样信息（12B）→ 子字段列表"""
     if len(b) < 12:
-        return b.hex().upper()
+        return []
     direction = "加快本地时间计数" if b[2] == 1 else ("减慢本地时间计数" if b[2] == 0 else f"未知({b[2]})")
-    return "；".join([
-        f"采样偏差补偿:{int.from_bytes(b[0:2], 'little')}",
-        f"本地误差补偿方向:{b[2]}({direction})",
-        f"保留:0x{b[3]:02X}",
-        f"评估计数偏差:{int.from_bytes(b[4:8], 'little')}",
-        f"本地时钟计数修正:{int.from_bytes(b[8:12], 'little')}",
-    ])
+    return [
+        ("采样偏差补偿", b[0:2], str(int.from_bytes(b[0:2], "little"))),
+        ("本地误差补偿方向", b[2:3], f"{b[2]}（{direction}）"),
+        ("保留", b[3:4], f"0x{b[3]:02X}"),
+        ("评估计数偏差", b[4:8], str(int.from_bytes(b[4:8], "little"))),
+        ("本地时钟计数修正", b[8:12], str(int.from_bytes(b[8:12], "little"))),
+    ]
 
 
-def _fmt_zero_cross_info(b: bytes) -> str:
-    """过零检测信息：1B标志(b0~2下降沿A/B/C，b3~5上升沿A/B/C) + N×(频率u16,占空比u16)
-
-    STA为13B（下降沿ABC 3对）；CCO变体25B（下降沿+上升沿共6对，手册4.1注：上升沿CCO时有此项）。
-    """
+def _decode_zero_cross_info(b: bytes) -> List[Tuple[str, bytes, str]]:
+    """过零检测信息 → 子字段列表（标志位 + N对频率/占空比，长度自适应13B/25B）"""
     if len(b) < 1:
-        return b.hex().upper()
+        return []
     flag = b[0]
     phases = ["A", "B", "C"]
     flag_parts = []
@@ -495,18 +496,48 @@ def _fmt_zero_cross_info(b: bytes) -> str:
         for p in range(3):
             if flag & (1 << (e * 3 + p)):
                 flag_parts.append(f"{phases[p]}相{edge}有过零")
-    lines = ["过零标志=0x%02X（%s）" % (flag, "，".join(flag_parts) if flag_parts else "无过零")]
+    subs = [("过零标志", b[0:1],
+             "0x%02X（%s）" % (flag, "，".join(flag_parts) if flag_parts else "无过零"))]
     pair_count = min((len(b) - 1) // 4, 6)
     idx = 1
     for i in range(pair_count):
         edge = "下降沿" if i < 3 else "上升沿"
         ph = phases[i % 3]
-        freq = int.from_bytes(b[idx:idx + 2], "little"); idx += 2
-        duty = int.from_bytes(b[idx:idx + 2], "little"); idx += 2
-        lines.append(f"{ph}相({edge}) 频率 {freq * 0.01:.2f}Hz 占空比 {duty * 0.1:.2f}%")
+        freq = int.from_bytes(b[idx:idx + 2], "little")
+        duty = int.from_bytes(b[idx + 2:idx + 4], "little")
+        subs.append((f"{ph}相({edge})过零检测频率", b[idx:idx + 2], f"{freq * 0.01:.2f} Hz"))
+        subs.append((f"{ph}相({edge})过零检测占空比", b[idx + 2:idx + 4], f"{duty * 0.1:.2f} %"))
+        idx += 4
     if pair_count < 6:
-        lines.append("（仅下降沿数据，上升沿为CCO扩展项）")
-    return "；".join(lines)
+        subs.append(("注", b"", "仅下降沿数据，上升沿为CCO扩展项"))
+    return subs
+
+
+# 结构化组解码 fmt → 子字段解码函数（TLV 循环中竖排展开）
+GROUP_DECODERS = {
+    "sw_info_group": _decode_sw_info_group,
+    "hw_info_group": _decode_hw_info_group,
+    "ntb_info": _decode_ntb_info,
+    "zero_cross_info": _decode_zero_cross_info,
+}
+
+
+def _fmt_sw_info_group(b: bytes) -> str:
+    return "；".join(f"{label}:{val}" for label, _raw, val in _decode_sw_info_group(b)) or b.hex().upper()
+
+
+def _fmt_hw_info_group(b: bytes) -> str:
+    return "；".join(f"{label}:{val}" for label, _raw, val in _decode_hw_info_group(b)) or b.hex().upper()
+
+
+def _fmt_ntb_info(b: bytes) -> str:
+    return "；".join(f"{label}:{val}" for label, _raw, val in _decode_ntb_info(b)) or b.hex().upper()
+
+
+def _fmt_zero_cross_info(b: bytes) -> str:
+    subs = _decode_zero_cross_info(b)
+    return "；".join(f"{label} {val}" if label == "注" else f"{label}:{val}"
+                    for label, _raw, val in subs) or b.hex().upper()
 
 
 def _parse_dual_tlv_rows(data: bytes, with_value: bool, include_info_byte: bool = True
@@ -581,15 +612,24 @@ def _parse_dual_tlv_rows(data: bytes, with_value: bool, include_info_byte: bool 
 
         semantic = _format_semantic(category_id, data_id, entry_data)
         if semantic is not None:
-            value = semantic
+            rows.append((row_name, entry_data.hex().upper(), semantic, desc))
         else:
             entry_def = LME_INFO_ENTRIES.get(category_id, {}).get(data_id)
-            if entry_def:
-                value = _format_value(entry_data, entry_def[3] or "hex")
+            fmt = entry_def[3] if entry_def else None
+            if fmt in GROUP_DECODERS:
+                # 结构化组：父行 + 每个子字段一行（竖排）
+                subs = GROUP_DECODERS[fmt](entry_data)
+                rows.append((row_name, entry_data.hex().upper(),
+                             f"展开 {len(subs)} 个子字段", desc))
+                for sub_label, sub_raw, sub_val in subs:
+                    rows.append((f"    └ {sub_label}",
+                                 sub_raw.hex().upper(), sub_val, f"{sub_label}（{fmt}）"))
+            elif entry_def:
+                value = _format_value(entry_data, fmt or "hex")
+                rows.append((row_name, entry_data.hex().upper(), value, desc))
             else:
                 value = _format_by_encoding(entry_data, encoding)
-
-        rows.append((row_name, entry_data.hex().upper(), value, desc))
+                rows.append((row_name, entry_data.hex().upper(), value, desc))
         entry_count += 1
 
     if entry_count < m:
