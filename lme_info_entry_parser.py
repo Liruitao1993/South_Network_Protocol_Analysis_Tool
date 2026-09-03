@@ -325,8 +325,29 @@ def _entry_raw_name(category_id: int, data_id: int) -> str:
     return entry_def[0] if entry_def else f"分类{category_id}数据{data_id}"
 
 
+def _extract_ascii_runs(data: bytes, min_len: int = 4) -> List[Tuple[int, int, str]]:
+    """提取连续可打印ASCII片段，返回 [(起始偏移, 结束偏移, 字符串)]，按长度降序"""
+    runs = []
+    start = None
+    for i, b in enumerate(data):
+        if 0x20 <= b < 0x7F:
+            if start is None:
+                start = i
+        else:
+            if start is not None and i - start >= min_len:
+                runs.append((start, i, data[start:i].decode("ascii")))
+            start = None
+    if start is not None and len(data) - start >= min_len:
+        runs.append((start, len(data), data[start:].decode("ascii")))
+    runs.sort(key=lambda r: -(r[1] - r[0]))
+    return runs
+
+
 def _format_by_encoding(entry_data: bytes, encoding: int) -> str:
-    """未知条目按头部编码格式解码：1=ASCII 2=BIN 3=BCD"""
+    """未知条目按头部编码格式解码：1=ASCII 2=BIN 3=BCD
+
+    BIN 数据（常见于厂商扩展分类6/7）会进一步挖掘内嵌 ASCII 串与整数值。
+    """
     if encoding == 1:
         try:
             s = entry_data.decode("ascii", errors="replace").rstrip("\x00")
@@ -337,6 +358,28 @@ def _format_by_encoding(entry_data: bytes, encoding: int) -> str:
         return entry_data.hex().upper()
     if encoding == 3:
         return "".join(f"{b:02X}" for b in entry_data)
+
+    # BIN：挖掘内嵌 ASCII（型号/版本字符串）
+    runs = _extract_ascii_runs(entry_data)
+    if runs:
+        s_off, e_off, text = runs[0]
+        prefix = entry_data[:s_off]
+        suffix = entry_data[e_off:]
+        parts = []
+        if prefix.strip(b"\x00"):
+            parts.append(f"二进制{prefix.hex().upper()}")
+        parts.append(f'ASCII"{text}"')
+        if suffix.strip(b"\x00"):
+            parts.append(f"尾部{suffix.hex().upper()}")
+        return " + ".join(parts)
+
+    # 纯二进制短数据：附小端/大端数值
+    if 1 <= len(entry_data) <= 8:
+        le = int.from_bytes(entry_data, "little")
+        be = int.from_bytes(entry_data, "big")
+        if le == be and len(entry_data) == 1:
+            return f"{entry_data.hex().upper()}（数值 {le}）"
+        return f"{entry_data.hex().upper()}（小端 {le} / 大端 {be}）"
     return entry_data.hex().upper()
 
 
@@ -440,7 +483,8 @@ def _parse_dual_tlv_rows(data: bytes, with_value: bool, include_info_byte: bool 
 
         name = _entry_display_name(category_id, data_id)
         enc_name = ENCODING_NAMES.get(encoding, f"未知编码({encoding})")
-        desc = f"分类{category_id}/数据{data_id}，{enc_name}，{length}字节"
+        vendor_note = "，厂商扩展分类手册未定义语义" if category_id >= 6 else ""
+        desc = f"分类{category_id}/数据{data_id}，{enc_name}，{length}字节{vendor_note}"
         row_name = f"  └ 条目{entry_count + 1} {name}"
 
         if not with_value:

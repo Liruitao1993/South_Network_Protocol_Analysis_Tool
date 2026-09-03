@@ -190,6 +190,13 @@ def test_dlt645_lme():
     val8 = " ".join(v[0] for v in fm8.values())
     check("真实结构帧 含厂商LH", "LH" in val8, val8[:300])
     check("真实结构帧 未知分类7条目不崩溃", "分类7" in " ".join(fm8.keys()), str(list(fm8)[:4]))
+    # 厂商扩展条目智能解码：内嵌ASCII型号应被挖出
+    cat7_vals = " ".join(v[0] for k, v in fm8.items() if "分类7" in k)
+    check("分类7/数据1 挖出ASCII型号", "MODEL-LS830AM-GPR01" in cat7_vals, cat7_vals[:200])
+    cat7_desc = " ".join(v[1] for k, v in fm8.items() if "分类7" in k)
+    check("分类7 说明标注厂商扩展", "厂商扩展" in cat7_desc, cat7_desc[:200])
+    # 纯二进制短数据附小端/大端数值
+    check("分类7/数据2 数值解读", "小端 196608" in cat7_vals and "大端 3" in cat7_vals, cat7_vals[:200])
     old = parse_lme_info_entries(r8["data"])
     check("旧接口 2元组且>=15条", all(len(t) == 2 for t in old) and len(old) >= 15, f"{len(old)} entries")
     check("旧接口 含外部厂商代码=LH",
