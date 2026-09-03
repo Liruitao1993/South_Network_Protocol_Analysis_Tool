@@ -1,6 +1,11 @@
 import json
 import os
 
+from lme_info_entry_parser import parse_lme_dlt645, DI_STA_VERSION_SINGLE, DI_DUAL_ENTRY
+
+# LME自定义DI集合（手册《LME产品相关信息生产运维接口手册_V2.4》中走645框架的接口）
+_LME_DI_CODES = (DI_STA_VERSION_SINGLE, DI_DUAL_ENTRY)
+
 class DLT645Parser:
     """DLT645-2007 电表协议解析器"""
 
@@ -164,6 +169,16 @@ class DLT645Parser:
         result['control_desc'] = ' | '.join(ctrl_desc)
         result['control_parsed'] = '; '.join(ctrl_parsed_value)
 
+        # LME自定义接口（手册4.2/4.6/4.7）：按DI+控制码分派深度解析
+        lme_rows = None
+        if result['di_code'] in _LME_DI_CODES:
+            try:
+                lme_rows, lme_name = parse_lme_dlt645(result['di_code'], ctrl, result['data'])
+                if lme_name:
+                    result['di_desc'] = lme_name
+            except Exception as e:
+                lme_rows = [('  └ ⚠ LME解析异常', str(e), '已回退显示原始数据')]
+
         result['fields'] = [
             ('帧起始符 1', '68H', '起始符'),
             ('从站地址', result['address'], '表地址，BCD编码，低位在前'),
@@ -182,7 +197,13 @@ class DLT645Parser:
 
         if len(result['data']) >=4:
             result['fields'].append(('数据标识 DI', result['di_code'], result['di_desc']))
-            if len(result['data']) >4:
+            if lme_rows is not None:
+                # LME自定义接口：逐字段深度解析
+                result['fields'].extend(lme_rows)
+                if len(result['data']) > 4:
+                    result['fields'].append(('数据内容(原始)', result['data'][4:].hex().upper(),
+                                             '减33H后原始数据（备查）'))
+            elif len(result['data']) >4:
                 result['fields'].append(('数据内容', result['data'][4:].hex().upper(), '实际数据值'))
         else:
             result['fields'].append(('数据域', result['data'].hex().upper(), '解码后数据（减33H）'))

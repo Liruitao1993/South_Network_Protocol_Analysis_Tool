@@ -66,8 +66,14 @@ def safe_parse_to_table(parser, frame_bytes, **kwargs):
         result = []
         data_len = r.get("data_length", 0)
         total_len = 10 + data_len + 2
-        for field, raw, desc in r.get("fields", []):
-            bs, be, pv = 0, 0, ""
+        for item in r.get("fields", []):
+            # LME自定义接口子字段为4元组(字段,原始hex,解析值,说明)，其余为3元组
+            if len(item) == 4:
+                field, raw, lme_parsed, desc = item
+            else:
+                field, raw, desc = item
+                lme_parsed = ""
+            bs, be, pv = 0, 0, lme_parsed
             if "帧起始符 1" in field:
                 bs, be = 0, 0
             elif "从站地址" in field:

@@ -81,14 +81,32 @@ class DLT645Validator(BaseValidator):
                 result.errors.append(f"数据域长度不匹配：声明{data_len}字节，实际{actual_data_len}字节")
                 result.valid = False
             elif data_len > 200:  # 合理性检查
-                check = CheckItem(
-                    name="数据长度",
-                    level=CheckLevel.WARN,
-                    expected="<=200字节",
-                    actual=f"{data_len}字节",
-                    message=f"数据长度{data_len}字节异常偏大"
-                )
-                result.warnings.append(f"数据长度{data_len}字节异常偏大")
+                # LME自定义接口（单模STA版本251B/双模STA条目255B）数据域合法超长
+                is_lme = False
+                if len(frame_bytes) >= 14:
+                    try:
+                        di_bytes = bytes(((b - 0x33) & 0xFF) for b in frame_bytes[10:14])
+                        di_code = f"{int.from_bytes(di_bytes, 'little'):08X}"
+                        is_lme = di_code in ("04FFAAF9", "FF00DD01")
+                    except Exception:
+                        is_lme = False
+                if is_lme:
+                    check = CheckItem(
+                        name="数据长度",
+                        level=CheckLevel.PASS,
+                        expected="LME自定义接口允许<=255字节",
+                        actual=f"{data_len}字节",
+                        message=f"LME自定义接口数据域{data_len}字节"
+                    )
+                else:
+                    check = CheckItem(
+                        name="数据长度",
+                        level=CheckLevel.WARN,
+                        expected="<=200字节",
+                        actual=f"{data_len}字节",
+                        message=f"数据长度{data_len}字节异常偏大"
+                    )
+                    result.warnings.append(f"数据长度{data_len}字节异常偏大")
             else:
                 check = CheckItem(
                     name="数据长度",

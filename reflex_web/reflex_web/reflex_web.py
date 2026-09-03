@@ -471,14 +471,21 @@ class State(rx.State):
     def _safe_parse_to_table(self, parser, frame_bytes, **kwargs):
         """解析帧为表格行；对没有 parse_to_table 的 parser（DLT645）用 parse() + 桌面版同款转换。"""
         if not hasattr(parser, "parse_to_table"):
-            # DLT645Parser 只有 parse() 返回 dict，fields 为 (字段名, 原始值, 说明) 三元组，
+            # DLT645Parser 只有 parse() 返回 dict，fields 普通行为 (字段名, 原始值, 说明)
+            # 三元组，LME自定义接口子字段为 (字段名, 原始hex, 解析值, 说明) 四元组；
             # 用桌面版（main_gui.DLT645GuiParser）同款逻辑补字节范围，转成表格行。
             dlt645_result = parser.parse(frame_bytes)
             result = []
             data_len = dlt645_result.get("data_length", 0)
             total_len = 10 + data_len + 2
-            for field, raw, desc in dlt645_result.get("fields", []):
-                byte_start, byte_end, parsed_value = 0, 0, ""
+            for item in dlt645_result.get("fields", []):
+                # LME自定义接口子字段为4元组(字段,原始hex,解析值,说明)，其余为3元组
+                if len(item) == 4:
+                    field, raw, lme_parsed, desc = item
+                else:
+                    field, raw, desc = item
+                    lme_parsed = ""
+                byte_start, byte_end, parsed_value = 0, 0, lme_parsed
                 if "帧起始符 1" in field:
                     byte_start, byte_end = 0, 0
                 elif "从站地址" in field:

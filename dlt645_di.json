@@ -6583,6 +6583,18 @@
       "unit": "kWh",
       "data_type": "XXXXXX.XXXX",
       "length": 5
+    },
+    "04FFAAF9": {
+      "name": "HPLC单模STA详细信息查询(LME自定义,手册4.2)",
+      "unit": "",
+      "data_type": "XX...XX",
+      "length": 251
+    },
+    "FF00DD01": {
+      "name": "HPLC双模STA详细信息查询/设置(LME自定义,手册4.6/4.7)",
+      "unit": "",
+      "data_type": "XX...XX",
+      "length": 255
     }
   }
 }

@@ -1,0 +1,109 @@
+558: ### 4.6 查询 HPLC 双模 STA 内部详细信息（LME 自定义）
+559: 
+560: 接口协议：DL/T645-2007 框架
+561: 
+562: 数据 ID: 0XFF00DD01
+563: 
+564: 
+565: 
+--- line 566 [TABLE] ---
+  | 数据标识编码 | 数据格式 | 字节数 | 单位 | 功能 | 数据标识名称
+  | DI3 | DI2 | DI1 | DIO | 读 | 写
+  | FF | 00 | DD | 01 | XX...XX | 251 |  | * | * | 读模块软件内部详细信息格式详见如下
+567: 
+568: 下行：
+569: 
+570: 
+571: 
+--- line 572 [TABLE] ---
+  | 域 | 格式 | 字节数/位数 | 备注
+  | 信息条目信息 | 信息条目信息 | 
+573: 
+574: 目数M
+575: 
+576: </td><td style='text-align: center; word-wrap: break-word;'>BIN</td><td style='text-align: center; word-wrap: break-word;'>1字节</td><td style='text-align: center; word-wrap: break-word;'>填0表示M个信息条目M=0，表示读取模块所支持信息数据M&gt;0，表示读取指定的信息条目数据</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>信息条目1</td><td style='text-align: center; word-wrap: break-word;'>信息条目1</td><td style='text-align: center; word-wrap: break-word;'>信息条目1分类ID</td><td style='text-align: center; word-wrap: break-word;'>BIN</td><td style='text-align: center; word-wrap: break-word;'>6位</td><td style='text-align: center; word-wrap: break-word;'>表示范围（0-64）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>1</td><td style='text-align: center; word-wrap: break-word;'>数据标识</td><td style='text-align: center; word-wrap: break-word;'>保留1</td><td style='text-align: center; word-wrap: break-word;'>BIN</td><td style='text-align: center; word-wrap: break-word;'>3位</td><td style='text-align: center; word-wrap: break-word;'>表示范围（0-7）</td></tr><tr><td colspan="2"></td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>...</td><td style='text-align: center; word-wrap: break-word;'>填0</td></tr><tr><td rowspan="2">信息条目M</td><td style='text-align: center; word-wrap: break-word;'>信息条目M</td><td style='text-align: center; word-wrap: break-word;'>信息条目M数据ID</td><td style='text-align: center; word-wrap: break-word;'>BIN</td><td style='text-align: center; word-wrap: break-word;'>6位</td><td style='text-align: center; word-wrap: break-word;'>表示范围（0-64）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>数据标识</td><td style='text-align: center; word-wrap: break-word;'>信息条目M分类ID</td><td style='text-align: center; word-wrap: break-word;'>BIN</td><td style='text-align: center; word-wrap: break-word;'>3位</td><td style='text-align: center; word-wrap: break-word;'>表示范围（0-7）</td></tr><tr><td style='text-align: center; word-wrap: break-word;'>M</td><td colspan="2">保留</td><td style='text-align: center; word-wrap: break-word;'>BIN</td><td style='text-align: center; word-wrap: break-word;'>7位</td><td style='text-align: center; word-wrap: break-word;'>填0</td></tr><tr><td colspan="3"></td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'></td><td style='text-align: center; word-wrap: break-word;'></td></tr></table>
+577: 
+578: 上行：
+579: 
+580: 数据单元格式见下表：
+581: 
+582: 
+583: 
+--- line 584 [TABLE] ---
+  | 域 | 格式 | 字节数/位数 | 备注
+585: 
+586: 
+587: 
+--- line 588 [TABLE] ---
+  | 信息条目信息 | 信息条目M | BIN | 1 字节 | 填0
+  | 信息条目1 | 信息条目1数据ID | BIN | 6 位 | 表示范围（0-64）
+  | 信息条目1 | 数据标识 | 信息条目1分类ID | BIN | 3 位
+  | 信息条目1 | 编码格式 | BIN | 2 位 | 1: ASCII、2: BIN、3: BCD
+  | 信息条目1数据标识 | 信息条目1数据... | BIN | 5 位 | 表示范围（0-31）
+  | 信息条目1数据标识 | 信息条目M数据ID | BIN | 6 位 | 表示范围（0-64）
+  | 信息条目1数据标识 | 编码格式 | BIN | 3 位 | 表示范围（0-7）
+  | M | 信息条目M数据长度L1 | BIN | 2 位 | 1: ASCII、2: BIN、3: BCD
+  | M | 信息条目M数据 | BIN | 5 位 | 表示范围（0-31）
+  |  |  | BIN | LM 字节 | 
+  |  |  |  |  | 
+589: 
+590: #### 信息条目定义参照附录 C: HPLC 双模模块信息条目定义
+591: 
+592: ### 4.7 设置 HPLC 双模 STA 详细信息（LME 自定义）
+593: 
+594: 接口协议：DL/T645-2007 框架
+595: 
+596: 数据 ID: 0XFF00DD01
+597: 
+598: 
+599: 
+--- line 600 [TABLE] ---
+  | 数据标识编码 | 数据格式 | 字节数 | 单位 | 功能 | 数据标识名称
+  | DI3 | DI2 | DI1 | DIO | 读 | 写
+  | FF | 00 | DD | 01 | XX...XX | 251 |  | * | * | 读模块软件内部详细信息格式详见如下
+601: 
+602: 下行：
+603: 
+604: 
+605: 
+--- line 606 [TABLE] ---
+  | 域 | 格式 | 字节数/位数 | 备注
+  | 信息条目信息 | 信息条目信息 | BIN | 1 字节 | 填 0
+  | 信息条目数 M | BIN | 1 字节 | 表示 M 个信息条目
+  | 信息条目1 | 信息条目1 | 信息条目1数据 ID | BIN | 6 位 | 表示范围（0-64）
+  | 数据标识 | 信息条目1分类 ID | BIN | 3 位 | 表示范围（0-7）
+  | 编码格式 | BIN | 2 位 | 1: ASCII、2: BIN、3: BCD
+  | 信息条目1数据长度 L1 | BIN | 5 位 | 表示范围（0-31）
+  | 信息条目1数据 | BIN | L1 字节 | 
+  | ... | ... | ... | 
+  | 信息条目M | 信息条目M | 信息条目M数据 ID | BIN | 6 位 | 表示范围（0-64）
+  | 数据标识 | 信息条目M分类 ID | BIN | 3 位 | 表示范围（0-7）
+  | 编码格式 | BIN | 2 位 | 1: ASCII、2: BIN、3: BCD
+  | 信息条目M数据长度 L1 | BIN | 5 位 | 表示范围（0-31）
+  | 信息条目M数据 | BIN | LM 字节 | 
+  |  |  |  | 
+607: 
+608: #### 上行：
+609: 
+610: 数据单元格式见下表：
+611: 
+612: 
+613: 
+--- line 614 [TABLE] ---
+  |  | 域 | 格式 | 字节数/位数 | 备注
+  | 信息条目信息条目数M | BIN | 1字节 | 填0表示M个信息条目M=0，表示读取模块所支持信息数据M>0，表示读取指定的信息条目数据
+  | 信息条目1数据标识 | 信息条目1数据ID | BIN | 6位 | 表示范围（0-64）
+  | 信息条目1分类ID | BIN | 3位 | 表示范围（0-7）
+  | 条目1 | 信息条目1设置结果 | BIN | 7位 | 0：设置成功1：参数不支持设置2：参数内容格式错误
+  |  |  |  |  | 3：参数保存失败其它保留
+  | ... | ... | ... | 
+  | 信息条目M | 信息条目M数据标识 | 信息条目M数据ID | BIN | 6位 | 表示范围（0-64）
+  | 信息条目M分类ID | BIN | 3位 | 表示范围（0-7）
+  | 信息条目M设置结果 | BIN | 7位 | 0：设置成功1：参数不支持设置2：参数内容格式错误3：参数保存失败其它保留
+615: 
+616: 
+617: 
+618: 
+619: #### 信息条目定义参照附录 C: HPLC 双模模块信息条目定义
+620: 
+621: ## 5 获取版本途径及软件

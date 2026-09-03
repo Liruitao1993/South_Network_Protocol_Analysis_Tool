@@ -4503,10 +4503,16 @@ class MainWindow(QMainWindow):
                     data_len = result.get("data_length", 0)
                     total_len = 10 + data_len + 2
 
-                    for field, raw, desc in result["fields"]:
+                    for item in result["fields"]:
+                        # LME自定义接口子字段为4元组(字段,原始hex,解析值,说明)，其余为3元组
+                        if len(item) == 4:
+                            field, raw, lme_parsed, desc = item
+                        else:
+                            field, raw, desc = item
+                            lme_parsed = ""
                         byte_start = 0
                         byte_end = 0
-                        parsed_value = ""
+                        parsed_value = lme_parsed
 
                         if "帧起始符 1" in field:
                             byte_start, byte_end = 0, 0
@@ -9635,8 +9641,14 @@ class MainWindow(QMainWindow):
                 # DLT645协议
                 result = self.dlt645_parser.parse(extracted_bytes)
                 parsed_data = []
-                for field, raw, desc in result["fields"]:
-                    parsed_data.append((field, raw, "", desc, 0, 0))
+                for item in result["fields"]:
+                    # LME自定义接口子字段为4元组(字段,原始hex,解析值,说明)，其余为3元组
+                    if len(item) == 4:
+                        field, raw, lme_parsed, desc = item
+                    else:
+                        field, raw, desc = item
+                        lme_parsed = ""
+                    parsed_data.append((field, raw, lme_parsed, desc, 0, 0))
                 dialog_title = f"深度解析DLT645-2007 (提取 {len(extracted_bytes)} 字节)"
             else:
                 # 默认DLMS APDU协议
