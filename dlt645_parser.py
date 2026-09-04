@@ -84,8 +84,18 @@ class DLT645Parser:
         result['checksum'] = data[-2]
         result['checksum_valid'] = (sum(data[0:-2]) & 0xFF) == data[-2]
 
+        # 读通信地址应答(FUNC=0x13,从站)与写通信地址请求(FUNC=0x15,主站)
+        # 数据域为6字节表地址（无数据标识DI）
+        func_code = result['control'] & 0x1F
+        addr_in_data = func_code in (0x13, 0x15) and len(result['data']) == 6
+        if addr_in_data:
+            result['address_in_data'] = result['data'][0:6][::-1].hex().upper()
+        # 广播校时(FUNC=0x08)：数据域6字节为 ss mm hh DD MM 星期（BCD），无DI
+        timing_in_data = func_code == 0x08 and len(result['data']) == 6
+        no_di = addr_in_data or timing_in_data
+
         # 解析数据标识DI(前4字节)
-        if len(result['data']) >=4:
+        if len(result['data']) >= 4 and not no_di:
             di_val = int.from_bytes(result['data'][0:4], byteorder='little')
             di_code_str = f"{di_val:08X}"
             result['di_code'] = di_code_str
@@ -195,7 +205,27 @@ class DLT645Parser:
                 '数据域长度声明值与实际帧内容不匹配，解析结果可能不准确'
             ))
 
-        if len(result['data']) >=4:
+        if addr_in_data:
+            # 读/写通信地址：数据域即6字节表地址（BCD低位在前，与地址域同序）
+            addr_raw = ' '.join(f"{b:02X}" for b in result['data'][0:6])
+            addr_desc = ('读通信地址应答，数据域为表地址' if func_code == 0x13
+                         else '写通信地址请求，数据域为待写入表地址')
+            result['fields'].append(
+                ('通信地址（数据域）', addr_raw, result['address_in_data'],
+                 f'{addr_desc}，BCD编码低位在前'))
+        elif timing_in_data:
+            # 广播校时：ss mm hh DD MM 星期（BCD）
+            def _bcd(b):
+                return (b >> 4) * 10 + (b & 0x0F)
+            td = result['data']
+            week_map = {1: '一', 2: '二', 3: '三', 4: '四', 5: '五', 6: '六', 7: '日'}
+            time_text = (f"{_bcd(td[4]):02d}月{_bcd(td[3]):02d}日 "
+                         f"{_bcd(td[2]):02d}:{_bcd(td[1]):02d}:{_bcd(td[0]):02d} "
+                         f"星期{week_map.get(_bcd(td[5]), str(_bcd(td[5])))}")
+            result['fields'].append(
+                ('校时数据（数据域）', ' '.join(f"{b:02X}" for b in td[0:6]),
+                 time_text, '广播校时，ss mm hh DD MM 星期，BCD编码'))
+        elif len(result['data']) >=4:
             result['fields'].append(('数据标识 DI', result['di_code'], result['di_desc']))
             if lme_rows is not None:
                 # LME自定义接口：逐字段深度解析

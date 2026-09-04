@@ -271,6 +271,41 @@ def test_dlt645_lme():
     warn9b = [c for c in v9b.checks if c.name == "数据长度" and c.level.name == "WARN"]
     check("validator 未知DI超长 仍WARN", len(warn9b) == 1)
 
+    # ========== 10. 读/写通信地址帧（数据域为6B表地址，无DI） ==========
+    # 官方工具样例帧：93H=读地址应答，数据域减33H为 28 00 00 26 05 26
+    addr_frame = bytes.fromhex("682800002605 266893065B33335938598D16".replace(" ", ""))
+    ra = DLT645Parser.parse(addr_frame)
+    check("读地址应答 帧合法", ra["valid"], ra.get("error"))
+    check("读地址应答 无误判DI", ra.get("di_code", "") == "", ra.get("di_code"))
+    fa = field_map(ra)
+    check("读地址应答 通信地址行", "通信地址（数据域）" in fa, str(list(fa)))
+    check("读地址应答 地址=260526000028",
+          fa.get("通信地址（数据域）", ("",))[0] == "260526000028", str(fa.get("通信地址（数据域）")))
+    check("读地址应答 原始序=28 00 00 26 05 26",
+          fa.get("通信地址（数据域）", ("", ""))[2] == "28 00 00 26 05 26", str(fa.get("通信地址（数据域）")))
+    check("读地址应答 无未知数据标识",
+          not any("未知数据标识" in str(v) for v in fa.values()))
+
+    # 写地址请求（C=15H，数据域6B新地址）
+    wa_data = bytes([0x28, 0x00, 0x00, 0x26, 0x05, 0x26])
+    rw = DLT645Parser.parse(build_frame(wa_data, ctrl=0x15))
+    fw = field_map(rw)
+    check("写地址请求 通信地址行",
+          "通信地址（数据域）" in fw and fw["通信地址（数据域）"][0] == "260526000028",
+          str(fw.get("通信地址（数据域）")))
+
+    # 广播校时（C=08H，数据域 ss mm hh DD MM 星期 BCD）
+    def bcd(v):
+        return ((v // 10) << 4) | (v % 10)
+    tdata = bytes([bcd(30), bcd(26), bcd(16), bcd(4), bcd(9), 5])  # 09月04日16:26:30 周五
+    rt = DLT645Parser.parse(build_frame(tdata, ctrl=0x08))
+    ft = field_map(rt)
+    check("广播校时 校时数据行", "校时数据（数据域）" in ft, str(list(ft)))
+    check("广播校时 时间解析",
+          "09月04日 16:26:30" in ft.get("校时数据（数据域）", ("",))[0]
+          and "星期五" in ft.get("校时数据（数据域）", ("",))[0],
+          str(ft.get("校时数据（数据域）")))
+
     assert not FAILURES, f"{len(FAILURES)} 项失败: {FAILURES}"
 
 
