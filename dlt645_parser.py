@@ -220,7 +220,8 @@ class DLT645Parser:
             elif (ctrl & 0x80) and func_code in (0x11, 0x12) and body:
                 # 读数据应答：按DI的data_type解码数值
                 decoded = decode_value(body, result.get('di_data_type', ''),
-                                       result.get('di_unit', ''))
+                                       result.get('di_unit', ''),
+                                       result.get('di_desc', ''))
                 fmt_desc = result.get('di_data_type', '')
                 result['fields'].append((
                     '数据值', body.hex().upper(),

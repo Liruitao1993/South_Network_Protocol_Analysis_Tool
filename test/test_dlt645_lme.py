@@ -322,8 +322,8 @@ def test_dlt645_lme():
     f11c = field_map(r11c)
     check("非BCD回退hex", "AABBCCDD" in f11c.get("数据值", ("", ""))[2], str(f11c.get("数据值")))
 
-    # ========== 12. 异常应答 ERR ==========
-    err_frame_data = bytes([0x03])  # 密码错/未授权
+    # ========== 12. 异常应答 ERR（位域，bit2=密码错 → 0x04） ==========
+    err_frame_data = bytes([0x04])  # 密码错/未授权
     # 控制码 D1H = DIR1+D6+FUNC01
     def build_ctrl(dd, ctrl, addr=b"\x00" * 6):
         enc = bytes((b + 0x33) & 0xFF for b in dd)
@@ -331,10 +331,24 @@ def test_dlt645_lme():
         return body + bytes([sum(body) & 0xFF, 0x16])
     r12 = DLT645Parser.parse(build_ctrl(err_frame_data, 0xD1))
     f12 = field_map(r12)
-    check("异常应答 ERR解码", "密码错/未授权" in f12.get("错误信息字 ERR", ("",))[0],
+    check("异常应答 ERR位域解码", "密码错/未授权" in f12.get("错误信息字 ERR", ("",))[0],
           str(f12.get("错误信息字 ERR")))
+    multi_err = field_map(DLT645Parser.parse(build_ctrl(bytes([0x03]), 0xD1)))
+    mev = multi_err.get("错误信息字 ERR", ("",))[0]
+    check("异常应答 多错误位(bit0其他+bit1无请求)",
+          "其他错误" in mev and "无请求数据" in mev, mev)
     check("异常应答 控制码标签", "异常应答" in r12["control_desc"], r12["control_desc"])
     check("异常应答 无误判DI", r12.get("di_code", "") == "")
+
+    # ========== 12b. 电表运行状态字按附录C位定义展开 ==========
+    # 状态字4（DI=04000504，线序 04 05 00 04）A相故障：bit7断相+bit3过压=0x88
+    r12b = DLT645Parser.parse(build_frame(bytes.fromhex("04050004 88000000".replace(" ", ""))))
+    sv = field_map(r12b).get("数据值", ("",))[0]
+    check("状态字4 断相/过压置位", "断相" in sv and "过压" in sv, sv[:200])
+    # 状态字1（DI=04000501，线序 01 05 00 04）：bit6有功方向=0x40
+    r12c = DLT645Parser.parse(build_frame(bytes.fromhex("01050004 40000000".replace(" ", ""))))
+    svc = field_map(r12c).get("数据值", ("",))[0]
+    check("状态字1 有功方向置位", "有功功率方向" in svc and "置位" in svc, svc[:200])
 
     # ========== 13. 写数据/改密码/清零命令请求拆分 ==========
     # 写数据14H：DI(00010000) + 密码权限04/密码123456 + 操作者00000001 + 数据BCD

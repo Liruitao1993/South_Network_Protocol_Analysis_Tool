@@ -12,18 +12,86 @@
 
 from typing import List, Tuple, Optional
 
-# 错误信息字 ERR（DL/T645-2007 附录C，标准定义）
-ERR_MAP = {
-    0x00: "正确",
-    0x01: "其他错误",
-    0x02: "无此数据",
-    0x03: "密码错/未授权",
-    0x04: "通信速率不能更改",
-    0x05: "年月日非法",
-    0x06: "时段表区间重叠",
-    0x07: "通信时硬件故障",
-    0x08: "通信节点忙",
+# 错误信息字 ERR（DL/T645-2007 附录C）—— 位域字节，某位=1 表示对应错误发生
+ERR_BITS = {
+    0: "其他错误",
+    1: "无请求数据",
+    2: "密码错/未授权",
+    3: "通信速率不能更改",
+    4: "日时段数超",
+    5: "费率数超",
+    6: "年时区数超",
+    # bit7 保留
 }
+
+# 电表运行状态字 1~7（DL/T645-2007 附录C，DI 04000501~04000507，BS32）
+# 每个为 {bit位: 含义}；bit0 为最低位，状态字取前 2 字节（bit0~15）
+STATUS_WORD_BITS = {
+    1: {
+        7: "无功功率方向(0正1反)", 6: "有功功率方向(0正1反)",
+        5: "停电抄表电池(0正常1欠压)", 4: "时钟电池(0正常1欠压)",
+        3: "需量积算方式(0滑差1区间)",
+    },
+    2: {
+        7: "C相无功方向(0正1反)", 6: "B相无功方向(0正1反)", 5: "A相无功方向(0正1反)",
+        4: "C相有功方向(0正1反)", 3: "B相有功方向(0正1反)", 2: "A相有功方向(0正1反)",
+    },
+    3: {
+        7: "继电器状态(0通1断)", 6: "编程允许(0禁止1许可)",
+        5: "供电方式(配合bit4)", 4: "当前运行时段(0第一套1第二套)",
+    },
+    4: {  # A相故障
+        7: "断相", 6: "过载", 5: "过流", 4: "失流", 3: "过压",
+        2: "欠压", 1: "潮流方向异常", 0: "失压", 8: "断流",
+    },
+    5: {  # B相故障，位定义同 A 相
+        7: "断相", 6: "过载", 5: "过流", 4: "失流", 3: "过压",
+        2: "欠压", 1: "潮流方向异常", 0: "失压", 8: "断流",
+    },
+    6: {  # C相故障，位定义同 A 相
+        7: "断相", 6: "过载", 5: "过流", 4: "失流", 3: "过压",
+        2: "欠压", 1: "潮流方向异常", 0: "失压", 8: "断流",
+    },
+    7: {  # 合相故障
+        6: "需量超限", 5: "掉电", 4: "电压不平衡", 3: "辅助电源失电",
+        2: "电流不平衡", 1: "电流逆相序", 0: "电压逆相序",
+    },
+}
+
+# 状态字 N 对应的相位标签（4=A相 5=B相 6=C相，故障类）
+STATUS_WORD_PHASE = {4: "A相", 5: "B相", 6: "C相"}
+
+STATUS_WORD_NAME_RE = {
+    "状态字1": 1, "状态字2": 2, "状态字3": 3,
+    "状态字4": 4, "状态字5": 5, "状态字6": 6, "状态字7": 7,
+}
+
+
+def decode_status_word(name: str, data: bytes) -> Optional[str]:
+    """按附录C位定义展开电表运行状态字；不匹配返回 None"""
+    word_no = None
+    for key, no in STATUS_WORD_NAME_RE.items():
+        if key in name:
+            word_no = no
+            break
+    if word_no is None or not data:
+        return None
+    bits = int.from_bytes(data[:2], "little")
+    table = STATUS_WORD_BITS[word_no]
+    phase = STATUS_WORD_PHASE.get(word_no, "")
+    set_flags, clear_flags = [], []
+    for bit, meaning in table.items():
+        label = (phase + meaning) if phase and word_no in (4, 5, 6) else meaning
+        (set_flags if bits & (1 << bit) else clear_flags).append(label)
+    parts = [f"bit位值={bits & 0xFFFF:016b}"]
+    parts.append("置位: " + ("；".join(set_flags) if set_flags else "无"))
+    # 故障类状态字：0=无故障，仅列置位项即可，省略未置位长列表
+    if word_no not in (4, 5, 6):
+        parts.append("未置位: " + "；".join(clear_flags))
+    elif not set_flags:
+        parts.append("无故障")
+    return " | ".join(parts)
+
 
 # 功能码标签（D4~D0）
 FUNC_NAMES = {
@@ -57,10 +125,12 @@ def _bcd_digits(b: bytes) -> Optional[str]:
     return digits
 
 
-def decode_value(data: bytes, data_type: str, unit: str = "") -> Optional[str]:
+def decode_value(data: bytes, data_type: str, unit: str = "",
+                 di_name: str = "") -> Optional[str]:
     """按 data_type 解码标准 DI 数据体（不含 DI 本身的 4 字节）
 
     返回可读字符串；无法按类型解码时返回 None（调用方回退裸 hex）。
+    di_name 用于 BS 状态字按附录C位定义展开。
     """
     if not data or not data_type:
         return None
@@ -69,9 +139,13 @@ def decode_value(data: bytes, data_type: str, unit: str = "") -> Optional[str]:
 
     # 状态字/位串：BS32、BS96 等
     if dt.upper().startswith("BS"):
+        # 电表运行状态字 1~7：按附录C位定义展开
+        if di_name and "状态字" in di_name:
+            sw = decode_status_word(di_name, data)
+            if sw:
+                return sw
         bits = "".join(f"{b:08b}" for b in data)
         n = len(data) * 8
-        # 每字节 8 位标注（bit0 为最低位）
         return (f"二进制({n}位)：{bits}；状态字位定义见DL/T645-2007附录C"
                 f"{'；原始hex=' + data.hex().upper() if len(data) > 12 else ''}")
 
@@ -122,11 +196,16 @@ def decode_value(data: bytes, data_type: str, unit: str = "") -> Optional[str]:
 
 
 def decode_err(b: bytes) -> Optional[str]:
-    """异常应答错误信息字 ERR（1 字节）"""
+    """异常应答错误信息字 ERR（1 字节位域，附录C）：某位=1 表示对应错误发生"""
     if len(b) != 1:
         return None
     code = b[0]
-    return ERR_MAP.get(code, f"保留/未知错误码(0x{code:02X})")
+    if code == 0:
+        return "无错误（ERR=0）"
+    errs = [meaning for bit, meaning in ERR_BITS.items() if code & (1 << bit)]
+    if not errs:
+        return f"未知错误（ERR=0x{code:02X}）"
+    return "；".join(errs) + f"（ERR=0x{code:02X}）"
 
 
 def split_write_request(data: bytes) -> List[Tuple[str, str, str, str]]:
