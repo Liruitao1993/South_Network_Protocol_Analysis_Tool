@@ -138,6 +138,7 @@ a = Analysis(
         'gdw_eb_di_lookup',  # EB 数据标识查询（被 frame_gen_widget 静态 import）
         'archive_widget',
         'lme_info_entry_parser',  # LME自定义接口解析（dlt645_parser/archive_widget 静态 import，显式声明保险）
+        'dlt645_data_codec',  # DLT645标准数据值解码（dlt645_parser 静态 import，显式声明保险）
         'topology_widget',
         'preset_buttons',
         'test_plan_widget',

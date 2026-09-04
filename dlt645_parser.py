@@ -2,6 +2,10 @@ import json
 import os
 
 from lme_info_entry_parser import parse_lme_dlt645, DI_STA_VERSION_SINGLE, DI_DUAL_ENTRY
+from dlt645_data_codec import (
+    FUNC_NAMES, decode_value, decode_err,
+    split_write_request, split_change_password, split_clear_command,
+)
 
 # LME自定义DI集合（手册《LME产品相关信息生产运维接口手册_V2.4》中走645框架的接口）
 _LME_DI_CODES = (DI_STA_VERSION_SINGLE, DI_DUAL_ENTRY)
@@ -92,7 +96,9 @@ class DLT645Parser:
             result['address_in_data'] = result['data'][0:6][::-1].hex().upper()
         # 广播校时(FUNC=0x08)：数据域6字节为 ss mm hh DD MM 星期（BCD），无DI
         timing_in_data = func_code == 0x08 and len(result['data']) == 6
-        no_di = addr_in_data or timing_in_data
+        # 异常应答(D6=1)：数据域仅1字节错误信息字ERR，无DI
+        err_in_data = bool(result['control'] & 0x40) and len(result['data']) == 1
+        no_di = addr_in_data or timing_in_data or err_in_data
 
         # 解析数据标识DI(前4字节)
         if len(result['data']) >= 4 and not no_di:
@@ -113,34 +119,16 @@ class DLT645Parser:
         ctrl = result['control']
         ctrl_desc = []
         ctrl_parsed_value = []
+        func = ctrl & 0x1F
+        func_name = FUNC_NAMES.get(func, f"未知功能码{func:02X}H")
+        is_exception = bool(ctrl & 0x40)
 
         # 解析 D7 方向位
         if ctrl & 0x80:
             ctrl_parsed_value.append("DIR=1(从站应答)")
             ctrl_desc.append('从站应答')
-            func = ctrl & 0x1F
-            if func == 0x11:
-                ctrl_desc.append('读数据应答')
-                ctrl_parsed_value.append("FUNC=11H(读数据应答)")
-            elif func == 0x12:
-                ctrl_desc.append('读后续数据应答')
-                ctrl_parsed_value.append("FUNC=12H(读后续数据应答)")
-            elif func == 0x14:
-                ctrl_desc.append('写数据应答')
-                ctrl_parsed_value.append("FUNC=14H(写数据应答)")
-            elif func == 0x13:
-                ctrl_desc.append('读地址应答')
-                ctrl_parsed_value.append("FUNC=13H(读地址应答)")
-            elif func == 0x15:
-                ctrl_desc.append('写地址应答')
-                ctrl_parsed_value.append("FUNC=15H(写地址应答)")
-            elif func == 0x16:
-                ctrl_desc.append('冻结命令应答')
-                ctrl_parsed_value.append("FUNC=16H(冻结命令应答)")
-            elif func == 0x17:
-                ctrl_desc.append('更改速率应答')
-                ctrl_parsed_value.append("FUNC=17H(更改速率应答)")
-
+            ctrl_desc.append(f"{func_name}应答" + ("（异常）" if is_exception else ""))
+            ctrl_parsed_value.append(f"FUNC={func:02X}H({func_name}应答)")
             # D5 后续帧标志
             if ctrl & 0x20:
                 ctrl_desc.append('有后续帧')
@@ -150,31 +138,13 @@ class DLT645Parser:
         else:
             ctrl_parsed_value.append("DIR=0(主站请求)")
             ctrl_desc.append('主站请求')
-            func = ctrl & 0x1F
-            if func == 0x11:
-                ctrl_desc.append('读数据')
-                ctrl_parsed_value.append("FUNC=11H(读数据)")
-            elif func == 0x12:
-                ctrl_desc.append('读后续数据')
-                ctrl_parsed_value.append("FUNC=12H(读后续数据)")
-            elif func == 0x14:
-                ctrl_desc.append('写数据')
-                ctrl_parsed_value.append("FUNC=14H(写数据)")
-            elif func == 0x13:
-                ctrl_desc.append('读通信地址')
-                ctrl_parsed_value.append("FUNC=13H(读通信地址)")
-            elif func == 0x15:
-                ctrl_desc.append('写通信地址')
-                ctrl_parsed_value.append("FUNC=15H(写通信地址)")
-            elif func == 0x16:
-                ctrl_desc.append('冻结命令')
-                ctrl_parsed_value.append("FUNC=16H(冻结命令)")
-            elif func == 0x17:
-                ctrl_desc.append('更改通信速率')
-                ctrl_parsed_value.append("FUNC=17H(更改通信速率)")
-            elif func == 0x08:
-                ctrl_desc.append('广播校时')
-                ctrl_parsed_value.append("FUNC=08H(广播校时)")
+            ctrl_desc.append(func_name)
+            ctrl_parsed_value.append(f"FUNC={func:02X}H({func_name})")
+
+        # D6 异常应答标志
+        if is_exception:
+            ctrl_desc.append('异常应答')
+            ctrl_parsed_value.append("D6=1(异常应答)")
 
         result['control_desc'] = ' | '.join(ctrl_desc)
         result['control_parsed'] = '; '.join(ctrl_parsed_value)
@@ -205,7 +175,13 @@ class DLT645Parser:
                 '数据域长度声明值与实际帧内容不匹配，解析结果可能不准确'
             ))
 
-        if addr_in_data:
+        if err_in_data:
+            # 异常应答：数据域仅 1 字节错误信息字 ERR
+            err_raw = f"{result['data'][0]:02X}"
+            result['fields'].append(
+                ('错误信息字 ERR', err_raw, decode_err(result['data'][0:1]) or err_raw,
+                 'D6=1 异常应答，错误码定义见DL/T645-2007附录C'))
+        elif addr_in_data:
             # 读/写通信地址：数据域即6字节表地址（BCD低位在前，与地址域同序）
             addr_raw = ' '.join(f"{b:02X}" for b in result['data'][0:6])
             addr_desc = ('读通信地址应答，数据域为表地址' if func_code == 0x13
@@ -225,16 +201,49 @@ class DLT645Parser:
             result['fields'].append(
                 ('校时数据（数据域）', ' '.join(f"{b:02X}" for b in td[0:6]),
                  time_text, '广播校时，ss mm hh DD MM 星期，BCD编码'))
+        elif func_code in (0x1A, 0x1B) and not (ctrl & 0x80):
+            # 电表清零/事件清零请求：密码4B+操作者代码4B+操作对象4B，数据域无数据标识前缀
+            result['fields'].append(
+                ('命令数据域', result['data'].hex().upper(),
+                 f"{FUNC_NAMES.get(func_code, '清零')}请求",
+                 '密码PA P0P1P2 + 操作者代码C0~C3 + 操作对象标识'))
+            result['fields'].extend(split_clear_command(result['data']))
         elif len(result['data']) >=4:
             result['fields'].append(('数据标识 DI', result['di_code'], result['di_desc']))
+            body = result['data'][4:]
             if lme_rows is not None:
                 # LME自定义接口：逐字段深度解析
                 result['fields'].extend(lme_rows)
-                if len(result['data']) > 4:
-                    result['fields'].append(('数据内容(原始)', result['data'][4:].hex().upper(),
+                if body:
+                    result['fields'].append(('数据内容(原始)', body.hex().upper(),
                                              '减33H后原始数据（备查）'))
-            elif len(result['data']) >4:
-                result['fields'].append(('数据内容', result['data'][4:].hex().upper(), '实际数据值'))
+            elif (ctrl & 0x80) and func_code in (0x11, 0x12) and body:
+                # 读数据应答：按DI的data_type解码数值
+                decoded = decode_value(body, result.get('di_data_type', ''),
+                                       result.get('di_unit', ''))
+                fmt_desc = result.get('di_data_type', '')
+                result['fields'].append((
+                    '数据值', body.hex().upper(),
+                    decoded if decoded else body.hex().upper(),
+                    f"{result['di_desc']}；格式{fmt_desc or '未定'}"
+                    + (f"；单位{result['di_unit']}" if result.get('di_unit') else '')
+                    + ('' if decoded else '；按格式解码失败，显示原始hex')))
+            elif not (ctrl & 0x80) and func_code == 0x14:
+                # 写数据请求：DI + 密码4B + 操作者代码4B + 写入数据
+                wr_rows = split_write_request(result['data'])
+                if body and len(body) > 8:
+                    payload = body[8:]
+                    decoded = decode_value(payload, result.get('di_data_type', ''),
+                                           result.get('di_unit', ''))
+                    if decoded:
+                        wr_rows[-1] = (wr_rows[-1][0], wr_rows[-1][1], decoded,
+                                       wr_rows[-1][3] + f"；{result.get('di_data_type','')}")
+                result['fields'].extend(wr_rows)
+            elif not (ctrl & 0x80) and func_code == 0x18:
+                # 修改密码请求：DI + 原密码组4B + 新密码组4B
+                result['fields'].extend(split_change_password(result['data']))
+            elif body:
+                result['fields'].append(('数据内容', body.hex().upper(), '实际数据值'))
         else:
             result['fields'].append(('数据域', result['data'].hex().upper(), '解码后数据（减33H）'))
 

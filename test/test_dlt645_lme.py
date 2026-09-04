@@ -173,7 +173,7 @@ def test_dlt645_lme():
     r7 = DLT645Parser.parse(build_frame(d7, ctrl=0x91))
     check("标准帧 DI=00010000", r7["di_code"] == "00010000", r7["di_code"])
     check("标准帧 描述=当前正向有功总电能", "正向有功" in r7["di_desc"], r7["di_desc"])
-    check("标准帧 走数据内容行", any("数据内容" == n for n in field_map(r7)))
+    check("标准帧 走数据值解码行", "数据值" in field_map(r7), str(list(field_map(r7))))
 
     # ========== 8. 真实抓包帧结构回归（双模STA应答 M=17） ==========
     # 硬件信息组31B：B0芯片型号=4, B1~4 Flash=42590002, B5电容=1, B6过零电路=1,
@@ -305,6 +305,65 @@ def test_dlt645_lme():
           "09月04日 16:26:30" in ft.get("校时数据（数据域）", ("",))[0]
           and "星期五" in ft.get("校时数据（数据域）", ("",))[0],
           str(ft.get("校时数据（数据域）")))
+
+    # ========== 11. 标准DLT645数据值解码 ==========
+    # 读正向有功总电能应答：DI=00010000 + 123456.78kWh（线序 78 56 34 12）
+    r11 = DLT645Parser.parse(build_frame(bytes.fromhex("00000100 78563412".replace(" ", ""))))
+    f11 = field_map(r11)
+    check("电能值解码 123456.78", "123456.78 kWh" in f11.get("数据值", ("",))[0],
+          str(f11.get("数据值")))
+    # 日期 DI 04000101 YYYYMMDD：线序 DD MM YY = 04 09 26
+    r11b = DLT645Parser.parse(build_frame(bytes.fromhex("01010004 040926".replace(" ", ""))))
+    f11b = field_map(r11b)
+    check("日期解码 2026-09-04", "2026-09-04" in " ".join(v[0] for v in f11b.values()),
+          str(f11b.get("数据值")))
+    # 非BCD数据回退hex不报错（伪数据）
+    r11c = DLT645Parser.parse(build_frame(bytes.fromhex("00000100 AABBCCDD".replace(" ", ""))))
+    f11c = field_map(r11c)
+    check("非BCD回退hex", "AABBCCDD" in f11c.get("数据值", ("", ""))[2], str(f11c.get("数据值")))
+
+    # ========== 12. 异常应答 ERR ==========
+    err_frame_data = bytes([0x03])  # 密码错/未授权
+    # 控制码 D1H = DIR1+D6+FUNC01
+    def build_ctrl(dd, ctrl, addr=b"\x00" * 6):
+        enc = bytes((b + 0x33) & 0xFF for b in dd)
+        body = bytes([0x68]) + addr + bytes([0x68, ctrl, len(enc)]) + enc
+        return body + bytes([sum(body) & 0xFF, 0x16])
+    r12 = DLT645Parser.parse(build_ctrl(err_frame_data, 0xD1))
+    f12 = field_map(r12)
+    check("异常应答 ERR解码", "密码错/未授权" in f12.get("错误信息字 ERR", ("",))[0],
+          str(f12.get("错误信息字 ERR")))
+    check("异常应答 控制码标签", "异常应答" in r12["control_desc"], r12["control_desc"])
+    check("异常应答 无误判DI", r12.get("di_code", "") == "")
+
+    # ========== 13. 写数据/改密码/清零命令请求拆分 ==========
+    # 写数据14H：DI(00010000) + 密码权限04/密码123456 + 操作者00000001 + 数据BCD
+    wd = bytes.fromhex("00000100") + bytes([0x04, 0x12, 0x34, 0x56,
+                                            0x00, 0x00, 0x00, 0x01]) + bytes.fromhex("7856")
+    r13 = DLT645Parser.parse(build_ctrl(wd, 0x14))
+    f13 = field_map(r13)
+    check("写帧 密码权限", "权限级别 04" in f13.get("密码权限 PA", ("",))[0], str(list(f13)[:8]))
+    check("写帧 密码P0P1P2", f13.get("密码 P0P1P2", ("",))[0] == "123456", str(f13.get("密码 P0P1P2")))
+    check("写帧 操作者代码", f13.get("操作者代码 C0~C3", ("",))[0] == "00000001",
+          str(f13.get("操作者代码 C0~C3")))
+    check("写帧 写入数据", "写入数据" in f13, str(list(f13)))
+
+    # 修改密码18H：DI + 原密码组(04/111111) + 新密码组(04/222222)
+    cp = bytes.fromhex("00000904") + bytes([0x04, 0x11, 0x11, 0x11]) + bytes([0x04, 0x22, 0x22, 0x22])
+    r13b = DLT645Parser.parse(build_ctrl(cp, 0x18))
+    f13b = field_map(r13b)
+    check("改密码 控制码标签", "修改密码" in r13b["control_desc"], r13b["control_desc"])
+    check("改密码 新密码组", any("新密码 密码 P0P1P2" in k for k in f13b)
+          and "222222" in " ".join(v[0] for v in f13b.values()), str(list(f13b)))
+
+    # 事件清零1BH：密码4B + 操作者4B + 对象FFFFFFFF
+    ev = bytes([0x02, 0x99, 0x99, 0x98, 0x00, 0x00, 0x00, 0x01]) + b"\xFF" * 4
+    r13c = DLT645Parser.parse(build_ctrl(ev, 0x1B))
+    f13c = field_map(r13c)
+    check("事件清零 标签", "事件清零" in r13c["control_desc"], r13c["control_desc"])
+    check("事件清零 全部对象", "全部对象" in f13c.get("操作对象标识", ("",))[0],
+          str(f13c.get("操作对象标识")))
+    check("事件清零 密码行", "密码 P0P1P2" in " ".join(f13c.keys()), str(list(f13c)))
 
     assert not FAILURES, f"{len(FAILURES)} 项失败: {FAILURES}"
 
