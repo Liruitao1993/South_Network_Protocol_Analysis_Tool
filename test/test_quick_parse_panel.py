@@ -18,7 +18,6 @@
 - 预填协议优先级：自动识别优先（识别得出即切换），识别不出兜底主窗体协议
 """
 
-
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -494,8 +493,7 @@ def main():
             f"主程序单帧解析输入框收到报文（实际 {w.single_input.toPlainText()[:30]}...）",
       )
       check(
-            w.protocol_combo.currentIndex() == 0
-            and w.tab_widget.currentIndex() == 0,
+            w.protocol_combo.currentIndex() == 0 and w.tab_widget.currentIndex() == 0,
             f"主程序协议下拉=0、tab=单帧解析页（实际 protocol={w.protocol_combo.currentIndex()}, tab={w.tab_widget.currentIndex()}）",
       )
       check(not qp.isVisible(), "「在主窗口打开」后小窗隐藏")

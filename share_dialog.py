@@ -186,7 +186,9 @@ class ShareDialog(QDialog):
         # ── 说明（选填，预填环境信息）──
         self.note_edit = QTextEdit()
         self.note_edit.setPlaceholderText("这帧报文的用途/场景，方便他人理解")
-        self.note_edit.setPlainText(f"来自桌面端 {collect_sys_info(app_version, self.proto_combo.currentText())}")
+        self.note_edit.setPlainText(
+            f"来自桌面端 {collect_sys_info(app_version, self.proto_combo.currentText())}"
+        )
         self.note_edit.setMaximumHeight(72)
         form.addRow("说明:", self.note_edit)
 
@@ -269,7 +271,9 @@ class ShareDialog(QDialog):
             self.note_edit.toPlainText(),
         )
         req = QNetworkRequest(QUrl(self.server_url + "/api/frameshare"))
-        req.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json")
+        req.setHeader(
+            QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json"
+        )
         req.setTransferTimeout(SUBMIT_TIMEOUT_MS)
 
         self._submit_btn.setEnabled(False)
@@ -291,9 +295,7 @@ class ShareDialog(QDialog):
                     f"提交失败: {reply.errorString()}（请检查服务器地址与网络）"
                 )
                 return
-            status = reply.attribute(
-                QNetworkRequest.Attribute.HttpStatusCodeAttribute
-            )
+            status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
             data = bytes(reply.readAll().data())
             try:
                 resp = json.loads(data.decode("utf-8"))
@@ -326,6 +328,3 @@ class ShareDialog(QDialog):
         finally:
             reply.deleteLater()
             self._reply = None
-
-
-

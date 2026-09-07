@@ -4,7 +4,7 @@
     "frame_hex": "680C00000100010102E8ED16",
     "match_rule": "682A00C80300020300E8029808000202129078563412FC0301000F00010817484C3039XXXXXXXXXXXX16",
     "match_mode": "HEX",
-    "timeout_ms": 5000,
+    "timeout_ms": 6000,
     "send_enabled": true,
     "match_enabled": true,
     "response_frame": "680E00880000010001E800007216",

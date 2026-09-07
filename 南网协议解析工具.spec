@@ -113,6 +113,7 @@ a = Analysis(
         'system_integration.parse_prompt_dialog',
         'system_integration.quick_parse_panel',
         'system_integration.acrylic_effect',
+        'feedback_dialog',
         'protocol_parser',
         'plc_rf_parser',
         'hdlc_parser',

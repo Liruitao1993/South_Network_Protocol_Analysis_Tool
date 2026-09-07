@@ -1,4 +1,3 @@
-
 """
 南网协议解析工具 - PySide6 GUI版
 简洁界面，支持单帧解析和批量解析
@@ -88,10 +87,21 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.21.0"
-BUILD_DATE = "2026-09-01"  # 编译日期，每次打包前更新  # 编译日期，每次打包前更新
+APP_VERSION = "1.21.1"
+BUILD_DATE = "2026-09-02"  # 编译日期，每次打包前更新  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    (
+        "1.21.1",
+        "2026-09-02",
+        [
+            "Web 版「报文分享」新增管理员删除功能：/share 页复用反馈管理口令（AdminConfig，默认 admin123），管理员登录后每条分享记录卡片显示「删除」按钮——点击弹确认框，确认后删除该条（含 GUI 桌面端分享的记录）并刷新列表，防止分享区堆积杂乱内容",
+            "share_model.py 新增 ShareStore.delete(item_id)（不存在返回 False 幂等安全）；ShareState 改为继承主 State（与 FeedbackState 同款模式）以访问 admin_logged_in，顺带修复主页「分享此帧」弹窗打开时访问 last_parsed_hex 的现存 bug；删除按钮用 rx.stop_propagation 防止误触卡片打开详情；删除确认弹窗受控三件套（on_open_change 同步 + 显式关闭按钮）",
+            "测试：test_frame_share.py 新增 test_delete（存储层删除/幂等/删空页回退）与 test_delete_ui（删除按钮渲染/弹窗 open 绑定/stop_propagation），共 77 项全过；回归 test_web_feedback 49、test_feedback_api 31 全过；真机 e2e 验证提交→删除→幂等全链路",
+            "GUI 修复：测试方案表格「超时(ms)」列原用内嵌 QSpinBox，上下调节箭头遮挡数字看不清，改为可编辑文本单元格直接填写（整数 100–600000，非法/越界输入自动还原旧值，持久监听行不可编辑）",
+            "GUI 修复：懒加载标签页（TCP监控/协议组帧/档案管理/拓扑信息）首次点击替换占位页后图标永久丢失——_replace_lazy_tab 的 insertTab 未带回 tabIcon，现替换前保留图标",
+        ],
+    ),
     (
         "1.21.0",
         "2026-09-01",
@@ -1565,6 +1575,7 @@ class MainWindow(QMainWindow):
         # 分隔条拖动/尺寸变化后，子控件旧位置可能残留像素（Windows DWM 合成
         # 下半透明样式控件不保证擦除），强制父容器重绘消除分隔区域重影。
         for sp in self.findChildren(QSplitter):
+
             def _force_parent_rep(_a=None, _b=None, s=sp):
                 p = s.parentWidget()
                 if p is not None:
@@ -2813,6 +2824,7 @@ class MainWindow(QMainWindow):
             f"当前应用存活线程 {total} 个（Python {len(py_threads)} + QThread {len(qt_threads)}）\n"
             f"点击查看明细列表"
         )
+        self.statusBar().update()
 
     def _on_tab_changed_repaint(self, index: int):
         """切 tab 时请求重绘当前页，消除毛玻璃半透明背景下的残留重影。
@@ -5767,11 +5779,18 @@ class MainWindow(QMainWindow):
             # 主窗口协议名（如 "[0] 南网协议 (Q/CSG1209021-2019)"）→ 对话框内
             # 下拉为短名（"南网协议"），按索引映射
             short_names = {
-                0: "南网协议", 1: "PLC RF协议", 2: "HDLC/国网DLMS",
-                3: "DLMS-APDU(国网)", 4: "DLMS Wrapper裸报文",
-                5: "DLMS-APDU裸报文", 6: "DLT645-2007 电表协议",
-                7: "国网协议", 8: "698.45协议", 9: "新一代载波协议",
-                10: "国网新一代双模", 11: "HDC 1.0 双模",
+                0: "南网协议",
+                1: "PLC RF协议",
+                2: "HDLC/国网DLMS",
+                3: "DLMS-APDU(国网)",
+                4: "DLMS Wrapper裸报文",
+                5: "DLMS-APDU裸报文",
+                6: "DLT645-2007 电表协议",
+                7: "国网协议",
+                8: "698.45协议",
+                9: "新一代载波协议",
+                10: "国网新一代双模",
+                11: "HDC 1.0 双模",
             }
             proto = short_names.get(self.current_protocol, "不确定")
             dlg = ShareDialog(

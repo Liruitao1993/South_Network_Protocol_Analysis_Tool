@@ -268,6 +268,16 @@ class ShareStore:
         with sqlmodel.Session(self._engine) as session:
             return session.get(ShareItem, int(item_id))
 
+    def delete(self, item_id: int) -> bool:
+        """按 id 删除分享记录；不存在返回 False（幂等安全，不抛错）。"""
+        with sqlmodel.Session(self._engine) as session:
+            obj = session.get(ShareItem, int(item_id))
+            if obj is None:
+                return False
+            session.delete(obj)
+            session.commit()
+            return True
+
     def list_page(
         self, page: int, per_page: int, keyword: str = ""
     ) -> tuple[list[dict], int, int]:
@@ -285,14 +295,10 @@ class ShareStore:
             hex_variants = [kw]
             compact = _HEX_CLEAN_RE.sub("", kw)
             if compact and len(compact) >= 4 and len(compact) % 2 == 0:
-                spaced = " ".join(
-                    compact[i : i + 2] for i in range(0, len(compact), 2)
-                )
+                spaced = " ".join(compact[i : i + 2] for i in range(0, len(compact), 2))
                 if spaced != kw:
                     hex_variants.append(spaced)
-            like_conds = [
-                ShareItem.frame_hex.contains(v) for v in hex_variants
-            ]
+            like_conds = [ShareItem.frame_hex.contains(v) for v in hex_variants]
             like_conds += [
                 ShareItem.protocol.contains(kw),
                 ShareItem.sharer.contains(kw),
@@ -303,9 +309,9 @@ class ShareStore:
             total_q = session.exec(
                 sqlmodel.select(sqlmodel.func.count()).select_from(ShareItem)
                 if conds is None
-                else sqlmodel.select(sqlmodel.func.count()).select_from(
-                    ShareItem
-                ).where(conds)
+                else sqlmodel.select(sqlmodel.func.count())
+                .select_from(ShareItem)
+                .where(conds)
             )
             total = int(total_q.one() or 0)
             pages = max(1, (total + per_page - 1) // per_page)

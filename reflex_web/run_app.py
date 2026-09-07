@@ -334,10 +334,10 @@ def main():
             (b"access-control-allow-headers", b"content-type"),
         ]
         if origin:
-            headers.append(
-                (b"access-control-allow-origin", origin.encode("latin-1"))
-            )
-        await send({"type": "http.response.start", "status": status, "headers": headers})
+            headers.append((b"access-control-allow-origin", origin.encode("latin-1")))
+        await send(
+            {"type": "http.response.start", "status": status, "headers": headers}
+        )
         await send({"type": "http.response.body", "body": payload, "more_body": False})
 
     async def _handle_feedback_api(scope, receive, send, path: str):
@@ -354,7 +354,9 @@ def main():
         try:
             from reflex_web import feedback_model as fm
         except Exception as exc:  # noqa: BLE001
-            await _send_fb_json(send, 500, {"ok": False, "error": f"反馈模块不可用: {exc}"})
+            await _send_fb_json(
+                send, 500, {"ok": False, "error": f"反馈模块不可用: {exc}"}
+            )
             return
 
         # GET：字段约束配置
@@ -394,7 +396,9 @@ def main():
                 break
         if not boundary:
             await _send_fb_json(
-                send, 400, {"ok": False, "error": "请求格式错误（需要 multipart/form-data）"}
+                send,
+                400,
+                {"ok": False, "error": "请求格式错误（需要 multipart/form-data）"},
             )
             return
 
@@ -410,9 +414,7 @@ def main():
         if ok:
             await _send_fb_json(send, 200, {"ok": True, "id": result})
         else:
-            await _send_fb_json(
-                send, http_status, {"ok": False, "error": str(result)}
-            )
+            await _send_fb_json(send, http_status, {"ok": False, "error": str(result)})
 
     async def env_rewrite_middleware(scope, receive, send):
         if scope["type"] != "http":

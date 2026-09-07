@@ -61,8 +61,11 @@ def main():
     )
     check("无图提交成功", ok and st == 200, f"got {ok},{rid},{st}")
     item = store.get(int(rid))
-    check("落库 source=gui", item is not None and item.source == "gui",
-          f"source={getattr(item, 'source', None)}")
+    check(
+        "落库 source=gui",
+        item is not None and item.source == "gui",
+        f"source={getattr(item, 'source', None)}",
+    )
     check("sys_info 落库", item is not None and "1.20.0" in (item.sys_info or ""))
     check("contact 落库", item is not None and item.contact == "qq123")
 
@@ -73,8 +76,11 @@ def main():
     )
     check("带图提交成功", ok2 and st2 == 200, f"got {ok2},{rid2},{st2}")
     item2 = store.get(int(rid2))
-    check("截图文件名落库", item2 is not None and bool(item2.screenshots),
-          f"screenshots={getattr(item2, 'screenshots', None)}")
+    check(
+        "截图文件名落库",
+        item2 is not None and bool(item2.screenshots),
+        f"screenshots={getattr(item2, 'screenshots', None)}",
+    )
     up = fm.uploads_dir()
     check("截图文件落盘", up.exists() and any(p.suffix == ".png" for p in up.iterdir()))
     # 默认 source
@@ -102,14 +108,22 @@ def main():
     )
     check("描述超长 400", not ok and st == 400, f"got {ok},{st}")
     ok, msg, st = fm.submit_from_api(
-        {"issue_type": "功能异常", "protocol": "p", "description": "x",
-         "contact": "c" * 101},
+        {
+            "issue_type": "功能异常",
+            "protocol": "p",
+            "description": "x",
+            "contact": "c" * 101,
+        },
         [],
     )
     check("联系方式超长 400", not ok and st == 400, f"got {ok},{st}")
     ok, msg, st = fm.submit_from_api(
-        {"issue_type": "功能异常", "protocol": "p", "description": "x",
-         "sys_info": "s" * 2001},
+        {
+            "issue_type": "功能异常",
+            "protocol": "p",
+            "description": "x",
+            "sys_info": "s" * 2001,
+        },
         [],
     )
     check("sys_info 超长 400", not ok and st == 400, f"got {ok},{st}")
@@ -146,24 +160,44 @@ def main():
     head = b"--" + boundary
     crlf = b"\r\n"
     parts = []
-    for k, v in [("issue_type", "功能异常"), ("protocol", "南网协议"),
-                 ("description", "中文描述 ok")]:
+    for k, v in [
+        ("issue_type", "功能异常"),
+        ("protocol", "南网协议"),
+        ("description", "中文描述 ok"),
+    ]:
         parts.append(
-            head + crlf
-            + f'Content-Disposition: form-data; name="{k}"'.encode() + crlf + crlf
-            + v.encode("utf-8") + crlf
+            head
+            + crlf
+            + f'Content-Disposition: form-data; name="{k}"'.encode()
+            + crlf
+            + crlf
+            + v.encode("utf-8")
+            + crlf
         )
     parts.append(
-        head + crlf
-        + b'Content-Disposition: form-data; name="screenshots"; filename="s.png"' + crlf
-        + b"Content-Type: image/png" + crlf + crlf + PNG + crlf
+        head
+        + crlf
+        + b'Content-Disposition: form-data; name="screenshots"; filename="s.png"'
+        + crlf
+        + b"Content-Type: image/png"
+        + crlf
+        + crlf
+        + PNG
+        + crlf
     )
     body = b"".join(parts) + head + b"--" + crlf
     fields, files = fm.parse_multipart(body, boundary)
-    check("文本字段解析", fields.get("issue_type") == "功能异常"
-          and fields.get("description") == "中文描述 ok", f"fields={fields}")
-    check("文件字段解析", len(files) == 1 and files[0][0] == "s.png"
-          and files[0][1] == PNG, f"files={len(files)} match={files[0][1]==PNG if files else '-'}")
+    check(
+        "文本字段解析",
+        fields.get("issue_type") == "功能异常"
+        and fields.get("description") == "中文描述 ok",
+        f"fields={fields}",
+    )
+    check(
+        "文件字段解析",
+        len(files) == 1 and files[0][0] == "s.png" and files[0][1] == PNG,
+        f"files={len(files)} match={files[0][1] == PNG if files else '-'}",
+    )
     # 解析结果可直接喂给 submit_from_api
     files_t = [(n, d) for n, d in files]
     ok, rid, st = fm.submit_from_api(dict(fields, source="gui"), files_t)
@@ -179,8 +213,13 @@ def main():
 
     print("== api_config ==")
     cfg = fm.api_config()
-    check("config ok", cfg.get("ok") is True and cfg.get("max_screenshots") == 3
-          and "功能异常" in cfg.get("issue_types", []), f"{cfg}")
+    check(
+        "config ok",
+        cfg.get("ok") is True
+        and cfg.get("max_screenshots") == 3
+        and "功能异常" in cfg.get("issue_types", []),
+        f"{cfg}",
+    )
 
     print("== 旧库迁移（缺列自动补） ==")
     import sqlite3
@@ -207,10 +246,13 @@ def main():
     check("迁移补 source 列", "source" in cols, f"cols={cols}")
     check("迁移补 sys_info 列", "sys_info" in cols, f"cols={cols}")
     old = s2.get(1)
-    check("老记录 source 默认 web", old is not None and old.source == "web",
-          f"source={getattr(old, 'source', None)}")
+    check(
+        "老记录 source 默认 web",
+        old is not None and old.source == "web",
+        f"source={getattr(old, 'source', None)}",
+    )
 
-    print(f"\n{'='*50}")
+    print(f"\n{'=' * 50}")
     print(f"结果: {PASS} 通过, {FAIL} 失败")
     if FAIL:
         sys.exit(1)

@@ -180,11 +180,15 @@ def validate_fields(
     return True, ""
 
 
-def image_bytes_from_qimage(img: QImage, name_hint: str = "clipboard.png") -> tuple[str, bytes]:
+def image_bytes_from_qimage(
+    img: QImage, name_hint: str = "clipboard.png"
+) -> tuple[str, bytes]:
     """把 QImage 编码为 PNG 字节，返回 (filename, bytes)。"""
     ba = QByteArray()
     buffer = __import__("PySide6.QtCore", fromlist=["QBuffer"]).QBuffer(ba)
-    buffer.open(__import__("PySide6.QtCore", fromlist=["QIODevice"]).QIODevice.WriteOnly)
+    buffer.open(
+        __import__("PySide6.QtCore", fromlist=["QIODevice"]).QIODevice.WriteOnly
+    )
     img.save(buffer, "PNG")
     buffer.close()
     return ("clipboard.png", bytes(ba))
@@ -270,7 +274,9 @@ class FeedbackDialog(QDialog):
 
         # 截图
         shot_head = QHBoxLayout()
-        shot_head.addWidget(QLabel(f"截图（选填，最多 {MAX_SCREENSHOTS} 张，jpg/png/webp，单张 ≤5MB）:"))
+        shot_head.addWidget(
+            QLabel(f"截图（选填，最多 {MAX_SCREENSHOTS} 张，jpg/png/webp，单张 ≤5MB）:")
+        )
         shot_head.addStretch()
         self.paste_btn = QPushButton("粘贴截图")
         self.paste_btn.clicked.connect(self._paste_shot)
@@ -334,7 +340,9 @@ class FeedbackDialog(QDialog):
             item = QListWidgetItem(f"{name}  （{len(data) / 1024:.0f} KB）")
             pix = QPixmap()
             if pix.loadFromData(data):
-                item.setIcon(pix.scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                item.setIcon(
+                    pix.scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                )
             self.shot_list.addItem(item)
 
     def _paste_shot(self):
@@ -408,7 +416,12 @@ class FeedbackDialog(QDialog):
         contact = self.contact_edit.text().strip()
 
         ok, msg = validate_fields(
-            issue_type, protocol, description, contact, len(self._shots), self.server_url
+            issue_type,
+            protocol,
+            description,
+            contact,
+            len(self._shots),
+            self.server_url,
         )
         if not ok:
             self._set_status(msg)
@@ -421,8 +434,9 @@ class FeedbackDialog(QDialog):
 
         def add_text_part(key: str, value: str):
             part = QHttpPart()
-            part.setHeader(QNetworkRequest.ContentDispositionHeader,
-                           f'form-data; name="{key}"')
+            part.setHeader(
+                QNetworkRequest.ContentDispositionHeader, f'form-data; name="{key}"'
+            )
             part.setBody(QByteArray(value.encode("utf-8")))
             multi.append(part)
 
@@ -482,8 +496,10 @@ class FeedbackDialog(QDialog):
                     self._submit_failed(f"服务器返回错误：{reason}")
                 elif err in (QNetworkReply.OperationCanceledError,):
                     self._submit_failed("请求被取消")
-                elif reply.errorString() and ("timeout" in reply.errorString().lower()
-                                             or "timed out" in reply.errorString().lower()):
+                elif reply.errorString() and (
+                    "timeout" in reply.errorString().lower()
+                    or "timed out" in reply.errorString().lower()
+                ):
                     self._submit_failed("提交超时，请检查网络后重试")
                 else:
                     self._submit_failed(
@@ -507,7 +523,9 @@ class FeedbackDialog(QDialog):
         if box.clickedButton() is open_btn:
             from PySide6.QtGui import QDesktopServices
 
-            QDesktopServices.openUrl(QUrl(normalize_server_url(self.server_url) + "/feedback"))
+            QDesktopServices.openUrl(
+                QUrl(normalize_server_url(self.server_url) + "/feedback")
+            )
         self.accept()
 
     def _submit_failed(self, msg: str):

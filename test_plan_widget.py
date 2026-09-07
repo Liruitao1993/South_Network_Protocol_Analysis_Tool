@@ -56,6 +56,7 @@ from gui_utils import (
 
 try:
     from lua_script_engine import LUA_TEMPLATES, LuaScriptEngine
+
     LUA_AVAILABLE = True
 except ImportError:
     LUA_AVAILABLE = False
@@ -92,16 +93,16 @@ class VimHandler(QObject):
       :q       退出（发信号）
     """
 
-    mode_changed = Signal(str)   # 模式变化信号
-    command = Signal(str)        # 命令信号（如 :w, :q）
+    mode_changed = Signal(str)  # 模式变化信号
+    command = Signal(str)  # 命令信号（如 :w, :q）
 
     def __init__(self, editor: QPlainTextEdit, parent=None):
         super().__init__(parent)
         self._editor = editor
-        self._mode = "INSERT"     # 默认插入模式
-        self._pending = ""        # 待处理按键序列（如 dd, gg）
-        self._yank_buffer = ""    # 复制缓冲区
-        self._command_buffer = "" # :命令缓冲区
+        self._mode = "INSERT"  # 默认插入模式
+        self._pending = ""  # 待处理按键序列（如 dd, gg）
+        self._yank_buffer = ""  # 复制缓冲区
+        self._command_buffer = ""  # :命令缓冲区
         self._in_command_line = False  # 是否正在输入 : 命令
         editor.installEventFilter(self)
         self._update_cursor_style()
@@ -127,13 +128,19 @@ class VimHandler(QObject):
         )
         if self._mode == "INSERT":
             self._editor.setCursorWidth(2)
-            self._editor.setStyleSheet(f"QPlainTextEdit {{ {base} border: 1px solid #555; }}")
+            self._editor.setStyleSheet(
+                f"QPlainTextEdit {{ {base} border: 1px solid #555; }}"
+            )
         elif self._mode == "NORMAL":
             self._editor.setCursorWidth(8)
-            self._editor.setStyleSheet(f"QPlainTextEdit {{ {base} border: 2px solid #4FC3F7; }}")
+            self._editor.setStyleSheet(
+                f"QPlainTextEdit {{ {base} border: 2px solid #4FC3F7; }}"
+            )
         elif self._mode == "VISUAL":
             self._editor.setCursorWidth(2)
-            self._editor.setStyleSheet(f"QPlainTextEdit {{ {base} border: 2px solid #FFB74D; }}")
+            self._editor.setStyleSheet(
+                f"QPlainTextEdit {{ {base} border: 2px solid #FFB74D; }}"
+            )
 
     def eventFilter(self, obj, event):
         """事件过滤器，拦截键盘事件"""
@@ -164,7 +171,10 @@ class VimHandler(QObject):
                 self.set_mode("NORMAL")
                 return True
             # Ctrl+[ 也退出到 NORMAL
-            if key == Qt.Key.Key_BracketLeft and modifiers & Qt.KeyboardModifier.ControlModifier:
+            if (
+                key == Qt.Key.Key_BracketLeft
+                and modifiers & Qt.KeyboardModifier.ControlModifier
+            ):
                 self.set_mode("NORMAL")
                 return True
             return False  # 其他按键正常输入
@@ -342,27 +352,39 @@ class VimHandler(QObject):
             return True
 
         if text == "h":
-            cursor.movePosition(QTextCursor.MoveOperation.Left, QTextCursor.MoveMode.KeepAnchor)
+            cursor.movePosition(
+                QTextCursor.MoveOperation.Left, QTextCursor.MoveMode.KeepAnchor
+            )
             self._editor.setTextCursor(cursor)
             return True
         elif text == "j":
-            cursor.movePosition(QTextCursor.MoveOperation.Down, QTextCursor.MoveMode.KeepAnchor)
+            cursor.movePosition(
+                QTextCursor.MoveOperation.Down, QTextCursor.MoveMode.KeepAnchor
+            )
             self._editor.setTextCursor(cursor)
             return True
         elif text == "k":
-            cursor.movePosition(QTextCursor.MoveOperation.Up, QTextCursor.MoveMode.KeepAnchor)
+            cursor.movePosition(
+                QTextCursor.MoveOperation.Up, QTextCursor.MoveMode.KeepAnchor
+            )
             self._editor.setTextCursor(cursor)
             return True
         elif text == "l":
-            cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor)
+            cursor.movePosition(
+                QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor
+            )
             self._editor.setTextCursor(cursor)
             return True
         elif text == "w":
-            cursor.movePosition(QTextCursor.MoveOperation.NextWord, QTextCursor.MoveMode.KeepAnchor)
+            cursor.movePosition(
+                QTextCursor.MoveOperation.NextWord, QTextCursor.MoveMode.KeepAnchor
+            )
             self._editor.setTextCursor(cursor)
             return True
         elif text == "b":
-            cursor.movePosition(QTextCursor.MoveOperation.PreviousWord, QTextCursor.MoveMode.KeepAnchor)
+            cursor.movePosition(
+                QTextCursor.MoveOperation.PreviousWord, QTextCursor.MoveMode.KeepAnchor
+            )
             self._editor.setTextCursor(cursor)
             return True
         elif text == "y":
@@ -430,6 +452,7 @@ class VimHandler(QObject):
             return True
         return True
 
+
 # ------------------------------------------------------------------------------
 # 响应帧动态处理引擎（时间填充 / 校验自动计算）
 # ------------------------------------------------------------------------------
@@ -441,38 +464,262 @@ class VimHandler(QObject):
 
 # CRC16-CCITT 查表（与 plc_rf_parser.py 一致）
 _CRC16_TABLE = [
-    0x0000, 0x1189, 0x2312, 0x329b, 0x4624, 0x57ad, 0x6536, 0x74bf,
-    0x8c48, 0x9dc1, 0xaf5a, 0xbed3, 0xca6c, 0xdbe5, 0xe97e, 0xf8f7,
-    0x1081, 0x0108, 0x3393, 0x221a, 0x56a5, 0x472c, 0x75b7, 0x643e,
-    0x9cc9, 0x8d40, 0xbfdb, 0xae52, 0xdaed, 0xcb64, 0xf9ff, 0xe876,
-    0x2102, 0x308b, 0x0210, 0x1399, 0x6726, 0x76af, 0x4434, 0x55bd,
-    0xad4a, 0xbcc3, 0x8e58, 0x9fd1, 0xeb6e, 0xfae7, 0xc87c, 0xd9f5,
-    0x3183, 0x200a, 0x1291, 0x0318, 0x77a7, 0x662e, 0x54b5, 0x453c,
-    0xbdcb, 0xac42, 0x9ed9, 0x8f50, 0xfbef, 0xea66, 0xd8fd, 0xc974,
-    0x4204, 0x538d, 0x6116, 0x709f, 0x0420, 0x15a9, 0x2732, 0x36bb,
-    0xce4c, 0xdfc5, 0xed5e, 0xfcd7, 0x8868, 0x99e1, 0xab7a, 0xbaf3,
-    0x5285, 0x430c, 0x7197, 0x601e, 0x14a1, 0x0528, 0x37b3, 0x263a,
-    0xdecd, 0xcf44, 0xfddf, 0xec56, 0x98e9, 0x8960, 0xbbfb, 0xaa72,
-    0x6306, 0x728f, 0x4014, 0x519d, 0x2522, 0x34ab, 0x0630, 0x17b9,
-    0xef4e, 0xfec7, 0xcc5c, 0xddd5, 0xa96a, 0xb8e3, 0x8a78, 0x9bf1,
-    0x7387, 0x620e, 0x5095, 0x411c, 0x35a3, 0x242a, 0x16b1, 0x0738,
-    0xffcf, 0xee46, 0xdcdd, 0xcd54, 0xb9eb, 0xa862, 0x9af9, 0x8b70,
-    0x8408, 0x9581, 0xa71a, 0xb693, 0xc22c, 0xd3a5, 0xe13e, 0xf0b7,
-    0x0840, 0x19c9, 0x2b52, 0x3adb, 0x4e64, 0x5fed, 0x6d76, 0x7cff,
-    0x9489, 0x8500, 0xb79b, 0xa612, 0xd2ad, 0xc324, 0xf1bf, 0xe036,
-    0x18c1, 0x0948, 0x3bd3, 0x2a5a, 0x5ee5, 0x4f6c, 0x7df7, 0x6c7e,
-    0xa50a, 0xb483, 0x8618, 0x9791, 0xe32e, 0xf2a7, 0xc03c, 0xd1b5,
-    0x2942, 0x38cb, 0x0a50, 0x1bd9, 0x6f66, 0x7eef, 0x4c74, 0x5dfd,
-    0xb58b, 0xa402, 0x9699, 0x8710, 0xf3af, 0xe226, 0xd0bd, 0xc134,
-    0x39c3, 0x284a, 0x1ad1, 0x0b58, 0x7fe7, 0x6e6e, 0x5cf5, 0x4d7c,
-    0xc60c, 0xd785, 0xe51e, 0xf497, 0x8028, 0x91a1, 0xa33a, 0xb2b3,
-    0x4a44, 0x5bcd, 0x6956, 0x78df, 0x0c60, 0x1de9, 0x2f72, 0x3efb,
-    0xd68d, 0xc704, 0xf59f, 0xe416, 0x90a9, 0x8120, 0xb3bb, 0xa232,
-    0x5ac5, 0x4b4c, 0x79d7, 0x685e, 0x1ce1, 0x0d68, 0x3ff3, 0x2e7a,
-    0xe70e, 0xf687, 0xc41c, 0xd595, 0xa12a, 0xb0a3, 0x8238, 0x93b1,
-    0x6b46, 0x7acf, 0x4854, 0x59dd, 0x2d62, 0x3ceb, 0x0e70, 0x1ff9,
-    0xf78f, 0xe606, 0xd49d, 0xc514, 0xb1ab, 0xa022, 0x92b9, 0x8330,
-    0x7bc7, 0x6a4e, 0x58d5, 0x495c, 0x3de3, 0x2c6a, 0x1ef1, 0x0f78
+    0x0000,
+    0x1189,
+    0x2312,
+    0x329B,
+    0x4624,
+    0x57AD,
+    0x6536,
+    0x74BF,
+    0x8C48,
+    0x9DC1,
+    0xAF5A,
+    0xBED3,
+    0xCA6C,
+    0xDBE5,
+    0xE97E,
+    0xF8F7,
+    0x1081,
+    0x0108,
+    0x3393,
+    0x221A,
+    0x56A5,
+    0x472C,
+    0x75B7,
+    0x643E,
+    0x9CC9,
+    0x8D40,
+    0xBFDB,
+    0xAE52,
+    0xDAED,
+    0xCB64,
+    0xF9FF,
+    0xE876,
+    0x2102,
+    0x308B,
+    0x0210,
+    0x1399,
+    0x6726,
+    0x76AF,
+    0x4434,
+    0x55BD,
+    0xAD4A,
+    0xBCC3,
+    0x8E58,
+    0x9FD1,
+    0xEB6E,
+    0xFAE7,
+    0xC87C,
+    0xD9F5,
+    0x3183,
+    0x200A,
+    0x1291,
+    0x0318,
+    0x77A7,
+    0x662E,
+    0x54B5,
+    0x453C,
+    0xBDCB,
+    0xAC42,
+    0x9ED9,
+    0x8F50,
+    0xFBEF,
+    0xEA66,
+    0xD8FD,
+    0xC974,
+    0x4204,
+    0x538D,
+    0x6116,
+    0x709F,
+    0x0420,
+    0x15A9,
+    0x2732,
+    0x36BB,
+    0xCE4C,
+    0xDFC5,
+    0xED5E,
+    0xFCD7,
+    0x8868,
+    0x99E1,
+    0xAB7A,
+    0xBAF3,
+    0x5285,
+    0x430C,
+    0x7197,
+    0x601E,
+    0x14A1,
+    0x0528,
+    0x37B3,
+    0x263A,
+    0xDECD,
+    0xCF44,
+    0xFDDF,
+    0xEC56,
+    0x98E9,
+    0x8960,
+    0xBBFB,
+    0xAA72,
+    0x6306,
+    0x728F,
+    0x4014,
+    0x519D,
+    0x2522,
+    0x34AB,
+    0x0630,
+    0x17B9,
+    0xEF4E,
+    0xFEC7,
+    0xCC5C,
+    0xDDD5,
+    0xA96A,
+    0xB8E3,
+    0x8A78,
+    0x9BF1,
+    0x7387,
+    0x620E,
+    0x5095,
+    0x411C,
+    0x35A3,
+    0x242A,
+    0x16B1,
+    0x0738,
+    0xFFCF,
+    0xEE46,
+    0xDCDD,
+    0xCD54,
+    0xB9EB,
+    0xA862,
+    0x9AF9,
+    0x8B70,
+    0x8408,
+    0x9581,
+    0xA71A,
+    0xB693,
+    0xC22C,
+    0xD3A5,
+    0xE13E,
+    0xF0B7,
+    0x0840,
+    0x19C9,
+    0x2B52,
+    0x3ADB,
+    0x4E64,
+    0x5FED,
+    0x6D76,
+    0x7CFF,
+    0x9489,
+    0x8500,
+    0xB79B,
+    0xA612,
+    0xD2AD,
+    0xC324,
+    0xF1BF,
+    0xE036,
+    0x18C1,
+    0x0948,
+    0x3BD3,
+    0x2A5A,
+    0x5EE5,
+    0x4F6C,
+    0x7DF7,
+    0x6C7E,
+    0xA50A,
+    0xB483,
+    0x8618,
+    0x9791,
+    0xE32E,
+    0xF2A7,
+    0xC03C,
+    0xD1B5,
+    0x2942,
+    0x38CB,
+    0x0A50,
+    0x1BD9,
+    0x6F66,
+    0x7EEF,
+    0x4C74,
+    0x5DFD,
+    0xB58B,
+    0xA402,
+    0x9699,
+    0x8710,
+    0xF3AF,
+    0xE226,
+    0xD0BD,
+    0xC134,
+    0x39C3,
+    0x284A,
+    0x1AD1,
+    0x0B58,
+    0x7FE7,
+    0x6E6E,
+    0x5CF5,
+    0x4D7C,
+    0xC60C,
+    0xD785,
+    0xE51E,
+    0xF497,
+    0x8028,
+    0x91A1,
+    0xA33A,
+    0xB2B3,
+    0x4A44,
+    0x5BCD,
+    0x6956,
+    0x78DF,
+    0x0C60,
+    0x1DE9,
+    0x2F72,
+    0x3EFB,
+    0xD68D,
+    0xC704,
+    0xF59F,
+    0xE416,
+    0x90A9,
+    0x8120,
+    0xB3BB,
+    0xA232,
+    0x5AC5,
+    0x4B4C,
+    0x79D7,
+    0x685E,
+    0x1CE1,
+    0x0D68,
+    0x3FF3,
+    0x2E7A,
+    0xE70E,
+    0xF687,
+    0xC41C,
+    0xD595,
+    0xA12A,
+    0xB0A3,
+    0x8238,
+    0x93B1,
+    0x6B46,
+    0x7ACF,
+    0x4854,
+    0x59DD,
+    0x2D62,
+    0x3CEB,
+    0x0E70,
+    0x1FF9,
+    0xF78F,
+    0xE606,
+    0xD49D,
+    0xC514,
+    0xB1AB,
+    0xA022,
+    0x92B9,
+    0x8330,
+    0x7BC7,
+    0x6A4E,
+    0x58D5,
+    0x495C,
+    0x3DE3,
+    0x2C6A,
+    0x1EF1,
+    0x0F78,
 ]
 
 
@@ -527,8 +774,8 @@ def _parse_byte_range(range_str: str, total: int) -> tuple[int, int]:
 def _fill_time(params: list[str]) -> str:
     """填充系统时间（BCD码）"""
     byte_count = int(params[1])
-    fmt = params[2].strip('"\'')
-    endian = params[3].strip('"\'').lower() if len(params) > 3 else "big"
+    fmt = params[2].strip("\"'")
+    endian = params[3].strip("\"'").lower() if len(params) > 3 else "big"
 
     now = datetime.now()
     mapping = {
@@ -557,11 +804,13 @@ def _fill_time(params: list[str]) -> str:
     return result
 
 
-def _calc_checksum(frame_hex: str, match_start: int, match_end: int, params: list[str]) -> str:
+def _calc_checksum(
+    frame_hex: str, match_start: int, match_end: int, params: list[str]
+) -> str:
     """计算校验并返回 HEX 字符串"""
-    algo = params[0].strip('"\'')
+    algo = params[0].strip("\"'")
     size = int(params[1])
-    range_str = params[2].strip('"\'')
+    range_str = params[2].strip("\"'")
 
     # 将帧中所有 【】 标记（包括当前正在计算的）临时替换为等长占位符，
     # 保证总字节数正确，便于范围计算。
@@ -569,7 +818,7 @@ def _calc_checksum(frame_hex: str, match_start: int, match_end: int, params: lis
 
     def _ph_repl(m: Any) -> str:
         p = _split_bracket_params(m.group(1))
-        a = p[0].strip('"\'')
+        a = p[0].strip("\"'")
         if a in ("CS", "CRC16") or a == "time":
             s = int(p[1]) if len(p) > 1 else 0
         else:
@@ -608,7 +857,7 @@ def process_response_frame(frame_hex: str) -> str:
     def _repl_time(m: Any) -> str:
         content = m.group(1)
         params = _split_bracket_params(content)
-        if params and params[0].strip('"\'') == "time":
+        if params and params[0].strip("\"'") == "time":
             return _fill_time(params)
         return m.group(0)
 
@@ -621,7 +870,7 @@ def process_response_frame(frame_hex: str) -> str:
             break
         content = m.group(1)
         params = _split_bracket_params(content)
-        algo = params[0].strip('"\'') if params else ""
+        algo = params[0].strip("\"'") if params else ""
         if algo in ("CS", "CRC16"):
             replacement = _calc_checksum(result, m.start(), m.end(), params)
             result = result[: m.start()] + replacement + result[m.end() :]
@@ -643,18 +892,63 @@ class LuaSyntaxHighlighter(QSyntaxHighlighter):
 
     # Lua 关键字
     LUA_KEYWORDS = (
-        'and', 'break', 'do', 'else', 'elseif', 'end', 'false', 'for',
-        'function', 'goto', 'if', 'in', 'local', 'nil', 'not', 'or',
-        'repeat', 'return', 'then', 'true', 'until', 'while',
+        "and",
+        "break",
+        "do",
+        "else",
+        "elseif",
+        "end",
+        "false",
+        "for",
+        "function",
+        "goto",
+        "if",
+        "in",
+        "local",
+        "nil",
+        "not",
+        "or",
+        "repeat",
+        "return",
+        "then",
+        "true",
+        "until",
+        "while",
     )
 
     # Lua 内置函数
     LUA_BUILTINS = (
-        'print', 'type', 'tostring', 'tonumber', 'error', 'pcall', 'xpcall',
-        'select', 'unpack', 'rawget', 'rawset', 'rawequal', 'rawlen',
-        'setmetatable', 'getmetatable', 'require', 'dofile', 'loadfile',
-        'load', 'next', 'pairs', 'ipairs', 'assert', 'collectgarbage',
-        'coroutine', 'string', 'table', 'math', 'io', 'os', 'debug',
+        "print",
+        "type",
+        "tostring",
+        "tonumber",
+        "error",
+        "pcall",
+        "xpcall",
+        "select",
+        "unpack",
+        "rawget",
+        "rawset",
+        "rawequal",
+        "rawlen",
+        "setmetatable",
+        "getmetatable",
+        "require",
+        "dofile",
+        "loadfile",
+        "load",
+        "next",
+        "pairs",
+        "ipairs",
+        "assert",
+        "collectgarbage",
+        "coroutine",
+        "string",
+        "table",
+        "math",
+        "io",
+        "os",
+        "debug",
     )
 
     def __init__(self, parent=None):
@@ -674,23 +968,23 @@ class LuaSyntaxHighlighter(QSyntaxHighlighter):
         return f
 
     def _build_rules(self):
-        kw_fmt  = self._fmt('#569CD6', bold=True)   # 关键字：蓝
-        bi_fmt  = self._fmt('#4EC9B0')               # 内置函数：青绿
-        num_fmt = self._fmt('#B5CEA8')               # 数字：浅绿
-        str_fmt = self._fmt('#CE9178')               # 字符串：橙棕
-        op_fmt  = self._fmt('#D4D4D4')               # 运算符：浅灰
+        kw_fmt = self._fmt("#569CD6", bold=True)  # 关键字：蓝
+        bi_fmt = self._fmt("#4EC9B0")  # 内置函数：青绿
+        num_fmt = self._fmt("#B5CEA8")  # 数字：浅绿
+        str_fmt = self._fmt("#CE9178")  # 字符串：橙棕
+        op_fmt = self._fmt("#D4D4D4")  # 运算符：浅灰
 
         # 关键字（全词匹配）
-        kw_pat = r'\b(' + '|'.join(self.LUA_KEYWORDS) + r')\b'
+        kw_pat = r"\b(" + "|".join(self.LUA_KEYWORDS) + r")\b"
         self._rules.append((re.compile(kw_pat), kw_fmt))
 
         # 内置函数
-        bi_pat = r'\b(' + '|'.join(self.LUA_BUILTINS) + r')\s*(?=\()'
+        bi_pat = r"\b(" + "|".join(self.LUA_BUILTINS) + r")\s*(?=\()"
         self._rules.append((re.compile(bi_pat), bi_fmt))
 
         # 数字：十六进制 / 浮点 / 整数
-        self._rules.append((re.compile(r'\b0[xX][0-9a-fA-F]+\b'), num_fmt))
-        self._rules.append((re.compile(r'\b\d+\.?\d*(?:[eE][+-]?\d+)?\b'), num_fmt))
+        self._rules.append((re.compile(r"\b0[xX][0-9a-fA-F]+\b"), num_fmt))
+        self._rules.append((re.compile(r"\b\d+\.?\d*(?:[eE][+-]?\d+)?\b"), num_fmt))
 
         # 双引号字符串（含转义）
         self._rules.append((re.compile(r'"(?:\\.|[^"\\])*"'), str_fmt))
@@ -698,16 +992,16 @@ class LuaSyntaxHighlighter(QSyntaxHighlighter):
         self._rules.append((re.compile(r"'(?:\\.|[^'\\])*'"), str_fmt))
 
         # 运算符
-        self._rules.append((re.compile(r'[+\-*/%^#=<>~:;,.\(\)\{\}\[\]]'), op_fmt))
+        self._rules.append((re.compile(r"[+\-*/%^#=<>~:;,.\(\)\{\}\[\]]"), op_fmt))
 
     # ---- 多行注释状态 ----
     # userState: 0 = 正常, 1 = 在多行注释内
     def highlightBlock(self, text: str):
-        comment_fmt = self._fmt('#6A9955', italic=True)  # 注释：绿色斜体
+        comment_fmt = self._fmt("#6A9955", italic=True)  # 注释：绿色斜体
 
         # 处理多行注释延续
         if self.previousBlockState() == 1:
-            end_idx = text.find(']]')
+            end_idx = text.find("]]")
             if end_idx == -1:
                 self.setFormat(0, len(text), comment_fmt)
                 self.setCurrentBlockState(1)
@@ -726,7 +1020,7 @@ class LuaSyntaxHighlighter(QSyntaxHighlighter):
                 self.setFormat(start + m.start(), m.end() - m.start(), fmt)
 
         # 单行注释 --（需在其他规则之后处理，避免被覆盖）
-        single_comment_fmt = self._fmt('#6A9955', italic=True)
+        single_comment_fmt = self._fmt("#6A9955", italic=True)
         idx = self._find_single_comment(text, start)
         if idx != -1:
             self.setFormat(idx, len(text) - idx, single_comment_fmt)
@@ -735,13 +1029,13 @@ class LuaSyntaxHighlighter(QSyntaxHighlighter):
         ml_start = self._find_multiline_comment_start(text, start)
         if ml_start != -1:
             # 检查同一行是否有结束 ]]
-            content_start = text.find('[[', ml_start)
+            content_start = text.find("[[", ml_start)
             if content_start == -1:
                 # --[==[ 形式，找 [[ 之前的位置
                 content_start = ml_start + 2
             else:
                 content_start += 2
-            end_idx = text.find(']]', content_start)
+            end_idx = text.find("]]", content_start)
             if end_idx == -1:
                 self.setFormat(ml_start, len(text) - ml_start, single_comment_fmt)
                 self.setCurrentBlockState(1)
@@ -756,7 +1050,7 @@ class LuaSyntaxHighlighter(QSyntaxHighlighter):
         while idx < len(text):
             ch = text[idx]
             if in_str:
-                if ch == '\\':
+                if ch == "\\":
                     idx += 2
                     continue
                 if ch == in_str:
@@ -764,7 +1058,7 @@ class LuaSyntaxHighlighter(QSyntaxHighlighter):
             else:
                 if ch in ('"', "'"):
                     in_str = ch
-                elif ch == '-' and idx + 1 < len(text) and text[idx + 1] == '-':
+                elif ch == "-" and idx + 1 < len(text) and text[idx + 1] == "-":
                     return idx
             idx += 1
         return -1
@@ -777,7 +1071,7 @@ class LuaSyntaxHighlighter(QSyntaxHighlighter):
         while idx < len(text) - 1:
             ch = text[idx]
             if in_str:
-                if ch == '\\':
+                if ch == "\\":
                     idx += 2
                     continue
                 if ch == in_str:
@@ -785,10 +1079,10 @@ class LuaSyntaxHighlighter(QSyntaxHighlighter):
             else:
                 if ch in ('"', "'"):
                     in_str = ch
-                elif ch == '-' and text[idx + 1] == '-':
+                elif ch == "-" and text[idx + 1] == "-":
                     # 检查后面是否跟 [=[ 或 [[
-                    rest = text[idx + 2:]
-                    if rest.startswith('[[') or re.match(r'=+\[', rest):
+                    rest = text[idx + 2 :]
+                    if rest.startswith("[[") or re.match(r"=+\[", rest):
                         return idx
             idx += 1
         return -1
@@ -821,8 +1115,8 @@ class LuaCodeEditor(QPlainTextEdit):
     # 括号不匹配颜色
     _BRACKET_ERROR_COLOR = QColor(180, 60, 60, 180)
     # 配对括号映射
-    _BRACKET_PAIRS = {'(': ')', '[': ']', '{': '}'}
-    _BRACKET_OPEN = {')': '(', ']': '[', '}': '{'}
+    _BRACKET_PAIRS = {"(": ")", "[": "]", "{": "}"}
+    _BRACKET_OPEN = {")": "(", "]": "[", "}": "{"}
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -843,11 +1137,11 @@ class LuaCodeEditor(QPlainTextEdit):
     # ---- 编辑器基础样式 ----
     def _setup_editor_style(self):
         """设置暗色主题和等宽字体"""
-        font = QFont('Consolas', 10)
+        font = QFont("Consolas", 10)
         font.setStyleHint(QFont.StyleHint.Monospace)
         font.setFixedPitch(True)
         self.setFont(font)
-        self.setTabStopDistance(self.fontMetrics().horizontalAdvance(' ') * 4)
+        self.setTabStopDistance(self.fontMetrics().horizontalAdvance(" ") * 4)
         self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         # 暗色主题样式表
         self.setStyleSheet(
@@ -886,11 +1180,13 @@ class LuaCodeEditor(QPlainTextEdit):
     def _update_line_num_area_width(self):
         self.setViewportMargins(self.line_num_area_width(), 0, 0, 0)
 
-    def _update_line_num_area(self, rect: 'QRect', dy: int):
+    def _update_line_num_area(self, rect: "QRect", dy: int):
         if dy:
             self._line_num_area.scroll(0, dy)
         else:
-            self._line_num_area.update(0, rect.y(), self._line_num_area.width(), rect.height())
+            self._line_num_area.update(
+                0, rect.y(), self._line_num_area.width(), rect.height()
+            )
         if rect.contains(self.viewport().rect()):
             self._update_line_num_area_width()
 
@@ -904,12 +1200,15 @@ class LuaCodeEditor(QPlainTextEdit):
     def line_num_area_paint(self, event):
         """绘制行号区域"""
         from PySide6.QtGui import QPainter, QPen
+
         painter = QPainter(self._line_num_area)
         painter.fillRect(event.rect(), QColor(30, 30, 30))
 
         block = self.firstVisibleBlock()
         block_number = block.blockNumber()
-        top = int(self.blockBoundingGeometry(block).translated(self.contentOffset()).top())
+        top = int(
+            self.blockBoundingGeometry(block).translated(self.contentOffset()).top()
+        )
         bottom = top + int(self.blockBoundingRect(block).height())
         current_block = self.textCursor().blockNumber()
 
@@ -921,9 +1220,12 @@ class LuaCodeEditor(QPlainTextEdit):
                 else:
                     painter.setPen(QPen(self._LINE_NUM_COLOR))
                 painter.drawText(
-                    0, top, self._line_num_area.width() - 4,
+                    0,
+                    top,
+                    self._line_num_area.width() - 4,
                     self.fontMetrics().height(),
-                    Qt.AlignmentFlag.AlignRight, number
+                    Qt.AlignmentFlag.AlignRight,
+                    number,
                 )
             block = block.next()
             top = bottom
@@ -948,7 +1250,9 @@ class LuaCodeEditor(QPlainTextEdit):
         while block.isValid() and top < viewport_h:
             if block.blockNumber() == cursor_block:
                 bh = int(self.blockBoundingRect(block).height())
-                painter.fillRect(0, top, self.viewport().width(), bh, self._CURRENT_LINE_COLOR)
+                painter.fillRect(
+                    0, top, self.viewport().width(), bh, self._CURRENT_LINE_COLOR
+                )
                 break
             block = block.next()
             top += int(self.blockBoundingRect(block).height())
@@ -978,22 +1282,30 @@ class LuaCodeEditor(QPlainTextEdit):
             cursor = self.textCursor()
             block_text = cursor.block().text()
             # 提取当前行的前导空白
-            indent = ''
+            indent = ""
             for ch in block_text:
-                if ch in (' ', '\t'):
+                if ch in (" ", "\t"):
                     indent += ch
                 else:
                     break
             # 如果上一行以 then/do/function/else/elseif/for/if/repeat/while 结尾，增加一级缩进
             stripped = block_text.rstrip()
             indent_increase_keywords = (
-                'then', 'do', 'else', 'elseif', 'function', 'for',
-                'if', 'repeat', 'while', '{',
+                "then",
+                "do",
+                "else",
+                "elseif",
+                "function",
+                "for",
+                "if",
+                "repeat",
+                "while",
+                "{",
             )
-            last_word = stripped.split()[-1] if stripped.split() else ''
-            if last_word in indent_increase_keywords or stripped.endswith('{'):
-                indent += '    '
-            cursor.insertText('\n' + indent)
+            last_word = stripped.split()[-1] if stripped.split() else ""
+            if last_word in indent_increase_keywords or stripped.endswith("{"):
+                indent += "    "
+            cursor.insertText("\n" + indent)
             self.setTextCursor(cursor)
             return
 
@@ -1004,7 +1316,7 @@ class LuaCodeEditor(QPlainTextEdit):
                 # 选中文本时 Tab = 增加缩进
                 self._indent_selection(indent=True)
             else:
-                cursor.insertText('    ')
+                cursor.insertText("    ")
             return
 
         # Shift+Tab：减少缩进
@@ -1045,14 +1357,14 @@ class LuaCodeEditor(QPlainTextEdit):
             cursor.setPosition(block.position())
             text = block.text()
             if indent:
-                cursor.insertText('    ')
+                cursor.insertText("    ")
             else:
                 # 移除最多 4 个前导空格
                 spaces = 0
                 for ch in text:
-                    if ch == ' ' and spaces < 4:
+                    if ch == " " and spaces < 4:
                         spaces += 1
-                    elif ch == '\t':
+                    elif ch == "\t":
                         spaces += 4
                     else:
                         break
@@ -1060,7 +1372,7 @@ class LuaCodeEditor(QPlainTextEdit):
                     cursor.movePosition(
                         QTextCursor.MoveOperation.Right,
                         QTextCursor.MoveMode.KeepAnchor,
-                        min(spaces, len(text))
+                        min(spaces, len(text)),
                     )
                     cursor.removeSelectedText()
             block = block.next()
@@ -1070,16 +1382,22 @@ class LuaCodeEditor(QPlainTextEdit):
     def _update_bracket_match(self):
         """查找并高亮当前光标处的配对括号"""
         from PySide6.QtGui import QPlainTextEdit, QTextCharFormat, QTextCursor
+
         # 清除旧的高亮
-        extra = [s for s in self.extraSelections()
-                 if not hasattr(s, '_is_bracket') or not s._is_bracket]
+        extra = [
+            s
+            for s in self.extraSelections()
+            if not hasattr(s, "_is_bracket") or not s._is_bracket
+        ]
         cursor = self.textCursor()
         pos = cursor.position()
         doc = self.document()
         # 检查光标前一个字符
         if pos > 0:
             cursor.setPosition(pos - 1)
-            cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor)
+            cursor.movePosition(
+                QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor
+            )
             ch = cursor.selectedText()
             if ch in self._BRACKET_OPEN or ch in self._BRACKET_PAIRS:
                 match_pos = self._find_matching_bracket(doc, pos - 1, ch)
@@ -1088,8 +1406,7 @@ class LuaCodeEditor(QPlainTextEdit):
                     sel.cursor = QTextCursor(doc)
                     sel.cursor.setPosition(match_pos)
                     sel.cursor.movePosition(
-                        QTextCursor.MoveOperation.Right,
-                        QTextCursor.MoveMode.KeepAnchor
+                        QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor
                     )
                     sel.format = QTextCharFormat()
                     sel.format.setBackground(self._BRACKET_MATCH_COLOR)
@@ -1100,8 +1417,7 @@ class LuaCodeEditor(QPlainTextEdit):
                     sel2.cursor = QTextCursor(doc)
                     sel2.cursor.setPosition(pos - 1)
                     sel2.cursor.movePosition(
-                        QTextCursor.MoveOperation.Right,
-                        QTextCursor.MoveMode.KeepAnchor
+                        QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor
                     )
                     sel2.format = QTextCharFormat()
                     sel2.format.setBackground(self._BRACKET_MATCH_COLOR)
@@ -1113,8 +1429,7 @@ class LuaCodeEditor(QPlainTextEdit):
                     sel.cursor = QTextCursor(doc)
                     sel.cursor.setPosition(pos - 1)
                     sel.cursor.movePosition(
-                        QTextCursor.MoveOperation.Right,
-                        QTextCursor.MoveMode.KeepAnchor
+                        QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor
                     )
                     sel.format = QTextCharFormat()
                     sel.format.setBackground(self._BRACKET_ERROR_COLOR)
@@ -1160,6 +1475,7 @@ class _LineNumberArea(QWidget):
 
     def sizeHint(self):
         from PySide6.QtCore import QSize
+
         return QSize(self._editor.line_num_area_width(), 0)
 
     def paintEvent(self, event):
@@ -1233,7 +1549,9 @@ class AddTestItemDialog(QDialog):
         self.nature_combo.addItems(["发送帧", "后台监听", "纯等待", "Lua脚本"])
         self.nature_combo.setCurrentText(nature)
         self.nature_combo.currentTextChanged.connect(self._apply_nature)
-        nature_help = QLabel("发送帧→发后匹配  后台→全时监听  纯等待→忽略帧  Lua→脚本控制")
+        nature_help = QLabel(
+            "发送帧→发后匹配  后台→全时监听  纯等待→忽略帧  Lua→脚本控制"
+        )
         nature_help.setStyleSheet("color: #888; font-size: 11px;")
         row.addWidget(self.nature_combo)
         row.addWidget(nature_help)
@@ -1255,7 +1573,9 @@ class AddTestItemDialog(QDialog):
         self.vim_mode_label.setVisible(False)
         script_header.addWidget(self.vim_mode_label)
         # Vim 帮助提示
-        vim_help = QLabel("<span style='color:#888;font-size:10px'>ESC=普通模式 | hjkl=移动 | i=插入 | :w=保存 | :q=关闭</span>")
+        vim_help = QLabel(
+            "<span style='color:#888;font-size:10px'>ESC=普通模式 | hjkl=移动 | i=插入 | :w=保存 | :q=关闭</span>"
+        )
         vim_help.setVisible(False)
         self._vim_help_label = vim_help
         script_header.addWidget(vim_help)
@@ -1349,7 +1669,11 @@ class AddTestItemDialog(QDialog):
         self.frame_input.setVisible(not is_lua)
         self.frame_input.parent()  # label 也需要隐藏
         for widget in self.findChildren(QLabel):
-            if "帧内容" in widget.text() or "匹配规则" in widget.text() or "匹配模式" in widget.text():
+            if (
+                "帧内容" in widget.text()
+                or "匹配规则" in widget.text()
+                or "匹配模式" in widget.text()
+            ):
                 widget.setVisible(not is_lua)
             if "响应帧" in widget.text():
                 widget.setVisible(not is_lua)
@@ -1414,7 +1738,7 @@ class AddTestItemDialog(QDialog):
         nature = self.nature_combo.currentText()
         send_enabled = self.send_enabled.isChecked()
         match_enabled = self.match_enabled.isChecked()
-        is_lua = (nature == "Lua脚本")
+        is_lua = nature == "Lua脚本"
         if not name:
             QMessageBox.warning(self, "输入错误", "名称不能为空")
             return
@@ -1424,7 +1748,9 @@ class AddTestItemDialog(QDialog):
                 QMessageBox.warning(self, "输入错误", "Lua 脚本不能为空")
                 return
             if not LUA_AVAILABLE:
-                QMessageBox.warning(self, "依赖缺失", "lupa 库未安装，请运行: pip install lupa")
+                QMessageBox.warning(
+                    self, "依赖缺失", "lupa 库未安装，请运行: pip install lupa"
+                )
                 return
         else:
             script = ""
@@ -1468,9 +1794,9 @@ class TestPlanWidget(QWidget):
         self._waiting_for_response: bool = False
         self._any_frame_received: bool = False
         self._test_start_time: datetime | None = None  # 测试开始时间
-        self._test_end_time: datetime | None = None    # 测试结束时间
-        self._test_vars: dict[str, Any] = {}              # Lua 脚本共享变量
-        self._lua_engine = None                           # 当前运行的 Lua 引擎
+        self._test_end_time: datetime | None = None  # 测试结束时间
+        self._test_vars: dict[str, Any] = {}  # Lua 脚本共享变量
+        self._lua_engine = None  # 当前运行的 Lua 引擎
         self.setup_ui()
 
     # ------------------------------------------------------------------
@@ -1589,17 +1915,31 @@ class TestPlanWidget(QWidget):
         main_layout.addLayout(toolbar)
 
         # ---- 提示说明 ----
-        hint_label = QLabel("提示：匹配规则中的 <b>XX</b> 表示通配符（不判断该字节），可直接双击编辑规则修改需要匹配的报文内容")
+        hint_label = QLabel(
+            "提示：匹配规则中的 <b>XX</b> 表示通配符（不判断该字节），可直接双击编辑规则修改需要匹配的报文内容"
+        )
         hint_label.setStyleSheet("color: #666666; font-size: 12px; padding: 2px 4px;")
         main_layout.addWidget(hint_label)
 
         # ---- 测试项表格 ----
         self.table = ZoomableTableWidget()
         self.table.setColumnCount(12)
-        self.table.setHorizontalHeaderLabels([
-            "序号", "名称", "帧内容", "操作", "发送",
-            "状态", "启用匹配", "匹配规则", "匹配模式", "测试结果", "超时(ms)", "响应帧"
-        ])
+        self.table.setHorizontalHeaderLabels(
+            [
+                "序号",
+                "名称",
+                "帧内容",
+                "操作",
+                "发送",
+                "状态",
+                "启用匹配",
+                "匹配规则",
+                "匹配模式",
+                "测试结果",
+                "超时(ms)",
+                "响应帧",
+            ]
+        )
         # 表格复选框样式
         self.table.setStyleSheet(
             "QTableWidget::item { padding: 4px; }"
@@ -1626,7 +1966,9 @@ class TestPlanWidget(QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().hide()
-        self.table.setEditTriggers(QTableWidget.DoubleClicked | QTableWidget.EditKeyPressed)
+        self.table.setEditTriggers(
+            QTableWidget.DoubleClicked | QTableWidget.EditKeyPressed
+        )
         table_font = QFont()
         table_font.setPointSize(8)
         self.table.setFont(table_font)
@@ -1639,6 +1981,7 @@ class TestPlanWidget(QWidget):
         log_layout = QVBoxLayout(log_group)
         log_layout.setContentsMargins(4, 4, 4, 4)
         from PySide6.QtWidgets import QPlainTextEdit
+
         self.log_edit = QPlainTextEdit()
         self.log_edit.setReadOnly(True)
         self.log_edit.setMaximumBlockCount(500)
@@ -1729,9 +2072,13 @@ class TestPlanWidget(QWidget):
                 send_btn = QPushButton("后台")
                 set_btn(send_btn, "success", "sm")
             else:
-                send_btn = QPushButton("发送" if item.get("send_enabled", True) else "等待")
+                send_btn = QPushButton(
+                    "发送" if item.get("send_enabled", True) else "等待"
+                )
                 set_btn(send_btn, "primary", "sm")
-            send_btn.clicked.connect(lambda checked=False, r=row: self._on_send_single(r))
+            send_btn.clicked.connect(
+                lambda checked=False, r=row: self._on_send_single(r)
+            )
             self.table.setCellWidget(row, 3, send_btn)
             # 发送（使用复选框项）
             send_chk = QTableWidgetItem()
@@ -1741,7 +2088,9 @@ class TestPlanWidget(QWidget):
             else:
                 send_chk.setFlags(send_chk.flags() | Qt.ItemFlag.ItemIsUserCheckable)
                 send_chk.setCheckState(
-                    Qt.CheckState.Checked if item.get("send_enabled", True) else Qt.CheckState.Unchecked
+                    Qt.CheckState.Checked
+                    if item.get("send_enabled", True)
+                    else Qt.CheckState.Unchecked
                 )
             self.table.setItem(row, 4, send_chk)
             # 状态（不可编辑）
@@ -1762,7 +2111,9 @@ class TestPlanWidget(QWidget):
             else:
                 chk_item.setFlags(chk_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
                 chk_item.setCheckState(
-                    Qt.CheckState.Checked if item.get("match_enabled", True) else Qt.CheckState.Unchecked
+                    Qt.CheckState.Checked
+                    if item.get("match_enabled", True)
+                    else Qt.CheckState.Unchecked
                 )
             self.table.setItem(row, 6, chk_item)
             # 匹配规则（可编辑，显示带空格的 hex）
@@ -1773,7 +2124,9 @@ class TestPlanWidget(QWidget):
             mode_combo = QComboBox()
             mode_combo.addItems(["HEX", "ASCII"])
             mode_combo.setCurrentText(item.get("match_mode", "HEX"))
-            mode_combo.currentTextChanged.connect(lambda text, r=row: self._on_match_mode_changed(r, text))
+            mode_combo.currentTextChanged.connect(
+                lambda text, r=row: self._on_match_mode_changed(r, text)
+            )
             self.table.setCellWidget(row, 8, mode_combo)
             # 测试结果（不可编辑，只设置文字颜色）
             if persistent:
@@ -1788,7 +2141,9 @@ class TestPlanWidget(QWidget):
             # 超时(ms)：纯文本直接填写，避免 SpinBox 上下箭头遮挡数字
             timeout_item = QTableWidgetItem(str(item.get("timeout_ms", 2000)))
             if persistent:
-                timeout_item.setFlags(timeout_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                timeout_item.setFlags(
+                    timeout_item.flags() & ~Qt.ItemFlag.ItemIsEditable
+                )
             else:
                 timeout_item.setFlags(timeout_item.flags() | Qt.ItemFlag.ItemIsEditable)
             self.table.setItem(row, 10, timeout_item)
@@ -1813,11 +2168,11 @@ class TestPlanWidget(QWidget):
     def _set_result_style(self, item: QTableWidgetItem, result: str):
         """设置测试结果文字颜色"""
         color_map = {
-            "通过": "#008800",   # 绿色
-            "失败": "#CC0000",   # 红色
-            "超时": "#FF6600",   # 橙色
-            "延时到": "#4CAF50", # 绿色
-            "未测": "#999999",   # 灰色
+            "通过": "#008800",  # 绿色
+            "失败": "#CC0000",  # 红色
+            "超时": "#FF6600",  # 橙色
+            "延时到": "#4CAF50",  # 绿色
+            "未测": "#999999",  # 灰色
             "监听中": "#2E7D32",
         }
         if "匹配:" in result:
@@ -1838,11 +2193,15 @@ class TestPlanWidget(QWidget):
         elif col == 2:
             self._items[row]["frame_hex"] = item.text().replace(" ", "")
         elif col == 4:
-            self._items[row]["send_enabled"] = (item.checkState() == Qt.CheckState.Checked)
+            self._items[row]["send_enabled"] = (
+                item.checkState() == Qt.CheckState.Checked
+            )
             # 刷新操作按钮文字
             self._refresh_table()
         elif col == 6:
-            self._items[row]["match_enabled"] = (item.checkState() == Qt.CheckState.Checked)
+            self._items[row]["match_enabled"] = (
+                item.checkState() == Qt.CheckState.Checked
+            )
         elif col == 7:
             self._items[row]["match_rule"] = item.text().replace(" ", "")
         elif col == 10:
@@ -1888,7 +2247,9 @@ class TestPlanWidget(QWidget):
                 if item.get("is_lua_script"):
                     self._log(f"[添加] {item['name']}: [Lua脚本]")
                 else:
-                    self._log(f"[添加] {item['name']}: {self._fmt_hex(item['frame_hex'])}")
+                    self._log(
+                        f"[添加] {item['name']}: {self._fmt_hex(item['frame_hex'])}"
+                    )
                 self._auto_save()
                 self._update_bg_status()
 
@@ -1923,7 +2284,9 @@ class TestPlanWidget(QWidget):
             QMessageBox.information(self, "提示", "当前没有后台监听项")
 
     def _on_delete_item(self):
-        rows = sorted({index.row() for index in self.table.selectedIndexes()}, reverse=True)
+        rows = sorted(
+            {index.row() for index in self.table.selectedIndexes()}, reverse=True
+        )
         if not rows:
             QMessageBox.information(self, "提示", "请先选中要删除的行")
             return
@@ -1939,7 +2302,10 @@ class TestPlanWidget(QWidget):
     def _on_move_up(self):
         row = self.table.currentRow()
         if row > 0:
-            self._items[row], self._items[row - 1] = self._items[row - 1], self._items[row]
+            self._items[row], self._items[row - 1] = (
+                self._items[row - 1],
+                self._items[row],
+            )
             self._refresh_table()
             self.table.selectRow(row - 1)
             self._auto_save()
@@ -1947,7 +2313,10 @@ class TestPlanWidget(QWidget):
     def _on_move_down(self):
         row = self.table.currentRow()
         if 0 <= row < len(self._items) - 1:
-            self._items[row], self._items[row + 1] = self._items[row + 1], self._items[row]
+            self._items[row], self._items[row + 1] = (
+                self._items[row + 1],
+                self._items[row],
+            )
             self._refresh_table()
             self.table.selectRow(row + 1)
             self._auto_save()
@@ -2051,26 +2420,29 @@ class TestPlanWidget(QWidget):
 
         try:
             from report.excel_reporter import ExcelReporter
+
             reporter = ExcelReporter()
 
             # 获取测试日志
-            log_text = self.log_edit.toPlainText() if hasattr(self, 'log_edit') else ""
+            log_text = self.log_edit.toPlainText() if hasattr(self, "log_edit") else ""
 
             # 计算测试时间
-            start_time = getattr(self, '_test_start_time', None)
-            end_time = getattr(self, '_test_end_time', None)
+            start_time = getattr(self, "_test_start_time", None)
+            end_time = getattr(self, "_test_end_time", None)
 
             reporter.export(
                 file_path=file_path,
                 test_items=self._items,
                 test_log=log_text,
                 test_start_time=start_time,
-                test_end_time=end_time
+                test_end_time=end_time,
             )
             self._log(f"[导出报告] 已导出到 {file_path}")
             QMessageBox.information(self, "成功", f"测试报告已导出到:\n{file_path}")
         except ImportError:
-            QMessageBox.critical(self, "错误", "需要安装 openpyxl 库：pip install openpyxl")
+            QMessageBox.critical(
+                self, "错误", "需要安装 openpyxl 库：pip install openpyxl"
+            )
         except Exception as e:
             QMessageBox.critical(self, "导出失败", str(e))
 
@@ -2123,10 +2495,18 @@ class TestPlanWidget(QWidget):
         # 重置 Lua 测试变量
         self._test_vars = {}
         # 列出后台监听项
-        bg_items = [f"#{i+1} {p['name']}" for i, p in enumerate(self._items) if p.get("persistent")]
+        bg_items = [
+            f"#{i + 1} {p['name']}"
+            for i, p in enumerate(self._items)
+            if p.get("persistent")
+        ]
         if bg_items:
             self._log(f"[后台监听] 已激活: {', '.join(bg_items)}")
-        bg_no_match = [f"#{i+1} {p['name']}" for i, p in enumerate(self._items) if p.get("persistent") and not p.get("match_enabled", True)]
+        bg_no_match = [
+            f"#{i + 1} {p['name']}"
+            for i, p in enumerate(self._items)
+            if p.get("persistent") and not p.get("match_enabled", True)
+        ]
         if bg_no_match:
             self._log(f"[后台监听] 警告: 已强制启用匹配: {', '.join(bg_no_match)}")
         self._refresh_table()
@@ -2184,7 +2564,9 @@ class TestPlanWidget(QWidget):
         self._log("=" * 40)
         self._update_bg_status()
 
-    def _run_single_test(self, row: int, item: dict[str, Any], sequential: bool = False):
+    def _run_single_test(
+        self, row: int, item: dict[str, Any], sequential: bool = False
+    ):
         item["status"] = "测试中"
         item["test_result"] = "未测"
         self._refresh_table_row(row)
@@ -2198,7 +2580,9 @@ class TestPlanWidget(QWidget):
         frame = item["frame_hex"].replace(" ", "")
         timeout = item.get("timeout_ms", 2000)
         if send_enabled:
-            self._log(f"[{row + 1}] 发送 -> {item['name']}: {self._fmt_hex(frame)} (超时 {timeout}ms)")
+            self._log(
+                f"[{row + 1}] 发送 -> {item['name']}: {self._fmt_hex(frame)} (超时 {timeout}ms)"
+            )
         else:
             self._log(f"[{row + 1}] 等待 -> {item['name']} (仅监听，超时 {timeout}ms)")
         self._waiting_for_response = True
@@ -2215,18 +2599,28 @@ class TestPlanWidget(QWidget):
         if 0 <= row < len(self._items):
             item = self._items[row]
             item["status"] = "已测试"
-            is_pure_wait = not item.get("send_enabled", True) and not item.get("match_enabled", True)
+            is_pure_wait = not item.get("send_enabled", True) and not item.get(
+                "match_enabled", True
+            )
             if is_pure_wait:
                 item["test_result"] = "延时到"
-                self._log(f"[{row + 1}] 结果 -> 延时到 (纯等待 {item.get('timeout_ms', 2000)}ms)")
+                self._log(
+                    f"[{row + 1}] 结果 -> 延时到 (纯等待 {item.get('timeout_ms', 2000)}ms)"
+                )
             elif self._any_frame_received:
                 item["test_result"] = "失败"
                 self._log(f"[{row + 1}] 结果 -> 失败 (超时时间内收到帧但规则均不匹配)")
             else:
                 item["test_result"] = "超时"
-                self._log(f"[{row + 1}] 结果 -> 超时 (>{item.get('timeout_ms', 2000)}ms 无响应)")
+                self._log(
+                    f"[{row + 1}] 结果 -> 超时 (>{item.get('timeout_ms', 2000)}ms 无响应)"
+                )
             self._refresh_table_row(row)
-            if self._testing and self.chk_stop_on_fail.isChecked() and item["test_result"] == "失败":
+            if (
+                self._testing
+                and self.chk_stop_on_fail.isChecked()
+                and item["test_result"] == "失败"
+            ):
                 self._log("[测试停止] 失败时停止已启用")
                 self._finish_test()
                 return
@@ -2306,7 +2700,11 @@ class TestPlanWidget(QWidget):
             if self._lua_engine:
                 self._test_vars = self._lua_engine._test_vars
             self._refresh_table_row(row)
-            if self._testing and self.chk_stop_on_fail.isChecked() and item["test_result"] == "失败":
+            if (
+                self._testing
+                and self.chk_stop_on_fail.isChecked()
+                and item["test_result"] == "失败"
+            ):
                 self._log("[测试停止] 失败时停止已启用")
                 self._finish_test()
                 return
@@ -2338,11 +2736,15 @@ class TestPlanWidget(QWidget):
             mode = pi.get("match_mode", "HEX")
             if self._match_frame(rule, received_hex, mode):
                 match_count += 1
-                self._log(f"[后台 {pi_idx + 1}] 匹配 -> {pi['name']}: {self._fmt_hex(received_hex)}")
+                self._log(
+                    f"[后台 {pi_idx + 1}] 匹配 -> {pi['name']}: {self._fmt_hex(received_hex)}"
+                )
                 resp_raw = pi.get("response_frame", "")
                 resp_frame = process_response_frame(resp_raw)
                 if resp_frame and self._serial_worker and self._serial_worker.is_open():
-                    self._log(f"[后台 {pi_idx + 1}] 响应 -> {self._fmt_hex(resp_frame)}")
+                    self._log(
+                        f"[后台 {pi_idx + 1}] 响应 -> {self._fmt_hex(resp_frame)}"
+                    )
                     self._serial_worker.send_hex_string(resp_frame)
                 else:
                     self._log(f"[后台 {pi_idx + 1}] 未响应 -> 响应帧为空或串口未打开")
@@ -2350,7 +2752,9 @@ class TestPlanWidget(QWidget):
                 self._refresh_table_row(pi_idx)
                 self._update_bg_status()
             else:
-                self._log(f"[后台 {pi_idx + 1}] 不匹配 -> {pi['name']} | 规则:{self._fmt_hex(rule)} ≠ 收到:{self._fmt_hex(received_hex)}")
+                self._log(
+                    f"[后台 {pi_idx + 1}] 不匹配 -> {pi['name']} | 规则:{self._fmt_hex(rule)} ≠ 收到:{self._fmt_hex(received_hex)}"
+                )
         if check_count > 0 and match_count == 0:
             self._log(f"[后台] 已检查 {check_count} 个后台项，均不匹配")
 
@@ -2378,7 +2782,9 @@ class TestPlanWidget(QWidget):
                         resp_raw = item.get("response_frame", "")
                         resp_frame = process_response_frame(resp_raw)
                         if resp_frame:
-                            self._log(f"[{row + 1}] 响应 -> {self._fmt_hex(resp_frame)}")
+                            self._log(
+                                f"[{row + 1}] 响应 -> {self._fmt_hex(resp_frame)}"
+                            )
                             self._serial_worker.send_hex_string(resp_frame)
                         self._refresh_table_row(row)
                         if self._testing:
@@ -2472,7 +2878,9 @@ class TestPlanWidget(QWidget):
         # 发送
         send_chk = self.table.item(row, 4)
         send_chk.setCheckState(
-            Qt.CheckState.Checked if item.get("send_enabled", True) else Qt.CheckState.Unchecked
+            Qt.CheckState.Checked
+            if item.get("send_enabled", True)
+            else Qt.CheckState.Unchecked
         )
         persistent = item.get("persistent", False)
         # 状态
@@ -2487,7 +2895,9 @@ class TestPlanWidget(QWidget):
         # 启用匹配
         chk_item = self.table.item(row, 6)
         chk_item.setCheckState(
-            Qt.CheckState.Checked if item.get("match_enabled", True) else Qt.CheckState.Unchecked
+            Qt.CheckState.Checked
+            if item.get("match_enabled", True)
+            else Qt.CheckState.Unchecked
         )
         # 匹配规则（带空格的 hex）
         self.table.item(row, 7).setText(self._fmt_hex(item.get("match_rule", "")))
@@ -2543,7 +2953,7 @@ class TestPlanWidget(QWidget):
     @staticmethod
     def _fmt_hex(hex_str: str) -> str:
         s = hex_str.replace(" ", "").upper()
-        return " ".join(s[i:i + 2] for i in range(0, len(s), 2))
+        return " ".join(s[i : i + 2] for i in range(0, len(s), 2))
 
     def _stop_test(self):
         self._stop_requested = True
@@ -2617,7 +3027,9 @@ class TestPlanWidget(QWidget):
                 }
                 self._items.append(item)
             self._refresh_table()
-            self._log(f"[自动加载] 已从 {self._file_path.name} 加载 {len(self._items)} 项")
+            self._log(
+                f"[自动加载] 已从 {self._file_path.name} 加载 {len(self._items)} 项"
+            )
             self._update_bg_status()
         except Exception as e:
             print(f"[测试方案自动加载失败] {e}")

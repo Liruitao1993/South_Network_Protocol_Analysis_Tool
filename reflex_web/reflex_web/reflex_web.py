@@ -3838,6 +3838,9 @@ def header(show_parse_controls: bool = True) -> rx.Component:
                 ),
                 spacing="4",
                 width="100%",
+                # 板块导航不换行：标题栏高度恒定单行。窄屏时 flex 压缩可收缩项
+                # （协议选择器/间距）而非把按钮折到下一行，避免高/矮两种形态跳动
+                flex_wrap="nowrap",
             ),
             class_name="app-header-inner",
             width="100%",
@@ -7639,11 +7642,12 @@ class FeedbackState(State):
         self.fa_load()
 
 
-class ShareState(rx.State):
+class ShareState(State):
     """报文分享：列表/搜索（/share 页，所有人可见）+ 提交表单（主页弹窗）
 
-    独立 State（不继承主 State）：分享页无管理操作，不需 admin_logged_in；
-    主页「分享此帧」弹窗内的协议下拉用主 State 的 PROTOCOL_OPTIONS 只读
+    继承主 State：分享页管理员删除需要 admin_logged_in（与 FeedbackState 同款
+    模式）；主页「分享此帧」弹窗内的 last_parsed_hex / last_protocol_name 来自
+    主 State（继承后方可访问）。协议下拉用主 State 的 PROTOCOL_OPTIONS 只读
     渲染（Var 跨 State 读是允许的，仅写入受限），提交走本 State 事件。
     """
 
@@ -7665,6 +7669,11 @@ class ShareState(rx.State):
     sf_note: str = ""
     sf_msg: str = ""
     sf_msg_type: str = "info"
+
+    # ── 管理员删除（/share 页，仅 admin_logged_in 可见）──
+    sh_delete_id: int = 0  # 待确认删除的记录 id
+    sh_confirm_open: bool = False  # 删除确认弹窗开关
+    sh_admin_msg: str = ""  # 删除操作提示（未登录/失败）
 
     # ── 列表事件 ──
 
@@ -7711,6 +7720,33 @@ class ShareState(rx.State):
 
     def copy_detail_hex(self):
         return rx.set_clipboard(self.sh_detail.get("frame_hex", ""))
+
+    # ── 管理员删除事件 ──
+
+    def sh_ask_delete(self, item_id: int):
+        """点列表「删除」：记录待删 id 并打开确认弹窗（不立即删除）"""
+        self.sh_delete_id = int(item_id)
+        self.sh_confirm_open = True
+
+    def sh_cancel_delete(self):
+        """取消删除：关闭确认弹窗"""
+        self.sh_confirm_open = False
+        self.sh_delete_id = 0
+
+    def sh_confirm_delete(self):
+        """确认删除：校验管理员态 → 删除 → 刷新列表"""
+        if not self.admin_logged_in:
+            self.sh_admin_msg = "请先登录管理员"
+            self.sh_confirm_open = False
+            return
+        ok = sm.ShareStore.instance().delete(self.sh_delete_id)
+        self.sh_confirm_open = False
+        self.sh_delete_id = 0
+        if ok:
+            self.sh_msg = "已删除该记录"
+            self.sh_load()  # 删空当前页时 list_page 自动回退页码
+        else:
+            self.sh_msg = "删除失败：记录不存在或已被删除"
 
     # ── 提交表单事件（主页弹窗）──
 
@@ -8477,8 +8513,65 @@ def _sh_item_card(item: dict[str, Any]) -> rx.Component:
             cursor="pointer",
             on_click=lambda: ShareState.sh_open_detail(item),
         ),
+        # 管理员删除按钮（仅登录后显示；stop_propagation 防止触发卡片开详情）
+        # 放在卡片 on_click 容器之外，删除点击不冒泡到详情
+        rx.cond(
+            ShareState.admin_logged_in,
+            rx.button(
+                rx.hstack(rx.icon("trash", size=14), "删除", spacing="1"),
+                size="1",
+                color_scheme="red",
+                variant="soft",
+                on_click=[
+                    rx.stop_propagation,
+                    lambda: ShareState.sh_ask_delete(item["id"]),
+                ],
+                data_testid="sh-delete-btn",
+            ),
+        ),
         width="100%",
         padding="12px 16px",
+    )
+
+
+def _sh_delete_confirm_dialog() -> rx.Component:
+    """删除确认弹窗（受控三件套：on_open_change 同步 + 显式关闭按钮）"""
+    return rx.dialog.root(
+        rx.dialog.content(
+            rx.dialog.title("确认删除"),
+            rx.dialog.description("确定删除这条分享记录？删除后不可恢复。"),
+            rx.vstack(
+                rx.cond(
+                    ShareState.sh_admin_msg != "",
+                    rx.text(
+                        ShareState.sh_admin_msg,
+                        size="2",
+                        color="#dc2626",
+                    ),
+                ),
+                rx.hstack(
+                    rx.spacer(),
+                    rx.button(
+                        "取消",
+                        variant="soft",
+                        size="2",
+                        on_click=ShareState.sh_cancel_delete,
+                    ),
+                    rx.button(
+                        rx.hstack(rx.icon("trash", size=14), "确认删除", spacing="1"),
+                        color_scheme="red",
+                        size="2",
+                        on_click=ShareState.sh_confirm_delete,
+                    ),
+                    spacing="2",
+                ),
+                spacing="3",
+                width="100%",
+            ),
+            max_width="420px",
+        ),
+        open=ShareState.sh_confirm_open,
+        on_open_change=ShareState.sh_cancel_delete,
     )
 
 
@@ -8517,9 +8610,7 @@ def _sh_detail_dialog() -> rx.Component:
                 ),
                 rx.vstack(
                     rx.hstack(
-                        rx.text(
-                            "报文:", size="2", font_weight="medium"
-                        ),
+                        rx.text("报文:", size="2", font_weight="medium"),
                         rx.spacer(),
                         rx.button(
                             rx.hstack(rx.icon("copy", size=14), "复制", spacing="1"),
@@ -8714,7 +8805,9 @@ def share_page() -> rx.Component:
                         data_testid="sh-search",
                     ),
                     rx.el.a(
-                        rx.hstack(rx.icon("home", size=14), "去解析并分享", spacing="1"),
+                        rx.hstack(
+                            rx.icon("home", size=14), "去解析并分享", spacing="1"
+                        ),
                         href="/",
                         class_name="app-header-btn",
                         style={
@@ -8789,6 +8882,7 @@ def share_page() -> rx.Component:
                     ),
                 ),
                 _sh_detail_dialog(),
+                _sh_delete_confirm_dialog(),
                 spacing="3",
                 width="100%",
                 max_width="1000px",
@@ -9907,6 +10001,10 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
+  /* 板块文字永不折行 + 不被压缩：标题栏保持单行恒定高度，
+     窄屏时由 flex 压缩可收缩项（协议选择器）而非换行 */
+  white-space: nowrap;
+  flex-shrink: 0;
   transition: background 0.15s;
 }
 .app-header-btn:hover { background: rgba(255, 255, 255, 0.25); }
@@ -10139,7 +10237,13 @@ app.add_page(feedback_page, route="/feedback", title="问题反馈 - 多协议�
 app.add_page(
     feedback_admin_page, route="/feedback-admin", title="反馈管理 - 多协议解析平台"
 )
-app.add_page(share_page, route="/share", title="报文分享 - 多协议解析平台")
+app.add_page(
+    share_page,
+    route="/share",
+    title="报文分享 - 多协议解析平台",
+    # 页面首次加载拉取列表（ShareState.sh_load）——缺了它列表永远为空
+    on_load=ShareState.sh_load,
+)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -10503,7 +10607,5 @@ app._api.routes.insert(
 )
 app._api.routes.insert(
     0,
-    _FbRoute(
-        "/api/frameshare/config", _dev_frameshare_config_handler, methods=["GET"]
-    ),
+    _FbRoute("/api/frameshare/config", _dev_frameshare_config_handler, methods=["GET"]),
 )

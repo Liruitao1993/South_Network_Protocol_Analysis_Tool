@@ -12,6 +12,7 @@
 运行（项目根）：
     python test/test_frame_share.py
 """
+
 import json
 import os
 import shutil
@@ -27,7 +28,9 @@ warnings.filterwarnings("ignore")
 ROOT = Path(_path_setup.__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "reflex_web"))
-sys.path.insert(0, str(ROOT / "reflex_web" / "reflex_web"))
+# 注：不再加入 reflex_web/reflex_web/ 内层目录——它会遮蔽顶层 reflex_web 包名，
+# 导致 from reflex_web import ... 相对导入失败。share_model 经外层包导入
+# （与 test_web_feedback 的 from reflex_web import feedback_model 同款）。
 
 # 数据目录重定向（必须在 import share_model / feedback_dialog 前）
 _TMP = Path(tempfile.mkdtemp(prefix="fshare_test_"))
@@ -40,7 +43,7 @@ _CFG = _TMP / "config.json"
 _CFG.write_text("{}", encoding="utf-8")
 fd.set_config_path(_CFG)
 
-import share_model as sm  # noqa: E402
+from reflex_web import share_model as sm  # noqa: E402
 
 PASS = 0
 FAIL = 0
@@ -94,23 +97,36 @@ def test_submit():
     check("created_at set", len(item.created_at) >= 19)
 
     ok2, rid2, _ = sm.submit_share(
-        {"frame_hex": "68AA", "protocol": "698.45协议", "sharer": "web用户", "source": "web"}
+        {
+            "frame_hex": "68AA",
+            "protocol": "698.45协议",
+            "sharer": "web用户",
+            "source": "web",
+        }
     )
     check("valid web submit", ok2 and st == 200)
     it2 = sm.ShareStore.instance().get(int(rid2))
     check("web normalized", it2.frame_hex == "68 AA")
 
-    ok, err, st = sm.submit_share({"frame_hex": "xyz", "protocol": "南网协议", "sharer": "t"})
+    ok, err, st = sm.submit_share(
+        {"frame_hex": "xyz", "protocol": "南网协议", "sharer": "t"}
+    )
     check("bad hex 400", (not ok) and st == 400 and "报文" in err)
-    ok, err, st = sm.submit_share({"frame_hex": "6811", "protocol": "南网协议", "sharer": ""})
+    ok, err, st = sm.submit_share(
+        {"frame_hex": "6811", "protocol": "南网协议", "sharer": ""}
+    )
     check("empty sharer 400", (not ok) and st == 400 and "分享人" in err)
-    ok, err, st = sm.submit_share({"frame_hex": "6811", "protocol": "南网协议", "sharer": "x" * 51})
+    ok, err, st = sm.submit_share(
+        {"frame_hex": "6811", "protocol": "南网协议", "sharer": "x" * 51}
+    )
     check("long sharer 400", (not ok) and st == 400 and "50" in err)
     ok, err, st = sm.submit_share(
         {"frame_hex": "6811", "protocol": "南网协议", "sharer": "t", "note": "n" * 501}
     )
     check("long note 400", (not ok) and st == 400 and "500" in err)
-    ok, err, st = sm.submit_share({"frame_hex": "6811", "protocol": "乱写", "sharer": "t"})
+    ok, err, st = sm.submit_share(
+        {"frame_hex": "6811", "protocol": "乱写", "sharer": "t"}
+    )
     check("bad protocol 400", (not ok) and st == 400 and "协议" in err)
     ok, err, st = sm.submit_share({"protocol": "南网协议", "sharer": "t"})
     check("missing hex 400", (not ok) and st == 400)
@@ -170,13 +186,75 @@ def test_store():
     check("get by id", got is not None and got.id == items2[0]["id"])
 
 
+def test_delete():
+    print("test_ShareStore.delete:")
+    store = sm.ShareStore.instance()
+    # 取当前最大 id（test_store 后已有 26 条）
+    items, total, _ = store.list_page(1, 20, "")
+    first_id = items[0]["id"]
+    total_before = total
+
+    # 删除存在的记录
+    ok = store.delete(first_id)
+    check("delete existing", ok is True)
+    items2, total2, _ = store.list_page(1, 20, "")
+    check("total decreased", total2 == total_before - 1)
+    check("deleted gone", all(i["id"] != first_id for i in items2))
+
+    # 删除不存在的记录（幂等，不抛错）
+    ok2 = store.delete(first_id)
+    check("delete nonexistent idempotent", ok2 is False)
+    ok3 = store.delete(99999999)
+    check("delete huge id safe", ok3 is False)
+
+    # 删除后列表页数正确（删空当前页自动回退）
+    items3, total3, pages3 = store.list_page(1, 20, "")
+    check(
+        "list still works after delete",
+        len(items3) >= 0 and total3 >= 0 and pages3 >= 1,
+    )
+
+
+def test_delete_ui():
+    """删除 UI：删除按钮渲染 + 确认弹窗 open 绑定。
+
+    Reflex State 不能直接实例化（框架限制）；Radix Dialog 的 content 是
+    portal 渲染（render() 不展开），故验证可测部分：卡片删除按钮存在
+    （登录态由 ShareState.admin_logged_in 条件控制），确认弹窗组件的
+    open 属性绑定到 sh_confirm_open（portal 内容在运行时渲染）。
+    """
+    print("test_ShareState delete UI:")
+    from reflex_web import reflex_web as rw
+
+    # 渲染 share_page：删除按钮（sh-delete-btn testid 已在卡片内）
+    page = rw.share_page()
+    rendered = str(page.render())
+    check("delete button rendered", "sh-delete-btn" in rendered)
+
+    # 确认弹窗组件：open 绑定 sh_confirm_open（portal 内容不在 render 输出）
+    dlg = rw._sh_delete_confirm_dialog()
+    dlg_rendered = str(dlg.render())
+    check("confirm dialog open bound", "sh_confirm_open" in dlg_rendered)
+
+    # 删除按钮 on_click 绑定 sh_ask_delete + stop_propagation
+    check("delete bound ask", "sh_ask_delete" in rendered)
+    check(
+        "delete stops propagation",
+        "stopPropagation" in rendered or "stop_propagation" in rendered,
+    )
+
+
 def test_config_api():
     print("test_share_config:")
     cfg = sm.share_config()
     check("ok flag", cfg.get("ok") is True)
     check("protocols list", "南网协议" in cfg.get("protocols", []))
-    check("limits", cfg.get("max_sharer_len") == 50 and cfg.get("max_note_len") == 500
-          and cfg.get("max_frame_bytes") == 2048)
+    check(
+        "limits",
+        cfg.get("max_sharer_len") == 50
+        and cfg.get("max_note_len") == 500
+        and cfg.get("max_frame_bytes") == 2048,
+    )
 
 
 def test_share_page_url():
@@ -231,8 +309,13 @@ def test_gui_payload_and_validate():
 
     body = sd.build_payload("68 AA", "南网协议", "张三", "说明")
     obj = json.loads(body.decode("utf-8"))
-    check("payload fields", obj["frame_hex"] == "68 AA" and obj["protocol"] == "南网协议"
-          and obj["sharer"] == "张三" and obj["note"] == "说明")
+    check(
+        "payload fields",
+        obj["frame_hex"] == "68 AA"
+        and obj["protocol"] == "南网协议"
+        and obj["sharer"] == "张三"
+        and obj["note"] == "说明",
+    )
     check("payload source=gui", obj["source"] == "gui")
     check("payload utf8 body", "张三".encode() in body)
 
@@ -277,7 +360,9 @@ def test_gui_dialog_smoke():
             app_version="1.21.0",
         )
         check("dialog created", dlg is not None)
-        check("proto combo 13", dlg.proto_combo.count() == len(sd.SHARE_PROTOCOLS) == 13)
+        check(
+            "proto combo 13", dlg.proto_combo.count() == len(sd.SHARE_PROTOCOLS) == 13
+        )
         check("proto preselected", dlg.proto_combo.currentText() == "南网协议")
         check("hex view filled", dlg.hex_view.toPlainText().startswith("68 0E"))
         check("note prefilled env", "1.21.0" in dlg.note_edit.toPlainText())
@@ -308,6 +393,8 @@ def main():
         test_normalize()
         test_submit()
         test_store()
+        test_delete()
+        test_delete_ui()
         test_config_api()
         test_share_page_url()
         test_gui_payload_and_validate()
@@ -316,7 +403,7 @@ def main():
     finally:
         shutil.rmtree(_TMP, ignore_errors=True)
         os.environ.pop("FRAMESHARE_DATA_DIR", None)
-    print(f"\n{'='*40}")
+    print(f"\n{'=' * 40}")
     print(f"PASS: {PASS}  FAIL: {FAIL}")
     sys.exit(1 if FAIL else 0)
 
