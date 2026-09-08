@@ -1191,6 +1191,11 @@ class CSGNewGenParser:
         4: 264,
         5: 520,
     }
+
+    # 物理块大小候选集（帧长一致性推断用）：表13(ISAC)/表44(HRF)/BPLC 的全部可能取值，
+    # 由大到小排列。CMT/TMI 映射值与实际帧长不符时用它反推真实 PB 大小。
+    PB_SIZE_CANDIDATES = (520, 264, 136, 72, 40, 16)
+
     @staticmethod
     def _get_pb_size(tmi: int, version: int) -> int:
         """根据TMI/CMT和版本号获取物理块总大小(字节)"""
@@ -1207,6 +1212,34 @@ class CSGNewGenParser:
     def _get_pb_body_size(pb_total: int) -> int:
         """物理块体大小 = 物理块总大小 - PB头(4) - 保留(1) - PB检查序列(3)"""
         return pb_total - 4 - 1 - 3
+
+    def _infer_pb_size(self, offset: int, pb_count: int, frame_len: int,
+                       cmt_size: int) -> Tuple[int, bool]:
+        """按帧长一致性推断物理块大小，返回 (PB大小, 是否覆盖了CMT映射值)。
+
+        判据：SOF MPDU = FC [+eFC] + ΣPB（无尾字节），发送端必然满足
+            PB起始偏移 + 物理块个数 × PB大小 == 帧总长
+        CMT/TMI 映射值只是先验（BPLC 分支沿用 GDW 老表，实测存在 CMT=1 而
+        PB=520 的帧），映射值不满足等式时在候选集中取唯一解覆盖；
+        截断日志/SOF 带尾字节/混合 PB 大小 → 等式无解 → 回退映射值（行为同现状）。
+
+        Args:
+            offset: 第一个物理块的起始偏移（FC/eFC 之后）
+            pb_count: FC 可变区域给出的物理块个数
+            frame_len: 帧总长
+            cmt_size: CMT/TMI 映射得到的 PB 大小（先验值）
+        """
+        if pb_count < 1:
+            return cmt_size, False
+        remain = frame_len - offset
+        if remain <= 0:
+            return cmt_size, False
+        if pb_count * cmt_size == remain:
+            return cmt_size, False   # 映射值与帧长自洽，保持现状
+        for size in self.PB_SIZE_CANDIDATES:
+            if pb_count * size == remain:
+                return size, True    # 帧长一致性唯一解，覆盖映射值
+        return cmt_size, False       # 无解（截断/带尾字节/混合PB），回退映射值
 
     def _parse_pb_block(self, frame_bytes: bytes, offset: int,
                         table_data: list, frame_len: int):
@@ -1226,9 +1259,23 @@ class CSGNewGenParser:
         if hasattr(self, '_pb_size') and isinstance(self._pb_size, int):
             pb_total_size = self._pb_size
         else:
-            pb_total_size = self._get_pb_size(
+            # CMT/TMI 映射值只是先验，与帧长不符时按帧长一致性覆盖（不静默改判，
+            # 覆盖时在表格中追加一行提示，便于核对推断依据）
+            cmt_size = self._get_pb_size(
                 getattr(self, '_cmt_index', 4),
                 getattr(self, '_std_version', 1))
+            pb_total_size, pb_size_overridden = self._infer_pb_size(
+                offset, pb_count, frame_len, cmt_size)
+            if pb_size_overridden:
+                table_data.append((
+                    "PB大小推断",
+                    str(cmt_size),
+                    str(pb_total_size),
+                    f"CMT映射PB={cmt_size}字节与帧长不符，按 offset({offset})"
+                    f"+物理块个数({pb_count})×PB大小==帧长({frame_len}) "
+                    f"推断为{pb_total_size}字节",
+                    None, None
+                ))
         pb_body_size = self._get_pb_body_size(pb_total_size)
 
         # 遍历所有PB，输出PB头/PBCS行，拼接所有PB体为 mac_concat
@@ -1282,14 +1329,52 @@ class CSGNewGenParser:
             mac_concat += body
             # PBCS: 保留1字节 + 检查序列3字节
             pbcs_off = pb_off + pb_hdr_len + pb_body_size
+            if pbcs_off + 1 <= frame_len:
+                # 保留字节单独成行（R7），便于在 UI 中逐字节核对 CRC-24 计算范围
+                table_data.append((
+                    f"  保留{tag}(PB尾)",
+                    f"0x{frame_bytes[pbcs_off]:02X}",
+                    str(frame_bytes[pbcs_off]),
+                    "保留字节，计入PBCS校验范围",
+                    pbcs_off, pbcs_off
+                ))
             if pbcs_off + 4 <= frame_len:
                 pbcs_data = frame_bytes[pbcs_off + 1:pbcs_off + 4]
+                stored = int.from_bytes(pbcs_data, 'little')
+                # CRC-24 计算范围 = 物理块头 + 物理块体 + 保留（表49「物理块检查序列」），
+                # 用帧内真实字节计算，不用零填充后的 body
+                calc = self._crc24(frame_bytes[pb_off:pbcs_off + 1])
+                crc_len = pbcs_off + 1 - pb_off
+                if calc == stored:
+                    parsed = f"0x{stored:06X}，校验通过"
+                    desc = (f"物理块{tag}CRC-24(物理块头+物理块体+保留共{crc_len}字节)，"
+                            f"校验通过")
+                elif stored == 0:
+                    # 采集/发射机接口普遍不提供 PBCS（整帧置零），单列一态避免满屏误报
+                    parsed = "0x000000(置零)"
+                    desc = (f"物理块{tag}CRC-24计算值=0x{calc:06X}，存储PBCS=0x000000："
+                            f"PBCS置零/采集接口未提供，非校验失败")
+                else:
+                    parsed = f"0x{stored:06X}"
+                    desc = (f"物理块{tag}CRC-24(物理块头+物理块体+保留共{crc_len}字节)，"
+                            f"校验失败(计算值=0x{calc:06X})")
                 table_data.append((
                     f"物理块检查序列{tag}",
                     ' '.join(f'{b:02X}' for b in pbcs_data),
-                    "3字节",
-                    f"物理块{tag}CRC校验（保留1字节+检查序列3字节）",
+                    parsed,
+                    desc,
                     pbcs_off + 1, pbcs_off + 3
+                ))
+            else:
+                # 帧截断：尾部不足 保留1+PBCS3 共4字节 → 不计算、不抛异常（R6）
+                _t_start = pbcs_off if pbcs_off < frame_len else None
+                _t_end = frame_len - 1 if pbcs_off < frame_len else None
+                table_data.append((
+                    f"物理块检查序列{tag}",
+                    "",
+                    "PBCS缺失(帧截断)",
+                    f"物理块{tag}尾部不足4字节(保留1+PBCS3)，无法校验",
+                    _t_start, _t_end
                 ))
 
         mac_data = None

@@ -87,10 +87,19 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.22.0"
+APP_VERSION = "1.22.1"
 BUILD_DATE = "2026-09-08"  # 编译日期，每次打包前更新  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    (
+        "1.22.1",
+        "2026-09-08",
+        [
+            "修复协议9（通感一体化）多物理块帧切片：CMT映射PB大小与帧长不符时（如真实抓包 CMT=1 实为 4×520 字节 PB），按帧长一致性等式 offset+物理块个数×PB大小==帧长 在候选集 520/264/136/72/40/16 中唯一推断 PB 大小并追加「PB大小推断」提示行；无解（截断日志等）回退 CMT 映射值保持原行为；HRF/Bitloading 显式 PB 大小不参与推断",
+            "协议9 新增逐 PB 的 PBCS CRC-24 校验（计算范围=物理块头+物理块体+保留字节，存储值小端）：校验通过 / 置零(采集接口未提供) / 校验失败(计算值=…) 三态结论，尾部不足4字节显示「PBCS缺失(帧截断)」；另增 PB 尾保留字节行便于逐字节核对校验范围；经 4×520 置零 PBCS 真实帧与真实非零 PBCS 帧双重验算",
+            "测试：新增 test_csg_pb_size_pbcs.py（4 项：真实 2096 字节帧切片与置零告警、合成 4×136 校验通过、篡改 PBCS 校验失败、截断帧 PBCS 缺失）；既有 csg 测试 69 项全过无回归",
+        ],
+    ),
     (
         "1.22.0",
         "2026-09-08",

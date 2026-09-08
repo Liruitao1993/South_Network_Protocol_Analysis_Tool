@@ -1,0 +1,4 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/guides/index.md", "reason": "检查阶段通用质量清单入口"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "核对是否复用既有 CRC/PB 大小工具函数"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "核对表格行契约变更对 GUI/导出/监控器的影响"}

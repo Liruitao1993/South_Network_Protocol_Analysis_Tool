@@ -1,0 +1,4 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/guides/index.md", "reason": "指南索引：解析器改动前的通用思考清单"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "要求复用现有 _crc24/_get_pb_size，禁止新增重复 CRC 实现"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "parse_to_table 行元组契约被 GUI/导出/批量复用，改列语义需跨层核对"}
