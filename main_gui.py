@@ -100,6 +100,7 @@ CHANGELOG = [
             "测试：新增 test_csg_pb_size_pbcs.py（4 项：真实 2096 字节帧切片与置零告警、合成 4×136 校验通过、篡改 PBCS 校验失败、截断帧 PBCS 缺失）；既有 csg 测试 69 项全过无回归",
             "协议9 多物理块帧表格改为逐块交错展示：物理块头[i]→物理块体[i]→保留(PB尾)/物理块检查序列[i]→下一个PBH，不再把多PB体合并成一行堆在表尾；重组体不符 MAC 帧特征（噪声/加密载荷）时逐块按原始报文展示并抑制其后 MAC/MSDU 伪解析行（加「MAC重组解析=无法解析」标记行），合法 MAC 帧不受误伤；test_csg_pb_size_pbcs 增 T5/T6 覆盖顺序与抑制",
             "修复单帧解析选中行高亮同步：输入框可视区自动滚动到高亮字节位置（长报文换行后靠后字节的高亮此前落在滚动区外不可见，多PB帧 PBCS 行尤甚）；增加 start>end 异常范围守卫；新增 offscreen 回归 test_csg_pb_highlight_gui.py（16 项：PBCS 四行高亮落点+滚动同步+FC 对照）",
+            "「填充CRC-24」扩展支持逐物理块 PBCS 一键回填：解析器新增 calc_pbcs_fills（SOF MPDU 布局与 _parse_pb_block 同口径：FC 取物理块个数、帧长一致性判定 PB 起始{16,32}与大小，截断/信标/非SOF 不填），GUI 对每个完整 PB 重算 CRC-24(PBH+体+保留) 小端写回 PB 尾 3 字节并在提示框逐项列出；采集置零 00 00 00 的多 PB 帧填充后重解析即全部「校验通过」；新增 test_csg_pb_size_pbcs T7/T8 与 offscreen test_csg_pbcs_fill_gui.py（12 项）",
         ],
     ),
     (
@@ -5498,7 +5499,7 @@ class MainWindow(QMainWindow):
         self.single_input.setPlainText(hex_display)
 
     def _fill_crc24(self):
-        """填充 CRC-24 校验位（FC FCS + eFC CRC）"""
+        """填充 CRC-24 校验位（FC FCS + eFC CRC + 逐物理块 PBCS）"""
         result = self._get_frame_bytes_for_fill()
         if result is None:
             return
@@ -5537,6 +5538,19 @@ class MainWindow(QMainWindow):
                         modified[30] = (efc_crc >> 8) & 0xFF
                         modified[31] = (efc_crc >> 16) & 0xFF
                         filled.append(f"eFC CRC=0x{efc_crc:06X}(字节29-31)")
+
+        # ── 物理块检查序列 PBCS：逐 PB 重算 CRC-24(PBH+体+保留) 小端写回 PB 尾 3 字节 ──
+        # 支持多物理块一键填充（采集置零 00 00 00 的帧填充后校验即通过）
+        from csg_new_gen_parser import CSGNewGenParser
+        pbcs_fills = CSGNewGenParser().calc_pbcs_fills(bytes(modified))
+        for pbcs_off, val, idx in pbcs_fills:
+            modified[pbcs_off] = val & 0xFF
+            modified[pbcs_off + 1] = (val >> 8) & 0xFF
+            modified[pbcs_off + 2] = (val >> 16) & 0xFF
+            filled.append(
+                f"PBCS[{idx}]=0x{val:06X}(字节{pbcs_off}-{pbcs_off + 2})")
+        if self.current_protocol == 9 and not pbcs_fills:
+            filled.append("PBCS: 未填充（非SOF MPDU，或帧长与物理块布局不自洽）")
 
         self._update_input_hex(bytes(modified))
         QMessageBox.information(self, "成功", "已填充: " + "\n".join(filled))

@@ -12,6 +12,9 @@
 - T5 展示顺序：逐块交错「PBH→块体→PBCS」；噪声载荷块体按原始报文展示且
      抑制 MAC/MSDU 伪解析行（出现「MAC重组解析=无法解析」标记行）
 - T6 合法 MAC 帧体：块体行之后仍有 MAC/MSDU 解析行（抑制不误伤合法帧）
+- T7 一键填充计划：真实 4×520 置零帧 calc_pbcs_fills 返回 4 个 PB 的
+     (偏移, CRC-24, 序号)，写回后解析 4 行 PBCS 均「校验通过」
+- T8 填充边界：合成 136 帧填充幂等；截断帧帧长不自洽不填；信标帧不填
 """
 
 import _path_setup  # noqa: E402
@@ -321,6 +324,47 @@ def test_valid_mac_body_still_parsed():
     print("[OK] T6 合法MAC帧体仍解析测试通过")
 
 
+def test_pbcs_fill_plan_and_writeback():
+    """T7: calc_pbcs_fills 对真实 4×520 置零帧给出 4 块填充计划，写回后校验通过"""
+    frame = bytearray(bytes.fromhex("".join(REAL_FRAME_HEX.split())))
+    parser = CSGNewGenParser()
+    fills = parser.calc_pbcs_fills(bytes(frame))
+    expect = [(533, 0xE8976A, 0), (1053, 0xC178D2, 1),
+              (1573, 0x8C0F7E, 2), (2093, 0x1512FB, 3)]
+    assert fills == expect, f"填充计划错误: {fills}"
+
+    for off, val, _i in fills:
+        frame[off:off + 3] = val.to_bytes(3, 'little')
+    table = CSGNewGenParser().parse_to_table(bytes(frame), parse_level="fc_pb")
+    for i in range(4):
+        rows = rows_named(table, f"物理块检查序列[{i}]")
+        assert rows and "校验通过" in rows[0][2], f"填充后 PBCS[{i}] 应校验通过: {rows}"
+    print("[OK] T7 PBCS填充计划+写回校验通过测试通过")
+
+
+def test_pbcs_fill_edges():
+    """T8: 填充边界——合成帧幂等、截断帧只填完整块、信标帧不填"""
+    parser = CSGNewGenParser()
+
+    # 合成 4×136 帧 PBCS 已正确 → 填充计划与存储值一致（幂等）
+    frame = _synthetic_frame(pb_count=4, pb_total=136, cmt_index=4)
+    fills = parser.calc_pbcs_fills(frame)
+    assert len(fills) == 4, f"合成帧应有 4 个填充项: {fills}"
+    for off, val, i in fills:
+        stored = int.from_bytes(frame[off:off + 3], 'little')
+        assert stored == val, f"PB[{i}] 填充值应与已存储 PBCS 一致(幂等): {stored:#x} != {val:#x}"
+
+    # 截断末 PB 尾部 4 字节 → 帧长等式无解 → 不填（安全回退，避免写坏字节）
+    truncated = frame[:-4]
+    assert parser.calc_pbcs_fills(truncated) == [], "截断帧帧长不自洽时不应填充"
+
+    # 信标帧（定界符类型=0）→ 不填
+    beacon = bytearray(frame)
+    beacon[0] = (beacon[0] & 0xF8) | 0x00  # 接入指示=1, 定界符=0
+    assert parser.calc_pbcs_fills(bytes(beacon)) == [], "信标帧不应产生 PBCS 填充计划"
+    print("[OK] T8 PBCS填充边界测试通过")
+
+
 if __name__ == "__main__":
     test_real_4pb_520_slice_and_zero_pbcs()
     test_synthetic_4pb_136_pbcs_pass()
@@ -328,5 +372,7 @@ if __name__ == "__main__":
     test_truncated_pbcs_missing()
     test_interleaved_order_and_noise_suppression()
     test_valid_mac_body_still_parsed()
+    test_pbcs_fill_plan_and_writeback()
+    test_pbcs_fill_edges()
     print("=" * 50)
     print("[OK] 全部测试通过")

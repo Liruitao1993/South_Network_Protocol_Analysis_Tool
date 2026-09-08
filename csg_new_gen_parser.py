@@ -1241,6 +1241,47 @@ class CSGNewGenParser:
                 return size, True    # 帧长一致性唯一解，覆盖映射值
         return cmt_size, False       # 无解（截断/带尾字节/混合PB），回退映射值
 
+    def calc_pbcs_fills(self, frame_bytes: bytes) -> list:
+        """计算逐物理块 PBCS 的填充计划（供 GUI 「填充CRC-24」一键回填）。
+
+        仅处理 SOF MPDU 帧（接入指示=1 且定界符类型=1），信标/SACK/NET 或非 MPDU
+        输入返回空列表。PB 布局与 _parse_pb_block 同口径：物理块个数取 FC
+        （BPLC=byte7 低4位；ISAC=byte4[2-5]）；PB 起始偏移在 {16, 32} 中按帧长
+        一致性判定（32=含 eFC）；PB 大小 = (帧长-起始)/个数 且须落在
+        PB_SIZE_CANDIDATES 内。返回 [(pbcs_offset, crc24_value, pb_index), ...]，
+        pbcs_offset 为 3 字节 PBCS 位置（小端写回）；截断的物理块（尾部不足 3 字节）
+        不纳入计划。
+        """
+        fills = []
+        frame_len = len(frame_bytes)
+        if frame_len < 20:
+            return fills
+        b0 = frame_bytes[0]
+        if (b0 >> 3) & 0x01 != 1 or (b0 & 0x07) != 1:
+            return fills  # 非 SOF MPDU
+        std_version = (frame_bytes[12] >> 4) & 0x0F
+        if std_version == 2:
+            pb_count = (frame_bytes[4] >> 2) & 0x0F   # ISAC 表23
+        else:
+            pb_count = frame_bytes[7] & 0x0F          # BPLC 表20
+        if pb_count < 1 or pb_count > 8:
+            return fills
+        for start in (16, 32):
+            remain = frame_len - start
+            if remain <= 0 or remain % pb_count:
+                continue
+            pb_size = remain // pb_count
+            if pb_size not in CSGNewGenParser.PB_SIZE_CANDIDATES:
+                continue
+            for i in range(pb_count):
+                pb_off = start + i * pb_size
+                pbcs_off = pb_off + pb_size - 3
+                if pbcs_off + 3 > frame_len:
+                    break  # 截断块不填
+                fills.append((pbcs_off, self._crc24(frame_bytes[pb_off:pbcs_off]), i))
+            return fills  # 首个自洽布局即生效
+        return fills
+
     def _mac_plausible(self, data: bytes) -> bool:
         """重组后的 PB 体是否具备 MAC 帧特征的粗判（噪声载荷不输出伪解析行）。
 
