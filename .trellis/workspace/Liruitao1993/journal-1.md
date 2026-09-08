@@ -162,3 +162,24 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 6: 协议9多物理块帧PB大小推断与PBCS CRC-24校验修复(1.22.1)
+
+**Date**: 2026-09-08
+**Task**: 协议9多物理块帧PB大小推断与PBCS CRC-24校验修复(1.22.1)
+**Branch**: `main`
+
+### Summary
+
+真实4x520抓包帧暴露两缺陷：BPLC分支CMT->PB映射(0-7=>136)对SPLC帧失效致切片错位；PBCS从未计算CRC-24。修复：帧长一致性等式offset+pb_count*size==frame_len在候选集唯一推断PB大小并加提示行(无解回退先验,HRF/Bitloading显式值不参与)；逐PB CRC-24(PBH+体+保留,小端)三态结论(通过/置零未提供/失败)+截断分支+PB尾保留行。新增test_csg_pb_size_pbcs.py 4项,既有csg 69项无回归,合计73 passed。trellis-check自修截断偏移start>end边界。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `76af3dece5d36543a8a2a2f0caed3a929f781e06` | (see git log) |
+
+### Status
+
+[OK] **Completed**
