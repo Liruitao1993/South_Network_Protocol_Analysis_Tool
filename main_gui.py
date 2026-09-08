@@ -56,7 +56,7 @@ from PySide6.QtWidgets import (
 import app_icons
 import proc_stats
 import thread_registry
-from app_paths import app_data_dir, data_path
+from app_paths import app_data_dir, data_path, resource_path
 from command_lookup import get_command_lookup
 from diff_widget import DiffWidget
 from dlt645_di_lookup import get_dlt645_di_lookup
@@ -101,6 +101,7 @@ CHANGELOG = [
             "协议9 多物理块帧表格改为逐块交错展示：物理块头[i]→物理块体[i]→保留(PB尾)/物理块检查序列[i]→下一个PBH，不再把多PB体合并成一行堆在表尾；重组体不符 MAC 帧特征（噪声/加密载荷）时逐块按原始报文展示并抑制其后 MAC/MSDU 伪解析行（加「MAC重组解析=无法解析」标记行），合法 MAC 帧不受误伤；test_csg_pb_size_pbcs 增 T5/T6 覆盖顺序与抑制",
             "修复单帧解析选中行高亮同步：输入框可视区自动滚动到高亮字节位置（长报文换行后靠后字节的高亮此前落在滚动区外不可见，多PB帧 PBCS 行尤甚）；增加 start>end 异常范围守卫；新增 offscreen 回归 test_csg_pb_highlight_gui.py（16 项：PBCS 四行高亮落点+滚动同步+FC 对照）",
             "「填充CRC-24」扩展支持逐物理块 PBCS 一键回填：解析器新增 calc_pbcs_fills（SOF MPDU 布局与 _parse_pb_block 同口径：FC 取物理块个数、帧长一致性判定 PB 起始{16,32}与大小，截断/信标/非SOF 不填），GUI 对每个完整 PB 重算 CRC-24(PBH+体+保留) 小端写回 PB 尾 3 字节并在提示框逐项列出；采集置零 00 00 00 的多 PB 帧填充后重解析即全部「校验通过」；新增 test_csg_pb_size_pbcs T7/T8 与 offscreen test_csg_pbcs_fill_gui.py（12 项）",
+            "修复 exe 打包后窗口/托盘图标缺失：图标曾用 Path(__file__).parent 定位，frozen 下指向 _MEIPASS 而 spec datas 未打包 app_icon.ico 致 exists() 为假静默跳过（exe 文件图标是构建期 icon= 嵌入，与运行时窗口图标无关）；新增 _app_icon_path()（frozen 优先 _MEIPASS、回退 exe 目录）替换窗口与托盘两处引用，spec datas 补 ('app_icon.ico','.') 并补 dlt645_frame_gen/schema hiddenimports（1.22.0 组帧功能 exe 必需）；新增 offscreen test_app_icon_path.py（6 项）",
         ],
     ),
     (
@@ -1054,6 +1055,19 @@ class FlowLayout(QLayout):
         return y + last_lh - rect.y() + m.bottom()
 
 
+def _app_icon_path() -> Path:
+    """app_icon.ico 定位：frozen 优先 _MEIPASS 内置资源，缺失回退 exe 目录；开发模式项目根。
+
+    spec 的 datas 必须含 ('app_icon.ico', '.')：否则 frozen 下 _MEIPASS 无此文件，
+    窗口/托盘图标静默缺失（exe 在资源管理器里的文件图标是构建期 icon= 嵌入，
+    与运行时窗口图标无关）。
+    """
+    p = resource_path("app_icon.ico")
+    if not p.exists():
+        p = app_data_dir() / "app_icon.ico"
+    return p
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -1072,7 +1086,7 @@ class MainWindow(QMainWindow):
             f"协议解析工具 v{APP_VERSION} ({BUILD_DATE}) - 作者: liruitao"
         )
         # 窗口/任务栏图标（托盘另用同文件，见 sys_tray）
-        _app_icon = Path(__file__).parent / "app_icon.ico"
+        _app_icon = _app_icon_path()
         if _app_icon.exists():
             self.setWindowIcon(QIcon(str(_app_icon)))
 
@@ -6337,7 +6351,7 @@ class MainWindow(QMainWindow):
             False  # 关闭流程标志：拦截关闭途中后台线程排队投递的更新回调弹窗
         )
 
-        icon_path = str(Path(__file__).parent / "app_icon.ico")
+        icon_path = str(_app_icon_path())
         tray = SystemTrayManager(self)
         if tray.create(icon_path):
             self._tray_manager = tray

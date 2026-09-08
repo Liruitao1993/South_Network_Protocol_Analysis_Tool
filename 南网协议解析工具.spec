@@ -79,6 +79,7 @@ a = Analysis(
         ('gdw_custom_afn.json', '.'),
         ('meter_sim_data.json', '.'),  # 虚拟表（698.45 从站模拟器）档案种子数据
         ('icons', 'icons'),
+        ('app_icon.ico', '.'),  # 运行时窗口/托盘图标（frozen 下 _MEIPASS 必备，否则静默无图标）
         ('enhanced_export.py', '.'),  # 增强导出模块
         ('scripts', 'scripts'),  # Python 脚本预处理示例脚本
         # EB 数据标识 645/698 帧生成器：运行时动态 import 的纯逻辑模块
@@ -141,6 +142,8 @@ a = Analysis(
         'archive_widget',
         'lme_info_entry_parser',  # LME自定义接口解析（dlt645_parser/archive_widget 静态 import，显式声明保险）
         'dlt645_data_codec',  # DLT645标准数据值解码（dlt645_parser 静态 import，显式声明保险）
+        'dlt645_frame_gen',  # DLT645-2007 帧生成（frame_gen_widget 静态 import，显式声明保险）
+        'dlt645_frame_schema',  # DLT645 组帧命令 schema（frame_gen_widget 静态 import）
         'topology_widget',
         'preset_buttons',
         'test_plan_widget',
