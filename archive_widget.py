@@ -847,7 +847,7 @@ class ArchiveWidget(QWidget):
         self._start_copy_test(checked_rows, "concurrent")
 
     def _build_dlt645_read_energy_frame(self, addr: str) -> bytes:
-        """构建DLT645-2007读正向有功总电能帧"""
+        """构建DLT645-2007读正向有功总电能帧（正确实现，待收编到 dlt645_frame_gen，见父任务 X1）"""
         addr_bytes = bytes.fromhex(addr.zfill(12))[::-1]
         di_bytes = (0x00010000).to_bytes(4, 'little')
         data_field = bytes([(b + 0x33) & 0xFF for b in di_bytes])
@@ -1209,7 +1209,7 @@ class ArchiveWidget(QWidget):
         self._version_query_timer.start(self._version_query_timeout_ms)
 
     def _build_detail_version_inner_frame(self, addr: str) -> bytes:
-        """构建查询详细版本信息的内层DLT645帧（基于用户参考报文模板）"""
+        """构建查询详细版本信息的内层DLT645帧（正确实现，待收编到 dlt645_frame_gen，见父任务 X1）"""
         # 参考报文内层: 68 99 99 99 99 99 99 68 11 3C [60字节数据] B2 16
         addr_bytes = bytes.fromhex(addr)
         # 60字节数据域（使用参考报文中的原始数据域）

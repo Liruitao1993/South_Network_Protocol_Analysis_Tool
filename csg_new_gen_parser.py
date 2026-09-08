@@ -679,10 +679,16 @@ class CSGNewGenParser:
             if ed_rows is not None:
                 return ed_rows
 
-        # ── 通道自动识别：仅 MPDU 级输入（接入指示=1）按 FC 可变区域结构判别 PLC/HRF ──
-        if channel == "auto" and ((frame_bytes[0] >> 3) & 0x01) == 1:
+        # ── 通道识别：MPDU 级输入（接入指示=1）一律按 FC 可变区域结构判别 PLC/HRF。
+        # 批量解析中什么帧类型都会遇到，下拉固定值不能代表每帧信道，故以 FC 判别为准；
+        # 非 MPDU 级输入（MAC/MSDU/APP）无 FC 头，沿用调用方传入的 channel。
+        if ((frame_bytes[0] >> 3) & 0x01) == 1:
+            self._channel_pinned = (
+                self._channel if channel not in ("auto", None) else None)
             self._channel = self._detect_channel(frame_bytes, frame_len)
             self._detected_channel = self._channel
+        else:
+            self._channel_pinned = None
 
         # ── 自动识别帧的起始层次（优先级：MPDU > MAC > MSDU > APP）──
         offset = 0
@@ -693,14 +699,12 @@ class CSGNewGenParser:
 
         # ── 步骤0: 检测 MPDU 帧（FC帧控制，16字节头）──
         # MPDU特征：bit3=1（接入指示）+ bits0-2=定界符类型(0~3)
-        # 注意：SACK帧(定界符类型=2)应只有16字节，超过16字节则不是MPDU
+        # SACK/信标/NET 帧只有 FC 头（16 字节），但真实抓包常在 FC 之后带尾部字节
+        # （FCS/冗余），故统一按 >=16 判定 MPDU；尾字节在 FC 解析后单独展示，
+        # 绝不因长度不等于 16 而把 SACK 误送入 MAC 解析路径
         delimiter_type = first_byte & 0x07       # bits 0-2
         access_indicator = (first_byte >> 3) & 0x01  # bit 3
-        # SACK帧(类型2)必须恰好16字节，其他类型至少16字节
-        if delimiter_type == 2:
-            is_mpdu = (access_indicator == 1 and frame_len == 16)
-        else:
-            is_mpdu = (access_indicator == 1 and delimiter_type <= 3 and frame_len >= 16)
+        is_mpdu = (access_indicator == 1 and delimiter_type <= 3 and frame_len >= 16)
 
         is_pb_only = (parse_level == "pb_only")
         if is_pb_only:
@@ -815,17 +819,30 @@ class CSGNewGenParser:
             if parse_level == "fc_efc":
                 return table_data
 
+            # 下拉通道与 FC 结构判别不一致时提示（以 FC 判别为准）
+            pinned = getattr(self, "_channel_pinned", None)
+            if pinned and pinned != self._channel:
+                table_data.append((
+                    "通道判别", pinned, self._channel,
+                    "下拉通道与 FC 可变区域结构判别不一致，以 FC 判别为准",
+                    None, None))
             # 信标帧(定界符类型=0)：FC后直接为信标载荷，无物理块头
             if delimiter_type == 0:
                 beacon_data = frame_bytes[offset:]
                 if beacon_data:
                     table_data.extend(self._parse_beacon_payload(beacon_data, offset))
                 return table_data
-            # 选择确认帧(定界符类型=2)：仅FC头16字节，无物理块/MSDU
-            elif delimiter_type == 2:
-                return table_data
-            # 网间协调帧(定界符类型=3)：仅FC头16字节，无物理块/MSDU（表41）
-            elif delimiter_type == 3:
+            # 选择确认帧(定界符类型=2)/网间协调帧(类型3)：仅FC头16字节，无物理块/MSDU。
+            # 真实抓包常在 FC 之后带尾部字节（FCS/冗余）：单独展示而不报错，
+            # 更不回落到 MAC 解析路径（曾因此误报「MAC帧长度不足(需要≥36字节)」）。
+            elif delimiter_type in (2, 3):
+                if frame_len > offset:
+                    tail = frame_bytes[offset:]
+                    fname = "选择确认帧" if delimiter_type == 2 else "网间协调帧"
+                    table_data.append((
+                        "尾部字节", self._hex_space(tail), f"{len(tail)} 字节",
+                        f"{fname}无物理块/MSDU，FC 头之后的尾部字节（疑似 FCS/冗余）",
+                        offset, frame_len - 1))
                 return table_data
             else:
                 offset, mac_data, msdu_payload = self._parse_pb_block(
@@ -1617,7 +1634,7 @@ class CSGNewGenParser:
         ))
         offset += 3
 
-        # ── 通道自动识别结果（channel="auto" 时）──
+        # ── 通道判别结果（MPDU 级输入一律按 FC 判别，下拉通道仅作提示）──
         if getattr(self, '_detected_channel', None) is not None:
             ch = self._detected_channel
             ch_name = "PLC 载波" if ch == "plc" else "HRF 高速无线"
@@ -1625,7 +1642,8 @@ class CSGNewGenParser:
                 "通道判定",
                 ch,
                 ch_name,
-                "按FC可变区域结构自动识别（帧长一致性+PB大小/物理块个数强信号）",
+                "按FC可变区域结构判别（帧长一致性+PB大小/物理块个数强信号），"
+                "下拉通道仅作提示",
                 0, 15
             ))
 

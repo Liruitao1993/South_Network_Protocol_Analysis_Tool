@@ -362,31 +362,46 @@ def test_fujian_afn_map_present():
 
 
 def _build_eb_645_frame_logic(di, ctrl, addr_hex, data_hex=""):
-    """EB 645 帧纯逻辑（与 GUI _build_eb_645_frame / Web gen_eb_645_frame 一致）"""
-    di_bytes = bytes.fromhex(di)
+    """EB 645 帧纯逻辑：统一走 DLT645FrameGenerator
+
+    标准口径：数据域逐字节 +0x33、CS 覆盖帧头（含两个 68H 与地址域）。
+    """
+    from dlt645_frame_gen import DLT645FrameGenerator, encode_di
     data = bytes.fromhex(data_hex.replace(" ", "")) if data_hex.strip() else b""
     addr = bytes.fromhex(addr_hex.replace(" ", ""))
     if len(addr) != 6:
         addr = addr[:6].ljust(6, b'\x00')
-    data_len = len(di_bytes) + len(data)
-    body = bytes([ctrl, data_len]) + di_bytes + data
-    cs = sum(body) & 0xFF
-    return bytes([0x68]) + addr + bytes([0x68]) + body + bytes([cs, 0x16])
+    return DLT645FrameGenerator().build_frame(addr, ctrl, encode_di(di) + data)
 
 
 def test_eb_645_frame_generation():
-    """EB 数据标识 645 帧生成：68 A0..A5 68 C L DI3 DI2 DI1 DI0 DATA CS 16"""
+    """EB 645 帧：标准口径（+0x33、CS 含帧头）+ 与解析器互认 + 双口径兼容"""
     frame = _build_eb_645_frame_logic("EB030002", 0x81, "000000000000", "01 01 112233445566")
     b = frame
     assert b[0] == 0x68 and b[7] == 0x68 and b[-1] == 0x16, "645 帧结构错误"
-    assert b[10:14] == bytes.fromhex("EB030002"), "EB030002 字节序错误"
-    cs_calc = sum(b[8:-2]) & 0xFF
+    # 数据域加扰 + DI 低字节在前：EB030002 → 线上 02 00 03 EB → 加扰 35 33 36 1E
+    assert b[10:14] == bytes.fromhex("3533361E"), f"加扰 DI 错误: {b[10:14].hex()}"
+    # CS 覆盖帧首至数据域末
+    cs_calc = sum(b[:-2]) & 0xFF
     assert b[-2] == cs_calc, f"CS 校验错误: {b[-2]:02X} vs {cs_calc:02X}"
     # 数据标识长度 L = DI 4B + 数据 8B = 0C
     assert b[9] == 0x0C, f"数据长度错误: {b[9]:02X}"
-    # 与 Web 版逐字节一致
-    expected = "6800000000000068810CEB0300020101112233445566E416"
-    assert frame.hex().upper() == expected, f"与 Web 版不一致: {frame.hex().upper()}"
+    # 与解析器互认：DLT645Parser 判合法且 DI 还原为 EB030002
+    from dlt645_parser import DLT645Parser
+    r = DLT645Parser.parse(frame)
+    assert r.get("valid"), f"解析器判非法: {r.get('error')}"
+    assert r.get("di_code") == "EB030002", f"DI 还原错误: {r.get('di_code')}"
+    # 双口径兼容：明文旧帧仍可被国网内嵌解析路径识别并标注
+    from gdw10376_parser import GDW10376Parser
+    legacy = bytes.fromhex("6800000000000068810CEB0300020101112233445566E416")
+    rows = []
+    assert GDW10376Parser()._try_parse_embedded_eb(legacy, 0, rows), "明文旧帧应可解析"
+    assert any("明文未加扰" in str(x[2]) for x in rows), "应标注明文未加扰"
+    rows2 = []
+    assert GDW10376Parser()._try_parse_embedded_eb(frame, 0, rows2), "标准帧应可解析"
+    assert any("标准 +0x33" in str(x[2]) for x in rows2), "应标注标准加扰"
+    assert any(str(x[0]).endswith("校验和 CS") and str(x[2]) == "正确" for x in rows2), \
+        "标准帧 CS 应标注正确"
     print("PASS test_eb_645_frame_generation")
 
 

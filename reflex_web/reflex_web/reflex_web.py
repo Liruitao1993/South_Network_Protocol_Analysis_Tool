@@ -101,6 +101,17 @@ class State(rx.State):
     gen_field_values: list[str] = []  # [字段索引] 简单字段原始值，位置对齐
     gen_list_rows: list[list[list[str]]] = []  # [字段索引][行][item] 位置对齐
     gen_sub_fields: list[list[str]] = []  # [字段索引][子字段索引] 位置对齐
+    # ── DLT645-2007（协议6）组帧 ──
+    dlt645_cmd_options: list[str] = []  # 命令下拉标签（【分组】名称（C=xxH））
+    dlt645_cmd_keys: list[list[Any]] = []  # 与上表位置对齐的 [direction, func]
+    gen_dlt645_cmd_label: str = ""
+    gen_dlt645_dir: str = "req"
+    gen_dlt645_func: int = 0x11
+    gen_dlt645_di: str = ""
+    gen_dlt645_di_label: str = ""
+    gen_dlt645_addr: str = "000000000000"
+    gen_dlt645_fields: list[dict[str, str]] = []  # [{name,value,hint}] 动态字段
+    gen_dlt645_ctrl_label: str = ""
     # 渲染模型（全部 str 类型，供 Reflex foreach）
     gen_field_meta: list[
         dict[str, str]
@@ -338,6 +349,7 @@ class State(rx.State):
         self._load_di_options()
         self._load_afn_fn_options()
         self._load_dlt698_options()
+        self._load_dlt645_options()
 
     def set_csg_level(self, value: str):
         self.csg_parse_level = value
@@ -1587,10 +1599,12 @@ class State(rx.State):
             self.gen_eb_msg = f"EB 数据标识格式错误: {di}"
             self.gen_eb_msg_type = "error"
             return
-        data_len = len(di_bytes) + len(data_bytes)
-        body = bytes([ctrl, data_len]) + di_bytes + data_bytes
-        cs = sum(body) & 0xFF
-        frame = bytes([0x68]) + addr_bytes + bytes([0x68]) + body + bytes([cs, 0x16])
+        # 标准口径：数据域逐字节 +0x33、CS 覆盖帧头；统一调用 DLT645FrameGenerator，
+        # 与 GUI _build_eb_645_frame 同一实现，避免口径再次分裂
+        from dlt645_frame_gen import DLT645FrameGenerator, encode_di
+
+        frame = DLT645FrameGenerator().build_frame(
+            addr_bytes, ctrl, encode_di(di) + data_bytes)
         self.gen_eb_frame = frame.hex()
         info = lookup.get(di) if lookup else None
         name = info.get("名称", "") if info else ""
@@ -1926,6 +1940,92 @@ class State(rx.State):
             self.gen_dlt698_func = int_val
         self._update_gen_preview()
 
+    # ------------------------------------------------------------------
+    # DLT645-2007（协议6）组帧：与 GUI frame_gen_widget 的 dlt645 模式同构，
+    # 共用 dlt645_frame_gen / dlt645_frame_schema，保证同输入同输出（AC7）
+    # ------------------------------------------------------------------
+    def _load_dlt645_options(self):
+        """加载 645 命令下拉（请求/应答/异常三组）"""
+        try:
+            from dlt645_frame_schema import list_commands
+            opts, keys = [], []
+            for key, group, text in list_commands():
+                opts.append(f"【{group}】{text}")
+                keys.append([key[0], int(key[1])])
+            self.dlt645_cmd_options = opts
+            self.dlt645_cmd_keys = keys
+        except Exception:
+            self.dlt645_cmd_options = []
+            self.dlt645_cmd_keys = []
+            return
+        if self.dlt645_cmd_options and (
+                self.gen_dlt645_cmd_label not in self.dlt645_cmd_options):
+            self.select_dlt645_cmd(self.dlt645_cmd_options[0])
+
+    def select_dlt645_cmd(self, label: str):
+        """选择 645 命令并重建动态字段"""
+        self.gen_dlt645_cmd_label = label
+        try:
+            idx = self.dlt645_cmd_options.index(label)
+            direction, func = self.dlt645_cmd_keys[idx]
+        except (ValueError, IndexError):
+            return
+        self.gen_dlt645_dir = str(direction)
+        self.gen_dlt645_func = int(func)
+        self._refresh_dlt645_fields()
+        self._update_gen_preview()
+
+    def set_dlt645_di(self, value: str):
+        self.gen_dlt645_di = (value or "").strip()
+        self._refresh_dlt645_fields()
+        self._update_gen_preview()
+
+    def set_dlt645_addr(self, value: str):
+        self.gen_dlt645_addr = (value or "").strip()
+        self._update_gen_preview()
+
+    def set_dlt645_field(self, idx, value: str):
+        """设置 645 动态字段值（idx = gen_dlt645_fields 索引）"""
+        try:
+            idx = int(idx)
+        except (ValueError, TypeError):
+            return
+        if 0 <= idx < len(self.gen_dlt645_fields):
+            self.gen_dlt645_fields[idx]["value"] = str(value)
+        self._update_gen_preview()
+
+    def _refresh_dlt645_fields(self):
+        """按当前命令 + DI 掩码重建动态字段（与 GUI _rebuild_dlt645_fields 同规则）"""
+        from dlt645_frame_gen import DLT645FrameGenerator, describe_control
+        from dlt645_frame_schema import build_di_fields, get_command, get_di_info
+        try:
+            spec = get_command((self.gen_dlt645_dir, self.gen_dlt645_func))
+        except ValueError:
+            self.gen_dlt645_fields = []
+            self.gen_dlt645_ctrl_label = ""
+            return
+        fields = [f for f in (spec.get("fields") or []) if f.get("type") != "di"]
+        di = self.gen_dlt645_di.upper()
+        if spec.get("has_di") and di:
+            derived = build_di_fields(di)
+            if self.gen_dlt645_dir == "req" and self.gen_dlt645_func in (0x11, 0x12):
+                derived = [f for f in derived if f.get("type") == "lme_entries"]
+            fields = derived + [f for f in fields if f.get("type") not in
+                                ("di_value", "demand", "demand_time")]
+            info = get_di_info(di)
+            self.gen_dlt645_di_label = (
+                f"{info['name']}｜{info['data_type'] or '未声明'}｜{info['length']}B"
+                if info["name"] else "不在映射表，按裸字节填写")
+        else:
+            self.gen_dlt645_di_label = ""
+        self.gen_dlt645_fields = [
+            {"name": f["name"], "value": str(f.get("default", "")),
+             "hint": f.get("hint", "")} for f in fields
+        ]
+        ctrl = DLT645FrameGenerator.build_control(
+            spec["func"], dir_bit=spec["dir"], err=bool(spec.get("err")))
+        self.gen_dlt645_ctrl_label = describe_control(ctrl)
+
     def _load_di_options(self):
         """加载 DI 选项"""
         try:
@@ -2248,6 +2348,12 @@ class State(rx.State):
                 parts.append(f"APDU: {self.gen_dlt698_apdu}")
             if self.gen_dlt698_sub:
                 parts.append(f"子类型: {self.gen_dlt698_sub}")
+        elif p == 6:  # DLT645-2007
+            if self.gen_dlt645_cmd_label:
+                parts.append(f"命令: {self.gen_dlt645_cmd_label}")
+            if self.gen_dlt645_di:
+                parts.append(f"DI: {self.gen_dlt645_di}")
+            parts.append(f"表地址: {self.gen_dlt645_addr}")
 
         parts.append(f"源地址: {self.gen_src_addr}")
         parts.append(f"目的地址: {self.gen_dst_addr}")
@@ -2510,6 +2616,16 @@ class State(rx.State):
                 sc_bit=self.gen_dlt698_sc,
                 func_code=self.gen_dlt698_func,
             )
+
+        if p == 6:  # DLT645-2007：与 GUI 同一个生成器，保证同输入同输出
+            from dlt645_frame_gen import DLT645FrameGenerator
+
+            fv = {f["name"]: f["value"] for f in self.gen_dlt645_fields}
+            if self.gen_dlt645_di:
+                fv["数据标识 DI"] = self.gen_dlt645_di.upper()
+            return DLT645FrameGenerator().generate_frame(
+                (self.gen_dlt645_dir, self.gen_dlt645_func), fv,
+                addr=self.gen_dlt645_addr or None)
 
         raise ValueError(f"协议 {p} 暂不支持组帧")
 
@@ -6326,6 +6442,66 @@ def frame_gen_tab() -> rx.Component:
             ),
         )
 
+    # ── DLT645-2007（协议6）帧配置 ──
+    def dlt645_panel() -> rx.Component:
+        return rx.cond(
+            State.current_protocol == 6,
+            rx.card(
+                rx.vstack(
+                    rx.hstack(
+                        rx.icon("gauge", size=18, color="#2563eb"),
+                        rx.text("DLT645-2007 帧配置", font_weight="bold"),
+                        spacing="2",
+                    ),
+                    rx.hstack(
+                        rx.text("命令:", size="2"),
+                        rx.select(
+                            State.dlt645_cmd_options,
+                            value=State.gen_dlt645_cmd_label,
+                            on_change=State.select_dlt645_cmd,
+                            size="2",
+                        ),
+                        spacing="2",
+                    ),
+                    rx.hstack(
+                        rx.text("表地址:", size="2"),
+                        rx.input(
+                            value=State.gen_dlt645_addr,
+                            on_change=State.set_dlt645_addr,
+                            placeholder="12 位地址；校时 99…9 / 地址命令 AA…AA",
+                            width="180px",
+                            size="2",
+                        ),
+                        rx.text("数据标识:", size="2"),
+                        rx.input(
+                            value=State.gen_dlt645_di,
+                            on_change=State.set_dlt645_di,
+                            placeholder="8 位 DI，如 00010000",
+                            width="160px",
+                            size="2",
+                        ),
+                        rx.text(State.gen_dlt645_di_label, size="1", color="#6b7280"),
+                        spacing="2",
+                    ),
+                    rx.foreach(
+                        State.gen_dlt645_fields,
+                        lambda f, i: rx.hstack(
+                            rx.text(f["name"], size="2", width="130px"),
+                            rx.input(
+                                value=f["value"],
+                                on_change=lambda v: State.set_dlt645_field(i, v),
+                                placeholder=f["hint"],
+                                size="2",
+                            ),
+                            spacing="2",
+                        ),
+                    ),
+                    rx.text(State.gen_dlt645_ctrl_label, size="1", color="#6b7280"),
+                    spacing="3",
+                ),
+            ),
+        )
+
     # ── 国网中继地址 ──
     def gdw_relay_panel() -> rx.Component:
         return rx.cond(
@@ -6645,6 +6821,8 @@ def frame_gen_tab() -> rx.Component:
                 dynamic_fields(),
             ),
         ),
+        # DLT645-2007 帧配置（协议6，内部自带 rx.cond）
+        dlt645_panel(),
         # EB 数据标识 645 帧生成器（协议7 透明转发/事件上报报文内容辅助）
         rx.cond(
             State.current_protocol == 7,

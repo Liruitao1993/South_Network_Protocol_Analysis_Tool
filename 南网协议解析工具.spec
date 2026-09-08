@@ -75,6 +75,7 @@ a = Analysis(
     datas=[
         ('custom_di.json', '.'),
         ('dlt645_di.json', '.'),
+        ('DLT645_command.json', '.'),  # 协议6 预设命令种子数据
         ('gdw_custom_afn.json', '.'),
         ('meter_sim_data.json', '.'),  # 虚拟表（698.45 从站模拟器）档案种子数据
         ('icons', 'icons'),

@@ -87,10 +87,24 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.21.1"
-BUILD_DATE = "2026-09-02"  # 编译日期，每次打包前更新  # 编译日期，每次打包前更新
+APP_VERSION = "1.22.0"
+BUILD_DATE = "2026-09-08"  # 编译日期，每次打包前更新  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    (
+        "1.22.0",
+        "2026-09-08",
+        [
+            "协议6（DL/T645-2007）新增组帧能力：「协议组帧」「预设命令」tab 对协议6 开放；命令下拉分 主站请求/从站应答/异常应答 三组（12 功能码），DI 由 dlt645_di.json 1099 条驱动并按 17 种 data_type 掩码自动推导字段表单（真 BCD+小数点+低字节在前，填十进制而非 hex）；表地址/广播勾选/控制码只读展示；字段变化经 200ms 防抖实时刷新右侧解析预览，生成后「解析回读」标签当场闭环校验",
+            "新建 dlt645_frame_gen.py（全仓库唯一 645 封装实现：地址序/控制码/+0x33/L/CS/68…16）与 dlt645_frame_schema.py（命令 schema + 掩码推导 + LME 查询模板）；dlt645_data_codec.py 新增 encode_* 系列与既有 decode_*/split_* 成对互逆",
+            "LME 自定义接口查询请求 11H 结构化组帧：FF00DD01 按 分类/条目（含分类7）生成 条目信息+M+M×2B 请求头（数据ID 6bit|分类 3bit|保留 7bit），留空 M=0 读全量；04FFAAF9 无数据单元；lme_info_entry_parser.py 新增 pack_lme_query_request 等与解码互逆",
+            "Reflex Web 组帧页支持协议6（命令/表地址/DI/动态字段），与 GUI 共用同一生成器保证同输入同输出；preset_buttons 支持 dlt645 预设库（DLT645_command.json 5 条种子预设）；spec datas 同步",
+            "修正 EB 数据标识 645 帧口径：生成侧改为标准口径（数据域 +0x33、CS 覆盖帧头、DI 低字节在前——真实抓包 CCO-2-COM3 三帧逐字节验算证实），GUI/Web 两处手写封装统一改调 DLT645FrameGenerator；gdw10376_parser 内嵌 645 解析增加 -0x33 还原与 DI 双字节序兼容（标准低字节在前优先、旧高字节在前回退），新增 加扰/字节序/CS 三行标注（仅提示不阻断）",
+            "修正 dlt645_parser 广播校时解析：数据域第 6 字节为「年 YY」而非「星期」（DL/T645-2007 §7.6 线序 ss mm hh DD MM YY），同步修正测试断言",
+            "测试：新增 test_dlt645_frame_gen.py（161 项：真实抓包 golden sample 逐字节复现、掩码 encode→decode 往返、组帧→解析→校验闭环、LME 查询）与 test_dlt645_frame_gen_gui.py（66 项 offscreen 冒烟，实时预览走真实信号链路）；test_web_frame_gen_utils 增协议6 Web 同输出断言（74 项）；回归 test_gdw_fujian 19 项、test_dlt645_lme、test_quick_parse_panel 84 项全过",
+            "修复协议9 批量解析将 SACK 帧误报「MAC帧长度不足(需要≥36字节)」：SACK/信标/NET 的 MPDU 判定从「SACK 必须恰好16字节」放宽为 ≥16 字节，FC 头之后的尾部字节（疑似 FCS/冗余）单独成行展示，不再回落到 MAC 解析路径；通道判别改为 MPDU 级输入一律按 FC 可变区域结构判别（批量解析每帧各自判别），下拉通道仅作提示，判别与下拉不一致时加「通道判别」提示行并以判别为准；test_csg_hrf_mac 增 T9（SACK 尾字节 + 通道提示）并按新契约更新 T8",
+        ],
+    ),
     (
         "1.21.1",
         "2026-09-02",
@@ -2678,6 +2692,8 @@ class MainWindow(QMainWindow):
             self.protocol_combo.setCurrentIndex(7)
         elif protocol == "dlt698" and self.current_protocol != 8:
             self.protocol_combo.setCurrentIndex(8)
+        elif protocol == "dlt645" and self.current_protocol != 6:
+            self.protocol_combo.setCurrentIndex(6)
 
         # 检查串口是否打开
         if not self.serial_worker or not self.serial_worker.is_open():
@@ -3049,11 +3065,14 @@ class MainWindow(QMainWindow):
 
         # 协议组帧页面和预设命令页面在南网、国网、698.45协议下显示
         if hasattr(self, "_frame_gen_tab_index"):
-            show_frame_gen = index in (0, 7, 8)
+            # 协议组帧：0=南网 6=DLT645-2007 7=国网 8=698.45
+            show_frame_gen = index in (0, 6, 7, 8)
             self.tab_widget.setTabVisible(self._frame_gen_tab_index, show_frame_gen)
             if show_frame_gen:
                 if index == 0:
                     mode = "south"
+                elif index == 6:
+                    mode = "dlt645"
                 elif index == 7:
                     mode = "gdw"
                 else:
@@ -3065,7 +3084,8 @@ class MainWindow(QMainWindow):
                 if hasattr(self, "frame_gen_tab"):
                     self.frame_gen_tab.reset()
         if hasattr(self, "_preset_tab_index"):
-            self.tab_widget.setTabVisible(self._preset_tab_index, index in (0, 7, 8))
+            # 预设命令：0=南网 6=DLT645 7=国网 8=698.45
+            self.tab_widget.setTabVisible(self._preset_tab_index, index in (0, 6, 7, 8))
         if hasattr(self, "_virtual_meter_tab_index"):
             self.tab_widget.setTabVisible(self._virtual_meter_tab_index, index == 8)
             if index in (0, 7, 8):

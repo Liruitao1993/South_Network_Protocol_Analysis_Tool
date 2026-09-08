@@ -348,9 +348,15 @@ def test_eb_645_generator():
     check("645 帧生成非空", bool(frame), "")
     b = bytes.fromhex(frame)
     check("645 帧结构 68..68..16", b[0] == 0x68 and b[7] == 0x68 and b[-1] == 0x16, "")
-    cs_calc = sum(b[8:-2]) & 0xFF
-    check("645 帧 CS 正确", b[-2] == cs_calc, f"CS={b[-2]:02X} expect={cs_calc:02X}")
-    check("EB030002 字节序", b[10:14] == bytes.fromhex('EB030002'), b[10:14].hex())
+    cs_calc = sum(b[:-2]) & 0xFF
+    check("645 帧 CS 覆盖帧头", b[-2] == cs_calc, f"CS={b[-2]:02X} expect={cs_calc:02X}")
+    check("EB030002 加扰+低字节在前 3533361E",
+          b[10:14] == bytes.fromhex('3533361E'), b[10:14].hex())
+    from dlt645_parser import DLT645Parser as _P645
+    _r = _P645.parse(b)
+    check("EB 帧与 645 解析器互认",
+          bool(_r.get("valid")) and _r.get("di_code") == "EB030002",
+          f"valid={_r.get('valid')} di={_r.get('di_code')}")
 
     # 填入 52H-F1 报文内容字段
     s.set_protocol('7')
@@ -481,6 +487,69 @@ def test_eb_698_full_frame():
     check("698 完整帧填入报文内容", idx and s.gen_field_values[idx[0]] == s.gen_eb_frame, "")
 
 
+def test_dlt645_web():
+    """协议6 Web 组帧：与纯逻辑生成器同输入同输出（AC7）"""
+    print("== DLT645 Web 组帧 ==")
+    import os
+    os.environ['PYTEST_CURRENT_TEST'] = 'x'
+    import sys as _sys
+    _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "reflex_web"))
+    from reflex_web.reflex_web import State
+    from dlt645_frame_gen import DLT645FrameGenerator
+
+    s = State()
+    s.set_protocol('6')
+    check("645 命令下拉已加载", len(s.dlt645_cmd_options) >= 20,
+          str(len(s.dlt645_cmd_options)))
+    check("默认命令为读数据 11H",
+          s.gen_dlt645_func == 0x11 and s.gen_dlt645_dir == "req",
+          f"{s.gen_dlt645_dir}/{s.gen_dlt645_func}")
+    s.set_dlt645_di("00010000")
+    check("DI 标签含名称与格式",
+          "正向有功" in s.gen_dlt645_di_label and "XXXXXX.XX" in s.gen_dlt645_di_label,
+          s.gen_dlt645_di_label)
+    check("读请求无值字段", s.gen_dlt645_fields == [], str(s.gen_dlt645_fields))
+    web = bytes(s._build_frame_bytes())
+    pure = DLT645FrameGenerator().generate_frame(
+        ("req", 0x11), {"数据标识 DI": "00010000"}, addr="000000000000")
+    check("Web == 纯逻辑（读电能）", web == pure,
+          f"web={web.hex()} pure={pure.hex()}")
+
+    label = [o for o in s.dlt645_cmd_options if "写数据（C=14H）" in o]
+    check("命令下拉含写数据", bool(label), str(s.dlt645_cmd_options[:6]))
+    s.select_dlt645_cmd(label[0])
+    s.set_dlt645_di("00010000")
+    names = [f["name"] for f in s.gen_dlt645_fields]
+    check("写数据字段含 数据值/密码权限",
+          "数据值" in names and "密码权限 PA" in names, str(names))
+    s.set_dlt645_field(names.index("数据值"), "123456.78")
+    s.set_dlt645_addr("000000000033")
+    web2 = bytes(s._build_frame_bytes())
+    pure2 = DLT645FrameGenerator().generate_frame(
+        ("req", 0x14),
+        {"数据标识 DI": "00010000", "数据值": "123456.78",
+         "密码权限 PA": "00", "密码 P0P1P2": "000000",
+         "操作者代码 C0~C3": "00000000"},
+        addr="000000000033")
+    check("Web == 纯逻辑（写数据）", web2 == pure2,
+          f"web={web2.hex()} pure={pure2.hex()}")
+
+    # LME 查询请求：条目字段 → 同输出
+    s.select_dlt645_cmd([o for o in s.dlt645_cmd_options
+                         if o.startswith("【主站请求】读数据")][0])
+    s.set_dlt645_addr("000000000000")
+    s.set_dlt645_di("FF00DD01")
+    names3 = [f["name"] for f in s.gen_dlt645_fields]
+    check("FF00DD01 显示条目列表字段", names3 == ["条目列表"], str(names3))
+    s.set_dlt645_field(0, "0/1,0/2")
+    web3 = bytes(s._build_frame_bytes())
+    pure3 = DLT645FrameGenerator().generate_frame(
+        ("req", 0x11), {"数据标识 DI": "FF00DD01", "条目列表": "0/1,0/2"},
+        addr="000000000000")
+    check("Web == 纯逻辑（LME 查询）", web3 == pure3,
+          f"web={web3.hex()} pure={pure3.hex()}")
+
+
 if __name__ == "__main__":
     test_parse_field_value()
     test_collect_south()
@@ -495,5 +564,6 @@ if __name__ == "__main__":
     test_eb_645_generator()
     test_eb_698_apdu()
     test_eb_698_full_frame()
+    test_dlt645_web()
     print(f"\n结果: {PASS} 通过, {FAIL} 失败")
     sys.exit(1 if FAIL else 0)

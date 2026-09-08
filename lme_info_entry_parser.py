@@ -951,3 +951,55 @@ def format_lme_info_summary(results: List[Tuple[str, str]], max_len: int = 120) 
     if len(result) > max_len:
         result = result[:max_len - 3] + "..."
     return result if result else "已解析"
+
+
+# ======================================================================
+# 组帧方向：FF00DD01 查询请求（11H）——与上方 TLV 解码互为逆运算
+# ======================================================================
+
+def lme_entry_options() -> List[Tuple[int, int, str]]:
+    """全部可选条目：[(分类ID, 数据ID, 名称)]，供组帧 UI 使用（含分类7）"""
+    out: List[Tuple[int, int, str]] = []
+    for cat in sorted(LME_INFO_ENTRIES):
+        for data_id in sorted(LME_INFO_ENTRIES[cat]):
+            out.append((cat, data_id, LME_INFO_ENTRIES[cat][data_id][0]))
+    return out
+
+
+def pack_lme_query_header(cat: int, data_id: int) -> bytes:
+    """查询请求条目头（2 字节小端）：数据ID 6bit | 分类ID 3bit | 保留 7bit
+
+    注意与**应答**头（数据ID 6bit | 分类ID 3bit | 编码 2bit | 长度 5bit）
+    位域不同，两者不可混用。
+    """
+    if not 0 <= int(data_id) <= 0x3F:
+        raise ValueError(f"LME 数据ID 应为 0~63（当前 {data_id}）")
+    if not 0 <= int(cat) <= 0x07:
+        raise ValueError(f"LME 分类ID 应为 0~7（当前 {cat}）")
+    return (int(data_id) | (int(cat) << 6)).to_bytes(2, "little")
+
+
+def pack_lme_query_request(entries) -> bytes:
+    """FF00DD01 查询请求数据域（不含 DI）：条目信息(1B=0) + M(1B) + M×2B 请求头
+
+    entries: [(分类ID, 数据ID)] 列表，或 "分类/数据ID" 逗号分隔字符串
+             （如 "0/1,0/2"）；留空 → M=0 表示读取模块全部支持信息
+    """
+    if isinstance(entries, str):
+        parsed: List[Tuple[int, int]] = []
+        for part in entries.replace("，", ",").split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if "/" not in part:
+                raise ValueError(
+                    f"LME 条目格式应为 分类/数据ID（当前 {part!r}），如 0/1")
+            cat_s, id_s = part.split("/", 1)
+            parsed.append((int(cat_s, 0), int(id_s, 0)))
+        entries = parsed
+    if len(entries) > 0xFF:
+        raise ValueError(f"LME 条目数超上限 255（当前 {len(entries)}）")
+    out = bytearray([0x00, len(entries) & 0xFF])
+    for cat, data_id in entries:
+        out += pack_lme_query_header(cat, data_id)
+    return bytes(out)

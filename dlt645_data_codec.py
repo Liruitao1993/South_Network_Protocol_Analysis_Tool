@@ -283,3 +283,215 @@ def split_clear_command(data: bytes) -> List[Tuple[str, str, str, str]]:
                      "全部对象（FFFFFFFF）" if all_flag else di.hex().upper(),
                      "事件清零时DI0用FF表示分项/全部"))
     return rows
+
+
+# ======================================================================
+# 编码方向（组帧用）—— 每个函数与上方 decode_*/split_* 互为逆运算，
+# 新增/修改任一侧时必须同步另一侧并跑 test_dlt645_frame_gen.py 的往返断言。
+# ======================================================================
+
+_HEX_DIGITS = set("0123456789abcdefABCDEF")
+
+
+def parse_hex(text: str, expect_len: Optional[int] = None,
+              label: str = "数据") -> bytes:
+    """hex 字符串 → 字节；容忍空格与 0x 前缀。非法输入抛中文 ValueError。"""
+    s = (text or "").replace(" ", "").replace("\t", "")
+    if s.lower().startswith("0x"):
+        s = s[2:]
+    if not s:
+        return b""
+    if not set(s) <= _HEX_DIGITS:
+        raise ValueError(f"{label}含非法十六进制字符：{text!r}")
+    if len(s) % 2:
+        raise ValueError(
+            f"{label}十六进制字符数必须为偶数（当前 {len(s)} 个）")
+    b = bytes.fromhex(s)
+    if expect_len is not None and len(b) != expect_len:
+        raise ValueError(
+            f"{label}应为 {expect_len} 字节，当前 {len(b)} 字节")
+    return b
+
+
+def _digits_of(text: str, label: str, decimals: int) -> str:
+    """十进制字符串（可含一个小数点）→ 纯数字串，并校验小数位不超掩码"""
+    s = (text or "").strip().replace(" ", "")
+    if not s:
+        return ""
+    if not set(s) <= set("0123456789."):
+        raise ValueError(f"{label}只能包含数字与一个小数点（当前 {text!r}）")
+    if s.count(".") > 1:
+        raise ValueError(f"{label}最多只能有一个小数点（当前 {text!r}）")
+    if "." in s and len(s.split(".")[1]) > decimals:
+        raise ValueError(
+            f"{label}小数位数超出格式允许的 {decimals} 位（当前 {text!r}）")
+    return s.replace(".", "")
+
+
+def bcd_pack(digits: str, nbytes: int, label: str = "数据") -> bytes:
+    """数字串 → nbytes 字节 BCD，**低字节在前**（DLT645 线序）。
+
+    入参约定：digits 一律按**逻辑高位在前**传入，本函数负责转成线上低字节在前。
+    数值类：bcd_pack("12345678", 4) == b"\\x78\\x56\\x34\\x12"（即 123456.78）
+    日期类：bcd_pack("260904", 3) == b"\\x04\\x09\\x26"（YYMMDD → 线上 日 月 年）
+    与 _bcd_digits 互为逆运算。
+    """
+    digits = (digits or "").lstrip("0") or "0"
+    if len(digits) > nbytes * 2:
+        raise ValueError(
+            f"{label}超出 {nbytes} 字节 BCD 容量（最多 {nbytes * 2} 位，"
+            f"当前 {len(digits)} 位）")
+    digits = digits.rjust(nbytes * 2, "0")
+    hi_lo = bytes(int(digits[i:i + 2], 16) for i in range(0, len(digits), 2))
+    return hi_lo[::-1]
+
+
+def mask_shape(data_type: str) -> Tuple[int, int, int]:
+    """掩码 → (总位数, 小数位数, 字节数)；非 BCD 掩码返回 (0, 0, 0)。
+
+    例：'XXXXXX.XX' → (8, 2, 4)；'XX.XXXX,MDHM' 只取逗号前的数值部分。
+    """
+    base = (data_type or "").split(",")[0].strip()
+    if not base or "..." in base or not set(base) <= set("Xx."):
+        return (0, 0, 0)
+    decimals = (len(base) - base.index(".") - 1) if "." in base else 0
+    total = len(base.replace(".", ""))
+    return (total, decimals, (total + 1) // 2)
+
+
+def encode_value(value: str, data_type: str, unit: str = "",
+                 di_name: str = "", nbytes: Optional[int] = None) -> bytes:
+    """按 data_type 掩码把用户输入编成**未加扰**的数据字节（低字节在前）。
+
+    与 decode_value 互为逆运算（decode_value(encode_value(v, dt), dt) 应还原 v）。
+    nbytes 用于覆盖掩码推导的字节数（如 DI 表声明长度与掩码不一致时）。
+    """
+    dt = (data_type or "").strip()
+    up = dt.upper()
+
+    # 无数据域（如曲线数据块读请求）
+    if not dt:
+        return parse_hex(value, nbytes, di_name or "数据")
+
+    # 位串 BS32/BS64/BS96：按裸 hex 填写，长度固定
+    if up.startswith("BS"):
+        want = nbytes if nbytes is not None else int(up[2:] or 0) // 8
+        return parse_hex(value, want or None, di_name or "位串")
+
+    # 变长裸字节（LME 自定义 DI 等，掩码形如 XX...XX）
+    # 注意：必须用「三连点」判定，不能用 set(dt) <= set("Xx.")——
+    # 后者会把带小数点的 BCD 掩码（如 XXXXXX.XX）误归为裸字节。
+    if "..." in dt:
+        return parse_hex(value, nbytes, di_name or "数据")
+
+    # 通信地址 NNNNNNNNNNNN：12 位地址 → 6 字节，低字节在前
+    if set(up) == {"N"}:
+        s = (value or "").strip().replace(" ", "")
+        if not s:
+            return b""
+        want = nbytes if nbytes is not None else (len(s) + 1) // 2
+        if set(s) <= _HEX_DIGITS and len(s) % 2 == 0:
+            return parse_hex(s, want, di_name or "通信地址")[::-1]
+        return bcd_pack(_digits_of(s, di_name or "通信地址", 0), want,
+                        di_name or "通信地址")
+
+    # 日期 YYYYMMDD：线序 日 月 年（与 decode_value 的 data[0]=日 一致）
+    if "YYYYMMDD" in up:
+        s = (value or "").strip().replace("/", "-").replace(".", "-")
+        parts = s.split("-")
+        if len(parts) == 3 and len(parts[0]) == 4:
+            yy, mm, dd = parts[0][2:], parts[1], parts[2]
+        elif len(parts) == 3:
+            yy, mm, dd = parts[2], parts[1], parts[0]
+        else:
+            raise ValueError(f"{di_name or '日期'}格式应为 YYYY-MM-DD（当前 {value!r}）")
+        return bcd_pack(yy + mm + dd, 3, di_name or "日期")
+
+    # 时间 hhmmss：线序 秒 分 时
+    if "hhmmss" in dt.lower():
+        s = (value or "").strip().replace("：", ":")
+        parts = s.split(":")
+        if len(parts) != 3:
+            raise ValueError(f"{di_name or '时间'}格式应为 hh:mm:ss（当前 {value!r}）")
+        hh, mm, ss = parts
+        return bcd_pack(hh + mm + ss, 3, di_name or "时间")
+
+    # BCD 数值：XXXXXX.XX / XXX.X / XXXXXX / XX.XXXX,MDHM 的数值部分
+    total, decimals, want = mask_shape(dt)
+    if total:
+        digits = _digits_of(value, di_name or "数据值", decimals)
+        return bcd_pack(digits, nbytes if nbytes is not None else want,
+                        di_name or "数据值")
+
+    # 未识别掩码：回退裸 hex（UI 会标注「未识别格式，按裸字节填写」）
+    return parse_hex(value, nbytes, di_name or "数据")
+
+
+def encode_demand_with_time(demand: str, when: str,
+                            di_name: str = "最大需量") -> bytes:
+    """最大需量及发生时间（掩码 XX.XXXX,MDHM）：需量 XX.XXXX(3B) + MMDDhhmm(4B)。
+
+    线序依据 DL/T645-2007 §7.7 冻结命令的 MMDDhhmm（mm hh DD MM）同款倒序。
+    dlt645_di.json 对该掩码声明 length=8，与文档推导的 7 字节不符（疑为手写表笔误），
+    此处以掩码/文档为准，长度不符由调用方给 WARN 而不阻断。
+    """
+    val = bcd_pack(_digits_of(demand, di_name + "需量", 4), 3, di_name + "需量")
+    s = (when or "").strip().replace("/", "-").replace(".", "-").replace("：", ":")
+    if not s:
+        return val
+    parts = [p for p in s.replace("-", ":").split(":") if p != ""]
+    if len(parts) != 4:
+        raise ValueError(
+            f"{di_name}发生时间格式应为 MM-DD-hh-mm（当前 {when!r}）")
+    mm, dd, hh, mi = parts
+    stamp = bcd_pack(mm + dd + hh + mi, 4, di_name + "发生时间")
+    return val + stamp
+
+
+def pack_password(pa: int, pwd: str, label: str = "密码") -> bytes:
+    """密码组：PA(1) + P0P1P2(3)，共 4 字节。与 split_* 中的密码组解析互逆。"""
+    if not 0 <= int(pa) <= 0xFF:
+        raise ValueError(f"{label}权限 PA 应在 00~FF（当前 {pa!r}）")
+    p = parse_hex(pwd, 3, label + " P0P1P2") if (pwd or "").strip() else b"\x00" * 3
+    return bytes([int(pa)]) + p
+
+
+def pack_operator(code: str, label: str = "操作者代码") -> bytes:
+    """操作者代码 C0~C3（4 字节）；留空填 00000000。"""
+    if not (code or "").strip():
+        return b"\x00" * 4
+    return parse_hex(code, 4, label)
+
+
+def pack_write_request(di: bytes, pa: int, pwd: str, operator: str,
+                       payload: bytes) -> bytes:
+    """写数据 14H 数据域：DI(4) + PA P0P1P2(4) + C0~C3(4) + 数据(m)。
+
+    与 split_write_request 互为逆运算。
+    """
+    if len(di) != 4:
+        raise ValueError(f"数据标识应为 4 字节（当前 {len(di)} 字节）")
+    return di + pack_password(pa, pwd) + pack_operator(operator) + payload
+
+
+def pack_change_password(di: bytes, old_pa: int, old_pwd: str,
+                         new_pa: int, new_pwd: str) -> bytes:
+    """修改密码 18H 数据域：DI(4) + 原密码组(4) + 新密码组(4)。
+
+    与 split_change_password 互为逆运算。
+    """
+    if len(di) != 4:
+        raise ValueError(f"数据标识应为 4 字节（当前 {len(di)} 字节）")
+    return (di + pack_password(old_pa, old_pwd, "原密码")
+            + pack_password(new_pa, new_pwd, "新密码"))
+
+
+def pack_clear_command(pa: int, pwd: str, operator: str, di: bytes) -> bytes:
+    """清零类 1AH/1BH 数据域：PA P0P1P2(4) + C0~C3(4) + 操作对象标识(4)。
+
+    **无 DI 前缀**（与写数据帧不同）；di 传 FFFFFFFF 表示全部对象。
+    与 split_clear_command 互为逆运算。
+    """
+    if len(di) != 4:
+        raise ValueError(f"操作对象标识应为 4 字节（当前 {len(di)} 字节）")
+    return pack_password(pa, pwd) + pack_operator(operator) + di

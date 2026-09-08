@@ -30,6 +30,14 @@ from preset_buttons import PresetButtonManager, AddPresetDialog
 from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu, ZoomableTableWidget
 from gdw_eb_di_lookup import get_eb_di_lookup
 from gdw_eb_di_fields import EB_DI_FIELDS, encode_eb_di_data
+from dlt645_frame_gen import DLT645FrameGenerator, describe_control, encode_di
+from dlt645_frame_schema import (
+    build_di_fields,
+    get_command,
+    length_warning,
+    list_commands,
+)
+from dlt645_parser import DLT645Parser
 
 
 # =============================================================================
@@ -401,6 +409,101 @@ class FrameGenWidget(QWidget):
 
         self.dlt698_config_group.setVisible(False)
         left_layout.addWidget(self.dlt698_config_group)
+
+        # ---- DLT645-2007（协议6）命令选择 + 帧配置（默认隐藏）----
+        self._dlt645_gen = DLT645FrameGenerator()
+        self._current_dlt645_key = None
+        self._dlt645_field_widgets: Dict[str, QLineEdit] = {}
+        self._dlt645_addr_touched = False
+
+        self.dlt645_combo = QComboBox()
+        self.dlt645_combo.setMinimumWidth(360)
+        self.dlt645_combo.setEditable(True)
+        self.dlt645_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.dlt645_combo.completer().setCompletionMode(
+            self.dlt645_combo.completer().CompletionMode.PopupCompletion)
+        self.dlt645_combo.completer().setFilterMode(Qt.MatchFlag.MatchContains)
+        self.dlt645_combo.completer().popup().setStyleSheet(
+            "background-color: #ffffff; color: #000000; "
+            "selection-background-color: #2196F3; selection-color: #ffffff;"
+        )
+        self._populate_dlt645_combo()
+        self.dlt645_combo.currentIndexChanged.connect(self._on_dlt645_cmd_changed)
+        self.dlt645_combo.currentIndexChanged.connect(self._schedule_realtime_update)
+        self.dlt645_combo.setVisible(False)
+        cmd_layout.addWidget(self.dlt645_combo)
+
+        self.dlt645_config_group = QGroupBox("DLT645-2007 帧配置")
+        d645_layout = QVBoxLayout(self.dlt645_config_group)
+        d645_layout.setContentsMargins(6, 4, 6, 4)
+        d645_layout.setSpacing(4)
+
+        d645_addr_row = QHBoxLayout()
+        d645_addr_row.setSpacing(6)
+        d645_addr_row.addWidget(QLabel("表地址:"))
+        self.dlt645_addr = QLineEdit("000000000000")
+        self.dlt645_addr.setMaxLength(12)
+        self.dlt645_addr.setToolTip(
+            "12 位地址（书写序，高位在前），线上自动转为低字节在前；\n"
+            "广播校时为 999999999999，读/写通信地址为 AAAAAAAAAAAA")
+        self.dlt645_addr.textEdited.connect(self._on_dlt645_addr_edited)
+        self.dlt645_addr.textChanged.connect(self._schedule_realtime_update)
+        d645_addr_row.addWidget(self.dlt645_addr, 1)
+        self.dlt645_broadcast = QCheckBox("广播")
+        self.dlt645_broadcast.setToolTip("勾选后地址域自动填当前命令的广播地址")
+        self.dlt645_broadcast.toggled.connect(self._on_dlt645_broadcast)
+        self.dlt645_broadcast.toggled.connect(self._schedule_realtime_update)
+        d645_addr_row.addWidget(self.dlt645_broadcast)
+        d645_layout.addLayout(d645_addr_row)
+
+        self.dlt645_ctrl_label = QLabel("")
+        self.dlt645_ctrl_label.setStyleSheet("color: #666;")
+        self.dlt645_ctrl_label.setWordWrap(True)
+        d645_layout.addWidget(self.dlt645_ctrl_label)
+
+        self.dlt645_di_row = QWidget()
+        d645_di_row_layout = QHBoxLayout(self.dlt645_di_row)
+        d645_di_row_layout.setContentsMargins(0, 0, 0, 0)
+        d645_di_row_layout.setSpacing(6)
+        d645_di_row_layout.addWidget(QLabel("数据标识:"))
+        self.dlt645_di_combo = QComboBox()
+        self.dlt645_di_combo.setMinimumWidth(360)
+        self.dlt645_di_combo.setEditable(True)
+        self.dlt645_di_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.dlt645_di_combo.completer().setCompletionMode(
+            self.dlt645_di_combo.completer().CompletionMode.PopupCompletion)
+        self.dlt645_di_combo.completer().setFilterMode(Qt.MatchFlag.MatchContains)
+        self.dlt645_di_combo.setToolTip("可直接输入 8 位 DI，或输入中文关键词搜索（1099 条）")
+        self._populate_dlt645_di_combo()
+        self.dlt645_di_combo.currentIndexChanged.connect(self._on_dlt645_di_changed)
+        self.dlt645_di_combo.editTextChanged.connect(self._on_dlt645_di_changed)
+        self.dlt645_di_combo.currentIndexChanged.connect(self._schedule_realtime_update)
+        self.dlt645_di_combo.editTextChanged.connect(self._schedule_realtime_update)
+        d645_di_row_layout.addWidget(self.dlt645_di_combo, 1)
+        d645_layout.addWidget(self.dlt645_di_row)
+
+        self.dlt645_di_info = QLabel("")
+        self.dlt645_di_info.setStyleSheet("color: #888;")
+        self.dlt645_di_info.setWordWrap(True)
+        d645_layout.addWidget(self.dlt645_di_info)
+
+        self.dlt645_field_container = QWidget()
+        self.dlt645_field_layout = QVBoxLayout(self.dlt645_field_container)
+        self.dlt645_field_layout.setContentsMargins(0, 0, 0, 0)
+        self.dlt645_field_layout.setSpacing(4)
+        d645_layout.addWidget(self.dlt645_field_container)
+
+        self.dlt645_verify_label = QLabel("")
+        self.dlt645_verify_label.setWordWrap(True)
+        d645_layout.addWidget(self.dlt645_verify_label)
+
+        self.dlt645_warn_label = QLabel("")
+        self.dlt645_warn_label.setStyleSheet("color: #E65100;")
+        self.dlt645_warn_label.setWordWrap(True)
+        d645_layout.addWidget(self.dlt645_warn_label)
+
+        self.dlt645_config_group.setVisible(False)
+        left_layout.addWidget(self.dlt645_config_group)
 
         # ---- 模式切换 ----
         self.mode_group = QGroupBox("字段模式")
@@ -959,7 +1062,12 @@ class FrameGenWidget(QWidget):
         return values
 
     def _build_eb_645_frame(self) -> bytes:
-        """生成 EB 数据标识 645 帧: 68 A0..A5 68 C L DI3 DI2 DI1 DI0 DATA CS 16"""
+        """生成 EB 数据标识 645 帧: 68 A0..A5 68 C L DI3 DI2 DI1 DI0 DATA CS 16
+
+        标准口径：数据域逐字节 +0x33、CS 覆盖帧头（含两个 68H 与地址域）。
+        统一调用 DLT645FrameGenerator——此前此处手写封装 CS 漏算帧头且未加扰，
+        产出的帧真实设备不认、本工具解析器也判非法。
+        """
         di = self._eb_current_di
         if not di or not di.startswith("EB") or len(di) != 8:
             raise ValueError("请先选择 EB 数据标识（如 EB030002）")
@@ -968,11 +1076,8 @@ class FrameGenWidget(QWidget):
         addr = bytes.fromhex(self.eb_addr_edit.text().replace(" ", ""))
         if len(addr) != 6:
             addr = addr[:6].ljust(6, b'\x00')
-        di_bytes = bytes.fromhex(di)
-        data_len = len(di_bytes) + len(data)
-        body = bytes([ctrl, data_len]) + di_bytes + data
-        cs = sum(body) & 0xFF
-        return bytes([0x68]) + addr + bytes([0x68]) + body + bytes([cs, 0x16])
+        return self._dlt645_gen.build_frame(
+            addr, ctrl, encode_di(di) + data)
 
     def _build_eb_698_frame(self) -> bytes:
         """生成 EB 数据标识 698.45 完整帧（68 L C SA CA HCS APDU FCS 16）"""
@@ -1429,6 +1534,233 @@ class FrameGenWidget(QWidget):
             self._custom_mode = False
 
         self._rebuild_dlt698_field_form(key)
+
+    # ------------------------------------------------------------------
+    # DLT645-2007（协议6）命令下拉、DI 驱动字段与组帧
+    # ------------------------------------------------------------------
+    def _populate_dlt645_combo(self):
+        """命令下拉：主站请求 / 从站应答 / 异常应答三组，itemData = (direction, func)"""
+        self.dlt645_combo.clear()
+        for key, group, text in list_commands():
+            self.dlt645_combo.addItem(f"【{group}】{text}", tuple(key))
+
+    def _populate_dlt645_di_combo(self):
+        """1099 条 DI 全量入下拉；搜索靠 completer 的 MatchContains（可输 DI 或中文）"""
+        self.dlt645_di_combo.clear()
+        try:
+            from dlt645_di_lookup import get_dlt645_di_lookup
+            rows = get_dlt645_di_lookup().data
+        except Exception:
+            rows = []
+        for row in rows:
+            di_code = str(row[0]).upper()
+            di_name = str(row[1] or "")
+            self.dlt645_di_combo.addItem(f"{di_code}  {di_name}", di_code)
+        self._dlt645_last_di = None
+
+    def _reset_dlt645_selection(self):
+        """选中首个命令并刷新面板（setCurrentIndex 同值不发信号，故显式调一次）"""
+        if self.dlt645_combo.count():
+            self.dlt645_combo.setCurrentIndex(0)
+        self._on_dlt645_cmd_changed()
+
+    def _dlt645_cmd_key(self):
+        data = self.dlt645_combo.currentData()
+        if not data:
+            return None
+        direction, func = data
+        return (direction, int(func))
+
+    def _dlt645_current_di(self) -> str:
+        """从可编辑下拉取 DI：优先用输入文本（允许手填），否则用选中项的 data"""
+        text = (self.dlt645_di_combo.currentText() or "").strip()
+        code = text.split()[0].replace("-", "").upper() if text else ""
+        if len(code) == 8 and all(c in "0123456789ABCDEF" for c in code):
+            return code
+        data = self.dlt645_di_combo.currentData()
+        return str(data).upper() if data else ""
+
+    def _on_dlt645_cmd_changed(self, *_args):
+        key = self._dlt645_cmd_key()
+        if not key:
+            return
+        try:
+            spec = get_command(key)
+        except ValueError:
+            return
+        self._current_dlt645_key = key
+        ctrl = self._dlt645_gen.build_control(
+            spec["func"], dir_bit=spec["dir"], err=bool(spec.get("err")))
+        dlen = spec.get("data_len")
+        len_txt = f"L={dlen:02X}H" if isinstance(dlen, int) else "L=按内容"
+        tip = spec.get("hint") or ""
+        self.dlt645_ctrl_label.setText(
+            f"{describe_control(ctrl)}｜{len_txt}" + (f"｜{tip}" if tip else ""))
+        self.dlt645_di_row.setVisible(bool(spec.get("has_di")))
+        # 未手动改过地址时，地址随命令切到文档规定的默认值（校时 99×6 / 地址命令 AA×6）
+        if not self._dlt645_addr_touched and not self.dlt645_broadcast.isChecked():
+            self.dlt645_addr.setText(spec.get("addr_default") or "000000000000")
+        self._rebuild_dlt645_fields()
+        # 切命令后立即调度一次预览刷新（不必等用户改字段）
+        self._schedule_realtime_update()
+
+    def _on_dlt645_di_changed(self, *_args):
+        """DI 变化时重建字段表单；按解析后的 8 位码去重，避免逐字输入反复重建"""
+        di = self._dlt645_current_di()
+        if di == getattr(self, "_dlt645_last_di", None):
+            return
+        self._dlt645_last_di = di
+        if self._current_dlt645_key:
+            self._rebuild_dlt645_fields()
+
+    def _on_dlt645_addr_edited(self, *_args):
+        self._dlt645_addr_touched = True
+
+    def _on_dlt645_broadcast(self, checked: bool):
+        if checked:
+            self._dlt645_addr_backup = self.dlt645_addr.text().strip()
+            addr = "999999999999"
+            key = self._current_dlt645_key
+            if key:
+                try:
+                    spec = get_command(key)
+                except ValueError:
+                    spec = None
+                # 读/写通信地址用 AA×6（文档 §7.4/§7.5），其余广播用 99×6
+                if spec and spec["func"] in (0x13, 0x15):
+                    addr = "AAAAAAAAAAAA"
+            self.dlt645_addr.setText(addr)
+        else:
+            self.dlt645_addr.setText(
+                getattr(self, "_dlt645_addr_backup", "") or "000000000000")
+        self._dlt645_addr_touched = True
+
+    def _update_dlt645_di_info(self, di: str):
+        from dlt645_frame_schema import get_di_info
+        if not di:
+            self.dlt645_di_info.setText("未选择数据标识（可输 8 位 DI 或中文关键词搜索）")
+            return
+        info = get_di_info(di)
+        if info["name"]:
+            unit = f"｜单位 {info['unit']}" if info["unit"] else ""
+            self.dlt645_di_info.setText(
+                f"{di}｜{info['name']}｜格式 {info['data_type'] or '未声明'}"
+                f"｜长度 {info['length']} 字节{unit}")
+        else:
+            self.dlt645_di_info.setText(f"{di}｜不在 dlt645_di.json 映射表，按裸字节填写")
+
+    def _rebuild_dlt645_fields(self):
+        """按当前命令 + 所选 DI 的 data_type 掩码重建字段表单"""
+        self._clear_layout(self.dlt645_field_layout)
+        self._dlt645_field_widgets = {}
+        key = self._current_dlt645_key
+        if not key:
+            return
+        try:
+            spec = get_command(key)
+        except ValueError:
+            return
+        fields = [f for f in (spec.get("fields") or []) if f.get("type") != "di"]
+        if spec.get("has_di"):
+            di = self._dlt645_current_di()
+            self._update_dlt645_di_info(di)
+            # 读请求（11H/12H）数据域仅 DI：丢弃通用值字段（避免展示被忽略的输入框），
+            # 但保留 LME 查询请求的结构化条目字段（lme_entries）；
+            # 写数据 14H / 读应答 91H·92H 的数据域才含值，按掩码推导字段
+            derived = build_di_fields(di) if di else []
+            if key[0] == "req" and key[1] in (0x11, 0x12):
+                derived = [f for f in derived
+                           if f.get("type") == "lme_entries"]
+            # schema 里的通用值字段被掩码推导出的专用字段取代（裸 hex 兜底保留）
+            fields = derived + [f for f in fields if f.get("type") not in
+                                ("di_value", "demand", "demand_time")]
+        else:
+            self.dlt645_di_info.setText("")
+        for f in fields:
+            row = QHBoxLayout()
+            row.setSpacing(6)
+            lab = QLabel(f"{f['name']}:")
+            lab.setMinimumWidth(130)
+            row.addWidget(lab)
+            edit = QLineEdit(str(f.get("default", "")))
+            hint = f.get("hint") or ""
+            if hint:
+                edit.setToolTip(hint)
+                edit.setPlaceholderText(hint[:60])
+            row.addWidget(edit, 1)
+            # 动态字段也要接实时预览调度（与其他协议的固定控件同模式）
+            edit.textChanged.connect(self._schedule_realtime_update)
+            self.dlt645_field_layout.addLayout(row)
+            self._dlt645_field_widgets[f["name"]] = edit
+        self._refresh_dlt645_warning()
+
+    def _collect_dlt645_values(self) -> Dict[str, Any]:
+        fv: Dict[str, Any] = {}
+        key = self._current_dlt645_key
+        if key:
+            try:
+                spec = get_command(key)
+            except ValueError:
+                spec = {}
+            if spec.get("has_di"):
+                di = self._dlt645_current_di()
+                if di:
+                    fv["数据标识 DI"] = di
+        for name, w in self._dlt645_field_widgets.items():
+            fv[name] = w.text().strip()
+        return fv
+
+    def _refresh_dlt645_warning(self, fv=None):
+        """数据长度与 DI 声明不符时给警告，**不阻断**组帧（不校验 DI 可写性）"""
+        key = self._current_dlt645_key
+        if not key:
+            self.dlt645_warn_label.setText("")
+            return
+        try:
+            self.dlt645_warn_label.setText(length_warning(
+                key, fv if fv is not None else self._collect_dlt645_values()))
+        except Exception:
+            self.dlt645_warn_label.setText("")
+
+    def _verify_dlt645_frame(self, frame: bytes):
+        """组帧后立刻用本工具的解析器回读，让「组帧→解析」闭环在 UI 上可见"""
+        try:
+            r = DLT645Parser.parse(frame)
+            ok = bool(r.get("valid"))
+            di = r.get("di_code") or ""
+            desc = r.get("di_desc") or ""
+            extra = f"｜DI={di} {desc}".rstrip() if di else ""
+            self.dlt645_verify_label.setText(
+                f"解析回读：{'通过' if ok else '失败'}{extra}"
+                + ("" if ok else f"｜{r.get('error') or ''}"))
+            self.dlt645_verify_label.setStyleSheet(
+                "color: #2E7D32;" if ok else "color: #C62828;")
+        except Exception as e:
+            self.dlt645_verify_label.setText(f"解析回读异常：{e}")
+            self.dlt645_verify_label.setStyleSheet("color: #C62828;")
+
+    def _generate_dlt645_frame(self):
+        """生成 DLT645-2007 帧（协议6）"""
+        key = self._current_dlt645_key
+        if not key:
+            QMessageBox.warning(self, "警告", "请先选择命令")
+            return
+        fv = self._collect_dlt645_values()
+        addr = self.dlt645_addr.text().strip() or None
+        try:
+            frame = self._dlt645_gen.generate_frame(key, fv, addr=addr)
+        except ValueError as e:
+            self.dlt645_verify_label.setText("")
+            self.dlt645_warn_label.setText(str(e))
+            QMessageBox.warning(self, "组帧失败", str(e))
+            return
+        hex_str = frame.hex().upper()
+        self.result_hex.setText(
+            " ".join(hex_str[i:i + 2] for i in range(0, len(hex_str), 2)))
+        self._refresh_dlt645_warning(fv)
+        self._verify_dlt645_frame(frame)
+        # 点「生成帧」也同步刷新右侧实时预览（不依赖防抖定时器是否已被触发）
+        self._schedule_realtime_update()
 
     def _clear_layout(self, layout):
         """递归清空 layout 中所有 widget 和子 layout"""
@@ -2856,10 +3188,47 @@ class FrameGenWidget(QWidget):
                 self._do_realtime_update_south()
             elif self.protocol_mode == "dlt698":
                 self._do_realtime_update_dlt698()
+            elif self.protocol_mode == "dlt645":
+                self._do_realtime_update_dlt645()
             else:
                 self._do_realtime_update_gdw()
         except Exception:
             pass
+
+    def _do_realtime_update_dlt645(self):
+        """DLT645-2007 实时组帧与解析（200ms 轮询）
+
+        与其他模式一致：字段变化后自动重生成帧、刷新生成结果 hex，
+        并把解析结果填入右侧「实时解析预览」表。
+        """
+        key = self._current_dlt645_key
+        if not key:
+            self.preview_table.setRowCount(0)
+            return
+        fv = self._collect_dlt645_values()
+        addr = self.dlt645_addr.text().strip() or None
+        try:
+            frame = self._dlt645_gen.generate_frame(key, fv, addr=addr)
+        except Exception:
+            # 输入不完整/非法时静默清空预览（定时器高频运行，不弹窗）
+            self.preview_table.setRowCount(0)
+            return
+        hex_str = frame.hex().upper()
+        self.result_hex.setText(
+            " ".join(hex_str[i:i + 2] for i in range(0, len(hex_str), 2)))
+        try:
+            r = DLT645Parser.parse(frame)
+        except Exception:
+            self.preview_table.setRowCount(0)
+            return
+        # parse() 的 fields 行有 3 元组（表头类）与 4 元组两种，统一补齐到 4 列
+        rows = []
+        for it in r.get("fields", []):
+            it = tuple(it)
+            rows.append(it + ("",) * max(0, 4 - len(it)))
+        self._populate_preview_table(rows)
+        self._refresh_dlt645_warning(fv)
+        self._verify_dlt645_frame(frame)
 
     def _do_realtime_update_south(self):
         """南网实时组帧与解析"""
@@ -3143,6 +3512,8 @@ class FrameGenWidget(QWidget):
                 self._generate_south_frame()
             elif self.protocol_mode == "dlt698":
                 self._generate_dlt698_frame()
+            elif self.protocol_mode == "dlt645":
+                self._generate_dlt645_frame()
             else:
                 self._generate_gdw_frame()
         except Exception as e:
@@ -3761,8 +4132,8 @@ class FrameGenWidget(QWidget):
     # 协议模式切换
     # ------------------------------------------------------------------
     def set_protocol_mode(self, mode: str):
-        """切换协议模式: 'south'='南网', 'gdw'='国网', 'dlt698'='698.45'"""
-        if mode not in ("south", "gdw", "dlt698"):
+        """切换协议模式: 'south'='南网', 'gdw'='国网', 'dlt698'='698.45', 'dlt645'='DLT645-2007'"""
+        if mode not in ("south", "gdw", "dlt698", "dlt645"):
             return
         self.protocol_mode = mode
 
@@ -3770,9 +4141,11 @@ class FrameGenWidget(QWidget):
         self.di_combo.setVisible(False)
         self.afn_fn_combo.setVisible(False)
         self.dlt698_combo.setVisible(False)
+        self.dlt645_combo.setVisible(False)
         self.south_config_group.setVisible(False)
         self.gdw_config_group.setVisible(False)
         self.dlt698_config_group.setVisible(False)
+        self.dlt645_config_group.setVisible(False)
 
         # 切换命令选择区
         if mode == "south":
@@ -3786,6 +4159,13 @@ class FrameGenWidget(QWidget):
             self.dlt698_config_group.setVisible(True)
             self.mode_custom_rb.setVisible(False)
             self._custom_mode = False
+        elif mode == "dlt645":
+            self.cmd_select_group.setTitle("命令选择")
+            self.dlt645_combo.setVisible(True)
+            self.dlt645_config_group.setVisible(True)
+            self.mode_custom_rb.setVisible(False)
+            self._custom_mode = False
+            self._dlt645_addr_touched = False
         else:  # gdw
             self.cmd_select_group.setTitle("AFN+Fn 选择")
             self.afn_fn_combo.setVisible(True)
@@ -3803,9 +4183,19 @@ class FrameGenWidget(QWidget):
         self._current_di_key = None
         self._current_afn_fn = None
         self._current_dlt698_key = None
+        self._current_dlt645_key = None
+        self._dlt645_field_widgets.clear()
+        self.dlt645_verify_label.setText("")
+        self.dlt645_warn_label.setText("")
         self._rebuild_form(None)
         self.result_hex.clear()
         self.preview_table.setRowCount(0)
+
+        # dlt645 的命令选择必须在上面「清空当前选择」之后重建：
+        # 否则 _current_dlt645_key 会被同步清空，生成时误报「请先选择命令」。
+        # 又因首个命令就是下拉第 0 项，setCurrentIndex(0) 不会发信号，故需显式刷新。
+        if mode == "dlt645":
+            self._reset_dlt645_selection()
 
     # ------------------------------------------------------------------
     # 公共接口
@@ -3841,6 +4231,14 @@ class FrameGenWidget(QWidget):
         self.dlt698_seg.setCurrentIndex(0)
         self.dlt698_func.setCurrentIndex(1)
         self._current_dlt698_key = None
+        if hasattr(self, "dlt645_addr"):
+            self._dlt645_addr_touched = False
+            self.dlt645_broadcast.setChecked(False)
+            self.dlt645_addr.setText("000000000000")
+            self._current_dlt645_key = None
+            self.dlt645_verify_label.setText("")
+            self.dlt645_warn_label.setText("")
+            self._reset_dlt645_selection()
         self.result_hex.clear()
         if hasattr(self, 'preview_table'):
             self.preview_table.setRowCount(0)

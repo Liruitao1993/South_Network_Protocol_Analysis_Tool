@@ -269,21 +269,49 @@ def test_auto_channel_pb40_strong_signal():
 
 
 def test_auto_channel_explicit_unchanged():
-    """T8: 显式 channel=plc/hrf 行为不变（无通道判定行，解析结果一致）"""
+    """T8: 显式 channel 仅作为提示——MPDU 一律按 FC 判别；
+    判别与下拉一致时无「通道判别」提示行，解析结果不变"""
     parser = CSGNewGenParser()
     frame = _user_plc_mpdu()
     table = parser.parse_to_table(frame, parse_level="fc_pb", channel="plc")
-    assert find_field(table, "通道判定") is None, "显式plc不应出现通道判定行"
+    row = find_field(table, "通道判定")
+    assert row and row[2] == "PLC 载波", f"显式plc且FC判别一致时应为PLC: {row}"
+    assert find_field(table, "通道判别") is None, "判别与下拉一致时不应有不一致提示行"
     assert find_field(table, "符号数"), "显式plc解析缺少符号数"
 
     app_payload = bytes.fromhex("11 01 01 00 00 00 00 01")
     mac_frame = _single_hop_mac(0x01, app_payload)
     hrf = _hrf_sof_fc() + _pb136(mac_frame)
     table2 = parser.parse_to_table(hrf, parse_level="fc_pb", channel="hrf")
-    assert find_field(table2, "通道判定") is None, "显式hrf不应出现通道判定行"
+    row = find_field(table2, "通道判定")
+    assert row and row[2] == "HRF 高速无线", f"显式hrf且FC判别一致时应为HRF: {row}"
+    assert find_field(table2, "通道判别") is None, "判别与下拉一致时不应有不一致提示行"
     row = find_field(table2, "MCS")
     assert row and row[2] == "2", f"显式hrf MCS错误: {row}"
     print("[OK] T8 显式通道回归测试通过")
+
+
+def test_sack_tail_and_channel_note():
+    """T9: SACK 帧(含尾部字节)不再误报 MAC 长度不足；下拉与 FC 判别不一致时提示"""
+    parser = CSGNewGenParser()
+    sack = bytes.fromhex("0A10011000000000000000000010EDD22254EE")
+    table = parser.parse_to_table(sack, parse_level="auto", channel="plc")
+    blob = " ".join(str(r[0]) + str(r[3]) for r in table)
+    assert "MAC帧长度不足" not in blob, f"SACK 不应误报MAC长度不足: {blob[:200]}"
+    row = find_field(table, "定界符类型")
+    assert row and "选择确认" in str(row[3]), f"应识别为选择确认帧: {row}"
+    row = find_field(table, "尾部字节")
+    assert row and "3 字节" in str(row[2]), f"尾部字节应展示: {row}"
+    # 16 字节标准 SACK：无尾部字节行
+    table2 = parser.parse_to_table(sack[:16], parse_level="auto", channel="plc")
+    assert find_field(table2, "定界符类型") is not None, "16字节SACK应识别定界符"
+    assert find_field(table2, "尾部字节") is None, "16字节SACK不应有尾部字节行"
+    # 下拉与 FC 判别不一致 → 「通道判别」提示行（以 FC 判别为准）
+    table3 = parser.parse_to_table(_user_plc_mpdu(), parse_level="fc_pb",
+                                   channel="hrf")
+    row = find_field(table3, "通道判别")
+    assert row and row[1] == "hrf" and row[2] == "plc", f"不一致提示行错误: {row}"
+    print("[OK] T9 SACK尾字节与通道提示测试通过")
 
 
 if __name__ == "__main__":
@@ -295,5 +323,6 @@ if __name__ == "__main__":
     test_auto_channel_hrf()
     test_auto_channel_pb40_strong_signal()
     test_auto_channel_explicit_unchanged()
+    test_sack_tail_and_channel_note()
     print("=" * 50)
     print("[OK] 全部测试通过")

@@ -190,17 +190,17 @@ class DLT645Parser:
                 ('通信地址（数据域）', addr_raw, result['address_in_data'],
                  f'{addr_desc}，BCD编码低位在前'))
         elif timing_in_data:
-            # 广播校时：ss mm hh DD MM 星期（BCD）
+            # 广播校时：线序 ss mm hh DD MM YY（BCD）
+            # 依据 DL/T645-2007 §7.6：数据域 YYMMDDhhmmss（年.月.日.时.分.秒），L=06H，
+            # 帧格式表给出线序为 ss mm hh DD MM YY——**第 6 字节是年，不是星期**。
             def _bcd(b):
                 return (b >> 4) * 10 + (b & 0x0F)
             td = result['data']
-            week_map = {1: '一', 2: '二', 3: '三', 4: '四', 5: '五', 6: '六', 7: '日'}
-            time_text = (f"{_bcd(td[4]):02d}月{_bcd(td[3]):02d}日 "
-                         f"{_bcd(td[2]):02d}:{_bcd(td[1]):02d}:{_bcd(td[0]):02d} "
-                         f"星期{week_map.get(_bcd(td[5]), str(_bcd(td[5])))}")
+            time_text = (f"20{_bcd(td[5]):02d}-{_bcd(td[4]):02d}-{_bcd(td[3]):02d} "
+                         f"{_bcd(td[2]):02d}:{_bcd(td[1]):02d}:{_bcd(td[0]):02d}")
             result['fields'].append(
                 ('校时数据（数据域）', ' '.join(f"{b:02X}" for b in td[0:6]),
-                 time_text, '广播校时，ss mm hh DD MM 星期，BCD编码'))
+                 time_text, '广播校时，线序 ss mm hh DD MM YY，BCD编码'))
         elif func_code in (0x1A, 0x1B) and not (ctrl & 0x80):
             # 电表清零/事件清零请求：密码4B+操作者代码4B+操作对象4B，数据域无数据标识前缀
             result['fields'].append(

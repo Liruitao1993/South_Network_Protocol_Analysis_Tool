@@ -2238,16 +2238,46 @@ class GDW10376Parser:
             data_slice = content[10:]
         else:
             data_slice = content[10:10+data_len_field]
-        # 645 数据域前4字节 DI 小端: DI3 DI2 DI1 DI0 → 0xEBXXXXXXXX 需 DI0=EB
-        if len(data_slice) < 4 or data_slice[0] != 0xEB:
+        # 645 数据域前4字节为 DI。双口径兼容（决策 OQ6）：
+        # ① 加扰：标准口径数据域逐字节 +0x33（EB 加扰后为 1E），旧版明文帧首/末字节为 EB；
+        # ② 字节序：标准 645 低字节在前（DI3=EB 在末字节，真实抓包已证），
+        #    旧口径/附件1 表序为高字节在前（EB 在首字节）。
+        if len(data_slice) >= 4 and (data_slice[3] == 0x1E or data_slice[0] == 0x1E):
+            data_slice = bytes((b - 0x33) & 0xFF for b in data_slice)
+            scramble_note = "标准 +0x33 加扰"
+        elif len(data_slice) >= 4 and (data_slice[3] == 0xEB or data_slice[0] == 0xEB):
+            scramble_note = "明文未加扰（可能为旧版工具生成）"
+        else:
             return False
-        di3, di2, di1, di0 = data_slice[0], data_slice[1], data_slice[2], data_slice[3]
-        # 附件1 数据标识为 EB XX XX XX（DI3=EB 固定）
-        di_code = f"EB{di2:02X}{di1:02X}{di0:02X}"
+        if len(data_slice) < 4:
+            return False
+        if data_slice[3] == 0xEB:
+            di_code = (f"{data_slice[3]:02X}{data_slice[2]:02X}"
+                       f"{data_slice[1]:02X}{data_slice[0]:02X}")
+            order_note = "低字节在前（标准）"
+        elif data_slice[0] == 0xEB:
+            di_code = (f"{data_slice[0]:02X}{data_slice[1]:02X}"
+                       f"{data_slice[2]:02X}{data_slice[3]:02X}")
+            order_note = "高字节在前（旧口径）"
+        else:
+            return False
         di_name = self._get_eb_di_name(di_code)
         table_data.append(("  [内嵌645]控制码", f"0x{ctrl:02X}", self._get_645_ctrl_desc(ctrl), "645帧控制码", base_offset, base_offset + 8))
         table_data.append(("  [内嵌645]数据域长度", f"0x{data_len_field:02X}", str(data_len_field), "字节", base_offset + 9, base_offset + 9))
         table_data.append(("  [内嵌645]数据标识", di_code, di_name, "附件1 本地通信模块扩展协议", base_offset + 10, base_offset + 13))
+        table_data.append(("  [内嵌645]数据域口径", "",
+                           f"{scramble_note}｜DI {order_note}",
+                           "DL/T645-2007 数据域逐字节 +0x33、DI 低字节在前",
+                           base_offset + 10, base_offset + 9 + data_len_field))
+        # CS 校验标注（仅提示，不阻断解析：避免厂家实现差异导致整帧不可读）
+        if 10 + data_len_field + 2 <= len(content):
+            cs_expect = sum(content[:10 + data_len_field]) & 0xFF
+            cs_actual = content[10 + data_len_field]
+            table_data.append((
+                "  [内嵌645]校验和 CS", f"{cs_actual:02X}",
+                "正确" if cs_actual == cs_expect else f"不符（期望 {cs_expect:02X}）",
+                "sum(帧首…数据域末)&0xFF",
+                base_offset + 10 + data_len_field, base_offset + 10 + data_len_field))
         # 解析 EB 数据内容
         eb_data = data_slice[4:]
         self._parse_eb_di(di_code, eb_data, base_offset + 14, table_data)

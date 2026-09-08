@@ -294,16 +294,16 @@ def test_dlt645_lme():
           "通信地址（数据域）" in fw and fw["通信地址（数据域）"][0] == "260526000028",
           str(fw.get("通信地址（数据域）")))
 
-    # 广播校时（C=08H，数据域 ss mm hh DD MM 星期 BCD）
+    # 广播校时（C=08H，数据域线序 ss mm hh DD MM YY）
+    # 依据 DL/T645-2007 §7.6：数据域 YYMMDDhhmmss，第 6 字节是**年**而非星期
     def bcd(v):
         return ((v // 10) << 4) | (v % 10)
-    tdata = bytes([bcd(30), bcd(26), bcd(16), bcd(4), bcd(9), 5])  # 09月04日16:26:30 周五
+    tdata = bytes([bcd(30), bcd(26), bcd(16), bcd(4), bcd(9), bcd(26)])  # 2026-09-04 16:26:30
     rt = DLT645Parser.parse(build_frame(tdata, ctrl=0x08))
     ft = field_map(rt)
     check("广播校时 校时数据行", "校时数据（数据域）" in ft, str(list(ft)))
     check("广播校时 时间解析",
-          "09月04日 16:26:30" in ft.get("校时数据（数据域）", ("",))[0]
-          and "星期五" in ft.get("校时数据（数据域）", ("",))[0],
+          "2026-09-04 16:26:30" in ft.get("校时数据（数据域）", ("",))[0],
           str(ft.get("校时数据（数据域）")))
 
     # ========== 11. 标准DLT645数据值解码 ==========
