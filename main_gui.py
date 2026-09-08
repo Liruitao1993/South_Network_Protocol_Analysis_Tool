@@ -99,6 +99,7 @@ CHANGELOG = [
             "协议9 新增逐 PB 的 PBCS CRC-24 校验（计算范围=物理块头+物理块体+保留字节，存储值小端）：校验通过 / 置零(采集接口未提供) / 校验失败(计算值=…) 三态结论，尾部不足4字节显示「PBCS缺失(帧截断)」；另增 PB 尾保留字节行便于逐字节核对校验范围；经 4×520 置零 PBCS 真实帧与真实非零 PBCS 帧双重验算",
             "测试：新增 test_csg_pb_size_pbcs.py（4 项：真实 2096 字节帧切片与置零告警、合成 4×136 校验通过、篡改 PBCS 校验失败、截断帧 PBCS 缺失）；既有 csg 测试 69 项全过无回归",
             "协议9 多物理块帧表格改为逐块交错展示：物理块头[i]→物理块体[i]→保留(PB尾)/物理块检查序列[i]→下一个PBH，不再把多PB体合并成一行堆在表尾；重组体不符 MAC 帧特征（噪声/加密载荷）时逐块按原始报文展示并抑制其后 MAC/MSDU 伪解析行（加「MAC重组解析=无法解析」标记行），合法 MAC 帧不受误伤；test_csg_pb_size_pbcs 增 T5/T6 覆盖顺序与抑制",
+            "修复单帧解析选中行高亮同步：输入框可视区自动滚动到高亮字节位置（长报文换行后靠后字节的高亮此前落在滚动区外不可见，多PB帧 PBCS 行尤甚）；增加 start>end 异常范围守卫；新增 offscreen 回归 test_csg_pb_highlight_gui.py（16 项：PBCS 四行高亮落点+滚动同步+FC 对照）",
         ],
     ),
     (
@@ -9630,6 +9631,9 @@ class MainWindow(QMainWindow):
         text_len = len(self.single_input.toPlainText())
         if char_end > text_len:
             char_end = text_len
+        if char_start > char_end:
+            # 异常范围（如截断行 start>end）不高亮
+            return
 
         # 选中对应字符，应用高亮
         highlight_cursor = QTextCursor(doc)
@@ -9641,6 +9645,10 @@ class MainWindow(QMainWindow):
         hl_fmt.setForeground(QColor("#000000"))
         hl_fmt.setBackground(QColor(255, 235, 59, 160))  # 黄色半透明高亮
         highlight_cursor.setCharFormat(hl_fmt)
+
+        # 输入框可视区同步滚动到高亮位置：长报文换行后靠后的字节（如多PB帧的
+        # PBCS）否则高亮落在滚动区外，用户看不到对应报文位置
+        self.single_input.setTextCursor(highlight_cursor)
 
     def _extract_apdu_reparse(self, index):
         """双击表格行时，提取该行对应字节范围，弹窗深度解析DLMS-APDU"""
