@@ -9,6 +9,9 @@
 - T2 合成 4×136 PB 帧（CMT=4→映射136 与帧长自洽）：无推断行，4 行 PBCS 校验通过
 - T3 篡改 PB[2] 的 PBCS 为非零错误值：该行显示「校验失败(计算值=...)」
 - T4 截掉末 PB 尾部 4 字节：不抛异常，末 PB 显示「PBCS缺失(帧截断)」
+- T5 展示顺序：逐块交错「PBH→块体→PBCS」；噪声载荷块体按原始报文展示且
+     抑制 MAC/MSDU 伪解析行（出现「MAC重组解析=无法解析」标记行）
+- T6 合法 MAC 帧体：块体行之后仍有 MAC/MSDU 解析行（抑制不误伤合法帧）
 """
 
 import _path_setup  # noqa: E402
@@ -18,6 +21,8 @@ from csg_new_gen_parser import CSGNewGenParser
 
 # CRC-24 参数与解析器 _crc24 一致：poly=0x1800063, init=0, rev=True, xorOut=0
 _crc24_func = crcmod.mkCrcFun(0x1800063, initCrc=0x000000, rev=True, xorOut=0x000000)
+# CRC-32 (IEEE 802.3)：与解析器 MAC 帧完整性校验一致，用于构造合法 MAC 帧
+_crc32_func = crcmod.mkCrcFun(0x104C11DB7, initCrc=0x000000, rev=True, xorOut=0xFFFFFFFF)
 
 # 真实抓包帧（2096 字节 = FC 16 + 4×520 PB），来源 _tmp_test/probe_frame.hex，
 # 内嵌于此以便测试不依赖 _tmp_test 目录
@@ -158,6 +163,24 @@ def _synthetic_frame(pb_count=4, pb_total=136, cmt_index=4) -> bytes:
     return frame
 
 
+def _index_of(table, name):
+    """返回字段名首次出现的行下标（不存在返回 -1）"""
+    for idx, row in enumerate(table):
+        if str(row[0]).strip() == name:
+            return idx
+    return -1
+
+
+def _valid_mac_frame() -> bytes:
+    """构造合法 MAC 帧：版本1 短头(12B) + MSDU短头(VLAN=0,类型=0x01) + 应用层 + CRC-32"""
+    msdu = bytes([0x00, 0x01, 0x11, 0x01, 0x01, 0x00, 0x00, 0x00])
+    mac_hdr = bytearray(12)
+    mac_hdr[0] = 0x03  # 帧头类型=1(短头) | 版本=1(bit1)
+    mac_hdr[2:4] = len(msdu).to_bytes(2, 'little')
+    crc = _crc32_func(msdu).to_bytes(4, 'little')
+    return bytes(mac_hdr) + msdu + crc
+
+
 def test_real_4pb_520_slice_and_zero_pbcs():
     """T1: 真实 4-PB 帧按帧长一致性推断为 520 字节切片，PBCS 全零 → 置零告警"""
     frame = bytes.fromhex("".join(REAL_FRAME_HEX.split()))
@@ -248,10 +271,62 @@ def test_truncated_pbcs_missing():
     print("[OK] T4 截断帧PBCS缺失测试通过")
 
 
+def test_interleaved_order_and_noise_suppression():
+    """T5: 逐块交错展示 PBH→块体→PBCS；噪声载荷抑制 MAC/MSDU 伪解析行"""
+    frame = bytes.fromhex("".join(REAL_FRAME_HEX.split()))
+    table = CSGNewGenParser().parse_to_table(frame, parse_level="fc_pb")
+
+    # 交错顺序：物理块头[i] → 物理块体[i] → 物理块检查序列[i] → 物理块头[i+1]
+    for i in range(4):
+        i_head = _index_of(table, f"物理块头[{i}]")
+        i_body = _index_of(table, f"物理块体[{i}]")
+        i_pbcs = _index_of(table, f"物理块检查序列[{i}]")
+        assert i_head >= 0 and i_body >= 0 and i_pbcs >= 0, \
+            f"物理块[{i}] 缺少 PBH/块体/PBCS 行: {i_head},{i_body},{i_pbcs}"
+        assert i_head < i_body < i_pbcs, \
+            f"物理块[{i}] 行顺序应为 PBH→块体→PBCS: {i_head},{i_body},{i_pbcs}"
+        if i < 3:
+            i_next = _index_of(table, f"物理块头[{i + 1}]")
+            assert i_pbcs < i_next, f"物理块[{i}] 的 PBCS 应在下一个 PBH 之前: {i_pbcs},{i_next}"
+
+    # 噪声载荷：块体按原始报文展示，不再堆一行合并的「物理块体」
+    assert rows_named(table, "物理块体") == [], "多PB帧不应再出现合并的「物理块体」行"
+    for i in range(4):
+        body = rows_named(table, f"物理块体[{i}]")
+        assert body and "无法按MAC帧解析" in body[0][3], f"物理块体[{i}] 应标为原始报文展示: {body}"
+        assert body[0][2] == "512字节", f"物理块体[{i}] 应为 512 字节: {body}"
+
+    # 伪解析行抑制：无 MAC/MSDU 行，仅一条「MAC重组解析=无法解析」标记
+    assert rows_named(table, "帧头类型") == [], "噪声载荷不应输出 MAC 帧头类型行"
+    assert rows_named(table, "MSDU类型") == [], "噪声载荷不应输出 MSDU 类型行"
+    marker = rows_named(table, "MAC重组解析")
+    assert marker and marker[0][2] == "无法解析", f"应有 MAC重组解析=无法解析 标记行: {marker}"
+    print("[OK] T5 交错展示+噪声抑制测试通过")
+
+
+def test_valid_mac_body_still_parsed():
+    """T6: 单PB 携带合法 MAC 帧 → 块体行之后仍有 MAC/MSDU 解析行（抑制不误伤）"""
+    frame = _bplc_sof_fc(pb_count=1, cmt_index=4) + _pb(0, 136, body=_valid_mac_frame())
+    table = CSGNewGenParser().parse_to_table(frame, parse_level="fc_pb")
+
+    body = rows_named(table, "物理块体")
+    assert body, "单PB 帧应有「物理块体」行"
+    assert "承载MAC帧数据" in body[0][3], f"合法 MAC 帧体说明错误: {body}"
+    i_body = _index_of(table, "物理块体")
+    i_mac = _index_of(table, "帧头类型")
+    i_msdu = _index_of(table, "MSDU类型")
+    assert i_mac > i_body > 0, f"MAC 解析行应在块体行之后: {i_body},{i_mac}"
+    assert i_msdu > i_mac, f"MSDU 类型行应在 MAC 行之后: {i_mac},{i_msdu}"
+    assert rows_named(table, "MAC重组解析") == [], "合法 MAC 帧不应出现无法解析标记"
+    print("[OK] T6 合法MAC帧体仍解析测试通过")
+
+
 if __name__ == "__main__":
     test_real_4pb_520_slice_and_zero_pbcs()
     test_synthetic_4pb_136_pbcs_pass()
     test_synthetic_pbcs_mismatch()
     test_truncated_pbcs_missing()
+    test_interleaved_order_and_noise_suppression()
+    test_valid_mac_body_still_parsed()
     print("=" * 50)
     print("[OK] 全部测试通过")

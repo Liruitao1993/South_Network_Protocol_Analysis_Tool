@@ -1241,6 +1241,46 @@ class CSGNewGenParser:
                 return size, True    # 帧长一致性唯一解，覆盖映射值
         return cmt_size, False       # 无解（截断/带尾字节/混合PB），回退映射值
 
+    def _mac_plausible(self, data: bytes) -> bool:
+        """重组后的 PB 体是否具备 MAC 帧特征的粗判（噪声载荷不输出伪解析行）。
+
+        判据（表12 / MSDU 头约定）：
+        - 字节0 帧头类型(1b)∈{0,1} 且 版本(2b)∈{1,2}；
+        - 版本2 单跳帧：字节1 MSDU类型∈{0x01,0x02,0x80} 且 4+MSDU长度+4(CRC-32)≤总长；
+        - 版本1：MSDU 短头(12B头)/长头(32B头) 的 VLAN+类型合法，
+          或载荷带应用层特征(0x11/0x13 + 0x0101)，或管理消息特征扫描命中。
+        """
+        if len(data) < 8:
+            return False
+        b0 = data[0]
+        header_type = b0 & 0x01
+        version = (b0 >> 1) & 0x03
+        if header_type not in (0, 1) or version not in (1, 2):
+            return False
+        if version == 2:
+            msdu_type = data[1]
+            msdu_len = int.from_bytes(data[2:4], 'little')
+            return msdu_type in (0x01, 0x02, 0x80) and 4 + msdu_len + 4 <= len(data)
+        hdr = 32 if header_type == 0 else 12
+        payload = data[hdr:]
+        if len(payload) >= 3 and payload[0] in (0x11, 0x13) \
+                and ((payload[1] << 8) | payload[2]) == 0x0101:
+            return True
+        if hdr == 12 and len(payload) >= 2:
+            vlan, mtype = payload[0], payload[1]
+            if (0 <= vlan <= 3 and mtype in (0x01, 0x02, 0x80)) \
+                    or (vlan == 0x81 and mtype == 0x00):
+                return True
+        if hdr == 32 and len(payload) >= 18:
+            vlan = int.from_bytes(payload[12:16], 'little')
+            mtype = int.from_bytes(payload[16:18], 'little')
+            if (0 <= vlan <= 3 and mtype in (0x01, 0x02, 0x80)) \
+                    or (vlan == 0x8100 and mtype == 0x88E1):
+                return True
+        if len(payload) >= 2:
+            return self._scan_mgmt_msdu_offset(payload, max_scan=32) is not None
+        return False
+
     def _parse_pb_block(self, frame_bytes: bytes, offset: int,
                         table_data: list, frame_len: int):
         """解析物理块(PB)：PB头(4B) + PB体(MAC帧) + 保留 + PBCS(3B)
@@ -1278,11 +1318,13 @@ class CSGNewGenParser:
                 ))
         pb_body_size = self._get_pb_body_size(pb_total_size)
 
-        # 遍历所有PB，输出PB头/PBCS行，拼接所有PB体为 mac_concat
+        # 遍历所有PB：每块行先缓存，循环后按「PBH → 块体 → 保留/PBCS」逐块交错发射，
+        # 避免多PB帧的块体合并成一行堆在表格末尾；同时拼接所有PB体为 mac_concat
         mac_concat = b''
         pb_body_offset = offset + pb_hdr_len  # 第一个PB体起始（MAC帧头所在）
         pb_agg_flag = 0
         multi = pb_count > 1
+        pb_sections = []
         for i in range(pb_count):
             pb_off = offset + i * pb_total_size
             pb_data = frame_bytes[pb_off:pb_off + pb_total_size]
@@ -1293,29 +1335,31 @@ class CSGNewGenParser:
                 pb_agg_flag = pb_data[2] & 0x01
             pb_agg_desc = "物理块中有多个MAC帧，物理块体中有级联头" if pb_agg_flag else "物理块中只有一个MAC帧，物理块体中没有级联头"
             tag = f"[{i}]" if multi else ""
-            table_data.append((
-                f"物理块头{tag}",
-                ' '.join(f'{b:02X}' for b in pb_data[0:pb_hdr_len]),
-                f"序列号:{pb_seq}, 聚合标志:{pb_agg_flag}",
-                f"物理块头{tag}: {pb_agg_desc}",
-                pb_off, pb_off + pb_hdr_len - 1
-            ))
-            table_data.append((
-                f"  序列号{tag}",
-                ' '.join(f'{b:02X}' for b in pb_data[0:2]),
-                str(pb_seq),
-                f"MPDU载荷中物理块{tag}的序号",
-                pb_off, pb_off + 1
-            ))
-            table_data.append((
-                f"  聚合标志{tag}",
-                f"0b{pb_agg_flag}",
-                str(pb_agg_flag),
-                pb_agg_desc,
-                pb_off + 2, pb_off + 2
-            ))
+            head_rows = [
+                (
+                    f"物理块头{tag}",
+                    ' '.join(f'{b:02X}' for b in pb_data[0:pb_hdr_len]),
+                    f"序列号:{pb_seq}, 聚合标志:{pb_agg_flag}",
+                    f"物理块头{tag}: {pb_agg_desc}",
+                    pb_off, pb_off + pb_hdr_len - 1
+                ),
+                (
+                    f"  序列号{tag}",
+                    ' '.join(f'{b:02X}' for b in pb_data[0:2]),
+                    str(pb_seq),
+                    f"MPDU载荷中物理块{tag}的序号",
+                    pb_off, pb_off + 1
+                ),
+                (
+                    f"  聚合标志{tag}",
+                    f"0b{pb_agg_flag}",
+                    str(pb_agg_flag),
+                    pb_agg_desc,
+                    pb_off + 2, pb_off + 2
+                ),
+            ]
             pb_reserved = ((pb_data[2] >> 1) & 0x7F) | (pb_data[3] << 7)
-            table_data.append((
+            head_rows.append((
                 f"  保留{tag}",
                 f"0x{pb_reserved:04X}",
                 str(pb_reserved),
@@ -1323,15 +1367,18 @@ class CSGNewGenParser:
                 pb_off + 2, pb_off + 3
             ))
             # PB体（不足补0）
-            body = pb_data[pb_hdr_len:pb_hdr_len + pb_body_size]
-            if len(body) < pb_body_size:
-                body = body + b'\x00' * (pb_body_size - len(body))
+            raw_body = pb_data[pb_hdr_len:pb_hdr_len + pb_body_size]
+            actual_body_len = len(raw_body)
+            body = raw_body
+            if actual_body_len < pb_body_size:
+                body = raw_body + b'\x00' * (pb_body_size - actual_body_len)
             mac_concat += body
-            # PBCS: 保留1字节 + 检查序列3字节
+            # PBCS: 保留1字节 + 检查序列3字节（行缓存，待块体行之后发射）
+            pbcs_rows = []
             pbcs_off = pb_off + pb_hdr_len + pb_body_size
             if pbcs_off + 1 <= frame_len:
                 # 保留字节单独成行（R7），便于在 UI 中逐字节核对 CRC-24 计算范围
-                table_data.append((
+                pbcs_rows.append((
                     f"  保留{tag}(PB尾)",
                     f"0x{frame_bytes[pbcs_off]:02X}",
                     str(frame_bytes[pbcs_off]),
@@ -1358,7 +1405,7 @@ class CSGNewGenParser:
                     parsed = f"0x{stored:06X}"
                     desc = (f"物理块{tag}CRC-24(物理块头+物理块体+保留共{crc_len}字节)，"
                             f"校验失败(计算值=0x{calc:06X})")
-                table_data.append((
+                pbcs_rows.append((
                     f"物理块检查序列{tag}",
                     ' '.join(f'{b:02X}' for b in pbcs_data),
                     parsed,
@@ -1369,23 +1416,48 @@ class CSGNewGenParser:
                 # 帧截断：尾部不足 保留1+PBCS3 共4字节 → 不计算、不抛异常（R6）
                 _t_start = pbcs_off if pbcs_off < frame_len else None
                 _t_end = frame_len - 1 if pbcs_off < frame_len else None
-                table_data.append((
+                pbcs_rows.append((
                     f"物理块检查序列{tag}",
                     "",
                     "PBCS缺失(帧截断)",
                     f"物理块{tag}尾部不足4字节(保留1+PBCS3)，无法校验",
                     _t_start, _t_end
                 ))
+            pb_sections.append((tag, head_rows, pb_off, actual_body_len, pbcs_rows))
+
+        # 重组后判定 PB 体能否按 MAC 帧解析：噪声载荷只按原始报文展示，不输出伪解析行
+        is_beacon = getattr(self, '_delimiter_type', 1) == 0
+        if not mac_concat:
+            mac_plausible = False
+        elif is_beacon or pb_agg_flag:
+            mac_plausible = True  # 信标载荷/聚合帧走各自既有解析分支
+        else:
+            mac_plausible = self._mac_plausible(mac_concat)
+
+        # 逐块交错发射：物理块头 → 物理块体 → 保留(PB尾)/物理块检查序列
+        for tag, head_rows, pb_off, actual_body_len, pbcs_rows in pb_sections:
+            table_data.extend(head_rows)
+            body_start = pb_off + pb_hdr_len
+            body_bytes = frame_bytes[body_start:body_start + actual_body_len]
+            if is_beacon:
+                body_desc = "信标帧载荷（无MAC头）"
+            elif pb_agg_flag:
+                body_desc = "聚合帧载荷（级联头+MAC帧）"
+            elif mac_plausible:
+                body_desc = f"承载MAC帧数据{'(多PB重组)' if multi else ''}"
+            else:
+                body_desc = f"无法按MAC帧解析，原始报文展示{'(多PB重组后仍不符)' if multi else ''}"
+            table_data.append((
+                f"物理块体{tag}",
+                ' '.join(f'{b:02X}' for b in body_bytes[:32]) + ("..." if actual_body_len > 32 else ""),
+                f"{actual_body_len}字节",
+                body_desc,
+                body_start, body_start + actual_body_len - 1
+            ))
+            table_data.extend(pbcs_rows)
 
         mac_data = None
         if mac_concat:
-            table_data.append((
-                "物理块体",
-                ' '.join(f'{b:02X}' for b in mac_concat[:30]) + ("..." if len(mac_concat) > 30 else ""),
-                f"{len(mac_concat)}字节",
-                f"PB体承载MAC帧数据{'(多PB重组)' if multi else ''}",
-                pb_body_offset, pb_body_offset + len(mac_concat) - 1
-            ))
             if pb_agg_flag:
                 # 聚合帧：级联头 + MAC帧
                 # 聚合帧的级联块各自解析应用层，主流程不应再对整帧做MSDU兜底
@@ -1426,7 +1498,7 @@ class CSGNewGenParser:
                         "级联帧解析后的剩余数据",
                         pb_body_offset + cascade_offset, pb_body_offset + len(mac_concat) - 1
                     ))
-            else:
+            elif mac_plausible:
                 # 单MAC帧（可能跨多PB）
                 # 应用层由主流程兜底解析（MSDU头展示 + 分派），此处仅解析MAC头
                 self._aggregated = False
@@ -1447,6 +1519,15 @@ class CSGNewGenParser:
                     ))
                 actual_mac_len = mac_end - pb_body_offset
                 mac_data = mac_concat[:actual_mac_len]
+            else:
+                # 噪声载荷：重组体不符 MAC 帧特征，块体已逐块原始展示，不再输出伪解析行
+                self._aggregated = False
+                table_data.append((
+                    "MAC重组解析", "", "无法解析",
+                    "重组后的物理块体不符MAC帧特征(帧头类型/版本/MSDU类型/长度越界)，"
+                    "上方各物理块体已按原始报文展示",
+                    pb_body_offset, pb_body_offset + len(mac_concat) - 1
+                ))
 
         mac_hdr_len = 12
         if mac_data and ((mac_data[0] >> 1) & 0x03) == 2:
@@ -1464,7 +1545,8 @@ class CSGNewGenParser:
         elif mac_data is not None:
             msdu_payload = mac_data[mac_hdr_len:]
         else:
-            msdu_payload = frame_bytes
+            # 无PB体/噪声载荷：不做整帧兜底，避免对MPDU原始字节输出伪MSDU/应用层行
+            msdu_payload = b""
         offset += pb_hdr_len + mac_hdr_len
         return offset, mac_data, msdu_payload
 
