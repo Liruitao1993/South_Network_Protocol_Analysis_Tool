@@ -89,3 +89,11 @@ reflex_web/downloads/o.k..png
 # 临时测试/用户导出产物
 导出选中的测试.xlsx
 testfile.txt
+
+# 本地临时/生成物（不入库）
+/_tmp_test/
+/_tmp_ghost*.py
+/_ws_debug.log
+/query
+/repomix-output.md
+/test/_probe_qp_cards.py

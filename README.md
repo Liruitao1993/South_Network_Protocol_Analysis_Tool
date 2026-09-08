@@ -17,7 +17,7 @@
 | 批量解析 | 从文件或剪贴板导入多帧报文，自动提取完整帧并导出 JSON / CSV / Excel |
 | 协议校验 | 覆盖起始符、长度域、校验和与 CRC，逐项展示通过 / 失败 / 警告 |
 | 表格复制 | 解析结果、批量结果、监控器与 TCP 监控表格支持右键复制及 Ctrl+C |
-| 帧生成 | 南网、国网、698.45 组帧模板，支持预设命令一键填充 |
+| 帧生成 | 南网、国网、698.45、DLT645-2007 组帧模板，支持预设命令一键填充 |
 | 串口通信 | 串口参数配置、帧发送、实时接收解析与日志窗口 |
 | 测试方案 | 测试项 CRUD、顺序发送、超时匹配、结果记录与 Excel 报告导出 |
 | Lua 脚本 | 测试流程中嵌入可编程逻辑，支持条件分支、循环遍历、数据解析与变量共享 |
@@ -81,7 +81,7 @@ python main_gui.py
 python reflex_web/run_app.py
 ```
 
-**Reflex Web 版组帧**：南网(0)/国网(7)/698.45(8) 三种协议组帧与 GUI 完全对齐——预定字段（uint/enum/bytes/ascii/bcd/oi/oad_list/list/sub_fields 按类型分派）、自定义模板（含校验和回填）、698.45 A-XDR 数据编辑器；实时回读解析预览；预设命令按钮（NW_command.json / GW_command.json）一键填入与保存。启动前先编译前端：`cd reflex_web && reflex export --frontend-only --env prod --no-zip`，再 `python reflex_web/run_app.py`。
+**Reflex Web 版组帧**：南网(0)/国网(7)/698.45(8)/DLT645(6) 四种协议组帧与 GUI 完全对齐——预定字段（uint/enum/bytes/ascii/bcd/oi/oad_list/list/sub_fields 按类型分派）、自定义模板（含校验和回填）、698.45 A-XDR 数据编辑器；实时回读解析预览；预设命令按钮（NW_command.json / GW_command.json）一键填入与保存。启动前先编译前端：`cd reflex_web && reflex export --frontend-only --env prod --no-zip`，再 `python reflex_web/run_app.py`。
 
 **问题反馈**：导航栏「问题反馈」入口（`/feedback`）——用户提交问题类型/涉及协议/描述/联系方式/截图（≤3 张）；管理员通过 `/feedback-admin`（复用发布管理口令）查看/标记状态/删除。数据存 `reflex_web/data/`（SQLite + 截图），**重新部署自动保留**，备份只需拷贝该目录。
 
@@ -232,7 +232,7 @@ python main_gui.py --clipboard
 
 ### 帧生成与预设命令
 
-「协议组帧」与「预设命令」标签页在协议 0（南网）、协议 7（国网）与协议 8（698.45）下显示：
+「协议组帧」与「预设命令」标签页在协议 0（南网）、协议 6（DLT645-2007）、协议 7（国网）与协议 8（698.45）下显示：
 
 - 按字段模板填写参数
 - 支持预设命令一键填充
@@ -280,6 +280,7 @@ frame_diff_engine.py         # 协议感知报文对比引擎
 send_frame_lib.py            # 南网帧生成
 gdw_send_frame_lib.py        # 国网帧生成
 dl_t698_45_frame_gen.py      # 698.45 帧生成
+dlt645_frame_gen.py          # DLT645-2007 帧生成（唯一 645 封装实现）
 frame_gen_widget.py          # 协议组帧组件
 preset_buttons.py            # 预设命令组件
 test_plan_widget.py          # 测试方案组件

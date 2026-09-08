@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/guides/index.md", "reason": "Pre-Modification Rule：修改 CS 计算范围与加扰口径前必须全仓库检索 0x33 与 sum(...) & 0xFF，确认所有副本"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "本任务的核心是消除重复实现：应复用兄弟任务新建的 DLT645FrameGenerator 或 archive_widget.py:849 的正确参照，而非再写第 5 份 645 封装"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "生成侧（frame_gen_widget/reflex_web）与解析侧（gdw10376_parser）必须同时改，否则跨层口径不一致导致 EB 解析彻底失效"}
+{"file": ".trellis/tasks/09-07-eb-645-standard-fix/research/cs-and-scramble-evidence.md", "reason": "全部证据：真实抓包 3 帧 CS/加扰验算、附件1 附录3 文档口径、生成侧两处缺陷代码、解析侧缺陷代码、受影响测试与期望值清单、兼容性风险"}
+{"file": ".trellis/tasks/09-07-dlt645-frame-gen-core/design.md", "reason": "兄弟任务的生成器契约（§2.1 build_frame 签名与 scramble 参数）——本任务应复用它而非就地打补丁"}

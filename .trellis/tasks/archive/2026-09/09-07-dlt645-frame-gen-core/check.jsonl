@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/guides/index.md", "reason": "含「验证 AI 交叉评审结果」章节与常见误报模式，检查阶段判定 finding 真伪时使用"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "检查是否新增了重复的 645 封装实现（本任务的核心风险），以及 encode 是否与 decode 成对同居"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查 GUI 与 Web 是否调用同一生成器、字段值在层间传递是否有隐式类型转换或口径漂移"}
+{"file": ".trellis/tasks/09-07-dlt645-frame-gen-core/research/protocol-rules.md", "reason": "校验产出帧是否符合协议规则（CS 范围、+0x33、地址序、DI 传输序）的判据来源"}
+{"file": ".trellis/tasks/09-07-dlt645-frame-gen-core/research/integration-points.md", "reason": "逐项核对 G/M/W/P/S 接入点是否全部落地、有无遗漏（如 set_protocol 静默忽略这类历史坑）"}

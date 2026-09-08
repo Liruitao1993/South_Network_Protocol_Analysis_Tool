@@ -230,6 +230,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 │   ├── hdlc_parser.py              # HDLC/DLMS (HDLCParser)
 │   ├── dlms_deep_parser.py         # DLMS-APDU深度解析 (DLMSDeepParser) - 双击表格行触发
 │   ├── dlt645_parser.py            # DLT645-2007 (DLT645Parser)
+│   ├── dlt645_data_codec.py        # DLT645 数据域编解码（decode_*/split_* 与 encode_*/pack_* 成对互逆）
 │   ├── dl_t698_45_parser.py        # 698.45 链路层 (DLT69845Parser)
 │   │   └── dl_t698_45_apdu_parser.py # 698.45 APDU (DLT69845APDUParser) - 延迟导入避免循环依赖
 │   │       └── dl_t698_45_axdr.py     # A-XDR 编解码 (AXDRCoder, DL/T 790.6-2010)
@@ -260,6 +261,8 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 │   ├── gdw_send_frame_lib.py       # 国网帧生成 (GDWFrameGenerator)
 │   ├── dl_t698_45_frame_gen.py     # 698.45 帧生成 (DLT69845FrameGenerator)
 │   ├── dl_t698_45_frame_schema.py  # 698.45 组帧字段 schema
+│   ├── dlt645_frame_gen.py         # DLT645-2007 帧生成 (DLT645FrameGenerator) — 全仓库唯一 645 封装实现
+│   ├── dlt645_frame_schema.py      # DLT645 组帧命令 schema + data_type 掩码→字段推导
 │   ├── frame_generator_schema.py   # 南网帧生成 UI schema (~165KB)
 │   └── gdw_frame_generator_schema.py # 国网帧生成 UI schema
 │
@@ -424,6 +427,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 | `custom_di.json` | 南网自定义 DI | GUI 运行时增删 |
 | `gdw_custom_afn.json` | 国网自定义 AFN+Fn | GUI 运行时增删 |
 | `dlt645_di.json` | DLT645 标准 DI 映射 | `generate_dlt645_di.py` 生成，**勿手改** |
+| `DLT645_command.json` | 协议6 预设命令 | GUI 运行时增删（种子 5 条） |
 | `dl_t698_45_oi_lookup.py` 内 `OI_NAME_MAP` | 698.45 OI 名称 | `generate_oi_lookup.py` 生成 |
 | `oi_to_class.json` | 698.45 OI→类 | `extract_oi_to_class.py` 生成 |
 
@@ -475,6 +479,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 
 - **解析器**：`dlt645_parser.py` (DLT645Parser)
 - **查询**：`dlt645_di_lookup.py` + `dlt645_di.json`
+- **组帧**：`dlt645_frame_gen.py` + `dlt645_frame_schema.py`（GUI/Web 协议6；DI 掩码驱动字段模板）
 - **校验器**：`validator/dlt645_validator.py`
 - **参考文档**：
   - `DLT645-2007.md` — 主协议（Markdown）

@@ -1,0 +1,29 @@
+{
+  "id": "dlt645-frame-gen",
+  "name": "dlt645-frame-gen",
+  "title": "协议6 DLT645 组帧能力",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "Liruitao1993",
+  "assignee": "Liruitao1993",
+  "createdAt": "2026-09-07",
+  "completedAt": "2026-09-08",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "09-07-dlt645-frame-gen-core",
+    "09-07-eb-645-standard-fix"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/guides/index.md", "reason": "思考指南索引与 Pre-Modification Rule：改动任何值前必须先全仓库检索，本任务涉及多处 645 封装副本"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "本任务要新建 generator 与 encode 系列，仓库内已有 4 份 645 构帧实现（archive_widget.py:849、frame_gen_widget.py:961、reflex_web.py:1591、test_dlt645_lme.py:31），必须先搜索再新建，避免第 5 份副本"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "组帧链路跨 codec→generator→schema→GUI/Web→预设 JSON 多层，数据格式在层间变换（十进制串→BCD→加扰字节），属该指南的典型适用场景"}
+{"file": ".trellis/tasks/09-07-dlt645-frame-gen-core/research/protocol-rules.md", "reason": "645-2007 帧结构、地址字节序、控制码位定义、12 功能码表、+0x33 规则、CS 起止范围、DI 传输序，均带 file:line 与代码交叉验证"}
+{"file": ".trellis/tasks/09-07-dlt645-frame-gen-core/research/parser-codec-encode-gaps.md", "reason": "dlt645_parser.py 与 dlt645_data_codec.py 现状（全 decode 无 encode）与反向 encode 能力清单，Step 2 的直接输入"}
+{"file": ".trellis/tasks/09-07-dlt645-frame-gen-core/research/di-schema-source.md", "reason": "dlt645_di.json 结构与 17 种 data_type 掩码统计、dlt645_di_lookup 合并优先级，Step 3 掩码推导的直接输入"}
+{"file": ".trellis/tasks/09-07-dlt645-frame-gen-core/research/existing-generator-patterns.md", "reason": "三套既有 generator/schema 的类名·签名·schema 键·字段类型对齐，含关键警示：范本的 bcd 类型不是真 BCD 编码，不可照抄"}
+{"file": ".trellis/tasks/09-07-dlt645-frame-gen-core/research/integration-points.md", "reason": "GUI/主程序/Web/预设四处接入点的具体函数与行号清单（G1-G10 / M1-M6 / W1-W5 / P1-P9），Step 4-6 的施工图纸"}
+{"file": ".trellis/tasks/09-07-dlt645-frame-gen-core/research/lme-and-tests.md", "reason": "LME TLV 头编解码可逆性结论与项目测试约定（纯脚本 + check() 计数、无 pytest 装饰器），Step 3.4 与新建测试脚本的依据"}
