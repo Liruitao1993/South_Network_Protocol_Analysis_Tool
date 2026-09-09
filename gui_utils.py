@@ -34,16 +34,23 @@ _STANDARD_ICON_MAP = {
 # 默认图标尺寸（逻辑像素，随系统高 DPI 自动缩放）
 _BTN_ICON_SIZE = 16
 
+# 未知图标键告警去重（静默跳过曾导致「分享此帧」无图标长期未发现）
+_unknown_icon_keys_warned: set = set()
+
 
 def set_btn_icon(btn: QPushButton, icon_key: str, icon_only: bool = False) -> QPushButton:
     """为按钮添加 Qt 内置标准图标（图标 + 文字并存）。
 
-    - icon_key: _STANDARD_ICON_MAP 中的键；未知键静默跳过（不崩溃）。
+    - icon_key: _STANDARD_ICON_MAP 中的键；未知键跳过并打印一次告警（不崩溃）。
     - icon_only: 为 True 时隐藏文字仅显示图标（默认 False 保留文字）。
     图标尺寸固定 _BTN_ICON_SIZE，随系统高 DPI 自动适配；颜色随系统主题。
     """
     pix = _STANDARD_ICON_MAP.get(icon_key)
     if pix is None:
+        if icon_key not in _unknown_icon_keys_warned:
+            _unknown_icon_keys_warned.add(icon_key)
+            print(f"[gui_utils] set_btn_icon 未知图标键: {icon_key!r}（已跳过，"
+                  f"可用键: {sorted(_STANDARD_ICON_MAP)}）")
         return btn
     icon = btn.style().standardIcon(pix)
     btn.setIcon(icon)

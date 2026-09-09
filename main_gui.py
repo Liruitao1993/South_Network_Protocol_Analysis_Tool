@@ -102,6 +102,7 @@ CHANGELOG = [
             "修复单帧解析选中行高亮同步：输入框可视区自动滚动到高亮字节位置（长报文换行后靠后字节的高亮此前落在滚动区外不可见，多PB帧 PBCS 行尤甚）；增加 start>end 异常范围守卫；新增 offscreen 回归 test_csg_pb_highlight_gui.py（16 项：PBCS 四行高亮落点+滚动同步+FC 对照）",
             "「填充CRC-24」扩展支持逐物理块 PBCS 一键回填：解析器新增 calc_pbcs_fills（SOF MPDU 布局与 _parse_pb_block 同口径：FC 取物理块个数、帧长一致性判定 PB 起始{16,32}与大小，截断/信标/非SOF 不填），GUI 对每个完整 PB 重算 CRC-24(PBH+体+保留) 小端写回 PB 尾 3 字节并在提示框逐项列出；采集置零 00 00 00 的多 PB 帧填充后重解析即全部「校验通过」；新增 test_csg_pb_size_pbcs T7/T8 与 offscreen test_csg_pbcs_fill_gui.py（12 项）",
             "修复 exe 打包后窗口/托盘图标缺失：图标曾用 Path(__file__).parent 定位，frozen 下指向 _MEIPASS 而 spec datas 未打包 app_icon.ico 致 exists() 为假静默跳过（exe 文件图标是构建期 icon= 嵌入，与运行时窗口图标无关）；新增 _app_icon_path()（frozen 优先 _MEIPASS、回退 exe 目录）替换窗口与托盘两处引用，spec datas 补 ('app_icon.ico','.') 并补 dlt645_frame_gen/schema hiddenimports（1.22.0 组帧功能 exe 必需）；新增 offscreen test_app_icon_path.py（6 项）",
+            "修复「分享此帧」按钮无图标与同排不一致：set_btn_icon 的 Qt 标准图标映射表无 share 键且未知键静默跳过；改用图标库 Lucide share-2（16×16 与同排一致，颜色随主题自适应）；set_btn_icon 未知键改为打印一次告警，顺带暴露并修复虚拟表 tab 三处同类错键（media-playback-start/stop→play/stop、dialog-ok→apply、document-save→save）；新增 offscreen test_button_icons.py（10 项：按钮行图标全非空+尺寸+未知键安全跳过）",
         ],
     ),
     (
@@ -1674,7 +1675,11 @@ class MainWindow(QMainWindow):
             "把当前解析的报文分享到 Web 服务端（所有人可在「报文分享」页查看）"
         )
         set_btn(self.share_frame_btn, "warning", "lg")
-        set_btn_icon(self.share_frame_btn, "share")
+        # Qt 标准图标无 share 字形（set_btn_icon 未知键静默跳过，致此前该按钮无图标
+        # 与同排不一致）；改用图标库 Lucide share-2 线性图标，颜色随主题/按钮 palette 自适应
+        from PySide6.QtCore import QSize as _QSize
+        self.share_frame_btn.setIcon(app_icons.load_icon("share-2"))
+        self.share_frame_btn.setIconSize(_QSize(16, 16))  # 与同排 set_btn_icon 尺寸一致
         self.share_frame_btn.clicked.connect(self._show_share_dialog)
         btn_layout.addWidget(self.share_frame_btn)
 

@@ -158,7 +158,7 @@ class VirtualMeterWidget(QWidget):
         btn_refresh.clicked.connect(self._refresh_ports)
         self.btn_serial = QPushButton("开始监听")
         set_btn(self.btn_serial, "primary", "sm")
-        set_btn_icon(self.btn_serial, "media-playback-start")
+        set_btn_icon(self.btn_serial, "play")
         self.btn_serial.clicked.connect(self._toggle_serial)
         self.serial_status = QLabel("○ 未启动")
         for w in (QLabel("端口"), self.port_combo, QLabel("波特率"),
@@ -189,7 +189,7 @@ class VirtualMeterWidget(QWidget):
         set_btn(btn_gen, "primary", "sm")
         set_btn(btn_copy, "ghost", "sm")
         set_btn(btn_parse, "ghost", "sm")
-        set_btn_icon(btn_gen, "dialog-ok")
+        set_btn_icon(btn_gen, "apply")
         btn_example.clicked.connect(self._fill_example)
         btn_gen.clicked.connect(self._offline_generate)
         btn_copy.clicked.connect(self._copy_response)
@@ -303,7 +303,7 @@ class VirtualMeterWidget(QWidget):
 
         btn_save = QPushButton("保存设置")
         set_btn(btn_save, "primary", "sm")
-        set_btn_icon(btn_save, "document-save")
+        set_btn_icon(btn_save, "save")
         btn_save.clicked.connect(self._save_settings)
         grid.addWidget(btn_save, 8, 0)
         layout.addWidget(box)
@@ -344,7 +344,7 @@ class VirtualMeterWidget(QWidget):
             self._serial_thread.wait(2000)
             self._serial_thread = None
             self.btn_serial.setText("开始监听")
-            set_btn_icon(self.btn_serial, "media-playback-start")
+            set_btn_icon(self.btn_serial, "play")
             self.serial_status.setText("○ 未启动")
             return
         if not self.port_combo.currentText():
@@ -361,7 +361,7 @@ class VirtualMeterWidget(QWidget):
         self._serial_thread.frame_exchanged.connect(self._on_exchanged)
         self._serial_thread.start()
         self.btn_serial.setText("停止监听")
-        set_btn_icon(self.btn_serial, "media-playback-stop")
+        set_btn_icon(self.btn_serial, "stop")
         self.serial_status.setText("● 监听中")
 
     # ── 离线 ──────────────────────────────────────────────
