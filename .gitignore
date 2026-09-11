@@ -98,3 +98,5 @@ testfile.txt
 /repomix-output.md
 /test/_probe_qp_cards.py
 /dlt645_addr_history.json
+# Git worktree 本地隔离区（不入库）
+.worktrees/
