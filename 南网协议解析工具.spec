@@ -144,6 +144,10 @@ a = Analysis(
         'dlt645_data_codec',  # DLT645标准数据值解码（dlt645_parser 静态 import，显式声明保险）
         'dlt645_frame_gen',  # DLT645-2007 帧生成（frame_gen_widget 静态 import，显式声明保险）
         'dlt645_frame_schema',  # DLT645 组帧命令 schema（frame_gen_widget 静态 import）
+        'dlt645_sim',  # DLT645 虚拟表包（从站引擎 + LME 下发，dlt645_meter_sim_widget 静态 import）
+        'dlt645_sim.engine',
+        'dlt645_sim.archive',
+        'dlt645_sim.lme_query',  # LME 4.2/4.6/4.7 请求组帧（645虚拟表「模块版本查询」）
         'topology_widget',
         'preset_buttons',
         'test_plan_widget',

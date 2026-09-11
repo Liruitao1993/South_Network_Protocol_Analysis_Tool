@@ -1,13 +1,13 @@
 # 南网协议解析工具
 
-[![Version](https://img.shields.io/badge/version-1.23.5-blue)]()
+[![Version](https://img.shields.io/badge/version-1.23.6-blue)]()
 [![Python](https://img.shields.io/badge/Python-3.8%2B-brightgreen)]()
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)]()
 [![License](https://img.shields.io/badge/License-MIT-green)]()
 
 一个面向电力通信现场调试的多协议解析工具，基于 Python / PySide6 开发，支持 12 种电力通信协议，覆盖单帧解析、批量解析、协议校验、帧生成、串口通信、虚拟表、通信时序图、测试方案、Lua 脚本、实时监控与 TCP 抓包等工作流。
 
-当前版本为 `1.23.5`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
+当前版本为 `1.23.6`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
 
 ## 功能总览
 
@@ -435,9 +435,13 @@ python test/test_web_frame_gen_utils.py    # Reflex Web 组帧纯逻辑
 
 > 完整历史见 `main_gui.py:CHANGELOG`。以下仅摘录最近版本要点。
 
-### 1.23.5 — 2026-09-11
+### 1.23.6 — 2026-09-11
 
+- **云母主题（Mica · Win11）**：第 7 套内置主题，Win11 云母观感静态实现——壁纸取色均值底色 #f3f3f3 + Fluent 浅色配色 + DWM 圆角窗；全不透明（透明底衬会在批量解析等页面产生表面重影，已弃用），要透出壁纸请用毛玻璃主题
+
+### 1.23.5 — 2026-09-11
 - **645 虚拟表 GUI**：协议6 新增「645虚拟表」——离线应答 / 档案 / 串口从站
+
 
 ### 1.23.4 — 2026-09-11
 

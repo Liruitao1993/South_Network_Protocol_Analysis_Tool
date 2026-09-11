@@ -4,9 +4,14 @@
 输入：完整 645 帧（可含粘包多帧）
 输出：0..n 个从站响应帧 bytes
 
-支持首版：
+支持：
 - 读数据 C=11H：按 DI 查档案 → 正常应答 91H（DI+数据）；未知/无值 → 异常 D1H（ERR 无请求数据）
-- 读通信地址 04000000 的读请求：若数据域仅 DI 也走通用读路径；写地址等暂回异常
+- 读通信地址 C=13H（DLT645-2007 §7.4，地址域 AA…AA、L=00）：正常应答 93H，
+  数据域 = 6 字节表地址线上序（A0..A5，随帧 +33H 加扰）
+- 写通信地址 C=15H（§7.5，地址域 AA…AA、数据域 = 新地址 6 字节）：应答 95H
+  （地址域 = 新地址，L=00）并把自身地址改为新地址（经 on_address_written 回调同步 UI/档案）
+- 广播校时 08H：无应答，静默接收（记 last_error 供日志）
+- 其余功能码：异常应答 DnH（n=请求功能码，ERR 无请求数据）
 """
 
 from __future__ import annotations
@@ -14,7 +19,7 @@ from __future__ import annotations
 from typing import List, Optional, Tuple
 
 from dlt645_data_codec import encode_value
-from dlt645_frame_gen import DLT645FrameGenerator, encode_di
+from dlt645_frame_gen import DLT645FrameGenerator, encode_addr, encode_di
 from dlt645_parser import DLT645Parser
 
 from .archive import DLT645Archive
@@ -62,6 +67,7 @@ class DLT645MeterSim:
         archive: Optional[DLT645Archive] = None,
         generator: Optional[DLT645FrameGenerator] = None,
         parser: Optional[DLT645Parser] = None,
+        on_address_written=None,
     ):
         self.address = address
         self.archive = archive or DLT645Archive()
@@ -70,6 +76,9 @@ class DLT645MeterSim:
         self.req_count = 0
         self.rsp_count = 0
         self.last_error: Optional[str] = None
+        # 15H 写地址成功回调（参数：新地址显示序 hex 字符串）。串口线程内
+        # 调用时回调方应经 Signal 跳回 GUI 线程。
+        self.on_address_written = on_address_written
 
     def handle_frame(self, frame: bytes) -> List[bytes]:
         """处理一帧（或粘包多帧），返回响应帧列表。"""
@@ -116,9 +125,16 @@ class DLT645MeterSim:
             self.last_error = "收到非主站帧，忽略"
             return None
 
+        if func == 0x13:  # 读通信地址（§7.4）
+            return self._read_address_response()
+        if func == 0x15:  # 写通信地址（§7.5）
+            return self._write_address_response(frame)
+        if func == 0x08:  # 广播校时：从站不应答
+            self.last_error = "广播校时 08H 已接收（无应答）"
+            return None
         if func != 0x11:
             self.last_error = f"暂不支持功能码 0x{func:02X}"
-            return self._error_response(frame, ERR_NO_DATA)
+            return self._error_response(frame, ERR_NO_DATA, func=func)
 
         di_code, data_bytes = self._split_read_data(parsed, frame)
         if not di_code:
@@ -200,12 +216,43 @@ class DLT645MeterSim:
         }
         return quick.get(di_code)
 
+    def _read_address_response(self) -> bytes:
+        """13H → 93H：数据域 = 表地址 6 字节线上序（build_frame 统一 +33H）。"""
+        payload = encode_addr(self.address)
+        ctrl_out = self.gen.build_control(0x13, dir_bit=1, err=False)
+        rsp = self.gen.build_frame(self.address, ctrl_out, payload)
+        self.rsp_count += 1
+        return rsp
+
+    def _write_address_response(self, frame: bytes) -> bytes:
+        """15H → 95H：数据域 = 新地址 6 字节；改自身地址并回调。"""
+        length = frame[9] if len(frame) > 9 else 0
+        if length != 6 or len(frame) < 16:
+            self.last_error = f"写地址数据域长度非法 L={length:02X}"
+            return self._error_response(frame, ERR_NO_DATA, func=0x15)
+        wire = bytes((b - 0x33) & 0xFF for b in frame[10:16])  # 去加扰
+        new_addr = wire[::-1].hex().upper()  # 线上低字节在前 → 显示序
+        self.address = new_addr
+        ctrl_out = self.gen.build_control(0x15, dir_bit=1, err=False)
+        rsp = self.gen.build_frame(new_addr, ctrl_out, b"")
+        self.rsp_count += 1
+        if self.on_address_written is not None:
+            try:
+                self.on_address_written(new_addr)
+            except Exception:
+                pass
+        return rsp
+
     def _error_response(
-        self, request: bytes, err: int, di_wire: Optional[bytes] = None
+        self, request: bytes, err: int, di_wire: Optional[bytes] = None,
+        func: int = 0x11,
     ) -> bytes:
-        """异常应答 D1H：数据域 = DI(若有) + ERR 字节（未加扰）。"""
+        """异常应答 DnH（n=请求功能码，规约：异常帧功能码与请求一致）。
+
+        数据域 = DI(若有) + ERR 字节（未加扰）。
+        """
         if di_wire is None and len(request) >= 14:
             di_wire = bytes((b - 0x33) & 0xFF for b in request[10:14])
         payload = (di_wire or b"") + bytes([err & 0xFF])
-        ctrl = self.gen.build_control(0x11, dir_bit=1, err=True)
+        ctrl = self.gen.build_control(func, dir_bit=1, err=True)
         return self.gen.build_frame(self.address, ctrl, payload)

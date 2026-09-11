@@ -100,10 +100,36 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.5"
+APP_VERSION = "1.23.7"
 BUILD_DATE = "2026-09-11"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    (
+        "1.23.7",
+        "2026-09-11",
+        [
+            "645虚拟表新增「模块版本查询（LME 自定义下发）」：虚拟表首次具备**主站方向**能力，按《LME产品相关信息生产运维接口手册_V2.4》向 HPLC 模块索取版本信息——三个一键按钮「读模块版本(4.2)」「读内部详细信息(4.6)」「设置(4.7)」：4.2 读单模 STA 详细版本（DI=04FFAAF9，C=11H，无数据单元，一条请求拿回外部厂商/芯片/MCU/APS/NWK/PHY/DSP 版本与编译时间）；4.6 读双模 STA 内部信息条目（DI=FF00DD01，按「分类/数据ID」指定条目，留空 = M=0 读模块全部支持条目，分类1 即程序信息/内部版本主体）；4.7 设置双模条目（C=14H，按「分类/数据ID:数据hex」构造，TLV 头编码格式/长度按 LME_INFO_ENTRIES 定义自动填，5bit 上限 31 字节超限即报错）",
+            "新建 dlt645_sim/lme_query.py（纯逻辑无 Qt）：build_single_sta_query / build_dual_query / build_dual_set / build_query / decode_reply / reply_rows / describe_frame / describe_items；帧封装统一调 DLT645FrameGenerator（地址序/+0x33/CS/68…16 唯一权威），4.6 复用 pack_lme_query_request，解析复用 DLT645Parser 已内置的 LME 深度解析——不自造第二套 645 封装或 LME 解码",
+            "645虚拟表运行页新增分组（串口从站与离线模拟之间）：目标地址（默认 AAAAAAAAAAAA = 手册 §5.1.1 虚拟电表上位机点对点口径）+ 三个读取/设置按钮 + 条目行（4.2 自动隐藏清空、4.6/4.7 切换语义与 tooltip）+ 只读帧框（等宽）+ 「下发到串口」/「复制hex」；点按钮即组帧→帧框→日志（控制码/长度/数据域），串口已监听则自动下发，未监听只记提示不弹窗打断；4.7 写类下发前弹确认框列出条目明细（可能改模块参数：本地接口默认信息=波特率/校验位、继电器控制等），取消则帧保留不下发；组帧失败弹中文提示且不覆盖已有帧框",
+            "串口从站线程新增 slave_frame 信号：收帧按控制码 D7（idx8 & 0x80）分流——DIR=1 的帧（模块发来的回包）不再回「收到非主站帧，忽略」，而是上报 GUI；DIR=0 请求路径（引擎应答 + 回写）完全不变。回包经 DLT645Parser 解析后 LME 字段逐行填入「最近响应帧解析」表，日志给出一行摘要（接口名 + 厂商/芯片/版本/编译时间）",
+            "645虚拟表「离线模拟」支持 DIR=1 回包直解：贴入模块回包点「生成响应」时直接解析展示（日志「检测到从站回包，直接解析」），无硬件也能核对 4.2/4.6/4.7 回包；DIR=0 请求路径保持原从站应答行为",
+            "测试：新增 test/test_dlt645_sim_lme_query.py（95 项）——4.2 请求帧与手册 §5.1.1 发送示例逐字节一致（68 AA AA AA AA AA AA 68 11 04 2C DD 32 37 53 16）、4.6 M=0/M=1/M=2 数据域位域断言、4.7 TLV 头位域与 5bit 上限、手册接收帧（135B，CS=0x56）字段逐项回归（LH/60/V0102/2020-11-10/v0244/N0230/P2008/V4028/硬件信息长度0）、截断帧「⚠ 数据不完整」容错、offscreen GUI（三按钮/条目框显隐/失败不覆盖帧框/4.7 确认框/回包填表/离线 DIR=1 直解），并在本机 ELTIMA COM1↔COM2 虚拟串口对上完成**真实端到端**验证（下发 4.2 请求 → 对端逐字节比对 → 注入手册回包 → 自动解析进结果表）",
+            "spec hiddenimports 补 dlt645_sim / dlt645_sim.engine / dlt645_sim.archive / dlt645_sim.lme_query（此前 dlt645_sim 未显式声明，exe 打包保险）",
+        ],
+    ),
+    (
+        "1.23.6",
+        "2026-09-11",
+        [
+            "GUI 新增第 7 套主题「云母（Mica · Win11）」（theme_settings.py）：全不透明静态实现——底色取 Win11 云母在典型壁纸下的均值色 #f3f3f3，配色按 Fluent 浅色规范（#005fb8 主色/细扁平滚动条/下划线式输入焦点/药丸选项卡），Win11 另启用 DWM 圆角窗（DWMWA_WINDOW_CORNER_PREFERENCE=ROUND）。刻意不接 DWMWA_SYSTEMBACKDROP_TYPE 真底衬：那要求 WA_TranslucentBackground 透明窗口，而本 GUI 大量样式（GroupBox 标题等）直接绘于父容器表面，透明窗口下低 alpha 每帧混合擦不净旧像素，产生严重重影（毛玻璃靠亚克力模糊掩盖、云母平坦底色下原形毕露）——观感几乎一致、零重影；透明度滑杆对该主题走 setWindowOpacity 窗口级通道（build_mica_qss 不再缩放表面 alpha）；MICA 专属按钮调色板（secondary 深灰配白字，兼容统一 builder 的 p['text'] 键）",
+            "test_theme_settings 修复过时断言并扩至 48 项：apply 早已在主题 QSS 末尾追加统一按钮 QSS（1.23.x），原 styleSheet()==裸qss 全等断言自那起 12 项恒失败（HEAD 对照证实 pre-existing）→ 改前缀匹配+按钮段存在断言；云母新增逐关键表面「不得含 rgba 背景」不透明断言（重影回归防线）+玻璃专属行显隐；透明度断言钉到主窗口表面层（基础 QWidget 极低 alpha 非契约）",
+            "修复统一按钮 ghost 类白字隐形（08-26 按钮体系回归缺陷）：builder 的 ghost 文字色误用 p['text']（为 primary 深底设计的白色）→ default/mica/glass/vista 等浅色主题下「刷新/示例/复制响应/送单帧解析器回读/重载默认/导入导出JSON」等 ghost 按钮白字+透明底完全不可见；调色板新增 ghost_text 键（浅色主题 #334155、暗色 #d1d5db），builder 改 p.get('ghost_text', p['text']) 向后兼容；像素级验证 mica 下 ghost 文字真实渲染",
+            "修复协议6 645虚拟表串口下拉永远为空：Dlt645VirtualMeterWidget.__init__ 从未调用 _refresh_ports()（698 版有、645 版抄漏），port_combo 零条目点开无内容，而唯一填充入口「刷新」按钮恰是隐形的 ghost——两 bug 咬合表现为「串口列表点不开」；构造即填充（offscreen 实测 8 端口）",
+            "645虚拟表新增「表地址」预设定：串口从站组行首地址编辑框（12 位 hex，大写规范化，非法/非12位回退旧值并提示）；实时生效于离线与串口应答（引擎每帧经 _make_engine 工厂重建）、示例请求帧地址、档案保存/导出 JSON 与导入回填；tooltip 说明广播地址 999999999999/AAAAAAAAAAAA",
+            "645虚拟表「离线模拟」新增「下发响应到串口」（success 绿按钮+发送图标）：把「生成响应」得到的虚拟表应答帧真实写入串口 TX，向主站/集中器注入任意指定报文；与从站自动应答共用同一串口故需先「开始监听」，未监听/无响应帧/写失败分别弹提示不崩，多帧全部下发并在收发日志记 ⇱ 行；Dlt645SerialSlaveThread 暴露 write_frame（_ser 运行期句柄+写锁，与读循环并发安全）；COM1↔COM2 虚拟串口对真实回环逐字节验证",
+            "645虚拟表引擎补齐 DLT645-2007 §7 功能码（dlt645_sim/engine.py）：13H 读通信地址→93H（数据域=表地址线上序）、15H 写通信地址→95H（应答地址域=新地址；引擎改自身地址并经 address_written 信号跳回 GUI 同步编辑框+静默持久化，串口主站初始化不再回异常）、08H 广播校时静默接收无应答；此前这些帧一律回「暂不支持功能码」+D1H 异常（主站读/写地址流程直接被打断）；异常应答功能码同步修正为跟随请求（13H→D3H、15H→D5H，原恒 D1H 违反规约）；test_dlt645_sim 扩至 11 项（13H/15H 全链+坏长度 D5H+08H 无应答+D8H 异常码），用户真实帧 68 AA×6 68 13 00 DF 16 复验 93H 应答",
+        ],
+    ),
     (
         "1.23.5",
         "2026-09-11",

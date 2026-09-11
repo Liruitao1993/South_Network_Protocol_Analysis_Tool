@@ -6,5 +6,6 @@
 """
 
 from .engine import DLT645MeterSim
+from . import lme_query
 
-__all__ = ["DLT645MeterSim"]
+__all__ = ["DLT645MeterSim", "lme_query"]

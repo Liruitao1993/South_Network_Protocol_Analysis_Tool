@@ -1167,6 +1167,403 @@ def build_glass_qss(opacity: int = 60, tint: str = "#f0f5ff", bg_image: str = ""
 
 
 # ---------------------------------------------------------------------------
+# 云母主题样式表（Mica · Windows 11）
+# ---------------------------------------------------------------------------
+# Windows 11 云母观感的**全不透明**静态实现：底色取 Win11 云母在典型壁纸下
+# 的均值色（#f3f3f3），配色按 Fluent 浅色规范，另启用 DWM 圆角窗。刻意不用
+# WA_TranslucentBackground 透出真系统底衬——透明窗口下父容器低 alpha 每帧
+# 混合擦不净，本 GUI 大量控件（GroupBox 标题等）直接绘于容器表面，会产生
+# 严重重影（毛玻璃靠亚克力模糊掩盖，云母平坦底色下原形毕露）。
+MICA_QSS = """
+    /* ========== 全局基础 ========== */
+    * {
+        color: #1a1a1a;
+    }
+    QWidget {
+        background-color: #f3f3f3;
+        color: #1a1a1a;
+    }
+    QMainWindow {
+        background-color: #f3f3f3;
+    }
+    QStackedWidget, QScrollArea, QMdiArea {
+        background-color: #f9f9f9;
+    }
+    QStackedWidget > QWidget {
+        background-color: #f9f9f9;
+    }
+    QSplitter, QSplitterHandle {
+        background-color: transparent;
+    }
+    QTableCornerButton::section {
+        background-color: transparent;
+        border: none;
+    }
+
+    /* ========== 对话框 / 弹窗 ========== */
+    QDialog {
+        background-color: #f9f9f9;
+        color: #1a1a1a;
+    }
+    QMessageBox {
+        background-color: #f9f9f9;
+        color: #1a1a1a;
+    }
+    QMessageBox QLabel {
+        color: #1a1a1a;
+        background-color: transparent;
+    }
+    QMessageBox QPushButton {
+        background-color: #0067c0;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        padding: 6px 20px;
+        font-weight: bold;
+        min-width: 80px;
+    }
+    QMessageBox QPushButton:hover {
+        background-color: #1975c5;
+    }
+
+    /* ========== 右键菜单 ========== */
+    QMenu {
+        background-color: #fbfbfb;
+        color: #1a1a1a;
+        border: 1px solid #e5e5e5;
+        border-radius: 8px;
+        padding: 4px;
+    }
+    QMenu::item {
+        padding: 6px 30px 6px 20px;
+        background-color: transparent;
+        color: #1a1a1a;
+        border-radius: 4px;
+    }
+    QMenu::item:selected {
+        background-color: #ededed;
+        color: #1a1a1a;
+    }
+    QMenu::separator {
+        height: 1px;
+        background-color: #e0e0e0;
+        margin: 4px 8px;
+    }
+
+    /* ========== 工具提示 ========== */
+    QToolTip {
+        background-color: #f3f3f3;
+        color: #1a1a1a;
+        border: 1px solid #d8d8d8;
+        border-radius: 4px;
+        padding: 4px;
+    }
+
+    /* ========== 滚动条（Win11 细扁平） ========== */
+    QScrollBar:vertical {
+        background-color: transparent;
+        width: 10px;
+        border: none;
+        margin: 2px 1px;
+    }
+    QScrollBar::handle:vertical {
+        background-color: rgba(0, 0, 0, 95);
+        min-height: 30px;
+        border-radius: 4px;
+    }
+    QScrollBar::handle:vertical:hover {
+        background-color: rgba(0, 0, 0, 140);
+    }
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+        height: 0px;
+    }
+    QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+        background: none;
+    }
+    QScrollBar:horizontal {
+        background-color: transparent;
+        height: 10px;
+        border: none;
+        margin: 1px 2px;
+    }
+    QScrollBar::handle:horizontal {
+        background-color: rgba(0, 0, 0, 95);
+        min-width: 30px;
+        border-radius: 4px;
+    }
+    QScrollBar::handle:horizontal:hover {
+        background-color: rgba(0, 0, 0, 140);
+    }
+    QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+        width: 0px;
+    }
+    QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+        background: none;
+    }
+
+    /* ========== 分组框 ========== */
+    QGroupBox {
+        font-weight: bold;
+        border: 1px solid #e3e3e3;
+        border-radius: 6px;
+        margin-top: 6px;
+        padding-top: 6px;
+        background-color: #f7f7f7;
+        color: #1a1a1a;
+    }
+    QGroupBox::title {
+        subcontrol-origin: margin;
+        left: 8px;
+        padding: 0 4px;
+        color: #005fb8;
+    }
+
+    /* ========== 按钮（统一按钮 QSS 会追加覆盖语义色） ========== */
+    QPushButton {
+        background-color: #0067c0;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        padding: 4px 12px;
+        font-weight: bold;
+    }
+    QPushButton:hover {
+        background-color: #1975c5;
+    }
+    QPushButton:pressed {
+        background-color: #3183cb;
+        color: #f0f0f0;
+    }
+    QPushButton:disabled {
+        background-color: #cccccc;
+        color: #8a8a8a;
+    }
+    QPushButton#secondary {
+        background-color: #d9d9d9;
+        color: #1a1a1a;
+    }
+
+    /* ========== 文本编辑框 ========== */
+    QTextEdit {
+        border: 1px solid #d6d6d6;
+        border-bottom: 2px solid #8a8a8a;
+        border-radius: 4px;
+        padding: 5px;
+        background-color: #fdfdfd;
+        font-family: Consolas, Monaco, monospace;
+        color: #1a1a1a;
+    }
+    QPlainTextEdit {
+        border: 1px solid #d6d6d6;
+        border-bottom: 2px solid #8a8a8a;
+        border-radius: 4px;
+        padding: 5px;
+        background-color: #fdfdfd;
+        color: #1a1a1a;
+    }
+
+    /* ========== 行编辑框 ========== */
+    QLineEdit {
+        border: 1px solid #d6d6d6;
+        border-bottom: 2px solid #8a8a8a;
+        border-radius: 4px;
+        padding: 2px 6px;
+        background-color: #fdfdfd;
+        color: #1a1a1a;
+    }
+    QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {
+        border: 1px solid #d6d6d6;
+        border-bottom: 2px solid #005fb8;
+    }
+
+    /* ========== 表格 ========== */
+    QTableWidget {
+        border: 1px solid #e0e0e0;
+        border-radius: 4px;
+        background-color: #fcfcfc;
+        gridline-color: #ececec;
+        color: #1a1a1a;
+        font-size: 9pt;
+    }
+    QTableWidget::item:!alternate {
+        background-color: #ffffff;
+        color: #1a1a1a;
+        padding: 2px 4px;
+    }
+    QTableWidget::item:alternate {
+        background-color: #f0f6fc;
+        color: #1a1a1a;
+        padding: 2px 4px;
+    }
+    QTableWidget::item:selected {
+        background-color: #005fb8;
+        color: white;
+    }
+    QHeaderView::section {
+        background-color: #f6f6f6;
+        padding: 4px 8px;
+        border: none;
+        border-bottom: 1px solid #e0e0e0;
+        font-weight: bold;
+        color: #1a1a1a;
+        font-size: 9pt;
+    }
+
+    /* ========== 标签 ========== */
+    QLabel {
+        color: #1a1a1a;
+        background-color: transparent;
+    }
+
+    /* ========== 选项卡 ========== */
+    QTabWidget::pane {
+        border: 1px solid #e0e0e0;
+        border-radius: 6px;
+        background-color: #fafafa;
+    }
+    QTabBar::tab {
+        padding: 4px 12px;
+        margin-right: 2px;
+        border: none;
+        border-radius: 4px;
+        background-color: transparent;
+        color: #5f5f5f;
+    }
+    QTabBar::tab:selected {
+        background-color: rgba(0, 95, 184, 26);
+        color: #00427a;
+        font-weight: bold;
+    }
+    QTabBar::tab:hover:!selected {
+        background-color: #ececec;
+        color: #1a1a1a;
+    }
+
+    /* ========== 下拉框 ========== */
+    QComboBox {
+        border: 1px solid #d6d6d6;
+        border-bottom: 2px solid #8a8a8a;
+        border-radius: 4px;
+        padding: 2px 18px 2px 6px;
+        background-color: #fdfdfd;
+        color: #1a1a1a;
+        min-height: 18px;
+    }
+    QComboBox:hover {
+        background-color: #f8f8f8;
+    }
+    QComboBox:focus {
+        border-bottom: 2px solid #005fb8;
+    }
+    QComboBox::drop-down {
+        border: none;
+        width: 18px;
+    }
+    QComboBox::down-arrow {
+        width: 0;
+        height: 0;
+        border-left: 4px solid transparent;
+        border-right: 4px solid transparent;
+        border-top: 5px solid #5f5f5f;
+    }
+    QComboBox QAbstractItemView {
+        border: 1px solid #e0e0e0;
+        background-color: #fbfbfb;
+        selection-background-color: #e8f2fb;
+        selection-color: #1a1a1a;
+    }
+    QComboBox QListView::item {
+        background-color: transparent;
+        color: #1a1a1a;
+        padding: 3px 6px;
+        border-radius: 4px;
+    }
+    QComboBox QListView::item:selected {
+        background-color: #e8f2fb;
+        color: #1a1a1a;
+    }
+    QComboBox QListView::item:hover {
+        background-color: #f0f0f0;
+    }
+
+    /* ========== 数值输入框 ========== */
+    QSpinBox, QDoubleSpinBox {
+        border: 1px solid #d6d6d6;
+        border-bottom: 2px solid #8a8a8a;
+        border-radius: 4px;
+        padding: 2px 6px;
+        background-color: #fdfdfd;
+        color: #1a1a1a;
+    }
+
+    /* ========== 复选框 / 单选框 ========== */
+    QCheckBox, QRadioButton {
+        color: #1a1a1a;
+        background-color: transparent;
+    }
+    QCheckBox::indicator {
+        width: 16px;
+        height: 16px;
+        border: 1px solid #8a8a8a;
+        border-radius: 3px;
+        background-color: #fdfdfd;
+    }
+    QCheckBox::indicator:checked {
+        background-color: #005fb8;
+        border: 1px solid #005fb8;
+    }
+    QCheckBox::indicator:indeterminate {
+        background-color: #84beef;
+        border: 1px solid #005fb8;
+    }
+
+    /* ========== 文件/输入对话框 ========== */
+    QFileDialog {
+        background-color: #f9f9f9;
+        color: #1a1a1a;
+    }
+    QInputDialog {
+        background-color: #f9f9f9;
+        color: #1a1a1a;
+    }
+
+    /* ========== 菜单栏 ========== */
+    QMenuBar {
+        background-color: #fbfbfb;
+        color: #1a1a1a;
+        border-bottom: 1px solid #e6e6e6;
+        padding: 2px;
+    }
+    QMenuBar::item {
+        padding: 4px 10px;
+        background-color: transparent;
+        border-radius: 4px;
+    }
+    QMenuBar::item:selected {
+        background-color: #eaeaea;
+    }
+
+    /* ========== 状态栏 ========== */
+    QStatusBar {
+        background-color: #fbfbfb;
+        color: #1a1a1a;
+        border-top: 1px solid #e6e6e6;
+    }
+"""
+
+
+
+
+def build_mica_qss(opacity: int = 60) -> str:
+    """返回云母主题 QSS（静态全不透明配色）。
+
+    opacity 参数仅为与 build_glass_qss 的调用签名兼容而保留：云母表面全部
+    实色（透明窗口会在本 GUI 产生容器表面重影），用户透明度滑杆对该主题
+    走窗口级 setWindowOpacity 通道（apply 中统一处理）。
+    """
+    return MICA_QSS
+
+# ---------------------------------------------------------------------------
 # VISTA 原生主题补充：仅输入类控件强制浅色
 # ---------------------------------------------------------------------------
 # windowsvista 主题 qss 原本为 None（纯原生，跟随系统配色）。
@@ -1278,7 +1675,7 @@ def build_button_qss(p: Dict[str, str]) -> str:
 
     QPushButton[btnKind="ghost"] {{
         background-color: transparent;
-        color: {p['text']};
+        color: {p.get('ghost_text', p['text'])};
         border: none;
         min-width: 0;
     }}
@@ -1305,6 +1702,7 @@ BUTTON_PALETTE_LIGHT = {
     "warning": "#FF9800", "warning_h": "#F57C00", "warning_p": "#E65100",
     "accent": "#9C27B0", "accent_h": "#8E24AA", "accent_p": "#6A1B9A",
     "secondary": "#6b7280", "secondary_h": "#4b5563", "secondary_p": "#374151",
+    "ghost_text": "#334155",
     "ghost_h": "rgba(0,0,0,30)", "ghost_p": "rgba(0,0,0,50)",
     "dis_bg": "#cccccc", "dis_text": "#888888",
 }
@@ -1317,6 +1715,7 @@ BUTTON_PALETTE_DARK = {
     "warning": "#ffa726", "warning_h": "#fb8c00", "warning_p": "#ef6c00",
     "accent": "#ab47bc", "accent_h": "#9c27b0", "accent_p": "#7b1fa2",
     "secondary": "#4b5563", "secondary_h": "#374151", "secondary_p": "#1f2937",
+    "ghost_text": "#d1d5db",
     "ghost_h": "rgba(255,255,255,30)", "ghost_p": "rgba(255,255,255,50)",
     "dis_bg": "#444444", "dis_text": "#888888",
 }
@@ -1329,10 +1728,23 @@ BUTTON_PALETTE_GLASS = {
     "warning": "rgba(245,158,11,220)", "warning_h": "rgba(217,119,6,235)", "warning_p": "rgba(180,83,9,240)",
     "accent": "rgba(147,51,234,215)", "accent_h": "rgba(126,34,206,230)", "accent_p": "rgba(107,33,168,240)",
     "secondary": "rgba(100,116,139,220)", "secondary_h": "rgba(75,85,99,235)", "secondary_p": "rgba(55,65,81,240)",
+    "ghost_text": "#334155",
     "ghost_h": "rgba(0,0,0,25)", "ghost_p": "rgba(0,0,0,45)",
     "dis_bg": "rgba(203,213,225,180)", "dis_text": "#64748b",
 }
 
+BUTTON_PALETTE_MICA = {
+    "text": "#ffffff",
+    "primary": "#005fb8", "primary_h": "#1a72c2", "primary_p": "#3385cc",
+    "success": "#0f7b0f", "success_h": "#1c8a1c", "success_p": "#339933",
+    "danger": "#c42b1c", "danger_h": "#d13c2d", "danger_p": "#dd4d3e",
+    "warning": "#9d5d00", "warning_h": "#ab6b10", "warning_p": "#b97a22",
+    "accent": "#742774", "accent_h": "#833683", "accent_p": "#924592",
+    "secondary": "#6d6d6d", "secondary_h": "#5c5c5c", "secondary_p": "#4a4a4a",
+    "ghost_text": "#334155",
+    "ghost_h": "rgba(0,0,0,20)", "ghost_p": "rgba(0,0,0,40)",
+    "dis_bg": "#cccccc", "dis_text": "#8a8a8a",
+}
 
 def button_qss_for_theme(theme_id: str) -> str:
     """按主题 id 返回统一按钮 QSS。fusion/vista 用浅色调色板。"""
@@ -1340,8 +1752,9 @@ def button_qss_for_theme(theme_id: str) -> str:
         return build_button_qss(BUTTON_PALETTE_DARK)
     if theme_id == "glass":
         return build_button_qss(BUTTON_PALETTE_GLASS)
+    if theme_id == "mica":
+        return build_button_qss(BUTTON_PALETTE_MICA)
     return build_button_qss(BUTTON_PALETTE_LIGHT)
-
 
 # ---------------------------------------------------------------------------
 # 主题注册表
@@ -1376,6 +1789,14 @@ THEMES: List[Dict] = [
         "qss": GLASS_QSS,
         "desc": "半透明磨砂面板 + Windows 亚克力背景模糊（仅 Win10/11，其他环境退化为浅色半透明）",
         "win_blur": True,
+    },
+    {
+        "id": "mica",
+        "name": "云母（Mica · Win11）",
+        "style": "Fusion",
+        "qss": MICA_QSS,
+        "desc": "Windows 11 云母观感：壁纸取色均值底色（#f3f3f3）+ Fluent 浅色配色 + DWM 圆角窗；全不透明静态实现（透明底衬会在本工具产生表面重影，已弃用），要透出壁纸请用毛玻璃主题",
+        "mica": True,
     },
     {
         "id": "windows",
@@ -1484,6 +1905,46 @@ def _apply_glass_blur(app: QApplication, enabled: bool, tint: str = "#f0f5ff") -
             pass
 
 
+def _apply_mica_corners(app: QApplication, enabled: bool) -> None:
+    """云母主题窗口圆角：Win11 启用 DWMWCP_ROUND，切走恢复默认。
+
+    刻意不启用系统 Mica 底衬（DWMWA_SYSTEMBACKDROP_TYPE）——那要求
+    WA_TranslucentBackground 透明窗口，而透明窗口下父容器低 alpha 混合
+    擦不净旧像素，GroupBox 标题等直接绘于容器表面的样式会大量重影。
+    云母观感由 MICA_QSS 静态不透明配色达成；圆角不影响不透明合成，安全。
+
+    enabled=False 时只复位圆角，绝不触碰透明属性——毛玻璃主题自己管理
+    透明合成（apply 中本函数在其后执行，误关会把玻璃效果打掉）。
+    """
+    import ctypes
+    import sys
+    from PySide6.QtCore import Qt
+    for w in app.topLevelWidgets():
+        try:
+            if not w.isWindow() or not w.winId():
+                continue
+            if sys.platform == "win32":
+                try:
+                    pref = ctypes.c_int(3 if enabled else 0)  # ROUND / DEFAULT
+                    ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                        ctypes.c_void_p(int(w.winId())),
+                        29,  # DWMWA_WINDOW_CORNER_PREFERENCE
+                        ctypes.byref(pref), ctypes.sizeof(pref))
+                except Exception:
+                    pass
+            if enabled and w.testAttribute(
+                    Qt.WidgetAttribute.WA_TranslucentBackground):
+                # 防御：旧版云母实验残留的透明合成 → 关闭并强制重绘擦净
+                w.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+                w.setAutoFillBackground(True)
+                w.update()
+                w.repaint()
+        except RuntimeError:
+            pass
+        except Exception:
+            pass
+
+
 def _apply_window_opacity(app: QApplication, opacity_0_100: int) -> None:
     """设置所有顶级窗口不透明度（0~100），用于非毛玻璃主题的全局透明度。
 
@@ -1549,9 +2010,15 @@ class ThemeManager:
         qss = theme["qss"] or ""
         g = {**GLASS_DEFAULTS, **(glass or {})}
         is_glass = bool(theme.get("win_blur"))
+        is_mica = bool(theme.get("mica"))
         if is_glass:
             try:
                 qss = build_glass_qss(g["opacity"], g["tint"], g["bg_image"])
+            except Exception:
+                qss = theme["qss"] or ""
+        elif is_mica:
+            try:
+                qss = build_mica_qss(g["opacity"])
             except Exception:
                 qss = theme["qss"] or ""
         # 统一按钮风格追加在末尾：同特异性下后出现的规则胜出，
@@ -1574,12 +2041,16 @@ class ThemeManager:
                 app_icons.set_theme_color(None)
         except Exception:
             pass
-        # 透明度全局生效：
+        # 透明度/底衬全局生效：
         # - 毛玻璃：opacity 缩放 QSS alpha + 亚克力模糊，窗口透明合成。
+        # - 云母：静态不透明配色（透明底衬会在本 GUI 产生容器表面重影），
+        #   仅启用 DWM 圆角并防御性关闭可能残留的透明属性；opacity 与其他
+        #   普通主题一样走 setWindowOpacity 窗口级通道。
         # - 其它主题：setWindowOpacity 做 OS 级整窗透明（不依赖 WA_TranslucentBackground，
-        #   不产生“不擦背景”的重影）；切离玻璃时 _apply_glass_blur 会关闭亚克力与透明属性。
+        #   不产生"不擦背景"的重影）；切离玻璃时 _apply_glass_blur 会关闭亚克力与透明属性。
         try:
             _apply_glass_blur(app, is_glass, g["tint"])
+            _apply_mica_corners(app, is_mica)
             _apply_window_opacity(app, 100 if is_glass else g["opacity"])
         except Exception:
             pass
@@ -1643,7 +2114,7 @@ class ThemeManager:
 class ThemeSettingsDialog(QDialog):
     """主题与字体设置对话框
 
-    - 主题下拉：6 套内置主题，切换即预览（应用级样式立即生效）
+    - 主题下拉：7 套内置主题，切换即预览（应用级样式立即生效）
     - 字体：字体族（系统字体列表）+ 字号（8~24pt），切换即预览
     - 确定：MainWindow 保存配置；取消：还原进入对话框前的主题与字体
     """
@@ -1680,10 +2151,10 @@ class ThemeSettingsDialog(QDialog):
         self.theme_desc.setWordWrap(True)
         layout.addWidget(self.theme_desc)
 
-        # ---- 透明度与毛玻璃选项 ----
-        # 透明度全局生效：毛玻璃主题缩放 QSS 半透明 alpha + 亚克力；
-        # 其它主题通过 setWindowOpacity 实现窗口透明。玻璃颜色/背景图仅玻璃主题显示。
-        self.glass_group = QGroupBox("透明度与毛玻璃")
+        # ---- 透明度与玻璃/云母选项 ----
+        # 透明度全局生效：毛玻璃/云母主题缩放 QSS 半透明 alpha（云母另启用 DWM
+        # 系统底衬）；其它主题通过 setWindowOpacity 实现窗口透明。玻璃颜色/背景图仅玻璃主题显示。
+        self.glass_group = QGroupBox("透明度与毛玻璃/云母")
         g_layout = QVBoxLayout(self.glass_group)
         g_layout.setSpacing(6)
 

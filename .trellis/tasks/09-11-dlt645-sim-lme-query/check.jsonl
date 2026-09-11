@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/09-11-dlt645-sim-lme-query/prd.md", "reason": "验收对照：4.2 逐字节 golden、4.6/4.7 回读语义、4.7 确认框、离线 DIR=1 直解、既有测试无回归"}
+{"file": ".trellis/tasks/09-11-dlt645-sim-lme-query/design.md", "reason": "检查是否越界改动 dlt645_parser/lme_info_entry_parser 既有签名/dlt645_frame_schema/engine"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "检查复用 DLT645FrameGenerator 封装与 pack_lme_query_header/pack_lme_query_request，而非另写一套 645 封装"}

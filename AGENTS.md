@@ -287,7 +287,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 │   ├── feedback_dialog.py           # 问题反馈对话框 (FeedbackDialog) - 帮助菜单入口，提交到 Web 服务端共享 feedback.db（1.20.0 起）
 │   ├── share_dialog.py              # 报文分享对话框 (ShareDialog) - 单帧解析「分享此帧」，JSON POST /api/frameshare（1.21.0 起）
 │   ├── enhanced_export.py           # 增强导出功能 (EnhancedBatchResultExporter) - Excel/CSV/TXT/JSON
-│   ├── theme_settings.py            # 主题与字体设置 (ThemeManager + ThemeSettingsDialog) - 5套主题/QSS/字体持久化
+│   ├── theme_settings.py            # 主题与字体设置 (ThemeManager + ThemeSettingsDialog) - 7套主题(含Win11云母Mica)/QSS/字体持久化
 │   ├── meter_sim_widget.py         # 虚拟表 tab (VirtualMeterWidget) - 698.45 从站模拟器（离线/串口从站，仅协议8，1.16.0 起）
 │   ├── meter_sim/                  # 虚拟表核心逻辑包（纯逻辑无 Qt，1.16.0 起）
 │   │   ├── archive.py              #   档案 meter_sim_data.json（194 OI，app_paths 持久化）
@@ -295,6 +295,11 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 │   │   ├── response_builder.py     #   Get-Response Normal/NormalList/Record、链接、安全MAC封装；复用 DLT69845FrameGenerator
 │   │   ├── dynamic_data.py         #   时间/地址/电能量递增/冻结时标/漏点
 │   │   └── engine.py               #   MeterSimEngine.handle_frame(frame) -> 0..n 响应帧
+│   ├── dlt645_meter_sim_widget.py  # 645虚拟表 tab (Dlt645VirtualMeterWidget) - 645 从站模拟 + LME 主站下发（仅协议6，1.23.5 起）
+│   ├── dlt645_sim/                 # 645虚拟表核心逻辑包（纯逻辑无 Qt）
+│   │   ├── archive.py              #   档案 DI→可读值（dlt645_sim_data.json 持久化）
+│   │   ├── engine.py               #   从站引擎 handle_frame：11H 读档案 / 13H 读通信地址 / 15H 写通信地址 / 08H 校时 / 其余 DnH 异常
+│   │   └── lme_query.py            #   LME 自定义下发组帧 4.2/4.6/4.7（模块版本查询，1.23.7 起；复用 DLT645FrameGenerator + DLT645Parser）
 │   ├── monitor_widget.py            # 实时监控器 (RealtimeMonitorWidget) - 串口原始字节流自动组帧/CSV记录
 │   ├── monitor/tcp_monitor.py       # TCP流量监控 (TCPMonitorWidget) - scapy抓包/流重组/自动解析
 │   ├── system_integration/          # 系统集成包（Windows）
@@ -483,18 +488,22 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
   - `IEC 62056-46.PDF` — IEC 国际标准
   - `DLMS_Protocol.md` / `DLMS_Protocol.pdf` — DLMS 协议
 
-### 5.4 DLT645-2007（索引 5）
+### 5.4 DLT645-2007（索引 6）
 
 - **解析器**：`dlt645_parser.py` (DLT645Parser)
 - **查询**：`dlt645_di_lookup.py` + `dlt645_di.json`
 - **组帧**：`dlt645_frame_gen.py` + `dlt645_frame_schema.py`（GUI/Web 协议6；DI 掩码驱动字段模板）
+- **虚拟表（从站模拟 + LME 主站下发）**：`dlt645_meter_sim_widget.py`（tab「645虚拟表」，仅协议6）+ `dlt645_sim/` 包
+  - **LME 自定义接口**（《LME产品相关信息生产运维接口手册_V2.4》）：解析侧 `lme_info_entry_parser.py`（4.2 单模 STA 详细版本 DI=`04FFAAF9`；4.6/4.7 双模 STA 内部信息条目 DI=`FF00DD01`，TLV 条目字典 `LME_INFO_ENTRIES`），`dlt645_parser.py` 按 DI 自动分派深度展开；下发侧 `dlt645_sim/lme_query.py`（虚拟表作主站向模块索取版本信息：4.2 无数据单元 / 4.6 查询 11H / 4.7 设置 14H，TLV 头编码与长度取 `LME_INFO_ENTRIES` 定义，长度上限 31 字节）
+  - **手册 §5.1.1 逐字节 golden**：4.2 请求 `68 AA AA AA AA AA AA 68 11 04 2C DD 32 37 53 16`；应答 135 字节（L=0x7B、CS=0x56），字段 LH/60/V0102/2020-11-10/v0244/APS 0135/N0230/P2008/V4028
+  - **串口回包判据**：控制码在 idx8，`ctrl & 0x80`（D7=DIR）为 1 → 从站/模块发出的回包，虚拟表按主站解析展示（`Dlt645SerialSlaveThread.slave_frame`）；为 0 才走从站引擎应答
 - **校验器**：`validator/dlt645_validator.py`
 - **参考文档**：
   - `DLT645-2007.md` — 主协议（Markdown）
   - `DLT645-2007 多功能电表通信协议.pdf` — 原始 PDF
   - `国网计量中心电能表全性能试验检测公告-第4号补遗-事件记录采集-远程费控功能和负荷曲线抄读功能.pdf` — 补遗（PDF，需用 pdf skill 检索）
 
-### 5.5 国网协议（索引 6）
+### 5.5 国网协议（索引 7）
 
 - **解析器**：`gdw10376_parser.py` (GDW10376Parser) + `gdw10376_tool.py`
 - **组帧**：`gdw_send_frame_lib.py` + `gdw_frame_generator_schema.py`
@@ -506,7 +515,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
   - `协议文档/7.国网本地接口协议/附件1：本地通信模块扩展协议 V3.42-20260514`（**EB 数据标识扩展，1.14.0 起支持**，V3.31 前置版本）
   - `协议文档/7.国网本地接口协议/附件4：集中器和CCO通信接口补充要求-20220416`（以太网/UDP 通信链路要求）
 
-### 5.6 DL/T 698.45-2017（索引 7，**1.7.0 新增**）
+### 5.6 DL/T 698.45-2017（索引 8，**1.7.0 新增**）
 
 - **解析器**：
   - `dl_t698_45_parser.py` (DLT69845Parser) — 链路层帧（68 L L C SA CA [HCS] [APDU] [FCS] 16）
@@ -615,6 +624,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 **Tab 可见性规则（与注册表字段一一对应）：**
 
 - 虚拟表：`has_virtual_meter`，仅 698.45(8)；串口监听线程独立，关闭须 `shutdown()`
+- 645虚拟表：`has_dlt645_sim`，仅 DLT645(6)；同时含从站模拟与 LME 主站下发，串口线程独立，关闭须 `shutdown()`
 - 组帧 / 预设：`frame_gen_mode` / `preset_mode`，南网(0)/DLT645(6)/国网(7)/698.45(8)
 - 档案 / 拓扑：`has_archive` / `has_topology`，仅南网(0)/国网(7)
 - 新一代解析级别：`parse_level_family == "csg"`（索引 9）
@@ -643,6 +653,11 @@ python test/test_snrm_frame.py      # SNRM 帧
 python test/test_nw_lcmi.py         # 南网本地通信模块接口协议 LCMI（1.14.9 起：15 新 DI 解析 + 组帧回读 + 双格式兼容）
 python test/test_dl_t698_45.py      # 698.45 协议
 python test/test_dl_t698_45_data_decode.py  # 698.45 APDU 数据内容业务解码（电能量/需量/分相/单值）
+python test/test_dlt645_sim.py       # DLT645 虚拟表从站引擎（11H 读档案 / 13H 读地址 / 15H 写地址 / 08H 校时 / 异常应答）
+python test/test_dlt645_sim_lme_query.py  # 645虚拟表 LME 模块版本下发（95 项：4.2 手册 golden 逐字节 / 4.6 条目查询 / 4.7 TLV 与 5bit 上限 / 手册回包字段回归 / 截断容错 / offscreen GUI / COM1↔COM2 真实回环，1.23.7 起）
+python test/test_dlt645_lme.py       # LME 自定义接口解析（4.2 单模STA / 4.6·4.7 双模STA 条目 TLV）
+python test/test_dlt645_frame_gen.py # DLT645 组帧（掩码推导 / 组帧→解析闭环 / LME 查询模板）
+python test/test_dlt645_frame_gen_gui.py # 645 组帧标签页 offscreen 冒烟
 python test/test_meter_sim.py       # 698.45 虚拟表从站模拟器（62 项：自组帧自解析闭环/NormalList/Record/安全MAC/通配多表/名单/递增/漏点/粘包分片，1.16.0 起）
 python test/test_quick_parse_panel.py # uTools 风格快捷解析小窗（29 项：空态/真实帧/自动识别/错误态/徽章/显隐/手动切协议/MainWindow 集成，1.17.0 起）
 python test/test_app_exit.py         # 关闭/托盘退出进程不残留 + 线程回收（offscreen：X→托盘退出事件循环结束/直接关闭/虚拟表线程登记，1.17.2 起）
