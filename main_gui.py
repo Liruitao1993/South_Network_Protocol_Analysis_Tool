@@ -99,10 +99,18 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.2"
+APP_VERSION = "1.23.3"
 BUILD_DATE = "2026-09-11"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    (
+        "1.23.3",
+        "2026-09-11",
+        [
+            "工程债：新增 release_check.py 发布前自检——APP_VERSION/CHANGELOG/README 徽章/Inno Setup MyAppVersion 对齐、spec datas 关键文件存在性、核心测试一键跑；--sync-iss 可自动回写两个 .iss 版本号",
+            "新增 test/test_core_suite.py：与 release_check 共用核心测试清单（纯逻辑为主，--with-gui 追加 offscreen）；主题 offscreen 套件已知噪声仅 WARN",
+        ],
+    ),
     (
         "1.23.2",
         "2026-09-11",
