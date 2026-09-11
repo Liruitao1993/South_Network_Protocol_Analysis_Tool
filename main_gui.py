@@ -99,10 +99,18 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.1"
+APP_VERSION = "1.23.2"
 BUILD_DATE = "2026-09-11"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    (
+        "1.23.2",
+        "2026-09-11",
+        [
+            "批量解析新增「导入 pcap」：离线读 pcap/pcapng，TCP 流重组后写入批量输入框并自动批量解析——现场路径「抓包文件 → 帧列表 → 按类型全选 → 时序图/导出」闭环；三种模式：PLC2 监控帧（完整 ED..EE，推荐协议9）/ PLC2 业务帧（剥包装）/ 原始 TCP 负载（每段一行）",
+            "新增 pcap_import.py（纯逻辑无 Qt）：经典 .pcap 纯标准库解析零依赖；ED..EE 切帧与 FlowBuffer 同口径；format_batch_text 带时间戳/流方向注释；pcapng 走 scapy 兜底（Windows 会先补 ProgramFiles 再 import）；导入后建立批量原始日志快照，可右键回跳；test/test_pcap_import.py",
+        ],
+    ),
     (
         "1.23.1",
         "2026-09-11",
@@ -2329,6 +2337,16 @@ class MainWindow(QMainWindow):
         set_btn_icon(self.load_file_btn, "open_file")
         self.load_file_btn.clicked.connect(self.load_from_file)
         row0.addWidget(self.load_file_btn)
+
+        self.load_pcap_btn = self._make_toolbar_btn("导入 pcap", min_width=100)
+        self.load_pcap_btn.setToolTip(
+            "离线导入 pcap：TCP 负载 → 批量输入框并自动解析\n"
+            "经典 .pcap 零依赖；pcapng 需 scapy。\n"
+            "PLC2 模式切 ED..EE 监控帧，可再按类型全选 / 时序图"
+        )
+        set_btn_icon(self.load_pcap_btn, "open_file")
+        self.load_pcap_btn.clicked.connect(self.load_from_pcap)
+        row0.addWidget(self.load_pcap_btn)
 
         self.paste_btn = self._make_toolbar_btn("从剪贴板粘贴", min_width=100)
         self.paste_btn.setToolTip("从剪贴板粘贴报文文本")
@@ -7073,6 +7091,79 @@ class MainWindow(QMainWindow):
                 )
             except Exception as e:
                 QMessageBox.critical(self, "错误", f"读取文件失败：{str(e)}")
+
+    def load_from_pcap(self):
+        """从 pcap/pcapng 离线导入 TCP 应用层帧到批量解析输入框。
+
+        模式：
+          - PLC2 监控帧（完整 ED..EE，适合协议9）
+          - PLC2 业务帧（剥包装）
+          - 原始 TCP 负载（每段一行，通用）
+        """
+        import pcap_import as pcap_import_mod
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择 pcap 文件",
+            "",
+            "抓包文件 (*.pcap *.pcapng);;所有文件 (*)",
+        )
+        if not file_path:
+            return
+
+        box = QMessageBox(self)
+        box.setWindowTitle("导入模式")
+        box.setText(
+            "选择 TCP 应用层提取方式：\n\n"
+            "「PLC2 监控帧」— 按 ED..EE 切完整包装帧（推荐协议 9/时序图）\n"
+            "「PLC2 业务帧」— 剥监控头只要业务帧\n"
+            "「原始 TCP 负载」— 每个 TCP 段一行（通用兜底）"
+        )
+        btn_full = box.addButton("PLC2 监控帧", QMessageBox.AcceptRole)
+        btn_biz = box.addButton("PLC2 业务帧", QMessageBox.AcceptRole)
+        btn_raw = box.addButton("原始 TCP 负载", QMessageBox.AcceptRole)
+        box.addButton(QMessageBox.Cancel)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked in (None, box.button(QMessageBox.Cancel)):
+            return
+        if clicked is btn_full:
+            mode = "plc2_full"
+        elif clicked is btn_biz:
+            mode = "plc2_business"
+        else:
+            mode = "tcp_payload"
+
+        self.update_stats("正在导入 pcap…")
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            result = pcap_import_mod.import_pcap(file_path, mode=mode)
+            text = pcap_import_mod.format_batch_text(result.frames)
+            self.batch_input.setPlainText(text)
+            self._set_batch_snapshot(text, os.path.basename(file_path))
+            summary = pcap_import_mod.summarize(result)
+            if result.frame_count == 0:
+                QMessageBox.warning(
+                    self,
+                    "导入结果",
+                    f"未能提取到应用层帧。\n{summary}",
+                )
+                self.update_stats(f"pcap 导入完成，0 帧（{summary}）")
+                return
+            self.update_stats(
+                f"已从 pcap 导入 {result.frame_count} 帧（{summary}）；"
+                f"点击「开始批量解析」或自动继续"
+            )
+            # 直接批量解析，缩短现场路径：导入 → 解析 → 选类型 → 时序图
+            self.parse_batch()
+        except pcap_import_mod.PcapImportError as e:
+            QMessageBox.critical(self, "导入失败", str(e))
+            self.update_stats(f"pcap 导入失败：{e}")
+        except Exception as e:
+            QMessageBox.critical(self, "导入失败", f"意外错误：{e}")
+            self.update_stats(f"pcap 导入失败：{e}")
+        finally:
+            QApplication.restoreOverrideCursor()
 
     def paste_from_clipboard(self):
         """从剪贴板粘贴"""

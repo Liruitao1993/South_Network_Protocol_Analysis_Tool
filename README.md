@@ -1,20 +1,20 @@
 # 南网协议解析工具
 
-[![Version](https://img.shields.io/badge/version-1.23.1-blue)]()
+[![Version](https://img.shields.io/badge/version-1.23.2-blue)]()
 [![Python](https://img.shields.io/badge/Python-3.8%2B-brightgreen)]()
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)]()
 [![License](https://img.shields.io/badge/License-MIT-green)]()
 
 一个面向电力通信现场调试的多协议解析工具，基于 Python / PySide6 开发，支持 12 种电力通信协议，覆盖单帧解析、批量解析、协议校验、帧生成、串口通信、虚拟表、通信时序图、测试方案、Lua 脚本、实时监控与 TCP 抓包等工作流。
 
-当前版本为 `1.23.1`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
+当前版本为 `1.23.2`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
 
 ## 功能总览
 
 | 模块 | 说明 |
 | --- | --- |
 | 单帧解析 | 输入十六进制报文，按协议分层解析，点击解析行联动高亮输入框对应字节并自动滚动到位置 |
-| 批量解析 | 从文件或剪贴板导入多帧报文，自动提取完整帧，支持导出选中/全部、类型过滤与 JSON / CSV / Excel 导出 |
+| 批量解析 | 从文件/剪贴板/pcap 导入多帧报文，自动提取完整帧，支持导出选中/全部、类型过滤与 JSON / CSV / Excel 导出 |
 | 原始报文定位 | 批量摘要表点击行可回跳输入日志对应行；右键「转到原始报文位置」弹出只读查看器并高亮该帧 |
 | 协议校验 | 覆盖起始符、长度域、校验和与 CRC（含协议9逐 PB PBCS CRC-24），逐项展示通过 / 失败 / 警告 |
 | 表格复制 | 解析结果、批量结果、监控器与 TCP 监控表格支持右键复制及 Ctrl+C |
@@ -166,6 +166,7 @@ pyinstaller 南网协议解析工具.spec --noconfirm
 切换到「批量解析」标签页：
 
 - 从文件加载或剪贴板粘贴
+- **导入 pcap**：离线读经典 `.pcap`（零依赖）/ `.pcapng`（需 scapy），TCP 流重组后自动批量解析——PLC2 监控帧 / 业务帧 / 原始 TCP 负载三模式，接「按类型全选 → 时序图」
 - 自动从混杂文本中提取完整帧
 - 摘要表支持 Ctrl/Shift 多选，「导出选中」只导出目标子集；「按类型全选」可一键选中某类型全部帧
 - 点击摘要行可在输入框回跳并选中对应报文行
@@ -425,6 +426,11 @@ python test/test_web_frame_gen_utils.py    # Reflex Web 组帧纯逻辑
 ## 更新记录
 
 > 完整历史见 `main_gui.py:CHANGELOG`。以下仅摘录最近版本要点。
+
+### 1.23.2 — 2026-09-11
+
+- **批量解析「导入 pcap」**：离线读 pcap/pcapng → TCP 重组 → 批量输入并自动解析；经典 `.pcap` 零依赖
+- 新增 `pcap_import.py` 与 `test/test_pcap_import.py`
 
 ### 1.23.1 — 2026-09-11
 
