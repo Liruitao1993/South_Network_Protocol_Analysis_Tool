@@ -183,3 +183,41 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 7: 645虚拟表 LME 模块版本查询下发(1.23.7)
+
+**Date**: 2026-09-11
+**Task**: 645虚拟表 LME 模块版本查询下发(1.23.7)
+**Branch**: `main`
+
+### Summary
+
+虚拟表新增主站下发能力：4.2/4.6/4.7 LME 帧一键下发 + 模块回包解析（95 项测试含 COM1↔COM2 真实回环）
+
+### Main Changes
+
+- 新增 dlt645_sim/lme_query.py（纯逻辑，复用 DLT645FrameGenerator + pack_lme_query_request + DLT645Parser）
+- 645虚拟表运行页新增「模块版本查询」分组：三按钮+帧框+下发/复制；4.7 下发前确认
+- 串口线程按 ctrl(idx8)&0x80 分流 DIR=1 模块回包 → slave_frame → 结果表；离线 DIR=1 直解
+- AGENTS.md/CHANGELOG/APP_VERSION 1.23.7/spec hiddenimports/iss 同步；.trellis/spec 记录双角色契约
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `57a4154` | (see git log) |
+
+### Testing
+
+- [OK] test/test_dlt645_sim_lme_query.py 95/95（4.2 手册 golden 逐字节、4.6/4.7 位域、手册回包 135B 字段回归、截断容错、offscreen GUI、COM1↔COM2 真实回环）
+- [OK] 回归：test_dlt645_sim / test_dlt645_lme / test_dlt645_frame_gen(161) / test_dlt645_frame_gen_gui(73) / test_quick_parse_panel(84) / test_app_exit 全过
+- [OK] release_check PASS=41 FAIL=1（test_gw_new_gen 既有失败，未触碰协议10）
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 4.7 帧布局实机验证（文档/schema 无 645 密码组，若实机要求需在 build_dual_set 加前缀）
