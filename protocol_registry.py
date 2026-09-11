@@ -36,7 +36,8 @@ class ProtocolSpec:
     # Tab / 附属能力
     has_archive: bool = False
     has_topology: bool = False
-    has_virtual_meter: bool = False
+    has_virtual_meter: bool = False  # 698 虚拟表（协议8）
+    has_dlt645_sim: bool = False  # DLT645 虚拟表（协议6）
     has_monitor: bool = False
     monitor_wrapper: Optional[str] = None  # plc2 | hplc
     has_sequence_diagram: bool = False
@@ -147,6 +148,7 @@ _PROTOS: Tuple[ProtocolSpec, ...] = (
         frame_gen_mode="dlt645",
         # 1.22.0 起协议6 组帧/预设已开放；preset set_protocol 需同步 mode
         preset_mode="dlt645",
+        has_dlt645_sim=True,
         extract_strategy="line",
         validator_class="validator.dlt645_validator:DLT645Validator",
         parser_wrapper="dlt645",

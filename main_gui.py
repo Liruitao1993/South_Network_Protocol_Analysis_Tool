@@ -83,6 +83,7 @@ from gui_utils import (
 from llm_api_manager import LLMApiManagerDialog
 from llm_preprocess_widget import LLMPreprocessWidget
 from message_tool_widget import MessageToolWidget
+from dlt645_meter_sim_widget import Dlt645VirtualMeterWidget
 from meter_sim_widget import VirtualMeterWidget
 from monitor_widget import RealtimeMonitorWidget
 from obis_lookup import get_obis_lookup
@@ -99,10 +100,17 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.4"
+APP_VERSION = "1.23.5"
 BUILD_DATE = "2026-09-11"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    (
+        "1.23.5",
+        "2026-09-11",
+        [
+            "协议6 新增「645虚拟表」tab（dlt645_meter_sim_widget.py）：离线粘贴主站读请求→生成响应→解析回读/复制；档案 DI 值可编辑保存（dlt645_sim_data.json）；可选串口从站监听自动回复；注册表 has_dlt645_sim 控制可见性（仅协议6）；关闭软件时回收串口线程",
+        ],
+    ),
     (
         "1.23.4",
         "2026-09-11",
@@ -1659,6 +1667,16 @@ class MainWindow(QMainWindow):
         )
         self.tab_widget.setTabVisible(self._virtual_meter_tab_index, False)
 
+        # DLT645 虚拟表（协议6 从站模拟器）
+        self.dlt645_sim_tab = Dlt645VirtualMeterWidget()
+        self._dlt645_sim_tab_index = self.tab_widget.addTab(
+            self.dlt645_sim_tab, app_icons.load_icon("gauge"), "645虚拟表"
+        )
+        self.dlt645_sim_tab.parse_requested.connect(
+            self._on_virtual_meter_send_to_parser
+        )
+        self.tab_widget.setTabVisible(self._dlt645_sim_tab_index, False)
+
         # TCP 流量监控器页面（始终可见）
         self._tcp_monitor_placeholder = QWidget()
         self._tcp_monitor_tab_index = self.tab_widget.addTab(
@@ -3208,6 +3226,10 @@ class MainWindow(QMainWindow):
         if hasattr(self, "_virtual_meter_tab_index"):
             self.tab_widget.setTabVisible(
                 self._virtual_meter_tab_index, spec.has_virtual_meter
+            )
+        if hasattr(self, "_dlt645_sim_tab_index"):
+            self.tab_widget.setTabVisible(
+                self._dlt645_sim_tab_index, spec.has_dlt645_sim
             )
         # 档案管理 / 拓扑信息
         if hasattr(self, "_archive_tab_index"):
@@ -6490,6 +6512,10 @@ class MainWindow(QMainWindow):
         # 回收虚拟表串口监听线程
         try:
             self.virtual_meter_tab.shutdown()
+        except Exception:
+            pass
+        try:
+            self.dlt645_sim_tab.shutdown()
         except Exception:
             pass
         # 统一停止/回收所有后台线程与定时器
