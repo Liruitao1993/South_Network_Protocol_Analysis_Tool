@@ -33,3 +33,6 @@ for i, r in enumerate(w.batch_results):
             print(f"    {f[0]}: {f[3]}")
         print(f"  总行数: {len(td)}")
 
+
+# Qt offscreen 在解释器退出析构时可能原生崩溃(与测试结论无关)，显式退出避免污染退出码
+os._exit(0)

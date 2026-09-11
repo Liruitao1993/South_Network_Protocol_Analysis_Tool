@@ -415,6 +415,7 @@ class FrameGenWidget(QWidget):
         self._current_dlt645_key = None
         self._dlt645_field_widgets: Dict[str, QLineEdit] = {}
         self._dlt645_addr_touched = False
+        self._dlt645_addr_programmatic = False
 
         self.dlt645_combo = QComboBox()
         self.dlt645_combo.setMinimumWidth(360)
@@ -441,14 +442,30 @@ class FrameGenWidget(QWidget):
         d645_addr_row = QHBoxLayout()
         d645_addr_row.setSpacing(6)
         d645_addr_row.addWidget(QLabel("表地址:"))
-        self.dlt645_addr = QLineEdit("000000000000")
-        self.dlt645_addr.setMaxLength(12)
+        # 可编辑下拉：内置地址类型（广播/通配/全零）+ 历史输入过的地址（持久化），
+        # 也可直接手动输入 12 位地址
+        self.dlt645_addr = QComboBox()
+        self.dlt645_addr.setEditable(True)
+        self.dlt645_addr.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.dlt645_addr.setMinimumWidth(200)
+        self.dlt645_addr.completer().setCompletionMode(
+            self.dlt645_addr.completer().CompletionMode.PopupCompletion)
+        self.dlt645_addr.completer().setFilterMode(Qt.MatchFlag.MatchContains)
         self.dlt645_addr.setToolTip(
             "12 位地址（书写序，高位在前），线上自动转为低字节在前；\n"
-            "广播校时为 999999999999，读/写通信地址为 AAAAAAAAAAAA")
-        self.dlt645_addr.textEdited.connect(self._on_dlt645_addr_edited)
-        self.dlt645_addr.textChanged.connect(self._schedule_realtime_update)
+            "下拉可选 广播/通配/全零 或历史输入过的地址，也可直接输入")
+        self._dlt645_addr_defaults = [
+            "999999999999", "AAAAAAAAAAAA", "000000000000"]
+        self._dlt645_addr_history = self._load_dlt645_addr_history()
+        self._refresh_dlt645_addr_items()
+        self.dlt645_addr.setCurrentText("000000000000")
+        self.dlt645_addr.editTextChanged.connect(self._on_dlt645_addr_edited)
+        self.dlt645_addr.editTextChanged.connect(self._schedule_realtime_update)
+        self.dlt645_addr.currentIndexChanged.connect(self._on_dlt645_addr_selected)
         d645_addr_row.addWidget(self.dlt645_addr, 1)
+        self.dlt645_addr_type_label = QLabel("")
+        self.dlt645_addr_type_label.setStyleSheet("color: #666;")
+        d645_addr_row.addWidget(self.dlt645_addr_type_label)
         self.dlt645_broadcast = QCheckBox("广播")
         self.dlt645_broadcast.setToolTip("勾选后地址域自动填当前命令的广播地址")
         self.dlt645_broadcast.toggled.connect(self._on_dlt645_broadcast)
@@ -1599,7 +1616,7 @@ class FrameGenWidget(QWidget):
         self.dlt645_di_row.setVisible(bool(spec.get("has_di")))
         # 未手动改过地址时，地址随命令切到文档规定的默认值（校时 99×6 / 地址命令 AA×6）
         if not self._dlt645_addr_touched and not self.dlt645_broadcast.isChecked():
-            self.dlt645_addr.setText(spec.get("addr_default") or "000000000000")
+            self._set_dlt645_addr(spec.get("addr_default") or "000000000000")
         self._rebuild_dlt645_fields()
         # 切命令后立即调度一次预览刷新（不必等用户改字段）
         self._schedule_realtime_update()
@@ -1614,11 +1631,96 @@ class FrameGenWidget(QWidget):
             self._rebuild_dlt645_fields()
 
     def _on_dlt645_addr_edited(self, *_args):
+        if getattr(self, "_dlt645_addr_programmatic", False):
+            return
         self._dlt645_addr_touched = True
+        self._update_dlt645_addr_type_label()
+
+    def _on_dlt645_addr_selected(self, *_args):
+        """从下拉选择地址类型/历史地址：视为用户意图"""
+        self._dlt645_addr_touched = True
+        self._update_dlt645_addr_type_label()
+
+    def _dlt645_addr_value(self) -> str:
+        return (self.dlt645_addr.currentText() or "").strip()
+
+    def _set_dlt645_addr(self, value: str):
+        """程序性设置地址（不标记 touched），并刷新类型标签与预览"""
+        self._dlt645_addr_programmatic = True
+        self.dlt645_addr.setCurrentText(value)
+        self._dlt645_addr_programmatic = False
+        self._update_dlt645_addr_type_label()
+        self._schedule_realtime_update()
+
+    def _update_dlt645_addr_type_label(self):
+        v = self._dlt645_addr_value().upper()
+        if v == "999999999999":
+            t = "广播地址"
+        elif v == "AAAAAAAAAAAA":
+            t = "通配地址(读/写通信地址用)"
+        elif v == "000000000000":
+            t = "全零地址"
+        elif v in [h.upper() for h in self._dlt645_addr_history]:
+            t = "历史地址"
+        elif not v:
+            t = ""
+        else:
+            t = "单地址(手动)"
+        self.dlt645_addr_type_label.setText(f"类型: {t}" if t else "")
+
+    @staticmethod
+    def _load_dlt645_addr_history() -> List[str]:
+        """读取历史地址（dlt645_addr_history.json，缺失/损坏时返回空）"""
+        try:
+            import json
+            import os
+            from app_paths import data_path
+            p = str(data_path("dlt645_addr_history.json"))
+            if os.path.exists(p):
+                with open(p, "r", encoding="utf-8") as fh:
+                    data = json.load(fh)
+                hist = data.get("history", []) if isinstance(data, dict) else []
+                return [str(x) for x in hist if isinstance(x, str)][:20]
+        except Exception:
+            pass
+        return []
+
+    def _push_dlt645_addr_history(self, addr: str):
+        """生成成功后记录地址（去重、最多20条、持久化）"""
+        addr = (addr or "").strip().upper()
+        if len(addr) != 12:
+            return
+        hist = [addr] + [h for h in self._dlt645_addr_history
+                         if h.upper() != addr]
+        self._dlt645_addr_history = hist[:20]
+        self._refresh_dlt645_addr_items()
+        self._update_dlt645_addr_type_label()
+        try:
+            import json
+            from app_paths import data_path
+            with open(str(data_path("dlt645_addr_history.json")), "w",
+                      encoding="utf-8") as fh:
+                json.dump({"history": self._dlt645_addr_history}, fh,
+                          ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _refresh_dlt645_addr_items(self):
+        """重建地址下拉项：内置类型 + 历史（保留当前输入）"""
+        cur = self.dlt645_addr.currentText()
+        items = list(self._dlt645_addr_defaults)
+        for h in self._dlt645_addr_history:
+            if h not in items:
+                items.append(h)
+        self.dlt645_addr.blockSignals(True)
+        self.dlt645_addr.clear()
+        self.dlt645_addr.addItems(items)
+        self.dlt645_addr.setCurrentText(cur)
+        self.dlt645_addr.blockSignals(False)
 
     def _on_dlt645_broadcast(self, checked: bool):
         if checked:
-            self._dlt645_addr_backup = self.dlt645_addr.text().strip()
+            self._dlt645_addr_backup = self._dlt645_addr_value()
             addr = "999999999999"
             key = self._current_dlt645_key
             if key:
@@ -1629,9 +1731,9 @@ class FrameGenWidget(QWidget):
                 # 读/写通信地址用 AA×6（文档 §7.4/§7.5），其余广播用 99×6
                 if spec and spec["func"] in (0x13, 0x15):
                     addr = "AAAAAAAAAAAA"
-            self.dlt645_addr.setText(addr)
+            self._set_dlt645_addr(addr)
         else:
-            self.dlt645_addr.setText(
+            self._set_dlt645_addr(
                 getattr(self, "_dlt645_addr_backup", "") or "000000000000")
         self._dlt645_addr_touched = True
 
@@ -1746,7 +1848,7 @@ class FrameGenWidget(QWidget):
             QMessageBox.warning(self, "警告", "请先选择命令")
             return
         fv = self._collect_dlt645_values()
-        addr = self.dlt645_addr.text().strip() or None
+        addr = self._dlt645_addr_value() or None
         try:
             frame = self._dlt645_gen.generate_frame(key, fv, addr=addr)
         except ValueError as e:
@@ -1759,6 +1861,8 @@ class FrameGenWidget(QWidget):
             " ".join(hex_str[i:i + 2] for i in range(0, len(hex_str), 2)))
         self._refresh_dlt645_warning(fv)
         self._verify_dlt645_frame(frame)
+        # 生成成功后记入历史地址（下拉可选，持久化）
+        self._push_dlt645_addr_history(addr or "")
         # 点「生成帧」也同步刷新右侧实时预览（不依赖防抖定时器是否已被触发）
         self._schedule_realtime_update()
 
@@ -3206,7 +3310,7 @@ class FrameGenWidget(QWidget):
             self.preview_table.setRowCount(0)
             return
         fv = self._collect_dlt645_values()
-        addr = self.dlt645_addr.text().strip() or None
+        addr = self._dlt645_addr_value() or None
         try:
             frame = self._dlt645_gen.generate_frame(key, fv, addr=addr)
         except Exception:
@@ -4234,7 +4338,7 @@ class FrameGenWidget(QWidget):
         if hasattr(self, "dlt645_addr"):
             self._dlt645_addr_touched = False
             self.dlt645_broadcast.setChecked(False)
-            self.dlt645_addr.setText("000000000000")
+            self._set_dlt645_addr("000000000000")
             self._current_dlt645_key = None
             self.dlt645_verify_label.setText("")
             self.dlt645_warn_label.setText("")

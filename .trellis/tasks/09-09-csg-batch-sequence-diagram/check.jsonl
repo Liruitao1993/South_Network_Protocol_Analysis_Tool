@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查 batch_results → SequenceModel → 场景 → 双向联动的跨层数据契约一致性"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "检查是否重复实现已有摘要/图标/懒加载模式"}
+{"file": ".trellis/tasks/09-09-csg-batch-sequence-diagram/design.md", "reason": "对照设计契约检查实现：提取规则、节点排序、联动防循环、测试覆盖"}

@@ -128,8 +128,8 @@ def main():
     check("切命令后 DI 行可见", not w.dlt645_di_row.isHidden())
     check("控制码标签显示 C=0x11", "0x11" in w.dlt645_ctrl_label.text(),
           w.dlt645_ctrl_label.text())
-    check("默认地址 000000000000", w.dlt645_addr.text() == "000000000000",
-          w.dlt645_addr.text())
+    check("默认地址 000000000000", w._dlt645_addr_value() == "000000000000",
+          w._dlt645_addr_value())
     check("选中 DI 00010000", _set_di(w, "00010000"))
     check("DI 元数据标签含名称与格式",
           "正向有功" in w.dlt645_di_info.text() and "XXXXXX.XX" in w.dlt645_di_info.text(),
@@ -153,7 +153,7 @@ def main():
     idx = _find_cmd(w, ("req", 0x08))
     w.dlt645_combo.setCurrentIndex(idx)
     check("校时命令地址域自动填 999999999999",
-          w.dlt645_addr.text() == "999999999999", w.dlt645_addr.text())
+          w._dlt645_addr_value() == "999999999999", w._dlt645_addr_value())
     check("校时命令隐藏 DI 行", w.dlt645_di_row.isHidden())
     check("校时字段存在", _set_field(w, "校时时间", "2026-09-04 16:26:30"),
           str(_field_names(w)))
@@ -183,7 +183,7 @@ def main():
     _set_field(w, "密码权限 PA", "04")
     _set_field(w, "密码 P0P1P2", "111111")
     _set_field(w, "操作者代码 C0~C3", "12345678")
-    w.dlt645_addr.setText("000000000033")
+    w._set_dlt645_addr("000000000033")
     w._generate_dlt645_frame()
     got = w.result_hex.toPlainText().replace(" ", "")
     f = bytes.fromhex(got)
@@ -199,7 +199,7 @@ def main():
     _FakeMB.calls.clear()
     _set_field(w, "数据值", "")
     _set_field(w, "写入数据(裸hex)", "")
-    w.dlt645_addr.setText("ZZZZ")
+    w._set_dlt645_addr("ZZZZ")
     w._generate_dlt645_frame()
     check("非法地址触发警告弹窗", any(c[0] == "warning" for c in _FakeMB.calls),
           str(_FakeMB.calls))
@@ -208,7 +208,7 @@ def main():
           str(_FakeMB.calls))
 
     print("== 7. 切回其他协议：面板不串 ==")
-    w.dlt645_addr.setText("000000000000")
+    w._set_dlt645_addr("000000000000")
     w.set_protocol_mode("south")
     check("south 模式：645 面板隐藏", w.dlt645_combo.isHidden()
           and w.dlt645_config_group.isHidden())
@@ -223,8 +223,8 @@ def main():
     w.set_protocol_mode("dlt645")
     check("切回 dlt645：面板恢复可见", not w.dlt645_config_group.isHidden())
     w.reset()
-    check("reset 后不崩溃且地址复位", w.dlt645_addr.text() == "000000000000",
-          w.dlt645_addr.text())
+    check("reset 后不崩溃且地址复位", w._dlt645_addr_value() == "000000000000",
+          w._dlt645_addr_value())
 
     print("== 7b. 实时解析预览（信号→防抖调度→刷新，真实链路）==")
     # 注意：不得直接调 _do_realtime_update_dlt645——那会绕过信号接线，
@@ -278,13 +278,37 @@ def main():
           str(w.preview_table.rowCount()))
 
     _FakeMB.calls.clear()
-    w.dlt645_addr.setText("ZZ")
+    w._set_dlt645_addr("ZZ")
     QTest.qWait(300)
     check("非法输入实时路径静默清空预览", w.preview_table.rowCount() == 0,
           str(w.preview_table.rowCount()))
     check("非法输入实时路径不弹窗", not _FakeMB.calls, str(_FakeMB.calls))
-    w.dlt645_addr.setText("000000000000")
+    w._set_dlt645_addr("000000000000")
     QTest.qWait(300)
+
+    print("== 7c. 地址类型与历史地址 ==")
+    items = [w.dlt645_addr.itemText(i) for i in range(w.dlt645_addr.count())]
+    check("地址下拉含内置类型(广播/通配/全零)",
+          all(x in items for x in ("999999999999", "AAAAAAAAAAAA", "000000000000")),
+          str(items))
+    w._set_dlt645_addr("AAAAAAAAAAAA")
+    check("通配地址类型标签", "通配地址" in w.dlt645_addr_type_label.text(),
+          w.dlt645_addr_type_label.text())
+    w._set_dlt645_addr("999999999999")
+    check("广播地址类型标签", "广播地址" in w.dlt645_addr_type_label.text(),
+          w.dlt645_addr_type_label.text())
+    w._set_dlt645_addr("000000000000")
+    check("全零地址类型标签优先于历史", "全零地址" in w.dlt645_addr_type_label.text(),
+          w.dlt645_addr_type_label.text())
+    items = [w.dlt645_addr.itemText(i) for i in range(w.dlt645_addr.count())]
+    check("历史地址进入下拉(写数据用例的 000000000033)", "000000000033" in items,
+          str(items))
+    w._set_dlt645_addr("000000000033")
+    check("历史地址类型标签", "历史地址" in w.dlt645_addr_type_label.text(),
+          w.dlt645_addr_type_label.text())
+    w._set_dlt645_addr("123456789012")
+    check("手动地址类型标签", "单地址" in w.dlt645_addr_type_label.text(),
+          w.dlt645_addr_type_label.text())
 
     print("== 8. MainWindow：协议 6 下组帧 tab 可见（用户场景）==")
     import main_gui

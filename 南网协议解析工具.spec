@@ -160,6 +160,7 @@ a = Analysis(
         'frame_diff_engine',
         'lua_script_engine',
         'py_script_engine',  # Python 脚本预处理引擎
+        'batch_source_view',  # 原始日志快照查看器（main_gui 顶层静态 import，显式声明保险）
         # 可选依赖
         'crcmod',
         'serial',

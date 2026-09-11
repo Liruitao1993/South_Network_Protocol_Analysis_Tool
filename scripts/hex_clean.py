@@ -16,6 +16,11 @@
     [2026/08/07 12:34:56,789]
     2026-08-05 20:40:30 059: 流程日志：2026-08-05 20:40:29:713
 - 没有 'O 闭合的帧（日志被截断）视为不完整，丢弃。
+
+回退模式（兼容已清洗/无标记输入）：
+- 全文未出现 'ED 标记时（如输入已是每行一帧的纯 hex 文本），
+  逐行清洗：剥离行首时间戳 + 去除非 hex 字符，保留 hex 长度
+  ≥16 且为偶数的行（过滤空行/噪声行/截断残行）。
 """
 
 import re
@@ -48,7 +53,12 @@ def _strip_leading_ts(line):
 
     例如 "2026-08-05 20:40:30 059: 流程日志：2026-08-05 20:40:29:713 68 0E ..."
     剥离后得到 "68 0E ..."。
+    行首先有非 hex 日志标签、其后紧跟时间戳（"流程日志：2026-08-05 …"）的
+    形态也先剥标签，避免时间戳数字混入帧内容。
     """
+    stripped = _NONHEX_PREFIX_RE.sub('', line)
+    if stripped != line and _TS_RE.match(stripped):
+        line = stripped
     while True:
         m = _TS_RE.match(line)
         if not m:
@@ -57,6 +67,19 @@ def _strip_leading_ts(line):
         # 吃掉时间戳后紧邻的非 hex 文本（如 "流程日志："），便于继续匹配下一个时间戳
         line = _NONHEX_PREFIX_RE.sub('', line)
     return line
+
+
+def _fallback_per_line(lines):
+    """回退模式：无 'ED 标记输入（已是纯 hex 行）逐行清洗。
+
+    剥离行首时间戳后去除非 hex 字符；保留 hex 长度≥16 且偶数的行。
+    """
+    out = []
+    for ln in lines:
+        h = _HEX_STRIP_RE.sub('', _strip_leading_ts(ln))
+        if len(h) >= 16 and len(h) % 2 == 0:
+            out.append(h.upper())
+    return out
 
 
 def process(text, context):
@@ -69,6 +92,9 @@ def process(text, context):
         清洗后的文本，每行一个 hex 帧（帧头 ED 保留）
     """
     lines = text.splitlines()
+    # 无引号标记输入 → 逐行清洗回退模式（避免“输出为空”困惑）
+    if not any(_ED_MARKER in ln for ln in lines):
+        return '\n'.join(_fallback_per_line(lines))
     result = []
     pending = None  # 跨行累积中的 hex 字符串；None 表示当前没有未闭合帧
     i = 0

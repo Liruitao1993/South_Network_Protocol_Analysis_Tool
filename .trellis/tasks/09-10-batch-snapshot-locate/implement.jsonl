@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "新组件套路：独立文件+纯逻辑层无Qt+构建/弹出分离+Qt.UserRole 索引映射（摘要表第0列已存 batch_results 索引）"}
+{"file": ".trellis/tasks/09-10-batch-snapshot-locate/design.md", "reason": "技术设计：快照链写入点、归一化流匹配与消歧规则、查看器 extraSelections 合并、边界失败模式"}
+{"file": "scripts/hex_clean.py", "reason": "逐行时间戳剥离正则 _TS_RE/_strip_leading_ts 的来源，hex_stream 直接移植同一套规则"}

@@ -13,7 +13,17 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QObject, QPoint, QRect, QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import (
+    QModelIndex,
+    QObject,
+    QPoint,
+    QRect,
+    QSize,
+    Qt,
+    QThread,
+    QTimer,
+    Signal,
+)
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -54,6 +64,7 @@ from PySide6.QtWidgets import (
 )
 
 import app_icons
+import batch_source_view
 import proc_stats
 import thread_registry
 from app_paths import app_data_dir, data_path, resource_path
@@ -87,10 +98,31 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.22.1"
-BUILD_DATE = "2026-09-09"  # 编译日期，每次打包前更新  # 编译日期，每次打包前更新
+APP_VERSION = "1.23.0"
+BUILD_DATE = "2026-09-11"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    (
+        "1.23.0",
+        "2026-09-09",
+        [
+            "新增「通信时序图」标签页（仅协议9新一代载波）：批量解析结果一键生成 CCO⇄STA 通信序列图——节点按 TEI 自动判别（TEI=1 为 CCO 固定最左，其余 STA-XXXX 按首现排序），信标/SACK/应用层广播帧画为 CCO 发出的虚线广播箭头，单播为实线箭头；消息标签复用批量摘要（带 #帧号，超长截断+tooltip），纵轴按帧序排列；批量解析工具栏新增「时序图」按钮，摘要表有勾选行时仅用勾选帧（对齐「导出选中」惯例）否则全部帧",
+            "时序图交互：滚轮/Ctrl+滚轮缩放、拖拽平移、「适应窗口」复位、「导出 PNG」整图导出；点击图上消息跳回批量解析页定位对应帧行并填充详情，反向选中摘要表行时图上对应消息高亮（_seq_sync_guard 防信号循环）；重新批量解析/清空时图模型同步重置",
+            "时序图广播与未入网节点画法修正：真广播（信标/应用层广播）虚线箭头不再横穿全场景，改为只指向源节点相邻的已有节点（无右邻取左邻，单节点场景画固定长度短箭头）且标签加 [广播] 显式标识；TEI=0（关联请求等入网前帧，尚未分配具体TEI）节点标注「未入网站点」而非 STA-0000；test_csg_sequence_model 增 T10、test_csg_sequence_gui 增广播箭头落点断言",
+            "时序图 SACK 方向与台体角色修正：选择确认帧不再当广播——帧内「目的TEI」即箭头所指节点（src 取源TEI，Bitloading 扩展帧携带，缺省 CCO；无目的TEI 才退化为广播画法），虚线橙色保持控制帧视觉区分；业务标识=0xF0 测试命令帧（台体初始化过程发送，非 CCO 报文）源节点新增角色「台体发射机」（独立节点，不复用帧内 spoof 源TEI）；test_csg_sequence_model T4 改有向断言+增 T11，test_csg_sequence_gui 样本扩至 5 帧覆盖 SACK/台体节点",
+            "时序图直观性重构（物理实体视角）：存在 0xF0 测试帧时台体发射机与 CCO 合并为一条生命线「台体发射机(模拟CCO)」；未入网站点(TEI=0)按关联确认帧目的TEI 归并为同一 DUT 生命线「STA-XXXX (DUT)」并在关联确认行画「入网→STA-XXXX」状态标记；按关联请求/关联确认插入阶段分隔线（①初始化/②关联入网/③业务测试）；广播虚线改为覆盖全部已有节点（中央信标对所有STA有效，止于最右节点）；节点间距改为按最宽消息标签自适应加宽（下限360px，保证摘要文字在生命线间舒展不拥挤）、摘要截断40→60字；现场多STA日志（无测试帧且无关联确认）自动退化为按TEI分线不合并",
+            "时序图覆盖扩展至协议9/10/11（南网新一代/国网新一代双模/HDC 1.0）：三协议解析器字段同构（定界符类型/源TEI/目的TEI/发送类型/MMTYPE，仅字段名与缩进差异），提取器统一为通用管道（去缩进索引+多字段名候选：定界符类型(DT)/消息类型(MMTYPE)/原始TEI兜底），信标源TEI有效时取信标源、缺省/为0归CCO；标签页与「时序图」按钮对三协议可见/可用；test_csg_sequence_model 增 T13(协议10缩进字段)/T14(协议11同构+入网归并)、T9 改三协议分派断言，test_csg_sequence_gui 增协议10/11可见性断言",
+            "实现拆分：新文件 sequence_diagram_widget.py（纯逻辑层 SequenceNode/SequenceMessage/SequenceModel + build_sequence_model_csg/build_sequence_model 分派入口不依赖 Qt，UI 层 SequenceDiagramView/SequenceDiagramWidget 用 QGraphicsView 自绘，零新增依赖）；main_gui.py 仅增量接线（懒加载 tab/工具栏按钮/双向联动），tab 插入批量解析页之后不影响其他 tab 索引",
+            "测试：新增 test_csg_sequence_model.py（T1~T9：TEI提取/CCO最左/信标与SACK广播/失败帧跳过/节点去重/应用层广播/ED包装帧/分派与原始索引保持）与 test_csg_sequence_gui.py（offscreen 19 项：tab注册与协议可见性/按钮启停/全量与勾选子集生成/图↔表双向联动/clear_batch重置）；csg 既有回归（summary/batch_parse_level/batch_prefix/new_gen/hrf_mac）全过",
+            "批量解析脚本预处理 hex_clean 回退模式修复：此前脚本只识别监控日志 'ED ... 'O 标记，协议9批量输入为裸 hex 行时逐行跳过、输出为空，GUI 弹「脚本输出为空，未修改输入内容」看似运行无变化；现全文无 'ED 标记时回退为逐行通用清洗（剥离行首时间戳/日志标签、去非 hex 字符、保留长度≥16 且偶数的行），含标记输入保持原提取行为不变；新增 test/test_hex_clean_script.py（19 项）",
+            "脚本列表去重：「加载」判重与启动回填 config.json py_scripts 时改用 realpath+normcase 规范化路径比较（Windows 正/反斜杠同一文件不再重复注册），历史重复条目启动加载时自动去重回填并自愈写回 config.json",
+            "新增 ED 包装头格式选择「广西台体(14字节头)」：广西台体发射机报文与 PLC2.0 同为 ED..EE 包装但数据域公共头 8 字节（时间戳4+物理信道1+物理块个数1+物理块长度2，无 Payload CRC），业务帧自第 14 字节起（PLC2.0 为 15 字节）；协议9 工具栏新增下拉（PLC2.0 台体/广西台体），单帧/批量/校验剥离/批量提取四条链路统一按所选格式剥离；包装头表格按广西布局展示字段偏移；新增 test/test_ed_gx_wrapper.py（17 项）并以真实广西台体帧端到端验证（业务偏移14→SOF帧解析成功）",
+            "ED 包装头格式新增「自动识别(推荐)」默认项：逐帧打分判别 gx/plc2——剥头后业务帧首字节符合 FC MPDU 特征(+2)、物理块长度字段与业务长度自洽((业务长-16)为pb_len正整数倍且pb_len属常用PB尺寸,+1)，平局优先 plc2，无正分回退手动选择；单帧/批量/校验剥离/批量提取四条链路统一逐帧自动识别，混合日志（广西台体+PLC2.0 帧混排）无需手动切换；test_ed_gx_wrapper 扩至 22 项（auto 双向识别/手动覆盖/auto 批量剥离）",
+            "批量解析结果→输入日志行回跳：解析时逐帧记录显示行号 _src_line（行式协议 3/5/9/10/11 及通用：提取器返回行号三元组 + 前缀剥离行映射 _last_strip_line_map + 首部空白行偏移；流式扫描协议 0/1/2/4/7/8 不记录）；点击摘要行（含时序图联动选中）自动在批量输入框选中并滚动到对应报文行；修复协议9前缀剥离重复执行导致行映射被覆盖（_csg_strip_done 防重入）；新增 test/test_batch_src_line_jump.py（8 项：行号记录/点击回跳/ED包装行/监控前缀映射/lead偏移）",
+            "批量解析摘要表右键「转到原始报文位置」：拖入/打开文件/粘贴时建立不可变**原始日志快照**（CLI/脚本回填式预处理只改输入框不动快照，解决原文被清洗覆盖后无处可回看的问题）；帧 hex 在快照归一化 hex 流中定位（逐行剥行首时间戳防数字混入、跨行帧连续、重发帧按出现次序消歧、命中按帧缓存二次定位零重算），弹 Notepad++ 式只读查看器（新文件 batch_source_view.py：行号边栏/等宽/黄底高亮+滚动居中/Ctrl+F 搜索条含上一个下一个与命中计数、非模态单实例复用）；**Ctrl+G 快捷键**直达当前行定位（菜单项同示快捷键），**弹窗保持**——弹窗打开期间摘要表切换行自动静默跟随刷新高亮（不抢焦点不弹提示），直到用户关闭弹窗才停止；右键菜单另含「复制本帧HEX」，保留原复制选中行/全部；手敲无快照时 parse_batch 兜底以框现文为快照，clear_batch 同步销毁快照与查看器；新增 test/test_batch_snapshot_locate.py（47 项：纯逻辑 12 + 快照链 6 + offscreen GUI 29）",
+            "修复多物理块重组解析后点击行高亮错位：MAC 帧跨多 PB 时重组解析（MAC头/MSDU/应用层/级联块行）的偏移处于 concat 拼接缓冲区坐标，未翻译回原始帧导致点击行定位到错误字节；csg_new_gen_parser 新增 _concat_segments 分段映射（concat 区间→原始帧 PB 体起始）与 _concat_to_orig/_remap_concat_rows，在级联头/级联块/单MAC/填充/MSDU 应用层各行添加时翻译回原始偏移，单 PB 恒等、非 PB 帧每帧重置不受残留影响，MAC重组噪声标记行不再给错误高亮范围；新增 test/test_csg_multipb_highlight.py（5 项：2-PB 跨块行偏移自洽/跨块行存在/单PB恒等/非PB无残留）；另隔离 Qt offscreen 解释器退出期原生崩溃对测试退出码的污染（6 个 GUI 测试结尾 os._exit）",
+        ],
+    ),
     (
         "1.22.1",
         "2026-09-08",
@@ -944,6 +976,12 @@ class DragDropTextEdit(QTextEdit):
                             main_win.update_stats(
                                 f"已拖入文件 {fname}（{len(lines)} 行）"
                             )
+                        # 拖入即建立原始日志快照（预处理只改输入框，快照永不动）
+                        mw = self.window()
+                        if hasattr(mw, "_set_batch_snapshot"):
+                            import os as _os
+
+                            mw._set_batch_snapshot(content, _os.path.basename(file_path))
                     except Exception as e:
                         from PySide6.QtWidgets import QMessageBox
 
@@ -1100,6 +1138,8 @@ class MainWindow(QMainWindow):
         self._pending_archive_mode = "south"
         self._pending_topology_mode = "south"
         self._lazy_tab_guard = False
+        # 时序图⇄摘要表双向联动防循环标志（模式同 _lazy_tab_guard）
+        self._seq_sync_guard = False
         # 字节剔除缓存：记录上次剔除后成功解析的hex，避免重复剔除
         self._csg_last_stripped_hex = ""
 
@@ -1111,6 +1151,14 @@ class MainWindow(QMainWindow):
 
         # 批量解析结果缓存
         self.batch_results: list[dict[str, Any]] = []
+
+        # 批量输入原始日志快照（拖入/打开/粘贴时建立；回填式预处理只改输入框
+        # 不改快照；摘要表右键「转到原始报文位置」在快照中定位，09-10 任务）
+        self._batch_snapshot_text: str = ""
+        self._batch_snapshot_name: str = ""
+        self._snapshot_hex_cache = None  # (snapshot_text, stream, line_of)
+        self._snapshot_hits = {}  # frame_hex → 快照内全部命中 [(s,e),...]（随快照重建清空）
+        self._src_viewer = None  # 原始日志查看器（非模态单实例）
 
         # 字节高亮映射
         self._byte_ranges: list = []
@@ -1520,9 +1568,15 @@ class MainWindow(QMainWindow):
         self.tab_widget.addTab(
             self.protocol_lookup_tab, app_icons.load_icon("search"), "查询"
         )
-        self.tab_widget.addTab(
+        self._batch_tab_index = self.tab_widget.addTab(
             self.create_batch_parse_tab(), app_icons.load_icon("files"), "批量解析"
         )
+        # 通信时序图页面（协议9批量解析结果可视化，懒加载，仅协议9可见）
+        self._seq_diagram_placeholder = QWidget()
+        self._seq_diagram_tab_index = self.tab_widget.addTab(
+            self._seq_diagram_placeholder, app_icons.load_icon("waypoints"), "通信时序图"
+        )
+        self.tab_widget.setTabVisible(self._seq_diagram_tab_index, False)
         # 协议组帧页面（南网和国网协议支持）
         self._frame_gen_placeholder = QWidget()
         self._frame_gen_tab_index = self.tab_widget.addTab(
@@ -1709,6 +1763,20 @@ class MainWindow(QMainWindow):
         )
         self.ed_monitor_chk.setVisible(False)
         btn_layout.addWidget(self.ed_monitor_chk)
+
+        # ED 包装头格式选择（仅协议9显示）：自动识别 / PLC2.0 台体 15B 头 / 广西台体 14B 头
+        self.ed_wrapper_combo = QComboBox()
+        self.ed_wrapper_combo.addItem("自动识别(推荐)", "auto")
+        self.ed_wrapper_combo.addItem("PLC2.0 台体(15字节头)", "plc2")
+        self.ed_wrapper_combo.addItem("广西台体(14字节头)", "gx")
+        self.ed_wrapper_combo.setToolTip(
+            "ED..EE 监控包装头格式：\n"
+            "自动识别：逐帧按业务帧 FC 特征 + 物理块长度自洽性打分判别\n"
+            "PLC2.0 台体：数据域公共头 9 字节，业务帧自第 15 字节起\n"
+            "广西台体：数据域公共头 8 字节（无 Payload CRC 字节），业务帧自第 14 字节起"
+        )
+        self.ed_wrapper_combo.setVisible(False)
+        btn_layout.addWidget(self.ed_wrapper_combo)
 
         # 4字节反转勾选项（仅南网新一代协议显示）
         self.csg_reverse_4byte_chk = QCheckBox("4字节反转")
@@ -2420,6 +2488,18 @@ class MainWindow(QMainWindow):
             lambda: self.export_batch("selected_dialog")
         )
         row2.addWidget(self.batch_export_selected_btn)
+
+        # 「时序图」：协议9批量结果生成通信时序图（CCO⇄STA 消息交互图）；
+        # 有勾选行时仅用勾选帧（对齐「导出选中」惯例），否则全部帧；仅协议9可用
+        self.batch_seq_diagram_btn = self._make_toolbar_btn("时序图", min_width=100)
+        self.batch_seq_diagram_btn.setToolTip(
+            "将解析结果生成通信时序图（CCO⇄STA 消息交互）；\n"
+            "摘要表有勾选行时仅用勾选帧，否则用全部帧"
+        )
+        self.batch_seq_diagram_btn.setIcon(app_icons.load_icon("waypoints"))
+        self.batch_seq_diagram_btn.clicked.connect(self._generate_sequence_diagram)
+        self.batch_seq_diagram_btn.setEnabled(self.current_protocol in (9, 10, 11))
+        row2.addWidget(self.batch_seq_diagram_btn)
         toolbar_box.addLayout(row2)
 
         input_layout.addLayout(toolbar_box)
@@ -2555,13 +2635,17 @@ class MainWindow(QMainWindow):
         self.batch_summary_table.itemSelectionChanged.connect(
             self._update_batch_selected_count
         )
+        # 选区变化联动通信时序图高亮（摘要表 → 图 方向）
+        self.batch_summary_table.itemSelectionChanged.connect(
+            self._on_batch_selection_highlight_seq
+        )
         self.batch_summary_table.setAlternatingRowColors(True)
         self.batch_summary_table.verticalHeader().hide()
         table_font = self._ui_font(-2)
         self.batch_summary_table.setFont(table_font)
         self.batch_summary_table.verticalHeader().setDefaultSectionSize(22)
-        # 右键复制菜单 + Ctrl+C
-        self._setup_table_copy_menu(self.batch_summary_table)
+        # 右键菜单：定位原始报文 + 复制（专用菜单，含通用复制项）
+        self._setup_batch_summary_menu()
         # 选中行/项变化时更新详情
         self.batch_summary_table.cellClicked.connect(self._on_batch_row_selected)
         self.batch_summary_table.itemSelectionChanged.connect(
@@ -2904,6 +2988,8 @@ class MainWindow(QMainWindow):
             self._ensure_topology_tab()
         elif index == getattr(self, "_tcp_monitor_tab_index", -1):
             self._ensure_tcp_monitor_tab()
+        elif index == getattr(self, "_seq_diagram_tab_index", -1):
+            self._ensure_seq_diagram_tab()
 
     def _ensure_frame_gen_tab(self):
         if hasattr(self, "frame_gen_tab"):
@@ -2968,6 +3054,24 @@ class MainWindow(QMainWindow):
         )
         self._replace_lazy_tab(
             self._tcp_monitor_placeholder, self._tcp_monitor_tab_index, tab
+        )
+        apply_chinese_context_menus(tab)
+        return tab
+
+    def _ensure_seq_diagram_tab(self):
+        """懒加载创建通信时序图标签页（协议9批量解析可视化）"""
+        if hasattr(self, "seq_diagram_tab"):
+            return self.seq_diagram_tab
+        from sequence_diagram_widget import SequenceDiagramWidget
+
+        tab = SequenceDiagramWidget()
+        self.seq_diagram_tab = tab
+        # 点击图上消息 → 跳回批量解析页定位对应帧
+        tab.message_clicked.connect(self._on_seq_message_clicked)
+        # 图内「刷新」→ 按当前 batch_results（含勾选子集规则）重建
+        tab.refresh_requested.connect(self._generate_sequence_diagram)
+        self._replace_lazy_tab(
+            self._seq_diagram_placeholder, self._seq_diagram_tab_index, tab
         )
         apply_chinese_context_menus(tab)
         return tab
@@ -3171,6 +3275,8 @@ class MainWindow(QMainWindow):
         )
         # ED 监控协议勾选项：仅协议索引9（南网新一代）时可见
         self.ed_monitor_chk.setVisible(show_csg_level)
+        if hasattr(self, "ed_wrapper_combo"):
+            self.ed_wrapper_combo.setVisible(show_csg_level)
         # 4字节反转勾选项：仅协议索引9（南网新一代）时可见
         self.csg_reverse_4byte_chk.setVisible(show_csg_level)
         # 通道下拉框：仅协议索引9（南网新一代）时可见
@@ -3212,6 +3318,14 @@ class MainWindow(QMainWindow):
         self._fit_combo_to_current(self.csg_pb_frame_type_combo, min_w=90)
         self._fit_combo_to_current(self.gw_pb_frame_type_combo, min_w=90)
         self._reflow_proto_group()
+
+        # 通信时序图标签页：协议9/10/11（南网新一代/国网新一代/HDC 1.0）可见；按钮同步启停
+        if hasattr(self, "_seq_diagram_tab_index"):
+            self.tab_widget.setTabVisible(
+                self._seq_diagram_tab_index, index in (9, 10, 11)
+            )
+        if hasattr(self, "batch_seq_diagram_btn"):
+            self.batch_seq_diagram_btn.setEnabled(index in (9, 10, 11))
 
         # 监控器标签页：仅南网新一代(9)/国网新一代(10)可见，并注入对应解析器与摘要函数
         if hasattr(self, "_monitor_tab_index"):
@@ -4763,7 +4877,8 @@ class MainWindow(QMainWindow):
         prefix_len = len(prefix)
 
         out_lines = []
-        for line in text.splitlines():
+        out_map = []
+        for line_idx, line in enumerate(text.splitlines()):
             pos = line.find(prefix)
             if pos == -1:
                 # 不含监控标记的行：直接丢弃（时间戳/测试标记/纯文本日志等）
@@ -4776,6 +4891,8 @@ class MainWindow(QMainWindow):
             payload_tokens = tokens[self.CSG_MONITOR_HEADER_BYTES :]
             if payload_tokens:
                 out_lines.append(" ".join(payload_tokens))
+                out_map.append(line_idx)
+        self._last_strip_line_map = out_map
         return "\n".join(out_lines)
 
     def _strip_gw_new_gen_prefix(self, text: str) -> str:
@@ -4797,13 +4914,15 @@ class MainWindow(QMainWindow):
 
         parse_level = getattr(self, "_gw_parse_level", "auto")
         out_lines = []
+        out_map = []
 
         # ── 状态机：提取所有完整 hex 帧 ──
         hex_frames = []
         in_payload = False  # 是否在引号包裹的 payload 内
         payload_hex = ""  # 当前 payload 累积的 hex
+        payload_start_idx = -1  # 跨行 payload 的起始行号
 
-        for line in text.splitlines():
+        for line_idx, line in enumerate(text.splitlines()):
             line_s = line.strip()
             if not line_s:
                 continue
@@ -4817,7 +4936,7 @@ class MainWindow(QMainWindow):
                     payload_hex += re.sub(r"[^0-9A-Fa-f]", "", before_close).upper()
                     in_payload = False
                     if len(payload_hex) >= 4:
-                        hex_frames.append(payload_hex)
+                        hex_frames.append((payload_hex, payload_start_idx))
                     payload_hex = ""
                 else:
                     # 无闭合引号：整行都是 hex 数据（可能还有下一行）
@@ -4835,11 +4954,12 @@ class MainWindow(QMainWindow):
                         r"[^0-9A-Fa-f]", "", after_quote[: close_match.start()]
                     ).upper()
                     if len(hex_clean) >= 4:
-                        hex_frames.append(hex_clean)
+                        hex_frames.append((hex_clean, line_idx))
                 else:
                     # 引号跨行
                     payload_hex = re.sub(r"[^0-9A-Fa-f]", "", after_quote).upper()
                     in_payload = True
+                    payload_start_idx = line_idx
                 continue
 
             # ── 普通行：取最后一个冒号后的 hex ──
@@ -4856,14 +4976,14 @@ class MainWindow(QMainWindow):
             else:
                 hex_clean = re.sub(r"[^0-9A-Fa-f]", "", hex_part).upper()
             if len(hex_clean) >= 4:
-                hex_frames.append(hex_clean)
+                hex_frames.append((hex_clean, line_idx))
 
         # 处理尾部残留（引号未闭合的不完整帧）
         if payload_hex and len(payload_hex) >= 4:
-            hex_frames.append(payload_hex)
+            hex_frames.append((payload_hex, payload_start_idx))
 
         # ── 按解析级别定位帧起始 ──
-        for hex_clean in hex_frames:
+        for hex_clean, src_idx in hex_frames:
             if parse_level == "app":
                 found = False
                 i = 0
@@ -4876,7 +4996,9 @@ class MainWindow(QMainWindow):
                 if not found:
                     continue
             out_lines.append(hex_clean)
+            out_map.append(src_idx)
 
+        self._last_strip_line_map = out_map
         return "\n".join(out_lines)
 
     def _strip_csg_new_gen_frame_prefix(
@@ -4907,13 +5029,15 @@ class MainWindow(QMainWindow):
             return self._strip_csg_monitor_prefix(text)
 
         out_lines = []
+        out_map = []
 
         # ── 状态机：提取所有完整 hex 帧（支持跨行引号包裹） ──
         hex_frames = []
         in_payload = False  # 是否在引号包裹的 payload 内
         payload_hex = ""  # 当前 payload 累积的 hex
+        payload_start_idx = -1  # 跨行 payload 的起始行号
 
-        for line in text.splitlines():
+        for line_idx, line in enumerate(text.splitlines()):
             line_s = line.strip()
             if not line_s:
                 continue
@@ -4926,7 +5050,7 @@ class MainWindow(QMainWindow):
                     payload_hex += re.sub(r"[^0-9A-Fa-f]", "", before_close).upper()
                     in_payload = False
                     if len(payload_hex) >= 4:
-                        hex_frames.append(payload_hex)
+                        hex_frames.append((payload_hex, payload_start_idx))
                     payload_hex = ""
                 else:
                     payload_hex += re.sub(r"[^0-9A-Fa-f]", "", line_s).upper()
@@ -4942,10 +5066,11 @@ class MainWindow(QMainWindow):
                         r"[^0-9A-Fa-f]", "", after_quote[: close_match.start()]
                     ).upper()
                     if len(hex_clean) >= 4:
-                        hex_frames.append(hex_clean)
+                        hex_frames.append((hex_clean, line_idx))
                 else:
                     payload_hex = re.sub(r"[^0-9A-Fa-f]", "", after_quote).upper()
                     in_payload = True
+                    payload_start_idx = line_idx
                 continue
 
             # ── 普通行：取最后一个冒号后的 hex ──
@@ -4961,18 +5086,19 @@ class MainWindow(QMainWindow):
             else:
                 hex_clean = re.sub(r"[^0-9A-Fa-f]", "", hex_part).upper()
             if len(hex_clean) >= 4:
-                hex_frames.append(hex_clean)
+                hex_frames.append((hex_clean, line_idx))
 
         if payload_hex and len(payload_hex) >= 4:
-            hex_frames.append(payload_hex)
+            hex_frames.append((payload_hex, payload_start_idx))
 
         # ── 按解析级别定位帧起始 ──
-        for hex_clean in hex_frames:
+        for hex_clean, src_idx in hex_frames:
             # 检测 TCP 包装前缀 EDA5：从 ED 偏移 15 字节(30 hex)定位 FC 起始
             if parse_level != "pb_only" and hex_clean.startswith("EDA5"):
                 if len(hex_clean) >= 62:
                     hex_clean = hex_clean[30:]
                     out_lines.append(hex_clean)
+                    out_map.append(src_idx)
                 continue
 
             if parse_level in ("pb_only", "mac_only"):
@@ -5005,7 +5131,9 @@ class MainWindow(QMainWindow):
                     if not found:
                         continue
             out_lines.append(hex_clean)
+            out_map.append(src_idx)
 
+        self._last_strip_line_map = out_map
         return "\n".join(out_lines)
 
     # ── PLC2.0 收发机监控包装头(ED..EE)解析 ──
@@ -5035,8 +5163,73 @@ class MainWindow(QMainWindow):
             return f"PLC2.0 MIMO(0x{ch:02X})"
         return f"保留(0x{ch:02X})"
 
-    def _parse_ed_monitor_header(self, frame_bytes: bytes):
-        """解析 ED..EE PLC2.0 监控包装头
+    def _ed_wrapper_mode(self) -> str:
+        """ED 包装头格式选择：auto=自动识别 / plc2=PLC2.0 台体 / gx=广西台体"""
+        combo = getattr(self, "ed_wrapper_combo", None)
+        if combo is not None:
+            return combo.currentData() or "auto"
+        return "auto"
+
+    # 常用物理块尺寸（PB 大小候选集，与 csg_new_gen_parser 帧长一致性推断同口径）
+    _ED_PB_SIZES = (16, 40, 72, 136, 264, 520)
+
+    def _detect_ed_wrapper(self, frame_bytes: bytes) -> str:
+        """自动识别 ED 包装头格式：gx(8B 公共头) / plc2(9B 公共头)
+
+        逐候选格式打分（plc2 优先平局）：
+          +2 剥头后业务帧首字节符合 FC MPDU 特征
+             （bit3 接入指示=1 且 bits0-2 定界符类型 0~3）
+          +1 物理块长度字段(小端)与业务长度自洽：
+             (业务长度-16) 为 pb_len 正整数倍且倍数≤5、pb_len 属常用 PB 尺寸；
+             无业务域（控制报文等）时仅看 pb_len 是否属常用尺寸
+        识别失败（无正分）回退当前下拉手动值。
+        """
+        fallback = self._ed_wrapper_mode()
+        fallback = "plc2" if fallback == "auto" else fallback
+        n = len(frame_bytes)
+        if n < 8 or frame_bytes[0] != 0xED:
+            return fallback
+        frame_len = frame_bytes[1] | (frame_bytes[2] << 8)
+        if frame_len < 4 or frame_len > 4096:
+            return fallback
+        total = frame_len + 4
+        if total > n or frame_bytes[5] != 0xEF or frame_bytes[total - 1] != 0xEE:
+            return fallback
+        data = frame_bytes[6 : 6 + frame_len - 4]
+        best, best_score = None, 0
+        for wrapper, hdr_len, pb_off in (("plc2", 9, 7), ("gx", 8, 6)):
+            if len(data) < hdr_len:
+                continue
+            business = data[hdr_len:]
+            score = 0
+            if business:
+                fc = business[0]
+                if (fc & 0x08) and (fc & 0x07) <= 3:
+                    score += 2
+                pb_len = int.from_bytes(data[pb_off : pb_off + 2], "little")
+                if pb_len in self._ED_PB_SIZES:
+                    rest = len(business) - 16
+                    if 0 < rest <= pb_len * 5 and rest % pb_len == 0:
+                        score += 1
+            else:
+                pb_len = int.from_bytes(data[pb_off : pb_off + 2], "little")
+                if pb_len in self._ED_PB_SIZES:
+                    score += 1
+            if score > best_score:
+                best, best_score = wrapper, score
+        if best is None or best_score <= 0:
+            return fallback
+        return best
+
+    def _ed_wrapper_for_frame(self, frame_bytes: bytes) -> str:
+        """单帧 ED 包装格式：下拉 auto 时逐帧自动识别，否则手动指定"""
+        mode = self._ed_wrapper_mode()
+        if mode == "auto":
+            return self._detect_ed_wrapper(frame_bytes)
+        return mode
+
+    def _parse_ed_monitor_header(self, frame_bytes: bytes, wrapper: str = "plc2"):
+        """解析 ED..EE 监控包装头（PLC2.0 / 广西台体两种公共头格式）
 
         包结构: ED(1)+帧长(2,LE)+控制域1(1)+控制域2(1)+EF(1)+数据域(变长)+CS(1)+EE(1)
         数据报文(ctrl1=0x00) ctrl2=0x01/0x02/0x03 的数据域公共头(9字节):
@@ -5081,7 +5274,9 @@ class MainWindow(QMainWindow):
 
         rows = [
             (
-                "── PLC2.0 监控包装头 ──",
+                "── 广西台体监控包装头 ──"
+                if wrapper == "gx"
+                else "── PLC2.0 监控包装头 ──",
                 "",
                 "",
                 "ED..EE 监控设备附加信息（不属于业务帧）",
@@ -5133,32 +5328,47 @@ class MainWindow(QMainWindow):
 
         business = b""
         business_offset = data_start  # 默认偏移
-        # 数据报文 0x01/0x02/0x03：解析 9 字节公共头
-        if ctrl1 == 0x00 and ctrl2 in (0x01, 0x02, 0x03) and data_len >= 9:
-            ch = data[0]
-            ts = int.from_bytes(data[1:5], "little")
-            pb_cnt = data[5]
-            flag6 = data[6]
-            pb_len = int.from_bytes(data[7:9], "little")
-            business = data[9:]
-            business_offset = data_start + 9  # 业务帧从数据域第10字节开始
-            crc_txt = "错误" if (ctrl2 == 0x02 and flag6 == 1) else "正确/保留"
+        # 数据报文 0x01/0x02/0x03：解析公共头
+        # PLC2.0=9字节: 物理信道(1)+时间戳(4)+物理块个数(1)+PayloadCRC(1)+物理块长度(2)
+        # 广西台体=8字节: 时间戳(4)+物理信道(1)+物理块个数(1)+物理块长度(2)
+        hdr_len = 8 if wrapper == "gx" else 9
+        if ctrl1 == 0x00 and ctrl2 in (0x01, 0x02, 0x03) and data_len >= hdr_len:
+            if wrapper == "gx":
+                ts = int.from_bytes(data[0:4], "little")
+                ch = data[4]
+                pb_cnt = data[5]
+                pb_len = int.from_bytes(data[6:8], "little")
+                business = data[8:]
+                business_offset = data_start + 8  # 业务帧从数据域第9字节开始
+            else:
+                ch = data[0]
+                ts = int.from_bytes(data[1:5], "little")
+                pb_cnt = data[5]
+                flag6 = data[6]
+                pb_len = int.from_bytes(data[7:9], "little")
+                business = data[9:]
+                business_offset = data_start + 9  # 业务帧从数据域第10字节开始
+            crc_txt = (
+                "错误"
+                if (wrapper != "gx" and ctrl2 == 0x02 and flag6 == 1)
+                else "正确/保留"
+            )
             rows += [
                 (
                     "物理信道",
                     f"0x{ch:02X}",
                     self._plc2_channel_name(ch),
                     "0x01-HPLC 0x02-RF 0x03-HPLC+RF 0x10~0x1C-MIMO 0x20-OFDMA",
-                    data_start,
-                    data_start,
+                    data_start + (4 if wrapper == "gx" else 0),
+                    data_start + (4 if wrapper == "gx" else 0),
                 ),
                 (
                     "时间戳",
                     f"0x{ts:08X}",
                     str(ts),
                     "HW→PC 接收开始时间(小端)",
-                    data_start + 1,
-                    data_start + 4,
+                    data_start + (0 if wrapper == "gx" else 1),
+                    data_start + (3 if wrapper == "gx" else 4),
                 ),
                 (
                     "物理块个数",
@@ -5168,23 +5378,28 @@ class MainWindow(QMainWindow):
                     data_start + 5,
                     data_start + 5,
                 ),
-                (
-                    "Payload CRC",
-                    f"0x{flag6:02X}",
-                    crc_txt,
-                    "ctrl2=0x02时: 0-正确 1-错误；其余保留",
-                    data_start + 6,
-                    data_start + 6,
-                ),
+            ]
+            if wrapper != "gx":
+                rows.append(
+                    (
+                        "Payload CRC",
+                        f"0x{flag6:02X}",
+                        crc_txt,
+                        "ctrl2=0x02时: 0-正确 1-错误；其余保留",
+                        data_start + 6,
+                        data_start + 6,
+                    )
+                )
+            rows.append(
                 (
                     "单个物理块长度",
                     str(pb_len),
                     f"{pb_len} 字节(小端)",
                     None,
-                    data_start + 7,
-                    data_start + 8,
-                ),
-            ]
+                    data_start + (6 if wrapper == "gx" else 7),
+                    data_start + (7 if wrapper == "gx" else 8),
+                )
+            )
         else:
             business = data
 
@@ -5306,7 +5521,7 @@ class MainWindow(QMainWindow):
             )
             if ed_mode:
                 ed_rows, business, ed_business_offset = self._parse_ed_monitor_header(
-                    frame_bytes
+                    frame_bytes, wrapper=self._ed_wrapper_for_frame(frame_bytes)
                 )
                 if ed_rows is None or business is None:
                     declared = (
@@ -6676,7 +6891,9 @@ class MainWindow(QMainWindow):
         ed_rows = None
         try:
             if idx in (9, 10) and frame_bytes and frame_bytes[0] == 0xED:
-                rows, business, _offset = self._parse_ed_monitor_header(frame_bytes)
+                rows, business, _offset = self._parse_ed_monitor_header(
+                    frame_bytes, wrapper=self._ed_wrapper_for_frame(frame_bytes)
+                )
                 if rows is None or business is None:
                     return (
                         None,
@@ -6738,7 +6955,7 @@ class MainWindow(QMainWindow):
             if idx in (9, 10) and frame_bytes and frame_bytes[0] == 0xED:
                 try:
                     _rows, business, _offset = self._parse_ed_monitor_header(
-                        frame_bytes
+                        frame_bytes, wrapper=self._ed_wrapper_for_frame(frame_bytes)
                     )
                     if business:
                         verify_bytes = business
@@ -7163,6 +7380,8 @@ class MainWindow(QMainWindow):
             return
         # 取第一帧解析
         first = frames[0]
+        if isinstance(first, tuple):
+            first = first[0]
         clean = self._clean_hex_input(first)
         if len(clean) % 2 != 0 or not all(c in "0123456789abcdefABCDEF" for c in clean):
             QMessageBox.information(self, "提示", "文件中未找到有效的十六进制报文。")
@@ -7185,6 +7404,8 @@ class MainWindow(QMainWindow):
                 with open(file_path, encoding="utf-8", errors="ignore") as f:
                     content = f.read()
                 self.batch_input.setPlainText(content)
+                # 建立原始日志快照（此后 CLI/脚本回填只改输入框，不动快照）
+                self._set_batch_snapshot(content, os.path.basename(file_path))
                 frames = self._extract_frames(content)
                 self.update_stats(
                     f'已从文件加载，识别到 {len(frames)} 帧报文（点击"开始批量解析"执行）'
@@ -7198,6 +7419,8 @@ class MainWindow(QMainWindow):
         text = clipboard.text()
         if text:
             self.batch_input.setPlainText(text)
+            # 粘贴即建立原始日志快照（内容来自剪贴板，无名）
+            self._set_batch_snapshot(text, "剪贴板")
             frames = self._extract_frames(text)
             self.update_stats(
                 f'已粘贴，识别到 {len(frames)} 帧报文（点击"开始批量解析"执行）'
@@ -7274,7 +7497,17 @@ class MainWindow(QMainWindow):
 
     def parse_batch(self):
         """批量解析 - 支持所有协议"""
-        input_text = self.batch_input.toPlainText().strip()
+        full_text = self.batch_input.toPlainText()
+        # 快照兜底：用户未走 拖入/打开/粘贴 入口（手敲/程序注入）且尚无快照时，
+        # 以解析瞬间的输入框全文为原始日志快照（此后回填式预处理不覆盖它）
+        if not self._batch_snapshot_text and full_text.strip():
+            self._set_batch_snapshot(full_text, "输入框内容")
+        input_text = full_text.strip()
+        # 行号回跳：记录首部空白行剥离偏移与前缀剥离行映射（strip 函数填充）
+        lead = len(full_text) - len(full_text.lstrip())
+        self._batch_lead_lines = full_text[:lead].count("\n") if lead else 0
+        self._last_strip_line_map = None
+        self._csg_strip_done = False  # 协议9前缀剥离防重复（重复剥离会覆盖行映射）
         self._debug_log(f"parse_batch: 输入 {len(input_text)} 字符")
         self._debug_log(f"parse_batch: 前200字符:\n{input_text[:200]}")
 
@@ -7286,6 +7519,7 @@ class MainWindow(QMainWindow):
             input_text = self._strip_csg_new_gen_frame_prefix(
                 input_text, getattr(self, "_csg_parse_level", "auto")
             )
+            self._csg_strip_done = True
             self._debug_log(
                 f"_strip_csg_new_gen_frame_prefix: {before}→{len(input_text)} 字符"
             )
@@ -7315,7 +7549,8 @@ class MainWindow(QMainWindow):
         # 新一代载波协议(索引9)：先剥离监控日志前缀（在 hex 清洗前处理原始文本）
         # 监控日志格式: "<时间> <序号> -> 接收机 Has Get <15字节监控头> <协议报文>"
         # 需要先识别 "-> 接收机 Has Get" 标记，去除其后 15 字节监控头，再提取协议报文
-        if self.current_protocol == 9:
+        if self.current_protocol == 9 and not getattr(self, "_csg_strip_done", False):
+            # 已在清洗前剥离过则跳过（重复剥离会把行映射覆盖为清洗后文本的行号）
             input_text = self._strip_csg_new_gen_frame_prefix(
                 input_text, getattr(self, "_csg_parse_level", "auto")
             )
@@ -7346,6 +7581,8 @@ class MainWindow(QMainWindow):
 
         # 根据当前协议选择帧提取方式
         frames = self._extract_frames_for_protocol(input_text, self.current_protocol)
+        strip_map = getattr(self, "_last_strip_line_map", None)
+        self._last_strip_line_map = None
         self._debug_log(f"_extract_frames_for_protocol: 找到 {len(frames)} 帧")
         for i, f in enumerate(frames[:5], 1):
             fhex = f[0] if isinstance(f, tuple) else f
@@ -7373,17 +7610,32 @@ class MainWindow(QMainWindow):
         self.batch_summary_table.setRowCount(0)
         self.batch_detail_table.setRowCount(0)
         self.batch_detail_hex.clear()
+        # 时序图随批量结果重建（若已创建）
+        if getattr(self, "seq_diagram_tab", None) is not None:
+            self.seq_diagram_tab.set_model(None)
 
         success_count = 0
         fail_count = 0
 
         for i, frame_item in enumerate(frames):
-            # 协议9返回元组(frame_hex, ed_data_type)，其他协议返回纯字符串
+            # 协议9返回元组(frame_hex, ed_data_type, line_no)，行式协议返回
+            # (hex, "", line_no)，流式扫描协议返回纯字符串（无行号）
+            src_line_raw = -1
             if isinstance(frame_item, tuple):
-                frame_hex, ed_data_type = frame_item
+                if len(frame_item) >= 3:
+                    frame_hex, ed_data_type, src_line_raw = frame_item[:3]
+                else:
+                    frame_hex, ed_data_type = frame_item
             else:
                 frame_hex = frame_item
                 ed_data_type = ""
+            # 回跳显示日志行号 = 首部空白偏移 + 前缀剥离行映射
+            src_line = -1
+            if src_line_raw >= 0:
+                if strip_map and 0 <= src_line_raw < len(strip_map):
+                    src_line = self._batch_lead_lines + strip_map[src_line_raw]
+                else:
+                    src_line = self._batch_lead_lines + src_line_raw
 
             # 前 5 帧打印 debug 日志
             if i < 5:
@@ -7426,7 +7678,10 @@ class MainWindow(QMainWindow):
                     and frame_hex.startswith("ED")
                 ):
                     meta_rows, business_bytes, business_offset = (
-                        self._parse_ed_monitor_header(frame_bytes)
+                        self._parse_ed_monitor_header(
+                            frame_bytes,
+                            wrapper=self._ed_wrapper_for_frame(frame_bytes),
+                        )
                     )
                     if meta_rows is not None:
                         # 去掉最后一行"── 业务帧 ──"，因为没有业务数据
@@ -7443,7 +7698,12 @@ class MainWindow(QMainWindow):
                             )
                         )
                         table_data = meta_rows
-                        summary = f"[ED:{ed_data_type[3:]}] PLC2.0监控包装帧"
+                        ed_wrap_name = (
+                            "广西台体监控包装帧"
+                            if self._ed_wrapper_for_frame(frame_bytes) == "gx"
+                            else "PLC2.0监控包装帧"
+                        )
+                        summary = f"[ED:{ed_data_type[3:]}] {ed_wrap_name}"
                         status = "成功"
                         success_count += 1
                     else:
@@ -7489,6 +7749,7 @@ class MainWindow(QMainWindow):
                         "_status": status,
                         "_table_data": table_data,
                         "_type_name": proto_type,
+                        "_src_line": src_line,
                         "摘要": summary,
                     }
                 )
@@ -7501,6 +7762,7 @@ class MainWindow(QMainWindow):
                     {
                         "_input": frame_hex,
                         "_status": status,
+                        "_src_line": src_line,
                         "错误": str(e),
                         "摘要": summary,
                     }
@@ -8129,13 +8391,21 @@ class MainWindow(QMainWindow):
             return self._extract_hdlc_frames(clean)
         elif protocol_index == 3:
             # DLMS-APDU(国网)：按行分割，每行一帧
-            return [f.strip() for f in text.splitlines() if f.strip()]
+            return [
+                (f.strip(), "", i)
+                for i, f in enumerate(text.splitlines())
+                if f.strip()
+            ]
         elif protocol_index == 4:
             # DLMS Wrapper裸报文：识别Wrapper头部(8字节)并分割
             return self._extract_wrapper_frames(text)
         elif protocol_index == 5:
             # DLMS-APDU裸报文：按行分割，每行一帧
-            return [f.strip() for f in text.splitlines() if f.strip()]
+            return [
+                (f.strip(), "", i)
+                for i, f in enumerate(text.splitlines())
+                if f.strip()
+            ]
         elif protocol_index == 9:
             # 新一代载波协议(通感一体化)：按行提取，过滤无效短帧
             # 监控前缀已在 parse_batch 中通过 _strip_csg_monitor_prefix 剥离
@@ -8144,13 +8414,17 @@ class MainWindow(QMainWindow):
             # 国网新一代双模：按行提取，每行一帧
             # 前缀已在 parse_batch 中通过 _strip_gw_new_gen_prefix 剥离
             return [
-                f.strip()
-                for f in text.splitlines()
+                (f.strip(), "", i)
+                for i, f in enumerate(text.splitlines())
                 if f.strip() and len(f.strip()) >= 4
             ]
         else:
             # 通用：每行一帧
-            return [f.strip() for f in text.splitlines() if f.strip()]
+            return [
+                (f.strip(), "", i)
+                for i, f in enumerate(text.splitlines())
+                if f.strip()
+            ]
 
     def _extract_wrapper_frames(self, text: str) -> list:
         """
@@ -8361,13 +8635,14 @@ class MainWindow(QMainWindow):
           - **ED 监控帧处理**：若帧以 ED 开头，解析 ED..EE 包装头，提取业务帧
 
         Returns:
-            list of tuple: [(frame_hex, ed_data_type), ...]
+            list of tuple: [(frame_hex, ed_data_type, line_no), ...]
               - frame_hex: 提取后的帧 hex 字符串
               - ed_data_type: ED 数据类型描述（如 "FC数据"、"FC+Payload数据"），非 ED 帧为空字符串
+              - line_no: 该帧在输入文本中的行号（供结果回跳日志定位）
         """
         frames = []
-        for line in text.splitlines():
-            line = line.strip()
+        for line_no, raw_line in enumerate(text.splitlines()):
+            line = raw_line.strip()
             if not line:
                 continue
             # 仅保留 hex 字符（清洗后应已是纯 hex，此处兜底）
@@ -8384,7 +8659,8 @@ class MainWindow(QMainWindow):
             # ED 监控帧处理：解析 ED..EE 包装头，提取业务帧
             if clean_line.startswith("ED"):
                 business_hex, data_type = self._extract_business_from_ed_frame(
-                    clean_line
+                    clean_line,
+                    wrapper=self._ed_wrapper_for_frame(bytes.fromhex(clean_line)),
                 )
                 if business_hex:
                     clean_line = business_hex
@@ -8395,11 +8671,13 @@ class MainWindow(QMainWindow):
                     ed_data_type = data_type
                 # 其余情况（ED 解析失败）保留原始帧，ed_data_type 为空
 
-            frames.append((clean_line, ed_data_type))
+            frames.append((clean_line, ed_data_type, line_no))
         return frames
 
-    def _extract_business_from_ed_frame(self, hex_str: str) -> tuple:
-        """从 ED..EE PLC2.0 监控包装帧中提取业务数据
+    def _extract_business_from_ed_frame(
+        self, hex_str: str, wrapper: str = "plc2"
+    ) -> tuple:
+        """从 ED..EE 监控包装帧中提取业务数据（PLC2.0 9B / 广西台体 8B 公共头）
 
         包结构: ED(1)+帧长(2,LE)+控制域1(1)+控制域2(1)+EF(1)+数据域(变长)+CS(1)+EE(1)
         数据域公共头(9字节): 物理信道(1)+时间戳(4,LE)+物理块个数(1)+保留(1)+物理块长度(2,LE)
@@ -8478,15 +8756,16 @@ class MainWindow(QMainWindow):
                 ].hex().upper(), f"测试装置控制(0x{ctrl2:02X})"
 
         # 非数据报文或数据域不足，返回空
-        if ctrl1 != 0x00 or ctrl2 not in (0x01, 0x02, 0x03) or data_len < 9:
+        hdr_len = 8 if wrapper == "gx" else 9
+        if ctrl1 != 0x00 or ctrl2 not in (0x01, 0x02, 0x03) or data_len < hdr_len:
             # 控制报文或非标准数据子类型但有数据域：仍然视为合法 ED 帧，无业务数据
             if ctrl1 == 0x01:
                 return "", f"ED:控制报文(0x{ctrl2:02X})"
             else:
                 return "", f"ED:非业务帧(0x{ctrl1:02X}/0x{ctrl2:02X})"
 
-        # 跳过 9 字节公共头，提取业务数据
-        business = data[9:]
+        # 跳过公共头（PLC2.0=9 字节 / 广西台体=8 字节），提取业务数据
+        business = data[hdr_len:]
         if len(business) < 4:
             # 公共头完整但业务数据不足：仍按合法 ED 数据帧处理
             return "", f"ED:数据报文(业务不足,0x{ctrl2:02X})"
@@ -8653,6 +8932,22 @@ class MainWindow(QMainWindow):
             return str(p)
         return str((_P(__file__).parent / p).resolve())
 
+    @staticmethod
+    def _script_key(path):
+        """脚本路径判重键：realpath + normcase 规范化。
+
+        QFileDialog 返回反斜杠绝对路径，内置注册经 resolve 后为正斜杠/大小写
+        可能不同，逐字节比较会漏判导致同一文件重复注册（config.json 出现
+        三条 "hex_clean" 的根因）。
+        """
+        import os
+
+        try:
+            return os.path.normcase(os.path.realpath(path))
+        except OSError:
+            return os.path.normcase(str(path))
+
+
     def _load_py_scripts(self):
         """从 config.json 加载 Python 脚本列表；首次启动注册示例脚本"""
         from pathlib import Path as _P
@@ -8690,12 +8985,20 @@ class MainWindow(QMainWindow):
             self._persist_py_scripts(builtins)
             return
 
-        # 有保存记录 → 加载
+        # 有保存记录 → 加载（同名同路径历史重复条目去重回填）
         self._py_builtin_scripts = builtins  # 保存引用供参考
+        seen = set()
         for s in saved:
             if isinstance(s, dict) and "name" in s and "path" in s:
                 abs_path = self._resolve_script_path(s["path"])
+                key = (s["name"], self._script_key(abs_path))
+                if key in seen:
+                    continue
+                seen.add(key)
                 self._py_script_combo.addItem(s["name"], abs_path)
+        # 存在历史重复条目 → 自愈：把去重后的列表写回 config.json
+        if len(seen) < len(saved):
+            self._persist_py_scripts()
 
     def _persist_py_scripts(self, scripts_list=None):
         """将脚本列表持久化到 config.json 的 py_scripts 段
@@ -8752,9 +9055,11 @@ class MainWindow(QMainWindow):
         if not path:
             return
 
-        # 检查文件是否已在列表中
+        # 检查文件是否已在列表中（规范化路径比较，防同一文件多种写法漏判）
+        new_key = self._script_key(path)
         for i in range(self._py_script_combo.count()):
-            if self._py_script_combo.itemData(i) == path:
+            item_path = self._py_script_combo.itemData(i)
+            if item_path and self._script_key(item_path) == new_key:
                 self._py_script_combo.setCurrentIndex(i)
                 self.update_stats(
                     f"脚本已在列表中: {self._py_script_combo.itemText(i)}"
@@ -8936,6 +9241,179 @@ class MainWindow(QMainWindow):
         ]
         QMessageBox.information(self, "Python 脚本预处理帮助", "\n".join(lines))
 
+    # ==================== 原始日志快照与右键定位（09-10） ====================
+
+    def _set_batch_snapshot(self, text, name=""):
+        """建立/重建批量输入原始日志快照。
+
+        仅在 拖入文件 / 打开文件 / 粘贴 / parse_batch 兜底 四处调用；
+        CLI/脚本回填式预处理只改输入框，绝不触碰快照。
+        行尾统一为 \n（QPlainTextEdit.setPlainText 行为一致），并使流缓存失效。
+        """
+        self._batch_snapshot_text = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+        self._batch_snapshot_name = name or ""
+        self._snapshot_hex_cache = None
+        self._snapshot_hits = {}
+
+    def _snapshot_stream(self):
+        """快照归一化 hex 流（懒建缓存：同一快照对象复用）。"""
+        snap = self._batch_snapshot_text
+        if not snap:
+            return "", []
+        cache = self._snapshot_hex_cache
+        if cache is not None and cache[0] is snap:
+            return cache[1], cache[2]
+        stream, line_of = batch_source_view.hex_stream(snap)
+        self._snapshot_hex_cache = (snap, stream, line_of)
+        return stream, line_of
+
+    def _ensure_source_viewer(self):
+        """原始日志查看器（非模态单实例，重复右键复用）。"""
+        v = self._src_viewer
+        if v is None:
+            v = batch_source_view.SourceViewerDialog(self)
+            self._src_viewer = v
+        return v
+
+    def _snapshot_frame_hits(self, frame_hex: str):
+        """帧 hex 在快照中的全部命中（按帧缓存：重复定位/连续切行零重算）。"""
+        cached = self._snapshot_hits.get(frame_hex)
+        if cached is not None:
+            return cached
+        stream, line_of = self._snapshot_stream()
+        hits = batch_source_view.find_frame_in_stream(stream, line_of, frame_hex)
+        self._snapshot_hits[frame_hex] = hits
+        return hits
+
+    def _locate_frame_in_snapshot(self, frame_idx: int, silent: bool = False):
+        """在原始日志快照中定位该帧并在查看器高亮（Ctrl+G 快捷键同入口）。
+
+        silent=True（弹窗已开时的行切换跟随）：跳过一切模态提示/告警——
+        无快照/无 hex/零命中都静默返回，不打断连续浏览。
+        """
+        if frame_idx < 0 or frame_idx >= len(self.batch_results):
+            return
+        frame_hex = self.batch_results[frame_idx].get("_input", "")
+        if not frame_hex:
+            if not silent:
+                self.update_stats("该帧无原始 hex，无法定位")
+            return
+        if not self._batch_snapshot_text:
+            if not silent:
+                QMessageBox.information(
+                    self,
+                    "无原始日志快照",
+                    "当前没有原始日志快照。\n\n"
+                    "拖入 / 打开文件 / 粘贴日志时会自动建立快照；\n"
+                    "若输入框内容来自其他途径且未解析过，请先执行一次批量解析。",
+                )
+            return
+        hits = self._snapshot_frame_hits(frame_hex)
+        if hits:
+            # 重发消歧：摘要中该帧是第 nth 次出现 → 取快照第 nth 个命中（超界取末个）
+            nth = sum(
+                1
+                for j in range(frame_idx)
+                if self.batch_results[j].get("_input") == frame_hex
+            )
+            hit = hits[min(nth, len(hits) - 1)]
+        else:
+            hit = None
+        viewer = self._ensure_source_viewer()
+        viewer.set_source(self._batch_snapshot_text, self._batch_snapshot_name)
+        viewer.show_frame(hit, frame_idx + 1)
+        if silent:
+            # 弹窗已开：只更新高亮，不再抢焦点/置前（用户可能正在弹窗内搜索）
+            return
+        viewer.show()
+        viewer.raise_()
+        viewer.activateWindow()
+        if hit is None:
+            self.update_stats(
+                f"帧 #{frame_idx + 1} 未在原始日志快照中命中（可能已被脚本改写）"
+            )
+
+    def _setup_batch_summary_menu(self):
+        """批量摘要表专用右键菜单（定位原始报文 + 通用复制项）+ Ctrl+G 快捷键。"""
+        self.batch_summary_table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.batch_summary_table.customContextMenuRequested.connect(
+            self._show_batch_summary_menu
+        )
+        # Ctrl+G：定位当前选中帧到原始日志（弹窗已开时静默跟随刷新高亮）
+        sc = QShortcut(QKeySequence("Ctrl+G"), self.batch_summary_table)
+        sc.setContext(Qt.WidgetShortcut)
+        sc.activated.connect(self._locate_current_batch_frame)
+
+    def _locate_current_batch_frame(self):
+        """快捷键入口：对当前行执行快照定位。
+
+        弹窗已开 → silent（只刷新高亮，不抢焦点）；未开 → 完整弹出流程。
+        """
+        table_row = self.batch_summary_table.currentRow()
+        if table_row < 0:
+            return
+        item = self.batch_summary_table.item(table_row, 0)
+        if item is None:
+            return
+        orig_idx = item.data(Qt.UserRole)
+        if orig_idx is None or orig_idx >= len(self.batch_results):
+            return
+        v = self._src_viewer
+        already_open = v is not None and v.isVisible()
+        self._locate_frame_in_snapshot(orig_idx, silent=already_open)
+
+    def _build_batch_summary_menu(self, table: QTableWidget, pos):
+        """构建右键菜单（纯构建，不弹出——测试可直接调用）。
+
+        右键落在当前选区之外时先选中该行（Qt 惯例），使「定位/复制本帧」
+        作用于鼠标下的帧。
+        """
+        item = table.itemAt(pos)
+        if item is not None:
+            row = item.row()
+            if not table.selectionModel().isRowSelected(row, QModelIndex()):
+                table.selectRow(row)
+
+        menu = QMenu(table)
+        frame_idx = None
+        if item is not None:
+            num_item = table.item(item.row(), 0)
+            if num_item is not None:
+                frame_idx = num_item.data(Qt.UserRole)
+
+        act_loc = menu.addAction("转到原始报文位置  Ctrl+G")
+        act_loc.setShortcut("Ctrl+G")
+        act_loc.setEnabled(frame_idx is not None and frame_idx < len(self.batch_results))
+        if frame_idx is not None:
+            act_loc.triggered.connect(
+                lambda _c=False, i=frame_idx: self._locate_frame_in_snapshot(i)
+            )
+
+        act_copy_hex = menu.addAction("复制本帧HEX")
+        act_copy_hex.setEnabled(frame_idx is not None and frame_idx < len(self.batch_results))
+        if frame_idx is not None:
+            act_copy_hex.triggered.connect(
+                lambda _c=False, i=frame_idx: QApplication.clipboard().setText(
+                    self.batch_results[i].get("_input", "")
+                )
+            )
+
+        menu.addSeparator()
+        has_selection = len(table.selectedItems()) > 0
+        copy_sel = menu.addAction("复制选中行")
+        copy_sel.setEnabled(has_selection)
+        copy_sel.triggered.connect(
+            lambda: self._copy_table_rows(table, all_rows=False)
+        )
+        copy_all = menu.addAction("复制全部")
+        copy_all.triggered.connect(lambda: self._copy_table_rows(table, all_rows=True))
+        return menu
+
+    def _show_batch_summary_menu(self, pos):
+        """弹出批量摘要表右键菜单。"""
+        menu = self._build_batch_summary_menu(self.batch_summary_table, pos)
+        menu.exec(self.batch_summary_table.mapToGlobal(pos))
+
     def clear_batch(self):
         """清空批量解析内容"""
         self.batch_input.clear()
@@ -8943,6 +9421,19 @@ class MainWindow(QMainWindow):
         self.batch_detail_table.setRowCount(0)
         self.batch_detail_hex.clear()
         self.batch_results = []
+        # 原始日志快照与查看器随清空销毁（快照是用户刻意保留的原文，
+        # 「清空」语义 = 全部重来，下次拖入/粘贴重新建立）
+        self._batch_snapshot_text = ""
+        self._batch_snapshot_name = ""
+        self._snapshot_hex_cache = None
+        self._snapshot_hits = {}
+        if getattr(self, "_src_viewer", None) is not None:
+            self._src_viewer.close()
+            self._src_viewer.deleteLater()
+            self._src_viewer = None
+        # 时序图随批量结果清空（若已创建）
+        if getattr(self, "seq_diagram_tab", None) is not None:
+            self.seq_diagram_tab.set_model(None)
         self.batch_status_bar.setText("就绪")
         self.batch_frame_count_label.setText("共 0 帧")
         self.update_stats("待解析")
@@ -9473,6 +9964,82 @@ class MainWindow(QMainWindow):
                     self.batch_summary_table.selectRow(r)
                     break
 
+    def _generate_sequence_diagram(self):
+        """批量解析工具栏「时序图」/时序图页「刷新」：生成通信时序图并切到该页
+
+        数据范围：摘要表有勾选行时仅用勾选帧（保持 batch_results 原始索引，
+        图上 #N 与摘要表帧号一致），否则用全部帧。协议9/10/11可用。
+        """
+        if self.current_protocol not in (9, 10, 11):
+            QMessageBox.information(
+                self, "提示", "通信时序图当前仅支持协议9/10/11（南网新一代/国网新一代/HDC 1.0）。"
+            )
+            return
+        if not self.batch_results:
+            QMessageBox.information(
+                self, "提示", "请先完成批量解析，再生成时序图。"
+            )
+            return
+        selected = self._get_selected_batch_indices()
+        if selected:
+            results = [self.batch_results[i] for i in selected]
+            frame_indices = selected
+        else:
+            results = self.batch_results
+            frame_indices = None
+        from sequence_diagram_widget import build_sequence_model
+
+        model = build_sequence_model(
+            results, self.current_protocol, frame_indices=frame_indices
+        )
+        if model is None:
+            QMessageBox.information(self, "提示", "当前协议暂不支持时序图。")
+            return
+        tab = self._ensure_seq_diagram_tab()
+        tab.set_model(model)
+        self.tab_widget.setCurrentIndex(self._seq_diagram_tab_index)
+
+    def _on_seq_message_clicked(self, frame_idx: int):
+        """时序图消息点击 → 跳回批量解析页并定位对应帧行（图 → 摘要表方向）"""
+        if getattr(self, "_seq_sync_guard", False):
+            return
+        self._seq_sync_guard = True
+        try:
+            # 按序号列 UserRole 反查摘要表行（过滤后行号≠原始索引）
+            target_row = -1
+            for row in range(self.batch_summary_table.rowCount()):
+                item = self.batch_summary_table.item(row, 0)
+                if item is not None and item.data(Qt.UserRole) == frame_idx:
+                    target_row = row
+                    break
+            if target_row < 0:
+                return
+            self.tab_widget.setCurrentIndex(self._batch_tab_index)
+            self.batch_summary_table.selectRow(target_row)
+            item = self.batch_summary_table.item(target_row, 0)
+            if item is not None:
+                self.batch_summary_table.scrollToItem(item)
+            # selectRow 不触发 cellClicked，直接按原始索引填充详情
+            self._populate_batch_detail(frame_idx)
+        finally:
+            self._seq_sync_guard = False
+
+    def _on_batch_selection_highlight_seq(self):
+        """摘要表选区变化 → 时序图高亮对应消息（摘要表 → 图 方向）"""
+        if getattr(self, "_seq_sync_guard", False):
+            return
+        tab = getattr(self, "seq_diagram_tab", None)
+        if tab is None:
+            return
+        idxs = self._get_selected_batch_indices()
+        if len(idxs) != 1:
+            return
+        self._seq_sync_guard = True
+        try:
+            tab.highlight_frame(idxs[0])
+        finally:
+            self._seq_sync_guard = False
+
     def _on_batch_row_selected(self, row=None, col=None):
         """批量解析摘要表行选中时的处理（填充右侧详情面板）"""
         # 获取当前选中行的原始 batch_results 索引
@@ -9493,6 +10060,31 @@ class MainWindow(QMainWindow):
         if orig_idx < 0 or orig_idx >= len(self.batch_results):
             return
         self._populate_batch_detail(orig_idx)
+        # 回跳输入日志对应报文行（选中+居中）
+        self._jump_batch_input_to_src_line(orig_idx)
+        # 快照查看器已打开时：切行静默跟随（弹窗保持，只刷新高亮，直到用户关闭）
+        _viewer = self._src_viewer
+        if _viewer is not None and _viewer.isVisible():
+            self._locate_frame_in_snapshot(orig_idx, silent=True)
+
+    def _jump_batch_input_to_src_line(self, idx: int):
+        """批量解析结果 → 输入日志对应报文行回跳（选中该行并居中）
+
+        行号来源：批量解析时记录的 _src_line（显示文本行号）；
+        输入框内容在解析后被编辑时行号可能偏移，属尽力回跳。
+        """
+        if idx < 0 or idx >= len(self.batch_results):
+            return
+        line_no = self.batch_results[idx].get("_src_line", -1)
+        if line_no is None or line_no < 0:
+            return
+        block = self.batch_input.document().findBlockByNumber(line_no)
+        if not block.isValid():
+            return
+        cursor = QTextCursor(block)
+        cursor.movePosition(QTextCursor.EndOfBlock, QTextCursor.KeepAnchor)
+        self.batch_input.setTextCursor(cursor)
+        self.batch_input.ensureCursorVisible()  # QTextEdit 滚动到光标行可见
 
     def _populate_batch_detail(self, index: int):
         """填充批量解析详情面板（右侧表格 + 原始报文）"""

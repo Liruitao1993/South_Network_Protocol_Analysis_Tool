@@ -45,3 +45,6 @@ if biz:
             f.write(f"[{i:3d}] {name} | raw={raw} | parsed={parsed} | {comment} | offset={start}-{end}\n")
     print("结果写入 test_ofdma_out.txt")
 
+
+# Qt offscreen 在解释器退出析构时可能原生崩溃(与测试结论无关)，显式退出避免污染退出码
+os._exit(0)

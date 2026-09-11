@@ -656,6 +656,9 @@ class CSGNewGenParser:
         self._cmt_index = 4
         self._std_version = 1
         self._pb_count = 1
+        # 重组偏移映射重置：非 PB 帧（信标/直接应用层等）不得沿用上一帧映射
+        self._concat_segments = None
+        self._concat_origin = 0
         table_data = []
         frame_len = len(frame_bytes)
         self._aggregated = False
@@ -942,8 +945,11 @@ class CSGNewGenParser:
         # ── 解析 MSDU 负载（MSDU头判定 + 应用层分派），主流程与聚合帧级联块共用 ──
         # 聚合帧的级联块已在 _parse_pb_block 内各自解析应用层，跳过整帧兜底
         if not getattr(self, '_aggregated', False):
+            # MSDU/应用层行偏移处于 concat 空间，仅翻译新增行（之前的行已是原始偏移）
+            _before = len(table_data)
             table_data = self._parse_msdu_payload(msdu_payload, offset, mac_data,
                                                   table_data, is_direct_app)
+            table_data[_before:] = self._remap_concat_rows(table_data[_before:])
 
         return table_data
 
@@ -1322,6 +1328,44 @@ class CSGNewGenParser:
             return self._scan_mgmt_msdu_offset(payload, max_scan=32) is not None
         return False
 
+    def _concat_to_orig(self, idx: int) -> int:
+        """重组 concat 索引 → 原始帧偏移（按 PB 体分段翻译）。
+
+        多 PB 重组后各 PB 体在 concat 中连续，但在原始帧中被
+        PBH(4B)+保留(1B)+PBCS(3B) 隔开；重组解析产生的行偏移必须
+        分段翻译回原始帧，否则点击行高亮错位。
+        """
+        segs = getattr(self, '_concat_segments', None)
+        if not segs:
+            return idx
+        for cs, ce, os_ in segs:
+            if cs <= idx < ce:
+                return os_ + (idx - cs)
+        if idx < segs[0][0]:
+            return segs[0][2] + idx - segs[0][0]
+        cs, ce, os_ = segs[-1]
+        return os_ + (idx - cs)
+
+    def _remap_concat_rows(self, rows: list) -> list:
+        """将 concat 空间行偏移翻译回原始帧（origin 为第一 PB 体起始；
+        偏移为 None 的行原样保留；单 PB 时映射为恒等）"""
+        origin = getattr(self, '_concat_origin', 0)
+        out = []
+        for r in rows:
+            if (
+                isinstance(r, (tuple, list))
+                and len(r) >= 6
+                and r[4] is not None
+                and r[5] is not None
+            ):
+                r = (
+                    r[0], r[1], r[2], r[3],
+                    self._concat_to_orig(r[4] - origin),
+                    self._concat_to_orig(r[5] - origin),
+                )
+            out.append(r)
+        return out
+
     def _parse_pb_block(self, frame_bytes: bytes, offset: int,
                         table_data: list, frame_len: int):
         """解析物理块(PB)：PB头(4B) + PB体(MAC帧) + 保留 + PBCS(3B)
@@ -1466,6 +1510,16 @@ class CSGNewGenParser:
                 ))
             pb_sections.append((tag, head_rows, pb_off, actual_body_len, pbcs_rows))
 
+        # ── 多 PB 重组偏移映射：concat 区间 → 原始帧 PB 体起始 ──
+        # （mac_concat 按 pb_body_size 逐块拼接，含截断块的零填充）
+        segments = []
+        _cs = 0
+        for _tag, _heads, _pb_off, _body_len, _pbcs in pb_sections:
+            segments.append((_cs, _cs + pb_body_size, _pb_off + pb_hdr_len))
+            _cs += pb_body_size
+        self._concat_segments = segments
+        self._concat_origin = pb_body_offset
+
         # 重组后判定 PB 体能否按 MAC 帧解析：噪声载荷只按原始报文展示，不输出伪解析行
         is_beacon = getattr(self, '_delimiter_type', 1) == 0
         if not mac_concat:
@@ -1515,7 +1569,8 @@ class CSGNewGenParser:
                         ' '.join(f'{b:02X}' for b in cascade_hdr),
                         f"长度:{cascade_len}, 起始:{start_flag}, 结束:{end_flag}",
                         f"级联数据块长度:{cascade_len}字节",
-                        pb_body_offset + cascade_offset, pb_body_offset + cascade_offset + 1
+                        self._concat_to_orig(cascade_offset),
+                        self._concat_to_orig(cascade_offset + 1)
                     ))
                     cascade_offset += 2
                     if cascade_offset + cascade_len <= len(mac_concat):
@@ -1523,7 +1578,7 @@ class CSGNewGenParser:
                         _, mac_table = self._parse_mac_frame(
                             mac_seg, base_offset=pb_body_offset + cascade_offset,
                             parse_msdu_app=True)
-                        table_data.extend(mac_table)
+                        table_data.extend(self._remap_concat_rows(mac_table))
                         cascade_offset += cascade_len
                         cascade_idx += 1
                         if end_flag:
@@ -1537,7 +1592,8 @@ class CSGNewGenParser:
                         ' '.join(f'{b:02X}' for b in remaining[:30]) + ("..." if len(remaining) > 30 else ""),
                         f"{len(remaining)}字节",
                         "级联帧解析后的剩余数据",
-                        pb_body_offset + cascade_offset, pb_body_offset + len(mac_concat) - 1
+                        self._concat_to_orig(cascade_offset),
+                        self._concat_to_orig(len(mac_concat) - 1)
                     ))
             elif mac_plausible:
                 # 单MAC帧（可能跨多PB）
@@ -1545,7 +1601,7 @@ class CSGNewGenParser:
                 self._aggregated = False
                 mac_data = mac_concat
                 mac_end, mac_table = self._parse_mac_frame(mac_data, base_offset=pb_body_offset)
-                table_data.extend(mac_table)
+                table_data.extend(self._remap_concat_rows(mac_table))
                 # 填充（MAC帧末尾在最后一个PB体内的位置）
                 padding_start = mac_end - pb_body_offset
                 if padding_start < len(mac_concat):
@@ -1556,7 +1612,8 @@ class CSGNewGenParser:
                         ' '.join(f'{b:02X}' for b in padding[:20]) + ("..." if len(padding) > 20 else ""),
                         f"{len(padding)}字节",
                         desc,
-                        pb_body_offset + padding_start, pb_body_offset + len(mac_concat) - 1
+                        self._concat_to_orig(padding_start),
+                        self._concat_to_orig(len(mac_concat) - 1)
                     ))
                 actual_mac_len = mac_end - pb_body_offset
                 mac_data = mac_concat[:actual_mac_len]
@@ -1567,7 +1624,7 @@ class CSGNewGenParser:
                     "MAC重组解析", "", "无法解析",
                     "重组后的物理块体不符MAC帧特征(帧头类型/版本/MSDU类型/长度越界)，"
                     "上方各物理块体已按原始报文展示",
-                    pb_body_offset, pb_body_offset + len(mac_concat) - 1
+                    None, None
                 ))
 
         mac_hdr_len = 12

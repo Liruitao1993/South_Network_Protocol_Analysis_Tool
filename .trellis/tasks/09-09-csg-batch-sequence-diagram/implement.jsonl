@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "本功能跨越 parser table_data → 纯逻辑模型 → QGraphicsScene UI 三层，需按跨层契约检查数据流"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "摘要复用 batch_results[摘要]、图标按钮复用 _make_toolbar_btn 惯例、懒加载复用 _replace_lazy_tab，需先查已有模式避免重复造轮子"}
+{"file": ".trellis/tasks/09-09-csg-batch-sequence-diagram/design.md", "reason": "技术设计：架构边界、提取规则、布局坐标、联动防循环、测试设计"}

@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/09-10-batch-snapshot-locate/prd.md", "reason": "对照验收：快照不可变性（回填不污染）、弹窗只读+搜索、右键每次都弹、clear_batch 语义"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "检查是否复用既有 _copy_table_rows/_highlight_bytes 色系/行号 recipe，而非另造"}
+{"file": "test/test_batch_src_line_jump.py", "reason": "并行功能（框内行回跳）与本任务（快照定位）共用 parse_batch，检查互不破坏"}

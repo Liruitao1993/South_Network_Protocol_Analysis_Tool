@@ -25,8 +25,9 @@ print(f"ED提取: {len(biz)//2}B, type={dtype}")
 # 2. 帧提取
 frames = w._extract_csg_new_gen_frames(hex_str)
 print(f"帧提取: {len(frames)} 帧")
-for i, (fh, dt) in enumerate(frames):
-    print(f"  帧{i}: hex_len={len(fh)//2}B, ed_type={dt}")
+for i, item in enumerate(frames):
+    fh, dt = item[0], item[1]
+    print(f"  帧{i}: hex_len={len(fh)//2}B, ed_type={dt}, line_no={item[2] if len(item) > 2 else -1}")
 
 # 3. 直接解析提取出的业务帧
 from csg_new_gen_parser import CSGNewGenParser
@@ -47,3 +48,6 @@ for r in result:
     if any(k in str(r[0]) for k in ["OFDMA", "eFC", "站点", "扩展ID", "帧类型", "测试ID"]):
         print(f"  {r[0]}: {r[1]} / {r[2]} / {r[3]}")
 
+
+# Qt offscreen 在解释器退出析构时可能原生崩溃(与测试结论无关)，显式退出避免污染退出码
+os._exit(0)

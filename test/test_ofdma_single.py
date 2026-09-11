@@ -44,3 +44,6 @@ if biz:
 meta, business, bo = w._parse_ed_monitor_header(bytes.fromhex(hex_str))
 print(f"\n_parse_ed_monitor_header: meta={'OK' if meta else 'None'} business_len={len(business) if business else 0}")
 
+
+# Qt offscreen 在解释器退出析构时可能原生崩溃(与测试结论无关)，显式退出避免污染退出码
+os._exit(0)

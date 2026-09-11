@@ -98,8 +98,10 @@ def main():
     print("=" * 50)
     if FAILURES:
         print(f"[FAIL] {len(FAILURES)} 项失败: {FAILURES}")
-        raise SystemExit(1)
+        os._exit(1)
     print(f"[OK] 全部 {PASS} 项检查通过")
+    # Qt offscreen 在解释器退出析构时可能原生崩溃(与测试结论无关)，显式退出避免污染退出码
+    os._exit(0)
 
 
 if __name__ == "__main__":

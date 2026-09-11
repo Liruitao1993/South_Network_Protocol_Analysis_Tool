@@ -31,6 +31,6 @@ def process(text, context):
 
 ## 示例列表
 
-- `hex_clean.py` — 通用十六进制清洗：去除非 hex 字符，每行一帧归一化
+- `hex_clean.py` — 十六进制清洗：识别监控日志 `'ED ... 'O` 标记帧（含跨行）；全文无标记时回退为逐行通用清洗（剥离行首时间戳、去非 hex 字符，保留长度≥16 且为偶数的行）
 - `tcp_payload_extract.py` — TCP 日志 payload 提取：从 "tcp data: XX XX ..." 格式提取连续 hex
 - `filter_by_parse.py` — 按解析结果过滤：逐帧调用解析器，只保留解析成功的帧
