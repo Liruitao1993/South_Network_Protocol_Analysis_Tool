@@ -99,10 +99,18 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.3"
+APP_VERSION = "1.23.4"
 BUILD_DATE = "2026-09-11"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    (
+        "1.23.4",
+        "2026-09-11",
+        [
+            "DLT645 从站模拟核心（dlt645_sim/，纯逻辑无 Qt）：handle_frame 支持主站读数据 11H→91H 闭环；未知 DI / 不支持功能码回异常 D1H（ERR 无请求数据）；档案 DI→可读值（复用 encode_value / DLT645FrameGenerator）；test/test_dlt645_sim.py",
+            "GUI 虚拟表 tab 扩展与串口从站线程后续接入（本版本先落引擎与测试）",
+        ],
+    ),
     (
         "1.23.3",
         "2026-09-11",
