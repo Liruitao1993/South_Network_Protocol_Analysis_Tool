@@ -220,6 +220,8 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 │                                #  - current_protocol 硬编码索引(0~10)，见 §6
 │                                #  - ConfigDialog：配置文件路径管理（自定义 JSON 路径）
 │
+├── protocol_registry.py      # 协议能力注册表（1.23.1）：下拉名/别名/Tab/校验/提取/包装
+├── parser_registry.py        # Parser 懒加载（按名缓存实例）
 ├── 协议解析器（parser）── 每个返回嵌套 dict，字段约定见 §4
 │   ├── protocol_parser.py          # 南网 (ProtocolFrameParser) ~4450行 [最大单文件]
 │   │   └── protocol_tool.py          # ControlField(ctypes) + Frame(dataclass) 组帧
@@ -577,29 +579,49 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 
 ## 6. GUI 协议集成点（添加/修改协议必读）
 
-`current_protocol` 索引在 `main_gui.py` **硬编码**，添加新协议必须**同时**修改以下位置（用 grep 定位）：
+**1.23.1 起：能力元数据集中在 `protocol_registry.py`。**
+
+- `parser_registry.py`：按名字懒加载 parser 类/实例
+- `protocol_registry.py`：按协议索引声明展示名、别名、占位符、查询页、组帧/预设模式、Tab 能力（档案/拓扑/虚拟表/监控/时序图）、解析级别族、批量提取策略、校验器类路径、GUI 解析器包装
+
+`main_gui` 已改为查表分派的位置：
 
 | 位置 | 行为 |
 | ------ | ------ |
-| `MainWindow.__init__`（~L285） | 注释列出索引含义，并初始化对应 parser 实例 |
-| `protocol_combo.addItem`（~L549-560） | 添加下拉项（顺序即索引，现 0~11） |
-| `_on_protocol_changed`（~L1300+） | 协议切换：输入提示 / 查询页 / 各 Tab 可见性 |
-| `_extract_frames_for_protocol`（~L5449+） | 多帧提取逻辑（不同协议起始符不同；协议 11 走通用每行一帧） |
-| `_get_current_parser` / `_parse_single_frame`（~L3100+） | 选择 parser 调用（协议 11 → HDC10GuiParser 包装） |
-| `_update_protocol_lookup_tab`（~L2113+） | 查询标签页内容（DI/AFN/OBIS/命令字/业务标识/HDC 1.0 报文 ID） |
-| `_run_validation`（~L3698） | 校验器注册（`validators` dict，11 → HDC10Validator） |
-| `_protocol_name_to_index`（~L4600） | 协议名 ↔ 索引映射（含 "HDC1.0"→11 等） |
-| 批量解析（~L4780+） | 前缀剥离（10/11 → `_strip_gw_new_gen_prefix`）、摘要（10/11 → `_get_gw_new_gen_summary`） |
-**Tab 可见性规则：**
+| `protocol_combo` 填充 | `combo_labels()` |
+| `_on_protocol_changed` | 占位符 / Tab 可见性 / 组帧与预设 mode / 监控 / 时序图 |
+| `_update_protocol_lookup_tab` | `lookup_builder_method(spec.lookup_kind)` |
+| `_get_current_parser` | `build_gui_parser(...)` |
+| `_run_validation` / 快捷小窗校验 | `build_validator_map()` |
+| `_protocol_name_to_index` | `name_to_index()` |
+| `_extract_frames_for_protocol` | `spec.extract_strategy` |
 
-- 虚拟表（1.16.0 起）：**仅 698.45(8)**；`VirtualMeterWidget` 串口监听线程独立（不复用主 SerialWorker），关闭时须调 `shutdown()` 回收
-- 组帧 / 预设命令：南网(0) / 国网(7) / 698.45(8)，三种模式 `south` / `gdw` / `dlt698`
-- 档案管理 / 拓扑信息：仅南网(0) / 国网(7)
-- 新一代解析级别下拉：仅索引 9（新一代载波，auto/fc_pb/fc_efc/fc_only/app/pb_only）
-- 国网新一代 / HDC 1.0 解析级别 + 通道下拉：索引 10 / 11（auto/fc_pb/fc_only/mac_only/pb_only/fc_mac/app），由 `_hdc10_parse_level` / `_hdc10_channel` 控制
-- 实时监控器：仅索引 9 / 10 可见，南网新一代用 `ED..EE` 包装，国网新一代用 `96..16` 包装（**索引 11 无监控器**）
-- TCP 监控：始终可见，独立于协议切换；scapy 未安装或 npcap 缺失时功能降级并提示
-- 报文对比 / 报文工具 / 测试方案：始终可见
+**新增协议 checklist（1.23.1 起优先改注册表）：**
+
+1. 在 `protocol_registry._PROTOS` 末尾追加一条 `ProtocolSpec`（索引 = 下一项）
+2. 在 `parser_registry._PARSER_SPECS` 注册 parser 键
+3. 新建 `xxx_parser.py` + `validator/xxx_validator.py`
+4. 如需 Web 支持，同步 `reflex_web/`
+5. 新建 `test/test_xxx.py`；必要时扩 `test_protocol_registry.py`
+6. 同步本文件 §1/§3/§5、README 与 CHANGELOG；打包时检查 spec `datas`/hiddenimports
+
+仍可能需要手写的点（未完全表驱动）：
+
+- 批量前缀剥离 / 业务摘要（协议 9/10/11 共用逻辑，新协议若结构不同需在 `parse_batch` 增加策略）
+- 解析级别下拉的控件集合与默认值（`_csg_parse_level` / `_gw_parse_level` 等）
+- 查询页 builder 的具体 UI（`_create_*_lookup_content`）
+- 单帧解析里特殊预处理（ED 包装、PB 填充等）
+
+**Tab 可见性规则（与注册表字段一一对应）：**
+
+- 虚拟表：`has_virtual_meter`，仅 698.45(8)；串口监听线程独立，关闭须 `shutdown()`
+- 组帧 / 预设：`frame_gen_mode` / `preset_mode`，南网(0)/DLT645(6)/国网(7)/698.45(8)
+- 档案 / 拓扑：`has_archive` / `has_topology`，仅南网(0)/国网(7)
+- 新一代解析级别：`parse_level_family == "csg"`（索引 9）
+- 国网新一代 / HDC 1.0 解析级别+通道：`parse_level_family in ("gw","hdc10")`
+- 实时监控器：`has_monitor` + `monitor_wrapper`（9=plc2/ED..EE，10=hplc/96..16；**11 无**）
+- 通信时序图：`has_sequence_diagram`（9/10/11）
+- TCP 监控 / 报文对比 / 报文工具 / 测试方案：始终可见
 
 ---
 
@@ -708,16 +730,14 @@ python test/test_frame_share.py         # 报文分享（normalize_hex/submit_sh
 
 1. **协议定义优先**：遇到不确定的协议字段、字节序、校验范围，**先查 §5 对应文档**，不要凭记忆或猜测。
 2. **PDF 文档用 pdf skill 检索**：645 补遗、IEC 62056-46、DLT645 原始标准都是 PDF，调用 pdf skill 而非人工翻阅。
-3. **新增协议的完整 checklist**：
-   - [ ] 新建 `xxx_parser.py`，返回嵌套 dict（键名遵循 §4.2）
-   - [ ] 在 `main_gui.py` import + 初始化 parser 实例
-   - [ ] 添加 `protocol_combo.addItem`（注意索引顺序）
-   - [ ] 在 `_on_protocol_changed` / `_parse_single_frame` / `_extract_frames_for_protocol` / `_update_protocol_lookup_tab` 加分支
-   - [ ] 新建 `validator/xxx_validator.py` 继承 `BaseValidator`，在 `_run_validation` 注册（`main_gui.py` 的 `validators` dict）
+3. **新增协议的完整 checklist（1.23.1 起）**：
+   - [ ] 在 `protocol_registry.py` 追加 `ProtocolSpec`（下拉名/别名/占位符/能力/校验器/提取策略）
+   - [ ] 在 `parser_registry.py` 注册 parser 键；新建 `xxx_parser.py` 返回嵌套 dict（键名遵循 §4.2）
+   - [ ] 新建 `validator/xxx_validator.py` 继承 `BaseValidator`，写入 spec 的 `validator_class`
+   - [ ] 查询页如有新类型：在 `lookup_builder_method` 映射 + 实现 `_create_*_lookup_content`
    - [ ] 如需 Web 版支持，同步更新 `reflex_web/reflex_web/reflex_web.py` 与 `reflex_web/reflex_web/lookup_utils.py`
-   - [ ] 同步更新本文件 §1（协议表）、§3（架构）、§5（文档映射）、§6（集成点）
-   - [ ] 新建 `test_xxx.py`，含硬编码测试帧
-   - [ ] 如需打包，更新 spec 的 `datas`
+   - [ ] 同步更新本文件 §1/§3/§5/§6、README；新建 `test/test_xxx.py`
+   - [ ] 如需打包，更新 spec 的 `datas`/hiddenimports
 4. **解析器独立性**：parser 之间避免横向耦合；公共逻辑放 `base.py` 或工具模块。
 5. **GUI 组件拆分**：新 UI 组件独立成文件，`main_gui.py` 只负责组合。
 6. **中文键名保持一致**：`原始值`/`十进制`/`说明` 等，GUI 表格列直接读这些键。
@@ -729,6 +749,11 @@ python test/test_frame_share.py         # 报文分享（normalize_hex/submit_sh
 ## 10. 变更日志
 
 > 详细版本变更记录请查看 `main_gui.py:CHANGELOG`（按版本倒序），或运行 `git log --oneline` 查看提交历史。本文档仅保留最近两个版本的摘要。
+
+### 1.23.1 — 2026-09-11
+
+- **协议能力注册表**：新增 `protocol_registry.py`，12 协议元数据与校验器/解析器包装/批量提取策略集中声明；`main_gui` 的 combo/占位符/Tab 可见性/查询页/`_get_current_parser`/校验 map/名称映射/帧提取 全部查表
+- 修复协议6 预设命令 `set_protocol("dlt645")`；新增 `test/test_protocol_registry.py`
 
 ### 1.18.1 — 2026-08-28
 

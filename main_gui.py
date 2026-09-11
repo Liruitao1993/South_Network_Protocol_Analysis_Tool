@@ -88,6 +88,7 @@ from monitor_widget import RealtimeMonitorWidget
 from obis_lookup import get_obis_lookup
 from parser_registry import get_parser, get_parser_class
 from preset_buttons import PresetButtonWidget
+import protocol_registry as protocol_registry
 from serial_worker import SerialWorker
 from system_integration.clipboard_monitor import ClipboardMonitor
 from system_integration.global_hotkey import GlobalHotkeyManager
@@ -98,10 +99,19 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.0"
+APP_VERSION = "1.23.1"
 BUILD_DATE = "2026-09-11"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    (
+        "1.23.1",
+        "2026-09-11",
+        [
+            "架构：新增协议能力注册表 protocol_registry.py——12 种协议的展示名/别名/占位符/查询页/组帧模式/Tab 能力（档案/拓扑/虚拟表/监控/时序图）/解析级别族/批量提取策略/校验器类/GUI 解析器包装 统一声明；main_gui 查表分派，新增协议优先改注册表而非散落 8+ 处 if",
+            "main_gui 接线：protocol_combo 下拉、_on_protocol_changed 占位符与 Tab/控件可见性、查询页 builder 分派、_get_current_parser 包装、校验器 map（单帧+快捷小窗）、_protocol_name_to_index、_extract_frames_for_protocol 策略选择 全部走 protocol_registry",
+            "修复：协议6 预设命令页可见时未调用 preset_tab.set_protocol(\"dlt645\")（此前 set_protocol 分支写在 virtual_meter 可见块内且漏 6）；预设 mode 由注册表 preset_mode 驱动",
+        ],
+    ),
     (
         "1.23.0",
         "2026-09-09",
@@ -1302,18 +1312,8 @@ class MainWindow(QMainWindow):
         proto_layout.addWidget(proto_label)
 
         self.protocol_combo = QComboBox()
-        self.protocol_combo.addItem("[0] 南网协议 (Q/CSG1209021-2019)")
-        self.protocol_combo.addItem("[1] PLC RF协议 (万胜海外 V1_04)")
-        self.protocol_combo.addItem("[2] HDLC/国网DLMS (IEC 62056-46)")
-        self.protocol_combo.addItem("[3] DLMS-APDU(国网)")
-        self.protocol_combo.addItem("[4] DLMS Wrapper裸报文")
-        self.protocol_combo.addItem("[5] DLMS-APDU裸报文")
-        self.protocol_combo.addItem("[6] DLT645-2007 电表协议")
-        self.protocol_combo.addItem("[7] 国网协议 (Q/GDW 10376.2-2024)")
-        self.protocol_combo.addItem("[8] 698.45协议 (DL/T 698.45-2017)")
-        self.protocol_combo.addItem("[9] 新一代载波协议 (通感一体化)")
-        self.protocol_combo.addItem("[10] 国网新一代双模通信互联互通")
-        self.protocol_combo.addItem("[11] HDC 1.0 双模互联互通")
+        for label in protocol_registry.combo_labels():
+            self.protocol_combo.addItem(label)
         self.protocol_combo.setMinimumWidth(150)
         self.protocol_combo.setFont(self._ui_font(0))
         # 不使用 AdjustToContents：它把控件撑到列表中最长协议名宽度。
@@ -3145,73 +3145,19 @@ class MainWindow(QMainWindow):
     def _on_protocol_changed(self, index: int):
         """协议选择改变时的回调"""
         self.current_protocol = index
+        spec = protocol_registry.get_protocol(index)
         # 更新占位符提示
-        if index == 0:
-            self.single_input.setPlaceholderText(
-                "请输入十六进制报文，例如：68 0E 00 00 00 00 01 00 01 E8 00 05 EF 16"
-            )
-        elif index == 1:
-            self.single_input.setPlaceholderText(
-                "请输入PLC RF报文，例如：02 00 05 C0 20 01 00 99"
-            )
-        elif index == 2:
-            self.single_input.setPlaceholderText(
-                "请输入HDLC报文，例如：7E A0 07 01 01 93 ... 7E"
-            )
-        elif index == 3:  # DLMS-APDU(国网)
-            self.single_input.setPlaceholderText(
-                "请输入国网DLMS APDU报文，例如：C0 01 C1 00 ..."
-            )
-        elif index == 4:  # DLMS Wrapper裸报文
-            self.single_input.setPlaceholderText(
-                "请输入Wrapper报文，例如：00 01 00 02 00 1E ..."
-            )
-        elif index == 5:  # DLMS-APDU裸报文
-            self.single_input.setPlaceholderText(
-                "请输入APDU报文，例如：C0 01 C1 00 ..."
-            )
-        elif index == 6:  # DLT645-2007
-            self.single_input.setPlaceholderText(
-                "请输入DLT645报文，例如：68 AA AA AA AA AA AA 68 11 04 33 33 33 33 CS 16"
-            )
-        elif index == 7:  # 国网协议
-            self.single_input.setPlaceholderText(
-                "请输入国网报文，例如：68 0F 00 43 00 00 00 00 00 00 00 00 00 03 01 00 48 16"
-            )
-        elif index == 8:  # 698.45
-            self.single_input.setPlaceholderText(
-                "请输入698.45报文，例如：68 0E 00 41 01 07 08 09 AE C6 01 00 00 00 00 34 87 16"
-            )
-        elif index == 9:  # 新一代载波协议(通感一体化)
-            self.single_input.setPlaceholderText(
-                "请输入新一代载波报文，例如：11 01 01 00 00 00 00 01 00 01 00 00"
-            )
-        elif index == 10:  # 国网新一代双模通信互联互通
-            self.single_input.setPlaceholderText(
-                "请输入国网新一代报文，例如：ED A5 00 00 02 EF 01 7E 4E 97 86 01 00 88 00"
-            )
-        elif index == 11:  # HDC 1.0 双模互联互通
-            self.single_input.setPlaceholderText(
-                "请输入HDC 1.0报文，例如：01 00 01 00 00 10 00 11 ..."
-            )
+        self.single_input.setPlaceholderText(spec.placeholder)
 
         # 更新查询页面
         self._update_protocol_lookup_tab()
 
-        # 协议组帧页面和预设命令页面在南网、国网、698.45协议下显示
+        # 协议组帧页面和预设命令页面：注册表 frame_gen_mode / preset_mode
         if hasattr(self, "_frame_gen_tab_index"):
-            # 协议组帧：0=南网 6=DLT645-2007 7=国网 8=698.45
-            show_frame_gen = index in (0, 6, 7, 8)
+            show_frame_gen = spec.frame_gen_mode is not None
             self.tab_widget.setTabVisible(self._frame_gen_tab_index, show_frame_gen)
             if show_frame_gen:
-                if index == 0:
-                    mode = "south"
-                elif index == 6:
-                    mode = "dlt645"
-                elif index == 7:
-                    mode = "gdw"
-                else:
-                    mode = "dlt698"
+                mode = spec.frame_gen_mode
                 self._pending_frame_gen_mode = mode
                 if hasattr(self, "frame_gen_tab"):
                     self.frame_gen_tab.set_protocol_mode(mode)
@@ -3219,39 +3165,28 @@ class MainWindow(QMainWindow):
                 if hasattr(self, "frame_gen_tab"):
                     self.frame_gen_tab.reset()
         if hasattr(self, "_preset_tab_index"):
-            # 预设命令：0=南网 6=DLT645 7=国网 8=698.45
-            self.tab_widget.setTabVisible(self._preset_tab_index, index in (0, 6, 7, 8))
+            self.tab_widget.setTabVisible(
+                self._preset_tab_index, spec.frame_gen_mode is not None
+            )
+            if spec.preset_mode is not None and hasattr(self, "preset_tab"):
+                # 含协议6 dlt645：此前 set_protocol 挂在 virtual_meter 可见块内且漏 6
+                self.preset_tab.set_protocol(spec.preset_mode)
         if hasattr(self, "_virtual_meter_tab_index"):
-            self.tab_widget.setTabVisible(self._virtual_meter_tab_index, index == 8)
-            if index in (0, 7, 8):
-                if index == 0:
-                    mode = "south"
-                elif index == 7:
-                    mode = "gdw"
-                else:
-                    mode = "dlt698"
-                self.preset_tab.set_protocol(mode)
-        # 档案管理页面在南网、国网协议下显示
+            self.tab_widget.setTabVisible(
+                self._virtual_meter_tab_index, spec.has_virtual_meter
+            )
+        # 档案管理 / 拓扑信息
         if hasattr(self, "_archive_tab_index"):
-            show_archive = index in (0, 7)
-            self.tab_widget.setTabVisible(self._archive_tab_index, show_archive)
-            if show_archive:
-                if index == 0:
-                    mode = "south"
-                else:
-                    mode = "gdw"
+            self.tab_widget.setTabVisible(self._archive_tab_index, spec.has_archive)
+            if spec.has_archive:
+                mode = "south" if index == 0 else "gdw"
                 self._pending_archive_mode = mode
                 if hasattr(self, "archive_tab"):
                     self.archive_tab.set_protocol_mode(mode)
-        # 拓扑信息页面在南网、国网协议下显示
         if hasattr(self, "_topology_tab_index"):
-            show_topology = index in (0, 7)
-            self.tab_widget.setTabVisible(self._topology_tab_index, show_topology)
-            if show_topology:
-                if index == 0:
-                    mode = "south"
-                else:
-                    mode = "gdw"
+            self.tab_widget.setTabVisible(self._topology_tab_index, spec.has_topology)
+            if spec.has_topology:
+                mode = "south" if index == 0 else "gdw"
                 self._pending_topology_mode = mode
                 if hasattr(self, "topology_tab"):
                     self.topology_tab.set_protocol_mode(mode)
@@ -3260,7 +3195,7 @@ class MainWindow(QMainWindow):
                     self.topology_tab.clear_nodes()
 
         # 新一代载波协议解析级别选择和字节剔除：仅协议索引9时可见
-        show_csg_level = index == 9
+        show_csg_level = spec.parse_level_family == "csg"
         self.csg_parse_level_label.setVisible(show_csg_level)
         self.csg_parse_level_combo.setVisible(show_csg_level)
         self.csg_strip_head_label.setVisible(show_csg_level)
@@ -3284,7 +3219,7 @@ class MainWindow(QMainWindow):
         self.csg_channel_combo.setVisible(show_csg_level)
 
         # 国网新一代/HDC 1.0 解析级别选择：协议索引10和11时可见
-        show_gw_level = index in (10, 11)
+        show_gw_level = spec.parse_level_family in ("gw", "hdc10")
         self.gw_parse_level_label.setVisible(show_gw_level)
         self.gw_parse_level_combo.setVisible(show_gw_level)
         # 通道下拉框：协议索引10和11时可见
@@ -3319,27 +3254,24 @@ class MainWindow(QMainWindow):
         self._fit_combo_to_current(self.gw_pb_frame_type_combo, min_w=90)
         self._reflow_proto_group()
 
-        # 通信时序图标签页：协议9/10/11（南网新一代/国网新一代/HDC 1.0）可见；按钮同步启停
+        # 通信时序图标签页：注册表 has_sequence_diagram；按钮同步启停
         if hasattr(self, "_seq_diagram_tab_index"):
             self.tab_widget.setTabVisible(
-                self._seq_diagram_tab_index, index in (9, 10, 11)
+                self._seq_diagram_tab_index, spec.has_sequence_diagram
             )
         if hasattr(self, "batch_seq_diagram_btn"):
-            self.batch_seq_diagram_btn.setEnabled(index in (9, 10, 11))
+            self.batch_seq_diagram_btn.setEnabled(spec.has_sequence_diagram)
 
-        # 监控器标签页：仅南网新一代(9)/国网新一代(10)可见，并注入对应解析器与摘要函数
+        # 监控器标签页：注册表 has_monitor / monitor_wrapper
         if hasattr(self, "_monitor_tab_index"):
-            show_monitor = index in (9, 10)
+            show_monitor = spec.has_monitor
             self.tab_widget.setTabVisible(self._monitor_tab_index, show_monitor)
             if show_monitor:
-                parser = (
-                    self.csg_new_gen_parser if index == 9 else self.gw_new_gen_parser
-                )
-                # 协议9(新一代通感一体化/PLC2.0收发机)用 ED..EE 包装；
-                # 协议10(国网新一代/HPLC)用 96..16 包装
-                wrapper = "plc2" if index == 9 else "hplc"
+                parser = self.csg_new_gen_parser if index == 9 else self.gw_new_gen_parser
                 self.monitor_tab.set_protocol(
-                    parser, self._get_monitor_summary, wrapper_format=wrapper
+                    parser,
+                    self._get_monitor_summary,
+                    wrapper_format=spec.monitor_wrapper or "hplc",
                 )
 
         # 协议切换时把当前协议同步到快捷解析小窗（小窗存在时）
@@ -3439,57 +3371,16 @@ class MainWindow(QMainWindow):
             widget._refresh_profiles()
 
     def _update_protocol_lookup_tab(self):
-        """根据当前协议更新查询页面内容"""
-        # 清空当前查询页面内容（递归清除所有子layout和widget）
+        """根据当前协议更新查询页面内容（builder 由 protocol_registry 映射）"""
         self._clear_layout(self.protocol_lookup_tab_layout)
 
-        # 更新选项卡标签
         lookup_tab_index = self.tab_widget.indexOf(self.protocol_lookup_tab)
-
-        if self.current_protocol == 0:
-            # 南网协议：DI查询
-            self.tab_widget.setTabText(lookup_tab_index, "DI查询")
-            self._create_di_lookup_content(self.protocol_lookup_tab_layout)
-
-        elif self.current_protocol == 1:
-            # 万胜PLC RF协议：命令字查询
-            self.tab_widget.setTabText(lookup_tab_index, "命令字查询")
-            self._create_command_lookup_content(self.protocol_lookup_tab_layout)
-
-        elif self.current_protocol in (2, 3, 4, 5):
-            # HDLC/DLMS-APDU(国网)/Wrapper/DLMS-APDU：OBIS查询
-            self.tab_widget.setTabText(lookup_tab_index, "OBIS查询")
-            self._create_obis_lookup_content(self.protocol_lookup_tab_layout)
-
-        elif self.current_protocol == 6:
-            # DLT645-2007协议：DI查询
-            self.tab_widget.setTabText(lookup_tab_index, "DI查询")
-            self._create_dlt645_di_lookup_content(self.protocol_lookup_tab_layout)
-
-        elif self.current_protocol == 7:
-            # 国网协议：AFN查询
-            self.tab_widget.setTabText(lookup_tab_index, "AFN查询")
-            self._create_gdw_lookup_content(self.protocol_lookup_tab_layout)
-
-        elif self.current_protocol == 8:
-            # 698.45协议：OAD查询
-            self.tab_widget.setTabText(lookup_tab_index, "OAD查询")
-            self._create_oad_lookup_content(self.protocol_lookup_tab_layout)
-
-        elif self.current_protocol == 9:
-            # 新一代载波协议(通感一体化)：业务标识查询
-            self.tab_widget.setTabText(lookup_tab_index, "业务标识查询")
-            self._create_csg_new_gen_lookup_content(self.protocol_lookup_tab_layout)
-
-        elif self.current_protocol == 10:
-            # 国网新一代双模通信互联互通：报文ID查询
-            self.tab_widget.setTabText(lookup_tab_index, "报文ID查询")
-            self._create_gw_new_gen_lookup_content(self.protocol_lookup_tab_layout)
-
-        elif self.current_protocol == 11:
-            # HDC 1.0 双模互联互通：报文ID查询
-            self.tab_widget.setTabText(lookup_tab_index, "报文ID查询")
-            self._create_hdc10_lookup_content(self.protocol_lookup_tab_layout)
+        spec = protocol_registry.get_protocol(self.current_protocol)
+        builder_name = protocol_registry.lookup_builder_method(spec.lookup_kind)
+        if spec.lookup_tab_title:
+            self.tab_widget.setTabText(lookup_tab_index, spec.lookup_tab_title)
+        if builder_name:
+            getattr(self, builder_name)(self.protocol_lookup_tab_layout)
 
     def _create_oad_lookup_content(self, layout):
         """创建698.45协议OAD查询页面内容"""
@@ -4623,7 +4514,7 @@ class MainWindow(QMainWindow):
     def _get_current_parser(
         self, protocol_index=None, parse_level=None, frame_type=None
     ):
-        """获取当前选中的解析器
+        """获取当前选中的解析器（包装逻辑由 protocol_registry.build_gui_parser 分派）。
 
         可指定协议索引（用于热键弹窗切换协议）与解析级别覆盖
         （用于弹窗内选择解析级别，None 用主窗口当前设置）。
@@ -4631,177 +4522,36 @@ class MainWindow(QMainWindow):
         protocol_index = (
             self.current_protocol if protocol_index is None else protocol_index
         )
-        if protocol_index == 0:
-            return self.parser
-        elif protocol_index == 1:
-            return self.plc_rf_parser
-        elif protocol_index == 2:  # HDLC/国网DLMS (完整HDLC帧)
-            return self.hdlc_parser
-        elif protocol_index == 3:  # DLMS-APDU(国网) (直接解析APDU)
-            # 返回一个匿名对象，调用parse_apdu_to_table
-            class APDUParserGuowang:
-                def __init__(self, hdlc_parser):
-                    self.hdlc_parser = hdlc_parser
-
-                def parse_to_table(self, data):
-                    return self.hdlc_parser.parse_apdu_to_table(data)
-
-            return APDUParserGuowang(self.hdlc_parser)
-        elif protocol_index == 4:  # DLMS Wrapper裸报文 (直接解析Wrapper+APDU)
-            # 返回一个匿名对象，调用parse_wrapper_to_table
-            class WrapperParser:
-                def __init__(self, hdlc_parser):
-                    self.hdlc_parser = hdlc_parser
-
-                def parse_to_table(self, data):
-                    return self.hdlc_parser.parse_wrapper_to_table(data)
-
-            return WrapperParser(self.hdlc_parser)
-        elif protocol_index == 5:  # DLMS-APDU裸报文 (直接解析APDU)
-            # 返回一个匿名对象，调用parse_apdu_to_table
-            class APDUParser:
-                def __init__(self, hdlc_parser):
-                    self.hdlc_parser = hdlc_parser
-
-                def parse_to_table(self, data):
-                    return self.hdlc_parser.parse_apdu_to_table(data)
-
-            return APDUParser(self.hdlc_parser)
-        elif protocol_index == 6:  # DLT645-2007
-
-            class DLT645GuiParser:
-                def __init__(self, parser):
-                    self.parser = parser
-
-                def parse_to_table(self, data):
-                    result = self.parser.parse(data)
-                    table = []
-                    # DLT645 帧结构计算字节范围
-                    data_len = result.get("data_length", 0)
-                    total_len = 10 + data_len + 2
-
-                    for item in result["fields"]:
-                        # LME自定义接口子字段为4元组(字段,原始hex,解析值,说明)，其余为3元组
-                        if len(item) == 4:
-                            field, raw, lme_parsed, desc = item
-                        else:
-                            field, raw, desc = item
-                            lme_parsed = ""
-                        byte_start = 0
-                        byte_end = 0
-                        parsed_value = lme_parsed
-
-                        if "帧起始符 1" in field:
-                            byte_start, byte_end = 0, 0
-                        elif "从站地址" in field:
-                            byte_start, byte_end = 1, 6
-                        elif "帧起始符 2" in field:
-                            byte_start, byte_end = 7, 7
-                        elif "控制码" in field:
-                            byte_start, byte_end = 8, 8
-                            parsed_value = result.get("control_parsed", "")
-                        elif "数据长度" in field:
-                            byte_start, byte_end = 9, 9
-                        elif "数据标识 DI" in field:
-                            byte_start, byte_end = 10, 13
-                            di_code = result.get("di_code", "")
-                            di_desc = result.get("di_desc", "")
-                            parsed_value = (
-                                f"{di_code} ({di_desc})"
-                                if di_code and di_desc
-                                else di_code
-                            )
-                        elif "数据内容" in field:
-                            byte_start, byte_end = 14, 10 + data_len - 1
-                        elif "数据域" in field:
-                            byte_start, byte_end = 10, 10 + data_len - 1
-                        elif "校验和" in field:
-                            byte_start, byte_end = total_len - 2, total_len - 2
-                        elif "帧结束符" in field:
-                            byte_start, byte_end = total_len - 1, total_len - 1
-
-                        table.append(
-                            (field, raw, parsed_value, desc, byte_start, byte_end)
-                        )
-
-                    return table
-
-            return DLT645GuiParser(self.dlt645_parser)
-        elif protocol_index == 7:  # 国网协议
-            return self.gdw_parser
-        elif protocol_index == 8:  # 698.45
-            return self.dl_t698_45_parser
-        elif protocol_index == 9:  # 新一代载波协议(通感一体化)
-            # 包装解析器以传递解析级别参数（弹窗覆盖优先，否则用主窗口设置）
-            csg_parser = self.csg_new_gen_parser
-            if parse_level is None:
+        spec = protocol_registry.get_protocol(protocol_index)
+        family = spec.parse_level_family
+        if parse_level is None:
+            if family == "csg":
                 parse_level = getattr(self, "_csg_parse_level", "auto")
-            # pb_only模式下获取帧类型（未指定时用主窗口 combo）
-            if frame_type is None and parse_level in ("pb_only", "mac_only"):
-                frame_type = self.csg_pb_frame_type_combo.currentData()
-
-            class CSGGenGuiParser:
-                def __init__(self, parser, level, ftype=None, channel="plc"):
-                    self.parser = parser
-                    self.level = level
-                    self.frame_type = ftype
-                    self.channel = channel
-
-                def parse_to_table(self, data):
-                    kwargs = {"parse_level": self.level, "channel": self.channel}
-                    if self.frame_type is not None:
-                        kwargs["pb_frame_type"] = self.frame_type
-                    return self.parser.parse_to_table(data, **kwargs)
-
-            csg_channel = getattr(self, "_csg_channel", "auto")
-            return CSGGenGuiParser(csg_parser, parse_level, frame_type, csg_channel)
-        elif protocol_index == 10:  # 国网新一代双模通信互联互通
-            # 包装解析器以传递解析级别参数（弹窗覆盖优先，否则用主窗口设置）
-            gw_parser = self.gw_new_gen_parser
-            if parse_level is None:
+            elif family == "gw":
                 parse_level = getattr(self, "_gw_parse_level", "auto")
-            # pb_only模式下获取帧类型（未指定时用主窗口 combo）
-            if frame_type is None and parse_level == "pb_only":
-                frame_type = self.gw_pb_frame_type_combo.currentData()
-
-            class GWGenGuiParser:
-                def __init__(self, parser, level, ftype=None, channel="plc"):
-                    self.parser = parser
-                    self.level = level
-                    self.frame_type = ftype
-                    self.channel = channel
-
-                def parse_to_table(self, data):
-                    kwargs = {"parse_level": self.level, "channel": self.channel}
-                    if self.frame_type is not None:
-                        kwargs["frame_type"] = self.frame_type
-                    return self.parser.parse_to_table(data, **kwargs)
-
-            gw_channel = getattr(self, "_gw_channel", "plc")
-            return GWGenGuiParser(gw_parser, parse_level, frame_type, gw_channel)
-
-        elif protocol_index == 11:  # HDC 1.0 双模互联互通
-            hdc10_parser = self.hdc10_parser
-            if parse_level is None:
+            elif family == "hdc10":
                 parse_level = getattr(self, "_hdc10_parse_level", "auto")
-            if frame_type is None and parse_level == "pb_only":
+        if frame_type is None and parse_level is not None:
+            if family == "csg" and parse_level in ("pb_only", "mac_only"):
+                frame_type = self.csg_pb_frame_type_combo.currentData()
+            elif family in ("gw", "hdc10") and parse_level == "pb_only":
                 frame_type = self.gw_pb_frame_type_combo.currentData()
+        channel = "plc"
+        if family == "csg":
+            channel = getattr(self, "_csg_channel", "auto")
+        elif family == "gw":
+            channel = getattr(self, "_gw_channel", "plc")
+        elif family == "hdc10":
+            channel = getattr(self, "_hdc10_channel", "plc")
 
-            class HDC10GuiParser:
-                def __init__(self, parser, level, ftype=None, channel="plc"):
-                    self.parser = parser
-                    self.level = level
-                    self.frame_type = ftype
-                    self.channel = channel
-
-                def parse_to_table(self, data):
-                    kwargs = {"parse_level": self.level, "channel": self.channel}
-                    if self.frame_type is not None:
-                        kwargs["frame_type"] = self.frame_type
-                    return self.parser.parse_to_table(data, **kwargs)
-
-            hdc10_channel = getattr(self, "_hdc10_channel", "plc")
-            return HDC10GuiParser(hdc10_parser, parse_level, frame_type, hdc10_channel)
+        base = get_parser(spec.parser_key)
+        return protocol_registry.build_gui_parser(
+            protocol_index,
+            base,
+            parse_level=parse_level,
+            frame_type=frame_type,
+            channel=channel,
+        )
 
     def load_example(self, data: str):
         """加载示例数据"""
@@ -5602,33 +5352,8 @@ class MainWindow(QMainWindow):
         try:
             frame_bytes = bytes.fromhex(clean_input)
 
-            # 根据当前协议选择验证器
-            from validator import (
-                DLT645Validator,
-                GDWValidator,
-                HDLCValidator,
-                NWValidator,
-                PLCRFValidator,
-            )
-            from validator.csg_new_gen_validator import CSGNewGenValidator
-            from validator.dl_t698_45_validator import DLT69845Validator
-            from validator.gw_new_gen_validator import GWNewGenValidator
-            from validator.hdc10_validator import HDC10Validator
-
-            validators = {
-                0: NWValidator(),  # 南网
-                1: PLCRFValidator(),  # PLC RF
-                2: HDLCValidator(),  # HDLC/国网DLMS
-                3: HDLCValidator(),  # DLMS-APDU(国网)
-                4: HDLCValidator(),  # Wrapper
-                5: HDLCValidator(),  # APDU
-                6: DLT645Validator(),  # DLT645
-                7: GDWValidator(),  # 国网
-                8: DLT69845Validator(),  # 698.45
-                9: CSGNewGenValidator(),  # 新一代载波协议(通感一体化)
-                10: GWNewGenValidator(),  # 国网新一代双模通信互联互通
-                11: HDC10Validator(),  # HDC 1.0 双模互联互通
-            }
+            # 校验器由 protocol_registry 按索引懒加载构造（与快捷小窗共用）
+            validators = protocol_registry.build_validator_map()
 
             validator = validators.get(self.current_protocol)
             if validator:
@@ -6920,32 +6645,7 @@ class MainWindow(QMainWindow):
         """快捷小窗校验回调：返回 (valid|None, summary_str)。None=不支持校验。"""
         try:
             if not hasattr(self, "_quick_validators") or self._quick_validators is None:
-                from validator import (
-                    DLT645Validator,
-                    GDWValidator,
-                    HDLCValidator,
-                    NWValidator,
-                    PLCRFValidator,
-                )
-                from validator.csg_new_gen_validator import CSGNewGenValidator
-                from validator.dl_t698_45_validator import DLT69845Validator
-                from validator.gw_new_gen_validator import GWNewGenValidator
-                from validator.hdc10_validator import HDC10Validator
-
-                self._quick_validators = {
-                    0: NWValidator(),
-                    1: PLCRFValidator(),
-                    2: HDLCValidator(),
-                    3: HDLCValidator(),
-                    4: HDLCValidator(),
-                    5: HDLCValidator(),
-                    6: DLT645Validator(),
-                    7: GDWValidator(),
-                    8: DLT69845Validator(),
-                    9: CSGNewGenValidator(),
-                    10: GWNewGenValidator(),
-                    11: HDC10Validator(),
-                }
+                self._quick_validators = protocol_registry.build_validator_map()
             validator = self._quick_validators.get(idx)
             if validator is None:
                 return None, ""
@@ -7327,47 +7027,8 @@ class MainWindow(QMainWindow):
         self._parse_and_show_dialog(frame_bytes)
 
     def _protocol_name_to_index(self, name: str) -> int:
-        """协议名 → protocol_combo 索引（支持中文名 / 数字索引）"""
-        name = str(name).strip()
-        if name.isdigit():
-            return int(name)
-        names = {
-            "南网协议": 0,
-            "南网": 0,
-            "PLC RF协议": 1,
-            "PLC RF": 1,
-            "PLC": 1,
-            "HDLC": 2,
-            "HDLC/DLMS": 2,
-            "DLMS-APDU国网": 3,
-            "APDU国网": 3,
-            "DLMS Wrapper": 4,
-            "Wrapper": 4,
-            "DLMS-APDU裸": 5,
-            "APDU": 5,
-            "DLT645": 6,
-            "DLT645-2007": 6,
-            "645": 6,
-            "国网协议": 7,
-            "国网": 7,
-            "698.45": 8,
-            "698": 8,
-            "新一代载波": 9,
-            "载波": 9,
-            "国网新一代": 10,
-            "双模": 10,
-            "HDC1.0": 11,
-            "HDC 1.0": 11,
-            "hdc10": 11,
-            "旧版双模": 11,
-        }
-        if name in names:
-            return names[name]
-        # 模糊匹配
-        for key, idx in names.items():
-            if key in name or name in key:
-                return idx
-        return None
+        """协议名 → protocol_combo 索引（支持中文名 / 数字索引，查 protocol_registry）"""
+        return protocol_registry.name_to_index(name)
 
     def _parse_text_content(self, content: str):
         """从文本内容提取帧并按当前协议解析，弹出结果（文件右键 / --file 共用）"""
@@ -8370,61 +8031,42 @@ class MainWindow(QMainWindow):
         return " | ".join(parts) if parts else "-"
 
     def _extract_frames_for_protocol(self, text: str, protocol_index: int) -> list:
-        """根据协议提取对应格式的帧"""
+        """根据协议提取对应格式的帧（策略选择由 protocol_registry 驱动）"""
         import re
 
-        if protocol_index in (0, 7):
-            # 南网协议 / 国网协议：68开头，16结束，FT1.2帧格式
+        strategy = protocol_registry.get_protocol(protocol_index).extract_strategy
+        if strategy == "ft12_68":
+            # 南网/国网：68开头，16结束，FT1.2帧格式
             clean = re.sub(r"[^0-9A-Fa-f]", "", text).upper()
             return self._extract_68_frames(clean)
-        elif protocol_index == 8:
+        if strategy == "dlt698_45":
             # 698.45：68开头，16结束，但长度域定义不同
             clean = re.sub(r"[^0-9A-Fa-f]", "", text).upper()
             return self._extract_69845_frames(clean)
-        elif protocol_index == 1:
-            # PLC RF协议：尝试通用提取
+        if strategy == "generic":
             clean = re.sub(r"[^0-9A-Fa-f]", "", text).upper()
             return self._extract_generic_frames(clean, min_len=4, max_len=256)
-        elif protocol_index == 2:
-            # HDLC/DLMS协议：7E开头，7E结束
+        if strategy == "hdlc":
             clean = re.sub(r"[^0-9A-Fa-f]", "", text).upper()
             return self._extract_hdlc_frames(clean)
-        elif protocol_index == 3:
-            # DLMS-APDU(国网)：按行分割，每行一帧
-            return [
-                (f.strip(), "", i)
-                for i, f in enumerate(text.splitlines())
-                if f.strip()
-            ]
-        elif protocol_index == 4:
-            # DLMS Wrapper裸报文：识别Wrapper头部(8字节)并分割
+        if strategy == "wrapper":
             return self._extract_wrapper_frames(text)
-        elif protocol_index == 5:
-            # DLMS-APDU裸报文：按行分割，每行一帧
-            return [
-                (f.strip(), "", i)
-                for i, f in enumerate(text.splitlines())
-                if f.strip()
-            ]
-        elif protocol_index == 9:
-            # 新一代载波协议(通感一体化)：按行提取，过滤无效短帧
+        if strategy == "csg_line":
             # 监控前缀已在 parse_batch 中通过 _strip_csg_monitor_prefix 剥离
             return self._extract_csg_new_gen_frames(text)
-        elif protocol_index == 10:
-            # 国网新一代双模：按行提取，每行一帧
+        if strategy == "gw_line_min4":
             # 前缀已在 parse_batch 中通过 _strip_gw_new_gen_prefix 剥离
             return [
                 (f.strip(), "", i)
                 for i, f in enumerate(text.splitlines())
                 if f.strip() and len(f.strip()) >= 4
             ]
-        else:
-            # 通用：每行一帧
-            return [
-                (f.strip(), "", i)
-                for i, f in enumerate(text.splitlines())
-                if f.strip()
-            ]
+        # line / 默认：每行一帧
+        return [
+            (f.strip(), "", i)
+            for i, f in enumerate(text.splitlines())
+            if f.strip()
+        ]
 
     def _extract_wrapper_frames(self, text: str) -> list:
         """

@@ -1,13 +1,13 @@
 # 南网协议解析工具
 
-[![Version](https://img.shields.io/badge/version-1.23.0-blue)]()
+[![Version](https://img.shields.io/badge/version-1.23.1-blue)]()
 [![Python](https://img.shields.io/badge/Python-3.8%2B-brightgreen)]()
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)]()
 [![License](https://img.shields.io/badge/License-MIT-green)]()
 
 一个面向电力通信现场调试的多协议解析工具，基于 Python / PySide6 开发，支持 12 种电力通信协议，覆盖单帧解析、批量解析、协议校验、帧生成、串口通信、虚拟表、通信时序图、测试方案、Lua 脚本、实时监控与 TCP 抓包等工作流。
 
-当前版本为 `1.23.0`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
+当前版本为 `1.23.1`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
 
 ## 功能总览
 
@@ -298,6 +298,8 @@ Lua 脚本使用说明见 [`docs/Lua脚本使用说明.md`](docs/Lua脚本使用
 
 ```text
 main_gui.py                  # PySide6 GUI 主程序，应用入口
+parser_registry.py           # Parser 懒加载注册（按名缓存实例）
+protocol_registry.py         # 协议能力注册表（下拉/Tab/校验/提取/包装查表）
 app_paths.py                 # 可写数据文件路径唯一入口（frozen 下落 exe 目录）
 app_icons.py                 # 应用图标加载
 auto_updater.py              # 自动更新检查与下载
@@ -364,6 +366,7 @@ docs/Lua脚本使用说明.md       # Lua 脚本使用文档
 
 ```bash
 # 协议解析
+python test/test_protocol_registry.py     # 协议能力注册表（1.23.1）
 python test/test_csg_new_gen.py            # 新一代载波协议
 python test/test_gw_new_gen.py             # 国网新一代双模协议
 python test/test_gdw_fujian.py             # 国网福建增补规约 + EB 数据标识
@@ -422,6 +425,12 @@ python test/test_web_frame_gen_utils.py    # Reflex Web 组帧纯逻辑
 ## 更新记录
 
 > 完整历史见 `main_gui.py:CHANGELOG`。以下仅摘录最近版本要点。
+
+### 1.23.1 — 2026-09-11
+
+- **协议能力注册表 `protocol_registry.py`**：12 种协议的展示名/别名/占位符/查询页/组帧模式/Tab 能力/解析级别族/批量提取策略/校验器/解析器包装统一声明；`main_gui` 查表分派
+- 修复协议6 预设命令页未调用 `set_protocol("dlt645")`
+- 新增 `test/test_protocol_registry.py`
 
 ### 1.23.0 — 2026-09-09
 
