@@ -221,3 +221,42 @@
 ### Next Steps
 
 - 4.7 帧布局实机验证（文档/schema 无 645 密码组，若实机要求需在 build_dual_set 加前缀）
+
+
+## Session 8: 事件状态字随机 + 协议10红灯归零 + 后续批次规划
+
+**Date**: 2026-09-12
+**Task**: 事件状态字随机 + 协议10红灯归零 + 后续批次规划
+**Branch**: `main`
+
+### Summary
+
+交付 1.23.8 事件状态字随机与随机产生事件开关；查清并修复协议10 假阳性吞帧，release_check 首次全绿；建 5 个子任务规划
+
+### Main Changes
+
+- 645虚拟表：事件状态字 04001501 类型/长度修复（L=0x08→0x10）+ RandomEventWord + 模拟设置勾选框 + 持久化；顺带修复 import json 丢失导致的档案 JSON 读写全线失效
+- 协议10：parse_to_table 裸管理消息判据收紧（MMTYPE 命中 + 保留=0 + 非 FC 前缀），修掉整帧被吞的假阳性
+- 建父任务 09-12-backlog-batch-0912 + 5 子任务（南网自定义DI增删/645虚拟表功能码/HDC网间协调帧/协议9深解析/协议10未识别报文）
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2be9b2a` | (see git log) |
+| `0272643` | (see git log) |
+| `669fc74` | (see git log) |
+
+### Testing
+
+- [OK] test_dlt645_sim_event_word.py 66/66（含 COM1↔COM2 回环）；645 既有 5 套回归全过
+- [OK] release_check PASS=48 FAIL=0 WARN=0（此前长期 1 FAIL）
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 实现 09-12-nanwang-custom-di-crud（南网查询页自定义 DI 增删死按钮）
+- 按序推进 645虚拟表功能码 → HDC网间协调帧 → 协议10未识别报文 → 协议9深解析
