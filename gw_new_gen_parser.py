@@ -164,10 +164,22 @@ class GWNewGenParser:
         if len(data) < 2:
             return [("❌ 解析失败", "", "", "帧数据过短，无法解析", None, None, False)]
 
-        # ── 直接网络管理消息：首字节即MMTYPE(2B大端) ──
+        # ── 直接网络管理消息：首字节即MMTYPE(2B小端) ──
         # 管理消息报文头(表42): MMTYPE(2B) + 保留(2B)。部分帧直接以管理消息输入。
+        # 判据必须收紧，否则完整 MPDU 会被误吞：FC 首字节形如 0x11/0x09/0x19
+        # （bit3=接入指示=1，bit0~2=定界符类型≤3）时，其前 2 字节极易撞上 MMTYPE
+        # 表项（实测 `11 00` → 0x0011 Bitloading训练请求），整帧被当管理消息解析，
+        # 应用层/MAC 帧头/协议版本判定行全部消失（test_gw_new_gen「假阳性拒绝」）。
         from gw_new_gen_mme_parser import MMETYPE_NAMES
-        if len(data) >= 4 and (data[0] | (data[1] << 8)) in MMETYPE_NAMES:
+        _looks_like_fc = (
+            len(data) >= 16
+            and (data[0] & 0x07) <= 0x03       # 定界符类型 = 0~3
+            and ((data[0] >> 3) & 0x01) == 1   # 接入指示 = 1
+        )
+        if (len(data) >= 4
+                and (data[0] | (data[1] << 8)) in MMETYPE_NAMES
+                and data[2] == 0 and data[3] == 0   # 表42 保留字段必须为 0
+                and not _looks_like_fc):
             return self._parse_mgmt_if_direct(data, 0)
 
         # ── 应用层模式：输入即为应用层报文 ──
