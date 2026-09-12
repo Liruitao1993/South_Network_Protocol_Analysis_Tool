@@ -1,0 +1,32 @@
+{
+  "id": "backlog-batch-0912",
+  "name": "backlog-batch-0912",
+  "title": "后续功能批次（死按钮/虚拟表从站/HDC/协议9-10深解析）",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "Liruitao1993",
+  "assignee": "Liruitao1993",
+  "createdAt": "2026-09-12",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "09-12-nanwang-custom-di-crud",
+    "09-12-dlt645-sim-func-codes",
+    "09-12-hdc10-net-coord-vf",
+    "09-12-csg-mme-app-deep",
+    "09-12-gw-unknown-msg-deep"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
