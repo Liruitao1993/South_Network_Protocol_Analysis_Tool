@@ -100,10 +100,21 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.7"
-BUILD_DATE = "2026-09-11"  # 编译日期，每次打包前更新
+APP_VERSION = "1.23.8"
+BUILD_DATE = "2026-09-12"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    (
+        "1.23.8",
+        "2026-09-12",
+        [
+            "645虚拟表新增「模拟设置 · 随机产生事件」：勾选后每次读取事件状态字（DI 04001501 主动上报状态字 = 载波模块反复轮询的“电能表事件状态字”，`BS96` 12 字节）都返回一个新的随机值且与上一次不同；不勾选时读「档案数据」的值（新增默认项 12 字节全 0 = 无事件，读多少遍都一样）。离线与串口两条应答路径同时生效，生效时收发日志标注「◈ 随机事件状态字 04001501 = <24hex>」；勾选状态持久化到 dlt645_sim_data.json 的 random_event（旧文件无该字段按 false，导出/导入同步）",
+            "修复事件状态字应答被截断（实测缺陷）：engine._data_type_for 依次探测 dlt645_di_lookup 的 get_info/get/lookup —— 该方法真实名为 get_di_info，导致 04001501(BS96/12B) 落到兜底掩码 XXXXXX.XX 被编成 4 字节（请求 04001501 应答 L=08、解析成 00000000）。改为优先 dlt645_frame_schema.get_di_info（与组帧路径同一权威源，读 dlt645_di.json）取 data_type+length 并传 encode_value(nbytes=length)：应答回到 L=0x10（4 字节 DI + 12 字节数据）",
+            "新增 dlt645_sim/dynamic_data.py（纯逻辑无 Qt）：EVENT_WORD_DI=04001501 / EVENT_WORD_BYTES=12 + RandomEventWord（next_value() 返回 24 位 hex，保证与上一次不同、碰撞重抽；rng 可注入便于测试；reset() 清记忆）。引擎新增 event_word_source 注入参数与 last_note；产生器异常/返回非法值时回落档案值并记 last_error，不抛栈。**状态放 GUI 持有的实例**——引擎每帧重建（串口线程收帧循环内 _engine_factory()），放引擎里“每次变化”会失效",
+            "修复 645虚拟表档案 JSON 读写全线失效：dlt645_sim_data.json 的保存/静默保存/加载/导出/导入全部引用 json.dumps/loads，但 `import json` 在此前的并行改动中被误删（替换成 import threading）——「保存」按钮抛 NameError、加载被 try/except 静默吞掉（用户档案与表地址重启后不生效）、静默保存只记「⚠ 新地址持久化失败」。已补回 import json",
+            "测试：新增 test/test_dlt645_sim_event_word.py（66 项）——类型/长度修复（L=0x10、解析器读回 24 hex、常规 DI 类型不变）、默认不变化（连读 3 次逐字节相同且全 0、档案非 0 时按档案回）、随机模式（连读 20 次相邻互不相同且 20 个不同值、不影响其它 DI）、RandomEventWord 单测（含注入碰撞桩验证重抽）、异常容错（抛异常/非法值/空串/长度不符均回落档案且不崩）、offscreen GUI（小节与勾选框、勾选注入、离线两次响应不同、取消后恢复不变化）、持久化（写出/重载保持/旧 JSON 加载与导入均按 false 回落）、COM1↔COM2 真实回环（连读两次数据不同、取消后两次完全相同）。GUI 用例统一沙箱到临时目录，不碰用户 dlt645_sim_data.json",
+        ],
+    ),
     (
         "1.23.7",
         "2026-09-11",

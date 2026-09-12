@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from typing import Optional
@@ -18,6 +19,7 @@ import serial
 import serial.tools.list_ports
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QGroupBox,
@@ -40,6 +42,7 @@ from dlt645_parser import DLT645Parser
 from dlt645_sim import DLT645MeterSim
 from dlt645_sim import lme_query as lme
 from dlt645_sim.archive import DLT645Archive
+from dlt645_sim.dynamic_data import EVENT_WORD_DI, RandomEventWord
 from dlt645_sim.engine import extract_645_frames
 from gui_utils import ZoomableTableWidget, set_btn, set_btn_icon
 
@@ -118,6 +121,8 @@ class Dlt645SerialSlaveThread(QThread):
                             engine = self._engine_factory()
                             resps = engine.handle_frame(frame)
                             self.log.emit(f"← 请求: {req_hex[:80]}")
+                            if engine.last_note:
+                                self.log.emit(f"  ◈ {engine.last_note}")
                             if engine.last_error:
                                 self.log.emit(f"  ⚠ {engine.last_error}")
                             resp_hexes = []
@@ -169,6 +174,9 @@ class Dlt645VirtualMeterWidget(QWidget):
         super().__init__(parent)
         self.address = "000000000000"
         self.archive = DLT645Archive()
+        #: 事件状态字随机源：引擎每帧重建，故由本组件持有（见 dlt645_sim/dynamic_data.py）
+        self._event_word = RandomEventWord()
+        self._random_event = False
         self._load_archive_file()
         self.parser = DLT645Parser()
         self._serial_thread: Optional[Dlt645SerialSlaveThread] = None
@@ -231,6 +239,8 @@ class Dlt645VirtualMeterWidget(QWidget):
         gl.addStretch(1)
         layout.addWidget(grp)
 
+        layout.addWidget(self._build_sim_settings_group())
+
         layout.addWidget(self._build_lme_group())
 
         grp2 = QGroupBox("离线模拟（主站请求 hex → 虚拟表响应）")
@@ -286,6 +296,37 @@ class Dlt645VirtualMeterWidget(QWidget):
         self.resp_table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.resp_table, 1)
         return page
+
+    # ── 模拟设置（事件状态字随机变化等）────────────────────────────────
+    def _build_sim_settings_group(self) -> QGroupBox:
+        grp = QGroupBox("模拟设置")
+        gl = QVBoxLayout(grp)
+        row = QHBoxLayout()
+        self.chk_random_event = QCheckBox("随机产生事件")
+        self.chk_random_event.setChecked(self._random_event)
+        self.chk_random_event.setToolTip(
+            f"勾选后每次读取事件状态字（DI {EVENT_WORD_DI} 主动上报状态字，12 字节）\n"
+            "都返回一个新的随机值，且与上一次不同；\n"
+            "不勾选时读「档案数据」中的值（默认 12 字节全 0 = 无事件，次次相同）。"
+        )
+        self.chk_random_event.toggled.connect(self._on_random_event_toggled)
+        row.addWidget(self.chk_random_event)
+        hint = QLabel(
+            f"每次读取 {EVENT_WORD_DI}（主动上报状态字 / 事件状态字）返回新的随机 12 字节值；"
+            "不勾选时读档案值（默认全 0，不变化）。离线与串口应答均生效。"
+        )
+        hint.setWordWrap(True)
+        row.addWidget(hint, 1)
+        gl.addLayout(row)
+        return grp
+
+    def _on_random_event_toggled(self, checked: bool):
+        self._random_event = bool(checked)
+        self._event_word.reset()   # 清「上次值」记忆，避免与新开启的序列比较
+        self.log_view.appendPlainText(
+            f"● 随机产生事件：{'开启' if checked else '关闭'}"
+            + (f"（每次读 {EVENT_WORD_DI} 随机变化）" if checked else "（读档案值）"))
+        self._archive_save_quiet()
 
     # ── 模块版本查询（LME 自定义下发，主站方向）─────────────────────────
     def _build_lme_group(self) -> QGroupBox:
@@ -539,6 +580,7 @@ class Dlt645VirtualMeterWidget(QWidget):
         return DLT645MeterSim(
             address=self.address, archive=self.archive,
             on_address_written=self.address_written.emit,
+            event_word_source=self._event_word.next_value if self._random_event else None,
         )
 
     def _fill_example(self):
@@ -602,6 +644,8 @@ class Dlt645VirtualMeterWidget(QWidget):
         engine = self._make_engine()
         resps = engine.handle_frame(req)
         self.log_view.appendPlainText(f"← 请求 {req.hex(' ').upper()}")
+        if engine.last_note:
+            self.log_view.appendPlainText(f"  ◈ {engine.last_note}")
         if engine.last_error:
             self.log_view.appendPlainText(f"  ⚠ {engine.last_error}")
         if not resps:
@@ -736,7 +780,9 @@ class Dlt645VirtualMeterWidget(QWidget):
         path = app_paths.data_path(SETTINGS_FILE)
         path.write_text(
             json.dumps(
-                {"address": self.address, "values": data}, ensure_ascii=False, indent=2
+                {"address": self.address, "values": data,
+                 "random_event": self._random_event},
+                ensure_ascii=False, indent=2,
             ),
             encoding="utf-8",
         )
@@ -747,7 +793,8 @@ class Dlt645VirtualMeterWidget(QWidget):
         try:
             app_paths.data_path(SETTINGS_FILE).write_text(
                 json.dumps(
-                    {"address": self.address, "values": self.archive.as_dict()},
+                    {"address": self.address, "values": self.archive.as_dict(),
+                     "random_event": self._random_event},
                     ensure_ascii=False, indent=2,
                 ),
                 encoding="utf-8",
@@ -767,7 +814,8 @@ class Dlt645VirtualMeterWidget(QWidget):
             return
         open(path, "w", encoding="utf-8").write(
             json.dumps(
-                {"address": self.address, "values": self.archive.as_dict()},
+                {"address": self.address, "values": self.archive.as_dict(),
+                 "random_event": self._random_event},
                 ensure_ascii=False,
                 indent=2,
             )
@@ -786,6 +834,9 @@ class Dlt645VirtualMeterWidget(QWidget):
             if obj.get("address"):
                 self.address = str(obj["address"])
                 self.addr_edit.setText(self.address)
+            # 导入可选字段：缺失按 False（不能保留上一个文件的勾选状态）
+            self._random_event = bool(obj.get("random_event", False))
+            self.chk_random_event.setChecked(self._random_event)
             self.archive = DLT645Archive(values)
             self._refresh_archive_table()
         except Exception as e:
@@ -802,6 +853,10 @@ class Dlt645VirtualMeterWidget(QWidget):
                     self.address = str(obj["address"])
                 if isinstance(obj.get("values"), dict):
                     self.archive = DLT645Archive(obj["values"])
+                if "random_event" in obj:
+                    self._random_event = bool(obj.get("random_event"))
+                    if hasattr(self, "chk_random_event"):
+                        self.chk_random_event.setChecked(self._random_event)
         except Exception:
             pass
 

@@ -12,6 +12,9 @@
   （地址域 = 新地址，L=00）并把自身地址改为新地址（经 on_address_written 回调同步 UI/档案）
 - 广播校时 08H：无应答，静默接收（记 last_error 供日志）
 - 其余功能码：异常应答 DnH（n=请求功能码，ERR 无请求数据）
+- 事件状态字 DI 04001501：`event_word_source` 非空时每次读取取其随机值（绕过档案），
+  否则读档案（默认 12 字节全 0 = 无事件、次次相同）；应答长度按 `dlt645_di.json`
+  声明的 `BS96` = 12 字节（`_di_info_for`）
 """
 
 from __future__ import annotations
@@ -23,6 +26,7 @@ from dlt645_frame_gen import DLT645FrameGenerator, encode_addr, encode_di
 from dlt645_parser import DLT645Parser
 
 from .archive import DLT645Archive
+from .dynamic_data import EVENT_WORD_BYTES, EVENT_WORD_DI
 
 # ERR：无请求数据 = bit1
 ERR_NO_DATA = 0x02
@@ -68,6 +72,7 @@ class DLT645MeterSim:
         generator: Optional[DLT645FrameGenerator] = None,
         parser: Optional[DLT645Parser] = None,
         on_address_written=None,
+        event_word_source=None,
     ):
         self.address = address
         self.archive = archive or DLT645Archive()
@@ -76,6 +81,11 @@ class DLT645MeterSim:
         self.req_count = 0
         self.rsp_count = 0
         self.last_error: Optional[str] = None
+        #: 事件状态字（DI 04001501）随机源：无参可调用，返回 hex 字符串；
+        #: 由 GUI 持有（引擎每帧重建，状态不能挂在引擎上），None = 读档案值。
+        self.event_word_source = event_word_source
+        #: 本帧的补充说明（如「随机事件状态字」），供 GUI 日志标注
+        self.last_note: Optional[str] = None
         # 15H 写地址成功回调（参数：新地址显示序 hex 字符串）。串口线程内
         # 调用时回调方应经 Signal 跳回 GUI 线程。
         self.on_address_written = on_address_written
@@ -83,6 +93,7 @@ class DLT645MeterSim:
     def handle_frame(self, frame: bytes) -> List[bytes]:
         """处理一帧（或粘包多帧），返回响应帧列表。"""
         self.last_error = None
+        self.last_note = None
         frames = extract_645_frames(bytes(frame))
         if not frames:
             # 尝试整段当单帧（截断容错交给 parser）
@@ -141,14 +152,17 @@ class DLT645MeterSim:
             return self._error_response(frame, ERR_NO_DATA)
 
         di_wire = encode_di(di_code)
-        value_str = self.archive.get(di_code)
+        data_type, di_len = self._di_info_for(di_code)
+        value_str = self._event_word_value(di_code, di_len or EVENT_WORD_BYTES)
+        if value_str is None:
+            value_str = self.archive.get(di_code)
         if value_str is None:
             # 未知 DI → 无请求数据异常
             return self._error_response(frame, ERR_NO_DATA, di_wire=di_wire)
 
-        data_type = self._data_type_for(di_code)
         try:
-            value_bytes = encode_value(value_str, data_type or "XXXXXX.XX")
+            value_bytes = encode_value(value_str, data_type or "XXXXXX.XX",
+                                       nbytes=di_len or None)
         except Exception as e:
             self.last_error = f"编码值失败 DI={di_code}: {e}"
             return self._error_response(frame, ERR_NO_DATA, di_wire=di_wire)
@@ -182,27 +196,37 @@ class DLT645MeterSim:
             return di_text, raw
         return None, b""
 
-    def _data_type_for(self, di_code: str) -> Optional[str]:
+    def _di_info_for(self, di_code: str) -> Tuple[Optional[str], int]:
+        """DI → (data_type, 声明字节数)。
+
+        权威源是 `dlt645_frame_schema.get_di_info`（读 `dlt645_di.json`，与组帧路径同一份），
+        失败再回落既有快表。**历史缺陷**：旧实现探测 `dlt645_di_lookup` 的
+        `get_info`/`get`/`lookup`——该方法真实名为 `get_di_info`，导致 `BS96` 等按
+        `XXXXXX.XX` 编成 4 字节（04001501 应答 L=08 而非 0x10）。
+        """
+        try:
+            from dlt645_frame_schema import get_di_info
+
+            info = get_di_info(di_code) or {}
+            dt = (info.get("data_type") or "").strip()
+            length = int(info.get("length") or 0)
+            if dt or length:
+                return (dt or None, length)
+        except Exception:
+            pass
+
         try:
             from dlt645_di_lookup import get_dlt645_di_lookup
 
-            lookup = get_dlt645_di_lookup()
-            # 尝试 search / get
-            for attr in ("get_info", "get", "lookup"):
-                fn = getattr(lookup, attr, None)
-                if callable(fn):
-                    info = fn(di_code)
-                    if isinstance(info, dict):
-                        dt = info.get("data_type")
-                        if dt:
-                            return dt
-                    if isinstance(info, (tuple, list)) and len(info) >= 4:
-                        # (di_code, name, unit, data_type, ...)
-                        if info[3]:
-                            return info[3]
+            info = get_dlt645_di_lookup().get_di_info(di_code)
+            if isinstance(info, dict):
+                dt = (info.get("data_type") or "").strip()
+                if dt:
+                    return (dt, int(info.get("length") or 0))
         except Exception:
             pass
-        # 常见 DI 快表
+
+        # 常见 DI 快表（DI 表缺失时的兜底）
         quick = {
             "00010000": "XXXXXX.XX",
             "00020000": "XXXXXX.XX",
@@ -214,7 +238,35 @@ class DLT645MeterSim:
             "02050101": "XX.XXX",
             "04000201": "hhmmss",
         }
-        return quick.get(di_code)
+        return (quick.get(di_code), 0)
+
+    def _data_type_for(self, di_code: str) -> Optional[str]:
+        """兼容旧调用：只取 data_type。"""
+        return self._di_info_for(di_code)[0]
+
+    def _event_word_value(self, di_code: str, want_bytes: int) -> Optional[str]:
+        """随机事件状态字：仅 DI 04001501 且注入了产生器时生效（否则 None = 走档案）。
+
+        返回值必须**恰为** `want_bytes` 字节的偶数位 hex；长度不符同样按产生器故障处理
+        （回落档案值），否则非法长度会一路走到 `encode_value` 变成 D1H 异常应答。
+        """
+        if self.event_word_source is None or di_code != EVENT_WORD_DI:
+            return None
+        try:
+            value = str(self.event_word_source()).strip().upper()
+        except Exception as e:
+            self.last_error = f"随机事件状态字产生失败: {e}"
+            return None
+        if not value or any(c not in "0123456789ABCDEF" for c in value):
+            self.last_error = f"随机事件状态字非法: {value!r}"
+            return None
+        if len(value) != want_bytes * 2:
+            self.last_error = (
+                f"随机事件状态字长度非法: 期望 {want_bytes} 字节，"
+                f"实际 {len(value) // 2} 字节")
+            return None
+        self.last_note = f"随机事件状态字 {di_code} = {value}"
+        return value
 
     def _read_address_response(self) -> bytes:
         """13H → 93H：数据域 = 表地址 6 字节线上序（build_frame 统一 +33H）。"""

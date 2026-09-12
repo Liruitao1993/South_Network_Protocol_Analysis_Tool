@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/09-11-dlt645-sim-event-word/research/event-word-facts.md", "reason": "事件状态字=04001501 的证据链（DI 表 BS96/12、附件1 语义、山东和兑抓包轮询）、当前应答被截断为 4 字节的实测根因、以及引擎每帧重建 → 随机状态必须放 GUI 侧"}
+{"file": ".trellis/tasks/09-11-dlt645-sim-event-word/design.md", "reason": "检查是否越界改动 dlt645_parser / dlt645_data_codec / dlt645_frame_gen / dlt645_frame_schema 的既有签名，以及跨帧状态是否被错误放进每帧重建的引擎实例"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "检查是否复用 get_di_info / encode_value(nbytes=) / DLT645FrameGenerator，而非另写类型表或 645 封装"}

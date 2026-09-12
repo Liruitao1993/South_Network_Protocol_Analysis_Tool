@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/09-11-dlt645-sim-event-word/design.md", "reason": "事件状态字应答契约（L=0x10 / 12 字节 BS96）、RandomEventWord API、引擎注入点与持久化格式、跨帧状态必须在 GUI 侧的取舍"}
+{"file": ".trellis/tasks/09-11-dlt645-sim-event-word/prd.md", "reason": "验收标准与实测证据（04001501 当前被截断为 4 字节、实测表 15 字节矛盾、模块轮询抓包出处）"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "虚拟表「从站+主站」双角色与 mock 串口测试约定（本任务沿用同一 set_btn/offscreen/Signal 模式）"}

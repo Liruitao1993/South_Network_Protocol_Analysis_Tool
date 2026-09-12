@@ -298,6 +298,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 │   ├── dlt645_meter_sim_widget.py  # 645虚拟表 tab (Dlt645VirtualMeterWidget) - 645 从站模拟 + LME 主站下发（仅协议6，1.23.5 起）
 │   ├── dlt645_sim/                 # 645虚拟表核心逻辑包（纯逻辑无 Qt）
 │   │   ├── archive.py              #   档案 DI→可读值（dlt645_sim_data.json 持久化）
+│   │   ├── dynamic_data.py         #   动态数据：RandomEventWord 事件状态字随机源（04001501，1.23.8 起）
 │   │   ├── engine.py               #   从站引擎 handle_frame：11H 读档案 / 13H 读通信地址 / 15H 写通信地址 / 08H 校时 / 其余 DnH 异常
 │   │   └── lme_query.py            #   LME 自定义下发组帧 4.2/4.6/4.7（模块版本查询，1.23.7 起；复用 DLT645FrameGenerator + DLT645Parser）
 │   ├── monitor_widget.py            # 实时监控器 (RealtimeMonitorWidget) - 串口原始字节流自动组帧/CSV记录
@@ -497,6 +498,8 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
   - **LME 自定义接口**（《LME产品相关信息生产运维接口手册_V2.4》）：解析侧 `lme_info_entry_parser.py`（4.2 单模 STA 详细版本 DI=`04FFAAF9`；4.6/4.7 双模 STA 内部信息条目 DI=`FF00DD01`，TLV 条目字典 `LME_INFO_ENTRIES`），`dlt645_parser.py` 按 DI 自动分派深度展开；下发侧 `dlt645_sim/lme_query.py`（虚拟表作主站向模块索取版本信息：4.2 无数据单元 / 4.6 查询 11H / 4.7 设置 14H，TLV 头编码与长度取 `LME_INFO_ENTRIES` 定义，长度上限 31 字节）
   - **手册 §5.1.1 逐字节 golden**：4.2 请求 `68 AA AA AA AA AA AA 68 11 04 2C DD 32 37 53 16`；应答 135 字节（L=0x7B、CS=0x56），字段 LH/60/V0102/2020-11-10/v0244/APS 0135/N0230/P2008/V4028
   - **串口回包判据**：控制码在 idx8，`ctrl & 0x80`（D7=DIR）为 1 → 从站/模块发出的回包，虚拟表按主站解析展示（`Dlt645SerialSlaveThread.slave_frame`）；为 0 才走从站引擎应答
+  - **事件状态字（DI `04001501` 主动上报状态字，`BS96`=12 字节）**：载波模块反复轮询的「电能表事件状态字」（`协议文档/7.国网本地接口协议/附件1.md:214`）。档案默认 12 字节全 0（无事件、不变化）；「模拟设置 · 随机产生事件」勾选后由 `dlt645_sim/dynamic_data.py::RandomEventWord` 每次给新的随机 12 字节（保证与上次不同），引擎经 `event_word_source` 注入取用，勾选状态存 `dlt645_sim_data.json` 的 `random_event`
+  - **DI 类型/长度权威源 = `dlt645_frame_schema.get_di_info`**（读 `dlt645_di.json`）：引擎 `_di_info_for` 用它取 `data_type`+`length` 并以 `nbytes=length` 调 `encode_value`；`dlt645_di_lookup` 的方法名是 **`get_di_info`**（不是 `get_info`）——曾因探测错名让 `BS96` 按 4 字节回（04001501 应答 L=08）
 - **校验器**：`validator/dlt645_validator.py`
 - **参考文档**：
   - `DLT645-2007.md` — 主协议（Markdown）
@@ -655,6 +658,7 @@ python test/test_dl_t698_45.py      # 698.45 协议
 python test/test_dl_t698_45_data_decode.py  # 698.45 APDU 数据内容业务解码（电能量/需量/分相/单值）
 python test/test_dlt645_sim.py       # DLT645 虚拟表从站引擎（11H 读档案 / 13H 读地址 / 15H 写地址 / 08H 校时 / 异常应答）
 python test/test_dlt645_sim_lme_query.py  # 645虚拟表 LME 模块版本下发（95 项：4.2 手册 golden 逐字节 / 4.6 条目查询 / 4.7 TLV 与 5bit 上限 / 手册回包字段回归 / 截断容错 / offscreen GUI / COM1↔COM2 真实回环，1.23.7 起）
+python test/test_dlt645_sim_event_word.py # 645虚拟表 事件状态字（66 项：L=0x10 类型修复 / 默认 12 字节全 0 不变化 / 随机产生事件相邻不同 / 产生器碰撞重抽 / 异常回落 / 持久化 / COM1↔COM2 回环，1.23.8 起）
 python test/test_dlt645_lme.py       # LME 自定义接口解析（4.2 单模STA / 4.6·4.7 双模STA 条目 TLV）
 python test/test_dlt645_frame_gen.py # DLT645 组帧（掩码推导 / 组帧→解析闭环 / LME 查询模板）
 python test/test_dlt645_frame_gen_gui.py # 645 组帧标签页 offscreen 冒烟

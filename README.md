@@ -1,13 +1,13 @@
 # 南网协议解析工具
 
-[![Version](https://img.shields.io/badge/version-1.23.6-blue)]()
+[![Version](https://img.shields.io/badge/version-1.23.8-blue)]()
 [![Python](https://img.shields.io/badge/Python-3.8%2B-brightgreen)]()
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)]()
 [![License](https://img.shields.io/badge/License-MIT-green)]()
 
 一个面向电力通信现场调试的多协议解析工具，基于 Python / PySide6 开发，支持 12 种电力通信协议，覆盖单帧解析、批量解析、协议校验、帧生成、串口通信、虚拟表、通信时序图、测试方案、Lua 脚本、实时监控与 TCP 抓包等工作流。
 
-当前版本为 `1.23.6`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
+当前版本为 `1.23.8`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
 
 ## 功能总览
 
@@ -434,6 +434,15 @@ python test/test_web_frame_gen_utils.py    # Reflex Web 组帧纯逻辑
 ## 更新记录
 
 > 完整历史见 `main_gui.py:CHANGELOG`。以下仅摘录最近版本要点。
+
+### 1.23.8 — 2026-09-12
+
+- **645虚拟表「模拟设置 · 随机产生事件」**：勾选后每次读取事件状态字（DI `04001501` 主动上报状态字，`BS96` 12 字节）返回新的随机 12 字节值且与上一次不同；不勾选读档案值（新增默认项 12 字节全 0 = 无事件、读多少遍都一样）；离线与串口两条应答路径均生效，勾选状态经 `dlt645_sim_data.json` 的 `random_event` 持久化
+- **修复事件状态字应答被截断**：虚拟表引擎类型/长度解析改用权威源 `dlt645_frame_schema.get_di_info`（`data_type` + `length`，并以 `nbytes=length` 调 `encode_value`），04001501 应答从 `L=0x08`（4 字节）恢复为 `L=0x10`（4 字节 DI + 12 字节数据）；新增 `dlt645_sim/dynamic_data.py` 与 `test/test_dlt645_sim_event_word.py`
+
+### 1.23.7 — 2026-09-11
+
+- **645虚拟表「模块版本查询」**：虚拟表作主站一键下发 LME 4.2/4.6/4.7 请求，模块回包复用 `DLT645Parser` 做深度解析
 
 ### 1.23.6 — 2026-09-11
 

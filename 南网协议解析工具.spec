@@ -148,6 +148,7 @@ a = Analysis(
         'dlt645_sim.engine',
         'dlt645_sim.archive',
         'dlt645_sim.lme_query',  # LME 4.2/4.6/4.7 请求组帧（645虚拟表「模块版本查询」）
+        'dlt645_sim.dynamic_data',  # 事件状态字随机源（645虚拟表「模拟设置」）
         'topology_widget',
         'preset_buttons',
         'test_plan_widget',
