@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "检查项：新标签页是否遵守独立文件/纯逻辑层分离/tab 索引来源/协议可见性/测试分层"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "检查项：是否复用既有自绘与导出模式而非新造第二份实现"}

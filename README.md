@@ -1,13 +1,13 @@
 # 南网协议解析工具
 
-[![Version](https://img.shields.io/badge/version-1.23.8-blue)]()
+[![Version](https://img.shields.io/badge/version-1.23.9-blue)]()
 [![Python](https://img.shields.io/badge/Python-3.8%2B-brightgreen)]()
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)]()
 [![License](https://img.shields.io/badge/License-MIT-green)]()
 
 一个面向电力通信现场调试的多协议解析工具，基于 Python / PySide6 开发，支持 12 种电力通信协议，覆盖单帧解析、批量解析、协议校验、帧生成、串口通信、虚拟表、通信时序图、测试方案、Lua 脚本、实时监控与 TCP 抓包等工作流。
 
-当前版本为 `1.23.8`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
+当前版本为 `1.23.9`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
 
 ## 功能总览
 
@@ -26,6 +26,7 @@
 | Lua 脚本 | 测试流程中嵌入可编程逻辑，支持条件分支、循环遍历、数据解析与变量共享 |
 | 报文对比 | 双报文字节级 / 字段级对比，支持差异高亮、人话解读与报告导出 |
 | 报文工具 | ASCII / HEX 转换、DLT645 偏移、字节逆序、Pn/Fn 转换、CRC/校验和计算 |
+| 频谱图 | 按频谱仪参数（起止/中心/扫宽、RBW/VBW、参考电平、每格 dB、单位、检波方式）输入单条 trace 全部扫频点数值，绘制仪器式网格频谱图并可导出 PNG |
 | LLM 预处理 | 批量解析可折叠面板，OpenAI 兼容 API 多轮清洗原始日志后再解析 |
 | 实时监控器 | 南网新一代 / 国网新一代串口报文实时监控、自动组帧、过滤与 CSV 记录 |
 | TCP 监控 | 基于 scapy 的 TCP 抓包、流重组与南网新一代 / 国网新一代自动识别解析 |
@@ -282,6 +283,15 @@ python main_gui.py --clipboard
 - 生成帧后可直接通过串口发送，也可解析回读闭环校验
 - 协议 6 支持主站请求 / 从站应答 / 异常应答三组命令，DI 由数据字典驱动并按 data_type 掩码自动推导字段表单
 
+### 频谱图
+
+「频谱图」标签页把频谱仪屏幕上的参数与 trace 数值画成图（常驻显示，与协议无关）：
+
+- 参数区：起始/终止/中心/扫宽四字段**双向联动**（改任一项自动重算其余，按回车或移开焦点生效），可切换 kHz/MHz/GHz；另有 RBW、VBW、参考电平、每格 dB（0.1~20）、纵向格数（4~12）、幅值单位（dBm/dBμV/dBmV，支持按 50Ω 换算）、检波方式
+- 数据区：粘贴频谱仪导出的 trace 全部扫频点数值（空格/逗号/分号/换行或中文分隔符均可），点数即频率轴点数，等间隔线性均分
+- 绘图：仪器式网格（横向 10 格 × 纵向可配格数，顶格为参考电平、向下每格 −dB/div）；勾选「纵轴自动适配」改为按数据范围取轴；标题与参数注记随图渲染
+- 导出：工具栏「导出 PNG」，默认 1600×1000，可直接贴入测试报告
+
 ### 测试方案
 
 切换到「测试方案」标签页：
@@ -352,6 +362,7 @@ monitor_widget.py            # 实时监控器组件
 monitor/tcp_monitor.py       # TCP 流量监控组件
 system_integration/          # 系统集成：托盘 / 热键 / 快捷小窗 / 剪贴板 / Notepad++ / 单实例 / 右键菜单
 message_tool_widget.py       # 报文工具组件
+spectrum_widget.py           # 频谱图组件（纯逻辑层 + QPainter 自绘）
 theme_settings.py            # 主题与字体设置
 enhanced_export.py           # 增强导出功能
 llm_preprocess.py            # LLM 预处理客户端
@@ -405,6 +416,8 @@ python test/test_monitor_plc2_deframe.py   # PLC2 解帧
 python test/test_gw_monitor_summary.py     # 国网新一代监控摘要
 
 # 功能组件
+python test/test_spectrum_model.py         # 频谱图纯逻辑（解析/校验/轴/单位/联动）
+python test/test_spectrum_gui.py           # 频谱图 GUI（offscreen）
 python test/test_meter_sim.py              # 698 虚拟表从站模拟器
 python test/test_quick_parse_panel.py      # 快捷解析小窗
 python test/test_frame_share.py            # 报文分享
@@ -434,6 +447,14 @@ python test/test_web_frame_gen_utils.py    # Reflex Web 组帧纯逻辑
 ## 更新记录
 
 > 完整历史见 `main_gui.py:CHANGELOG`。以下仅摘录最近版本要点。
+
+### 1.23.9 — 2026-09-14
+
+- **新增「频谱图」标签页**（常驻，与协议无关）：频谱仪参数（起始/终止/中心/扫宽四字段双向联动、频率单位、RBW/VBW、参考电平、每格 dB、纵向格数、幅值单位、检波方式）+ 单条 trace 全部扫频点数值 → 仪器式网格频谱图，标题与参数注记随图渲染
+- **50Ω 单位换算**：幅值单位可选 dBm / dBμV / dBmV，勾选「输入按 dBm，50Ω 换算」时按 dBμV = dBm + 107、dBmV = dBm + 47 换算
+- **纵轴双口径**：默认仪器式（顶格 = 参考电平，向下每格 −dB/div），可勾选「纵轴自动适配」按数据 min/max 留 5% 余量取轴；越界点裁剪到边缘并提示个数
+- **导出 PNG**（默认 1600×1000），浅/暗主题自动适配调色板
+- 实现：新建 `spectrum_widget.py`（纯逻辑层 + QPainter 自绘，零新增依赖，不用 matplotlib/QtCharts）；新增 `test/test_spectrum_model.py`（103 项）与 `test/test_spectrum_gui.py`（58 项 offscreen）
 
 ### 1.23.8 — 2026-09-12
 

@@ -91,6 +91,7 @@ from parser_registry import get_parser, get_parser_class
 from preset_buttons import PresetButtonWidget
 import protocol_registry as protocol_registry
 from serial_worker import SerialWorker
+from spectrum_widget import SpectrumWidget
 from system_integration.clipboard_monitor import ClipboardMonitor
 from system_integration.global_hotkey import GlobalHotkeyManager
 from system_integration.parse_prompt_dialog import ParsePromptDialog
@@ -100,10 +101,21 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.8"
+APP_VERSION = "1.23.9"
 BUILD_DATE = "2026-09-12"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    (
+        "1.23.9",
+        "2026-09-14",
+        [
+            "新增「频谱图」标签页（常驻，与协议无关）：按频谱仪口径配置扫描参数——起始/终止/中心/扫宽四字段**双向联动**（改起始/终止重算中心与扫宽，改中心/扫宽重算起止；扫宽非正或推出非正起始频率时拒绝该次修改并提示）、四字段共用频率单位（kHz/MHz/GHz）、RBW/VBW（各自单位，留空则不标注）、参考电平、每格 dB（0.1~20）、纵向格数（4~12）、幅值单位（dBm/dBμV/dBmV，可选「输入按 dBm，50Ω 换算」：dBμV=dBm+107、dBmV=dBm+47）、检波方式（峰值/准峰值/平均值/RMS/采样）",
+            "输入单条 trace 的全部扫频点数值（空格/制表/逗号/分号/换行/中文全角分隔符均可，支持正负号与科学计数），点数即频率轴点数、等间隔线性均分；非法 token 报「第 N 项 + 原文」且不静默丢弃、不破坏已有图形（AGENTS.md §8 陷阱 23 口径）；越界点裁剪到边缘并在状态行提示个数",
+            "绘制：QPainter 自绘仪器式屏幕（横向固定 10 格 × 纵向可配格数，顶格=参考电平、每格 −dB/div；勾选「纵轴自动适配」后改按数据 min/max 留 5% 余量等分）；标题+参数注记（起止/扫宽/RBW/VBW/检波/参考电平/每格/点数/单位）随图渲染，可直接贴报告；「导出 PNG」默认 1600×1000；浅/暗双调色板并暴露 restyle_for_theme 接入主题切换",
+            "实现：新建 spectrum_widget.py（前半纯逻辑层不依赖 Qt：SpectrumParams/SpectrumTrace/parse_levels/validate_params/freqs_for/y_range/y_ticks/x_tick_labels/format_*/resolve_freq_inputs；后半 Qt 层 SpectrumCanvas/SpectrumWidget，导出与 on-screen 绘制共用同一 _paint）；main_gui 仅 3 处接线（import／常驻 tab 图标 chart-spline／_restyle_for_theme 钩子），不改协议可见性逻辑",
+            "零新增依赖：不使用 matplotlib（已被 南网协议解析工具.spec 显式排除）与 QtCharts，PyInstaller spec 无需改动（无新增 datas/hiddenimports）；测试：新增 test/test_spectrum_model.py（103 项纯逻辑）与 test/test_spectrum_gui.py（offscreen）并纳入 release_check 清单",
+        ],
+    ),
     (
         "1.23.8",
         "2026-09-12",
@@ -1692,6 +1704,13 @@ class MainWindow(QMainWindow):
         self.message_tool_tab = MessageToolWidget()
         self.tab_widget.addTab(
             self.message_tool_tab, app_icons.load_icon("toolbox"), "报文工具"
+        )
+
+        # 频谱图页面（频谱仪参数 + trace 数值 → 仪器式网格频谱图，与协议无关常驻）
+        self.spectrum_tab = SpectrumWidget()
+        self.spectrum_tab.restyle_for_theme(self._is_dark_theme())
+        self._spectrum_tab_index = self.tab_widget.addTab(
+            self.spectrum_tab, app_icons.load_icon("chart-spline"), "频谱图"
         )
 
         # 虚拟表（协议8 从站模拟器）
@@ -10548,6 +10567,11 @@ class MainWindow(QMainWindow):
         if getattr(self, "diff_tab", None) is not None:
             try:
                 self.diff_tab.restyle_for_theme(self._is_dark_theme())
+            except RuntimeError:
+                pass
+        if getattr(self, "spectrum_tab", None) is not None:
+            try:
+                self.spectrum_tab.restyle_for_theme(self._is_dark_theme())
             except RuntimeError:
                 pass
 

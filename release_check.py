@@ -74,6 +74,7 @@ CORE_TESTS = [
     "test/test_sack_fix.py",
     "test/test_monitor_deframe.py",
     "test/test_monitor_plc2_deframe.py",
+    "test/test_spectrum_model.py",
 ]
 
 # 可选 offscreen GUI（慢；主题套件本机既有 12 项失败，仅报告不阻断默认）
@@ -85,6 +86,7 @@ GUI_TESTS = [
     "test/test_dlt645_frame_gen_gui.py",
     "test/test_app_icon_path.py",
     "test/test_button_icons.py",
+    "test/test_spectrum_gui.py",
 ]
 
 # 已知环境失败：不因它挡发布，但会标 WARN

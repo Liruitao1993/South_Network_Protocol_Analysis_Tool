@@ -34,7 +34,7 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 
 ## 1. 项目概览
 
-多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.21.0`）。
+多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.23.9`）。
 
 **支持的协议（共 12 种，对应 GUI 协议下拉框 `current_protocol` 索引）：**
 
@@ -284,6 +284,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 │   │                                 #   拖入/打开/粘贴建立不可变快照（回填式预处理只改输入框）；前半纯逻辑
 │   │                                 #   (hex_stream/find_frame_in_stream，无Qt可测)，后半只读行号编辑器+Ctrl+F搜索条（1.23.0 起）
 │   ├── message_tool_widget.py       # 报文工具标签页 (MessageToolWidget) - ASCII/HEX转换/CRC/校验
+│   ├── spectrum_widget.py           # 频谱图标签页 (SpectrumWidget/SpectrumCanvas) - 频谱仪参数 + trace 数值 → 仪器式网格频谱图 + 导出PNG（常驻，与协议无关；1.23.9 起）
 │   ├── feedback_dialog.py           # 问题反馈对话框 (FeedbackDialog) - 帮助菜单入口，提交到 Web 服务端共享 feedback.db（1.20.0 起）
 │   ├── share_dialog.py              # 报文分享对话框 (ShareDialog) - 单帧解析「分享此帧」，JSON POST /api/frameshare（1.21.0 起）
 │   ├── enhanced_export.py           # 增强导出功能 (EnhancedBatchResultExporter) - Excel/CSV/TXT/JSON
@@ -695,6 +696,8 @@ python test/test_web_feedback.py        # Web 版问题反馈（存储层/截图
 python test/test_feedback_api.py        # 反馈提交 API（submit_from_api/parse_multipart/频率限制/旧库迁移，31 项，1.20.0 起）
 python test/test_feedback_dialog.py     # GUI 反馈对话框（URL/config/校验/sys_info/offscreen 冒烟，30 项，1.20.0 起）
 python test/test_frame_share.py         # 报文分享（normalize_hex/submit_share/Store 分页搜索/GUI payload+offscreen，57 项，1.21.0 起）
+python test/test_spectrum_model.py      # 频谱图纯逻辑（分隔符解析/参数错误矩阵/频率轴/纵轴双口径/刻度标签/50Ω换算/四字段联动，103 项，1.23.9 起）
+python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（常驻tab/控件/联动/绘制/非法输入/自动适配/换算/导出PNG/主题/清空，58 项，1.23.9 起）
 
 # 调试用临时脚本（可清理）：test_mac_*.py / test_msdu_debug.py / test_user_frame.py / test_full_debug.py / test_len_debug.py
 ```
@@ -768,6 +771,12 @@ python test/test_frame_share.py         # 报文分享（normalize_hex/submit_sh
 ## 10. 变更日志
 
 > 详细版本变更记录请查看 `main_gui.py:CHANGELOG`（按版本倒序），或运行 `git log --oneline` 查看提交历史。本文档仅保留最近两个版本的摘要。
+
+### 1.23.9 — 2026-09-14
+
+- **频谱图标签页**（`spectrum_widget.py`，常驻、与协议无关）：频谱仪参数（起始/终止/中心/扫宽**四字段双向联动** + 频率单位、RBW/VBW、参考电平、每格 dB、纵向格数、幅值单位 dBm/dBμV/dBmV（可选 50Ω 换算 +107/+47）、检波方式）+ 单条 trace 全部扫频点数值 → **QPainter 自绘仪器式网格频谱图**（横向 10 格 × 纵向 N 格，顶格=参考电平；可切「纵轴自动适配」），标题+参数注记随图渲染，可导出 PNG（1600×1000），浅/暗主题调色板
+- **零新增依赖**：不用 matplotlib（`南网协议解析工具.spec` 显式排除）与 QtCharts；纯逻辑层不依赖 Qt（解析/校验/频率轴/纵轴/刻度/换算/联动皆可脚本测试）
+- main_gui 仅 3 处接线（import / 常驻 tab `chart-spline` / `_restyle_for_theme` 钩子）；不改协议可见性
 
 ### 1.23.3 — 2026-09-11
 

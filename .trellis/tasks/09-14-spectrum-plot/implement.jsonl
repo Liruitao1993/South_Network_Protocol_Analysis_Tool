@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "PySide6 新增标签页五步套路：独立文件、纯逻辑层不 import PySide6、tab 索引用 addTab 返回值、主题 restyle、测试分层（纯逻辑脚本 + offscreen GUI）"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复用既有自绘/导出实现（sequence_diagram_widget.py 的 QPainter 绘制与导出 PNG），禁止复制第二份绘制逻辑"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "跨层契约：纯逻辑层（参数/解析/轴计算）与 Qt 层（绘制/控件）的边界与数据流约定"}
