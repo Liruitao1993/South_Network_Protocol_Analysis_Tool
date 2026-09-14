@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import bisect
 import math
+import re
 from dataclasses import dataclass
 from typing import Optional, Sequence, Tuple
 
@@ -85,6 +86,29 @@ _MAX_WIDGET_WIDTH = 16777215  # Qt 的 QWIDGETSIZE_MAX（PySide6 不导出该常
 # Qt 层导入失败时留痕，便于定位「SpectrumWidget 为 None」这类静默降级
 _QT_IMPORT_ERROR: Optional[Exception] = None
 
+# ── trace 文本预处理（R11）──
+_PURE_SEPARATOR_RE = re.compile(r"^[\s,;，、]+$")
+_NUMBER_PATTERN = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
+# 行尾数值：数值前必须是分隔边界（空格/冒号/等号/逗号/分号/竖线/括号等），
+# 这样 `12a3` 的尾部 `3`（前面是字母）不会被误当数值提取；数值后可带**电平**单位后缀
+# （实测日志常写成 `-51.5 dBm`）。频率单位（Hz/MHz/GHz）刻意不在白名单里：
+# 日志里「中心频率 600 MHz」这类行若被当作电平会污染图形。
+_UNIT_SUFFIX = r"(?:dBm|dB[uμµ]V|dBmV|dB)?"
+_TRAILING_NUMBER_RE = re.compile(
+    r"(?:^|[\s:=：,;|>\]\)\}\"'])"
+    + f"({_NUMBER_PATTERN})"
+    + r"\s*"
+    + _UNIT_SUFFIX
+    + r"\s*$"
+)
+# 纯时间戳行（防止把毫秒当成数值）：`2026-09-14 12:24:26:295` / `... 26.295`
+_TIMESTAMP_ONLY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}[ T][\d:. ]+$")
+# 行尾是「时:分[:秒][:毫秒]」形式（如 `12:24:26`、`12:24:26:295`、`12:24:26.295`）
+# → 该行没有 trace 数值，行尾数字是时间而非电平（否则毫秒 295 会变成 295 dBm 假点）
+_TIME_TAIL_RE = re.compile(r"\d{1,2}:\d{2}(?:[:.]\d+)?\s*$")
+# 日志结构特征（冒号/日期/制表符）——无值行据此判定为「日志噪声」而非拼写错误
+_NOISE_LINE_RE = re.compile(r"[:：\t]|\d{4}-\d{2}-\d{2}")
+
 
 class SpectrumInputError(ValueError):
     """频谱参数 / trace 数值校验失败（消息可直接展示给用户）。"""
@@ -140,36 +164,133 @@ class SpectrumTrace:
     params: SpectrumParams
     freqs: Tuple[float, ...]
     levels: Tuple[float, ...]
+    source: Optional[TraceInput] = None  # 输入预处理统计（用于提示「已清洗 N 行日志」）
 
     @property
     def n_points(self) -> int:
         return len(self.levels)
 
 
-def parse_levels(text: str) -> Tuple[float, ...]:
-    """解析 trace 数值文本（空格/制表/逗号/分号/换行/全角分隔符均可）。
+def _split_tokens(text: str) -> list:
+    """按分隔符切分为 token（分隔符归一为空格后 split）。"""
+    cleaned = text
+    for sep in _SEPARATORS:
+        cleaned = cleaned.replace(sep, " ")
+    return cleaned.split()
 
-    非法 token 一律抛错并指出**序号与原文**，绝不静默丢弃
-    （AGENTS.md §8 陷阱 23：宁可报错也不能给出空白结果）。
+
+def _token_value(token: str) -> Optional[float]:
+    """token → 数值；非法或非有限返回 None（inf/nan 一律视为无效）。"""
+    try:
+        value = float(token)
+    except ValueError:
+        return None
+    return value if math.isfinite(value) else None
+
+
+@dataclass(frozen=True)
+class TraceInput:
+    """预处理结果：数值 + 清洗统计（让用户知道输入被解释成了什么）。"""
+
+    values: Tuple[float, ...]
+    lines_total: int  # 有效行数（非空且非纯分隔符）= lines_used + lines_skipped
+    lines_used: int  # 产出数值的行数
+    lines_skipped: int  # 跳过（无数值的日志/时间戳行）
+    log_lines: int  # 命中「行尾取数值」的日志行数
+
+    @property
+    def cleaned(self) -> bool:
+        return self.log_lines > 0 or self.lines_skipped > 0
+
+    def note(self) -> str:
+        """状态行提示文本（未发生清洗时返回空串）。"""
+        if not self.cleaned:
+            return ""
+        parts = []
+        if self.log_lines:
+            parts.append(f"已清洗 {self.log_lines} 行日志")
+        if self.lines_skipped:
+            parts.append(f"跳过 {self.lines_skipped} 行无数值")
+        return "，".join(parts)
+
+
+def preprocess_trace(text: str) -> TraceInput:
+    """把粘贴文本清洗成 trace 数值（支持带日志前缀的行，取行尾真实数值）。
+
+    逐行判定（见 prd.md R11）：
+      1. 空行/纯分隔符行 → 忽略（不计入统计）；
+      2. 该行 token 全是有效数值 → 全部采纳（保留「一行多值」）；
+      3. 含日志结构的行：行尾以分隔边界取到**电平数值** → 采纳该值（日志行清洗）；
+      4. 含日志结构、行内有数值却拿不到行尾数值 → **报错**（不静默丢行）；
+      5. 含日志结构且整行无数值（头部行/纯时间戳行）→ 跳过并计数；
+      6. 无日志结构却含非法 token（`12a3`/`abc`/`x=12a3`）→ 报错（拼写错误不被当噪声吞掉）。
+
+    不变式：`lines_total == lines_used + lines_skipped`（有效行口径：非空且非纯分隔符）。
     """
     if text is None:
         raise SpectrumInputError("请输入 trace 数值")
-    cleaned = text.replace("\ufeff", "")
-    for sep in _SEPARATORS:
-        cleaned = cleaned.replace(sep, " ")
-    tokens = cleaned.split()
-    if not tokens:
-        raise SpectrumInputError("请输入 trace 数值")
-    values = []
-    for idx, token in enumerate(tokens, 1):
-        try:
-            value = float(token)
-        except ValueError:
-            raise SpectrumInputError(f"第 {idx} 项不是有效数值：{token}") from None
-        if not math.isfinite(value):
-            raise SpectrumInputError(f"第 {idx} 项不是有效数值：{token}")
-        values.append(value)
-    return tuple(values)
+    body = text.replace("\ufeff", "")
+    values: list = []
+    lines_total = lines_used = lines_skipped = log_lines = 0
+    for lineno, raw_line in enumerate(body.splitlines(), 1):
+        line = raw_line.strip()
+        if not line or _PURE_SEPARATOR_RE.match(line):
+            continue  # 空行 / 纯分隔符行
+        lines_total += 1
+        tokens = _split_tokens(line)
+        token_values = [_token_value(token) for token in tokens]
+        if tokens and all(value is not None for value in token_values):
+            values.extend(token_values)
+            lines_used += 1
+            continue
+        has_number = any(value is not None for value in token_values)
+        if _NOISE_LINE_RE.search(line):
+            trailing = _TRAILING_NUMBER_RE.search(line)
+            if (
+                trailing is not None
+                and not _TIMESTAMP_ONLY_RE.match(line)
+                and not _TIME_TAIL_RE.search(line)
+            ):
+                extracted = _token_value(trailing.group(1))
+                if extracted is None:  # 如 1e999 → inf
+                    raise SpectrumInputError(
+                        f"第 {lineno} 行行尾不是有效数值：{trailing.group(1)}"
+                    )
+                values.append(extracted)
+                lines_used += 1
+                log_lines += 1
+                continue
+            if has_number:
+                # 有数值但行尾不是数值：无法确定哪个是 trace 值 → 明确报错（R11 规则 4）
+                raise SpectrumInputError(
+                    f"第 {lineno} 行含数值但行尾不是数值，无法确定 trace 值：{line}"
+                )
+            lines_skipped += 1  # 头部/纯时间戳等无值日志行
+            continue
+        # 无日志结构却含非法 token → 数据行拼写错误，明确报错（绝不「只取一半」）
+        bad_idx = next(
+            (i for i, value in enumerate(token_values) if value is None), 0
+        )
+        first_bad = tokens[bad_idx] if tokens else line
+        raise SpectrumInputError(
+            f"第 {len(values) + bad_idx + 1} 项（第 {lineno} 行）"
+            f"不是有效数值：{first_bad}"
+        )
+    if not values:
+        hint = f"（已跳过 {lines_skipped} 行无数值日志行）" if lines_skipped else ""
+        raise SpectrumInputError(f"请输入 trace 数值{hint}")
+    return TraceInput(
+        values=tuple(values),
+        lines_total=lines_total,
+        lines_used=lines_used,
+        lines_skipped=lines_skipped,
+        log_lines=log_lines,
+    )
+
+
+def parse_levels(text: str) -> Tuple[float, ...]:
+    """解析 trace 数值文本（兼容日志行；详情见 preprocess_trace）。"""
+    return preprocess_trace(text).values
 
 
 def validate_params(params: SpectrumParams) -> None:
@@ -218,15 +339,17 @@ def freqs_for(params: SpectrumParams, n_points: int) -> Tuple[float, ...]:
 
 
 def build_trace(text: str, params: SpectrumParams) -> SpectrumTrace:
-    """校验参数 + 解析数值 + 换算单位 + 生成频率轴。"""
+    """校验参数 + 预处理数值（含日志行清洗）+ 换算单位 + 生成频率轴。"""
     validate_params(params)
-    raw = parse_levels(text)
+    parsed = preprocess_trace(text)
+    raw = parsed.values
     if len(raw) < 2:
         raise SpectrumInputError("至少需要 2 个数值点才能绘制")
     return SpectrumTrace(
         params=params,
         freqs=freqs_for(params, len(raw)),
         levels=display_levels(raw, params),
+        source=parsed,
     )
 
 
@@ -1662,13 +1785,17 @@ if _QT_AVAILABLE:
             layout.setSpacing(2)
 
             label = QLabel(
-                "trace 数值（每个数值一个扫频点，空格/逗号/分号/换行分隔，"
-                "点数即频率轴点数）"
+                "trace 数值（每个数值一个扫频点；空格/逗号/分号/换行分隔，"
+                "带日志前缀的行自动取行尾数值）"
             )
             layout.addWidget(label)
 
             self.trace_edit = QPlainTextEdit()
-            self.trace_edit.setPlaceholderText("-62.5 -63.1 -62.8 ...")
+            self.trace_edit.setPlaceholderText(
+                "-62.5 -63.1 -62.8 ...\n"
+                "或直接粘贴日志行：\n"
+                "2026-09-14 12:25:43 015: 流程日志：... --USER--MTC@PC: -51.564613"
+            )
             layout.addWidget(self.trace_edit, 1)
             return panel
 
@@ -1817,6 +1944,15 @@ if _QT_AVAILABLE:
             return params
 
         # ── 动作 ──────────────────────────────────────────────────
+        def _compose_status(self, trace: SpectrumTrace, out_of_range: int = 0) -> str:
+            """状态行文本：点数/步进/扫宽/RBW + 越界提示 + 日志清洗提示。"""
+            text = status_text(trace)
+            if out_of_range:
+                text += f"  ⚠ {out_of_range} 个点超出纵轴范围（已裁剪到边缘）"
+            if trace.source is not None and trace.source.cleaned:
+                text += f"  · {trace.source.note()}"
+            return text
+
         def _on_draw(self) -> None:
             try:
                 params = self.read_params()
@@ -1827,18 +1963,18 @@ if _QT_AVAILABLE:
             self._trace = trace
             self.canvas.set_auto_y(self.auto_check.isChecked())
             self.canvas.set_trace(trace)
-            text = status_text(trace)
             out_of_range = count_out_of_range(
                 params, trace.levels, self.auto_check.isChecked()
             )
-            if out_of_range:
-                text += f"  ⚠ {out_of_range} 个点超出纵轴范围（已裁剪到边缘）"
-            self._set_status(text, error=bool(out_of_range))
+            self._set_status(
+                self._compose_status(trace, out_of_range), error=bool(out_of_range)
+            )
             self._refresh_axis_label()
             dropped = self._refresh_markers()
             if dropped:
                 self._set_status(
-                    f"{text}  ⚠ {dropped} 个标记超出当前扫描范围，已丢弃",
+                    f"{self._compose_status(trace, out_of_range)}"
+                    f"  ⚠ {dropped} 个标记超出当前扫描范围，已丢弃",
                     error=True,
                 )
             self._refresh_integration()
@@ -1867,10 +2003,10 @@ if _QT_AVAILABLE:
                 out_of_range = count_out_of_range(
                     self._trace.params, self._trace.levels, checked
                 )
-                text = status_text(self._trace)
-                if out_of_range:
-                    text += f"  ⚠ {out_of_range} 个点超出纵轴范围（已裁剪到边缘）"
-                self._set_status(text, error=bool(out_of_range))
+                self._set_status(
+                    self._compose_status(self._trace, out_of_range),
+                    error=bool(out_of_range),
+                )
 
         def _on_export_png(self) -> None:
             path, _ = QFileDialog.getSaveFileName(

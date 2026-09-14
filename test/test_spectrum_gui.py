@@ -622,7 +622,75 @@ def main():
     check("清空后读数标签更新", tab.ibw_label.text() in ("未启用", "未绘制 trace"), tab.ibw_label.text())
     tab.ibw_check.setChecked(False)
 
-    # ── 10. 渲染与导出 ──
+    # ── 11. 日志文本预处理（R11）──
+    log_values = ["-51.564613", "-52.085311", "-52.614507", "-52.901395", "-52.524243"]
+    log_text = "\n".join(
+        "2026-09-14 12:25:43 {:03d}: 流程日志：2026-09-14 12:24:26:295 "
+        "--USER--MTC@DESKTOP-417FFS5: {}".format(i, v)
+        for i, v in enumerate(log_values)
+    )
+    tab.ibw_check.setChecked(False)
+    tab.trace_edit.setPlainText(log_text)
+    tab._on_draw()
+    log_trace = tab.current_trace()
+    check("日志行可绘制（点数 = 行数）", log_trace is not None and log_trace.n_points == 5)
+    check(
+        "日志行取行尾数值",
+        log_trace is not None
+        and log_trace.levels == tuple(float(v) for v in log_values),
+        str(log_trace.levels if log_trace else None),
+    )
+    check(
+        "状态行提示已清洗日志行",
+        "已清洗 5 行日志" in tab.status_label.text(),
+        tab.status_label.text(),
+    )
+    mixed_text = "流程日志：开始采集\n" + log_text + "\n2026-09-14 12:24:26:295\n-60 -61"
+    tab.trace_edit.setPlainText(mixed_text)
+    tab._on_draw()
+    mixed_trace = tab.current_trace()
+    check("混合输入点数正确（5 日志 + 2 纯值）", mixed_trace is not None and mixed_trace.n_points == 7)
+    check(
+        "混合输入状态行同时提示清洗与跳过",
+        "已清洗 5 行日志" in tab.status_label.text()
+        and "跳过 2 行无数值" in tab.status_label.text(),
+        tab.status_label.text(),
+    )
+    tab.trace_edit.setPlainText(_sample_text(100))
+    tab._on_draw()
+    check(
+        "纯数值输入不显示清洗提示",
+        "已清洗" not in tab.status_label.text(),
+        tab.status_label.text(),
+    )
+    # 切换「纵轴自动适配」不应吞掉清洗提示
+    tab.trace_edit.setPlainText(log_text)
+    tab._on_draw()
+    tab.auto_check.setChecked(True)
+    check(
+        "切换自动适配后清洗提示仍在",
+        "已清洗 5 行日志" in tab.status_label.text(),
+        tab.status_label.text(),
+    )
+    tab.auto_check.setChecked(False)
+    check(
+        "取消自动适配后清洗提示仍在",
+        "已清洗 5 行日志" in tab.status_label.text(),
+        tab.status_label.text(),
+    )
+    # 日志行有值但行尾非数值 → 明确报错（不静默丢行）
+    tab.trace_edit.setPlainText("-70 -71\n2026-09-14 12:00:00 INFO: -51.5 dBm extra")
+    tab._on_draw()
+    check(
+        "日志行无法确定数值时报错并指出行号",
+        "第 2 行" in tab.status_label.text() and "无法确定 trace 值" in tab.status_label.text(),
+        tab.status_label.text(),
+    )
+    check("报错时不破坏已有图形", tab.current_trace() is not None)
+    tab.trace_edit.setPlainText(_sample_text(100))
+    tab._on_draw()
+
+    # ── 12. 渲染与导出 ──
     tab.trace_edit.setPlainText(_sample_text(100))  # 上一节清空过 trace，这里恢复
     tab.unit_combo.setCurrentText("dBm")
     tab.rbw_edit.setText("100")

@@ -66,6 +66,7 @@ from spectrum_widget import (
     parse_levels,
     peak_index,
     peak_indices,
+    preprocess_trace,
     readout_text,
     resolve_freq_inputs,
     status_text,
@@ -609,9 +610,151 @@ def test_integration_band():
     check("换算后单位标注为 dBμV", converted.unit == "dBμV")
 
 
+USER_LOG_TEMPLATE = (
+    "2026-09-14 12:25:43 {seq:03d}: 流程日志：2026-09-14 12:24:26:295 "
+    "--USER--MTC@DESKTOP-417FFS5: {value}"
+)
+
+
+def test_preprocess_logs():
+    values = ["-51.564613", "-52.085311", "-52.614507", "-52.901395"]
+    text = "\n".join(
+        USER_LOG_TEMPLATE.format(seq=i, value=v) for i, v in enumerate(values)
+    )
+    parsed = preprocess_trace(text)
+    check(
+        "用户格式日志行 → 提取行尾数值",
+        parsed.values == tuple(float(v) for v in values),
+        str(parsed.values),
+    )
+    check("日志行统计：4 行全部命中", parsed.log_lines == 4 and parsed.lines_used == 4)
+    check("日志清洗不产生跳过", parsed.lines_skipped == 0)
+    check("清洗提示文本", parsed.note() == "已清洗 4 行日志", parsed.note())
+    check("cleaned 标记", parsed.cleaned is True)
+
+    mixed = (
+        "流程日志：开始采集\n"
+        "-70 -71\n"
+        "2026-09-14 12:25:43 015: amp= -51.5\n"
+        "2026-09-14 12:24:26:295\n"
+        "\n"
+        "-72"
+    )
+    mixed_parsed = preprocess_trace(mixed)
+    check(
+        "混合输入按出现顺序提取（含一行多值）",
+        mixed_parsed.values == (-70.0, -71.0, -51.5, -72.0),
+        str(mixed_parsed.values),
+    )
+    check(
+        "无值头部行与纯时间戳行被跳过",
+        mixed_parsed.lines_skipped == 2,
+        str(mixed_parsed.lines_skipped),
+    )
+    check("空行不计入统计", mixed_parsed.lines_total == 5, str(mixed_parsed.lines_total))
+    check(
+        "混合提示同时给出清洗与跳过",
+        "已清洗 1 行日志" in mixed_parsed.note() and "跳过 2 行无数值" in mixed_parsed.note(),
+        mixed_parsed.note(),
+    )
+
+    check(
+        "制表符分隔的日志行也按行尾取值",
+        preprocess_trace("INFO\tdevice\t-63.25").values == (-63.25,),
+        str(preprocess_trace("INFO\tdevice\t-63.25").values),
+    )
+    check(
+        "日志行内逗号不影响行尾取值",
+        preprocess_trace("2026-09-14 12:00:00 INFO amp=, -51.5").values == (-51.5,),
+    )
+    check(
+        "科学计数法行尾值",
+        preprocess_trace("2026-09-14 12:00:00 INFO: -1.5e-3").values == (-0.0015,),
+    )
+    check(
+        "行尾数值前必须是分隔边界（12a3 不被截取）",
+        raises(lambda: preprocess_trace("12a3"))[0],
+    )
+    check(
+        "日志行尾可带电平单位后缀（含空格）",
+        preprocess_trace("2026-09-14 12:00:00 INFO: -51.5 dBm").values == (-51.5,)
+        and preprocess_trace("2026-09-14 12:00:00 INFO: -51.5dBm").values == (-51.5,),
+    )
+    check(
+        "频率单位不在白名单（避免「中心频率 600 MHz」被当电平）",
+        raises(lambda: preprocess_trace("2026-09-14 12:00:00 设置中心频率 600 MHz"))[0],
+    )
+    # 行尾时间戳防护：毫秒/秒不能被当作 trace 值
+    check(
+        "行尾 HH:MM:SS[:.]mmm 不产生假点",
+        raises(lambda: preprocess_trace("2026-09-14 12:25:43 015: 流程日志：2026-09-14 12:24:26:295"))[0]
+        and raises(lambda: preprocess_trace("12:24:26"))[0]
+        and raises(lambda: preprocess_trace("2026/09/14 12:24:26"))[0],
+    )
+    check(
+        "行尾时间戳 + 真值时仍取真值",
+        preprocess_trace("2026-09-14 12:25:43 015: 流程日志：2026-09-14 12:24:26:295 --U@PC: -51.5").values
+        == (-51.5,),
+    )
+    # 规则 4 优先于规则 5：行内有数值却拿不到行尾数值 → 报错（不静默丢行）
+    for bad in (
+        "2026-09-14 12:00:00 INFO: -51.5 dBm extra",
+        "2026-09-14 12:00:00 INFO: -51.5 采集完成",
+    ):
+        ok, msg = raises(lambda b=bad: preprocess_trace(b), "无法确定 trace 值")
+        check(f"日志行有值但行尾非数值 → 报错：{bad[:28]}…", ok, msg)
+    ok, msg = raises(
+        lambda: preprocess_trace("-70 -71\n2026-09-14 12:00:00 INFO: -51.5 dBm extra"),
+        "第 2 行",
+    )
+    check("报错定位到具体行号", ok, msg)
+    # 非有限数值：日志路径与纯数值路径同口径拒绝
+    ok, msg = raises(lambda: preprocess_trace("2026-09-14 12:00:00 INFO: 1e999"), "行尾不是有效数值")
+    check("日志行尾 inf 被拒绝（不污染 levels）", ok, msg)
+    ok, msg = raises(lambda: preprocess_trace("流程日志：开始采集\n2026-09-14 12:00:00:000"), "已跳过 2 行")
+    check("全无值日志行时报错附带跳过行数", ok, msg)
+    check(
+        "统计不变式 lines_total == lines_used + lines_skipped",
+        mixed_parsed.lines_total == mixed_parsed.lines_used + mixed_parsed.lines_skipped,
+        f"{mixed_parsed}",
+    )
+
+    # 兼容性：拼写错误仍然明确报错，绝不「只取一半」
+    for bad, keyword in (
+        ("12a3", "第 1 项"),
+        ("12a3 5", "第 1 项"),
+        ("abc", "第 1 项"),
+        ("1 2 xx", "第 3 项"),
+        ("x=12a3", "第 1 项"),
+    ):
+        ok, msg = raises(lambda b=bad: preprocess_trace(b), keyword)
+        check(f"仍明确报错：{bad}", ok, msg)
+    check(
+        "报错消息含行号与原文",
+        "第 1 行" in raises(lambda: preprocess_trace("12a3"))[1],
+        raises(lambda: preprocess_trace("12a3"))[1],
+    )
+
+    check("纯数值多值行行为不变", parse_levels("1 2,3;4") == (1.0, 2.0, 3.0, 4.0))
+    ok, msg = raises(lambda: parse_levels("   ,;\n"), "请输入")
+    check("纯分隔符输入报「请输入」", ok, msg)
+    ok, msg = raises(lambda: parse_levels("流程日志：开始采集\n2026-09-14 12:00:00:000"), "请输入")
+    check("全是无值日志行时报「请输入」", ok, msg)
+
+    trace = build_trace(text, base_params())
+    check("build_trace 携带预处理统计", trace.source is not None and trace.source.log_lines == 4)
+    plain = build_trace("1 2 3", base_params())
+    check(
+        "纯数值输入的统计为「未清洗」",
+        plain.source is not None and plain.source.cleaned is False,
+        str(plain.source),
+    )
+
+
 def main():
     for fn in (
         test_parse_levels,
+        test_preprocess_logs,
         test_validate_params,
         test_freqs,
         test_build_trace,

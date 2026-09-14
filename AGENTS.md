@@ -696,8 +696,8 @@ python test/test_web_feedback.py        # Web 版问题反馈（存储层/截图
 python test/test_feedback_api.py        # 反馈提交 API（submit_from_api/parse_multipart/频率限制/旧库迁移，31 项，1.20.0 起）
 python test/test_feedback_dialog.py     # GUI 反馈对话框（URL/config/校验/sys_info/offscreen 冒烟，30 项，1.20.0 起）
 python test/test_frame_share.py         # 报文分享（normalize_hex/submit_share/Store 分页搜索/GUI payload+offscreen，57 项，1.21.0 起）
-python test/test_spectrum_model.py      # 频谱图纯逻辑（分隔符解析/参数错误矩阵/频率轴/纵轴双口径/刻度标签/50Ω换算/四字段联动/标记吸附/峰值搜索O(n)/Δ成对计算/积分带宽与积分功率（含极端电平与窄带），191 项，1.23.9 起）
-python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（常驻tab/控件/联动/绘制/非法输入/自动适配/换算/光标读数/MARK颜色与表格对应/峰值搜索/删除重编号/Δ标注/积分带宽竖线与填充/导出PNG含标记/主题/清空，123 项，1.23.9 起）
+python test/test_spectrum_model.py      # 频谱图纯逻辑（含 trace 日志清洗：分隔符解析/行尾取值/时间戳防护/统计不变式/错误兼容，225 项，1.23.9 起）
+python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块粘贴绘制、清洗提示不丢失、行号报错，135 项，1.23.9 起）
 
 # 调试用临时脚本（可清理）：test_mac_*.py / test_msdu_debug.py / test_user_frame.py / test_full_debug.py / test_len_debug.py
 ```
@@ -777,7 +777,8 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（常驻tab/�
 - **频谱图标签页**（`spectrum_widget.py`，常驻、与协议无关）：频谱仪参数（起始/终止/中心/扫宽**四字段双向联动** + 频率单位、RBW/VBW、参考电平、每格 dB、纵向格数、幅值单位 dBm/dBμV/dBmV（可选 50Ω 换算 +107/+47）、检波方式）+ 单条 trace 全部扫频点数值 → **QPainter 自绘仪器式网格频谱图**（横向 10 格 × 纵向 N 格，顶格=参考电平；可切「纵轴自动适配」），标题+参数注记随图渲染，可导出 PNG（1600×1000），浅/暗主题调色板
 - **测量（同版本追加）**：鼠标悬停十字光标 + 频点/幅值读数框（吸附最近数据点）；点击添加 MARK 标记 M1~M6，**每个标记一种固定颜色**（图上竖虚线/圆点/M? 标签与标记表行文字同色）；标记以**频率**为锚点（重绘/改单位后自动重新吸附、越界丢弃且提示不覆盖点数信息）；标记表 `标记/频率/幅值/Δ频率(哪两点)/Δ幅值(哪两点)`（Δ 一律标注 `M?↔M?`，`Δ 参考` 下拉可切参考标记）；测量栏峰值/谷值；「峰值搜索/下一个峰值」按 3 dB 显著度环形搜索（**单调栈 O(n)**，原 O(n²) 在 16000 点上 3.74 s 冻结 GUI）；标记与 Δ 注记随导出 PNG 渲染
 - **积分带宽（同版本追加）**：参数区「积分带宽」分组（中心频率 + 积分带宽 + kHz/MHz + 显示开关）；图上两条点划线竖线（独立配色）+ 边沿间半透明填充带 + `IBW 起–止` 标签；带内**积分功率**（线性求和后转 dB，按 `频率步进/RBW` 归一化；RBW 未填注明未归一化）与带宽内点数；越界按交集积分并标注、无交集不填充；参数区改包 `QScrollArea`（新增分组后矮窗口不裁掉底部控件）
-- **零新增依赖**：不用 matplotlib（`南网协议解析工具.spec` 显式排除）与 QtCharts；纯逻辑层不依赖 Qt（解析/校验/频率轴/纵轴/刻度/换算/联动/标记/峰值/积分功率 皆可脚本测试）
+- **trace 日志清洗（同版本追加）**：可直接粘贴带日志前缀的行（`… --USER--MTC@PC: -51.564613`）——每行取**行尾真实数值**（数值后可带 `dBm/MHz` 单位后缀）；逐行规则：空行忽略 / 全数值行全部采纳 / 行尾可取则取该值 / **有值却取不到行尾 → 明确报错**（不静默只取一半）/ 无数值含日志结构（冒号、日期、制表符）→ 跳过计数 / 无数值无日志结构 → 报错；纯时间戳行跳过；`TraceInput` 统计经状态行提示「已清洗 N 行日志，跳过 K 行无数值」
+- **零新增依赖**：不用 matplotlib（`南网协议解析工具.spec` 显式排除）与 QtCharts；纯逻辑层不依赖 Qt（解析/日志清洗/校验/频率轴/纵轴/刻度/换算/联动/标记/峰值/积分功率 皆可脚本测试）
 - main_gui 仅 3 处接线（import / 常驻 tab `chart-spline` / `_restyle_for_theme` 钩子）；不改协议可见性
 
 ### 1.23.3 — 2026-09-11
