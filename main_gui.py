@@ -102,7 +102,7 @@ from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
 APP_VERSION = "1.23.10"
-BUILD_DATE = "2026-09-12"  # 编译日期，每次打包前更新
+BUILD_DATE = "2026-09-14"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
     (
