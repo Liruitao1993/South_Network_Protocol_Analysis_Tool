@@ -12,6 +12,8 @@
   8. render_image 双主题尺寸正确且非纯色；导出 PNG 可被 QImage 读回
   9. 主题切换 restyle_for_theme 生效；主窗口 _restyle_for_theme 钩子不抛异常
  10. 清空复位
+ 11. 光标读数（悬停/移出）、MARK 标记（点击添加/上限 6/峰值搜索/下一个峰值/删除/清空）
+ 12. 标记表内容与 Δ 列、测量栏 Δf(M1↔M2)、重绘后按频率保持、带标记导出图与无标记不同
 
 直接运行: python test/test_spectrum_gui.py
 """
@@ -58,12 +60,14 @@ def _distinct_colors(image, step=17):
 
 
 def main():
-    from PySide6.QtGui import QImage
+    from PySide6.QtCore import QEvent, QPointF, Qt
+    from PySide6.QtGui import QImage, QMouseEvent
     from PySide6.QtWidgets import QApplication
 
     app = QApplication.instance() or QApplication([])
 
     import main_gui
+    from spectrum_widget import MAX_MARKERS, format_delta_hz, marker_color, peak_index
 
     win = main_gui.MainWindow()
     app.processEvents()
@@ -184,7 +188,315 @@ def main():
     )
     tab.unit_combo.setCurrentText("dBm")
 
-    # ── 8. 渲染与导出 ──
+    # ── 8. 光标读数与 MARK 标记（R7 / R8）──
+    tab.unit_combo.setCurrentText("dBm")
+    tab._on_draw()
+    canvas = tab.canvas
+    trace = tab.current_trace()
+    check("绘图区矩形可用", canvas.plot_rect() is not None and canvas.plot_rect().width() > 100)
+
+    def _mouse(kind, x, y, button=Qt.MouseButton.NoButton):
+        pos = QPointF(x, y)
+        QApplication.sendEvent(
+            canvas,
+            QMouseEvent(
+                kind, pos, pos, button, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier
+            ),
+        )
+        app.processEvents()
+
+    def _click_ratio(frac):
+        """按当前绘图区（每次重取：标记表显隐会改变画布高度）点击。"""
+        plot = canvas.plot_rect()
+        _mouse(
+            QEvent.Type.MouseButtonPress,
+            plot.left() + int(plot.width() * frac),
+            plot.center().y(),
+            Qt.MouseButton.LeftButton,
+        )
+
+    def _hover_ratio(frac):
+        plot = canvas.plot_rect()
+        _mouse(
+            QEvent.Type.MouseMove,
+            plot.left() + int(plot.width() * frac),
+            plot.center().y(),
+        )
+
+    # 无 trace 时悬停/点击不产生读数与标记（绘图区仍可算出，用于画空态提示）
+    canvas.set_trace(None)
+    empty_plot = canvas.plot_rect()
+    check("无 trace 时仍可算出绘图区（空态提示用）", empty_plot is not None)
+    _mouse(QEvent.Type.MouseMove, empty_plot.center().x(), empty_plot.center().y())
+    check("无 trace 时悬停无读数", canvas.cursor_readout() is None)
+    _mouse(
+        QEvent.Type.MouseButtonPress,
+        empty_plot.center().x(),
+        empty_plot.center().y(),
+        Qt.MouseButton.LeftButton,
+    )
+    check("无 trace 时点击不产生标记", tab.markers() == ())
+    canvas.set_trace(trace)
+
+    _hover_ratio(0.26)
+    readout = canvas.cursor_readout()
+    check("悬停产生光标读数", readout is not None)
+    if readout is not None:
+        index, freq, level = readout
+        check(
+            "读数 = 最近数据点的频率与幅值",
+            freq == trace.freqs[index] and level == trace.levels[index],
+            f"{freq}/{level} vs {trace.freqs[index]}/{trace.levels[index]}",
+        )
+        check(
+            "读数与悬停位置对应（±1 步进）",
+            abs(index - round(0.26 * (trace.n_points - 1))) <= 1,
+            str(index),
+        )
+    _mouse(QEvent.Type.Leave, 0, 0)
+    check("移出绘图区清除读数", canvas.cursor_readout() is None)
+
+    # 重绘后不残留旧轨迹读数（D3：set_trace 清空光标）
+    _hover_ratio(0.4)
+    tab._on_draw()
+    check("重绘后清除旧光标读数", canvas.cursor_readout() is None)
+
+    check("初始无标记且标记表隐藏", tab.markers() == () and tab.marker_table.isHidden())
+    _click_ratio(0.26)
+    _click_ratio(0.57)
+    check("点击两次 → 2 个标记", len(tab.markers()) == 2, str(len(tab.markers())))
+    check("标记命名 M1/M2", [m.label for m in tab.markers()] == ["M1", "M2"])
+    check("标记表显示且 2 行", not tab.marker_table.isHidden() and tab.marker_table.rowCount() == 2)
+    check(
+        "点击位点与标记频率一致（±1 步进）",
+        abs(tab.markers()[0].index - round(0.26 * (trace.n_points - 1))) <= 1
+        and abs(tab.markers()[1].index - round(0.57 * (trace.n_points - 1))) <= 1,
+        f"{tab.markers()[0].index} / {tab.markers()[1].index}",
+    )
+    check(
+        "标记表 M1 行为参考",
+        tab.marker_table.item(0, 3).text() == "参考",
+        tab.marker_table.item(0, 3).text(),
+    )
+    m1, m2 = tab.markers()
+    check(
+        "标记表 M2 行 Δ频率 = 两点频率差（带 M?↔M? 标注）",
+        tab.marker_table.item(1, 3).text()
+        == f"{m1.label}↔{m2.label}  {format_delta_hz(m2.freq_hz - m1.freq_hz)}",
+        tab.marker_table.item(1, 3).text(),
+    )
+    check(
+        "标记表行文字用该标记的颜色（M1/M2 不同色）",
+        tab.marker_table.item(0, 3).foreground().color().name()
+        != tab.marker_table.item(1, 3).foreground().color().name(),
+        f"{tab.marker_table.item(0, 3).foreground().color().name()} vs "
+        f"{tab.marker_table.item(1, 3).foreground().color().name()}",
+    )
+    check(
+        "标记表颜色 = marker_color(主题, 序号)",
+        tab.marker_table.item(0, 0).foreground().color().name().lower()
+        == marker_color(tab._dark, 0).lower()
+        and tab.marker_table.item(1, 0).foreground().color().name().lower()
+        == marker_color(tab._dark, 1).lower(),
+        f"{tab.marker_table.item(0, 0).foreground().color().name()} / "
+        f"{tab.marker_table.item(1, 0).foreground().color().name()}",
+    )
+    check(
+        "Δ 参考下拉列出全部标记",
+        [tab.ref_combo.itemText(i) for i in range(tab.ref_combo.count())] == ["M1", "M2"],
+        str([tab.ref_combo.itemText(i) for i in range(tab.ref_combo.count())]),
+    )
+    check(
+        "测量栏含 Δf(M1↔M2) 频段宽度",
+        "Δf(M1↔M2)" in tab.measure_label.text()
+        and format_delta_hz(m2.freq_hz - m1.freq_hz) in tab.measure_label.text(),
+        tab.measure_label.text(),
+    )
+    check("测量栏含峰值/谷值", "峰值" in tab.measure_label.text() and "谷值" in tab.measure_label.text())
+
+    # 切换 Δ 参考为 M2 → Δ 列与测量栏都按 M2 重新标注
+    tab.ref_combo.setCurrentIndex(1)
+    check("切换参考后 M2 行变参考", tab.marker_table.item(1, 3).text() == "参考")
+    check(
+        "切换参考后 M1 行标注 M2↔M1",
+        tab.marker_table.item(0, 3).text().startswith("M2↔M1"),
+        tab.marker_table.item(0, 3).text(),
+    )
+    check("切换参考后测量栏显示 M2↔M1", "Δf(M2↔M1)" in tab.measure_label.text(), tab.measure_label.text())
+    tab.ref_combo.setCurrentIndex(0)
+
+    # 三个标记：颜色互不相同、Δ 标注各自成对
+    _click_ratio(0.75)
+    colors = [
+        tab.marker_table.item(r, 0).foreground().color().name().lower()
+        for r in range(tab.marker_table.rowCount())
+    ]
+    check("3 个标记颜色互不相同", len(set(colors)) == 3, str(colors))
+    check(
+        "M3 行 Δ 标注 M1↔M3",
+        tab.marker_table.item(2, 3).text().startswith("M1↔M3"),
+        tab.marker_table.item(2, 3).text(),
+    )
+
+    # 峰值搜索 / 下一个峰值（走真实按钮信号，覆盖 .clicked 接线）
+    before_count = len(tab.markers())
+    tab.peak_btn.click()
+    peak_freq = trace.freqs[peak_index(trace.levels)]
+    check(
+        "峰值搜索把最后标记移到最大幅值点",
+        abs(tab.markers()[-1].freq_hz - peak_freq) < 1e-6,
+        f"{tab.markers()[-1].freq_hz} vs {peak_freq}",
+    )
+    before_index = tab.markers()[-1].index
+    tab.next_peak_btn.click()
+    check(
+        "下一个峰值移动到另一个峰",
+        tab.markers()[-1].index != before_index,
+        str(tab.markers()[-1].index),
+    )
+    check(
+        "标记数未增加（无选中即作用于最后一个）",
+        len(tab.markers()) == before_count,
+        f"{len(tab.markers())} vs {before_count}",
+    )
+
+    # 选中行分支：作用于选中行而非最后一个
+    tab.marker_table.selectRow(0)
+    app.processEvents()
+    first_before = tab.markers()[0].index
+    last_before = tab.markers()[-1].index
+    tab.peak_btn.click()
+    check(
+        "有选中行时峰值搜索作用于选中行",
+        tab.markers()[0].freq_hz == peak_freq and tab.markers()[-1].index == last_before,
+        f"{tab.markers()[0].freq_hz} / {tab.markers()[-1].index} vs {last_before}",
+    )
+
+    # 删除中间标记 → 重新编号连续
+    _click_ratio(0.9)
+    count_before = len(tab.markers())
+    tab.marker_table.selectRow(1)
+    app.processEvents()
+    tab.del_marker_btn.click()
+    labels = [m.label for m in tab.markers()]
+    check(
+        "删除中间标记后剩余标记重新连续编号",
+        len(labels) == count_before - 1 and labels == [f"M{i + 1}" for i in range(len(labels))],
+        str(labels),
+    )
+    check("删除后表格行数同步", tab.marker_table.rowCount() == len(labels), str(tab.marker_table.rowCount()))
+
+    # 收窄扫描范围 → 越界标记丢弃并提示，同时保留点数信息
+    tab._write_freq_fields(360e6, 600e6, None, None)
+    tab._on_draw()
+    check(
+        "越界标记被丢弃且提示仍保留点数信息",
+        "已丢弃" in tab.status_label.text() and "点数" in tab.status_label.text(),
+        tab.status_label.text(),
+    )
+    check(
+        "丢弃后标记重编号连续",
+        [m.label for m in tab.markers()] == [f"M{i + 1}" for i in range(len(tab.markers()))],
+        str([m.label for m in tab.markers()]),
+    )
+    tab._write_freq_fields(240e6, 960e6, None, None)
+    tab._on_draw()
+
+    # 上限与六标记表格
+    for frac in (0.1, 0.2, 0.3, 0.4, 0.5, 0.6):
+        _click_ratio(frac)
+    check("最多 6 个标记", len(tab.markers()) == MAX_MARKERS, str(len(tab.markers())))
+    check("6 个标记时表格 6 行", tab.marker_table.rowCount() == MAX_MARKERS)
+    check(
+        "6 个标记颜色互不相同",
+        len({tab.marker_table.item(r, 0).foreground().color().name() for r in range(6)}) == 6,
+    )
+    _click_ratio(0.8)
+    check(
+        f"第 {MAX_MARKERS + 1} 个标记被拒并提示",
+        len(tab.markers()) == MAX_MARKERS and f"最多 {MAX_MARKERS} 个标记" in tab.status_label.text(),
+        tab.status_label.text(),
+    )
+
+    # 重绘后标记按频率保持（单位换算 → 幅值随单位变化，频率不变）
+    before = [(m.freq_hz, m.level) for m in tab.markers()]
+    tab.unit_combo.setCurrentText("dBμV")
+    tab.convert_check.setChecked(True)
+    tab._on_draw()
+    after = [(m.freq_hz, m.level) for m in tab.markers()]
+    check("重绘后标记数量保持", len(after) == len(before))
+    check(
+        "重绘后标记频率保持（按频率锚定）",
+        all(abs(a[0] - b[0]) < 1e-6 for a, b in zip(after, before)),
+    )
+    check(
+        "重绘后标记幅值按新单位换算",
+        abs(after[0][1] - (before[0][1] + 107.0)) < 1e-6,
+        f"{before[0][1]} -> {after[0][1]}",
+    )
+    tab.convert_check.setChecked(False)
+    tab.unit_combo.setCurrentText("dBm")
+    tab._on_draw()
+
+    # 只改表单参数不重绘 → 只读标签提示「点绘制生效」，与画布口径不同源被显式标注
+    drawn_unit = tab.current_trace().params.unit
+    tab.unit_combo.setCurrentText("dBμV")
+    check(
+        "改单位未重绘时标签提示需重新绘制",
+        "点「绘制」生效" in tab.axis_label.text()
+        and tab.current_trace().params.unit == drawn_unit,
+        tab.axis_label.text(),
+    )
+    tab.unit_combo.setCurrentText("dBm")
+    check("参数复位后提示消失", "点「绘制」生效" not in tab.axis_label.text(), tab.axis_label.text())
+
+    tab.clear_markers_btn.click()
+    check("清空标记后表隐藏且画布无标记", tab.marker_table.isHidden() and tab.markers() == ())
+
+    # 上限 6
+    for frac in (0.1, 0.2, 0.3, 0.4, 0.5, 0.6):
+        _click_ratio(frac)
+    check("最多 6 个标记", len(tab.markers()) == MAX_MARKERS, str(len(tab.markers())))
+    _click_ratio(0.8)
+    check(
+        f"第 {MAX_MARKERS + 1} 个标记被拒并提示",
+        len(tab.markers()) == MAX_MARKERS and f"最多 {MAX_MARKERS} 个标记" in tab.status_label.text(),
+        tab.status_label.text(),
+    )
+
+    # 重绘后标记按频率保持（单位换算 → 幅值随单位变化，频率不变）
+    before = [(m.freq_hz, m.level) for m in tab.markers()]
+    tab.unit_combo.setCurrentText("dBμV")
+    tab.convert_check.setChecked(True)
+    tab._on_draw()
+    after = [(m.freq_hz, m.level) for m in tab.markers()]
+    check("重绘后标记数量保持", len(after) == len(before))
+    check(
+        "重绘后标记频率保持（按频率锚定）",
+        all(abs(a[0] - b[0]) < 1e-6 for a, b in zip(after, before)),
+    )
+    check(
+        "重绘后标记幅值按新单位换算",
+        abs(after[0][1] - (before[0][1] + 107.0)) < 1e-6,
+        f"{before[0][1]} -> {after[0][1]}",
+    )
+    tab.convert_check.setChecked(False)
+    tab.unit_combo.setCurrentText("dBm")
+    tab._on_draw()
+
+    # ── 9. 渲染与导出 ──
+    tab._on_clear_markers()
+    image_plain = canvas.render_image(800, 500)
+    plain = bytes(image_plain.constBits())  # 必须持有 QImage 引用：临时对象上取 constBits 会崩
+    _click_ratio(0.26)
+    _click_ratio(0.57)
+    image_marked = canvas.render_image(800, 500)
+    marked = bytes(image_marked.constBits())
+    check("带标记导出图与无标记不同（标记/Δ 注记已渲染）", plain != marked)
+    tab._on_clear_markers()
+    image_again = canvas.render_image(800, 500)
+    plain2 = bytes(image_again.constBits())
+    check("清除标记后恢复与无标记一致", plain == plain2)
     image = tab.canvas.render_image(1600, 1000)
     check("渲染尺寸 1600×1000", image.width() == 1600 and image.height() == 1000)
     check("渲染非纯色（网格+迹线）", _distinct_colors(image) > 3, str(_distinct_colors(image)))

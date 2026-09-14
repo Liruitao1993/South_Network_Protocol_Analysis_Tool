@@ -125,6 +125,49 @@ def palette_for(dark: bool) -> dict
 | 四字段联动后扫宽 ≤ 0 | 「扫宽必须为正数（终止频率需大于起始频率）」（保留原值） |
 | 四字段联动后起始频率 ≤ 0 | 「该中心频率与扫宽会得到非正的起始频率，已忽略本次修改」 |
 
+### 3.4 测量层（R7/R8，纯逻辑，可脚本测试）
+
+```python
+MAX_MARKERS = 6
+PEAK_MIN_PROMINENCE_DB = 3.0
+MARKER_COLORS_DARK / MARKER_COLORS_LIGHT = (...6 色...)      # M1..M6 与序号绑定的固定色
+
+@dataclass(frozen=True)
+class Marker:
+    label: str          # M1..M6（按列表顺序编号，删除后重新编号）
+    freq_hz: float
+    level: float
+    index: int          # 吸附到的数据点索引
+
+def marker_color(dark, order) -> str                    # 第 order 个标记的颜色（超出上限循环）
+def nearest_index(freqs, freq_hz) -> int                # bisect 二分吸附（任意单调轴正确；正中间取靠前）
+def markers_for(trace, freqs) -> tuple[Marker, ...]     # 越界频率丢弃、顺序重编号
+def peak_index(levels) -> int                            # 全局最大（并列取最靠前）
+def valley_index(levels) -> int                          # 全局最小
+def _valley_left(levels) / _valley_right(levels) -> tuple[float, ...]   # 单调栈 O(n) 谷值
+def peak_indices(levels, min_prominence_db=3.0) -> tuple[int, ...]      # 局部峰（O(n)）
+def next_peak_index(levels, current_index, direction=1, ...) -> int | None  # 环形
+def extreme_points(trace) -> tuple[Marker, Marker]       # (峰值点, 谷值点)
+def delta_pair_index(markers, ref_index=0) -> tuple[int, int] | None     # (参考, 目标)
+def marker_rows(markers, ref_index=0) -> tuple[tuple[str, ...], ...]     # Δ 单元格带 `M?↔M?` 前缀
+def delta_text(markers, ref_index=0) -> str                              # `Δf(M?↔M?) …  Δlevel …`
+def format_delta_hz(delta_hz) / format_delta_level(delta_db) -> str
+```
+
+- **标记以频率为锚点**（不存索引）：参数/单位/纵轴口径变化后重绘时由 `markers_for` 重新吸附；频率落在当前扫描范围外则丢弃（调用方把丢弃数量**追加**到状态行文本，不覆盖点数/步进信息）。
+- **显著度**（`peak_indices`）：局部极大的峰相对左右两侧「通往更高地形」路径谷值的落差 ≥ 阈值才算有效峰；首尾点不视为峰。**左右谷值用单调栈一次遍历预计算（O(n)）**——早期逐点扫描实现在「一侧没有更高点」的频谱上退化为 O(n²)（实测 16000 点 3.74 s，冻结 GUI 线程）；新实现与旧实现在 9000 组随机/边界数据上逐例等价（0 处不一致），16000 点耗时 5.3 ms。
+- **Δ 语义与「哪两点」**：M1 为默认参考，`Δ 参考` 下拉可改；Δ 单元格与测量栏文案一律带 `M?↔M?` 前缀；参考为最后一个标记时目标取前一个（参考恒在 `↔` 左侧，与表格一致）。
+- **色卡与主题**：`marker_color(dark, order)` 是图上与表格取色的唯一来源；`restyle_for_theme` 后重算表格文字颜色。
+
+### 3.5 交互层（R7 / R8，Qt）
+
+- **画布**：`setMouseTracking(True)`；绘图区几何由 `plot_rect()` **单一来源**同时供 `_paint` 与鼠标换算；`mouseMoveEvent` 在绘图区内 → 记录 `_cursor = (index, freq, level)` 重绘，`leaveEvent` 清除、`set_trace` 也清除（轨迹更换后旧读数作废）；`mousePressEvent`（左键、绘图区内）→ `add_marker_requested.emit(freq)`。
+- **只读状态接口**（测试与绘制共用）：`cursor_readout() -> tuple[int, float, float] | None`、`point_at(pos)`、`set_markers(markers)`、`set_reference(ref_index)`、`plot_rect()`。
+- **画布绘制**：光标十字点划线 + 该点圆点 + 读数框（框随光标偏移并夹在绘图区内）；标记竖虚线 + 圆点 + `M?` 标签（**颜色 = `marker_color(dark, order)`**，与标记表行文字同色）；≥2 个标记时在绘图区右上角画读数框，每行用该标记自身颜色，Δ 行用正文色。
+- **参数区第 2 行工具栏**：`峰值搜索` / `下一个峰值` / `删除标记` / `清空标记` / `Δ 参考` 下拉 + 测量栏文本。标记操作作用于**标记表选中行**，无选中则最后一个标记；无标记时峰值类按钮直接新建 M1。
+- **标记表**：`QTableWidget`，5 列 `标记/频率/幅值(单位)/Δ频率(哪两点)/Δ幅值(哪两点)`，行文字用该标记颜色，**仅在存在标记时可见**；显隐时用 `_rebalance_marker_table()` 重分配右侧 `QSplitter` 高度（QSplitter 不会自动让出空间，且未 show() 时 `sizes()` 不反映真实布局）。
+- **口径单源**：表单参数改动但未重绘时，只读纵轴标签追加「（参数已改，点「绘制」生效）」——画布/标记表一律以 `trace.params`（已绘制的那份）为准，避免同屏两套单位。
+
 ## 4. Qt 层设计
 
 ```python

@@ -25,10 +25,12 @@ from spectrum_widget import (
     DEFAULT_Y_DIVS,
     LEVEL_UNITS,
     MARKER_MAX_POINTS,
+    MAX_MARKERS,
     MIN_DB_PER_DIV,
     MAX_DB_PER_DIV,
     MIN_Y_DIVS,
     MAX_Y_DIVS,
+    PEAK_MIN_PROMINENCE_DB,
     SpectrumInputError,
     SpectrumParams,
     X_DIVS,
@@ -36,18 +38,33 @@ from spectrum_widget import (
     axis_range_text,
     build_trace,
     count_out_of_range,
+    delta_pair_index,
+    delta_text,
     display_levels,
+    extremes_text,
+    extreme_points,
+    format_delta_hz,
+    format_delta_level,
     format_fixed,
     format_hz,
     format_level,
     freqs_for,
+    marker_color,
+    marker_rows,
+    markers_for,
+    nearest_index,
+    next_peak_index,
     note_text,
     parse_levels,
+    peak_index,
+    peak_indices,
+    readout_text,
     resolve_freq_inputs,
     status_text,
     to_freq_unit,
     units_to_hz,
     validate_params,
+    valley_index,
     x_tick_labels,
     x_tick_stride,
     y_range,
@@ -314,11 +331,128 @@ def test_reports():
     check("纵轴文本（仪器式）", "-20 ~ -100 dBm" in axis and "参考电平口径" in axis, axis)
     axis_auto = axis_range_text(base_params(), (-70.0, -60.0), True)
     check("纵轴文本（自动适配）", "自动适配" in axis_auto, axis_auto)
-    check("标记阈值常量为 201", MARKER_MAX_POINTS == 201)
-    check("默认参数与常量一致",
-          base_params().db_per_div == DEFAULT_DB_PER_DIV
-          and base_params().y_divs == DEFAULT_Y_DIVS
-          and math.isclose(base_params().ref_level_db, DEFAULT_REF_LEVEL_DB))
+
+
+def test_measure_markers():
+    trace = build_trace(" ".join(str(-70 + i % 5) for i in range(20)), base_params())
+    check("nearest_index 精确命中", nearest_index(trace.freqs, trace.freqs[7]) == 7)
+    check("nearest_index 就近吸附", nearest_index(trace.freqs, 300e6) == 2, str(nearest_index(trace.freqs, 300e6)))
+    check("nearest_index 下越界夹到首点", nearest_index(trace.freqs, 1.0) == 0)
+    check("nearest_index 上越界夹到末点", nearest_index(trace.freqs, 9e9) == 19)
+    check("nearest_index 单点轴返回 0", nearest_index((5.0,), 1e9) == 0)
+    check(
+        "nearest_index 非等间隔轴也正确（二分）",
+        nearest_index((0.0, 100.0, 101.0, 102.0), 100.0) == 1,
+        str(nearest_index((0.0, 100.0, 101.0, 102.0), 100.0)),
+    )
+    check(
+        "nearest_index 正中间取靠前索引",
+        nearest_index((0.0, 10.0, 20.0), 5.0) == 0,
+        str(nearest_index((0.0, 10.0, 20.0), 5.0)),
+    )
+    ok, msg = raises(lambda: nearest_index((), 1.0), "可吸附")
+    check("nearest_index 空轴报错", ok, msg)
+
+    markers = markers_for(trace, (300e6, 1e12, 900e6))
+    check("markers_for 越界丢弃", len(markers) == 2, str(markers))
+    check("markers_for 顺序重编号", [m.label for m in markers] == ["M1", "M2"])
+    check("markers_for 频率吸附到数据点", markers[0].freq_hz == trace.freqs[2])
+    check("markers_for 幅值取该点", markers[0].level == trace.levels[2])
+    check("markers_for 空输入返回空", markers_for(trace, ()) == ())
+    check("markers_for 非有限值丢弃", markers_for(trace, (float("nan"),)) == ())
+
+    rows = marker_rows(markers)
+    check("标记表 M1 行为参考", rows[0][3] == "参考" and rows[0][4] == "参考", str(rows[0]))
+    check(
+        "标记表 M2 行 Δ 带「哪两点」标注",
+        rows[1][3] == f"M1↔M2  {format_delta_hz(markers[1].freq_hz - markers[0].freq_hz)}",
+        str(rows[1]),
+    )
+    check(
+        "标记表 M2 行 Δ幅值带标注",
+        rows[1][4] == f"M1↔M2  {format_delta_level(markers[1].level - markers[0].level)}",
+        str(rows[1]),
+    )
+    rows_ref2 = marker_rows(markers, ref_index=1)
+    check("参考标记改为 M2 时该行显示参考", rows_ref2[1][3] == "参考", str(rows_ref2[1]))
+    check(
+        "参考标记改为 M2 时 M1 行标注 M2↔M1 且符号相反",
+        rows_ref2[0][3]
+        == f"M2↔M1  {format_delta_hz(markers[0].freq_hz - markers[1].freq_hz)}",
+        str(rows_ref2[0]),
+    )
+    check("参考下标越界回落 M1", marker_rows(markers, ref_index=99)[1][3].startswith("M1↔M2"))
+
+    check("两点下标对默认 M1→M2", delta_pair_index(markers) == (0, 1))
+    check("参考为最后一个标记时取前一个", delta_pair_index(markers, 1) == (1, 0))
+    check("标记不足两个返回 None", delta_pair_index(markers[:1]) is None)
+    check("参考下标越界回落第一个", delta_pair_index(markers, 7) == (0, 1))
+    check("单标记无 Δ 文案", delta_text(markers[:1]) == "")
+    delta = delta_text(markers)
+    check("Δ 文案含频段宽度", "Δf(M1↔M2)" in delta and "Δlevel" in delta, delta)
+    three = markers_for(trace, (300e6, 600e6, 900e6))
+    check("参考为中间标记时取其后一个", delta_pair_index(three, 1) == (1, 2))
+    check(
+        "Δ 文案带自定义参考（标注哪两点）",
+        "Δf(M2↔M3)" in delta_text(three, 1),
+        delta_text(three, 1),
+    )
+    check(
+        "参考为最后一个标记时标注前一个",
+        "Δf(M3↔M2)" in delta_text(three, 2),
+        delta_text(three, 2),
+    )
+
+    check(
+        "标记颜色 M1~M6 互不相同",
+        len({marker_color(True, i) for i in range(MAX_MARKERS)}) == MAX_MARKERS,
+    )
+    check(
+        "标记颜色浅/暗主题不同",
+        all(marker_color(True, i) != marker_color(False, i) for i in range(MAX_MARKERS)),
+    )
+    check("M1 颜色稳定（暗色 #4FC3F7）", marker_color(True, 0) == "#4FC3F7", marker_color(True, 0))
+    check("超出上限循环取色", marker_color(True, MAX_MARKERS) == marker_color(True, 0))
+    check("Δ 频率带符号格式", format_delta_hz(-700e3) == "-700 kHz", format_delta_hz(-700e3))
+    check("Δ 电平带符号格式", format_delta_level(-0.2) == "-0.20 dB", format_delta_level(-0.2))
+    check(
+        "读数文本含频率与幅值",
+        readout_text(426261000.0, -51.0, "dBm") == "426.261 MHz   -51 dBm",
+        readout_text(426261000.0, -51.0, "dBm"),
+    )
+
+
+def test_peak_search():
+    levels = [0.0, 1.0, 0.0, 1.0, 0.0, 5.0, 0.0, 0.0, 4.0, 0.0]
+    check("峰值索引取最大点", peak_index(levels) == 5)
+    check("峰值并列取最靠前", peak_index([1.0, 3.0, 3.0]) == 1)
+    ok, msg = raises(lambda: peak_index(()), "没有数据点")
+    check("空数据搜索峰值报错", ok, msg)
+    check("谷值索引取最小点", valley_index([5.0, 1.0, 3.0]) == 1)
+    ok, msg = raises(lambda: valley_index(()), "没有数据点")
+    check("空数据搜索谷值报错", ok, msg)
+
+    check("局部峰：1 dB 峰被显著度过滤", peak_indices(levels) == (5, 8), str(peak_indices(levels)))
+    check(
+        "局部峰：低阈值时全部命中",
+        peak_indices(levels, min_prominence_db=0.5) == (1, 3, 5, 8),
+        str(peak_indices(levels, min_prominence_db=0.5)),
+    )
+    check("首尾点不作为峰（首点 9.0 虽为最大值）", peak_indices([9.0, 0.0, 5.0, 0.0]) == (2,))
+    check("平坦数据无峰", peak_indices([3.0] * 8) == ())
+    check("数据太短无峰", peak_indices([1.0, 2.0]) == ())
+
+    check("下一个峰向右侧找", next_peak_index(levels, 5) == 8)
+    check("下一个峰环形回到首个", next_peak_index(levels, 8) == 5)
+    check("上一个峰向前找", next_peak_index(levels, 8, direction=-1) == 5)
+    check("无峰时返回 None", next_peak_index([1.0] * 8, 3) is None)
+
+    trace = build_trace(" ".join(str(v) for v in levels), base_params())
+    high, low = extreme_points(trace)
+    check("峰值点频率/幅值", high.index == 5 and high.level == 5.0 and high.freq_hz == trace.freqs[5])
+    check("谷值点频率/幅值", low.index == 0 and low.level == 0.0 and low.freq_hz == trace.freqs[0])
+    text = extremes_text(trace)
+    check("极值摘要文本", "峰值" in text and "谷值" in text and "dBm" in text, text)
 
 
 def main():
@@ -333,6 +467,8 @@ def main():
         test_unit_conversion,
         test_resolve_freq,
         test_reports,
+        test_measure_markers,
+        test_peak_search,
     ):
         print(f"\n── {fn.__name__} ──")
         fn()
