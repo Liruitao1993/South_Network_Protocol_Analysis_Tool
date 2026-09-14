@@ -1,20 +1,20 @@
 # 南网协议解析工具
 
-[![Version](https://img.shields.io/badge/version-1.23.9-blue)]()
+[![Version](https://img.shields.io/badge/version-1.23.10-blue)]()
 [![Python](https://img.shields.io/badge/Python-3.8%2B-brightgreen)]()
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)]()
 [![License](https://img.shields.io/badge/License-MIT-green)]()
 
 一个面向电力通信现场调试的多协议解析工具，基于 Python / PySide6 开发，支持 12 种电力通信协议，覆盖单帧解析、批量解析、协议校验、帧生成、串口通信、虚拟表、通信时序图、测试方案、Lua 脚本、实时监控与 TCP 抓包等工作流。
 
-当前版本为 `1.23.9`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
+当前版本为 `1.23.10`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
 
 ## 功能总览
 
 | 模块 | 说明 |
 | --- | --- |
 | 单帧解析 | 输入十六进制报文，按协议分层解析，点击解析行联动高亮输入框对应字节并自动滚动到位置 |
-| 批量解析 | 从文件/剪贴板/pcap 导入多帧报文，自动提取完整帧，支持导出选中/全部、类型过滤与 JSON / CSV / Excel 导出 |
+| 批量解析 | 从文件/剪贴板/pcap 导入多帧报文，自动提取完整帧，支持导出选中/全部、类型过滤与 JSON / CSV / Excel 导出；摘要列对**测试帧（业务标识 0xF0）**体现测试模式（如 `测试模式:PLC物理层透传测试模式(3)`）、测试ID、通信频段 |
 | 原始报文定位 | 批量摘要表点击行可回跳输入日志对应行；右键「转到原始报文位置」弹出只读查看器并高亮该帧 |
 | 协议校验 | 覆盖起始符、长度域、校验和与 CRC（含协议9逐 PB PBCS CRC-24），逐项展示通过 / 失败 / 警告 |
 | 表格复制 | 解析结果、批量结果、监控器与 TCP 监控表格支持右键复制及 Ctrl+C |
@@ -450,6 +450,11 @@ python test/test_web_frame_gen_utils.py    # Reflex Web 组帧纯逻辑
 ## 更新记录
 
 > 完整历史见 `main_gui.py:CHANGELOG`。以下仅摘录最近版本要点。
+
+### 1.23.10 — 2026-09-14
+
+- **批量解析摘要体现测试帧的测试模式**：协议9 业务标识 `0xF0` 测试帧与协议10/11 通信测试/检测扩展命令的摘要列现在带上 `测试模式:…`（含 `安全测试模式`/`新一代测试模式` 子模式）；没有测试模式字段的测试帧回退显示 `测试ID`/`扩展ID`/`通信频段`，上行测试帧显示「测试帧上行」
+- `test/test_csg_summary.py` 去掉文件内复刻的摘要逻辑（已与产品实现漂移），改为复用 `main_gui.MainWindow` 真实实现并新增测试帧用例
 
 ### 1.23.9 — 2026-09-14
 

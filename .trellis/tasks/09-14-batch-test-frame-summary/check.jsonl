@@ -1,0 +1,1 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "检查项：是否复用既有摘要实现（禁止第二份复刻）、测试是否走真实实现而非复刻逻辑"}

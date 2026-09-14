@@ -34,7 +34,7 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 
 ## 1. 项目概览
 
-多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.23.9`）。
+多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.23.10`）。
 
 **支持的协议（共 12 种，对应 GUI 协议下拉框 `current_protocol` 索引）：**
 
@@ -771,6 +771,13 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 ## 10. 变更日志
 
 > 详细版本变更记录请查看 `main_gui.py:CHANGELOG`（按版本倒序），或运行 `git log --oneline` 查看提交历史。本文档仅保留最近两个版本的摘要。
+
+### 1.23.10 — 2026-09-14
+
+- **批量解析摘要体现测试帧的测试模式**：`main_gui._extract_test_mode_content(table_data)`（staticmethod，纯逻辑）从解析行提取 `测试模式/配置操作`（名称/数值双槽探测：协议9 表61 名称在 comment、协议10 检测扩展命令名称在 parsed）+ `安全测试模式`/`新一代测试模式` 子模式；协议9 接入 `_extract_csg_core_content` **首个分支**（业务标识 0xF0；测试帧帧类型是「命令帧」，不提前返回会被通用命令分支淹没），协议10/11 在 `_get_gw_new_gen_summary` 既有片段后追加
+- **无测试模式字段的测试帧回退**：`测试ID`（0/1/2 类，如「频段切换命令」）/`扩展ID`（2.0测试，如「Bitloading表下发」）/`通信频段:0x02`/上行「测试帧上行（确认/否认，无数据单元）」；非测试帧不受影响（helper 无痕迹返回空串）
+- **名称取槽位不做描述黑名单**：两个解析器把模式名放在相反槽位（协议9 表61 名称在 comment、协议10 检测扩展命令名称在 parsed）→ 统一按「**parsed 非数值则名称在 parsed，否则在 comment**」探测，避免漏掉某个模式的描述句（曾因此让模式15 输出描述文本而非子模式名）；名称自带括号时省略模式号；`上行负载` 分支要求表内 `业务标识` 自证 0xF0（该行名被 4 个非测试上行业务共用），协议10/11 仅在三个哨兵行存在时才调用 helper
+- **测试单源**：`test/test_csg_summary.py` 删除文件内复刻的摘要逻辑（已与产品实现漂移：复刻版输出「网络层」而产品输出「网络管理消息」），改为 Host 复用 `MainWindow` 未绑定方法 + 新增真实抓包 0xF0 帧/1.0 测试帧/上行/非测试帧用例；`test/test_gw_monitor_summary.py` 增检测扩展命令模式 3/13 与普通通信测试用例
 
 ### 1.23.9 — 2026-09-14
 

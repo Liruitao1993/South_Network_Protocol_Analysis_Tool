@@ -21,8 +21,14 @@ _summary = main_gui.MainWindow._get_gw_new_gen_summary
 
 
 class Host:
-    """仅提供 _get_gw_new_gen_summary 的最小宿主"""
+    """仅提供摘要方法的最小宿主"""
+
     _get_gw_new_gen_summary = _summary
+    # 摘要内部会调用该方法取测试模式（staticmethod 需显式包裹，否则会多传 self）
+    _extract_test_mode_content = staticmethod(
+        main_gui.MainWindow._extract_test_mode_content
+    )
+    _TEST_MODE_SENTINELS = main_gui.MainWindow._TEST_MODE_SENTINELS
 
 
 host = Host()
@@ -119,6 +125,41 @@ td6 = parser.parse_to_table(frame1, parse_level="fc_only")
 s6 = host._get_gw_new_gen_summary(td6)
 print("6 FC-only摘要:", s6)
 check("FC-only含帧类型信息", len(s6) > 1 and s6 != "-", s6)
+
+# ---------- 7. 测试类报文：检测扩展命令应体现测试模式 ----------
+from gw_new_gen_cmd_payloads import _parse_comm_test
+
+# 字节1高4位=测试模式；模式3=HPLC物理层透传测试模式（配置值/数据域随模式而定）
+td7 = _parse_comm_test(bytes([0x41, 0x30, 0x00, 0x00, 0x00, 0x00]), 0, 0)
+s7 = host._get_gw_new_gen_summary(td7)
+print("7 检测扩展命令(模式3)摘要:", s7)
+check("含测试模式(PLC物理层透传)", "测试模式:HPLC物理层透传测试模式(3)" in s7, s7)
+
+# 模式13=安全测试模式，子模式 SM3算法测试
+td8 = _parse_comm_test(bytes([0x41, 0xD0, 0x00, 0x00, 0x02, 0x00]), 0, 0)
+s8 = host._get_gw_new_gen_summary(td8)
+print("8 安全测试模式摘要:", s8)
+check("含测试模式(安全测试模式)", "测试模式:安全测试模式(13)" in s8, s8)
+check("含安全测试子模式", "安全测试模式:SM3算法测试" in s8, s8)
+
+# 模式15=新一代扩展测试模式，子模式6=CCO信标机制切换（帧取自 test/test_gw_ext_cmd.py）
+td10 = _parse_comm_test(bytes.fromhex("01F01600000001"), 0, 0)
+s10 = host._get_gw_new_gen_summary(td10)
+print("10 新一代测试模式摘要:", s10)
+check("含测试模式(新一代扩展测试模式)", "测试模式:新一代扩展测试模式(15)" in s10, s10)
+check("含新一代子模式名(取 parsed 槽)", "新一代测试模式:CCO信标机制切换" in s10, s10)
+
+# 模式1 的名称自带括号 → 不应重复追加模式号
+td11 = _parse_comm_test(bytes.fromhex("0110000000"), 0, 0)
+s11 = host._get_gw_new_gen_summary(td11)
+print("11 模式1摘要:", s11)
+check("名称自带括号时不重复括号", "(暂未使用)(1)" not in s11 and "测试模式:" in s11, s11)
+
+# 普通通信测试（模式=0）不应出现测试模式片段
+td9 = _parse_comm_test(bytes([0x41, 0x00, 0x00, 0x08]), 0, 0)
+s9 = host._get_gw_new_gen_summary(td9)
+print("9 普通通信测试摘要:", s9)
+check("普通通信测试无测试模式片段", "测试模式" not in s9, s9)
 
 print(f"\n=== 结果: {passed} 通过, {failed} 失败 ===")
 if failed > 0:

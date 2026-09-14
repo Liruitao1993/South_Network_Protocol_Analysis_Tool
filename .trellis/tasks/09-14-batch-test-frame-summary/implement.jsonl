@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "本项目 PySide6 组件与摘要/自绘类约定：纯逻辑可脚本测试、复用既有实现不复制第二份、状态与数据同源"}
+{"file": ".trellis/tasks/09-14-batch-test-frame-summary/design.md", "reason": "字段消费表与接入点（协议9 走 core-content 首分支、协议10 末尾追加）的依据"}

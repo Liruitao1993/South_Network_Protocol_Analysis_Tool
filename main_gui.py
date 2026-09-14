@@ -101,10 +101,21 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.9"
+APP_VERSION = "1.23.10"
 BUILD_DATE = "2026-09-12"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    (
+        "1.23.10",
+        "2026-09-14",
+        [
+            "批量解析摘要体现测试帧的测试模式：协议9（新一代载波）业务标识 `0xF0` 测试帧、协议10/11（国网新一代/HDC 1.0）通信测试/检测扩展命令，摘要列现在会带上**测试模式**内容——`测试模式:PLC物理层透传测试模式(3)`（协议9 表61）、`测试模式:HPLC物理层透传测试模式(3)` / `测试模式:安全测试模式(13) | 安全测试模式:SM3算法测试`（协议10 检测扩展命令，含安全/新一代子模式）",
+            "测试帧没有「测试模式/配置操作」字段时回退到可读信息：`测试ID:频段切换命令`（协议9 测试ID 0/1/2 类）、`扩展ID:Bitloading表下发`（2.0测试）、`通信频段:0x02`（测试数据区）、上行测试帧 → `测试帧上行（确认/否认，无数据单元）`；非测试帧摘要**逐字符不变**（helper 无痕迹时返回空串，不追加）",
+            "新增 `MainWindow._extract_test_mode_content(table_data)`（staticmethod，纯逻辑）：按「名称/数值」双槽探测字段（协议9 表61 名称在 comment、协议10 名称在 parsed），过滤协议9 恒定输出的占位子模式行（「安全测试模式（仅测试模式13生效）」）；协议9 摘要走 `_extract_csg_core_content` 的**首个分支**（测试帧帧类型为「命令帧」，不提前返回会被通用命令分支淹没），协议10/11 在既有片段之后追加",
+            "测试：`test/test_csg_summary.py` 去掉文件内复刻的摘要逻辑（原来那份已与产品实现漂移：新实现输出「网络管理消息」「业务标识:确认(0x00)」，复刻版是「网络层」「业务标识:确认」），改为复用 `MainWindow` 未绑定方法（Host 宿主，免 GUI 驱动），并新增**整帧→解析→摘要**用例覆盖 gate 与分支接线：真实抓包 0xF0 帧 / 1.0 测试帧 / 2.0 测试帧（扩展ID）/ 上行测试帧 / 非测试上行业务帧（sid 0x01/0x03/0x04/0x06）回归网；`test/test_gw_monitor_summary.py` 新增检测扩展命令模式 3、13、15 与模式 1（括号去重）、模式 0（无片段）五例",
+            "复核（trellis-check 子代理）修复：① 模式15 的 `新一代测试模式` 取到 comment 描述文本（`转发数据规约类型字段扩展为新一代测试模式`）而非子模式名 → 去掉描述文本黑名单，改为「**parsed 非数值则名称在 parsed，否则在 comment**」的槽位探测（两个协议槽位相反），现输出 `新一代测试模式:CCO信标机制切换`；② 名称自带括号时重复括号（`保留(14)(14)`）→ 已带括号则省略模式号；③ `上行负载` 行名被 4 个非测试上行业务共用，helper 单独调用会误报「测试帧上行」→ 该分支要求表内 `业务标识` 自证为 0xF0，且协议10/11 只在三个哨兵行存在时才调用 helper；④ 新增用例改为整帧→摘要（原版本直调 helper，gate 写错也测不出）",
+        ],
+    ),
     (
         "1.23.9",
         "2026-09-14",
@@ -7802,6 +7813,120 @@ class MainWindow(QMainWindow):
                 summary_parts.append(f"{parsed_val}")
             return " | ".join(summary_parts) if summary_parts else "-"
 
+    # 测试模式/子模式的解析行名（协议9 表61 与协议10 检测扩展命令共用）
+    _TEST_MODE_SENTINELS = ("测试模式/配置操作", "安全测试模式", "新一代测试模式")
+
+    @staticmethod
+    def _extract_test_mode_content(table_data: list) -> str:
+        """测试帧/检测扩展命令 → 摘要片段（非测试类报文返回空串）。
+
+        现场关注的「测试模式」来自解析器的两类字段：
+          - 协议9 1.0测试（表61）/ 协议10 检测扩展命令 → `测试模式/配置操作`
+          - 协议10 子模式 → `安全测试模式`(模式13) / `新一代测试模式`(模式15)
+        测试帧若没有上述字段（如协议9 测试ID=0x00/0x01/0x02 类），回退到
+        `测试ID`/`扩展ID`/测试数据区频段，避免这类帧的摘要一片空白。
+
+        输出示例：
+          "测试模式:PLC物理层透传测试模式(3)"
+          "测试模式:安全测试模式(13) | 安全测试模式:SHA256签名"
+          "测试ID:频段切换命令 | 通信频段:0x02"
+          "测试帧上行（确认/否认，无数据单元）"
+        """
+        if not table_data:
+            return ""
+
+        import re
+
+        fs = {}
+        for item in table_data:
+            key = str(item[0]).strip()
+            if key:
+                fs.setdefault(key, item)
+
+        def _numeric(text: str) -> bool:
+            text = text.strip()
+            return bool(re.fullmatch(r"0[xX][0-9A-Fa-f]+|-?\d+(?:\.\d+)?", text))
+
+        # 名称所在槽位两个协议相反，按「非数值者即名称」探测（不做描述文本黑名单）：
+        #   协议9 表61：raw=0x03  parsed=3(数值)  comment=PLC物理层透传测试模式（高4位）
+        #   协议10 检测扩展命令：raw=3  parsed=HPLC物理层透传测试模式  comment=检测扩展命令:…
+        #   → parsed 非数值时名称在 parsed；否则名称在 comment；再退回 raw。
+        def _name_of(item) -> str:
+            for cand in (item[2], item[3], item[1]):
+                text = str(cand).strip() if cand not in (None, "") else ""
+                text = text.replace("（高4位）", "").strip()
+                text = re.sub(r"^[^:：]*检测扩展命令[:：]?\s*", "", text)
+                if not text or _numeric(text):
+                    continue
+                if "仅测试模式" in text:
+                    continue  # 协议9 表61 恒定输出的占位子模式行
+                return text
+            return ""
+
+        def _value_of(item) -> str:
+            for cand in (item[2], item[1]):
+                text = str(cand).strip() if cand not in (None, "") else ""
+                if _numeric(text):
+                    return text
+            return ""
+
+        def _is_test_frame_rows() -> bool:
+            """本 helper 只服务测试类报文：协议9 以业务标识 0xF0 自证。"""
+            svc = fs.get("业务标识")
+            if svc is None:
+                return False
+            return (
+                str(svc[2]).strip() == "240"
+                or "F0" in str(svc[1]).upper()
+                or "测试帧" in str(svc[3])
+            )
+
+        parts = []
+
+        mode_item = fs.get("测试模式/配置操作")
+        if mode_item is not None:
+            name = _name_of(mode_item)
+            value = _value_of(mode_item)
+            # 名称自带括号（`保留(14)`、`…测试模式(暂未使用)`）时不再重复追加模式号
+            has_paren_suffix = bool(re.search(r"[（(][^（()）]*[)）]\s*$", name))
+            if value and not has_paren_suffix:
+                parts.append(f"测试模式:{name}({value})")
+            elif name:
+                parts.append(f"测试模式:{name}")
+
+        for sub_name in ("安全测试模式", "新一代测试模式"):
+            sub_item = fs.get(sub_name)
+            if sub_item is None:
+                continue
+            sub_text = _name_of(sub_item)
+            if sub_text:
+                parts.append(f"{sub_name}:{sub_text}")
+
+        if mode_item is None:
+            # 没有「测试模式/配置操作」的测试帧（协议9 测试ID 0/1/2 或 2.0测试扩展ID）：
+            # 回退到测试ID/扩展ID，避免这类帧摘要一片空白
+            test_id = fs.get("测试ID")
+            ext_id = fs.get("扩展ID")
+            if test_id is not None:
+                text = _name_of(test_id)
+                if text:
+                    parts.append(f"测试ID:{text}")
+            if ext_id is not None:
+                text = _name_of(ext_id)
+                if text:
+                    parts.append(f"扩展ID:{text}")
+
+        data_item = fs.get("测试数据区")
+        if data_item is not None:
+            comment = str(data_item[3]) if data_item[3] not in (None, "") else ""
+            if "通信频段" in comment:
+                band = comment.split(":", 1)[1].strip() if ":" in comment else comment
+                parts.append(f"通信频段:{band}")
+
+        if not parts and "上行负载" in fs and _is_test_frame_rows():
+            return "测试帧上行（确认/否认，无数据单元）"
+        return " | ".join(parts)
+
     def _get_csg_new_gen_summary(self, table_data: list) -> str:
         """新一代载波协议(索引9)批量解析摘要生成
 
@@ -8001,6 +8126,19 @@ class MainWindow(QMainWindow):
         svc_desc = fields.get("业务标识", ("", "", "", ""))[3]
         # 从 "业务标识 N - 名称" 中提取业务名
         svc_name = svc_desc.split(" - ", 1)[1] if " - " in svc_desc else svc_desc
+
+        # ── 测试帧（业务标识 0xF0）：优先体现测试模式/测试ID ──
+        # 必须放在确认/否认、命令帧分支之前：测试帧的帧类型域是「命令帧」，
+        # 否则会落到通用命令帧列表，测试模式信息被淹没。
+        svc_item = fields.get("业务标识")
+        if svc_item is not None and (
+            str(svc_item[2]).strip() == "240"
+            or "F0" in str(svc_item[1]).upper()
+            or "测试帧" in str(svc_item[3])
+        ):
+            mode_text = self._extract_test_mode_content(table_data)
+            if mode_text:
+                return mode_text
 
         # ── 否认帧：显示否认原因 ──
         if "否认" in svc_name:
@@ -8223,6 +8361,15 @@ class MainWindow(QMainWindow):
         dlen = val("转发数据长度")
         if dlen:
             parts.append(f"数据:{dlen}")
+
+        # 9. 测试类报文（通信测试/检测扩展命令）：体现测试模式/配置操作
+        #    仅在三个哨兵行之一存在时才调用，避免 helper 对同名字段误提取（协议10 无 0xF0 概念）
+        if any(
+            str(item[0]).strip() in self._TEST_MODE_SENTINELS for item in table_data
+        ):
+            test_mode_text = self._extract_test_mode_content(table_data)
+            if test_mode_text:
+                parts.append(test_mode_text)
 
         return " | ".join(parts) if parts else "-"
 
