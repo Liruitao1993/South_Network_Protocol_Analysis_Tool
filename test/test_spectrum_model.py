@@ -33,6 +33,8 @@ from spectrum_widget import (
     PEAK_MIN_PROMINENCE_DB,
     SpectrumInputError,
     SpectrumParams,
+    SpectrumTrace,
+    UNIT_DBUV,
     X_DIVS,
     auto_tick_decimals,
     axis_range_text,
@@ -45,16 +47,22 @@ from spectrum_widget import (
     extreme_points,
     format_delta_hz,
     format_delta_level,
+    format_band,
     format_fixed,
     format_hz,
     format_level,
     freqs_for,
+    ibw_edges,
+    integrate_band,
+    integration_band_for,
+    integration_text,
     marker_color,
     marker_rows,
     markers_for,
     nearest_index,
     next_peak_index,
     note_text,
+    palette_for,
     parse_levels,
     peak_index,
     peak_indices,
@@ -455,6 +463,152 @@ def test_peak_search():
     check("极值摘要文本", "峰值" in text and "谷值" in text and "dBm" in text, text)
 
 
+def test_integration_band():
+    check("边沿 = 中心 ± 带宽/2", ibw_edges(600e6, 100e6) == (550e6, 650e6))
+    ok, msg = raises(lambda: ibw_edges(600e6, 0.0), "积分带宽必须为正数")
+    check("带宽为 0 报错", ok, msg)
+    ok, msg = raises(lambda: ibw_edges(600e6, -1.0), "积分带宽必须为正数")
+    check("带宽为负报错", ok, msg)
+    ok, msg = raises(lambda: ibw_edges(float("nan"), 1e6), "中心频率")
+    check("中心频率非法报错", ok, msg)
+    check("频段文案同单位合并", format_band(550e6, 650e6) == "550–650 MHz", format_band(550e6, 650e6))
+    check(
+        "频段文案跨单位不合并",
+        format_band(550e6, 1.5e9) == "550 MHz–1.5 GHz",
+        format_band(550e6, 1.5e9),
+    )
+
+    trace = build_trace(" ".join(["-70"] * 101), base_params(rbw_hz=7.2e6))
+    expected = -70.0 + 10.0 * math.log10(101)
+    result = integrate_band(trace, 600e6, 720e6, trace.params.rbw_hz)
+    check("带内点数 = 全部点", result.n_points == 101, str(result.n_points))
+    check(
+        "积分功率 = 常量电平 + 10log10(N)（步进==RBW 时归一化系数为 1）",
+        abs(result.total_db - expected) < 1e-9,
+        f"{result.total_db} vs {expected}",
+    )
+    check("按 RBW 归一化标记", result.normalized is True)
+    check("未超出扫描范围", result.clipped is False)
+    check("结果单位为 trace 单位", result.unit == "dBm")
+
+    half_rbw = integrate_band(trace, 600e6, 720e6, 3.6e6)
+    check(
+        "RBW 缩小一半 → 积分功率 +3.01 dB",
+        abs(half_rbw.total_db - (expected + 10.0 * math.log10(2.0))) < 1e-9,
+        str(half_rbw.total_db),
+    )
+    raw = integrate_band(trace, 600e6, 720e6, None)
+    check("不给 RBW → 未归一化且等于未归一化求和", raw.normalized is False and abs(raw.total_db - expected) < 1e-9)
+    check("未归一化文案注明 RBW 未填", "未归一化，RBW 未填" in integration_text(raw), integration_text(raw))
+
+    narrow = integrate_band(trace, 600e6, 72e6, trace.params.rbw_hz)
+    check(
+        "带宽 72 MHz（±36 MHz，含 10 个点间隔）点数正确",
+        narrow.n_points == 11,
+        str(narrow.n_points),
+    )
+
+    clipped = integrate_band(trace, 240e6, 400e6, trace.params.rbw_hz)
+    check("带宽超出扫描范围标记 clipped", clipped.clipped is True)
+    check("越界时按交集积分且有点", clipped.n_points > 0 and clipped.n_points < 101)
+    check("越界文案", "超出扫描范围" in integration_text(clipped), integration_text(clipped))
+
+    empty = integrate_band(trace, 5e9, 100e6, trace.params.rbw_hz)
+    check("无交集时点数为 0 且无结果", empty.n_points == 0 and empty.total_db is None)
+    check("无交集文案", "与扫描范围无交集" in integration_text(empty), integration_text(empty))
+
+    band, same = integration_band_for(trace, 600e6, 720e6, trace.params.rbw_hz)
+    check("IntegrationBand 携带边沿与读数文本", band.low_hz == 240e6 and "积分带宽" in band.text)
+    check(
+        "画布短行只含边沿与积分功率（不压纵轴刻度）",
+        band.short_text.startswith("IBW Σ") and "点，" not in band.short_text,
+        band.short_text,
+    )
+
+    # 极端电平不溢出/不下溢（移位求和 log-sum-exp）
+    huge = build_trace("1e308 1e308", base_params(rbw_hz=7.2e6))
+    huge_result = integrate_band(huge, 600e6, 720e6, huge.params.rbw_hz)
+    check(
+        "1e308 级电平不抛异常且结果有限",
+        huge_result.total_db is not None and math.isfinite(huge_result.total_db),
+        str(huge_result.total_db),
+    )
+    tiny = build_trace("-4000 -4000", base_params(rbw_hz=7.2e6))
+    tiny_result = integrate_band(tiny, 600e6, 720e6, tiny.params.rbw_hz)
+    check(
+        "极低电平不触发 log10(0) 域错",
+        tiny_result.total_db is not None and math.isfinite(tiny_result.total_db),
+        str(tiny_result.total_db),
+    )
+    normalize_gain = 10.0 * math.log10(720e6 / 7.2e6)  # 步进/RBW = 100 → +20 dB
+    check(
+        "极低电平结果 = 单点电平 + 10log10(2) + 归一化增益",
+        abs(tiny_result.total_db - (-4000.0 + 10.0 * math.log10(2.0) + normalize_gain)) < 1e-9,
+        str(tiny_result.total_db),
+    )
+
+    # 带宽小于一个频率步进 → 单点外推并提示
+    narrow_band = integrate_band(trace, 276e6, 1e6, trace.params.rbw_hz)
+    check("带宽 < 1 步进时仅 1 个点", narrow_band.n_points == 1, str(narrow_band.n_points))
+    check("单点外推标记 narrow", narrow_band.narrow is True)
+    check("单点外推文案", "按单点外推" in integration_text(narrow_band), integration_text(narrow_band))
+
+    # RBW 无效（0）与「无步进可言」的原因文案
+    zero_rbw = integrate_band(trace, 600e6, 720e6, 0.0)
+    check("RBW=0 视为未归一化且不误报「RBW 未填」", zero_rbw.normalized is False and zero_rbw.basis == "未归一化，RBW 未填")
+    two_point = build_trace("1 2", base_params(rbw_hz=7.2e6))
+    two_result = integrate_band(two_point, 600e6, 720e6, two_point.params.rbw_hz)
+    check(
+        "N=2 时步进 = 全扫宽，仍按 RBW 归一化",
+        two_result.normalized is True
+        and abs(
+            two_result.total_db
+            - (2.0 + 10.0 * math.log10(1 + 10 ** -0.1) + normalize_gain)
+        )
+        < 1e-9,
+        str(two_result.total_db),
+    )
+    single = SpectrumTrace(
+        params=base_params(rbw_hz=7.2e6), freqs=(600e6,), levels=(-70.0,)
+    )
+    single_result = integrate_band(single, 600e6, 720e6, 7.2e6)
+    check(
+        "单点 trace（无步进可言）→ 未归一化且原因标注点数不足",
+        single_result.normalized is False
+        and single_result.basis == "未归一化，点数不足",
+        single_result.basis,
+    )
+
+    # 积分带宽配色与 6 个标记颜色都不相同（避免图上混淆）
+    for dark in (True, False):
+        palette = palette_for(dark)
+        marker_colors = {marker_color(dark, i).lower() for i in range(MAX_MARKERS)}
+        check(
+            f"积分带宽配色独立（dark={dark}）",
+            palette["ibw"].lower() not in marker_colors
+            and palette["ibw"].lower() != palette["trace"].lower(),
+            palette["ibw"],
+        )
+        check(
+            f"积分带宽填充色为半透明（dark={dark}）",
+            len(palette["ibw_fill"]) == 9,
+            palette["ibw_fill"],
+        )
+
+    # 单位偏移在求和前后抵消：dBμV 结果的积分功率 = dBm 结果 + 107
+    dbuv = build_trace(
+        " ".join(["-70"] * 101),
+        base_params(rbw_hz=7.2e6, unit=UNIT_DBUV, convert_50ohm=True),
+    )
+    converted = integrate_band(dbuv, 600e6, 720e6, dbuv.params.rbw_hz)
+    check(
+        "50Ω 单位换算对积分功率为常量偏移（+107）",
+        abs(converted.total_db - (expected + 107.0)) < 1e-9,
+        f"{converted.total_db} vs {expected + 107.0}",
+    )
+    check("换算后单位标注为 dBμV", converted.unit == "dBμV")
+
+
 def main():
     for fn in (
         test_parse_levels,
@@ -469,6 +623,7 @@ def main():
         test_reports,
         test_measure_markers,
         test_peak_search,
+        test_integration_band,
     ):
         print(f"\n── {fn.__name__} ──")
         fn()

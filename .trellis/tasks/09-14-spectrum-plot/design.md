@@ -168,6 +168,36 @@ def format_delta_hz(delta_hz) / format_delta_level(delta_db) -> str
 - **标记表**：`QTableWidget`，5 列 `标记/频率/幅值(单位)/Δ频率(哪两点)/Δ幅值(哪两点)`，行文字用该标记颜色，**仅在存在标记时可见**；显隐时用 `_rebalance_marker_table()` 重分配右侧 `QSplitter` 高度（QSplitter 不会自动让出空间，且未 show() 时 `sizes()` 不反映真实布局）。
 - **口径单源**：表单参数改动但未重绘时，只读纵轴标签追加「（参数已改，点「绘制」生效）」——画布/标记表一律以 `trace.params`（已绘制的那份）为准，避免同屏两套单位。
 
+### 3.6 积分带宽（R10，纯逻辑 + 渲染约定）
+
+```python
+@dataclass(frozen=True)
+class IntegrationBand:      # 画布只负责画：边沿 + 两条文本
+    low_hz: float
+    high_hz: float
+    text: str               # 侧栏只读行（完整口径：点数、归一化原因、越界/窄带提示）
+    short_text: str         # 画布右上读数框短行（`IBW Σ -49.96 dBm`）
+
+@dataclass(frozen=True)
+class IntegrationResult:
+    low_hz: float; high_hz: float; n_points: int
+    total_db: float | None; unit: str
+    normalized: bool; basis: str      # 未归一化时必须写明原因
+    clipped: bool                     # 超出扫宽，按交集积分
+    narrow: bool                      # 带宽 < 一个步进（单点外推）
+
+def ibw_edges(center_hz, bandwidth_hz) -> tuple[float, float]      # 中心 ± 带宽/2（带宽必须为正）
+def integrate_band(trace, center_hz, bandwidth_hz, rbw_hz=None) -> IntegrationResult
+def integration_text(result) -> str          # 侧栏长文本
+def integration_short_text(result) -> str    # 画布短文本
+def integration_band_for(trace, center_hz, bandwidth_hz, rbw_hz=None) -> (IntegrationBand, IntegrationResult)
+def format_band(low_hz, high_hz) -> str      # 同单位合并（`550–650 MHz`）
+```
+
+- **求和与归一化**：`peak + 10log10(Σ10^((v-peak)/10))`（移位求和，防极端电平溢出/下溢），再 `+10log10(步进/RBW)`；单位偏移在求和前后抵消。
+- **渲染**：填充与两条点划线在 **迹线之下**（`_paint_ibw_region` 紧跟网格/边框之后调用），带内 `IBW 起–止` 标签与右上读数框短文在 `_paint_measure` 内（最上层）且夹在绘图区内；配色用独立 palette 键（`ibw` / `ibw_fill`）。
+- **状态**：`SpectrumCanvas.set_integration_band(band|None)` 是唯一入口，`set_trace()` 一并清空（避免旧轨迹的区域带画在新轨迹上）；`SpectrumWidget._refresh_integration()` 由 `_on_draw` / `_on_clear` / 开关 / 编辑完成 / 频率与带宽单位切换触发，归一化口径取 `trace.params.rbw_hz`（与画布注记同源），表单 RBW 偏离时追加提示。
+
 ## 4. Qt 层设计
 
 ```python

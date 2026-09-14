@@ -81,6 +81,9 @@ def marker_color(dark: bool, order: int) -> str:
 
 _SEPARATORS = (",", ";", "\t", "\r", "\n", "，", "、")  # 归一为空格后 split
 _TITLE = "频谱图"
+_MAX_WIDGET_WIDTH = 16777215  # Qt 的 QWIDGETSIZE_MAX（PySide6 不导出该常量）
+# Qt 层导入失败时留痕，便于定位「SpectrumWidget 为 None」这类静默降级
+_QT_IMPORT_ERROR: Optional[Exception] = None
 
 
 class SpectrumInputError(ValueError):
@@ -636,6 +639,143 @@ def resolve_freq_inputs(
     return start, stop, (start + stop) / 2.0, stop - start
 
 
+def format_band(low_hz: float, high_hz: float) -> str:
+    """频段文案（同一单位择优，避免 550 MHz–650 MHz 重复单位）。"""
+    low_text, high_text = format_hz(low_hz), format_hz(high_hz)
+    low_value, low_unit = low_text.rsplit(" ", 1)
+    high_value, high_unit = high_text.rsplit(" ", 1)
+    if low_unit == high_unit:
+        return f"{low_value}–{high_text}"
+    return f"{low_text}–{high_text}"
+
+
+@dataclass(frozen=True)
+class IntegrationBand:
+    """积分带宽显示信息（纯逻辑产物，画布只负责画）。"""
+
+    low_hz: float
+    high_hz: float
+    text: str  # 参数区只读行的完整读数（含边沿、积分功率、点数与归一化口径）
+    short_text: str  # 画布注记短行（如 `IBW Σ -49.96 dBm`），避免压住纵轴刻度
+
+
+@dataclass(frozen=True)
+class IntegrationResult:
+    """带内积分功率结果。"""
+
+    low_hz: float
+    high_hz: float
+    n_points: int
+    total_db: Optional[float]  # 无交集时为 None
+    unit: str
+    normalized: bool  # 是否按「频率步进 / RBW」归一化
+    basis: str  # 归一化口径说明（未归一化时写明原因）
+    clipped: bool  # 带宽是否超出扫描范围（按交集积分）
+    narrow: bool  # 带宽小于一个频率步进（单点外推）
+
+
+def ibw_edges(center_hz: float, bandwidth_hz: float) -> Tuple[float, float]:
+    """积分带宽边沿 = 中心 ± 带宽/2（带宽必须为正）。"""
+    if not math.isfinite(bandwidth_hz) or bandwidth_hz <= 0:
+        raise SpectrumInputError("积分带宽必须为正数")
+    if not math.isfinite(center_hz):
+        raise SpectrumInputError("积分带宽中心频率必须是有效数值")
+    return center_hz - bandwidth_hz / 2.0, center_hz + bandwidth_hz / 2.0
+
+
+def integrate_band(
+    trace: SpectrumTrace,
+    center_hz: float,
+    bandwidth_hz: float,
+    rbw_hz: Optional[float] = None,
+) -> IntegrationResult:
+    """带内积分功率：对落在带宽内的点做线性功率求和后转回 dB。
+
+    - 单位偏移（dBm/dBμV/dBmV 之间的常数）在求和前后相互抵消，故直接对显示值求和；
+    - `rbw_hz` 给出时按 `频率步进 / RBW` 归一化（每点视作宽度=步进的功率密度），
+      未给出则只做求和并在文本中注明原因；
+    - 求和用**移位求和**（log-sum-exp）：`peak + 10log10(Σ10^((v-peak)/10))`，
+      对极端电平（±数千 dB）不溢出/不下溢（直接 `10**(L/10)` 会抛 OverflowError 或 log10(0) 域错）；
+    - 带宽超出扫描范围时按交集积分（`clipped=True`），无交集时 `n_points=0`。
+    """
+    low_hz, high_hz = ibw_edges(center_hz, bandwidth_hz)
+    clipped = low_hz < trace.freqs[0] or high_hz > trace.freqs[-1]
+    inside = [
+        level
+        for freq, level in zip(trace.freqs, trace.levels)
+        if low_hz <= freq <= high_hz
+    ]
+    step_hz = trace.params.step_hz(trace.n_points)
+    normalized = False
+    narrow = False
+    total_db: Optional[float] = None
+    basis = "未归一化"
+    if inside:
+        peak = max(inside)
+        linear = math.fsum(10.0 ** ((level - peak) / 10.0) for level in inside)
+        total_db = peak + 10.0 * math.log10(linear)
+        if rbw_hz and step_hz:
+            total_db += 10.0 * math.log10(step_hz / rbw_hz)
+            normalized = True
+            basis = "按 RBW 归一化"
+            if bandwidth_hz < step_hz:
+                narrow = True
+        elif rbw_hz:
+            basis = "未归一化，点数不足"
+        else:
+            basis = "未归一化，RBW 未填"
+    return IntegrationResult(
+        low_hz=low_hz,
+        high_hz=high_hz,
+        n_points=len(inside),
+        total_db=total_db,
+        unit=trace.params.unit,
+        normalized=normalized,
+        basis=basis,
+        clipped=clipped,
+        narrow=narrow,
+    )
+
+
+def integration_text(result: IntegrationResult) -> str:
+    """积分带宽读数文本（参数区只读行用，含完整口径）。"""
+    band = format_band(result.low_hz, result.high_hz)
+    if result.n_points == 0:
+        return f"积分带宽 {band}  ⚠ 与扫描范围无交集"
+    power = format_level(result.total_db, result.unit)
+    text = f"积分带宽 {band}  积分功率 {power}（{result.n_points} 点，{result.basis}）"
+    if result.narrow:
+        text += "  ⚠ 带宽小于频率步进，按单点外推"
+    if result.clipped:
+        text += "  ⚠ 超出扫描范围，按交集积分"
+    return text
+
+
+def integration_short_text(result: IntegrationResult) -> str:
+    """画布注记短行（窄画布下不压住纵轴刻度）。"""
+    band = format_band(result.low_hz, result.high_hz)
+    if result.n_points == 0:
+        return f"IBW {band}  无交集"
+    return f"IBW Σ {format_level(result.total_db, result.unit)}"
+
+
+def integration_band_for(
+    trace: SpectrumTrace,
+    center_hz: float,
+    bandwidth_hz: float,
+    rbw_hz: Optional[float] = None,
+) -> Tuple[IntegrationBand, IntegrationResult]:
+    """画布标注（含边沿与短读数）与积分结果的组合入口。"""
+    result = integrate_band(trace, center_hz, bandwidth_hz, rbw_hz)
+    band = IntegrationBand(
+        low_hz=result.low_hz,
+        high_hz=result.high_hz,
+        text=integration_text(result),
+        short_text=integration_short_text(result),
+    )
+    return band, result
+
+
 def note_text(params: SpectrumParams, n_points: int) -> str:
     """图中参数注记（导出图一并渲染，便于直接贴报告）。"""
     parts = [
@@ -692,6 +832,8 @@ def palette_for(dark: bool) -> dict:
             "marker": "#4FC3F7",
             "cursor": "#90A4AE",
             "panel": "#CC101010",
+            "ibw": "#ECEFF1",
+            "ibw_fill": "#26ECEFF1",
         }
     return {
         "bg": "#FFFFFF",
@@ -705,6 +847,8 @@ def palette_for(dark: bool) -> dict:
         "marker": "#6A1B9A",
         "cursor": "#607D8B",
         "panel": "#E6FFFFFF",
+        "ibw": "#455A64",
+        "ibw_fill": "#26455A64",
     }
 
 
@@ -722,6 +866,7 @@ try:
         QComboBox,
         QFileDialog,
         QFormLayout,
+        QFrame,
         QGroupBox,
         QHBoxLayout,
         QHeaderView,
@@ -729,6 +874,7 @@ try:
         QLineEdit,
         QPlainTextEdit,
         QPushButton,
+        QScrollArea,
         QSizePolicy,
         QSpinBox,
         QSplitter,
@@ -741,8 +887,9 @@ try:
     import app_icons
 
     _QT_AVAILABLE = True
-except ImportError:  # pragma: no cover - 无 Qt 环境（CI 纯逻辑）不执行 Qt 层
+except ImportError as exc:  # pragma: no cover - 无 Qt 环境（CI 纯逻辑）不执行 Qt 层
     _QT_AVAILABLE = False
+    _QT_IMPORT_ERROR = exc
 
 
 if _QT_AVAILABLE:
@@ -761,6 +908,7 @@ if _QT_AVAILABLE:
             self._cursor: Optional[Tuple[int, float, float]] = None
             self._dark = False
             self._ref_index = 0  # 两点测量的参考标记下标（Δ 显示哪两个点之间）
+            self._ibw: Optional[IntegrationBand] = None  # 积分带宽（None = 不显示）
             self.setMinimumSize(400, 220)
             self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             self.setMouseTracking(True)
@@ -770,6 +918,7 @@ if _QT_AVAILABLE:
         def set_trace(self, trace: Optional[SpectrumTrace]) -> None:
             self._trace = trace
             self._cursor = None  # 轨迹换了，旧读数作废（否则十字与读数框口径不一致）
+            self._ibw = None  # 同理：积分带宽必须由 _refresh_integration 按新轨迹重建
             self.update()
 
         def set_auto_y(self, auto: bool) -> None:
@@ -857,6 +1006,14 @@ if _QT_AVAILABLE:
             self._ref_index = int(ref_index)
             self.update()
 
+        def set_integration_band(self, band: Optional[IntegrationBand]) -> None:
+            """设置/清除积分带宽（None = 不画两条竖线）。"""
+            self._ibw = band
+            self.update()
+
+        def integration_band(self) -> Optional[IntegrationBand]:
+            return self._ibw
+
         def cursor_readout(self) -> Optional[Tuple[int, float, float]]:
             """当前光标读数 (索引, 频率, 幅值)；无则 None。"""
             return self._cursor
@@ -934,6 +1091,9 @@ if _QT_AVAILABLE:
                 painter.drawLine(plot.left(), y, plot.right(), y)
             painter.setPen(QPen(QColor(palette["axis"]), 1))
             painter.drawRect(plot)
+
+            # ── 积分带宽：半透明填充 + 两条竖线放在**迹线之下**（z 序：区域带属背景）──
+            self._paint_ibw_region(painter, plot, params)
 
             # ── 纵轴刻度 ──
             painter.setFont(label_font)
@@ -1042,6 +1202,33 @@ if _QT_AVAILABLE:
 
             self._paint_measure(painter, plot, trace, label_font, note_font)
 
+        def _paint_ibw_region(
+            self, painter: QPainter, plot: QRect, params: Optional[SpectrumParams]
+        ) -> None:
+            """积分带宽填充与两条竖线（画在迹线之下，区域带不压前景图元）。"""
+            if self._ibw is None or params is None:
+                return
+            span_hz = params.span_hz or 1.0
+
+            def x_of_hz(hz: float) -> float:
+                ratio = (hz - params.start_hz) / span_hz
+                ratio = 0.0 if ratio < 0.0 else (1.0 if ratio > 1.0 else ratio)
+                return plot.left() + ratio * plot.width()
+
+            low_x, high_x = x_of_hz(self._ibw.low_hz), x_of_hz(self._ibw.high_hz)
+            if high_x <= low_x:
+                return  # 无交集（两边沿夹到同一列）→ 不画
+            palette = self._palette
+            painter.save()
+            painter.setClipRect(plot)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(palette["ibw_fill"]))
+            painter.drawRect(QRectF(low_x, plot.top(), high_x - low_x, plot.height()))
+            painter.setPen(QPen(QColor(palette["ibw"]), 1.2, Qt.PenStyle.DashDotLine))
+            for x in (low_x, high_x):
+                painter.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()))
+            painter.restore()
+
         def _paint_measure(
             self, painter: QPainter, plot: QRect, trace: SpectrumTrace, label_font, note_font
         ) -> None:
@@ -1094,8 +1281,8 @@ if _QT_AVAILABLE:
                 painter.drawEllipse(QPointF(x, y), 3.0, 3.0)
             painter.restore()
 
-            # ── 标记读数 + Δ 注记（右上角，导出图自带说明；每行用标记自身颜色）──
-            if self._markers:
+            # ── 标记读数 + Δ 注记 + 积分带宽读数（右上角，导出图自带说明；每行用对应颜色）──
+            if self._markers or self._ibw is not None:
                 painter.setFont(note_font)
                 metrics = QFontMetrics(note_font)
                 lines = [
@@ -1108,6 +1295,8 @@ if _QT_AVAILABLE:
                 delta = delta_text(self._markers, self._ref_index)
                 if delta:
                     lines.append((delta, QColor(palette["text"])))
+                if self._ibw is not None:
+                    lines.append((self._ibw.short_text, QColor(palette["ibw"])))
                 width = max(metrics.horizontalAdvance(text) for text, _ in lines) + 16
                 height = metrics.height() * len(lines) + 10
                 box = QRect(
@@ -1131,6 +1320,28 @@ if _QT_AVAILABLE:
                         int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
                         text,
                     )
+
+            # ── 积分带宽标签（竖线/填充已在迹线之下画过；标签夹在绘图区内）──
+            if self._ibw is not None:
+                painter.setFont(label_font)
+                metrics = QFontMetrics(label_font)
+                text = f"IBW {format_band(self._ibw.low_hz, self._ibw.high_hz)}"
+                width = metrics.horizontalAdvance(text) + 8
+                left = plot.left() + 4
+                if self._ibw.high_hz >= params.stop_hz:
+                    left = plot.right() - width - 4
+                box = QRectF(
+                    max(plot.left() + 2, min(left, plot.right() - width - 2)),
+                    plot.top() + 4,
+                    width,
+                    label_font.pointSizeF() + 8,
+                )
+                painter.setPen(QPen(QColor(palette["ibw"])))
+                painter.drawText(
+                    box.intersected(QRectF(plot)),
+                    int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop),
+                    text,
+                )
 
             # ── 光标读数框（跟随光标，夹在绘图区内）──
             if self._cursor is not None:
@@ -1261,9 +1472,9 @@ if _QT_AVAILABLE:
             measure_bar.addStretch()
             layout.addLayout(measure_bar)
 
-            # ── 主体：左参数 / 右画布 + 标记表 + 数据 ──
+            # ── 主体：左参数（可滚动）/ 右画布 + 标记表 + 数据 ──
             splitter = QSplitter(Qt.Orientation.Horizontal)
-            splitter.addWidget(self._build_param_panel())
+            splitter.addWidget(self._wrap_param_scroll(self._build_param_panel()))
 
             right = QSplitter(Qt.Orientation.Vertical)
             self._right_splitter = right
@@ -1289,6 +1500,18 @@ if _QT_AVAILABLE:
             self.restyle_for_theme(False)
 
         # ── 构建：参数区 ──────────────────────────────────────────
+        @staticmethod
+        def _wrap_param_scroll(panel: QWidget) -> QScrollArea:
+            """参数区放进滚动容器：新增分组后矮窗口不会裁掉底部控件。"""
+            area = QScrollArea()
+            area.setWidget(panel)
+            area.setWidgetResizable(True)
+            area.setFrameShape(QFrame.Shape.NoFrame)
+            area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            area.setMinimumWidth(panel.minimumWidth() + 14)
+            area.setMaximumWidth(min(panel.maximumWidth() + 14, _MAX_WIDGET_WIDTH))
+            return area
+
         def _build_param_panel(self) -> QWidget:
             panel = QWidget()
             panel.setMinimumWidth(300)
@@ -1368,6 +1591,40 @@ if _QT_AVAILABLE:
             form.addRow("纵轴范围", self.axis_label)
 
             outer.addWidget(box)
+
+            # ── 积分带宽分组（R10）──
+            ibw_box = QGroupBox("积分带宽")
+            ibw_form = QFormLayout(ibw_box)
+            ibw_form.setContentsMargins(8, 8, 8, 8)
+            ibw_form.setSpacing(6)
+
+            self.ibw_check = QCheckBox("显示积分带宽（两条竖线）")
+            self.ibw_check.toggled.connect(self._on_ibw_toggled)
+            ibw_form.addRow("", self.ibw_check)
+
+            self.ibw_center_edit = QLineEdit(_fmt_number(to_freq_unit(DEFAULT_START_HZ + (DEFAULT_STOP_HZ - DEFAULT_START_HZ) / 2.0, DEFAULT_FREQ_UNIT)))
+            self.ibw_center_edit.setToolTip("积分带宽中心频率（与上方频率字段共用单位）")
+            self.ibw_center_edit.editingFinished.connect(self._refresh_integration)
+            ibw_form.addRow("中心频率", self.ibw_center_edit)
+
+            self.ibw_bw_edit = QLineEdit("100")
+            self.ibw_bw_edit.editingFinished.connect(self._refresh_integration)
+            ibw_form.addRow("积分带宽", self.ibw_bw_edit)
+
+            self.ibw_unit_combo = QComboBox()
+            self.ibw_unit_combo.addItems(list(RBW_UNITS))
+            self.ibw_unit_combo.setCurrentText(DEFAULT_FREQ_UNIT)
+            self.ibw_unit_combo.currentTextChanged.connect(
+                lambda text, e=self.ibw_bw_edit, c=self.ibw_unit_combo: self._on_bw_unit_changed(e, c, text)
+            )
+            self.ibw_bw_edit._unit = self.ibw_unit_combo.currentText()
+            ibw_form.addRow("带宽单位", self.ibw_unit_combo)
+
+            self.ibw_label = QLabel("未启用")
+            self.ibw_label.setWordWrap(True)
+            ibw_form.addRow("积分功率", self.ibw_label)
+
+            outer.addWidget(ibw_box)
 
             hint = QLabel(
                 "参数改完按回车或移开焦点即自动联动：\n"
@@ -1460,11 +1717,15 @@ if _QT_AVAILABLE:
                 self.stop_edit,
                 self.center_edit,
                 self.span_edit,
+                getattr(self, "ibw_center_edit", None),
             ):
+                if edit is None:
+                    continue
                 value = self._try_float(edit.text())
                 if value is not None:
                     edit.setText(_fmt_number(value * factor))
             self._refresh_axis_label()
+            self._refresh_integration()
 
         def _on_bw_unit_changed(self, edit: QLineEdit, combo: QComboBox, new_unit: str) -> None:
             value = self._try_float(edit.text())
@@ -1476,6 +1737,8 @@ if _QT_AVAILABLE:
                 edit.setText(
                     _fmt_number(value * RBW_UNITS[old_unit] / RBW_UNITS[new_unit])
                 )
+            if edit is getattr(self, "ibw_bw_edit", None):
+                self._refresh_integration()
 
         def _read_freq_fields(self) -> Tuple[float, float, float, float]:
             unit = self._freq_unit
@@ -1578,6 +1841,7 @@ if _QT_AVAILABLE:
                     f"{text}  ⚠ {dropped} 个标记超出当前扫描范围，已丢弃",
                     error=True,
                 )
+            self._refresh_integration()
 
         def _on_paste(self) -> None:
             text = QApplication.clipboard().text()
@@ -1592,6 +1856,7 @@ if _QT_AVAILABLE:
             self._trace = None
             self.canvas.set_trace(None)
             self._refresh_markers()
+            self._refresh_integration()
             self._refresh_axis_label()
             self._set_status("就绪")
 
@@ -1624,6 +1889,70 @@ if _QT_AVAILABLE:
                 f"已导出：{path}" if ok else f"⚠ 导出失败：{path}", error=not ok
             )
             return ok
+
+        # ── 积分带宽（R10）────────────────────────────────────────
+        def _on_ibw_toggled(self, _checked: bool) -> None:
+            self._refresh_integration()
+
+        def _read_ibw(self) -> Optional[Tuple[float, float]]:
+            """读取 (中心频率 Hz, 带宽 Hz)；未启用返回 None，非法输入提示后返回 None。"""
+            if not self.ibw_check.isChecked():
+                return None
+            try:
+                center = units_to_hz(
+                    self._read_float(self.ibw_center_edit, "积分带宽中心频率"),
+                    self._freq_unit,
+                )
+                bandwidth = units_to_hz(
+                    self._read_float(self.ibw_bw_edit, "积分带宽"),
+                    self.ibw_unit_combo.currentText(),
+                )
+                ibw_edges(center, bandwidth)  # 带宽必须为正
+            except SpectrumInputError as exc:
+                self.ibw_label.setText(f"⚠ {exc}")
+                return None
+            return center, bandwidth
+
+        def _refresh_integration(self) -> None:
+            """按已绘制 trace 与积分带宽参数刷新两条竖线、带内标注与积分功率读数。"""
+            trace = self._trace
+            if trace is None:
+                self.canvas.set_integration_band(None)
+                self.ibw_label.setText(
+                    "未绘制 trace" if self.ibw_check.isChecked() else "未启用"
+                )
+                return
+            if not self.ibw_check.isChecked():
+                self.canvas.set_integration_band(None)
+                self.ibw_label.setText("未启用")
+                return
+            got = self._read_ibw()
+            if got is None:
+                self.canvas.set_integration_band(None)
+                return
+            center, bandwidth = got
+            # 归一化口径取**已绘制 trace** 的 RBW（与画布同一份口径）
+            band, result = integration_band_for(
+                trace, center, bandwidth, trace.params.rbw_hz
+            )
+            self.canvas.set_integration_band(band)
+            text = integration_text(result)
+            if self._form_rbw_differs(trace):
+                text += "（RBW 参数已改，点「绘制」生效）"
+            self.ibw_label.setText(text)
+
+        def _form_rbw_differs(self, trace: SpectrumTrace) -> bool:
+            """表单 RBW 是否已偏离已绘制 trace（口径提示用）。"""
+            try:
+                form_rbw = self._read_optional_hz(
+                    self.rbw_edit, self.rbw_unit_combo, "RBW"
+                )
+            except SpectrumInputError:
+                return False
+            old_rbw = trace.params.rbw_hz
+            if form_rbw is None or old_rbw is None:
+                return form_rbw != old_rbw
+            return abs(form_rbw - old_rbw) > 1e-9
 
         # ── MARK 标记与测量（R7 / R8）──────────────────────────────
         def markers(self) -> Tuple[Marker, ...]:
@@ -1877,6 +2206,8 @@ if _QT_AVAILABLE:
                 self.hint_label.setStyleSheet(f"color: {self._palette['sub']};")
             if hasattr(self, "measure_label"):
                 self.measure_label.setStyleSheet(f"color: {self._palette['sub']};")
+            if hasattr(self, "ibw_label"):
+                self.ibw_label.setStyleSheet(f"color: {self._palette['sub']};")
             if hasattr(self, "marker_table") and self.marker_table.rowCount():
                 self._fill_marker_table(self.canvas.markers())
             if hasattr(self, "status_label"):

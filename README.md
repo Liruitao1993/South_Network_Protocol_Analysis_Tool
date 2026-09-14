@@ -292,7 +292,8 @@ python main_gui.py --clipboard
 - 绘图：仪器式网格（横向 10 格 × 纵向可配格数，顶格为参考电平、向下每格 −dB/div）；勾选「纵轴自动适配」改为按数据范围取轴；标题与参数注记随图渲染
 - **光标测量**：鼠标在图上移动即显示十字光标与读数框（最近数据点的频率与幅值，吸附不插值）
 - **MARK 标记与两点测量**：点击绘图区添加标记 M1~M6（吸附最近数据点），**每个标记一种颜色**，图上标记与标记表文字同色，便于一一对应；标记表列出 `标记/频率/幅值/Δ频率(哪两点)/Δ幅值(哪两点)`，Δ 一律标注是哪两个标记之差（如 `M1↔M3`），可用「Δ 参考」下拉切换参考标记；测量栏显示峰值/谷值；「峰值搜索」「下一个峰值」可把标记移到全局峰或下一个局部峰（环形）
-- 导出：工具栏「导出 PNG」，默认 1600×1000，标记与 Δ 注记一并渲染，可直接贴入测试报告
+- **积分带宽（IBW）**：设定中心频率与积分带宽后勾选「显示积分带宽」，图上出现两条点划线竖线 + 半透明填充带 + `IBW 起–止` 标签，并给出带内**积分功率**（按「频率步进/RBW」归一化，RBW 未填则注明未归一化）与带宽内点数；带宽超出扫宽按交集积分并提示
+- 导出：工具栏「导出 PNG」，默认 1600×1000，标记、Δ 与积分带宽注记一并渲染，可直接贴入测试报告
 
 ### 测试方案
 
@@ -418,8 +419,8 @@ python test/test_monitor_plc2_deframe.py   # PLC2 解帧
 python test/test_gw_monitor_summary.py     # 国网新一代监控摘要
 
 # 功能组件
-python test/test_spectrum_model.py         # 频谱图纯逻辑（解析/校验/轴/单位/联动/标记/峰值搜索/Δ成对，154 项）
-python test/test_spectrum_gui.py           # 频谱图 GUI（offscreen，含光标读数、MARK 颜色与 Δ 标注，109 项）
+python test/test_spectrum_model.py         # 频谱图纯逻辑（解析/校验/轴/单位/联动/标记/峰值搜索/Δ成对/积分带宽，191 项）
+python test/test_spectrum_gui.py           # 频谱图 GUI（offscreen，含光标、MARK 颜色、Δ 标注、积分带宽竖线，123 项）
 python test/test_meter_sim.py              # 698 虚拟表从站模拟器
 python test/test_quick_parse_panel.py      # 快捷解析小窗
 python test/test_frame_share.py            # 报文分享
@@ -456,8 +457,9 @@ python test/test_web_frame_gen_utils.py    # Reflex Web 组帧纯逻辑
 - **50Ω 单位换算**：幅值单位可选 dBm / dBμV / dBmV，勾选「输入按 dBm，50Ω 换算」时按 dBμV = dBm + 107、dBmV = dBm + 47 换算
 - **纵轴双口径**：默认仪器式（顶格 = 参考电平，向下每格 −dB/div），可勾选「纵轴自动适配」按数据 min/max 留 5% 余量取轴；越界点裁剪到边缘并提示个数
 - **光标读数与测量**：鼠标悬停绘图区显示十字光标与读数框（最近数据点的频率/幅值）；点击添加 MARK 标记 M1~M6，**每个标记一种颜色**（图上标记与标记表文字同色，便于一一对应）；标记表列出频率/幅值/`Δ频率(哪两点)`/`Δ幅值(哪两点)`，Δ 一律标注是哪两个标记之差，可用「Δ 参考」切换参考标记；测量栏显示峰值/谷值；「峰值搜索」「下一个峰值」按 3 dB 显著度环形搜索局部峰，导出 PNG 时标记与 Δ 注记一并渲染
+- **积分带宽（IBW）**：中心频率 + 积分带宽 + 显示开关；图上两条点划线竖线、边沿间半透明填充带与 `IBW 起–止` 标签；带内积分功率（按 `频率步进/RBW` 归一化，RBW 未填则注明未归一化）、带宽内点数；越界按交集积分并提示、无交集不填充
 - **导出 PNG**（默认 1600×1000），浅/暗主题自动适配调色板
-- 实现：新建 `spectrum_widget.py`（纯逻辑层 + QPainter 自绘，零新增依赖，不用 matplotlib/QtCharts）；新增 `test/test_spectrum_model.py`（154 项）与 `test/test_spectrum_gui.py`（109 项 offscreen）
+- 实现：新建 `spectrum_widget.py`（纯逻辑层 + QPainter 自绘，零新增依赖，不用 matplotlib/QtCharts）；新增 `test/test_spectrum_model.py`（191 项）与 `test/test_spectrum_gui.py`（123 项 offscreen）
 
 ### 1.23.8 — 2026-09-12
 

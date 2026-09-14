@@ -115,7 +115,9 @@ CHANGELOG = [
             "实现：新建 spectrum_widget.py（前半纯逻辑层不依赖 Qt：SpectrumParams/SpectrumTrace/parse_levels/validate_params/freqs_for/y_range/y_ticks/x_tick_labels/format_*/resolve_freq_inputs + 测量层 Marker/markers_for/peak_indices/next_peak_index/delta_text；后半 Qt 层 SpectrumCanvas/SpectrumWidget，paintEvent 与导出 render_image 共用同一 _paint，绘图区几何由 plot_rect() 单一来源同时供绘制与鼠标换算）；main_gui 仅 3 处接线（import／常驻 tab 图标 chart-spline／_restyle_for_theme 钩子），不改协议可见性逻辑",
             "测量：鼠标悬停绘图区即出十字光标 + 读数框（最近数据点的频率/幅值，吸附不插值）；左键点击添加 MARK 标记 M1~M6（吸附最近数据点、超出上限给提示）——**每个标记一种固定颜色**（M1~M6 与序号绑定，浅/暗主题各一套；图上竖虚线/圆点/M? 标签与标记表行文字同色，便于图↔表对应，切主题同步重算）；标记以**频率为锚点**，重绘/改单位/切纵轴口径后自动重新吸附、超出扫描范围自动丢弃（丢弃提示追加在点数状态之后不覆盖）；「峰值搜索/下一个峰值」作用于标记表选中行（无选中即最后一个标记，无标记则在峰值处新建；唯一显著峰时明确提示不移动），「删除标记/清空标记」管理标记表（删除后连续重编号）；标记表列 `标记/频率/幅值(单位)/Δ频率(哪两点)/Δ幅值(哪两点)` 且**仅在存在标记时显示**（不压缩画布高度）",
             "两点测量与基础计算：Δ 一律**标注是哪两个点之间的差值**（单元格与测量栏都带 `M?↔M?` 前缀，如 `M1↔M3 560.348 MHz`、`Δf(M2↔M3) 159.652 MHz Δlevel -0.30 dB`）；新增「Δ 参考」下拉切换参考标记（默认 M1），切换后表格 Δ 列与测量栏同时重算；峰值/谷值（频率 + 幅值）常驻测量栏；「下一个峰值」按 3 dB 显著度（标准 key-col 定义）环形搜索局部峰，显著度用**单调栈 O(n) 预计算**（原逐点扫描实现最坏 O(n²)，16000 点实测 3.74 s 冻结界面 → 现 5.3 ms，9000 组数据逐例等价）",
-            "零新增依赖：不使用 matplotlib（已被 南网协议解析工具.spec 显式排除）与 QtCharts，PyInstaller spec 无需改动（无新增 datas/hiddenimports）；测试：新增 test/test_spectrum_model.py（154 项纯逻辑）与 test/test_spectrum_gui.py（109 项 offscreen）并纳入 release_check 清单",
+            "积分带宽（IBW）：参数区新增分组——中心频率（与四字段共用频率单位）+ 积分带宽（kHz/MHz）+「显示积分带宽（两条竖线）」开关；勾选后图上出现两条**点划线竖线**（独立配色，与 6 个标记颜色都不撞色）+ 边沿间半透明填充带 + 带内顶部 `IBW 460–660 MHz` 标签，画布右上读数框追加一行积分功率",
+            "积分功率计算：对落在 [低边沿, 高边沿] 内的点做线性功率求和后转回 dB，并按「频率步进 / RBW」归一化（RBW 未填则不做归一化并在读数注明）；单位偏移在求和前后抵消，故 dBμV/dBmV 口径直接可用（dBμV 结果 = dBm 结果 + 107）；读数同时给出带宽内点数；带宽超出扫宽按交集积分并标注「超出扫描范围」，与扫宽无交集则不填充并标注「无交集」",
+            "零新增依赖：不使用 matplotlib（已被 南网协议解析工具.spec 显式排除）与 QtCharts，PyInstaller spec 无需改动（无新增 datas/hiddenimports）；测试：新增 test/test_spectrum_model.py（191 项纯逻辑）与 test/test_spectrum_gui.py（123 项 offscreen）并纳入 release_check 清单",
         ],
     ),
     (

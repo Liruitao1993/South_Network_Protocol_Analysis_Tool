@@ -9,11 +9,12 @@
   5. 非法 token 报错且不破坏已有图形
   6. 纵轴自动适配切换改变纵轴口径
   7. 单位换算（50Ω）作用于迹线数值
-  8. render_image 双主题尺寸正确且非纯色；导出 PNG 可被 QImage 读回
-  9. 主题切换 restyle_for_theme 生效；主窗口 _restyle_for_theme 钩子不抛异常
- 10. 清空复位
- 11. 光标读数（悬停/移出）、MARK 标记（点击添加/上限 6/峰值搜索/下一个峰值/删除/清空）
- 12. 标记表内容与 Δ 列、测量栏 Δf(M1↔M2)、重绘后按频率保持、带标记导出图与无标记不同
+  8. 光标读数（悬停/移出/重绘清除）与 MARK 标记（点击添加/上限 6/峰值搜索/下一个峰值/删除/清空）
+  9. 标记表内容、标记颜色与表格对应、Δ「哪两点」标注与参考切换、重绘后按频率保持
+ 10. 积分带宽：竖线/填充/短注记、积分功率精确值、越界与无交集、单位联动、关闭后与从未开启逐像素一致
+ 11. 渲染与导出（1600×1000、PNG 可读回、带标记渲染差异）
+ 12. 主题切换 restyle_for_theme 生效；主窗口 _restyle_for_theme 钩子不抛异常
+ 13. 清空复位
 
 直接运行: python test/test_spectrum_gui.py
 """
@@ -67,7 +68,14 @@ def main():
     app = QApplication.instance() or QApplication([])
 
     import main_gui
+    import spectrum_widget
     from spectrum_widget import MAX_MARKERS, format_delta_hz, marker_color, peak_index
+
+    check(
+        "Qt 层导入成功（否则 SpectrumWidget 为 None）",
+        spectrum_widget._QT_AVAILABLE,
+        str(spectrum_widget._QT_IMPORT_ERROR),
+    )
 
     win = main_gui.MainWindow()
     app.processEvents()
@@ -453,38 +461,173 @@ def main():
     tab.clear_markers_btn.click()
     check("清空标记后表隐藏且画布无标记", tab.marker_table.isHidden() and tab.markers() == ())
 
-    # 上限 6
-    for frac in (0.1, 0.2, 0.3, 0.4, 0.5, 0.6):
-        _click_ratio(frac)
-    check("最多 6 个标记", len(tab.markers()) == MAX_MARKERS, str(len(tab.markers())))
-    _click_ratio(0.8)
+    # ── 9. 积分带宽（R10）──
+    tab.ibw_check.setChecked(False)
+    tab._refresh_integration()
+    check("未启用时读数提示未启用", tab.ibw_label.text() == "未启用", tab.ibw_label.text())
+    check("未启用时画布无积分带宽", canvas.integration_band() is None)
+
+    # 常量 trace：积分功率可精确预期
+    tab.trace_edit.setPlainText(" ".join(["-70"] * 101))
+    tab.rbw_edit.setText("7200")
+    tab.rbw_unit_combo.setCurrentText("kHz")
+    tab._on_draw()
+    # 同一 trace 下的「无积分带宽」基线（后续所有渲染对比都以此为准）
+    same_trace_image = canvas.render_image(900, 560)
+    never_on = bytes(same_trace_image.constBits())
+    tab.ibw_center_edit.setText("600")
+    tab.ibw_bw_edit.setText("720")
+    tab.ibw_unit_combo.setCurrentText("MHz")
+    tab.ibw_check.setChecked(True)
+    app.processEvents()
+    band = canvas.integration_band()
+    check("积分带宽边沿 = 中心 ± 带宽/2", band is not None and (band.low_hz, band.high_hz) == (240e6, 960e6), str(band))
+    expected = -70.0 + 10.0 * math.log10(101)
     check(
-        f"第 {MAX_MARKERS + 1} 个标记被拒并提示",
-        len(tab.markers()) == MAX_MARKERS and f"最多 {MAX_MARKERS} 个标记" in tab.status_label.text(),
-        tab.status_label.text(),
+        "常量 trace 积分功率 = -70 + 10log10(101)",
+        f"{round(expected, 4):g}" in tab.ibw_label.text(),
+        tab.ibw_label.text(),
+    )
+    check("读数含点数与归一化口径", "101 点" in tab.ibw_label.text() and "按 RBW 归一化" in tab.ibw_label.text(), tab.ibw_label.text())
+
+    # 两条竖线：带内像素与带外不同，且沿带宽聚类
+    tab.ibw_center_edit.setText("600")
+    tab.ibw_bw_edit.setText("200")
+    tab._refresh_integration()
+    app.processEvents()
+    image = canvas.render_image(900, 560)
+    check("启用后渲染与同 trace 无积分带宽基线不同", bytes(image.constBits()) != never_on)
+    probe_plot = canvas.plot_rect(image.rect())
+
+    def _pixel(freq_mhz):
+        x = probe_plot.left() + int(
+            probe_plot.width() * (freq_mhz * 1e6 - 240e6) / 720e6
+        )
+        return image.pixelColor(x, probe_plot.top() + 25).name()
+
+    inside = _pixel(600)
+    outside = _pixel(300)
+    check("带宽内半透明填充生效", inside != outside, f"{inside} vs {outside}")
+    edge_left = _pixel(500)
+    check("左边沿处有竖线（像素与填充不同）", edge_left not in (inside, outside), edge_left)
+    check(
+        "边沿位置 = 500/700 MHz",
+        abs(canvas.integration_band().low_hz - 500e6) < 1e-6
+        and abs(canvas.integration_band().high_hz - 700e6) < 1e-6,
+        str(canvas.integration_band()),
+    )
+    # z 序：填充在迹线之下（带内迹线像素不被压暗）
+    tab.ibw_check.setChecked(False)
+    app.processEvents()
+    off_image = canvas.render_image(700, 420)
+    tab.ibw_check.setChecked(True)
+    tab.ibw_center_edit.setText("600")
+    tab.ibw_bw_edit.setText("200")
+    tab._refresh_integration()
+    app.processEvents()
+    on_image = canvas.render_image(700, 420)
+    trace_color = spectrum_widget.palette_for(tab._dark)["trace"].lower()
+    area = canvas.plot_rect(off_image.rect())
+
+    def _count_trace_pixels(image):
+        total = 0
+        for py in range(area.top(), area.bottom()):
+            for px in range(area.left(), area.right()):
+                if image.pixelColor(px, py).name().lower() == trace_color:
+                    total += 1
+        return total
+
+    check(
+        "积分带宽填充在迹线之下（迹线像素数不变）",
+        _count_trace_pixels(off_image) == _count_trace_pixels(on_image) > 0,
+        f"{_count_trace_pixels(off_image)} vs {_count_trace_pixels(on_image)}",
+    )
+    # 窄带靠右缘：带内标签不得画到绘图区之外
+    tab.ibw_center_edit.setText("950")
+    tab.ibw_bw_edit.setText("20")
+    tab._refresh_integration()
+    app.processEvents()
+    narrow_on = canvas.render_image(700, 420)
+    tab.ibw_check.setChecked(False)
+    app.processEvents()
+    narrow_off = canvas.render_image(700, 420)
+    outside_diff = 0
+    for py in range(area.top(), area.bottom()):
+        for px in range(area.right() + 2, min(area.right() + 100, narrow_on.width())):
+            if narrow_on.pixelColor(px, py) != narrow_off.pixelColor(px, py):
+                outside_diff += 1
+    check("窄带靠右缘时 IBW 标签不越出绘图区", outside_diff == 0, str(outside_diff))
+    tab.ibw_check.setChecked(True)
+    tab.ibw_center_edit.setText("600")
+    tab.ibw_bw_edit.setText("100")
+    tab._refresh_integration()
+
+    # 越界与无交集
+    tab.ibw_center_edit.setText("240")
+    tab.ibw_bw_edit.setText("400")
+    tab._refresh_integration()
+    check("带宽越界时读数提示按交集积分", "超出扫描范围" in tab.ibw_label.text(), tab.ibw_label.text())
+    tab.ibw_center_edit.setText("5000")
+    tab.ibw_bw_edit.setText("100")
+    tab._refresh_integration()
+    check("与扫描范围无交集时读数提示", "无交集" in tab.ibw_label.text(), tab.ibw_label.text())
+    empty_image = canvas.render_image(900, 560)
+    tab.ibw_check.setChecked(False)
+    app.processEvents()
+    check("关闭积分带宽后画布不再持有积分带宽", canvas.integration_band() is None)
+    disabled_image = canvas.render_image(900, 560)
+    # 读数框（右上角，含 ⚠ 无交集提示）属预期差异；先比对绘图区内部像素
+    probe_area = canvas.plot_rect(empty_image.rect())
+    probe_x = probe_area.left() + int(probe_area.width() * 0.1)
+    probe_y = probe_area.bottom() - 8
+    check(
+        "无交集时不绘制竖线/填充（绘图区像素与关闭态一致）",
+        empty_image.pixelColor(probe_x, probe_y).name()
+        == disabled_image.pixelColor(probe_x, probe_y).name(),
+        f"{empty_image.pixelColor(probe_x, probe_y).name()} vs "
+        f"{disabled_image.pixelColor(probe_x, probe_y).name()}",
+    )
+    # 强不变量：同一 trace 下「从未开启」与「开启后再关闭」必须逐像素一致
+    again_image = canvas.render_image(900, 560)
+    check(
+        "开启后再关闭 = 从未开启（同 trace 逐像素一致）",
+        bytes(again_image.constBits()) == never_on,
     )
 
-    # 重绘后标记按频率保持（单位换算 → 幅值随单位变化，频率不变）
-    before = [(m.freq_hz, m.level) for m in tab.markers()]
-    tab.unit_combo.setCurrentText("dBμV")
-    tab.convert_check.setChecked(True)
+    # 单位切换同步换算中心频率
+    tab.ibw_center_edit.setText("600")
+    tab.freq_unit_combo.setCurrentText("GHz")
+    check("切到 GHz 后积分带宽中心频率同步换算", tab.ibw_center_edit.text() == "0.6", tab.ibw_center_edit.text())
+    tab.freq_unit_combo.setCurrentText("MHz")
+
     tab._on_draw()
-    after = [(m.freq_hz, m.level) for m in tab.markers()]
-    check("重绘后标记数量保持", len(after) == len(before))
+    tab.ibw_check.setChecked(True)
+    tab.ibw_center_edit.setText("600")
+    tab.ibw_bw_edit.setText("100")
+    tab.ibw_unit_combo.setCurrentText("MHz")
+    tab._refresh_integration()
+    app.processEvents()
+    marked_ibw = canvas.render_image(800, 500)
+    _click_ratio(0.3)
+    with_marker = canvas.render_image(800, 500)
     check(
-        "重绘后标记频率保持（按频率锚定）",
-        all(abs(a[0] - b[0]) < 1e-6 for a, b in zip(after, before)),
+        "积分带宽与标记可同屏共存（渲染继续变化）",
+        bytes(with_marker.constBits()) != bytes(marked_ibw.constBits()),
+        f"markers={len(tab.markers())} trace={tab.current_trace() is not None} "
+        f"band={canvas.integration_band() is not None}",
     )
-    check(
-        "重绘后标记幅值按新单位换算",
-        abs(after[0][1] - (before[0][1] + 107.0)) < 1e-6,
-        f"{before[0][1]} -> {after[0][1]}",
-    )
-    tab.convert_check.setChecked(False)
+    tab.clear_markers_btn.click()
+    tab._on_clear()
+    check("清空 trace 后积分带宽读数回到未启用/未绘制", canvas.integration_band() is None, str(canvas.integration_band()))
+    check("清空后读数标签更新", tab.ibw_label.text() in ("未启用", "未绘制 trace"), tab.ibw_label.text())
+    tab.ibw_check.setChecked(False)
+
+    # ── 10. 渲染与导出 ──
+    tab.trace_edit.setPlainText(_sample_text(100))  # 上一节清空过 trace，这里恢复
     tab.unit_combo.setCurrentText("dBm")
+    tab.rbw_edit.setText("100")
+    tab.rbw_unit_combo.setCurrentText("kHz")
     tab._on_draw()
-
-    # ── 9. 渲染与导出 ──
     tab._on_clear_markers()
     image_plain = canvas.render_image(800, 500)
     plain = bytes(image_plain.constBits())  # 必须持有 QImage 引用：临时对象上取 constBits 会崩
