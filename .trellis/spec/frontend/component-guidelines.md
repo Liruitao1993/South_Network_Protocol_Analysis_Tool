@@ -315,7 +315,18 @@ Web 版（`reflex_web/reflex_web/`）与 PySide6 版（`main_gui.py`）**共享 
 - 条件样式用 `class_name=rx.cond(...)`（`style=rx.cond({...})` 实测不落 DOM，见下条）；
 - 鼠标坐标拿不到（Reflex 不暴露 DOM 事件）→ 首版把绘图区切成 N 个透明带（`id="sp-band-i"`）各带 `on_click=State.xxx(i)`，点击按带中心频率吸附到最近数据点；需要更高精度或悬停时再上 JS 桥。
 
-### 6. 方法论陷阱（本次实测）
+### 6. Web 主题契约（1.23.12 起，改任何样式前先读）
+
+- **单一来源**：颜色只在 `reflex_web/reflex_web/theme_web.py` 的 `TOKENS_LIGHT`/`TOKENS_DARK` 里定义；
+  `GLOBAL_CSS`、组件、SVG 一律引用 `var(--token)`。**禁止在组件里写裸 hex**（`test/test_web_theme.py` 有一条守卫断言）。
+- **浅色 = 现状值**：`TOKENS_LIGHT` 必须等于改造前的实际硬编码值（测试逐 token 断言）→ 新增主题不会悄悄改掉默认观感。
+- **模式**：由 `html.light` / `html.dark` 类驱动（Reflex/Radix 约定）。我们自己的模式选择写 `localStorage['nw-theme']` 并**同时**镜像 provider 读取的 `theme` 键；挂载后 Provider 可能重写根节点类，故 `theme_web.apply_mode_js` 里装了一个 class 观察器把最终态纠回（幂等，不会自激）。
+- **强调色**：Radix 组件走 `rx.theme(accent_color=ThemeState.accent, …)`；自定义 CSS 走页面根容器上的 `.nw-accent-<id>` 覆盖块。**主题 class 必须挂在包含 header 的根容器上**——header 在 `.app-container` 之外，挂在里层会导致顶栏不跟强调色。
+- **每个页面都要挂样式**：`theme_style()`（SEARCHABLE_CSS + GLOBAL_CSS + 主题 token）必须在 `index` / `share_page` / `feedback_page` / `feedback_admin_page` 的根容器上都渲染；独立页面漏挂会让 `var(--accent)` 等解析失败（顶栏背景透明、白字不可见——1.23.12 真实踩过）。
+- **SVG 上色**：`fill/stroke="var(--token)"`（Reflex 会落到 CSS）；标记配色用 `var(--sp-mN)`（由 `spectrum_widget.MARKER_COLORS_*` 生成 CSS 变量，图与标记表同源）。
+- **Reflex 坑**：`rx.el.text(children=…)` 与 `_create()` 冲突（内容用位置参数，且在关键字参数之前）；SVG 数值属性只收 `str|int`。
+
+### 7. 方法论陷阱（本次实测）
 - **`style=rx.cond(cond, {...}, {})` 在本项目不落到 DOM**：批量摘要行原用该写法做选中高亮，实测所有行的 `style` 属性为 `null`（选中行也不高亮）。改用 `class_name=rx.cond(cond, "batch-row-selected", "")` + `GLOBAL_CSS` 里一条 `.batch-row-selected{border:2px solid #2563eb!important}` 即生效（`class_name=rx.cond` 在 tab 高亮等处以证实可用）。凡「条件样式」优先 class，不要用 `style` 传 dict 条件。
 - **Reflex State 字段即 WebSocket 载荷**：`batch_results` 这类"结果集字段"一旦到万级就会整批序列化下发（本项目实测 24MB 告警）。**大结果集必须只把当前页放进 State**（全量放 `_private` 字段），分页数学走纯函数 `web_utils.paginate`。
 - **推断型缺陷结论必须先用真实调用路径复现再改代码**：只读审计曾断言「Web 剔除不幂等（连点两次 = 二次裁剪）」，依据仅是「没有缓存」；实测发现 Web 每次都从**未被回写的** `frame_hex` 重算，本就幂等——按该结论加缓存后第二次解析反而拿到**未剔除**的原始字节（真回归），已撤销。凡结论带「因此/必然/会」的推断，先写 3 行脚本跑一遍。

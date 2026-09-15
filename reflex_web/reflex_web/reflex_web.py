@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
 from . import share_model as sm  # noqa: F401  顶部导入：构建期完成 rx.Model 元数据注册
-from . import spectrum_web, web_utils
+from . import spectrum_web, theme_web, web_utils
 
 # 批量摘要每页条数选项（值给 rx.el.option 用字符串，State 侧 int(value)）
 PAGE_SIZE_OPTIONS = (100, 200, 500, 1000)
@@ -4121,7 +4121,7 @@ class SpectrumState(rx.State):
         rows = marker_rows(markers, self.sp_ref_index)
         self.sp_marker_rows = [
             {"label": r[0], "freq": r[1], "level": r[2], "d_freq": r[3], "d_level": r[4],
-             "color": spectrum_web.marker_color(False, i)}
+             "color": spectrum_web.marker_var(i)}
             for i, r in enumerate(rows)
         ]
         self.sp_marker_count = len(markers)
@@ -4226,6 +4226,158 @@ class SpectrumState(rx.State):
 def _fmt_num(value: float) -> str:
     """数值回写表单（去掉多余小数位，避免 599.9999999 这类噪声）。"""
     return f"{round(float(value), 6):g}"
+
+
+# ═══════════════════════════════════════════════════════════════
+# 主题状态（模式 + 预设 + 强调色/灰阶/圆角；浅色 token 与改造前等价）
+# ═══════════════════════════════════════════════════════════════
+
+
+class ThemeState(rx.State):
+    """Web 主题：模式（浅/深/跟随系统）+ 预设（外观组合）+ 三维微调。
+
+    单一真相：本 State + `html.light|dark` 类 + `localStorage['nw-theme']`（见 `theme_web`）。
+    模式切换不依赖 Radix Provider 的内存状态——类由我们设置，并同步它读取的 `theme` 键。
+    """
+
+    mode: str = "light"
+    preset: str = "classic-light"
+    accent: str = theme_web.DEFAULT_ACCENT
+    gray: str = theme_web.DEFAULT_GRAY
+    radius: str = theme_web.DEFAULT_RADIUS
+    preset_options: list[dict[str, str]] = theme_web.preset_options()
+    accent_options: list[dict[str, str]] = [
+        {"label": label, "value": value} for value, label in theme_web.ACCENTS
+    ]
+    mode_options: list[dict[str, str]] = [
+        {"label": "浅色", "value": "light"},
+        {"label": "深色", "value": "dark"},
+        {"label": "跟随系统", "value": "system"},
+    ]
+
+    @rx.var
+    def root_class(self) -> str:
+        """页面根容器 class（强调色 token 作用域）。"""
+        return theme_web.theme_class(self.accent)
+
+    @rx.var
+    def preset_label(self) -> str:
+        for p in theme_web.PRESETS:
+            if p["id"] == self.preset:
+                return p["label"]
+        return "自定义"
+
+    @rx.var
+    def theme_choice(self) -> str:
+        """主题下拉的当前值（预设 id 或 accent:xxx）。"""
+        if self.preset != theme_web.CUSTOM_PRESET:
+            return theme_web.PRESET_PREFIX + self.preset
+        return theme_web.ACCENT_PREFIX + self.accent
+
+    @rx.var
+    def mode_button_label(self) -> str:
+        return theme_web.mode_label(self.mode)
+
+    @rx.var
+    def mode_button_icon(self) -> str:
+        return theme_web.mode_icon(self.mode)
+
+    def theme_boot(self):
+        """页面加载事件：注册跟随系统监听 + 读回本地主题并应用。
+
+        on_load 必须是事件处理器（EventHandler）而非裸 EventSpec，故这里返回
+        `rx.call_script(...)` 让它链式执行；脚本返回值交给 `restore`。
+        """
+        return rx.call_script(theme_web.restore_js(), callback=ThemeState.restore)
+
+    def apply_choice(self, value: str):
+        """主题下拉统一入口：`preset:xxx` / `accent:xxx` / `mode:xxx`。"""
+        if value.startswith(theme_web.PRESET_PREFIX):
+            return self.apply_preset(value[len(theme_web.PRESET_PREFIX):])
+        if value.startswith(theme_web.ACCENT_PREFIX):
+            return self.set_dimension("accent", value[len(theme_web.ACCENT_PREFIX):])
+        if value.startswith(theme_web.MODE_PREFIX):
+            return self.set_mode(value[len(theme_web.MODE_PREFIX):])
+        return None
+
+    def cycle_mode(self):
+        """模式循环按钮：浅色 → 深色 → 跟随系统。"""
+        return self.set_mode(theme_web.next_mode(self.mode))
+
+    def apply_preset(self, preset_id: str):
+        """套用预设（模式 + 强调色 + 灰阶 + 圆角）。"""
+        preset = theme_web.PRESET_BY_ID.get(preset_id)
+        if preset is None:
+            return
+        self.preset = preset["id"]
+        self.mode = preset["mode"]
+        self.accent = preset["accent"]
+        self.gray = preset["gray"]
+        self.radius = preset["radius"]
+        return rx.call_script(
+            theme_web.persist_js(self.mode, self.accent, self.gray, self.radius)
+        )
+
+    def set_mode(self, mode: str):
+        """模式切换（浅色/深色/跟随系统）。"""
+        if mode not in theme_web.MODES:
+            return
+        self.mode = mode
+        return rx.call_script(
+            theme_web.persist_js(self.mode, self.accent, self.gray, self.radius)
+        )
+
+    def set_dimension(self, name: str, value: str):
+        """强调色 / 灰阶 / 圆角 微调（脱离预设 → 「自定义」）。"""
+        if name == "accent" and value in [a for a, _ in theme_web.ACCENTS]:
+            self.accent = value
+        elif name == "gray" and value in theme_web.GRAYS:
+            self.gray = value
+        elif name == "radius" and value in theme_web.RADII:
+            self.radius = value
+        else:
+            return
+        self.preset = theme_web.CUSTOM_PRESET
+        return rx.call_script(
+            theme_web.persist_js(self.mode, self.accent, self.gray, self.radius)
+        )
+
+    def restore(self, raw: str):
+        """on_load 读回本地设置（`localStorage['nw-theme']` 的 JSON 串）。"""
+        if not raw:
+            return
+        try:
+            saved = json.loads(raw)
+        except (TypeError, ValueError):
+            return
+        if isinstance(saved, dict):
+            if saved.get("mode") in theme_web.MODES:
+                self.mode = saved["mode"]
+            if saved.get("accent") in [a for a, _ in theme_web.ACCENTS]:
+                self.accent = saved["accent"]
+            if saved.get("gray") in theme_web.GRAYS:
+                self.gray = saved["gray"]
+            if saved.get("radius") in theme_web.RADII:
+                self.radius = saved["radius"]
+            # 与某个预设完全一致则回显该预设（而非「自定义」）
+            self.preset = theme_web.match_preset(
+                self.mode, self.accent, self.gray, self.radius
+            )
+
+
+
+# ═══════════════════════════════════════════════════════════════
+# 全局样式（所有页面共用：基础设计系统 + 主题 token）
+# ═══════════════════════════════════════════════════════════════
+
+
+def theme_style() -> rx.Component:
+    """全局样式表（SEARCHABLE_CSS + GLOBAL_CSS + 主题 token）。
+
+    **每个页面都要挂**：独立页面（/share、/feedback 等）此前没有 GLOBAL_CSS，
+    而 header 已改用 `var(--accent)` 等 token → 缺样式会让顶栏背景透明、白字不可见。
+    """
+    return rx.el.style(SEARCHABLE_CSS + GLOBAL_CSS + theme_web.build_theme_css())
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -4351,6 +4503,38 @@ def header(show_parse_controls: bool = True) -> rx.Component:
                 ),
                 # 版本徽章
                 rx.badge("v1.13.0", color_scheme="blue", variant="soft", size="2"),
+                # ── 主题控件（仅主页；独立页面不渲染，避免挤掉导航按钮）──
+                rx.cond(
+                    show_parse_controls,
+                    rx.hstack(
+                    # ── 主题控件（紧凑：一个下拉 + 一个模式循环按钮）──
+                    rx.el.select(
+                        *[
+                            rx.el.option(o["label"], value=o["value"])
+                            for o in theme_web.preset_options()
+                        ],
+                        value=ThemeState.theme_choice,
+                        on_change=ThemeState.apply_choice,
+                        class_name="app-header-select",
+                        title="主题：预设 / 强调色 / 模式",
+                        data_testid="theme-preset",
+                    ),
+                    rx.el.button(
+                        rx.hstack(
+                            rx.icon(ThemeState.mode_button_icon, size=14),
+                            ThemeState.mode_button_label,
+                            spacing="1",
+                        ),
+                        on_click=ThemeState.cycle_mode,
+                        class_name="app-header-btn",
+                        title="切换模式：浅色 → 深色 → 跟随系统",
+                        data_testid="theme-mode",
+                    ),
+                        spacing="2",
+                        align="center",
+                    ),
+                    rx.fragment(),
+                ),
                 # 管理员登录/登出按钮（主页开弹窗；独立页面跳回主页弹窗位置）
                 rx.cond(
                     State.admin_logged_in,
@@ -4387,7 +4571,7 @@ def header(show_parse_controls: bool = True) -> rx.Component:
                         width="8px",
                         height="8px",
                         border_radius="50%",
-                        background="#4ade80",
+                        background="var(--ok)",
                         box_shadow="0 0 6px rgba(74, 222, 128, 0.8)",
                     ),
                     rx.text("就绪", size="1", color="white"),
@@ -4403,7 +4587,7 @@ def header(show_parse_controls: bool = True) -> rx.Component:
             width="100%",
             padding_y="3",
         ),
-        background="linear-gradient(135deg, #1e40af 0%, #2563eb 55%, #3b82f6 100%)",
+        background="linear-gradient(135deg, var(--accent-ink, #1e40af) 0%, var(--accent, #2563eb) 55%, var(--accent-ink, #3b82f6) 100%)",
         box_shadow="0 2px 16px rgba(30, 64, 175, 0.25)",
         position="sticky",
         top="0",
@@ -4419,7 +4603,7 @@ def newgen_controls() -> rx.Component:
         | (State.current_protocol == 11),
         rx.card(
             rx.hstack(
-                rx.icon("sliders_horizontal", size=18, color="#2563eb"),
+                rx.icon("sliders_horizontal", size=18, color="var(--accent)"),
                 rx.text("解析级别:", size="2", font_weight="medium"),
                 # 南网新一代（协议9）解析级别
                 rx.cond(
@@ -4624,7 +4808,7 @@ def single_parse_tab() -> rx.Component:
         rx.card(
             rx.vstack(
                 rx.hstack(
-                    rx.icon("file_input", size=20, color="#2563eb"),
+                    rx.icon("file_input", size=20, color="var(--accent)"),
                     rx.heading("报文输入", size="3", font_weight="semibold"),
                     spacing="2",
                 ),
@@ -4689,7 +4873,7 @@ def single_parse_tab() -> rx.Component:
             rx.card(
                 rx.vstack(
                     rx.hstack(
-                        rx.icon("table", size=20, color="#2563eb"),
+                        rx.icon("table", size=20, color="var(--accent)"),
                         rx.heading("解析结果", size="3", font_weight="semibold"),
                         rx.spacer(),
                         rx.badge(
@@ -4735,8 +4919,8 @@ def single_parse_tab() -> rx.Component:
                         ),
                         rx.center(
                             rx.vstack(
-                                rx.icon("inbox", size=48, color="#9ca3af"),
-                                rx.text("暂无解析结果", color="#6b7280", size="2"),
+                                rx.icon("inbox", size=48, color="var(--muted-2)"),
+                                rx.text("暂无解析结果", color="var(--muted)", size="2"),
                                 spacing="2",
                                 padding="8",
                             ),
@@ -4752,7 +4936,7 @@ def single_parse_tab() -> rx.Component:
             rx.card(
                 rx.vstack(
                     rx.hstack(
-                        rx.icon("circle_check", size=20, color="#059669"),
+                        rx.icon("circle_check", size=20, color="var(--ok)"),
                         rx.heading("校验结果", size="3", font_weight="semibold"),
                         spacing="2",
                     ),
@@ -4766,10 +4950,10 @@ def single_parse_tab() -> rx.Component:
                         ),
                         rx.center(
                             rx.vstack(
-                                rx.icon("shield", size=48, color="#9ca3af"),
+                                rx.icon("shield", size=48, color="var(--muted-2)"),
                                 rx.text(
                                     "点击「校验报文」进行协议一致性校验",
-                                    color="#6b7280",
+                                    color="var(--muted)",
                                     size="2",
                                 ),
                                 spacing="2",
@@ -4803,7 +4987,7 @@ def batch_parse_tab() -> rx.Component:
         rx.card(
             rx.vstack(
                 rx.hstack(
-                    rx.icon("list", size=20, color="#2563eb"),
+                    rx.icon("list", size=20, color="var(--accent)"),
                     rx.heading("批量报文输入", size="3", font_weight="semibold"),
                     rx.spacer(),
                     rx.text("(支持监控日志/纯HEX)", size="1", color="gray"),
@@ -4813,7 +4997,7 @@ def batch_parse_tab() -> rx.Component:
                 rx.upload(
                     rx.vstack(
                         rx.hstack(
-                            rx.icon("upload", size=20, color="#2563eb"),
+                            rx.icon("upload", size=20, color="var(--accent)"),
                             rx.text(
                                 "将日志文件拖拽到此处，或点击选择文件",
                                 size="2",
@@ -4842,7 +5026,7 @@ def batch_parse_tab() -> rx.Component:
                     State.batch_upload_name != "",
                     rx.card(
                         rx.hstack(
-                            rx.icon("file_check", size=16, color="#059669"),
+                            rx.icon("file_check", size=16, color="var(--ok)"),
                             rx.vstack(
                                 rx.text(
                                     f"{State.batch_upload_name}（{round(State.batch_upload_size / (1024 * 1024), 2)} MB，{State.batch_file_lines} 行）",
@@ -4887,7 +5071,7 @@ def batch_parse_tab() -> rx.Component:
                 rx.card(
                     rx.vstack(
                         rx.hstack(
-                            rx.icon("wand", size=16, color="#7c3aed"),
+                            rx.icon("wand", size=16, color="var(--accent)"),
                             rx.text(
                                 "预处理（命令链）", size="2", font_weight="semibold"
                             ),
@@ -5039,7 +5223,7 @@ def batch_parse_tab() -> rx.Component:
             rx.card(
                 rx.vstack(
                     rx.hstack(
-                        rx.icon("table", size=18, color="#2563eb"),
+                        rx.icon("table", size=18, color="var(--accent)"),
                         rx.heading("批量解析摘要", size="2", font_weight="semibold"),
                         spacing="2",
                     ),
@@ -5159,7 +5343,7 @@ def batch_parse_tab() -> rx.Component:
                                             width="100%",
                                             cursor="pointer",
                                             _hover={
-                                                "background": "rgba(37, 99, 235, 0.05)"
+                                                "background": "var(--accent-soft)"
                                             },
                                             # 选中高亮用 class（`style=rx.cond({...})` 在本项目
                                             # 实测不落到 DOM，class_name=rx.cond 是已验证可用的写法）
@@ -5187,8 +5371,8 @@ def batch_parse_tab() -> rx.Component:
                         ),
                         rx.center(
                             rx.vstack(
-                                rx.icon("inbox", size=48, color="#9ca3af"),
-                                rx.text("暂无批量解析结果", color="#6b7280", size="2"),
+                                rx.icon("inbox", size=48, color="var(--muted-2)"),
+                                rx.text("暂无批量解析结果", color="var(--muted)", size="2"),
                                 spacing="2",
                                 padding="8",
                             ),
@@ -5204,7 +5388,7 @@ def batch_parse_tab() -> rx.Component:
             rx.card(
                 rx.vstack(
                     rx.hstack(
-                        rx.icon("zoom_in", size=18, color="#2563eb"),
+                        rx.icon("zoom_in", size=18, color="var(--accent)"),
                         rx.heading("选中帧详细解析", size="2", font_weight="semibold"),
                         spacing="2",
                     ),
@@ -5222,7 +5406,7 @@ def batch_parse_tab() -> rx.Component:
                                 font_size="11px",
                             ),
                             padding="2",
-                            background="rgba(37, 99, 235, 0.05)",
+                            background="var(--accent-soft)",
                             border_radius="6px",
                             width="100%",
                         ),
@@ -5282,10 +5466,10 @@ def batch_parse_tab() -> rx.Component:
                         ),
                         rx.center(
                             rx.vstack(
-                                rx.icon("mouse_pointer", size=48, color="#9ca3af"),
+                                rx.icon("mouse_pointer", size=48, color="var(--muted-2)"),
                                 rx.text(
                                     "点击左侧摘要行查看详细解析",
-                                    color="#6b7280",
+                                    color="var(--muted)",
                                     size="2",
                                 ),
                                 spacing="2",
@@ -5410,9 +5594,9 @@ def _searchable_select(
         rx.cond(
             selected != "",
             rx.hstack(
-                rx.icon("check", size=14, color="#16a34a"),
-                rx.text("已选: ", size="1", color="#16a34a"),
-                rx.text(selected_label, size="1", color="#16a34a"),
+                rx.icon("check", size=14, color="var(--ok)"),
+                rx.text("已选: ", size="1", color="var(--ok)"),
+                rx.text(selected_label, size="1", color="var(--ok)"),
                 spacing="1",
             ),
         ),
@@ -5507,7 +5691,7 @@ def frame_gen_tab() -> rx.Component:
             rx.card(
                 rx.vstack(
                     rx.hstack(
-                        rx.icon("layers", size=18, color="#2563eb"),
+                        rx.icon("layers", size=18, color="var(--accent)"),
                         rx.heading("组帧模式", size="3", font_weight="semibold"),
                         spacing="2",
                     ),
@@ -5583,7 +5767,7 @@ def frame_gen_tab() -> rx.Component:
             rx.card(
                 rx.vstack(
                     rx.hstack(
-                        rx.icon("bookmark", size=18, color="#2563eb"),
+                        rx.icon("bookmark", size=18, color="var(--accent)"),
                         rx.heading("预设命令", size="3", font_weight="semibold"),
                         rx.spacer(),
                         rx.input(
@@ -5738,7 +5922,7 @@ def frame_gen_tab() -> rx.Component:
         return rx.card(
             rx.vstack(
                 rx.hstack(
-                    rx.icon("layers", size=18, color="#2563eb"),
+                    rx.icon("layers", size=18, color="var(--accent)"),
                     rx.heading(
                         "EB 数据标识 帧生成器", size="2", font_weight="semibold"
                     ),
@@ -6367,7 +6551,7 @@ def frame_gen_tab() -> rx.Component:
             rx.card(
                 rx.vstack(
                     rx.hstack(
-                        rx.icon("list_tree", size=18, color="#2563eb"),
+                        rx.icon("list_tree", size=18, color="var(--accent)"),
                         rx.heading("数据字段", size="3", font_weight="semibold"),
                         spacing="2",
                     ),
@@ -6594,7 +6778,7 @@ def frame_gen_tab() -> rx.Component:
             rx.card(
                 rx.vstack(
                     rx.hstack(
-                        rx.icon("table_2", size=18, color="#f97316"),
+                        rx.icon("table_2", size=18, color="var(--warn)"),
                         rx.heading("自定义字段模板", size="3", font_weight="semibold"),
                         spacing="2",
                     ),
@@ -6760,7 +6944,7 @@ def frame_gen_tab() -> rx.Component:
             rx.card(
                 rx.vstack(
                     rx.hstack(
-                        rx.icon("braces", size=18, color="#7c3aed"),
+                        rx.icon("braces", size=18, color="var(--accent)"),
                         rx.heading(
                             "A-XDR 数据编辑器", size="3", font_weight="semibold"
                         ),
@@ -6884,7 +7068,7 @@ def frame_gen_tab() -> rx.Component:
             rx.card(
                 rx.vstack(
                     rx.hstack(
-                        rx.icon("server", size=18, color="#2563eb"),
+                        rx.icon("server", size=18, color="var(--accent)"),
                         rx.heading("SA 与控制字段", size="3", font_weight="semibold"),
                         spacing="2",
                     ),
@@ -7000,7 +7184,7 @@ def frame_gen_tab() -> rx.Component:
             rx.card(
                 rx.vstack(
                     rx.hstack(
-                        rx.icon("gauge", size=18, color="#2563eb"),
+                        rx.icon("gauge", size=18, color="var(--accent)"),
                         rx.text("DLT645-2007 帧配置", font_weight="bold"),
                         spacing="2",
                     ),
@@ -7031,7 +7215,7 @@ def frame_gen_tab() -> rx.Component:
                             width="160px",
                             size="2",
                         ),
-                        rx.text(State.gen_dlt645_di_label, size="1", color="#6b7280"),
+                        rx.text(State.gen_dlt645_di_label, size="1", color="var(--muted)"),
                         spacing="2",
                     ),
                     rx.foreach(
@@ -7047,7 +7231,7 @@ def frame_gen_tab() -> rx.Component:
                             spacing="2",
                         ),
                     ),
-                    rx.text(State.gen_dlt645_ctrl_label, size="1", color="#6b7280"),
+                    rx.text(State.gen_dlt645_ctrl_label, size="1", color="var(--muted)"),
                     spacing="3",
                 ),
             ),
@@ -7060,7 +7244,7 @@ def frame_gen_tab() -> rx.Component:
             rx.card(
                 rx.vstack(
                     rx.hstack(
-                        rx.icon("git_branch", size=18, color="#2563eb"),
+                        rx.icon("git_branch", size=18, color="var(--accent)"),
                         rx.heading("中继地址 A2", size="3", font_weight="semibold"),
                         spacing="2",
                     ),
@@ -7085,7 +7269,7 @@ def frame_gen_tab() -> rx.Component:
             rx.card(
                 rx.vstack(
                     rx.hstack(
-                        rx.icon("scan_eye", size=18, color="#059669"),
+                        rx.icon("scan_eye", size=18, color="var(--ok)"),
                         rx.heading("实时回读解析", size="3", font_weight="semibold"),
                         spacing="2",
                     ),
@@ -7143,7 +7327,7 @@ def frame_gen_tab() -> rx.Component:
             rx.card(
                 rx.vstack(
                     rx.hstack(
-                        rx.icon("info", size=18, color="#2563eb"),
+                        rx.icon("info", size=18, color="var(--accent)"),
                         rx.heading("信息域配置", size="3", font_weight="semibold"),
                         spacing="2",
                     ),
@@ -7181,7 +7365,7 @@ def frame_gen_tab() -> rx.Component:
         rx.card(
             rx.vstack(
                 rx.hstack(
-                    rx.icon("settings", size=20, color="#2563eb"),
+                    rx.icon("settings", size=20, color="var(--accent)"),
                     rx.heading("选择命令", size="3", font_weight="semibold"),
                     rx.spacer(),
                     rx.cond(
@@ -7289,7 +7473,7 @@ def frame_gen_tab() -> rx.Component:
         rx.card(
             rx.vstack(
                 rx.hstack(
-                    rx.icon("grid_3x_3", size=20, color="#2563eb"),
+                    rx.icon("grid_3x_3", size=20, color="var(--accent)"),
                     rx.heading("帧配置", size="3", font_weight="semibold"),
                     spacing="2",
                 ),
@@ -7385,7 +7569,7 @@ def frame_gen_tab() -> rx.Component:
             rx.card(
                 rx.vstack(
                     rx.hstack(
-                        rx.icon("eye", size=20, color="#2563eb"),
+                        rx.icon("eye", size=20, color="var(--accent)"),
                         rx.heading("生成预览", size="3", font_weight="semibold"),
                         spacing="2",
                     ),
@@ -7408,7 +7592,7 @@ def frame_gen_tab() -> rx.Component:
             rx.card(
                 rx.vstack(
                     rx.hstack(
-                        rx.icon("square_arrow_out_up_right", size=20, color="#059669"),
+                        rx.icon("square_arrow_out_up_right", size=20, color="var(--ok)"),
                         rx.heading("生成结果", size="3", font_weight="semibold"),
                         spacing="2",
                     ),
@@ -7429,9 +7613,9 @@ def frame_gen_tab() -> rx.Component:
                         ),
                         rx.center(
                             rx.vstack(
-                                rx.icon("building", size=48, color="#9ca3af"),
+                                rx.icon("building", size=48, color="var(--muted-2)"),
                                 rx.text(
-                                    "点击「生成帧」查看结果", color="#6b7280", size="2"
+                                    "点击「生成帧」查看结果", color="var(--muted)", size="2"
                                 ),
                                 spacing="2",
                                 padding="8",
@@ -7489,7 +7673,7 @@ def diff_tab() -> rx.Component:
             rx.card(
                 rx.vstack(
                     rx.hstack(
-                        rx.icon("file", size=18, color="#2563eb"),
+                        rx.icon("file", size=18, color="var(--accent)"),
                         rx.heading("报文 A (基准)", size="2", font_weight="semibold"),
                         spacing="2",
                     ),
@@ -7510,7 +7694,7 @@ def diff_tab() -> rx.Component:
             rx.card(
                 rx.vstack(
                     rx.hstack(
-                        rx.icon("file", size=18, color="#d97706"),
+                        rx.icon("file", size=18, color="var(--warn)"),
                         rx.heading("报文 B (对比)", size="2", font_weight="semibold"),
                         spacing="2",
                     ),
@@ -7581,7 +7765,7 @@ def diff_tab() -> rx.Component:
             rx.card(
                 rx.vstack(
                     rx.hstack(
-                        rx.icon("lightbulb", size=18, color="#f59e0b"),
+                        rx.icon("lightbulb", size=18, color="var(--warn)"),
                         rx.heading("差异说明", size="3", font_weight="semibold"),
                         spacing="2",
                     ),
@@ -7590,7 +7774,7 @@ def diff_tab() -> rx.Component:
                             State.diff_explanations,
                             lambda exp: rx.hstack(
                                 rx.icon(
-                                    "info", size=14, color="#f59e0b", flex_shrink="0"
+                                    "info", size=14, color="var(--warn)", flex_shrink="0"
                                 ),
                                 rx.text(exp, size="2"),
                                 spacing="2",
@@ -7598,7 +7782,7 @@ def diff_tab() -> rx.Component:
                                 padding_y="1",
                                 width="100%",
                                 background="rgba(245, 158, 11, 0.05)",
-                                border_left="3px solid #f59e0b",
+                                border_left="3px solid var(--warn)",
                                 border_radius="4px",
                             ),
                         ),
@@ -7615,7 +7799,7 @@ def diff_tab() -> rx.Component:
         rx.card(
             rx.vstack(
                 rx.hstack(
-                    rx.icon("table", size=18, color="#2563eb"),
+                    rx.icon("table", size=18, color="var(--accent)"),
                     rx.heading("字段级对比", size="3", font_weight="semibold"),
                     rx.spacer(),
                     rx.badge(
@@ -7706,10 +7890,10 @@ def diff_tab() -> rx.Component:
                     ),
                     rx.center(
                         rx.vstack(
-                            rx.icon("git_compare", size=40, color="#9ca3af"),
+                            rx.icon("git_compare", size=40, color="var(--muted-2)"),
                             rx.text(
                                 "点击「开始对比」查看字段级差异",
-                                color="#6b7280",
+                                color="var(--muted)",
                                 size="2",
                             ),
                             spacing="2",
@@ -7727,7 +7911,7 @@ def diff_tab() -> rx.Component:
         rx.card(
             rx.vstack(
                 rx.hstack(
-                    rx.icon("binary", size=18, color="#2563eb"),
+                    rx.icon("binary", size=18, color="var(--accent)"),
                     rx.heading(
                         "字节级对比 (按字段分组)", size="3", font_weight="semibold"
                     ),
@@ -7851,10 +8035,10 @@ def diff_tab() -> rx.Component:
                     ),
                     rx.center(
                         rx.vstack(
-                            rx.icon("binary", size=40, color="#9ca3af"),
+                            rx.icon("binary", size=40, color="var(--muted-2)"),
                             rx.text(
                                 "点击「开始对比」查看字节级差异",
-                                color="#6b7280",
+                                color="var(--muted)",
                                 size="2",
                             ),
                             spacing="2",
@@ -7885,7 +8069,7 @@ def download_tab() -> rx.Component:
         rx.card(
             rx.vstack(
                 rx.hstack(
-                    rx.icon("download", size=22, color="#2563eb"),
+                    rx.icon("download", size=22, color="var(--accent)"),
                     rx.heading("客户端下载", size="4", font_weight="bold"),
                     spacing="2",
                 ),
@@ -7949,7 +8133,7 @@ def download_tab() -> rx.Component:
             rx.card(
                 rx.vstack(
                     rx.hstack(
-                        rx.icon("info", size=20, color="#2563eb"),
+                        rx.icon("info", size=20, color="var(--accent)"),
                         rx.heading("当前版本", size="3", font_weight="bold"),
                         rx.spacer(),
                         rx.badge(
@@ -7992,7 +8176,7 @@ def download_tab() -> rx.Component:
             rx.card(
                 rx.vstack(
                     rx.hstack(
-                        rx.icon("history", size=20, color="#6b7280"),
+                        rx.icon("history", size=20, color="var(--muted)"),
                         rx.heading("版本历史", size="3", font_weight="bold"),
                         rx.spacer(),
                         rx.badge(
@@ -8047,7 +8231,7 @@ def download_tab() -> rx.Component:
                         src=State.download_image_data_url,
                         alt="客户端软件界面",
                         border_radius="8px",
-                        border="1px solid #e5e7eb",
+                        border="1px solid var(--border)",
                         width="100%",
                         max_width="960px",
                         object_fit="contain",
@@ -8055,13 +8239,13 @@ def download_tab() -> rx.Component:
                     rx.box(
                         rx.center(
                             rx.vstack(
-                                rx.icon("image_off", size=40, color="#94a3b8"),
-                                rx.text("暂无界面截图", size="2", color="#94a3b8"),
+                                rx.icon("image_off", size=40, color="var(--muted-2)"),
+                                rx.text("暂无界面截图", size="2", color="var(--muted-2)"),
                                 spacing="2",
                             ),
                             min_height="200px",
                         ),
-                        border="1px dashed #cbd5e1",
+                        border="1px dashed var(--border-strong)",
                         border_radius="8px",
                     ),
                 ),
@@ -8076,7 +8260,7 @@ def download_tab() -> rx.Component:
             rx.card(
                 rx.vstack(
                     rx.hstack(
-                        rx.icon("file_text", size=18, color="#2563eb"),
+                        rx.icon("file_text", size=18, color="var(--accent)"),
                         rx.heading(
                             "客户端说明 (README)", size="3", font_weight="semibold"
                         ),
@@ -8552,14 +8736,14 @@ def _fb_msg_banner() -> rx.Component:
                 ),
                 size=16,
                 color=rx.cond(
-                    FeedbackState.fb_msg_type == "error", "#dc2626", "#16a34a"
+                    FeedbackState.fb_msg_type == "error", "var(--danger)", "var(--ok)"
                 ),
             ),
             rx.text(
                 FeedbackState.fb_msg,
                 size="2",
                 color=rx.cond(
-                    FeedbackState.fb_msg_type == "error", "#dc2626", "#15803d"
+                    FeedbackState.fb_msg_type == "error", "var(--danger)", "var(--ok)"
                 ),
             ),
             spacing="2",
@@ -8567,8 +8751,8 @@ def _fb_msg_banner() -> rx.Component:
             border_radius="8px",
             background=rx.cond(
                 FeedbackState.fb_msg_type == "error",
-                "#fef2f2",
-                "#f0fdf4",
+                "var(--danger)",
+                "var(--ok-soft)",
             ),
             width="100%",
         ),
@@ -8578,13 +8762,14 @@ def _fb_msg_banner() -> rx.Component:
 def feedback_page() -> rx.Component:
     """问题反馈提交页（用户侧，无需登录）"""
     return rx.box(
+        theme_style(),
         rx.el.style(GLOBAL_CSS),
         header(show_parse_controls=False),
         rx.box(
             rx.vstack(
                 # 页面标题
                 rx.hstack(
-                    rx.icon("message_square_heart", size=24, color="#2563eb"),
+                    rx.icon("message_square_heart", size=24, color="var(--accent)"),
                     rx.heading("问题反馈", size="5", font_weight="bold"),
                     spacing="2",
                     margin_bottom="4px",
@@ -8592,7 +8777,7 @@ def feedback_page() -> rx.Component:
                 rx.text(
                     "使用中遇到问题或有改进建议，请在此反馈。我们会尽快处理。",
                     size="2",
-                    color="#64748b",
+                    color="var(--muted)",
                     margin_bottom="12px",
                 ),
                 # 表单卡片
@@ -8643,7 +8828,7 @@ def feedback_page() -> rx.Component:
                                 rx.text(
                                     f"{FeedbackState.fb_desc.length()} / 2000",
                                     size="1",
-                                    color="#94a3b8",
+                                    color="var(--muted-2)",
                                 ),
                                 spacing="2",
                                 width="100%",
@@ -8682,7 +8867,7 @@ def feedback_page() -> rx.Component:
                             ),
                             rx.upload(
                                 rx.hstack(
-                                    rx.icon("image_up", size=20, color="#2563eb"),
+                                    rx.icon("image_up", size=20, color="var(--accent)"),
                                     rx.text("拖拽截图到此处，或点击选择", size="2"),
                                     spacing="2",
                                     align="center",
@@ -8702,13 +8887,13 @@ def feedback_page() -> rx.Component:
                             rx.cond(
                                 FeedbackState.fb_files.length() > 0,
                                 rx.hstack(
-                                    rx.icon("paperclip", size=14, color="#64748b"),
+                                    rx.icon("paperclip", size=14, color="var(--muted)"),
                                     rx.text(
                                         "已选 "
                                         + FeedbackState.fb_files.length().to_string()
                                         + " 张截图",
                                         size="1",
-                                        color="#64748b",
+                                        color="var(--muted)",
                                     ),
                                     rx.button(
                                         "清除",
@@ -8751,8 +8936,9 @@ def feedback_page() -> rx.Component:
             class_name="app-container",
             width="100%",
         ),
-        background="#f1f5f9",
+        background="var(--bg)",
         min_height="100vh",
+        class_name=ThemeState.root_class,
     )
 
 
@@ -8781,7 +8967,7 @@ def _fa_item_row(item: dict[str, Any]) -> rx.Component:
                         variant="soft",
                         size="1",
                     ),
-                    rx.text(item["protocol"], size="1", color="#64748b"),
+                    rx.text(item["protocol"], size="1", color="var(--muted)"),
                     # 桌面端 GUI 提交标记（Web 表单提交 source=web，不显示）
                     rx.cond(
                         item.get("source", "web") == "gui",
@@ -8794,20 +8980,20 @@ def _fa_item_row(item: dict[str, Any]) -> rx.Component:
                 rx.text(
                     item["description"],
                     size="2",
-                    color="#334155",
+                    color="var(--text-2)",
                     no_of_lines=2,
                     width="100%",
                 ),
                 rx.hstack(
-                    rx.text("#" + item["id"].to_string(), size="1", color="#94a3b8"),
-                    rx.text(item["created_at"], size="1", color="#94a3b8"),
+                    rx.text("#" + item["id"].to_string(), size="1", color="var(--muted-2)"),
+                    rx.text(item["created_at"], size="1", color="var(--muted-2)"),
                     spacing="3",
                 ),
                 spacing="1",
                 align="start",
                 flex="1",
             ),
-            rx.icon("chevron_right", size=18, color="#94a3b8"),
+            rx.icon("chevron_right", size=18, color="var(--muted-2)"),
             spacing="3",
             align="center",
             width="100%",
@@ -8843,19 +9029,19 @@ def _fa_detail_dialog() -> rx.Component:
                     rx.text(
                         d["protocol"],
                         size="2",
-                        color="#64748b",
+                        color="var(--muted)",
                     ),
                     spacing="2",
                 ),
                 rx.text(
                     "#" + d["id"].to_string() + "  ·  " + d["created_at"].to_string(),
                     size="1",
-                    color="#94a3b8",
+                    color="var(--muted-2)",
                 ),
                 rx.text(
                     d["description"],
                     size="2",
-                    color="#0f172a",
+                    color="var(--text)",
                     style={"white_space": "pre-wrap"},
                     width="100%",
                 ),
@@ -8864,7 +9050,7 @@ def _fa_detail_dialog() -> rx.Component:
                     rx.text(
                         "联系方式: " + d["contact"].to_string(),
                         size="2",
-                        color="#475569",
+                        color="var(--text-2)",
                     ),
                 ),
                 # GUI 桌面端提交的环境信息（Web 表单提交无此字段）
@@ -8875,14 +9061,14 @@ def _fa_detail_dialog() -> rx.Component:
                             "客户端环境",
                             size="2",
                             font_weight="medium",
-                            color="#475569",
+                            color="var(--text-2)",
                         ),
                         rx.code(
                             d.get("sys_info", "").to(str),
                             size="1",
                             white_space="pre-wrap",
                             width="100%",
-                            background="#f1f5f9",
+                            background="var(--bg)",
                             padding="8px",
                             border_radius="6px",
                         ),
@@ -8905,7 +9091,7 @@ def _fa_detail_dialog() -> rx.Component:
                                     max_height="320px",
                                     max_width="100%",
                                     border_radius="8px",
-                                    border="1px solid #e2e8f0",
+                                    border="1px solid var(--border)",
                                 ),
                             ),
                         ),
@@ -8921,8 +9107,8 @@ def _fa_detail_dialog() -> rx.Component:
                         size="2",
                         color=rx.cond(
                             FeedbackState.fa_detail_msg.contains("需要管理员"),
-                            "#dc2626",
-                            "#15803d",
+                            "var(--danger)",
+                            "var(--ok)",
                         ),
                     ),
                 ),
@@ -8930,7 +9116,7 @@ def _fa_detail_dialog() -> rx.Component:
                 rx.cond(
                     State.admin_logged_in,
                     rx.hstack(
-                        rx.text("标记状态:", size="2", color="#64748b"),
+                        rx.text("标记状态:", size="2", color="var(--muted)"),
                         rx.button(
                             "已确认",
                             size="1",
@@ -8964,9 +9150,9 @@ def _fa_detail_dialog() -> rx.Component:
                         width="100%",
                     ),
                     rx.hstack(
-                        rx.icon("info", size=14, color="#94a3b8"),
+                        rx.icon("info", size=14, color="var(--muted-2)"),
                         rx.text(
-                            "管理员登录后可修改状态或删除", size="1", color="#94a3b8"
+                            "管理员登录后可修改状态或删除", size="1", color="var(--muted-2)"
                         ),
                         spacing="1",
                     ),
@@ -9002,7 +9188,7 @@ def feedback_list_tab() -> rx.Component:
     """问题反馈列表 Tab（主页内，所有人可见；管理操作仅登录后）"""
     return rx.vstack(
         rx.hstack(
-            rx.icon("message_square_heart", size=20, color="#2563eb"),
+            rx.icon("message_square_heart", size=20, color="var(--accent)"),
             rx.heading("问题反馈", size="4", font_weight="bold"),
             rx.spacer(),
             rx.el.a(
@@ -9012,7 +9198,7 @@ def feedback_list_tab() -> rx.Component:
                 style={
                     "text_decoration": "none",
                     "color": "white",
-                    "background": "linear-gradient(135deg, #2563eb, #3b82f6)",
+                    "background": "linear-gradient(135deg, var(--accent, #2563eb), var(--accent-ink, #3b82f6))",
                     "padding": "6px 14px",
                     "border_radius": "8px",
                     "font_size": "13px",
@@ -9039,7 +9225,7 @@ def feedback_list_tab() -> rx.Component:
         ),
         rx.cond(
             FeedbackState.fa_msg != "",
-            rx.text(FeedbackState.fa_msg, size="2", color="#64748b"),
+            rx.text(FeedbackState.fa_msg, size="2", color="var(--muted)"),
         ),
         rx.cond(
             FeedbackState.fa_total > 0,
@@ -9049,11 +9235,11 @@ def feedback_list_tab() -> rx.Component:
                 width="100%",
             ),
             rx.vstack(
-                rx.icon("inbox", size=36, color="#cbd5e1"),
+                rx.icon("inbox", size=36, color="var(--border-strong)"),
                 rx.text(
                     "暂无反馈，点击右上角「我要反馈」提交第一条",
                     size="3",
-                    color="#94a3b8",
+                    color="var(--muted-2)",
                 ),
                 spacing="2",
                 align="center",
@@ -9088,7 +9274,7 @@ def feedback_list_tab() -> rx.Component:
                     + FeedbackState.fa_total.to_string()
                     + " 条）",
                     size="1",
-                    color="#64748b",
+                    color="var(--muted)",
                 ),
                 rx.button(
                     "下一页 ›",
@@ -9111,24 +9297,25 @@ def feedback_list_tab() -> rx.Component:
 def feedback_admin_page() -> rx.Component:
     """反馈管理页（历史入口，现列表已迁至主页「问题反馈」Tab，此页保留链接兼容）"""
     return rx.box(
+        theme_style(),
         rx.el.style(GLOBAL_CSS),
         header(show_parse_controls=False),
         rx.box(
             rx.vstack(
                 rx.hstack(
-                    rx.icon("inbox", size=24, color="#2563eb"),
+                    rx.icon("inbox", size=24, color="var(--accent)"),
                     rx.heading("反馈管理", size="5", font_weight="bold"),
                     spacing="2",
                 ),
                 rx.text(
                     "反馈列表已迁移至主页「问题反馈」标签页（与发布管理同级）。",
                     size="2",
-                    color="#64748b",
+                    color="var(--muted)",
                 ),
                 rx.text(
                     "在该标签页中所有人可查看反馈列表与状态；管理员登录后可修改状态/删除。",
                     size="2",
-                    color="#64748b",
+                    color="var(--muted)",
                 ),
                 rx.el.a(
                     rx.hstack(
@@ -9138,7 +9325,7 @@ def feedback_admin_page() -> rx.Component:
                     style={
                         "text_decoration": "none",
                         "color": "white",
-                        "background": "linear-gradient(135deg, #2563eb, #3b82f6)",
+                        "background": "linear-gradient(135deg, var(--accent, #2563eb), var(--accent-ink, #3b82f6))",
                         "padding": "10px 20px",
                         "border_radius": "10px",
                         "font_weight": "medium",
@@ -9151,8 +9338,9 @@ def feedback_admin_page() -> rx.Component:
             class_name="app-container",
             width="100%",
         ),
-        background="#f1f5f9",
+        background="var(--bg)",
         min_height="100vh",
+        class_name=ThemeState.root_class,
     )
 
 
@@ -9185,13 +9373,13 @@ def _sh_item_card(item: dict[str, Any]) -> rx.Component:
                     rx.text(
                         "分享人: ",
                         size="1",
-                        color="#475569",
+                        color="var(--text-2)",
                         font_weight="medium",
                     ),
                     rx.text(
                         item["sharer"],
                         size="1",
-                        color="#475569",
+                        color="var(--text-2)",
                         font_weight="medium",
                     ),
                     spacing="2",
@@ -9211,23 +9399,23 @@ def _sh_item_card(item: dict[str, Any]) -> rx.Component:
                 rx.hstack(
                     rx.cond(
                         item.get("note", "") != "",
-                        rx.text(item["note"], size="1", color="#64748b"),
+                        rx.text(item["note"], size="1", color="var(--muted)"),
                     ),
                     rx.text(
                         "#",
                         size="1",
-                        color="#94a3b8",
+                        color="var(--muted-2)",
                     ),
                     rx.text(
-                        str(item.get("id", "")),
+                        item["id"].to_string(),
                         size="1",
-                        color="#94a3b8",
+                        color="var(--muted-2)",
                     ),
-                    rx.text("·", size="1", color="#94a3b8"),
+                    rx.text("·", size="1", color="var(--muted-2)"),
                     rx.text(
                         item["created_at"],
                         size="1",
-                        color="#94a3b8",
+                        color="var(--muted-2)",
                     ),
                     spacing="3",
                 ),
@@ -9235,7 +9423,7 @@ def _sh_item_card(item: dict[str, Any]) -> rx.Component:
                 align="start",
                 flex="1",
             ),
-            rx.icon("chevron_right", size=18, color="#94a3b8"),
+            rx.icon("chevron_right", size=18, color="var(--muted-2)"),
             spacing="3",
             align="center",
             width="100%",
@@ -9275,7 +9463,7 @@ def _sh_delete_confirm_dialog() -> rx.Component:
                     rx.text(
                         ShareState.sh_admin_msg,
                         size="2",
-                        color="#dc2626",
+                        color="var(--danger)",
                     ),
                 ),
                 rx.hstack(
@@ -9316,10 +9504,10 @@ def _sh_detail_dialog() -> rx.Component:
                         d["protocol"], color_scheme="purple", variant="soft", size="1"
                     ),
                     _sh_source_badge(d.get("source", "web")),
-                    rx.text("#", size="1", color="#94a3b8"),
-                    rx.text(d["id"].to_string(), size="1", color="#94a3b8"),
-                    rx.text("·", size="1", color="#94a3b8"),
-                    rx.text(d["created_at"], size="1", color="#94a3b8"),
+                    rx.text("#", size="1", color="var(--muted-2)"),
+                    rx.text(d["id"].to_string(), size="1", color="var(--muted-2)"),
+                    rx.text("·", size="1", color="var(--muted-2)"),
+                    rx.text(d["created_at"], size="1", color="var(--muted-2)"),
                     spacing="2",
                 ),
                 rx.hstack(
@@ -9332,7 +9520,7 @@ def _sh_detail_dialog() -> rx.Component:
                     rx.text(
                         d["note"],
                         size="2",
-                        color="#334155",
+                        color="var(--text-2)",
                         style={"white_space": "pre-wrap"},
                         width="100%",
                     ),
@@ -9359,7 +9547,7 @@ def _sh_detail_dialog() -> rx.Component:
                             "word_break": "break-all",
                             "width": "100%",
                             "padding": "8px",
-                            "background": "#f1f5f9",
+                            "background": "var(--bg)",
                             "border_radius": "6px",
                         },
                     ),
@@ -9410,7 +9598,7 @@ def _share_submit_dialog() -> rx.Component:
                             "word_break": "break-all",
                             "width": "100%",
                             "padding": "8px",
-                            "background": "#f1f5f9",
+                            "background": "var(--bg)",
                             "border_radius": "6px",
                             "max_height": "120px",
                             "overflow_y": "auto",
@@ -9471,7 +9659,7 @@ def _share_submit_dialog() -> rx.Component:
                         ShareState.sf_msg,
                         size="2",
                         color=rx.cond(
-                            ShareState.sf_msg_type == "error", "#dc2626", "#15803d"
+                            ShareState.sf_msg_type == "error", "var(--danger)", "var(--ok)"
                         ),
                     ),
                 ),
@@ -9504,12 +9692,13 @@ def _share_submit_dialog() -> rx.Component:
 def share_page() -> rx.Component:
     """报文分享页（所有人可浏览/搜索；提交入口在主页单帧解析）"""
     return rx.box(
+        theme_style(),
         rx.el.style(GLOBAL_CSS),
         header(show_parse_controls=False),
         rx.box(
             rx.vstack(
                 rx.hstack(
-                    rx.icon("share_2", size=24, color="#2563eb"),
+                    rx.icon("share_2", size=24, color="var(--accent)"),
                     rx.heading("报文分享", size="5", font_weight="bold"),
                     rx.badge(
                         ShareState.sh_total.to_string() + " 条",
@@ -9522,7 +9711,7 @@ def share_page() -> rx.Component:
                 rx.text(
                     "在主页单帧解析后点击「分享此帧」，即可把有价值的命令帧分享到这里，供所有人查阅。",
                     size="2",
-                    color="#64748b",
+                    color="var(--muted)",
                 ),
                 # 搜索框
                 rx.hstack(
@@ -9542,7 +9731,7 @@ def share_page() -> rx.Component:
                         style={
                             "text_decoration": "none",
                             "color": "white",
-                            "background": "linear-gradient(135deg, #2563eb, #3b82f6)",
+                            "background": "linear-gradient(135deg, var(--accent, #2563eb), var(--accent-ink, #3b82f6))",
                         },
                     ),
                     spacing="3",
@@ -9550,7 +9739,7 @@ def share_page() -> rx.Component:
                 ),
                 rx.cond(
                     ShareState.sh_msg != "",
-                    rx.text(ShareState.sh_msg, size="2", color="#dc2626"),
+                    rx.text(ShareState.sh_msg, size="2", color="var(--danger)"),
                 ),
                 # 列表
                 rx.cond(
@@ -9561,7 +9750,7 @@ def share_page() -> rx.Component:
                         width="100%",
                     ),
                     rx.vstack(
-                        rx.icon("inbox", size=36, color="#cbd5e1"),
+                        rx.icon("inbox", size=36, color="var(--border-strong)"),
                         rx.text(
                             rx.cond(
                                 ShareState.sh_keyword != "",
@@ -9569,7 +9758,7 @@ def share_page() -> rx.Component:
                                 "暂无分享，去主页解析报文后点击「分享此帧」",
                             ),
                             size="3",
-                            color="#94a3b8",
+                            color="var(--muted-2)",
                         ),
                         spacing="2",
                         align="center",
@@ -9597,7 +9786,7 @@ def share_page() -> rx.Component:
                             + ShareState.sh_total.to_string()
                             + " 条）",
                             size="1",
-                            color="#64748b",
+                            color="var(--muted)",
                         ),
                         rx.button(
                             "下一页 ›",
@@ -9619,8 +9808,9 @@ def share_page() -> rx.Component:
             class_name="app-container",
             width="100%",
         ),
-        background="#f1f5f9",
+        background="var(--bg)",
         min_height="100vh",
+        class_name=ThemeState.root_class,
     )
 
 
@@ -9691,7 +9881,7 @@ def release_tab() -> rx.Component:
         rx.card(
             rx.vstack(
                 rx.hstack(
-                    rx.icon("package", size=22, color="#16a34a"),
+                    rx.icon("package", size=22, color="var(--ok)"),
                     rx.heading("当前版本", size="4", font_weight="bold"),
                     rx.spacer(),
                     rx.button(
@@ -9816,7 +10006,7 @@ def release_tab() -> rx.Component:
         rx.card(
             rx.vstack(
                 rx.hstack(
-                    rx.icon("upload", size=20, color="#2563eb"),
+                    rx.icon("upload", size=20, color="var(--accent)"),
                     rx.heading("发布新版本", size="4", font_weight="bold"),
                     spacing="2",
                 ),
@@ -9825,19 +10015,19 @@ def release_tab() -> rx.Component:
                     rx.text("exe 文件:", size="2", font_weight="medium"),
                     rx.upload(
                         rx.vstack(
-                            rx.icon("upload", size=32, color="#94a3b8"),
+                            rx.icon("upload", size=32, color="var(--muted-2)"),
                             rx.text(
                                 "拖拽 exe 到此处，或点击选择文件",
                                 size="2",
                                 color="gray",
                             ),
-                            rx.text("支持 .exe，最大 500MB", size="1", color="#94a3b8"),
+                            rx.text("支持 .exe，最大 500MB", size="1", color="var(--muted-2)"),
                             spacing="2",
                             align="center",
                             justify="center",
                             padding="20px",
                         ),
-                        border="1px dashed #cbd5e1",
+                        border="1px dashed var(--border-strong)",
                         border_radius="8px",
                         padding="20px",
                         on_drop=State.handle_release_upload,
@@ -9858,7 +10048,7 @@ def release_tab() -> rx.Component:
                     rx.cond(
                         State.release_upload_name != "",
                         rx.hstack(
-                            rx.icon("file_check", size=18, color="#16a34a"),
+                            rx.icon("file_check", size=18, color="var(--ok)"),
                             rx.text(
                                 State.release_upload_name,
                                 size="2",
@@ -9923,19 +10113,19 @@ def release_tab() -> rx.Component:
                     rx.text("软件界面截图:", size="2", font_weight="medium"),
                     rx.upload(
                         rx.vstack(
-                            rx.icon("image", size=24, color="#94a3b8"),
+                            rx.icon("image", size=24, color="var(--muted-2)"),
                             rx.text(
                                 "拖拽截图到此处，或点击选择", size="2", color="gray"
                             ),
                             rx.text(
-                                "支持 png/jpg/jpeg/gif/webp", size="1", color="#94a3b8"
+                                "支持 png/jpg/jpeg/gif/webp", size="1", color="var(--muted-2)"
                             ),
                             spacing="1",
                             align="center",
                             justify="center",
                             padding="12px",
                         ),
-                        border="1px dashed #cbd5e1",
+                        border="1px dashed var(--border-strong)",
                         border_radius="8px",
                         padding="12px",
                         on_drop=State.handle_screenshot_upload,
@@ -9950,9 +10140,9 @@ def release_tab() -> rx.Component:
                     rx.cond(
                         State.release_screenshot_uploaded,
                         rx.hstack(
-                            rx.icon("check_check", size=16, color="#16a34a"),
+                            rx.icon("check_check", size=16, color="var(--ok)"),
                             rx.text(
-                                "截图已上传，发布时一起更新", size="1", color="#16a34a"
+                                "截图已上传，发布时一起更新", size="1", color="var(--ok)"
                             ),
                             spacing="1",
                         ),
@@ -9970,7 +10160,7 @@ def release_tab() -> rx.Component:
                     rx.text("客户端说明 (README):", size="2", font_weight="medium"),
                     rx.upload(
                         rx.vstack(
-                            rx.icon("file-text", size=24, color="#94a3b8"),
+                            rx.icon("file-text", size=24, color="var(--muted-2)"),
                             rx.text(
                                 "拖拽 README 文件到此处，或点击选择",
                                 size="2",
@@ -9979,14 +10169,14 @@ def release_tab() -> rx.Component:
                             rx.text(
                                 "支持 md/markdown/txt 文本文件",
                                 size="1",
-                                color="#94a3b8",
+                                color="var(--muted-2)",
                             ),
                             spacing="1",
                             align="center",
                             justify="center",
                             padding="12px",
                         ),
-                        border="1px dashed #cbd5e1",
+                        border="1px dashed var(--border-strong)",
                         border_radius="8px",
                         padding="12px",
                         on_drop=State.handle_readme_upload,
@@ -10002,11 +10192,11 @@ def release_tab() -> rx.Component:
                     rx.cond(
                         State.release_readme_name != "",
                         rx.hstack(
-                            rx.icon("check_check", size=16, color="#16a34a"),
+                            rx.icon("check_check", size=16, color="var(--ok)"),
                             rx.text(
                                 f"已加载 {State.release_readme_name}，发布时一起更新",
                                 size="1",
-                                color="#16a34a",
+                                color="var(--ok)",
                             ),
                             spacing="1",
                         ),
@@ -10110,7 +10300,7 @@ def release_tab() -> rx.Component:
                                 State.release_success_info["sha256"],
                                 size="1",
                                 word_break="break-all",
-                                background="#f1f5f9",
+                                background="var(--bg)",
                                 padding="8px",
                                 border_radius="4px",
                                 width="100%",
@@ -10143,7 +10333,7 @@ def release_tab() -> rx.Component:
         rx.card(
             rx.vstack(
                 rx.hstack(
-                    rx.icon("history", size=20, color="#f59e0b"),
+                    rx.icon("history", size=20, color="var(--warn)"),
                     rx.heading("历史版本", size="4", font_weight="bold"),
                     spacing="2",
                 ),
@@ -10207,7 +10397,7 @@ def release_tab() -> rx.Component:
         rx.card(
             rx.vstack(
                 rx.hstack(
-                    rx.icon("key", size=20, color="#6366f1"),
+                    rx.icon("key", size=20, color="var(--accent)"),
                     rx.heading("修改密码", size="4", font_weight="bold"),
                     spacing="2",
                 ),
@@ -10282,7 +10472,7 @@ def lookup_tab() -> rx.Component:
         rx.card(
             rx.vstack(
                 rx.hstack(
-                    rx.icon("search", size=20, color="#2563eb"),
+                    rx.icon("search", size=20, color="var(--accent)"),
                     rx.heading(State.lookup_title, size="3", font_weight="semibold"),
                     rx.spacer(),
                     rx.badge(
@@ -10357,10 +10547,10 @@ def lookup_tab() -> rx.Component:
                     ),
                     rx.center(
                         rx.vstack(
-                            rx.icon("search", size=48, color="#9ca3af"),
+                            rx.icon("search", size=48, color="var(--muted-2)"),
                             rx.text(
                                 "点击「搜索」或切换协议查看查询数据",
-                                color="#6b7280",
+                                color="var(--muted)",
                                 size="2",
                             ),
                             spacing="2",
@@ -10411,7 +10601,7 @@ def message_tool_tab() -> rx.Component:
         rx.card(
             rx.vstack(
                 rx.hstack(
-                    rx.icon("wrench", size=20, color="#2563eb"),
+                    rx.icon("wrench", size=20, color="var(--accent)"),
                     rx.heading("报文工具", size="3", font_weight="semibold"),
                     rx.spacer(),
                     spacing="2",
@@ -10540,7 +10730,7 @@ def message_tool_tab() -> rx.Component:
                     width="100%",
                     font_family="monospace",
                     font_size="13px",
-                    background="#f8fafc",
+                    background="var(--code-bg)",
                 ),
                 spacing="3",
                 width="100%",
@@ -10582,7 +10772,7 @@ def spectrum_tab() -> rx.Component:
         rx.card(
             rx.vstack(
                 rx.hstack(
-                    rx.icon("sliders_horizontal", size=18, color="#2563eb"),
+                    rx.icon("sliders_horizontal", size=18, color="var(--accent)"),
                     rx.heading("频谱仪参数", size="2", font_weight="semibold"),
                     rx.spacer(),
                     rx.text(
@@ -10667,7 +10857,7 @@ def spectrum_tab() -> rx.Component:
                 rx.text(
                     SpectrumState.sp_axis_range,
                     size="1",
-                    color="#6b7280",
+                    color="var(--muted)",
                 ),
                 spacing="3",
                 width="100%",
@@ -10678,7 +10868,7 @@ def spectrum_tab() -> rx.Component:
         rx.card(
             rx.vstack(
                 rx.hstack(
-                    rx.icon("waves", size=18, color="#2563eb"),
+                    rx.icon("waves", size=18, color="var(--accent)"),
                     rx.heading("Trace 数值", size="2", font_weight="semibold"),
                     rx.spacer(),
                     rx.text(
@@ -10740,7 +10930,7 @@ def spectrum_tab() -> rx.Component:
                 ),
                 rx.cond(
                     SpectrumState.sp_msg != "",
-                    rx.text(SpectrumState.sp_msg, size="1", color="#2563eb"),
+                    rx.text(SpectrumState.sp_msg, size="1", color="var(--accent)"),
                 ),
                 spacing="2",
                 width="100%",
@@ -10758,8 +10948,8 @@ def spectrum_tab() -> rx.Component:
                             y=spectrum_web.PLOT_Y0,
                             width=spectrum_web.PLOT_X1 - spectrum_web.PLOT_X0,
                             height=spectrum_web.PLOT_Y1 - spectrum_web.PLOT_Y0,
-                            fill="#fbfdff",
-                            stroke="#cbd5e1",
+                            fill="var(--plot-bg)",
+                            stroke="var(--border-strong)",
                             stroke_width="1",
                         ),
                         rx.foreach(
@@ -10767,7 +10957,7 @@ def spectrum_tab() -> rx.Component:
                             lambda g: rx.el.line(
                                 x1=g["x"], y1=spectrum_web.PLOT_Y0,
                                 x2=g["x"], y2=spectrum_web.PLOT_Y1,
-                                stroke="#e2e8f0", stroke_width="1",
+                                stroke="var(--grid)", stroke_width="1",
                             ),
                         ),
                         rx.foreach(
@@ -10775,7 +10965,7 @@ def spectrum_tab() -> rx.Component:
                             lambda g: rx.el.line(
                                 x1=spectrum_web.PLOT_X0, y1=g["y"],
                                 x2=spectrum_web.PLOT_X1, y2=g["y"],
-                                stroke="#e2e8f0", stroke_width="1",
+                                stroke="var(--grid)", stroke_width="1",
                             ),
                         ),
                         # 积分带宽带（画在迹线之下：半透明填充 + 两条点划线边沿）
@@ -10787,7 +10977,7 @@ def spectrum_tab() -> rx.Component:
                                     y=spectrum_web.PLOT_Y0,
                                     width=SpectrumState.sp_ibw_rect["w"],
                                     height=spectrum_web.PLOT_Y1 - spectrum_web.PLOT_Y0,
-                                    fill="rgba(37, 99, 235, 0.10)",
+                                    fill="var(--accent-soft)",
                                     stroke="none",
                                 ),
                                 rx.el.line(
@@ -10795,7 +10985,7 @@ def spectrum_tab() -> rx.Component:
                                     y1=spectrum_web.PLOT_Y0,
                                     x2=SpectrumState.sp_ibw_rect["low_x"],
                                     y2=spectrum_web.PLOT_Y1,
-                                    stroke="#1d4ed8",
+                                    stroke="var(--accent)",
                                     stroke_width="1",
                                     stroke_dasharray="5 3",
                                 ),
@@ -10804,7 +10994,7 @@ def spectrum_tab() -> rx.Component:
                                     y1=spectrum_web.PLOT_Y0,
                                     x2=SpectrumState.sp_ibw_rect["high_x"],
                                     y2=spectrum_web.PLOT_Y1,
-                                    stroke="#1d4ed8",
+                                    stroke="var(--accent)",
                                     stroke_width="1",
                                     stroke_dasharray="5 3",
                                 ),
@@ -10816,7 +11006,7 @@ def spectrum_tab() -> rx.Component:
                             rx.el.path(
                                 d=SpectrumState.sp_polyline,
                                 fill="none",
-                                stroke="#0f766e",
+                                stroke="var(--trace)",
                                 stroke_width="1.4",
                             ),
                         ),
@@ -10844,19 +11034,19 @@ def spectrum_tab() -> rx.Component:
                         rx.el.text(
                             SpectrumState.sp_params_note,
                             x=spectrum_web.PLOT_X0, y="22",
-                            fill="#334155", font_size="12",
+                            fill="var(--text-2)", font_size="12",
                         ),
                         rx.el.text(
                             SpectrumState.sp_status,
                             x=spectrum_web.PLOT_X0, y=spectrum_web.VIEW_H - 12,
-                            fill="#64748b", font_size="11",
+                            fill="var(--muted)", font_size="11",
                         ),
                         rx.foreach(
                             SpectrumState.sp_y_labels,
                             lambda t: rx.el.text(
                                 t["text"],
                                 x=spectrum_web.PLOT_X0 - 8, y=t["ty"],
-                                fill="#475569", font_size="11", text_anchor="end",
+                                fill="var(--text-2)", font_size="11", text_anchor="end",
                             ),
                         ),
                         rx.foreach(
@@ -10864,7 +11054,7 @@ def spectrum_tab() -> rx.Component:
                             lambda t: rx.el.text(
                                 t["text"],
                                 x=t["x"], y=t["ty"],
-                                fill="#475569", font_size="11",
+                                fill="var(--text-2)", font_size="11",
                                 text_anchor=t["anchor"],
                             ),
                         ),
@@ -10875,7 +11065,7 @@ def spectrum_tab() -> rx.Component:
                                 SpectrumState.sp_ibw_short,
                                 x=spectrum_web.PLOT_X1 - 4,
                                 y=spectrum_web.PLOT_Y0 + 14,
-                                fill="#1d4ed8", font_size="11",
+                                fill="var(--accent-ink)", font_size="11",
                                 text_anchor="end",
                             ),
                         ),
@@ -10896,7 +11086,7 @@ def spectrum_tab() -> rx.Component:
                         view_box=spectrum_web.view_box(),
                         width="100%",
                         height="min(72vh, 620px)",
-                        style={"background": "#ffffff"},
+                        style={"background": "var(--card)"},
                     ),
                     spacing="2",
                     width="100%",
@@ -10907,9 +11097,9 @@ def spectrum_tab() -> rx.Component:
                 rx.card(
                     rx.vstack(
                         rx.heading("测量", size="2", font_weight="semibold"),
-                        rx.text(SpectrumState.sp_readout, size="1", color="#111827"),
+                        rx.text(SpectrumState.sp_readout, size="1", color="var(--text)"),
                         rx.text(SpectrumState.sp_extremes, size="1", color="gray"),
-                        rx.text(SpectrumState.sp_delta, size="1", color="#111827"),
+                        rx.text(SpectrumState.sp_delta, size="1", color="var(--text)"),
                         rx.hstack(
                             rx.button("峰值搜索", on_click=SpectrumState.sp_next_peak,
                                       size="1", variant="soft"),
@@ -11005,7 +11195,7 @@ def spectrum_tab() -> rx.Component:
                             align="center",
                             wrap="wrap",
                         ),
-                        rx.text(SpectrumState.sp_ibw_text, size="1", color="#1d4ed8"),
+                        rx.text(SpectrumState.sp_ibw_text, size="1", color="var(--accent-ink)"),
                         spacing="2",
                         width="100%",
                     ),
@@ -11030,8 +11220,8 @@ def spectrum_tab() -> rx.Component:
 # 可搜索下拉列表样式（项目未启用 Tailwind，class_name 仅作钩子，样式在此定义）
 SEARCHABLE_CSS = """
 .searchable-dropdown {
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
   max-height: 240px;
@@ -11040,8 +11230,8 @@ SEARCHABLE_CSS = """
 }
 .searchable-dropdown::-webkit-scrollbar { width: 6px; }
 .searchable-dropdown::-webkit-scrollbar-track { background: transparent; }
-.searchable-dropdown::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
-.searchable-dropdown::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+.searchable-dropdown::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+.searchable-dropdown::-webkit-scrollbar-thumb:hover { background: var(--muted-2); }
 .sd-row {
   display: block;
   width: 100%;
@@ -11051,15 +11241,15 @@ SEARCHABLE_CSS = """
   background: transparent;
   cursor: pointer;
   font-size: 13px;
-  color: #1f2937;
+  color: var(--text);
   transition: background-color 0.1s;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.sd-row:hover { background: #f3f4f6; }
+.sd-row:hover { background: var(--card-hover); }
 .sd-value {
-  color: #2563eb;
+  color: var(--accent);
   font-weight: 600;
   font-family: Consolas, 'Courier New', monospace;
   font-size: 12px;
@@ -11074,17 +11264,15 @@ SEARCHABLE_CSS = """
 .sd-empty {
   padding: 10px 12px;
   text-align: center;
-  color: #9ca3af;
+  color: var(--muted-2);
   font-size: 13px;
 }
 """
 
-# 全局设计系统：页面背景/容器/卡片/表格/按钮/输入控件/Tab 导航
-# 项目未启用 Tailwind，Radix 组件通过 .rt-* 类覆盖，自定义类直接定义
 GLOBAL_CSS = """
 /* ===== 基础 ===== */
 body {
-  background: #f1f5f9;
+  background: var(--bg);
   -webkit-font-smoothing: antialiased;
 }
 /* 内容容器（占满浏览器宽度；窄屏自动收窄） */
@@ -11105,37 +11293,37 @@ body {
 }
 /* ===== 卡片 ===== */
 .rt-Card {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 14px;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 1px 3px var(--shadow), 0 1px 2px var(--shadow);
   padding: 18px 22px;
 }
 /* 批量摘要：选中行高亮（class 版，见批量面板注释） */
 .batch-row-selected {
-  border: 2px solid #2563eb !important;
-  background: rgba(37, 99, 235, 0.04);
+  border: 2px solid var(--accent) !important;
+  background: var(--accent-soft);
 }
 /* ===== 表格 ===== */
 .rt-TableRoot {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border);
   border-radius: 10px;
   overflow: hidden;
-  background: #ffffff;
+  background: var(--card);
 }
 .rt-TableRoot .rt-TableColumnHeaderCell {
-  background: #f8fafc;
-  color: #334155;
+  background: var(--code-bg);
+  color: var(--text-2);
   font-weight: 600;
   font-size: 12px;
   letter-spacing: 0.02em;
   padding: 10px 14px;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
 .rt-TableRoot .rt-TableCell {
   padding: 8px 14px;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--bg);
   font-size: 13px;
   vertical-align: middle;
   /* 所有单元格（含解析值/说明纯文本）自动换行，避免长内容撑爆列宽 */
@@ -11151,7 +11339,7 @@ body {
   max-width: 100%;
 }
 .rt-TableRoot .rt-TableRow:last-child .rt-TableCell { border-bottom: none; }
-.rt-TableRoot .rt-TableRow:hover .rt-TableCell { background: #f8fafc; }
+.rt-TableRoot .rt-TableRow:hover .rt-TableCell { background: var(--code-bg); }
 /* ===== 按钮 ===== */
 .rt-Button { border-radius: 8px; font-weight: 600; }
 /* ===== 输入框 / 文本域 ===== */
@@ -11160,30 +11348,30 @@ body {
   transition: box-shadow 0.15s, border-color 0.15s;
 }
 .rt-TextFieldRoot:focus-within, .rt-TextAreaRoot:focus-within {
-  border-color: #2563eb;
+  border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 /* ===== 原生 select ===== */
 .app-select {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 6px 10px;
-  background: #ffffff;
+  background: var(--card);
   font-size: 13px;
-  color: #334155;
+  color: var(--text-2);
   outline: none;
   cursor: pointer;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .app-select:focus {
-  border-color: #2563eb;
+  border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 /* 顶栏内 select（深色背景） */
 .app-header-select {
   background: rgba(255, 255, 255, 0.12);
   border: 1px solid rgba(255, 255, 255, 0.28);
-  color: #ffffff;
+  color: var(--card);
   border-radius: 8px;
   padding: 7px 12px;
   font-size: 13px;
@@ -11193,7 +11381,7 @@ body {
   transition: background 0.15s;
 }
 .app-header-select:hover { background: rgba(255, 255, 255, 0.22); }
-.app-header-select option { color: #0f172a; background: #ffffff; }
+.app-header-select option { color: var(--text); background: var(--card); }
 .app-header-btn {
   background: rgba(255, 255, 255, 0.15);
   color: white;
@@ -11217,11 +11405,11 @@ body {
 .app-tabbar {
   display: flex;
   gap: 2px;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--border);
   margin-bottom: 18px;
-  background: #ffffff;
+  background: var(--card);
   border-radius: 12px 12px 0 0;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 1px 3px var(--shadow);
   /* 仅横向滚动（窄屏时）；纵向必须 hidden —— overflow-x:auto 会让
      overflow-y 的 visible 变 auto，Tab 按钮高度略超容器时右侧
      会出现一条无意义的垂直滚动条 */
@@ -11238,7 +11426,7 @@ body {
   background: transparent;
   padding: 12px 16px;
   font-size: 14px;
-  color: #64748b;
+  color: var(--muted);
   cursor: pointer;
   font-weight: 500;
   border-bottom: 2px solid transparent;
@@ -11246,28 +11434,32 @@ body {
   white-space: nowrap;
   transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
-.app-tab:hover { color: #2563eb; background: #f1f5f9; }
+.app-tab:hover { color: var(--accent); background: var(--bg); }
 .app-tab-active {
-  color: #2563eb;
-  border-bottom-color: #2563eb;
+  color: var(--accent);
+  border-bottom-color: var(--accent);
   font-weight: 600;
-  background: #eff6ff;
+  background: var(--accent-soft);
 }
 .app-tab svg { width: 16px; height: 16px; flex-shrink: 0; }
 /* ===== 消息条 ===== */
 .rt-Callout { border-radius: 10px; }
 /* ===== 全局滚动条 ===== */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted-2); }
 ::-webkit-scrollbar-track { background: transparent; }
 """
+
+# 全局设计系统：页面背景/容器/卡片/表格/按钮/输入控件/Tab 导航
+# 项目未启用 Tailwind，Radix 组件通过 .rt-* 类覆盖，自定义类直接定义
 
 
 def index() -> rx.Component:
     """主页面"""
-    return rx.box(
-        rx.el.style(SEARCHABLE_CSS + GLOBAL_CSS),
+    return rx.theme(
+        rx.box(
+        theme_style(),
         header(),
         rx.box(
             newgen_controls(),
@@ -11430,8 +11622,16 @@ def index() -> rx.Component:
         admin_login_dialog(),
         # 分享此帧弹窗（单帧解析结果区按钮触发）
         _share_submit_dialog(),
-        background="#f1f5f9",
+        background="var(--bg)",
         min_height="100vh",
+        class_name=ThemeState.root_class,
+        ),
+        # Radix 主题包裹：模式交给 html.light/.dark 类（appearance=inherit），
+        # 强调色/灰阶/圆角由 ThemeState 驱动 → Radix 组件随之换色
+        appearance="inherit",
+        accent_color=ThemeState.accent,
+        gray_color=ThemeState.gray,
+        radius=ThemeState.radius,
     )
 
 
@@ -11452,17 +11652,31 @@ app = rx.App(
     ],
 )
 
-app.add_page(index, route="/", title="多协议解析平台")
-app.add_page(feedback_page, route="/feedback", title="问题反馈 - 多协议解析平台")
 app.add_page(
-    feedback_admin_page, route="/feedback-admin", title="反馈管理 - 多协议解析平台"
+    index,
+    route="/",
+    title="多协议解析平台",
+    # 读回浏览器本地主题（模式 + 外观）并即时应用
+    on_load=ThemeState.theme_boot,
+)
+app.add_page(
+    feedback_page,
+    route="/feedback",
+    title="问题反馈 - 多协议解析平台",
+    on_load=ThemeState.theme_boot,
+)
+app.add_page(
+    feedback_admin_page,
+    route="/feedback-admin",
+    title="反馈管理 - 多协议解析平台",
+    on_load=ThemeState.theme_boot,
 )
 app.add_page(
     share_page,
     route="/share",
     title="报文分享 - 多协议解析平台",
-    # 页面首次加载拉取列表（ShareState.sh_load）——缺了它列表永远为空
-    on_load=ShareState.sh_load,
+    # 页面首次加载：读回本地主题 + 拉取分享列表（缺了 sh_load 列表永远为空）
+    on_load=[ThemeState.theme_boot, ShareState.sh_load],
 )
 
 

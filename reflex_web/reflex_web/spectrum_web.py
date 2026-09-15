@@ -192,13 +192,21 @@ def y_label_items(
     return items
 
 
+def marker_var(order: int) -> str:
+    """标记颜色变量（由 theme_web.marker_css 按主题生成数值，图与表共用同一变量）。"""
+    return f"var(--sp-m{int(order) % 6 + 1})"
+
+
 def marker_items(
     markers: Sequence[Marker],
     params: SpectrumParams,
     trace: SpectrumTrace,
     auto: bool,
 ) -> list:
-    """标记图元：[{x, y, label, color, text}]（竖虚线 + 圆点 + 标签，颜色与标记表同源）。"""
+    """标记图元：[{x, y, label, color, text}]（竖虚线 + 圆点 + 标签，颜色与标记表同源）。
+
+    颜色是 CSS 变量（`var(--sp-mN)`）→ 明暗主题各自解析，无需 Python 侧判断。
+    """
     items = []
     for order, marker in enumerate(markers):
         items.append(
@@ -206,7 +214,7 @@ def marker_items(
                 "x": _num(x_for_freq(marker.freq_hz, params)),
                 "y": _num(y_for_level(marker.level, params, trace.levels, auto)),
                 "label": marker.label,
-                "color": marker_color(False, order),
+                "color": marker_var(order),
                 "text": f"{marker.label}",
             }
         )
