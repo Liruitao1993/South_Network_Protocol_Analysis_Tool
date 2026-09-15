@@ -303,3 +303,24 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 11: Web 频谱图移植（复用桌面纯逻辑层 + SVG 自绘）
+
+**Date**: 2026-09-15
+**Task**: Web 频谱图移植（复用桌面纯逻辑层 + SVG 自绘）
+**Branch**: `main`
+
+### Summary
+
+新增常驻频谱图 tab：spectrum_web.py 纯几何(SVG) + SpectrumState + spectrum_tab；复用 spectrum_widget 前 950 行纯逻辑（零算法重写），QPainter→SVG；点击带实现标记 M1~M6（配色/Δ/峰值搜索/IBW 全对齐）；导出 PNG 走前端 SVG→canvas。测试 64 项；release_check PASS=53。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `621b346` | (see git log) |
+
+### Status
+
+[OK] **Completed**
