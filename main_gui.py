@@ -102,10 +102,20 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.12"
+APP_VERSION = "1.23.13"
 BUILD_DATE = "2026-09-15"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    (
+        "1.23.13",
+        "2026-09-15",
+        [
+            "修复批量解析「预处理」命令链在中文输入法全角状态下不可用（现场现象：同为预处理的 `find \"CSG\"` 报「未知命令: find　＂CSG＂」，而无参数的 `hex_extract` 等能执行）。根因：全角空格（U+3000）与全角/弯引号（＂ “ ” ‘ ’）都不是 ASCII 字符，`shlex.split` 既不把它们当分隔符也不当引号 → 整串被当成一个命令名",
+            "新增 `pp_cli.split_commands()`（GUI / Web 输入框共用）：先按原样拆分，**只有首个 token 不是已知命令时**才做全角→半角归一化重试（U+3000 / U+00A0 / U+2000–U+200A / U+202F / U+205F → 半角空格，U+200B 与 BOM 删除，＂“”‘’ → 半角引号），故「半角分隔符 + 参数里刻意保留全角字符」（如 `find \"A　B\"`）不会被改写；`main_gui._run_cli_preprocessor` 与 Web `parse_batch` / `run_preprocess` 三处调用点改走该函数（删除各自的 `shlex.split`）",
+            "`pp_cli.parse_and_run` 未知命令报错增强：命令名含非 ASCII 字符时附转义形式与码位（如 `\\u67e5（含非 ASCII 字符 U+67E5）`），并补「半角空格分隔、半角双引号包裹」提示——全角/零宽字符肉眼不可见，旧文案无法定位；GUI 预处理命令框 tooltip、帮助对话框与 Web 预处理面板说明同步补半角书写规则",
+            "新增 `test/test_pp_cli.py`（47 项：半角基准 / 全角·NBSP·零宽归一化 / 参数内容保护 / 错误提示码位 / 用户场景端到端 / offscreen `MainWindow._run_cli_preprocessor` 全角不弹错、非法命令仍报错、真实 config.json 未被改写），登记进 `release_check.py:CORE_TESTS`",
+        ],
+    ),
     (
         "1.23.12",
         "2026-09-15",
@@ -2479,6 +2489,7 @@ class MainWindow(QMainWindow):
             "可用命令: find <pat> | excluding <pat> | replace <pat> <repl>\n"
             "          head <n> | tail <n> | skip <n> | hex_extract | dedup\n"
             "          tcp_extract | merge_payloads\n"
+            "分隔用半角空格，含空格的参数用半角双引号（全角空格/引号会自动归一化）\n"
             "点「保存」按钮保存当前命令到列表，点「删除」按钮删除选中命令"
         )
         # 加载预设命令
@@ -8745,19 +8756,20 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            # 用 shlex 正确解析带引号的参数
-            import shlex
+            # 用 split_commands 拆分（兼容中文输入法全角状态下打出的空格/引号）
+            from pp_cli import parse_and_run, split_commands
 
-            commands = shlex.split(cmd_text)
+            commands = split_commands(cmd_text)
         except ValueError as e:
             QMessageBox.warning(
-                self, "命令解析错误", f"命令格式错误: {e}\n请检查引号是否匹配。"
+                self,
+                "命令解析错误",
+                f"命令格式错误: {e}\n请检查引号是否匹配。\n"
+                "提示: 命令与参数之间用半角空格分隔，含空格的参数用半角双引号包裹（中文输入法请切到半角）。",
             )
             return
 
         try:
-            from pp_cli import parse_and_run
-
             result = parse_and_run(input_text, commands)
 
             if not result.strip():
@@ -8862,6 +8874,9 @@ class MainWindow(QMainWindow):
         lines.append('  find "60F0" excluding "mrd:" dedup')
         lines.append('  find "nwk:" replace ".*nwk:" "NWK:" head 10')
         lines.append("  hex_extract")
+        lines.append("\n书写规则:")
+        lines.append("  命令与参数之间用半角空格分隔，含空格的参数用半角双引号包裹")
+        lines.append('  例: find "tcp data:"（全角空格/全角引号会自动归一化）')
         lines.append("\n常用命令管理:")
         lines.append("  ★  保存当前命令到下拉列表（持久化到 config.json）")
         lines.append("  ×  删除下拉列表中选中的命令")

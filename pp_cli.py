@@ -29,8 +29,12 @@
 
     # 从监控日志提取 hex 帧
     pp_cli.py monitor.log hex_extract -o frames.txt
+
+命令与参数之间用半角空格分隔，含空格的参数用半角双引号包裹。
+（GUI/Web 输入框走的 split_commands() 会把全角空格/全角引号自动归一化为半角。）
 """
 import re
+import shlex
 import sys
 import argparse
 import json
@@ -224,6 +228,62 @@ COMMANDS = {
 }
 
 
+# ── 命令串拆分（半角 / 全角兼容）─────────────────────────────────────────
+
+# 中文输入法全角状态下打出的空格与引号不是 ASCII 字符：shlex 既不把 U+3000 当分隔符，
+# 也不把 ＂/“” 当引号 → 整串被当成一个命令名（GUI 表现为「未知命令: find　＂CSG＂」）。
+# 这里把全角/异体字符归一化为半角，只在按原样拆分得不到已知命令时兜底启用。
+_CMD_NORMALIZE_MAP = {
+    "\u3000": " ",  # 全角空格
+    "\u00a0": " ",  # 不间断空格 NBSP
+    "\u2000": " ", "\u2001": " ", "\u2002": " ", "\u2003": " ", "\u2004": " ",
+    "\u2005": " ", "\u2006": " ", "\u2007": " ", "\u2008": " ", "\u2009": " ",
+    "\u200a": " ",
+    "\u202f": " ",  # 窄不间断空格
+    "\u205f": " ",  # 中数学空格
+    "\u200b": "",   # 零宽空格
+    "\ufeff": "",   # BOM
+    "\uff02": '"', "\u201c": '"', "\u201d": '"',  # 全角/弯双引号 → "
+    "\uff07": "'", "\u2018": "'", "\u2019": "'",  # 全角/弯单引号 → '
+}
+
+_CMD_NORMALIZE_TABLE = str.maketrans(_CMD_NORMALIZE_MAP)
+
+
+def normalize_command_text(text: str) -> str:
+    """全角/异体空格与引号 → 半角（映射见 _CMD_NORMALIZE_MAP）"""
+    return text.translate(_CMD_NORMALIZE_TABLE)
+
+
+def split_commands(cmd_text: str) -> List[str]:
+    """把命令串拆成命令链（GUI / Web 输入框调用）
+
+    先按原样 shlex 拆分；只有首个 token 不是已知命令时才做全角→半角归一化重试，
+    因此「半角分隔符 + 参数里刻意保留全角字符」的写法不会被改写。
+    引号不闭合仍抛 ValueError，由调用方提示。
+    """
+    text = cmd_text.strip()
+    tokens = shlex.split(text)
+    if tokens and tokens[0] in COMMANDS:
+        return tokens
+    normalized = normalize_command_text(text)
+    if normalized != text:
+        retry = shlex.split(normalized)
+        if retry and retry[0] in COMMANDS:
+            return retry
+    return tokens
+
+
+def _describe_token(token: str) -> str:
+    """错误提示里的 token 描述：含非 ASCII 字符时附码位，便于定位全角/零宽字符"""
+    bad = sorted({ch for ch in token if ord(ch) > 0x7E})
+    if not bad:
+        return token
+    codes = " ".join(f"U+{ord(ch):04X}" for ch in bad)
+    escaped = token.encode("unicode_escape").decode("ascii")
+    return f"{escaped}（含非 ASCII 字符 {codes}）"
+
+
 # ── 管线执行器 ────────────────────────────────────────────────────────────
 
 def parse_and_run(input_text: str, commands: List[str]) -> str:
@@ -233,7 +293,11 @@ def parse_and_run(input_text: str, commands: List[str]) -> str:
     while i < len(commands):
         cmd_name = commands[i]
         if cmd_name not in COMMANDS:
-            raise ValueError(f"未知命令: {cmd_name}\n可用命令: {', '.join(COMMANDS.keys())}")
+            raise ValueError(
+                f"未知命令: {_describe_token(cmd_name)}\n"
+                f"可用命令: {', '.join(COMMANDS.keys())}\n"
+                "提示: 命令与参数之间用半角空格分隔，含空格的参数用半角双引号包裹"
+            )
         info = COMMANDS[cmd_name]
         n_args = info["args"]
         args = commands[i+1:i+1+n_args]

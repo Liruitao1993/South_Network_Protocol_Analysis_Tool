@@ -74,6 +74,7 @@ CORE_TESTS = [
     "test/test_ed_gx_wrapper.py",
     "test/test_ed_fallback_fix.py",
     "test/test_hex_clean_script.py",
+    "test/test_pp_cli.py",
     "test/test_batch_src_line_jump.py",
     "test/test_batch_snapshot_locate.py",
     "test/test_csg_sequence_model.py",

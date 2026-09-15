@@ -833,11 +833,9 @@ class State(rx.State):
             # 步骤0：CLI 预处理命令链（用户输入的 pp_cli 管道命令）
             if self.batch_pp_commands.strip():
                 try:
-                    import shlex
+                    from pp_cli import parse_and_run, split_commands
 
-                    from pp_cli import parse_and_run
-
-                    cmds = shlex.split(self.batch_pp_commands)
+                    cmds = split_commands(self.batch_pp_commands)
                     input_text = parse_and_run(input_text, cmds)
                     self.batch_pp_last_result = f"预处理完成（{' '.join(cmds)}）：{len(input_text.splitlines())} 行"
                     # 预处理结果回写：文件源写回后端，避免大内容进前端
@@ -1117,12 +1115,10 @@ class State(rx.State):
             self.message_type = "warning"
             return
         try:
-            import shlex
-
-            from pp_cli import parse_and_run
+            from pp_cli import parse_and_run, split_commands
 
             source = self._batch_file_content if has_file else self.batch_input
-            cmds = shlex.split(self.batch_pp_commands)
+            cmds = split_commands(self.batch_pp_commands)
             result = parse_and_run(source, cmds)
             if has_file:
                 # 大文件内容写回后端，不进入前端
@@ -4897,7 +4893,7 @@ def batch_parse_tab() -> rx.Component:
                             ),
                             rx.spacer(),
                             rx.text(
-                                "支持: find / excluding / replace / head / tail / skip / hex_extract / tcp_extract / merge_payloads / dedup",
+                                "支持: find / excluding / replace / head / tail / skip / hex_extract / tcp_extract / merge_payloads / dedup（半角空格分隔，全角自动归一化）",
                                 size="1",
                                 color="gray",
                             ),
