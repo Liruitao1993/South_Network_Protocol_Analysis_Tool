@@ -705,7 +705,7 @@ python test/test_monitor_strip.py   # 监控报文头尾剔除
 python test/test_theme_settings.py  # 主题与字体设置
 python test/test_web_frame_gen_utils.py # Reflex Web 版组帧纯逻辑
 python test/test_web_parse_fixes.py     # Reflex Web 版解析 P0 修复（75 项：严格 hex 清洗/失败判定（含中途 ❌）/剔除/级别参数下发/ED gx 双布局/pb_only frame_type/查询页 AFN·协议10·698 属性/校验器工厂/CRC-24 同口径 + reflex State 真实实例 + parse_batch 批量端到端，1.23.12 起）
-python test/test_web_batch_paging.py    # Reflex Web 版批量摘要分页（25 项：paginate 纯函数 + 250 帧端到端翻页/跨页选中/每页条数切换/清空归零，1.23.12 起）
+python test/test_web_batch_paging.py    # Reflex Web 版批量摘要分页与搜索（57 项：paginate/filter 纯函数 + 250 帧端到端翻页/跨页选中/每页条数切换 + 249 行端到端搜索（HEX/类型/#序号）与状态筛选/过滤后翻页/选中清理，1.23.12 起）
 python test/test_web_spectrum.py        # Reflex Web 版频谱图（64 项：复用桌面纯逻辑层守卫 + SVG 几何 + SpectrumState 端到端（联动/标记/峰值/IBW/错误路径）+ 组件树，1.23.12 起）
 python test/test_web_theme.py           # Reflex Web 版主题系统（89 项：预设/维度清单 + token 契约与浅色等价 + CSS 结构 + 标记配色单一来源 + ThemeState 端到端 + 无裸 hex 守卫，1.23.12 起）
 python test/test_web_feedback.py        # Web 版问题反馈（存储层/截图校验/防穿越/部署 data/ 保留，1.19.0 起）
@@ -805,7 +805,7 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 - **Reflex Web 版解析 P0 修复（任务 09-15-web-parse-p0-fixes）**：`_get_validator` 未定义变量 `p` → 12 协议校验全部 NameError（改走 `protocol_registry.make_validator`）；批量失败判定只看首行 → 改全表扫描「以 ❌ 开头的行」（**两侧**同时统一空表 = 失败）；奇数长度 hex 静默截断 → 改报错；协议10/11 pb_only 补 `frame_type` 下发 + 协议9 补 `mac_only`/PB 帧类型下拉；查询页南网 AFN=DI1、协议10 改读 `GWNewGenParser` 自有 7 类表、协议8 补属性/方法列；报文工具 CRC-24 `rev=True`
 - **ED..EE 监控包装格式判别下沉到解析器**：`csg_new_gen_parser.detect_ed_wrapper`（逐帧打分，plc2/gx）+ `_parse_ed_wrapper` 双布局 + `parse_to_table(ed_wrapper=None)`；桌面 `main_gui._detect_ed_wrapper` 改为委托（删除重复打分与 `_ED_PB_SIZES`）。**广西台体(gx, 8B 公共头)帧此前在两端未勾选 ED 复选框时都错位 1 字节，本版一起修好**；摘要按「含 `监控包装头`」判定并区分两种包装名
 - 新增 `test/test_web_parse_fixes.py`（75 项，含 reflex `State(_reflex_internal_init=True)` 真实实例断言与 `parse_batch` 批量端到端），登记进 `release_check.py:CORE_TESTS`；批量链路同时统一：`mac_only` 剥离直通（此前整行被丢弃）、不静默裁剪奇数长度、异常状态字面量 `异常`
-- **Web 批量界面分页与全宽**（`web_utils.paginate/page_of` + `test/test_web_batch_paging.py` 25 项）：全量摘要留后端、前端只同步当前页（替换 `batch_display_limit=300` 截断），首页/上页/下页/末页 + 每页 100/200/500/1000，行号跨页连续；摘要/明细区高度改 `calc(100vh - …)`；`.app-container`/`.app-header-inner` 放开为全宽；选中高亮改 `class_name=rx.cond`（`style=rx.cond({...})` 在本项目不落 DOM）
+- **Web 批量界面分页与全宽**（`web_utils.paginate/page_of` + `test/test_web_batch_paging.py` 25 项）：全量摘要留后端、前端只同步当前页（替换 `batch_display_limit=300` 截断），首页/上页/下页/末页 + 每页 100/200/500/1000，行号跨页连续；摘要/明细区高度改 `calc(100vh - …)`；`.app-container`/`.app-header-inner` 放开为全宽；选中高亮改 `class_name=rx.cond`（`style=rx.cond({...})` 在本项目不落 DOM）；**批量结果可搜索**（关键词匹配 摘要/类型/帧HEX/#序号 + 状态筛选，过滤作用于全量摘要后分页，帧 HEX 存后端私有行不下发前端）
 - 审计勘误：原「Web 剔除不幂等」结论实测不成立（Web 每次从原始 `frame_hex` 重算本就幂等；照该结论加缓存会真回归，已撤销）→ 以纯函数 `strip_frame_bytes` + 重复调用一致断言钉住不变式
 - 复核（trellis-check）追加修复：桌面快捷解析小窗 ED 调用点漏传 `wrapper`（gx 帧错位 1 字节）→ 补传并把两个 ED 入口的 `wrapper` 默认值改为「None=按当前下拉/自动识别」；`validator/__init__.py` 补齐 `GWNewGenValidator`/`HDC10Validator` re-export + 三个 spec 补 `protocol_registry`/`parser_registry`/`hdc10_*`/`validator.*` hiddenimports（`make_validator` 走 importlib，打包器静态分析看不到）
 - **Web 版新增「频谱图」常驻标签页**（任务 09-15-web-spectrum-plot）：桌面 `spectrum_widget.py` 纯逻辑层（前 ~950 行，零 Qt）**被 Web 直接复用**（参数校验/trace 清洗/刻度/标记吸附/峰值搜索/积分带宽同一实现），新增 `reflex_web/reflex_web/spectrum_web.py` 仅做 SVG 坐标换算（纯函数），QPainter 换成 SVG；功能对齐桌面（四字段联动/单位换算/点击加 M1~M6 标记含固定配色与 Δ/峰值搜索/积分带宽含 RBW 归一化/导出 PNG 走前端 SVG→canvas）；新增 `test/test_web_spectrum.py`（64 项）

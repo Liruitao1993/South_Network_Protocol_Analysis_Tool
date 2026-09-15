@@ -77,8 +77,13 @@ class State(rx.State):
     batch_page: int = 0
     batch_page_size: int = 100
     batch_page_count: int = 0
-    # 全部帧的摘要（私有 → 不序列化到前端；翻页时切片）
+    # 关键词搜索 + 状态筛选（与桌面 _on_batch_filter_changed 同口径）
+    batch_search: str = ""
+    batch_status_filter: str = "all"
+    batch_visible_count: int = 0
+    # 全部帧的摘要（私有 → 不序列化到前端；过滤/翻页都基于它切片）
     _batch_summaries: list[dict[str, Any]] = []
+    _batch_filtered: list[dict[str, Any]] = []
     # 预处理命令链（pp_cli 管道式命令）
     batch_pp_commands: str = ""
     batch_pp_last_result: str = ""
@@ -928,6 +933,10 @@ class State(rx.State):
                         "proto": all_results[-1]["proto"],
                         "summary": all_results[-1]["summary"],
                         "len": all_results[-1]["len"],
+                        # 供关键词搜索匹配（桌面同口径匹配原始 HEX）；不下发前端。
+                        # 取 all_results[-1]（异常分支为 b""）而非局部 frame_bytes：
+                        # 该行在 except 之后，异常路径里 frame_bytes 可能未赋值。
+                        "hex": all_results[-1]["frame_bytes"].hex().upper(),
                     }
                 )
 
@@ -940,8 +949,10 @@ class State(rx.State):
             self._batch_all_results = all_results
             self._batch_summaries = summaries
             self.batch_total_frames = len(all_results)
+            self._batch_filtered = summaries
+            self.batch_visible_count = len(summaries)
             self.batch_page = 0
-            self._load_batch_page()
+            self._apply_batch_filter()  # 尊重已填的搜索词/状态筛选
 
             success_count = sum(1 for r in all_results if r["status"] == "成功")
             fail_count = sum(1 for r in all_results if r["status"] == "失败")
@@ -1020,13 +1031,48 @@ class State(rx.State):
 
     # ── 摘要分页 ─────────────────────────────────────────────
     def _load_batch_page(self) -> None:
-        """把 _batch_summaries 的当前页写入 batch_results（前端只同步这一页）。"""
+        """把「过滤后的摘要」的当前页写入 batch_results（前端只同步这一页）。
+
+        行的 `hex`（供搜索匹配用）不下发前端：切片后剔除，前端载荷与改造前一致。
+        """
         self.batch_page = web_utils.page_of(self.batch_page, self.batch_page_count)
         rows, page_count = web_utils.paginate(
-            self._batch_summaries, self.batch_page, self.batch_page_size
+            self._batch_filtered, self.batch_page, self.batch_page_size
         )
         self.batch_page_count = page_count
-        self.batch_results = rows
+        self.batch_results = [
+            {k: v for k, v in row.items() if k != "hex"} for row in rows
+        ]
+
+    def _apply_batch_filter(self) -> None:
+        """重算过滤结果并回到第 1 页（搜索/筛选变化时调用）。
+
+        选中帧若被过滤掉则清空详情，避免「右侧还显示着已看不见的那帧」。
+        """
+        self._batch_filtered = web_utils.filter_batch_summaries(
+            self._batch_summaries, self.batch_search, self.batch_status_filter
+        )
+        self.batch_visible_count = len(self._batch_filtered)
+        self.batch_page = 0
+        self._load_batch_page()
+        if self.batch_selected_idx >= 0 and not any(
+            row.get("id") == self.batch_selected_idx for row in self._batch_filtered
+        ):
+            self.batch_selected_idx = -1
+            self.batch_detail_hex = ""
+            self.batch_detail_rows = []
+
+    def set_batch_search(self, value: str):
+        """批量结果搜索（摘要 / 类型 / 帧 HEX / #序号）。"""
+        self.batch_search = value
+        if self._batch_summaries:
+            self._apply_batch_filter()
+
+    def set_batch_status_filter(self, value: str):
+        """批量结果状态筛选（全部/成功/失败/异常）。"""
+        self.batch_status_filter = value or "all"
+        if self._batch_summaries:
+            self._apply_batch_filter()
 
     def batch_goto_page(self, page: int):
         """跳页（首页=0 / 上页=当前-1 / 下页=当前+1 / 末页=page_count-1）。"""
@@ -1072,7 +1118,11 @@ class State(rx.State):
         self.batch_total_frames = 0
         self.batch_page = 0
         self.batch_page_count = 0
+        self.batch_search = ""
+        self.batch_status_filter = "all"
+        self.batch_visible_count = 0
         self._batch_summaries = []
+        self._batch_filtered = []
         self._batch_file_content = ""
         self._batch_all_results = []
 
@@ -5227,6 +5277,44 @@ def batch_parse_tab() -> rx.Component:
                         rx.heading("批量解析摘要", size="2", font_weight="semibold"),
                         spacing="2",
                     ),
+                    # ── 搜索 + 状态筛选（口径同桌面 _on_batch_filter_changed）──
+                    rx.hstack(
+                        rx.icon("search", size=15, color="var(--muted)"),
+                        rx.input(
+                            value=State.batch_search,
+                            on_change=State.set_batch_search,
+                            placeholder="搜索：摘要 / 类型 / 帧HEX / #序号",
+                            size="1",
+                            width="100%",
+                            font_family="monospace",
+                            data_testid="batch-search",
+                        ),
+                        rx.el.select(
+                            *[
+                                rx.el.option(label, value=value)
+                                for value, label in web_utils.BATCH_STATUS_FILTERS
+                            ],
+                            value=State.batch_status_filter,
+                            on_change=State.set_batch_status_filter,
+                            class_name="app-select",
+                            title="按状态筛选",
+                            data_testid="batch-status-filter",
+                        ),
+                        rx.cond(
+                            (State.batch_search != "")
+                            | (State.batch_status_filter != "all"),
+                            rx.text(
+                                f"显示 {State.batch_visible_count} / {State.batch_total_frames}",
+                                size="1",
+                                color="var(--muted)",
+                                white_space="nowrap",
+                                data_testid="batch-filter-count",
+                            ),
+                        ),
+                        spacing="2",
+                        align="center",
+                        width="100%",
+                    ),
                     rx.cond(
                         State.batch_results.length() > 0,
                         rx.vstack(
@@ -5372,7 +5460,15 @@ def batch_parse_tab() -> rx.Component:
                         rx.center(
                             rx.vstack(
                                 rx.icon("inbox", size=48, color="var(--muted-2)"),
-                                rx.text("暂无批量解析结果", color="var(--muted)", size="2"),
+                                rx.cond(
+                                    State.batch_visible_count == 0,
+                                    rx.text(
+                                        "当前搜索/筛选条件下没有匹配的帧",
+                                        color="var(--muted)",
+                                        size="2",
+                                    ),
+                                    rx.text("暂无批量解析结果", color="var(--muted)", size="2"),
+                                ),
                                 spacing="2",
                                 padding="8",
                             ),

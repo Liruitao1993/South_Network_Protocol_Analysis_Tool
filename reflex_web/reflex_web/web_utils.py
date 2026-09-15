@@ -116,6 +116,44 @@ def parse_kwargs_for(protocol_index: int, parse_level: str = "auto",
     return {}
 
 
+# 批量摘要状态筛选：下拉值 → 结果表状态字面量
+BATCH_STATUS_FILTERS = (
+    ("all", "全部"),
+    ("success", "成功"),
+    ("fail", "失败"),
+    ("error", "异常"),
+)
+_STATUS_BY_KEY = dict(BATCH_STATUS_FILTERS[1:])
+
+
+def filter_batch_summaries(summaries: list, keyword: str = "", status: str = "all") -> list:
+    """批量摘要过滤（与桌面 `_on_batch_filter_changed` 同口径）。
+
+    - 状态：all / success(成功) / fail(失败) / error(异常)
+    - 关键词：大小写不敏感，匹配 **摘要 + 协议类型 + 帧 HEX + 序号(#N)**
+      （桌面即「摘要 + 协议/类型 + 原始HEX」，这里多给 #N 便于按序号定位）
+    """
+    kw = (keyword or "").strip().lower()
+    want = _STATUS_BY_KEY.get(status)
+    out = []
+    for row in summaries or []:
+        if want and row.get("status") != want:
+            continue
+        if kw:
+            hay = " ".join(
+                (
+                    str(row.get("summary", "")),
+                    str(row.get("proto", "")),
+                    str(row.get("hex", "")),
+                    "#" + str(int(row.get("id", 0)) + 1),
+                )
+            ).lower()
+            if kw not in hay:
+                continue
+        out.append(row)
+    return out
+
+
 def paginate(items: list, page: int, page_size: int) -> tuple:
     """列表分页 → (当前页切片, 总页数)。
 
