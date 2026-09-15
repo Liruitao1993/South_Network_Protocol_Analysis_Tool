@@ -382,3 +382,24 @@ theme_web.py 纯逻辑（6 预设/5 强调色/3 模式/token 表/客户端脚本
 ### Status
 
 [OK] **Completed**
+
+
+## Session 14: Web 批量解析结果搜索/筛选（接分页）
+
+**Date**: 2026-09-15
+**Task**: Web 批量解析结果搜索/筛选（接分页）
+**Branch**: `main`
+
+### Summary
+
+filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态筛选/可见计数 + 私有 _batch_filtered；分页改为对过滤后摘要切片（搜索作用于全量）；帧 HEX 存后端私有行不下发；UI 搜索框+状态下拉+显示 N/M；test_web_batch_paging 扩至 57 项；顺带修 hex 字段的 UnboundLocalError。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7dc5ac5` | (see git log) |
+
+### Status
+
+[OK] **Completed**
