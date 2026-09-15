@@ -324,3 +324,40 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 12: 预处理命令链全角空格/引号不可用修复（1.23.13）
+
+**Date**: 2026-09-15
+**Task**: 预处理命令链全角空格/引号不可用修复（1.23.13）
+**Branch**: `main`
+
+### Summary
+
+定位并修复批量解析预处理命令链在中文输入法全角状态下报「未知命令」的缺陷；pp_cli 新增 split_commands 单源 + 三处调用点收口 + 错误提示码位；新增 test/test_pp_cli.py 47 项；发布自检全绿
+
+### Main Changes
+
+- pp_cli.split_commands()：兜底式全角→半角归一化（仅首个 token 非已知命令时重试），保参数里刻意保留的全角字符
+- main_gui._run_cli_preprocessor 与 Web parse_batch/run_preprocess 三处改走 split_commands；tooltip/帮助/Web 说明补半角规则
+- parse_and_run 未知命令报错附转义+非 ASCII 码位+半角提示；AGENTS.md 新增陷阱 33；版本 1.23.13 + iss/README 同步
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b5e0efe` | (see git log) |
+
+### Testing
+
+- [OK] test/test_pp_cli.py 47 项（含 offscreen MainWindow 真实回调：全角不弹错/非法命令仍报错/真实 config.json 未改写）
+- [OK] Web 真实 reflex State 驱动 run_preprocess + parse_batch：半角/全角/NBSP 四种写法产出逐字相同
+- [OK] python release_check.py PASS=54 FAIL=0 WARN=0
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 并行任务 09-15-web-theme-system 正在改 reflex_web/reflex_web/reflex_web.py（var(--token) + theme_web.py），当前工作区该模块 import 报 NameError: theme_web 未定义——其落地后需重跑 test_web_parse_fixes/release_check

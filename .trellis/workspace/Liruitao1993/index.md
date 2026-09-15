@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 11
+- **Total Sessions**: 12
 - **Last Active**: 2026-09-15
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~326 | Active |
+| `journal-1.md` | ~363 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 12 | 2026-09-15 | 预处理命令链全角空格/引号不可用修复（1.23.13） | `b5e0efe` | `main` |
 | 11 | 2026-09-15 | Web 频谱图移植（复用桌面纯逻辑层 + SVG 自绘） | `621b346` | `main` |
 | 10 | 2026-09-15 | Web 版解析 P0 缺陷修复（审计→任务树→实现→复核→提交） | `5f4fde3` | `main` |
 | 9 | 2026-09-15 | 自定义DI增删单源收口 1.23.11 + 三任务归档 + AGENTS目录树补漏 | `bd4be7a`, `7618f3b` | `main` |
