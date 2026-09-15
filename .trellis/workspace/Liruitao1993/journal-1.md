@@ -361,3 +361,24 @@
 ### Next Steps
 
 - 并行任务 09-15-web-theme-system 正在改 reflex_web/reflex_web/reflex_web.py（var(--token) + theme_web.py），当前工作区该模块 import 报 NameError: theme_web 未定义——其落地后需重跑 test_web_parse_fixes/release_check
+
+
+## Session 13: Web 主题系统（明暗模式 + 预设 + token 化 + 频谱图跟随）+ 用户报障修复
+
+**Date**: 2026-09-15
+**Task**: Web 主题系统（明暗模式 + 预设 + token 化 + 频谱图跟随）+ 用户报障修复
+**Branch**: `main`
+
+### Summary
+
+theme_web.py 纯逻辑（6 预设/5 强调色/3 模式/token 表/客户端脚本）；GLOBAL_CSS 与组件 215 处色值 token 化（浅色等价，测试断言）；顶栏主题下拉+模式按钮，localStorage 持久化，class 观察器兜住 Reflex ThemeProvider 覆盖竞态；频谱图 SVG 与标记配色走 var(--sp-mN)。顺带修用户报障：独立页面顶栏导航被主题控件挤没（主题控件限主页 + 全页注入样式）、顶栏渐变不随强调色（class 挂根容器）、分享卡片 str(Var) 垃圾串。test_web_theme.py 89 项；release_check PASS=55。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `20f2c8c` | (see git log) |
+
+### Status
+
+[OK] **Completed**
