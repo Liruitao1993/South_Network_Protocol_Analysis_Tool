@@ -260,3 +260,25 @@
 
 - 实现 09-12-nanwang-custom-di-crud（南网查询页自定义 DI 增删死按钮）
 - 按序推进 645虚拟表功能码 → HDC网间协调帧 → 协议10未识别报文 → 协议9深解析
+
+
+## Session 9: 自定义DI增删单源收口 1.23.11 + 三任务归档 + AGENTS目录树补漏
+
+**Date**: 2026-09-15
+**Task**: 自定义DI增删单源收口 1.23.11 + 三任务归档 + AGENTS目录树补漏
+**Branch**: `main`
+
+### Summary
+
+南网查询页自定义DI增删收口为 custom_di_store.py 单源（protocol_parser/main_gui/lookup_pages 三方共用；覆盖确认+多选批量删除+内置拒删），lookup_pages 两枚「功能待实现」死按钮转真；新增 test_nanwang_custom_di.py 92 项并入 CORE_TESTS，修复 test_plc_rf GBK 控制台✓崩溃；release_check PASS=50 FAIL=0 WARN=0 全绿；APP_VERSION 1.23.11 / BUILD_DATE 2026-09-15，iss 与 README 徽章同步；删除 _seq_preview.png；归档 09-14-spectrum-plot、09-14-batch-test-frame-summary、09-12-nanwang-custom-di-crud；AGENTS.md 补 §3 目录树漏项与 §7/§10 更新
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bd4be7a` | (see git log) |
+| `7618f3b` | (see git log) |
+
+### Status
+
+[OK] **Completed**
