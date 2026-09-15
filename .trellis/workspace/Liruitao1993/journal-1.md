@@ -282,3 +282,24 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 10: Web 版解析 P0 缺陷修复（审计→任务树→实现→复核→提交）
+
+**Date**: 2026-09-15
+**Task**: Web 版解析 P0 缺陷修复（审计→任务树→实现→复核→提交）
+**Branch**: `main`
+
+### Summary
+
+新增父任务 09-15-web-parse-alignment + 5 子任务（p0-fixes 已归档）。完成 P0：校验 NameError、批量失败判定、奇数长度、剔除误判撤销、frame_type/mac_only、ED 广西台体单源、查询页 3 处事实错误、CRC-24。新增 test_web_parse_fixes.py 75 项；release_check PASS=51 FAIL=0。复核发现并修复：快捷小窗 ED 漏传 wrapper、打包 hiddenimports（validator re-export + 3 spec）、文档口径。教训：推断型审计结论必须实测复现（剔除误判曾被照抄改坏）。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5f4fde3` | (see git log) |
+
+### Status
+
+[OK] **Completed**
