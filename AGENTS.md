@@ -34,7 +34,7 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 
 ## 1. 项目概览
 
-多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.23.10`）。
+多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.23.11`）。
 
 **支持的协议（共 12 种，对应 GUI 协议下拉框 `current_protocol` 索引）：**
 
@@ -215,13 +215,14 @@ python reflex_web/build_embedded_deploy.py --python-version 3.12
 ## 3. 架构总览
 
 ```
-main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 行，MainWindow 类
+main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+ 行，MainWindow 类
 │                                #  - APP_VERSION、CHANGELOG（手写）+ _get_git_changelog()（动态）
 │                                #  - current_protocol 硬编码索引(0~10)，见 §6
 │                                #  - ConfigDialog：配置文件路径管理（自定义 JSON 路径）
 │
 ├── protocol_registry.py      # 协议能力注册表（1.23.1）：下拉名/别名/Tab/校验/提取/包装
 ├── parser_registry.py        # Parser 懒加载（按名缓存实例）
+├── custom_di_store.py        # 南网自定义DI存储单源（纯逻辑无Qt：custom_di.json 读写/校验/upsert/批量删；main_gui·lookup_pages·protocol_parser 共用）
 ├── 协议解析器（parser）── 每个返回嵌套 dict，字段约定见 §4
 │   ├── protocol_parser.py          # 南网 (ProtocolFrameParser) ~4450行 [最大单文件]
 │   │   └── protocol_tool.py          # ControlField(ctypes) + Frame(dataclass) 组帧
@@ -253,6 +254,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 │   ├── dlt645_di_lookup.py         # DLT645 DI
 │   ├── gdw_afn_lookup.py           # 国网 AFN
 │   ├── gdw_eb_di_lookup.py         # 本地通信模块扩展 EB 数据标识（附件1，1.14.0 起）
+│   ├── gdw_eb_di_fields.py         # EB 数据标识字段 schema（字段格式/编码实现，供 698 APDU EBE0 等解析复用）
 │   └── (698.45 OI 查询内嵌于 dl_t698_45_oi_lookup.py)
 │
 ├── 对比引擎
@@ -274,6 +276,14 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，5000+ 
 │   ├── test_plan_widget.py         # 测试计划 (TestPlanWidget) - CRUD/顺序发送/超时/结果
 │   ├── serial_worker.py            # 串口通信线程 (SerialWorker)
 │   ├── gui_utils.py                # 中文右键菜单等工具
+│   ├── lookup_pages.py             # 简化版查询页（当前无调用方；create_di_lookup_page 的自定义DI增删与 main_gui 共用 custom_di_store）
+│   ├── app_icons.py                # 图标加载（icons/lucide/*.svg；按钮/窗口图标）
+│   ├── thread_registry.py          # QThread 登记表（新增 QThread 必须 track；_shutdown_threads 兜底回收依赖）
+│   ├── auto_updater.py             # 自动升级：版本比对/下载/update.bat 替换编排（纯逻辑无Qt；配置在 config.json update 段）
+│   ├── llm_preprocess.py           # LLM 日志预处理纯逻辑（LLMWorker 线程，thread_registry 登记）
+│   ├── llm_preprocess_widget.py    # LLM 日志预处理面板（挂在批量解析输入区，默认折叠）
+│   ├── llm_api_manager.py          # LLM API Key 管理对话框（llm_preprocess 的 API 配置）
+│   ├── enhanced_batch_export.py    # 批量解析增强导出（与 enhanced_export 配合的批量侧实现）
 │   ├── archive_widget.py           # 档案管理 (ArchiveWidget) - 仅南网(0)/国网(6)
 │   ├── topology_widget.py          # 拓扑信息 (TopologyWidget) - 仅南网(0)/国网(6)
 │   ├── diff_widget.py              # 报文对比标签页 (DiffWidget) - 双报文输入，字节/字段级对比
@@ -655,6 +665,7 @@ python test/test_actual_hdlc.py     # 真实 HDLC 报文
 python test/test_special_frame.py   # 特殊帧
 python test/test_snrm_frame.py      # SNRM 帧
 python test/test_nw_lcmi.py         # 南网本地通信模块接口协议 LCMI（1.14.9 起：15 新 DI 解析 + 组帧回读 + 双格式兼容）
+python test/test_nanwang_custom_di.py # 南网自定义DI增删（92项：store纯逻辑/沙箱零污染/MainWindow offscreen 增删·覆盖·内置拒绝·批量·重启保持/简化页/无死按钮反例，1.23.11 起）
 python test/test_dl_t698_45.py      # 698.45 协议
 python test/test_dl_t698_45_data_decode.py  # 698.45 APDU 数据内容业务解码（电能量/需量/分相/单值）
 python test/test_dlt645_sim.py       # DLT645 虚拟表从站引擎（11H 读档案 / 13H 读地址 / 15H 写地址 / 08H 校时 / 异常应答）
@@ -771,6 +782,13 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 ## 10. 变更日志
 
 > 详细版本变更记录请查看 `main_gui.py:CHANGELOG`（按版本倒序），或运行 `git log --oneline` 查看提交历史。本文档仅保留最近两个版本的摘要。
+
+### 1.23.11 — 2026-09-15
+
+- **南网查询页「自定义DI」增删收口（09-12-nanwang-custom-di-crud）**：新增 `custom_di_store.py` 单源（纯逻辑无 Qt：`custom_di.json` 读写 / 单字节 hex 校验 / DI 键解析 / upsert / 批量删除），`protocol_parser` 三处读写委托之（整体读改写，未知字段不丢）；`main_gui._add_custom_di/_del_custom_di` 与 `lookup_pages` 简化页共用 `apply_custom_di_add` / `delete_selected_custom_di_interactive` 同一份实现
+- **行为增强**：重复 DI 由直接拒绝改为**覆盖确认**（提示区分「已添加/已覆盖」）；删除支持**多选批量**（DI 表开 ExtendedSelection，提示带条数与被忽略的内置条数）；内置 DI 拒删 / 未选中给出可读提示；新增条目同步进解析器 `DI_COMBINATION_MAP`（单帧解析即时生效）
+- `lookup_pages.create_di_lookup_page` 两枚「功能待实现」死按钮改真实增删；表格刷新改 `state` 字典（刷新重建列表，防闭包引用陈旧 `di_data`）
+- 测试：`test/test_nanwang_custom_di.py` 92 项（含 `app_paths.data_path` 沙箱零污染真身、offscreen MainWindow 增删/重启保持），登记进 `release_check.py:CORE_TESTS`
 
 ### 1.23.10 — 2026-09-14
 
