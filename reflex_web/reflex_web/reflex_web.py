@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
 from . import share_model as sm  # noqa: F401  顶部导入：构建期完成 rx.Model 元数据注册
-from . import web_utils
+from . import spectrum_web, web_utils
 
 # 批量摘要每页条数选项（值给 rx.el.option 用字符串，State 侧 int(value)）
 PAGE_SIZE_OPTIONS = (100, 200, 500, 1000)
@@ -3801,6 +3801,435 @@ class State(rx.State):
                 self.tool_output = f"错误: {e}"
         else:
             self.tool_output = f"未知操作: {op}"
+
+
+# ═══════════════════════════════════════════════════════════════
+# 频谱图（常驻，与协议无关）——绘制与测量逻辑复用桌面 spectrum_widget 纯逻辑层
+# ═══════════════════════════════════════════════════════════════
+
+
+class SpectrumState(rx.State):
+    """频谱图标签页状态。
+
+    数值/算法全部来自 `spectrum_widget`（桌面 1.23.9 起的纯逻辑层，零 Qt 依赖）：
+    参数校验 / trace 清洗 / 刻度 / 标记吸附 / 峰值搜索 / 积分带宽；
+    SVG 坐标换算在 `spectrum_web`（纯函数）。本类只做「取输入 → 调纯函数 → 组装前端模型」。
+    """
+
+    # ── 参数（用户输入原样保留，解析后交给纯逻辑层校验）──
+    sp_start: str = "240"
+    sp_stop: str = "960"
+    sp_center: str = "600"
+    sp_span: str = "720"
+    sp_freq_unit: str = "MHz"
+    sp_ref: str = "-20"
+    sp_dbdiv: str = "10"
+    sp_ydivs: str = "8"
+    sp_amp_unit: str = "dBm"
+    sp_50ohm: bool = False
+    sp_detector: str = "峰值"
+    sp_auto_y: bool = False
+    sp_rbw: str = "7.2"
+    sp_rbw_unit: str = "MHz"
+    sp_vbw: str = ""
+    sp_vbw_unit: str = "kHz"
+    sp_trace_text: str = ""
+    # ── 图形（前端渲染模型；全部 JSON 可序列化）──
+    sp_has_trace: bool = False
+    sp_polyline: str = ""
+    sp_grid_v: list[dict[str, Any]] = []
+    sp_grid_h: list[dict[str, Any]] = []
+    sp_x_labels: list[dict[str, Any]] = []
+    sp_y_labels: list[dict[str, Any]] = []
+    sp_bands: list[dict[str, Any]] = []
+    sp_params_note: str = ""
+    sp_status: str = ""
+    sp_axis_range: str = ""
+    sp_note: str = ""
+    # ── 标记（以频率为锚点，重绘自动重吸附）──
+    sp_markers_svg: list[dict[str, Any]] = []
+    sp_marker_rows: list[dict[str, Any]] = []
+    sp_marker_count: int = 0
+    sp_ref_index: int = 0
+    sp_readout: str = ""
+    sp_extremes: str = ""
+    sp_delta: str = ""
+    # ── 积分带宽 ──
+    sp_ibw_show: bool = False
+    sp_ibw_center: str = "600"
+    sp_ibw_bw: str = "100"
+    sp_ibw_unit: str = "MHz"
+    sp_ibw_rect: dict[str, Any] = {}
+    sp_ibw_text: str = ""
+    sp_ibw_short: str = ""
+    # ── 内部：最近一次成功的 trace（私有字段 → 不进前端序列化）──
+    _sp_trace: Any = None
+    _sp_marker_freqs: list = []
+    # ── 消息 ──
+    sp_error: str = ""
+    sp_msg: str = ""
+
+    # ------------------------------------------------------------------
+    # 输入 → SpectrumParams
+    # ------------------------------------------------------------------
+    def _sp_freq_hz(self, text: str, name: str) -> float:
+        from spectrum_widget import SpectrumInputError, units_to_hz
+
+        raw = (text or "").strip()
+        if not raw:
+            raise SpectrumInputError(f"{name}不能为空")
+        try:
+            value = float(raw)
+        except ValueError:
+            raise SpectrumInputError(f"{name}必须是数值（当前：{raw}）")
+        return units_to_hz(value, self.sp_freq_unit)
+
+    def _sp_opt_hz(self, text: str, unit: str, name: str):
+        from spectrum_widget import SpectrumInputError, units_to_hz
+
+        raw = (text or "").strip()
+        if not raw:
+            return None
+        try:
+            value = float(raw)
+        except ValueError:
+            raise SpectrumInputError(f"{name}必须是数值（当前：{raw}）")
+        return units_to_hz(value, unit)
+
+    def _sp_num(self, text: str, name: str) -> float:
+        from spectrum_widget import SpectrumInputError
+
+        raw = (text or "").strip()
+        if not raw:
+            raise SpectrumInputError(f"{name}不能为空")
+        try:
+            return float(raw)
+        except ValueError:
+            raise SpectrumInputError(f"{name}必须是数值（当前：{raw}）")
+
+    def _sp_params(self):
+        """把表单字段装配成 SpectrumParams（数值/单位错误直接抛纯逻辑层的异常类型）。"""
+        from spectrum_widget import SpectrumInputError, SpectrumParams
+
+        try:
+            y_divs = int(float((self.sp_ydivs or "").strip()))
+        except ValueError:
+            raise SpectrumInputError(f"纵向格数必须是整数（当前：{self.sp_ydivs}）")
+        return SpectrumParams(
+            start_hz=self._sp_freq_hz(self.sp_start, "起始频率"),
+            stop_hz=self._sp_freq_hz(self.sp_stop, "终止频率"),
+            ref_level_db=self._sp_num(self.sp_ref, "参考电平"),
+            db_per_div=self._sp_num(self.sp_dbdiv, "每格 dB"),
+            y_divs=y_divs,
+            unit=self.sp_amp_unit,
+            convert_50ohm=bool(self.sp_50ohm),
+            rbw_hz=self._sp_opt_hz(self.sp_rbw, self.sp_rbw_unit, "RBW"),
+            vbw_hz=self._sp_opt_hz(self.sp_vbw, self.sp_vbw_unit, "VBW"),
+            detector=self.sp_detector,
+        )
+
+    # ------------------------------------------------------------------
+    # 参数动作
+    # ------------------------------------------------------------------
+    def sp_set_param(self, name: str, value: str):
+        """通用参数写入（文本类参数）；频率四字段走联动。"""
+        setattr(self, f"sp_{name}", value)
+        if name in ("start", "stop", "center", "span"):
+            self._sp_apply_freq_link(name)
+        else:
+            self._sp_draw_if_ready()
+
+    def _sp_apply_freq_link(self, changed: str) -> None:
+        """起始/终止/中心/扫宽 双向联动（纯逻辑 resolve_freq_inputs）。"""
+        from spectrum_widget import (
+            SpectrumInputError,
+            resolve_freq_inputs,
+            to_freq_unit,
+        )
+
+        try:
+            start, stop, center, span = resolve_freq_inputs(
+                changed,
+                self._sp_freq_hz(self.sp_start, "起始频率"),
+                self._sp_freq_hz(self.sp_stop, "终止频率"),
+                self._sp_freq_hz(self.sp_center, "中心频率"),
+                self._sp_freq_hz(self.sp_span, "扫宽"),
+            )
+        except SpectrumInputError as exc:
+            self.sp_error = str(exc)
+            self.sp_msg = ""
+            return
+        self.sp_error = ""
+        self.sp_msg = "频率参数已联动更新"
+        unit = self.sp_freq_unit
+        self.sp_start = _fmt_num(to_freq_unit(start, unit))
+        self.sp_stop = _fmt_num(to_freq_unit(stop, unit))
+        self.sp_center = _fmt_num(to_freq_unit(center, unit))
+        self.sp_span = _fmt_num(to_freq_unit(span, unit))
+        self._sp_draw_if_ready()
+
+    def sp_set_unit(self, unit: str):
+        """频率单位切换：数值按新单位换算（与桌面 _on_freq_unit_changed 同口径）。"""
+        from spectrum_widget import FREQ_UNITS
+
+        if unit == self.sp_freq_unit or unit not in FREQ_UNITS:
+            return
+        factor = FREQ_UNITS[self.sp_freq_unit] / FREQ_UNITS[unit]
+        for field in ("sp_start", "sp_stop", "sp_center", "sp_span", "sp_ibw_center"):
+            raw = (getattr(self, field) or "").strip()
+            try:
+                value = float(raw)
+            except ValueError:
+                continue
+            setattr(self, field, _fmt_num(value * factor))
+        self.sp_freq_unit = unit
+        self.sp_ibw_text = ""
+        self._sp_draw_if_ready()
+
+    def sp_set_toggle(self, name: str, value: bool):
+        """布尔参数：50Ω 换算 / 纵轴自动适配 / 积分带宽显示。"""
+        if name == "ibw_show":
+            self.sp_ibw_show = bool(value)
+        elif name == "50ohm":
+            self.sp_50ohm = bool(value)
+        elif name == "auto_y":
+            self.sp_auto_y = bool(value)
+        self._sp_draw_if_ready()
+
+    def sp_set_select(self, name: str, value: str):
+        """下拉参数：幅值单位 / 检波方式 / 积分带宽单位 / RBW·VBW 单位。"""
+        mapping = {
+            "amp_unit": "sp_amp_unit",
+            "detector": "sp_detector",
+            "ibw_unit": "sp_ibw_unit",
+            "rbw_unit": "sp_rbw_unit",
+            "vbw_unit": "sp_vbw_unit",
+        }
+        attr = mapping.get(name)
+        if attr is None:
+            return
+        setattr(self, attr, value)
+        self._sp_draw_if_ready()
+
+    def sp_set_ref_index(self, value: str):
+        """Δ 参考标记切换。"""
+        try:
+            self.sp_ref_index = int(value)
+        except (TypeError, ValueError):
+            self.sp_ref_index = 0
+        self._sp_refresh_markers()
+
+    def sp_set_trace_text(self, value: str):
+        """trace 文本输入。"""
+        self.sp_trace_text = value
+
+    def sp_draw(self):
+        """绘制：参数/trace 校验失败时**保留旧图**，只写错误信息。"""
+        from spectrum_widget import SpectrumInputError, build_trace
+
+        if not (self.sp_trace_text or "").strip():
+            self.sp_error = "请输入 trace 数值"
+            return
+        try:
+            params = self._sp_params()
+            trace = build_trace(self.sp_trace_text, params)
+        except SpectrumInputError as exc:
+            self.sp_error = str(exc)
+            self.sp_msg = ""
+            return
+        self.sp_error = ""
+        self._sp_trace = trace
+        self.sp_note = trace.source.note() if trace.source else ""
+        self._sp_refresh_markers(redraw=True)
+
+    def sp_clear(self):
+        self.sp_trace_text = ""
+        self._sp_trace = None
+        self._sp_marker_freqs = []
+        self.sp_has_trace = False
+        self.sp_polyline = ""
+        self.sp_markers_svg = []
+        self.sp_marker_rows = []
+        self.sp_marker_count = 0
+        self.sp_readout = ""
+        self.sp_extremes = ""
+        self.sp_delta = ""
+        self.sp_ibw_rect = {}
+        self.sp_ibw_text = ""
+        self.sp_ibw_short = ""
+        self.sp_status = ""
+        self.sp_axis_range = ""
+        self.sp_note = ""
+        self.sp_error = ""
+        self.sp_msg = "已清空"
+
+    def _sp_draw_if_ready(self):
+        """参数变化时：已有 trace 就自动重绘（否则只清错误）。"""
+        if self._sp_trace is None:
+            self.sp_error = ""
+            return
+        self.sp_draw()
+
+    # ------------------------------------------------------------------
+    # 渲染模型组装
+    # ------------------------------------------------------------------
+    def _sp_refresh_markers(self, redraw: bool = False):
+        """按频率锚点重建标记（吸附/越界丢弃/重编号）并刷新图表与读数。"""
+        from spectrum_widget import markers_for
+
+        trace = self._sp_trace
+        if trace is None:
+            return
+        dropped = 0
+        markers = ()
+        if self._sp_marker_freqs:
+            markers = markers_for(trace, self._sp_marker_freqs)
+            dropped = len(self._sp_marker_freqs) - len(markers)
+        self._sp_marker_freqs = [m.freq_hz for m in markers]
+        if dropped and not self.sp_msg:
+            self.sp_msg = f"{dropped} 个标记超出扫描范围已丢弃"
+        self._sp_render(trace, markers)
+
+    def _sp_render(self, trace, markers):
+        """组装全部前端渲染模型（网格/标签/迹线/注记/标记/IBW）。"""
+        from spectrum_widget import (
+            axis_range_text,
+            count_out_of_range,
+            delta_text,
+            extremes_text,
+            marker_rows,
+            note_text,
+            status_text,
+        )
+
+        params = trace.params
+        auto = bool(self.sp_auto_y)
+        self.sp_grid_v, self.sp_grid_h = spectrum_web.grid_segments(params)
+        self.sp_x_labels = spectrum_web.x_label_items(params)
+        self.sp_y_labels = spectrum_web.y_label_items(params, trace.levels, auto)
+        self.sp_bands = spectrum_web.band_items()
+        self.sp_polyline = spectrum_web.trace_path(trace, auto)
+        self.sp_params_note = note_text(params, trace.n_points)
+        self.sp_axis_range = axis_range_text(params, trace.levels, auto)
+
+        out_of_range = count_out_of_range(params, trace.levels, auto)
+        status = status_text(trace)
+        if out_of_range:
+            status += f" · ⚠ {out_of_range} 点超出纵轴范围（已裁剪到边缘）"
+        if self.sp_note:
+            status += f" · {self.sp_note}"
+        self.sp_status = status
+        self.sp_extremes = extremes_text(trace)
+
+        self.sp_markers_svg = spectrum_web.marker_items(markers, params, trace, auto)
+        rows = marker_rows(markers, self.sp_ref_index)
+        self.sp_marker_rows = [
+            {"label": r[0], "freq": r[1], "level": r[2], "d_freq": r[3], "d_level": r[4],
+             "color": spectrum_web.marker_color(False, i)}
+            for i, r in enumerate(rows)
+        ]
+        self.sp_marker_count = len(markers)
+        self.sp_ref_index = min(self.sp_ref_index, max(0, len(markers) - 1))
+        self.sp_delta = delta_text(markers, self.sp_ref_index)
+        if not markers:
+            self.sp_readout = ""
+        self.sp_has_trace = True
+        self._sp_refresh_ibw(trace)
+
+    def _sp_refresh_ibw(self, trace):
+        """积分带宽：边沿 + 带内积分 + 带矩形（画在迹线之下）。"""
+        from spectrum_widget import SpectrumInputError, integration_band_for
+
+        if not self.sp_ibw_show:
+            self.sp_ibw_rect = {}
+            self.sp_ibw_text = ""
+            self.sp_ibw_short = ""
+            return
+        try:
+            center = self._sp_freq_hz(self.sp_ibw_center, "积分带宽中心频率")
+            from spectrum_widget import units_to_hz
+
+            raw = (self.sp_ibw_bw or "").strip()
+            try:
+                bandwidth = units_to_hz(float(raw), self.sp_ibw_unit)
+            except ValueError:
+                raise SpectrumInputError(f"积分带宽必须是数值（当前：{raw}）")
+            band, _result = integration_band_for(trace, center, bandwidth, trace.params.rbw_hz)
+        except SpectrumInputError as exc:
+            self.sp_ibw_rect = {}
+            self.sp_ibw_text = f"⚠ {exc}"
+            self.sp_ibw_short = ""
+            return
+        rect = spectrum_web.band_rect(band.low_hz, band.high_hz, trace.params)
+        self.sp_ibw_rect = rect or {}
+        self.sp_ibw_text = band.text
+        self.sp_ibw_short = band.short_text
+
+    # ------------------------------------------------------------------
+    # 测量动作
+    # ------------------------------------------------------------------
+    def sp_plot_click(self, band_index: int):
+        """点击绘图区某一带 → 读数 + 在该带最近数据点加标记。"""
+        from spectrum_widget import MAX_MARKERS, nearest_index, readout_text
+
+        trace = self._sp_trace
+        if trace is None:
+            self.sp_error = "请先绘制图形"
+            return
+        freq = spectrum_web.band_click_freq(band_index, trace.params)
+        idx = nearest_index(trace.freqs, freq)
+        self.sp_readout = readout_text(trace.freqs[idx], trace.levels[idx], trace.params.unit)
+        if len(self._sp_marker_freqs) >= MAX_MARKERS:
+            self.sp_msg = f"标记已达上限（M1~M{MAX_MARKERS}），请先删除"
+        else:
+            self.sp_msg = ""
+            self._sp_marker_freqs = self._sp_marker_freqs + [trace.freqs[idx]]
+        self._sp_refresh_markers()
+
+    def sp_next_peak(self):
+        """峰值搜索/下一个峰值（相对最后一个标记；无标记则从起点）。"""
+        from spectrum_widget import MAX_MARKERS, next_peak_index
+
+        trace = self._sp_trace
+        if trace is None:
+            self.sp_error = "请先绘制图形"
+            return
+        current = (
+            min(range(trace.n_points), key=lambda i: abs(trace.freqs[i] - self._sp_marker_freqs[-1]))
+            if self._sp_marker_freqs
+            else 0
+        )
+        idx = next_peak_index(trace.levels, current, 1)
+        if idx is None:
+            self.sp_msg = "未找到显著峰（显著度阈值 3 dB）"
+            return
+        if len(self._sp_marker_freqs) >= MAX_MARKERS:
+            self.sp_msg = f"标记已达上限（M1~M{MAX_MARKERS}），请先删除"
+            return
+        self._sp_marker_freqs = self._sp_marker_freqs + [trace.freqs[idx]]
+        self.sp_msg = ""
+        self._sp_refresh_markers()
+
+    def sp_del_marker(self):
+        if self._sp_marker_freqs:
+            self._sp_marker_freqs = self._sp_marker_freqs[:-1]
+            self._sp_refresh_markers()
+
+    def sp_clear_markers(self):
+        if self._sp_marker_freqs:
+            self._sp_marker_freqs = []
+            self.sp_readout = ""
+            self.sp_msg = "已清空标记"
+            self._sp_refresh_markers()
+
+    def sp_export_png(self):
+        """导出 PNG（纯前端：SVG → canvas → 下载，零新增依赖）。"""
+        return rx.call_script(spectrum_web.EXPORT_PNG_JS)
+
+
+def _fmt_num(value: float) -> str:
+    """数值回写表单（去掉多余小数位，避免 599.9999999 这类噪声）。"""
+    return f"{round(float(value), 6):g}"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -10128,8 +10557,479 @@ def message_tool_tab() -> rx.Component:
 
 
 # ═══════════════════════════════════════════════════════════════
+# 频谱图 Tab（SVG 自绘；与协议无关）
+# ═══════════════════════════════════════════════════════════════
+
+
+def _sp_field(label: str, name: str, value, width: str = "90px") -> rx.Component:
+    """参数输入（文本，改动即联动/重绘）。"""
+    return rx.hstack(
+        rx.text(label, size="1", color="gray", white_space="nowrap"),
+        rx.input(
+            value=value,
+            on_change=lambda v: SpectrumState.sp_set_param(name, v),
+            width=width,
+            size="1",
+            font_family="monospace",
+        ),
+        spacing="1",
+        align="center",
+    )
+
+
+def spectrum_tab() -> rx.Component:
+    """频谱图：参数 → trace → SVG 网格图 → 测量 → 积分带宽。"""
+    from spectrum_widget import DETECTORS, LEVEL_UNITS, RBW_UNITS, SpectrumParams
+
+    return rx.vstack(
+        # ── 参数 ──
+        rx.card(
+            rx.vstack(
+                rx.hstack(
+                    rx.icon("sliders_horizontal", size=18, color="#2563eb"),
+                    rx.heading("频谱仪参数", size="2", font_weight="semibold"),
+                    rx.spacer(),
+                    rx.text(
+                        "频率字段双向联动（改起始/终止→重算中心与扫宽）",
+                        size="1",
+                        color="gray",
+                    ),
+                    spacing="2",
+                    width="100%",
+                ),
+                rx.hstack(
+                    _sp_field("起始", "start", SpectrumState.sp_start),
+                    _sp_field("终止", "stop", SpectrumState.sp_stop),
+                    _sp_field("中心", "center", SpectrumState.sp_center),
+                    _sp_field("扫宽", "span", SpectrumState.sp_span),
+                    rx.el.select(
+                        *[rx.el.option(u, value=u) for u in ("kHz", "MHz", "GHz")],
+                        value=SpectrumState.sp_freq_unit,
+                        on_change=SpectrumState.sp_set_unit,
+                        class_name="app-select",
+                    ),
+                    spacing="3",
+                    align="center",
+                    wrap="wrap",
+                    width="100%",
+                ),
+                rx.hstack(
+                    _sp_field("参考电平", "ref", SpectrumState.sp_ref, "70px"),
+                    _sp_field("每格dB", "dbdiv", SpectrumState.sp_dbdiv, "60px"),
+                    _sp_field("纵格数", "ydivs", SpectrumState.sp_ydivs, "50px"),
+                    _sp_field("RBW", "rbw", SpectrumState.sp_rbw, "70px"),
+                    rx.el.select(
+                        *[rx.el.option(u, value=u) for u in RBW_UNITS],
+                        value=SpectrumState.sp_rbw_unit,
+                        on_change=lambda v: SpectrumState.sp_set_select("rbw_unit", v),
+                        class_name="app-select",
+                    ),
+                    _sp_field("VBW", "vbw", SpectrumState.sp_vbw, "70px"),
+                    rx.el.select(
+                        *[rx.el.option(u, value=u) for u in RBW_UNITS],
+                        value=SpectrumState.sp_vbw_unit,
+                        on_change=lambda v: SpectrumState.sp_set_select("vbw_unit", v),
+                        class_name="app-select",
+                    ),
+                    spacing="3",
+                    align="center",
+                    wrap="wrap",
+                    width="100%",
+                ),
+                rx.hstack(
+                    rx.text("幅值单位", size="1", color="gray"),
+                    rx.el.select(
+                        *[rx.el.option(u, value=u) for u in LEVEL_UNITS],
+                        value=SpectrumState.sp_amp_unit,
+                        on_change=lambda v: SpectrumState.sp_set_select("amp_unit", v),
+                        class_name="app-select",
+                    ),
+                    rx.checkbox(
+                        "输入按 dBm，50Ω 换算",
+                        checked=SpectrumState.sp_50ohm,
+                        on_change=lambda v: SpectrumState.sp_set_toggle("50ohm", v),
+                        size="2",
+                    ),
+                    rx.text("检波", size="1", color="gray"),
+                    rx.el.select(
+                        *[rx.el.option(d, value=d) for d in DETECTORS],
+                        value=SpectrumState.sp_detector,
+                        on_change=lambda v: SpectrumState.sp_set_select("detector", v),
+                        class_name="app-select",
+                    ),
+                    rx.checkbox(
+                        "纵轴自动适配",
+                        checked=SpectrumState.sp_auto_y,
+                        on_change=lambda v: SpectrumState.sp_set_toggle("auto_y", v),
+                        size="2",
+                    ),
+                    spacing="3",
+                    align="center",
+                    wrap="wrap",
+                    width="100%",
+                ),
+                rx.text(
+                    SpectrumState.sp_axis_range,
+                    size="1",
+                    color="#6b7280",
+                ),
+                spacing="3",
+                width="100%",
+            ),
+            width="100%",
+        ),
+        # ── trace 输入 ──
+        rx.card(
+            rx.vstack(
+                rx.hstack(
+                    rx.icon("waves", size=18, color="#2563eb"),
+                    rx.heading("Trace 数值", size="2", font_weight="semibold"),
+                    rx.spacer(),
+                    rx.text(
+                        "分隔符任意（空格/逗号/换行）；支持带日志前缀的行，自动取行尾电平",
+                        size="1",
+                        color="gray",
+                    ),
+                    spacing="2",
+                    width="100%",
+                ),
+                rx.text_area(
+                    value=SpectrumState.sp_trace_text,
+                    on_change=SpectrumState.sp_set_trace_text,
+                    placeholder="粘贴单条 trace 的全部扫频点数值，例如：-51.5 -52.1 -53.0 …",
+                    height="110px",
+                    width="100%",
+                    font_family="monospace",
+                    font_size="12px",
+                ),
+                rx.hstack(
+                    rx.button(
+                        rx.icon("chart_spline", size=16),
+                        "绘制",
+                        on_click=SpectrumState.sp_draw,
+                        color_scheme="blue",
+                        size="2",
+                    ),
+                    rx.button(
+                        rx.icon("eraser", size=16),
+                        "清空",
+                        on_click=SpectrumState.sp_clear,
+                        variant="outline",
+                        color_scheme="gray",
+                        size="2",
+                    ),
+                    rx.button(
+                        rx.icon("download", size=16),
+                        "导出 PNG",
+                        on_click=SpectrumState.sp_export_png,
+                        variant="outline",
+                        color_scheme="green",
+                        size="2",
+                    ),
+                    rx.spacer(),
+                    rx.text(SpectrumState.sp_status, size="1", color="gray"),
+                    spacing="3",
+                    align="center",
+                    width="100%",
+                ),
+                rx.cond(
+                    SpectrumState.sp_error != "",
+                    rx.callout(
+                        SpectrumState.sp_error,
+                        icon="triangle_alert",
+                        color_scheme="red",
+                        size="1",
+                        width="100%",
+                    ),
+                ),
+                rx.cond(
+                    SpectrumState.sp_msg != "",
+                    rx.text(SpectrumState.sp_msg, size="1", color="#2563eb"),
+                ),
+                spacing="2",
+                width="100%",
+            ),
+            width="100%",
+        ),
+        # ── 画布 + 测量 ──
+        rx.hstack(
+            rx.card(
+                rx.vstack(
+                    rx.el.svg(
+                        # 网格
+                        rx.el.rect(
+                            x=spectrum_web.PLOT_X0,
+                            y=spectrum_web.PLOT_Y0,
+                            width=spectrum_web.PLOT_X1 - spectrum_web.PLOT_X0,
+                            height=spectrum_web.PLOT_Y1 - spectrum_web.PLOT_Y0,
+                            fill="#fbfdff",
+                            stroke="#cbd5e1",
+                            stroke_width="1",
+                        ),
+                        rx.foreach(
+                            SpectrumState.sp_grid_v,
+                            lambda g: rx.el.line(
+                                x1=g["x"], y1=spectrum_web.PLOT_Y0,
+                                x2=g["x"], y2=spectrum_web.PLOT_Y1,
+                                stroke="#e2e8f0", stroke_width="1",
+                            ),
+                        ),
+                        rx.foreach(
+                            SpectrumState.sp_grid_h,
+                            lambda g: rx.el.line(
+                                x1=spectrum_web.PLOT_X0, y1=g["y"],
+                                x2=spectrum_web.PLOT_X1, y2=g["y"],
+                                stroke="#e2e8f0", stroke_width="1",
+                            ),
+                        ),
+                        # 积分带宽带（画在迹线之下：半透明填充 + 两条点划线边沿）
+                        rx.cond(
+                            SpectrumState.sp_ibw_rect["w"] != None,
+                            rx.el.g(
+                                rx.el.rect(
+                                    x=SpectrumState.sp_ibw_rect["x"],
+                                    y=spectrum_web.PLOT_Y0,
+                                    width=SpectrumState.sp_ibw_rect["w"],
+                                    height=spectrum_web.PLOT_Y1 - spectrum_web.PLOT_Y0,
+                                    fill="rgba(37, 99, 235, 0.10)",
+                                    stroke="none",
+                                ),
+                                rx.el.line(
+                                    x1=SpectrumState.sp_ibw_rect["low_x"],
+                                    y1=spectrum_web.PLOT_Y0,
+                                    x2=SpectrumState.sp_ibw_rect["low_x"],
+                                    y2=spectrum_web.PLOT_Y1,
+                                    stroke="#1d4ed8",
+                                    stroke_width="1",
+                                    stroke_dasharray="5 3",
+                                ),
+                                rx.el.line(
+                                    x1=SpectrumState.sp_ibw_rect["high_x"],
+                                    y1=spectrum_web.PLOT_Y0,
+                                    x2=SpectrumState.sp_ibw_rect["high_x"],
+                                    y2=spectrum_web.PLOT_Y1,
+                                    stroke="#1d4ed8",
+                                    stroke_width="1",
+                                    stroke_dasharray="5 3",
+                                ),
+                            ),
+                        ),
+                        # 迹线（单条 path；越界点已裁到边缘）
+                        rx.cond(
+                            SpectrumState.sp_polyline != "",
+                            rx.el.path(
+                                d=SpectrumState.sp_polyline,
+                                fill="none",
+                                stroke="#0f766e",
+                                stroke_width="1.4",
+                            ),
+                        ),
+                        # 标记（竖虚线 + 圆点 + 标签；颜色与标记表同源）
+                        rx.foreach(
+                            SpectrumState.sp_markers_svg,
+                            lambda m: rx.el.g(
+                                rx.el.line(
+                                    x1=m["x"], y1=spectrum_web.PLOT_Y0,
+                                    x2=m["x"], y2=spectrum_web.PLOT_Y1,
+                                    stroke=m["color"], stroke_width="1",
+                                    stroke_dasharray="4 3",
+                                ),
+                                rx.el.circle(cx=m["x"], cy=m["y"], r="3.6",
+                                             fill=m["color"]),
+                                rx.el.text(
+                                    m["label"],
+                                    x=m["x"], y=spectrum_web.PLOT_Y0 - 6,
+                                    fill=m["color"], font_size="12",
+                                    text_anchor="middle", font_weight="bold",
+                                ),
+                            ),
+                        ),
+                        # 参数注记 / 状态行 / 纵轴标签
+                        rx.el.text(
+                            SpectrumState.sp_params_note,
+                            x=spectrum_web.PLOT_X0, y="22",
+                            fill="#334155", font_size="12",
+                        ),
+                        rx.el.text(
+                            SpectrumState.sp_status,
+                            x=spectrum_web.PLOT_X0, y=spectrum_web.VIEW_H - 12,
+                            fill="#64748b", font_size="11",
+                        ),
+                        rx.foreach(
+                            SpectrumState.sp_y_labels,
+                            lambda t: rx.el.text(
+                                t["text"],
+                                x=spectrum_web.PLOT_X0 - 8, y=t["ty"],
+                                fill="#475569", font_size="11", text_anchor="end",
+                            ),
+                        ),
+                        rx.foreach(
+                            SpectrumState.sp_x_labels,
+                            lambda t: rx.el.text(
+                                t["text"],
+                                x=t["x"], y=t["ty"],
+                                fill="#475569", font_size="11",
+                                text_anchor=t["anchor"],
+                            ),
+                        ),
+                        # 积分带宽短注记（窄画布下不压纵轴刻度）
+                        rx.cond(
+                            SpectrumState.sp_ibw_short != "",
+                            rx.el.text(
+                                SpectrumState.sp_ibw_short,
+                                x=spectrum_web.PLOT_X1 - 4,
+                                y=spectrum_web.PLOT_Y0 + 14,
+                                fill="#1d4ed8", font_size="11",
+                                text_anchor="end",
+                            ),
+                        ),
+                        # 点击带（透明，承载 click）
+                        rx.foreach(
+                            SpectrumState.sp_bands,
+                            lambda b: rx.el.rect(
+                                id=b["id"],
+                                x=b["x"], y=spectrum_web.PLOT_Y0,
+                                width=b["w"],
+                                height=spectrum_web.PLOT_Y1 - spectrum_web.PLOT_Y0,
+                                fill="transparent",
+                                cursor="crosshair",
+                                on_click=lambda: SpectrumState.sp_plot_click(b["index"]),
+                            ),
+                        ),
+                        id="spectrum-svg",
+                        view_box=spectrum_web.view_box(),
+                        width="100%",
+                        height="min(72vh, 620px)",
+                        style={"background": "#ffffff"},
+                    ),
+                    spacing="2",
+                    width="100%",
+                ),
+                width="62%",
+            ),
+            rx.vstack(
+                rx.card(
+                    rx.vstack(
+                        rx.heading("测量", size="2", font_weight="semibold"),
+                        rx.text(SpectrumState.sp_readout, size="1", color="#111827"),
+                        rx.text(SpectrumState.sp_extremes, size="1", color="gray"),
+                        rx.text(SpectrumState.sp_delta, size="1", color="#111827"),
+                        rx.hstack(
+                            rx.button("峰值搜索", on_click=SpectrumState.sp_next_peak,
+                                      size="1", variant="soft"),
+                            rx.button("删除标记", on_click=SpectrumState.sp_del_marker,
+                                      size="1", variant="soft"),
+                            rx.button("清空标记", on_click=SpectrumState.sp_clear_markers,
+                                      size="1", variant="soft"),
+                            spacing="2",
+                        ),
+                        rx.hstack(
+                            rx.text("Δ 参考", size="1", color="gray"),
+                            rx.el.select(
+                                *[rx.el.option(f"M{i + 1}", value=str(i)) for i in range(6)],
+                                default_value="0",
+                                on_change=SpectrumState.sp_set_ref_index,
+                                class_name="app-select",
+                            ),
+                            spacing="2",
+                            align="center",
+                        ),
+                        spacing="2",
+                        width="100%",
+                    ),
+                    width="100%",
+                ),
+                rx.card(
+                    rx.vstack(
+                        rx.heading("标记", size="2", font_weight="semibold"),
+                        rx.cond(
+                            SpectrumState.sp_marker_rows.length() > 0,
+                            rx.table.root(
+                                rx.table.header(
+                                    rx.table.row(
+                                        rx.table.column_header_cell("标记"),
+                                        rx.table.column_header_cell("频率"),
+                                        rx.table.column_header_cell("幅值"),
+                                        rx.table.column_header_cell("Δ频率"),
+                                        rx.table.column_header_cell("Δ幅值"),
+                                    )
+                                ),
+                                rx.table.body(
+                                    rx.foreach(
+                                        SpectrumState.sp_marker_rows,
+                                        lambda r: rx.table.row(
+                                            rx.table.cell(
+                                                rx.text(r["label"], color=r["color"],
+                                                        font_weight="bold", size="1")
+                                            ),
+                                            rx.table.cell(rx.text(r["freq"], size="1")),
+                                            rx.table.cell(rx.text(r["level"], size="1")),
+                                            rx.table.cell(rx.text(r["d_freq"], size="1")),
+                                            rx.table.cell(rx.text(r["d_level"], size="1")),
+                                        ),
+                                    )
+                                ),
+                                variant="surface",
+                                size="1",
+                                width="100%",
+                            ),
+                            rx.text(
+                                "点击左侧图形即可添加标记（M1~M6，标记吸附到最近数据点）",
+                                size="1", color="gray",
+                            ),
+                        ),
+                        spacing="2",
+                        width="100%",
+                    ),
+                    width="100%",
+                ),
+                rx.card(
+                    rx.vstack(
+                        rx.hstack(
+                            rx.checkbox(
+                                "积分带宽",
+                                checked=SpectrumState.sp_ibw_show,
+                                on_change=lambda v: SpectrumState.sp_set_toggle("ibw_show", v),
+                                size="2",
+                            ),
+                            rx.spacer(),
+                            spacing="2",
+                            width="100%",
+                        ),
+                        rx.hstack(
+                            _sp_field("中心", "ibw_center", SpectrumState.sp_ibw_center, "80px"),
+                            _sp_field("带宽", "ibw_bw", SpectrumState.sp_ibw_bw, "70px"),
+                            rx.el.select(
+                                *[rx.el.option(u, value=u) for u in ("kHz", "MHz", "GHz")],
+                                value=SpectrumState.sp_ibw_unit,
+                                on_change=lambda v: SpectrumState.sp_set_select("ibw_unit", v),
+                                class_name="app-select",
+                            ),
+                            spacing="2",
+                            align="center",
+                            wrap="wrap",
+                        ),
+                        rx.text(SpectrumState.sp_ibw_text, size="1", color="#1d4ed8"),
+                        spacing="2",
+                        width="100%",
+                    ),
+                    width="100%",
+                ),
+                spacing="3",
+                width="38%",
+            ),
+            spacing="4",
+            width="100%",
+            align="start",
+        ),
+        spacing="4",
+        width="100%",
+    )
+
+
+# ═══════════════════════════════════════════════════════════════
 # 主页面
-# ══════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
 
 # 可搜索下拉列表样式（项目未启用 Tailwind，class_name 仅作钩子，样式在此定义）
 SEARCHABLE_CSS = """
@@ -10422,6 +11322,17 @@ def index() -> rx.Component:
                     ),
                     data_testid="tab-lookup",
                 ),
+                # 频谱图（常驻，与协议无关；状态在 SpectrumState）
+                rx.el.button(
+                    rx.hstack(rx.icon("chart_spline", size=16), "频谱图", spacing="1"),
+                    on_click=lambda: State.set_tab("spectrum"),
+                    class_name=rx.cond(
+                        State.active_tab == "spectrum",
+                        "app-tab app-tab-active",
+                        "app-tab",
+                    ),
+                    data_testid="tab-spectrum",
+                ),
                 rx.el.button(
                     rx.hstack(rx.icon("wrench", size=16), "报文工具", spacing="1"),
                     on_click=lambda: State.set_tab("tool"),
@@ -10503,7 +11414,11 @@ def index() -> rx.Component:
                                         rx.cond(
                                             State.active_tab == "release",
                                             release_tab(),
-                                            lookup_tab(),
+                                            rx.cond(
+                                                State.active_tab == "spectrum",
+                                                spectrum_tab(),
+                                                lookup_tab(),
+                                            ),
                                         ),
                                     ),
                                 ),

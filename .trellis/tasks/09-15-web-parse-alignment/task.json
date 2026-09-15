@@ -23,7 +23,8 @@
     "09-15-web-shared-parse-core",
     "09-15-web-batch-alignment",
     "09-15-web-single-frame-alignment",
-    "09-15-web-parse-perf"
+    "09-15-web-parse-perf",
+    "09-15-web-spectrum-plot"
   ],
   "parent": null,
   "relatedFiles": [],

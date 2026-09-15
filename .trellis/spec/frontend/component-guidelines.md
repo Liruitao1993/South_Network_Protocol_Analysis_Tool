@@ -298,7 +298,24 @@ Web 版（`reflex_web/reflex_web/`）与 PySide6 版（`main_gui.py`）**共享 
 - **断言必须能在实现回退时变红**：写「修复前后差异」的判据（例：不下发 `frame_type` 时断言出现 `未知(None)`，下发后断言 `仅PB - SOF帧`），不要只断言「有结果/不抛异常」。
 - 桌面回归网（ED 相关必跑）：`test_ed_gx_wrapper.py` / `test_ed_fallback_fix.py` / `test_csg_summary.py` / `test_csg_batch_prefix.py` / `test_csg_sequence_model.py` / `test_gw_monitor_summary.py` / `test_batch_src_line_jump.py`。
 
-### 5. 方法论陷阱（本次实测）
+### 5. Web 版复用桌面纯逻辑层（本项目范式，1.23.12 起）
+
+**什么时候适用**：桌面某个功能是「纯逻辑 + Qt 绘制」两层结构（如 `spectrum_widget.py`：前 ~950 行只依赖 `math/bisect/re`，后 ~1400 行是 QPainter/QWidget）。
+**做法**：
+1. Web 侧**直接 `import` 桌面模块**，只调用其纯逻辑 API（`spectrum_widget` 的 Qt 层被 `try: from PySide6 … except ImportError` 守护，Web 进程天然走 except 分支 → 纯逻辑可用）；
+2. 新增一个**纯** Web 模块承载「绘制层专有逻辑」（如 `reflex_web/spectrum_web.py` 的 SVG 坐标换算），不改桌面行为；
+3. State 只做「取输入 → 调纯函数 → 组装前端渲染模型」。
+
+**收益实测**：频谱图移植零算法重写——参数校验、trace 日志清洗、刻度、标记吸附、峰值搜索（O(n) 单调栈）、积分带宽（含移位求和/RBW 归一化口径）全部复用，桌面既有 225 项纯逻辑测试直接成为 Web 回归网。
+
+**Reflex/SVG 坑（实测）**：
+- `el` 没有 `polyline`（只有 `path`/`polygon`），且 `polygon` 会自动闭合首尾（多一条回边）→ 迹线用 `rx.el.path(d="M…L…")`；
+- SVG 数值属性只接受 `str | int`：`rect.x`/`circle.r`/`stroke_width`/`font_size` 给 float 会 `TypeError`；几何层统一输出**字符串**（`f"{v:.2f}"`），常量用 int；
+- `rx.el.text(children=...)` 与 `_create()` 的 children 参数冲突 → 文本内容用**第一个位置参数**传，且必须写在关键字参数之前；
+- 条件样式用 `class_name=rx.cond(...)`（`style=rx.cond({...})` 实测不落 DOM，见下条）；
+- 鼠标坐标拿不到（Reflex 不暴露 DOM 事件）→ 首版把绘图区切成 N 个透明带（`id="sp-band-i"`）各带 `on_click=State.xxx(i)`，点击按带中心频率吸附到最近数据点；需要更高精度或悬停时再上 JS 桥。
+
+### 6. 方法论陷阱（本次实测）
 - **`style=rx.cond(cond, {...}, {})` 在本项目不落到 DOM**：批量摘要行原用该写法做选中高亮，实测所有行的 `style` 属性为 `null`（选中行也不高亮）。改用 `class_name=rx.cond(cond, "batch-row-selected", "")` + `GLOBAL_CSS` 里一条 `.batch-row-selected{border:2px solid #2563eb!important}` 即生效（`class_name=rx.cond` 在 tab 高亮等处以证实可用）。凡「条件样式」优先 class，不要用 `style` 传 dict 条件。
 - **Reflex State 字段即 WebSocket 载荷**：`batch_results` 这类"结果集字段"一旦到万级就会整批序列化下发（本项目实测 24MB 告警）。**大结果集必须只把当前页放进 State**（全量放 `_private` 字段），分页数学走纯函数 `web_utils.paginate`。
 - **推断型缺陷结论必须先用真实调用路径复现再改代码**：只读审计曾断言「Web 剔除不幂等（连点两次 = 二次裁剪）」，依据仅是「没有缓存」；实测发现 Web 每次都从**未被回写的** `frame_hex` 重算，本就幂等——按该结论加缓存后第二次解析反而拿到**未剔除**的原始字节（真回归），已撤销。凡结论带「因此/必然/会」的推断，先写 3 行脚本跑一遍。
