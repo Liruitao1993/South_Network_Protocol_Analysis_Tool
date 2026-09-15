@@ -116,6 +116,30 @@ def parse_kwargs_for(protocol_index: int, parse_level: str = "auto",
     return {}
 
 
+def paginate(items: list, page: int, page_size: int) -> tuple:
+    """列表分页 → (当前页切片, 总页数)。
+
+    - `page` 越界自动夹取到 [0, page_count-1]（翻页按钮不传非法值时也不会空屏）
+    - 空列表 → ([], 1)
+    - `page_size <= 0` 视为 1
+    用途：批量摘要只把「当前页」放进 Reflex State，避免整个结果集经 WebSocket 下发。
+    """
+    if page_size is None or page_size <= 0:
+        page_size = 1
+    total = len(items or [])
+    page_count = max(1, (total + page_size - 1) // page_size)
+    page = max(0, min(int(page or 0), page_count - 1))
+    start = page * page_size
+    return (items or [])[start:start + page_size], page_count
+
+
+def page_of(page: int, page_count: int) -> int:
+    """把页码夹取到合法范围（与 paginate 同一规则，供 State 单独校正页码用）。"""
+    if page_count <= 0:
+        return 0
+    return max(0, min(int(page or 0), page_count - 1))
+
+
 # ═══════════════════════════════════════════════════════════════
 # 解析级别 / 物理块帧类型选项（UI 与逻辑共用单一来源）
 # ═══════════════════════════════════════════════════════════════

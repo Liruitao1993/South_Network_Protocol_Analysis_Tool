@@ -24,6 +24,9 @@ sys.path.insert(0, str(ROOT))
 from . import share_model as sm  # noqa: F401  顶部导入：构建期完成 rx.Model 元数据注册
 from . import web_utils
 
+# 批量摘要每页条数选项（值给 rx.el.option 用字符串，State 侧 int(value)）
+PAGE_SIZE_OPTIONS = (100, 200, 500, 1000)
+
 # ═══════════════════════════════════════════════════════════════
 # 状态管理
 # ═══════════════════════════════════════════════════════════════
@@ -68,10 +71,14 @@ class State(rx.State):
     # 批量解析进度
     batch_progress: int = 0
     batch_total: int = 0
-    # 解析出的总帧数（batch_results 可能被截断，此字段始终为真实总数）
+    # 解析出的总帧数（batch_results 只含当前页，此字段始终为真实总数）
     batch_total_frames: int = 0
-    # 摘要列表显示上限（防止大文件渲染卡死，导出仍包含全部）
-    batch_display_limit: int = 300
+    # 摘要分页（前端只放当前页 → 大日志不再整批经 WebSocket 下发）
+    batch_page: int = 0
+    batch_page_size: int = 100
+    batch_page_count: int = 0
+    # 全部帧的摘要（私有 → 不序列化到前端；翻页时切片）
+    _batch_summaries: list[dict[str, Any]] = []
     # 预处理命令链（pp_cli 管道式命令）
     batch_pp_commands: str = ""
     batch_pp_last_result: str = ""
@@ -872,8 +879,8 @@ class State(rx.State):
 
             # 完整结果（含 frame_bytes + 解析明细）存后端，不发送前端
             all_results = []
-            # 前端只展示摘要（截断到显示上限）
-            display_results = []
+            # 全量摘要（私有字段；前端只同步当前页 → 大日志不再整批下发）
+            summaries = []
 
             for idx, frame_hex in enumerate(frame_hexes):
                 try:
@@ -915,27 +922,28 @@ class State(rx.State):
                         }
                     )
 
-                # 前端只保留摘要行（限显示上限），避免大结果同步卡死
-                if len(display_results) < self.batch_display_limit:
-                    display_results.append(
-                        {
-                            "id": all_results[-1]["id"],
-                            "status": all_results[-1]["status"],
-                            "proto": all_results[-1]["proto"],
-                            "summary": all_results[-1]["summary"],
-                            "len": all_results[-1]["len"],
-                        }
-                    )
+                # 摘要行全量收集（私有字段，不下发前端；前端只拿当前页）
+                summaries.append(
+                    {
+                        "id": all_results[-1]["id"],
+                        "status": all_results[-1]["status"],
+                        "proto": all_results[-1]["proto"],
+                        "summary": all_results[-1]["summary"],
+                        "len": all_results[-1]["len"],
+                    }
+                )
 
                 # 每块 yield：让出事件循环 + 向前端发送进度 delta
                 self.batch_progress = idx + 1
                 if (idx + 1) % CHUNK_SIZE == 0 or (idx + 1) == total:
                     yield None
 
-            # 结果落地：后端存全量，前端存摘要
+            # 结果落地：明细与全量摘要存后端，前端只同步当前页
             self._batch_all_results = all_results
-            self.batch_results = display_results
+            self._batch_summaries = summaries
             self.batch_total_frames = len(all_results)
+            self.batch_page = 0
+            self._load_batch_page()
 
             success_count = sum(1 for r in all_results if r["status"] == "成功")
             fail_count = sum(1 for r in all_results if r["status"] == "失败")
@@ -961,14 +969,17 @@ class State(rx.State):
             self.is_loading = False
 
     def select_batch_item(self, idx: int):
-        """选择批量解析结果项，显示详细解析（完整结果从后端 _batch_all_results 读取）"""
+        """选择批量解析结果项，显示详细解析（完整结果从后端 _batch_all_results 读取）
+
+        idx 是**当前页内**的下标；明细按该行的全局 id 取，
+        batch_selected_idx 存全局 id（跨页高亮仍然正确）。
+        """
         if idx < 0 or idx >= len(self.batch_results):
             return
 
-        self.batch_selected_idx = idx
-        # 显示列表条目只含摘要，完整明细（frame_bytes/result）在后端
         display_item = self.batch_results[idx]
         frame_id = display_item.get("id", idx)
+        self.batch_selected_idx = frame_id
         item = None
         if 0 <= frame_id < len(self._batch_all_results):
             item = self._batch_all_results[frame_id]
@@ -1009,6 +1020,43 @@ class State(rx.State):
         """通过索引选择（用于 rx.foreach 回调）"""
         self.select_batch_item(index)
 
+    # ── 摘要分页 ─────────────────────────────────────────────
+    def _load_batch_page(self) -> None:
+        """把 _batch_summaries 的当前页写入 batch_results（前端只同步这一页）。"""
+        self.batch_page = web_utils.page_of(self.batch_page, self.batch_page_count)
+        rows, page_count = web_utils.paginate(
+            self._batch_summaries, self.batch_page, self.batch_page_size
+        )
+        self.batch_page_count = page_count
+        self.batch_results = rows
+
+    def batch_goto_page(self, page: int):
+        """跳页（首页=0 / 上页=当前-1 / 下页=当前+1 / 末页=page_count-1）。"""
+        self.batch_page = int(page or 0)
+        self._load_batch_page()
+
+    def batch_first_page(self):
+        self.batch_goto_page(0)
+
+    def batch_prev_page(self):
+        self.batch_goto_page(self.batch_page - 1)
+
+    def batch_next_page(self):
+        self.batch_goto_page(self.batch_page + 1)
+
+    def batch_last_page(self):
+        self.batch_goto_page(self.batch_page_count - 1)
+
+    def set_batch_page_size(self, value: str):
+        """每页条数（100/200/500/1000）：改后回到第一页。"""
+        try:
+            size = int(value)
+        except (TypeError, ValueError):
+            size = 100
+        self.batch_page_size = size if size > 0 else 100
+        self.batch_page = 0
+        self._load_batch_page()
+
     def clear_batch(self):
         """清空批量解析"""
         self.batch_input = ""
@@ -1024,6 +1072,9 @@ class State(rx.State):
         self.batch_progress = 0
         self.batch_total = 0
         self.batch_total_frames = 0
+        self.batch_page = 0
+        self.batch_page_count = 0
+        self._batch_summaries = []
         self._batch_file_content = ""
         self._batch_all_results = []
 
@@ -4525,7 +4576,7 @@ def batch_parse_tab() -> rx.Component:
                     ),
                     rx.spacer(),
                     rx.text(
-                        f"共 {State.batch_results.length()} 帧", size="1", color="gray"
+                        f"共 {State.batch_total_frames} 帧", size="1", color="gray"
                     ),
                     spacing="3",
                 ),
@@ -4570,12 +4621,72 @@ def batch_parse_tab() -> rx.Component:
                     rx.cond(
                         State.batch_results.length() > 0,
                         rx.vstack(
+                            # 分页条放在列表上方：不必滚动就能翻页（大列表下方看不到）
+                            rx.hstack(
+                                rx.text(
+                                    f"共 {State.batch_total_frames} 帧",
+                                    size="1",
+                                    color="gray",
+                                ),
+                                rx.spacer(),
+                                rx.button(
+                                    rx.icon("chevrons_left", size=14),
+                                    "首页",
+                                    on_click=State.batch_first_page,
+                                    disabled=State.batch_page <= 0,
+                                    size="1",
+                                    variant="soft",
+                                ),
+                                rx.button(
+                                    rx.icon("chevron_left", size=14),
+                                    "上一页",
+                                    on_click=State.batch_prev_page,
+                                    disabled=State.batch_page <= 0,
+                                    size="1",
+                                    variant="soft",
+                                ),
+                                rx.text(
+                                    f"第 {State.batch_page + 1} / {State.batch_page_count} 页",
+                                    size="1",
+                                    font_weight="medium",
+                                    white_space="nowrap",
+                                ),
+                                rx.button(
+                                    "下一页",
+                                    rx.icon("chevron_right", size=14),
+                                    on_click=State.batch_next_page,
+                                    disabled=State.batch_page
+                                    >= State.batch_page_count - 1,
+                                    size="1",
+                                    variant="soft",
+                                ),
+                                rx.button(
+                                    "末页",
+                                    rx.icon("chevrons_right", size=14),
+                                    on_click=State.batch_last_page,
+                                    disabled=State.batch_page
+                                    >= State.batch_page_count - 1,
+                                    size="1",
+                                    variant="soft",
+                                ),
+                                rx.text("每页", size="1", color="gray"),
+                                rx.el.select(
+                                    *[
+                                        rx.el.option(str(n), value=str(n))
+                                        for n in PAGE_SIZE_OPTIONS
+                                    ],
+                                    default_value="100",
+                                    on_change=State.set_batch_page_size,
+                                    class_name="app-select",
+                                ),
+                                spacing="2",
+                                align="center",
+                                width="100%",
+                            ),
                             rx.scroll_area(
                                 rx.vstack(
                                     rx.foreach(
-                                        State.batch_results[
-                                            : State.batch_display_limit
-                                        ],
+                                        State.batch_results,
                                         lambda item, idx: rx.card(
                                             rx.hstack(
                                                 rx.badge(
@@ -4593,7 +4704,9 @@ def batch_parse_tab() -> rx.Component:
                                                     size="1",
                                                 ),
                                                 rx.text(
-                                                    "#" + (idx + 1).to_string(),
+                                                    # 全局序号（跨页连续）
+                                                    "#"
+                                                    + (item["id"].to(int) + 1).to_string(),
                                                     size="1",
                                                     font_weight="bold",
                                                 ),
@@ -4623,10 +4736,13 @@ def batch_parse_tab() -> rx.Component:
                                             _hover={
                                                 "background": "rgba(37, 99, 235, 0.05)"
                                             },
-                                            style=rx.cond(
-                                                State.batch_selected_idx == item["id"],
-                                                {"border": "2px solid #2563eb"},
-                                                {},
+                                            # 选中高亮用 class（`style=rx.cond({...})` 在本项目
+                                            # 实测不落到 DOM，class_name=rx.cond 是已验证可用的写法）
+                                            class_name=rx.cond(
+                                                State.batch_selected_idx
+                                                == item["id"].to(int),
+                                                "batch-row-selected",
+                                                "",
                                             ),
                                             on_click=lambda: State.select_batch_by_index(
                                                 idx
@@ -4636,20 +4752,12 @@ def batch_parse_tab() -> rx.Component:
                                     spacing="1",
                                     width="100%",
                                 ),
-                                height="360px",
+                                # 高度随视口（一屏尽量多行），短屏保底 320px
+                                height="calc(100vh - 400px)",
+                                min_height="300px",
                                 width="100%",
                             ),
-                            # 超出显示上限提示（导出仍包含全部）
-                            rx.cond(
-                                State.batch_total_frames > State.batch_display_limit,
-                                rx.text(
-                                    f"仅显示前 {State.batch_display_limit} 条，共 {State.batch_total_frames} 帧（导出包含全部）",
-                                    size="1",
-                                    color="amber",
-                                    font_weight="medium",
-                                ),
-                            ),
-                            spacing="1",
+                            spacing="2",
                             width="100%",
                         ),
                         rx.center(
@@ -4743,7 +4851,9 @@ def batch_parse_tab() -> rx.Component:
                                 size="1",
                                 width="100%",
                             ),
-                            height="350px",
+                            # 高度随视口（比摘要区再让出原始帧 HEX 行的高度）
+                            height="calc(100vh - 430px)",
+                            min_height="300px",
                         ),
                         rx.center(
                             rx.vstack(
@@ -10081,9 +10191,9 @@ body {
   background: #f1f5f9;
   -webkit-font-smoothing: antialiased;
 }
-/* 内容容器（限宽居中） */
+/* 内容容器（占满浏览器宽度；窄屏自动收窄） */
 .app-container {
-  max-width: 1320px;
+  max-width: 100%;
   margin: 0 auto;
   padding: 20px 28px 64px;
   width: 100%;
@@ -10091,7 +10201,7 @@ body {
 }
 /* 顶栏容器 */
 .app-header-inner {
-  max-width: 1320px;
+  max-width: 100%;
   margin: 0 auto;
   padding: 0 28px;
   width: 100%;
@@ -10104,6 +10214,11 @@ body {
   border-radius: 14px;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
   padding: 18px 22px;
+}
+/* 批量摘要：选中行高亮（class 版，见批量面板注释） */
+.batch-row-selected {
+  border: 2px solid #2563eb !important;
+  background: rgba(37, 99, 235, 0.04);
 }
 /* ===== 表格 ===== */
 .rt-TableRoot {

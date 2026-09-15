@@ -3,7 +3,7 @@
   "name": "web-batch-alignment",
   "title": "Web 批量解析能力对齐（摘要/前缀剥离/行号/导出）",
   "description": "协议10/11 摘要对齐桌面、测试模式摘要、跨行 fc_payload_data 状态机、EDA5 剥离、行号映射与原始日志定位、导出字段详情",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
