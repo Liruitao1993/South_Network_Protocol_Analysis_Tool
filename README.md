@@ -1,6 +1,6 @@
 # 南网协议解析工具
 
-[![Version](https://img.shields.io/badge/version-1.23.10-blue)]()
+[![Version](https://img.shields.io/badge/version-1.23.11-blue)]()
 [![Python](https://img.shields.io/badge/Python-3.8%2B-brightgreen)]()
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)]()
 [![License](https://img.shields.io/badge/License-MIT-green)]()

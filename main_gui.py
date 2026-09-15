@@ -65,6 +65,7 @@ from PySide6.QtWidgets import (
 
 import app_icons
 import batch_source_view
+import custom_di_store
 import proc_stats
 import thread_registry
 from app_paths import app_data_dir, data_path, resource_path
@@ -101,10 +102,20 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.10"
-BUILD_DATE = "2026-09-14"  # 编译日期，每次打包前更新
+APP_VERSION = "1.23.11"
+BUILD_DATE = "2026-09-15"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    (
+        "1.23.11",
+        "2026-09-15",
+        [
+            "南网查询页「添加/删除自定义DI」收口为共用单源：新增 `custom_di_store.py`（纯逻辑无 Qt：JSON 读写/单字节 hex 校验/键解析/upsert/批量删除），`protocol_parser` 三处读写委托之（未知字段不丢），`main_gui` 与 `lookup_pages` 简化页共用同一份 `apply_custom_di_add` / `delete_selected_custom_di_interactive` 实现",
+            "行为增强：重复 DI 由「直接拒绝」改为**覆盖确认**（提示区分「已添加/已覆盖」）；删除支持**多选批量**（DI 表开启 ExtendedSelection，提示带条数与被忽略的内置条数）；未选中/仅内置 DI 给出可读提示；新增行同步合并进解析器 `DI_COMBINATION_MAP`（单帧解析即时生效）",
+            "`lookup_pages.py` 简化版查询页两枚死按钮（弹「功能待实现」）改为真实增删；DI 表格刷新改走 `state` 字典（刷新后重建列表，避免闭包引用陈旧 `di_data`）",
+            "新增 `test/test_nanwang_custom_di.py`（92 项：store 纯逻辑 / 未知字段保留 / 非法 JSON 容错 / 沙箱隔离真身零改动 / MainWindow offscreen 增删·覆盖·内置拒绝·多选批量·重启保持 / 简化页 / 源码无「待实现」反例），登记进 `release_check.py` CORE_TESTS；附带修复 `test_plc_rf.py` 在 GBK 控制台 print ✓ 崩溃（补 UTF-8 重配置），`release_check.py` 子进程统一注入 `PYTHONIOENCODING=utf-8` 且报告输出容错",
+        ],
+    ),
     (
         "1.23.10",
         "2026-09-14",
@@ -2217,8 +2228,7 @@ class MainWindow(QMainWindow):
         self._di_data = []
         di_map = self.parser.DI_COMBINATION_MAP
         afn_map = self.parser.AFN_MAP
-        custom_list = get_parser_class("south").load_custom_di_list()
-        custom_keys = {(e["di3"], e["di2"], e["di1"], e["di0"]) for e in custom_list}
+        custom_keys = custom_di_store.custom_key_set()
 
         for (di3, di2, di1, di0), desc in di_map.items():
             afn_val = di1
@@ -2341,84 +2351,29 @@ class MainWindow(QMainWindow):
         if dialog.exec() != QDialog.Accepted:
             return
 
-        # 验证输入
-        try:
-            di3 = int(di3_input.text().strip(), 16)
-            di2 = int(di2_input.text().strip(), 16)
-            di1 = int(di1_input.text().strip(), 16)
-            di0 = int(di0_input.text().strip(), 16)
-        except ValueError:
-            QMessageBox.warning(self, "错误", "DI字段必须为十六进制（00-FF）！")
-            return
+        # 校验/去重/落盘/提示统一走 lookup_pages（与简化版查询页同一实现）
+        import lookup_pages
 
-        desc = desc_input.text().strip()
-        if not desc:
-            QMessageBox.warning(self, "错误", "请填写中文含义！")
-            return
-
-        # 检查重复
-        custom_list = get_parser_class("south").load_custom_di_list()
-        key = (di3, di2, di1, di0)
-        for e in custom_list:
-            if (e["di3"], e["di2"], e["di1"], e["di0"]) == key:
-                QMessageBox.warning(self, "重复", "该DI已存在于自定义列表中！")
-                return
-
-        # 保存到 JSON
-        custom_list.append(
-            {"di3": di3, "di2": di2, "di1": di1, "di0": di0, "desc": desc}
-        )
-        get_parser_class("south").save_custom_di(custom_list)
-
-        # 合并到解析器（单帧解析也能识别）
-        if key not in self.parser.DI_COMBINATION_MAP:
-            self.parser.DI_COMBINATION_MAP[key] = desc
-
-        # 刷新表格
-        self._load_di_map_data()
-        QMessageBox.information(
+        lookup_pages.apply_custom_di_add(
             self,
-            "成功",
-            f"已添加自定义DI: {di3:02X} {di2:02X} {di1:02X} {di0:02X} → {desc}",
+            di3_input.text(),
+            di2_input.text(),
+            di1_input.text(),
+            di0_input.text(),
+            desc_input.text(),
+            on_changed=self._load_di_map_data,
         )
 
     def _del_custom_di(self):
-        """删除选中的自定义DI"""
-        row = self.di_table.currentRow()
-        if row < 0 or row >= len(self._di_data):
-            QMessageBox.warning(self, "提示", "请先选中一条记录！")
-            return
+        """删除选中的自定义DI（多选批量；实现见 lookup_pages，与简化版查询页同一份）"""
+        import lookup_pages
 
-        di3, di2, di1, di0, afn_val, afn_name, desc, is_custom = self._di_data[row]
-
-        if not is_custom:
-            QMessageBox.warning(self, "提示", "只能删除自定义DI（蓝色★标记的记录）！")
-            return
-
-        reply = QMessageBox.question(
+        lookup_pages.delete_selected_custom_di_interactive(
             self,
-            "确认删除",
-            f"确定删除自定义DI：{di3:02X} {di2:02X} {di1:02X} {di0:02X} ({desc})？",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
+            self.di_table,
+            self._di_data,
+            on_changed=self._load_di_map_data,
         )
-        if reply != QMessageBox.Yes:
-            return
-
-        # 从 JSON 移除
-        custom_list = get_parser_class("south").load_custom_di_list()
-        key = (di3, di2, di1, di0)
-        custom_list = [
-            e for e in custom_list if (e["di3"], e["di2"], e["di1"], e["di0"]) != key
-        ]
-        get_parser_class("south").save_custom_di(custom_list)
-
-        # 从解析器移除
-        if key in self.parser.DI_COMBINATION_MAP:
-            del self.parser.DI_COMBINATION_MAP[key]
-
-        self._load_di_map_data()
-        QMessageBox.information(self, "成功", "已删除自定义DI")
 
     def create_batch_parse_tab(self) -> QWidget:
         """创建批量解析标签页（左右分栏布局：左侧摘要 + 右侧详情）"""
@@ -4220,6 +4175,9 @@ class MainWindow(QMainWindow):
         self.di_table.setColumnWidth(4, 200)
         self.di_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.di_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.di_table.setSelectionMode(
+            QTableWidget.SelectionMode.ExtendedSelection
+        )
         self.di_table.setAlternatingRowColors(True)
         self.di_table.verticalHeader().hide()
         self.di_table.verticalHeader().setDefaultSectionSize(20)

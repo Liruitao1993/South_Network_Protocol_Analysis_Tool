@@ -1,7 +1,7 @@
 import struct
 from typing import Dict, Any, Optional, Tuple
 from protocol_tool import ControlField
-from app_paths import data_path, ensure_data_file
+import custom_di_store
 import ctypes
 
 
@@ -781,49 +781,28 @@ class ProtocolFrameParser:
         0x10: {"名称": "通信模块资产编码", "字节数": 24, "格式": "ASCII"},
     }
 
-    # 自定义DI配置文件路径
-    CUSTOM_DI_FILE = "custom_di.json"
+    # 自定义DI配置文件路径（真正的读写统一在 custom_di_store，此处仅作兼容别名）
+    CUSTOM_DI_FILE = custom_di_store.CUSTOM_DI_FILE
 
     def __init__(self):
         self._load_custom_di()
 
     def _load_custom_di(self):
         """从 custom_di.json 加载用户自定义DI条目，合并到 DI_COMBINATION_MAP"""
-        import json
-        ensure_data_file(self.CUSTOM_DI_FILE)
-        custom_file = data_path(self.CUSTOM_DI_FILE)
-        if custom_file.exists():
-            try:
-                with open(custom_file, 'r', encoding='utf-8') as f:
-                    entries = json.load(f)
-                for entry in entries:
-                    key = (entry["di3"], entry["di2"], entry["di1"], entry["di0"])
-                    if key not in self.DI_COMBINATION_MAP:
-                        self.DI_COMBINATION_MAP[key] = entry["desc"]
-            except Exception:
-                pass
+        for entry in custom_di_store.load_custom_di():
+            key = custom_di_store.key_of(entry)
+            if key is not None and key not in self.DI_COMBINATION_MAP:
+                self.DI_COMBINATION_MAP[key] = entry.get("desc", "")
 
     @staticmethod
     def save_custom_di(entries: list):
-        """保存自定义DI条目到 custom_di.json"""
-        import json
-        custom_file = data_path(ProtocolFrameParser.CUSTOM_DI_FILE)
-        with open(custom_file, 'w', encoding='utf-8') as f:
-            json.dump(entries, f, ensure_ascii=False, indent=2)
+        """保存自定义DI条目到 custom_di.json（委托 custom_di_store 单源读写）"""
+        custom_di_store.save_custom_di(entries)
 
     @staticmethod
     def load_custom_di_list() -> list:
-        """读取 custom_di.json 返回列表"""
-        import json
-        ensure_data_file(ProtocolFrameParser.CUSTOM_DI_FILE)
-        custom_file = data_path(ProtocolFrameParser.CUSTOM_DI_FILE)
-        if custom_file.exists():
-            try:
-                with open(custom_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except Exception:
-                pass
-        return []
+        """读取 custom_di.json 返回列表（委托 custom_di_store 单源读写）"""
+        return custom_di_store.load_custom_di()
 
     def parse(self, frame_bytes: bytes) -> Dict[str, Any]:
         """解析协议帧

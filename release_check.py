@@ -14,11 +14,19 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+
+# GBK 控制台容错：报告里的测试输出可能含 ✓/★ 等非 GBK 字符，避免 print 崩溃
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 ROOT = Path(__file__).resolve().parent
 MAIN_GUI = ROOT / "main_gui.py"
@@ -70,6 +78,7 @@ CORE_TESTS = [
     "test/test_batch_snapshot_locate.py",
     "test/test_csg_sequence_model.py",
     "test/test_app_paths.py",
+    "test/test_nanwang_custom_di.py",
     "test/test_web_frame_gen_utils.py",
     "test/test_sack_fix.py",
     "test/test_monitor_deframe.py",
@@ -222,6 +231,9 @@ def run_test_script(rel: str, timeout: int = 180) -> tuple[bool, str]:
             encoding="utf-8",
             errors="replace",
             timeout=timeout,
+            # 仅约束子进程 stdio 为 UTF-8（不改变 open() 默认编码），
+            # 避免测试 print ✓/★ 等字符在 GBK 控制台下 UnicodeEncodeError
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )
     except subprocess.TimeoutExpired:
         return False, f"超时 {timeout}s"

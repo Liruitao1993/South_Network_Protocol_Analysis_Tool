@@ -5,6 +5,13 @@
 
 import _path_setup  # noqa: E402
 
+import sys  # noqa: E402
+
+try:  # GBK 控制台下 print ✓ 等字符会 UnicodeEncodeError，统一切 UTF-8
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 from plc_rf_parser import PLCRFProtocolParser
 
 def test_frame(hex_str, description):
