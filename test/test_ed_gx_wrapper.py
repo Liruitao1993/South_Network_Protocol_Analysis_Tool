@@ -161,6 +161,26 @@ def main():
     check("手动 gx 覆盖自动", win._ed_wrapper_for_frame(plc2_frame) == "gx")
     combo.setCurrentIndex(combo.findData("auto"))
 
+    # ── 4b. 不传 wrapper 的调用点默认走自动识别（历史缺陷：默认硬编码 plc2，
+    #        快捷解析小窗漏传 wrapper → gx 帧按 9B 头错位 1 字节）──
+    rows_d, business_d, off_d = win._parse_ed_monitor_header(frame)
+    check(
+        "默认(不传 wrapper)按自动识别取 gx 布局：偏移=14",
+        off_d == 14 and business_d == SOF_DOWN,
+        f"off={off_d} head={business_d[:8].hex() if business_d else None}",
+    )
+    check(
+        "默认调用标题行为广西台体",
+        rows_d is not None and rows_d[0][0] == "── 广西台体监控包装头 ──",
+        f"title={rows_d[0][0] if rows_d else None}",
+    )
+    bh_d, dt_d = win._extract_business_from_ed_frame(frame.hex().upper())
+    check(
+        "业务提取默认(不传 wrapper)同样识别 gx",
+        bh_d == SOF_DOWN.hex().upper() and dt_d == "FC+Payload数据",
+        f"head={bh_d[:16]}",
+    )
+
     # ── 5. 批量提取链路在 auto 模式剥离 gx 14B 头 ──
     frames = win._extract_csg_new_gen_frames(frame.hex().upper())
     check("批量提取 1 帧", len(frames) == 1, f"n={len(frames)}")

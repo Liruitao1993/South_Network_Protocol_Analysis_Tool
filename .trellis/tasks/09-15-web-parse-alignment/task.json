@@ -1,0 +1,32 @@
+{
+  "id": "web-parse-alignment",
+  "name": "web-parse-alignment",
+  "title": "Web 版解析能力对齐（P0 缺陷 + 共享核心 + 能力补齐 + 性能）",
+  "description": "Reflex Web 版解析能力与 PySide6 桌面版对齐：P0 缺陷（校验 NameError / 失败判定 / 奇数 hex / 剔除幂等 / 帧类型 / ED gx / 查询页事实错误）、共享核心抽取与协议注册表接入、批量与单帧能力补齐、解析性能与内存",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "Liruitao1993",
+  "assignee": "Liruitao1993",
+  "createdAt": "2026-09-15",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "09-15-web-parse-p0-fixes",
+    "09-15-web-shared-parse-core",
+    "09-15-web-batch-alignment",
+    "09-15-web-single-frame-alignment",
+    "09-15-web-parse-perf"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

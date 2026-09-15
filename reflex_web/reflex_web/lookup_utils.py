@@ -60,9 +60,9 @@ QUERY_CONFIG = {
         "title": "业务标识查询",
         "columns": ["类别", "代码", "名称"],
     },
-    10: {  # 国网新一代
+    10: {  # 国网新一代（数据源：GWNewGenParser 自有表，含安全机制说明）
         "title": "报文ID查询",
-        "columns": ["类别", "代码", "名称"],
+        "columns": ["类别", "代码", "名称", "说明"],
     },
     11: {  # HDC 1.0 双模互联互通
         "title": "报文ID/端口查询",
@@ -81,17 +81,23 @@ def get_query_config(protocol_index: int) -> Dict[str, Any]:
 # ═══════════════════════════════════════════════════════════════
 
 def _search_south_di(keyword: str = "") -> List[List[str]]:
-    """南网 DI 查询"""
+    """南网 DI 查询
+
+    AFN 列 = DI1（键序 (DI3, DI2, DI1, DI0)，见 protocol_parser.py:519-541 的分组注释
+    「# AFN=02H 管理任务」）；此前误用 DI3 低 4 位，导致所有 E8 前缀 DI 都显示 08H。
+    桌面同口径：main_gui.py:2234-2235（afn_val = di1 + AFN_MAP 名称）。
+    """
     try:
         from protocol_parser import ProtocolFrameParser
         parser = ProtocolFrameParser()
+        afn_map = getattr(parser, "AFN_MAP", {})
         results = []
         keyword_upper = keyword.upper().strip()
         for (di3, di2, di1, di0), desc in parser.DI_COMBINATION_MAP.items():
-            # 计算 AFN
-            afn = (di3 & 0x0F)
-            afn_hex = f"{afn:02X}H"
-            row = [f"{di3:02X}", f"{di2:02X}", f"{di1:02X}", f"{di0:02X}", afn_hex, desc]
+            afn = di1
+            afn_name = afn_map.get(afn, f"未知({afn:02X})")
+            row = [f"{di3:02X}", f"{di2:02X}", f"{di1:02X}", f"{di0:02X}",
+                   f"{afn:02X}H {afn_name}", desc]
 
             if not keyword_upper:
                 results.append(row)
@@ -255,7 +261,12 @@ def _is_eb_query(protocol_index: int, keyword: str) -> bool:
 
 
 def _search_698_oi(keyword: str = "") -> List[List[str]]:
-    """698.45 OI 查询"""
+    """698.45 OI 查询
+
+    属性/方法列来自 OILookup 类映射（OI_TO_CLASS_ID → CLASS_ID_MAP），
+    与桌面 _load_oad_map_data（main_gui.py:3809-3823）同口径；
+    此前恒为 "-" 占位。
+    """
     try:
         from dl_t698_45_oi_lookup import OILookup
         lookup = OILookup()
@@ -264,8 +275,19 @@ def _search_698_oi(keyword: str = "") -> List[List[str]]:
 
         # OI_NAME_MAP 是 oi->名称 的映射
         oi_map = getattr(lookup, 'OI_NAME_MAP', {})
+        oi_to_class = getattr(lookup, 'OI_TO_CLASS_ID', {})
+        class_map = getattr(lookup, 'CLASS_ID_MAP', {})
         for oi_val, name in oi_map.items():
-            row = [f"0x{oi_val:04X}", name, "-", "-", ""]
+            class_id = oi_to_class.get(oi_val)
+            info = class_map.get(class_id, {}) if class_id is not None else {}
+            attrs = ", ".join(
+                f"{k}:{v}" for k, v in (info.get("attributes", {}) or {}).items()
+            )
+            methods = ", ".join(
+                f"{k}:{v}" for k, v in (info.get("methods", {}) or {}).items()
+            )
+            row = [f"0x{oi_val:04X}", name, attrs or "-", methods or "-",
+                   f"OI=0x{oi_val:04X}"]
             if not keyword_upper:
                 results.append(row)
                 continue
@@ -326,9 +348,43 @@ def _search_csg_service(keyword: str = "") -> List[List[str]]:
 
 
 def _search_gw_newgen(keyword: str = "") -> List[List[str]]:
-    """国网新一代报文ID查询"""
-    # 先用新一代载波的数据（两者有很多共用部分），后续可补充国网特有的
-    return _search_csg_service(keyword)
+    """国网新一代报文ID查询（数据源：GWNewGenParser 自有映射表）
+
+    与桌面 _create_gw_new_gen_lookup_content（main_gui.py:3669-3685）同口径：
+    7 类共 49 条，含安全机制说明。此前直接复用协议9 的表（源码自述 TODO），
+    导致「关联请求」等协议10 专有名称搜不到。
+    """
+    try:
+        from gw_new_gen_parser import GWNewGenParser
+
+        parser = GWNewGenParser()
+        keyword_upper = keyword.upper().strip()
+        results = []
+
+        for code, name in parser.MSG_IDS.items():
+            sec = (code >> 12) & 0x0F
+            results.append(["报文ID", f"0x{code:04X}", name, f"安全机制={sec}"])
+        for code, name in parser.PORT_NAMES.items():
+            results.append(["报文端口号", f"0x{code:02X}", name, ""])
+        for code, name in parser.DELIMITER_TYPES.items():
+            results.append(["定界符类型", str(code), name, ""])
+        for code, name in parser.MSDU_TYPES.items():
+            results.append(["MSDU类型", str(code), name, ""])
+        for code, name in parser.PROTOCOL_TYPES.items():
+            results.append(["规约类型", str(code), name, ""])
+        for code, name in parser.SEND_TYPES.items():
+            results.append(["发送类型", str(code), name, ""])
+        for code, name in parser.BROADCAST_DIRS.items():
+            results.append(["广播方向", str(code), name, ""])
+
+        if not keyword_upper:
+            return results
+        return [
+            row for row in results
+            if any(keyword_upper in str(cell).upper() for cell in row)
+        ]
+    except Exception as e:
+        return [[f"加载失败: {e}", "", "", ""]]
 
 
 def _search_hdc10(keyword: str = "") -> List[List[str]]:

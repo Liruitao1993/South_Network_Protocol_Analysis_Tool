@@ -40,6 +40,8 @@ class State(rx.State):
     csg_strip_tail: int = 0
     gw_parse_level: str = "auto"
     gw_channel: str = "plc"
+    # 国网新一代/HDC 1.0 的物理块帧类型（仅 pb_only 下发；取值见解析器 frame_type）
+    gw_pb_frame_type: int = 1
     gw_strip_head: int = 0
     gw_strip_tail: int = 0
     hdc10_parse_level: str = "auto"
@@ -364,6 +366,13 @@ class State(rx.State):
         """设置国网新一代通道（PLC/HRF）"""
         self.gw_channel = value
 
+    def set_gw_pb_frame_type(self, value: str):
+        """设置国网新一代/HDC 1.0 物理块帧类型（0=信标 1=SOF 2=SACK 3=NET）"""
+        try:
+            self.gw_pb_frame_type = int(value)
+        except (TypeError, ValueError):
+            self.gw_pb_frame_type = 1
+
     def set_csg_strip_head(self, value: str):
         try:
             self.csg_strip_head = int(value) if value else 0
@@ -529,40 +538,18 @@ class State(rx.State):
         return parser.parse_to_table(frame_bytes, **kwargs)
 
     def _get_validator(self):
-        """获取校验器"""
-        try:
-            from validator import (
-                CSGNewGenValidator,
-                DLT645Validator,
-                DLT69845Validator,
-                GDWValidator,
-                HDLCValidator,
-                NWValidator,
-                PLCRFValidator,
-            )
-            from validator.gw_new_gen_validator import GWNewGenValidator
-            from validator.hdc10_validator import HDC10Validator
+        """获取当前协议的校验器（单一来源：protocol_registry）
 
-            validators = {
-                0: NWValidator,
-                1: PLCRFValidator,
-                2: HDLCValidator,
-                3: HDLCValidator,
-                4: HDLCValidator,
-                5: HDLCValidator,
-                6: DLT645Validator,
-                7: GDWValidator,
-                8: DLT69845Validator,
-                9: CSGNewGenValidator,
-                10: GWNewGenValidator,
-                11: HDC10Validator,
-            }
-            return validators.get(p, NWValidator)()
-        except ImportError:
-            return None
+        原实现在函数内自建 12 项映射且引用了未定义的 p，导致 12 种协议全部
+        报「校验出错: name 'p' is not defined」（异常被 except ImportError 之外的
+        verify_frame 兜底吞成文案）。改为走桌面同一份注册表工厂。
+        """
+        import protocol_registry
+
+        return protocol_registry.make_validator(self.current_protocol)
 
     def _clean_hex(self, hex_str: str) -> bytes:
-        """清洗并转换 hex 字符串
+        """清洗并转换 hex 字符串（严格：奇数长度/空输入报错，不静默截断）
 
         支持输入格式（对齐 GUI 版 _clean_hex_input）：
           - 纯 hex: 6811010101
@@ -571,33 +558,44 @@ class State(rx.State):
           - 0x 前缀: 0x68 0x11 0x01 或 0x68,0x11,0x01
           - 混合分隔: 68, 11 - 01. 01
         """
-        # 先处理 0x/0X 前缀，避免 0x 被误清洗导致字节对齐错误
-        text = re.sub(r"0[xX]([0-9A-Fa-f])", r"\1", hex_str)
-        cleaned = re.sub(r"[^0-9A-Fa-f]", "", text).upper()
-        if len(cleaned) % 2 != 0:
-            cleaned = cleaned[:-1]
-        if not cleaned:
-            raise ValueError("报文为空")
-        try:
-            return bytes.fromhex(cleaned)
-        except ValueError as e:
-            raise ValueError(f"十六进制格式错误: {e}")
+        return web_utils.hex_to_bytes_strict(hex_str)
 
     def _apply_strip(self, frame_bytes: bytes) -> bytes:
-        """应用新一代载波/国网新一代字节剔除"""
+        """应用新一代载波/国网新一代字节剔除（对原始输入重算，重复点击结果一致）
+
+        桌面用「剔除后回写输入框 + _csg_last_stripped_hex 缓存」保证幂等
+        （main_gui.py:5322-5346）；Web 输入框是受控 textarea，回写会打断编辑，
+        故改为每次从原始 frame_hex 重算——同一输入恒定得到同一结果，等价幂等。
+        """
         if self.current_protocol == 9:
             head, tail = self.csg_strip_head, self.csg_strip_tail
         elif self.current_protocol == 10:
             head, tail = self.gw_strip_head, self.gw_strip_tail
         else:
             return frame_bytes
-        if head <= 0 and tail <= 0:
-            return frame_bytes
-        total = len(frame_bytes)
-        tail_end = total - tail if tail > 0 else total
-        if head >= tail_end:
-            raise ValueError(f"剔除字节数过多（前{head}+尾{tail}），超出总长{total}")
-        return frame_bytes[head:tail_end]
+        return web_utils.strip_frame_bytes(frame_bytes, head, tail)
+
+    def _parse_kwargs(self) -> dict:
+        """按当前协议构造 parse_to_table 的级别相关参数（单帧/批量共用）
+
+        协议9 通道暂由 parser 自动判别（channel="auto"）；通道下拉属后续子任务。
+        """
+        if self.current_protocol == 9:
+            return web_utils.parse_kwargs_for(
+                9, self.csg_parse_level, self.csg_pb_frame_type,
+                self.gw_pb_frame_type, "auto",
+            )
+        if self.current_protocol == 10:
+            return web_utils.parse_kwargs_for(
+                10, self.gw_parse_level, self.csg_pb_frame_type,
+                self.gw_pb_frame_type, self.gw_channel,
+            )
+        if self.current_protocol == 11:
+            return web_utils.parse_kwargs_for(
+                11, self.hdc10_parse_level, self.csg_pb_frame_type,
+                self.gw_pb_frame_type, self.hdc10_channel,
+            )
+        return {}
 
     async def parse_frame(self):
         """解析单帧报文"""
@@ -615,28 +613,8 @@ class State(rx.State):
             frame_bytes = self._apply_strip(frame_bytes)
 
             parser = self._get_parser()
-
-            # 新一代载波/国网新一代/HDC 1.0 需要 parse_level
-            if self.current_protocol == 9:
-                result = parser.parse_to_table(
-                    frame_bytes,
-                    parse_level=self.csg_parse_level,
-                    pb_frame_type=self.csg_pb_frame_type,
-                )
-            elif self.current_protocol == 10:
-                result = parser.parse_to_table(
-                    frame_bytes,
-                    parse_level=self.gw_parse_level,
-                    channel=self.gw_channel,
-                )
-            elif self.current_protocol == 11:
-                result = parser.parse_to_table(
-                    frame_bytes,
-                    parse_level=self.hdc10_parse_level,
-                    channel=self.hdc10_channel,
-                )
-            else:
-                result = self._safe_parse_to_table(parser, frame_bytes)
+            kwargs = self._parse_kwargs()
+            result = self._safe_parse_to_table(parser, frame_bytes, **kwargs)
 
             # 转换结果
             self.parse_result = []
@@ -695,7 +673,9 @@ class State(rx.State):
 
         self.is_loading = True
         try:
-            frame_bytes = self._clean_hex(self.frame_hex)
+            # 与 parse_frame 同预处理（清洗 + 剔除）：保证「解析通过但校验失败」
+            # 不会因为一个用剔除后字节、一个用原始字节而出现
+            frame_bytes = self._apply_strip(self._clean_hex(self.frame_hex))
             validator = self._get_validator()
             if validator is None:
                 self.message = "当前协议不支持校验"
@@ -832,8 +812,6 @@ class State(rx.State):
         self._batch_all_results = []
 
         try:
-            import re
-
             from .web_utils import (
                 clean_hex_input,
                 extract_frames_for_protocol,
@@ -887,6 +865,7 @@ class State(rx.State):
             total = len(frame_hexes)
             self.batch_total = total
             parser = self._get_parser()
+            parse_kwargs = self._parse_kwargs()
 
             # 分块处理：每 N 帧 yield 一次，让出事件循环并向前端发送进度
             CHUNK_SIZE = 100
@@ -898,39 +877,17 @@ class State(rx.State):
 
             for idx, frame_hex in enumerate(frame_hexes):
                 try:
-                    clean = re.sub(r"[^0-9A-Fa-f]", "", frame_hex).upper()
-                    if len(clean) % 2 != 0:
-                        clean = clean[:-1]
-                    frame_bytes = bytes.fromhex(clean)
+                    # 不静默裁剪奇数长度：交给 bytes.fromhex 报错并由 per-frame
+                    # except 记为「异常」（桌面同口径，main_gui.py:7476）
+                    frame_bytes = bytes.fromhex(frame_hex)
 
-                    # 按协议类型传解析级别
-                    if self.current_protocol == 9:
-                        result = parser.parse_to_table(
-                            frame_bytes,
-                            parse_level=self.csg_parse_level,
-                            pb_frame_type=self.csg_pb_frame_type,
-                        )
-                    elif self.current_protocol == 10:
-                        result = parser.parse_to_table(
-                            frame_bytes,
-                            parse_level=self.gw_parse_level,
-                            channel=self.gw_channel,
-                        )
-                    elif self.current_protocol == 11:
-                        result = parser.parse_to_table(
-                            frame_bytes,
-                            parse_level=self.hdc10_parse_level,
-                            channel=self.hdc10_channel,
-                        )
-                    else:
-                        result = self._safe_parse_to_table(parser, frame_bytes)
+                    result = self._safe_parse_to_table(parser, frame_bytes, **parse_kwargs)
 
-                    status = (
-                        "成功"
-                        if result and (not result[0] or "❌" not in str(result[0][0]))
-                        else "失败"
+                    # 状态/类型/摘要：全表扫描 ❌ 行 + 空表判定
+                    ok_name = get_frame_summary(result, self.current_protocol)
+                    status, type_name, summary = web_utils.batch_frame_outcome(
+                        result, ok_name
                     )
-                    proto_name = get_frame_summary(result, self.current_protocol)
 
                     all_results.append(
                         {
@@ -938,20 +895,22 @@ class State(rx.State):
                             "frame_bytes": frame_bytes,
                             "result": result,
                             "status": status,
-                            "proto": proto_name,
-                            "summary": proto_name[:120],
+                            "proto": type_name,
+                            "summary": summary[:120],
                             "len": len(frame_bytes),
                         }
                     )
                 except Exception as ex:
+                    # 状态字面量与桌面一致（成功/失败/异常），异常另留错误串
                     all_results.append(
                         {
                             "id": idx,
                             "frame_bytes": b"",
                             "result": [],
-                            "status": "错误",
-                            "proto": "解析错误",
-                            "summary": str(ex)[:100],
+                            "status": "异常",
+                            "proto": "异常",
+                            "summary": f"{frame_hex[:40]}… {ex}"[:100],
+                            "error": str(ex),
                             "len": 0,
                         }
                     )
@@ -979,9 +938,15 @@ class State(rx.State):
             self.batch_total_frames = len(all_results)
 
             success_count = sum(1 for r in all_results if r["status"] == "成功")
-            fail_count = len(all_results) - success_count
-            self.message = f"批量解析完成 — 共 {len(all_results)} 帧（✅ {success_count} 成功，❌ {fail_count} 失败）"
-            self.message_type = "success" if fail_count == 0 else "warning"
+            fail_count = sum(1 for r in all_results if r["status"] == "失败")
+            err_count = len(all_results) - success_count - fail_count
+            msg = f"批量解析完成 — 共 {len(all_results)} 帧（✅ {success_count} 成功，❌ {fail_count} 失败"
+            if err_count:
+                msg += f"，⚠️ {err_count} 异常"
+            self.message = msg + "）"
+            self.message_type = (
+                "success" if (fail_count == 0 and err_count == 0) else "warning"
+            )
             self.batch_pp_last_result = ""
             # 发送完成 delta（结果 + 完成消息）
             yield None
@@ -3984,12 +3949,10 @@ def newgen_controls() -> rx.Component:
                 rx.cond(
                     State.current_protocol == 9,
                     rx.el.select(
-                        rx.el.option("自动识别", value="auto"),
-                        rx.el.option("FC+PB解析(完整MPDU)", value="fc_pb"),
-                        rx.el.option("FC+eFC解析", value="fc_efc"),
-                        rx.el.option("仅FC解析", value="fc_only"),
-                        rx.el.option("仅物理块PB", value="pb_only"),
-                        rx.el.option("应用层报文", value="app"),
+                        *[
+                            rx.el.option(o["label"], value=o["value"])
+                            for o in web_utils.CSG_PARSE_LEVEL_OPTIONS
+                        ],
                         default_value="auto",
                         on_change=State.set_csg_level,
                         class_name="app-select",
@@ -3999,13 +3962,10 @@ def newgen_controls() -> rx.Component:
                 rx.cond(
                     State.current_protocol == 10,
                     rx.el.select(
-                        rx.el.option("自动识别", value="auto"),
-                        rx.el.option("FC+PB解析(完整MPDU)", value="fc_pb"),
-                        rx.el.option("仅FC解析", value="fc_only"),
-                        rx.el.option("仅MAC帧", value="mac_only"),
-                        rx.el.option("仅物理块PB", value="pb_only"),
-                        rx.el.option("FC+MAC头", value="fc_mac"),
-                        rx.el.option("应用层报文", value="app"),
+                        *[
+                            rx.el.option(o["label"], value=o["value"])
+                            for o in web_utils.GW_PARSE_LEVEL_OPTIONS
+                        ],
                         default_value="auto",
                         on_change=State.set_gw_level,
                         class_name="app-select",
@@ -4015,16 +3975,72 @@ def newgen_controls() -> rx.Component:
                 rx.cond(
                     State.current_protocol == 11,
                     rx.el.select(
-                        rx.el.option("自动识别", value="auto"),
-                        rx.el.option("FC+PB解析(完整MPDU)", value="fc_pb"),
-                        rx.el.option("仅FC解析", value="fc_only"),
-                        rx.el.option("仅MAC帧", value="mac_only"),
-                        rx.el.option("仅物理块PB", value="pb_only"),
-                        rx.el.option("FC+MAC头", value="fc_mac"),
-                        rx.el.option("应用层报文", value="app"),
+                        *[
+                            rx.el.option(o["label"], value=o["value"])
+                            for o in web_utils.GW_PARSE_LEVEL_OPTIONS
+                        ],
                         default_value="auto",
                         on_change=State.set_hdc10_level,
                         class_name="app-select",
+                    ),
+                ),
+                # 物理块帧类型：协议9（mac_only/pb_only）与协议10/11（pb_only）
+                # 协议9 用 sof/beacon/sack/net，协议10/11 用 1/0/2/3
+                rx.cond(
+                    (State.current_protocol == 9)
+                    & (
+                        (State.csg_parse_level == "pb_only")
+                        | (State.csg_parse_level == "mac_only")
+                    ),
+                    rx.hstack(
+                        rx.text("PB帧类型:", size="2", font_weight="medium"),
+                        rx.el.select(
+                            *[
+                                rx.el.option(o["label"], value=o["value"])
+                                for o in web_utils.CSG_PB_FRAME_TYPE_OPTIONS
+                            ],
+                            default_value="sof",
+                            on_change=State.set_csg_pb_frame_type,
+                            class_name="app-select",
+                        ),
+                        spacing="2",
+                        align="center",
+                    ),
+                ),
+                rx.cond(
+                    (State.current_protocol == 10)
+                    & (State.gw_parse_level == "pb_only"),
+                    rx.hstack(
+                        rx.text("PB帧类型:", size="2", font_weight="medium"),
+                        rx.el.select(
+                            *[
+                                rx.el.option(o["label"], value=o["value"])
+                                for o in web_utils.GW_PB_FRAME_TYPE_OPTIONS
+                            ],
+                            default_value="1",
+                            on_change=State.set_gw_pb_frame_type,
+                            class_name="app-select",
+                        ),
+                        spacing="2",
+                        align="center",
+                    ),
+                ),
+                rx.cond(
+                    (State.current_protocol == 11)
+                    & (State.hdc10_parse_level == "pb_only"),
+                    rx.hstack(
+                        rx.text("PB帧类型:", size="2", font_weight="medium"),
+                        rx.el.select(
+                            *[
+                                rx.el.option(o["label"], value=o["value"])
+                                for o in web_utils.GW_PB_FRAME_TYPE_OPTIONS
+                            ],
+                            default_value="1",
+                            on_change=State.set_gw_pb_frame_type,
+                            class_name="app-select",
+                        ),
+                        spacing="2",
+                        align="center",
                     ),
                 ),
                 # 国网新一代/HDC 1.0 通道下拉（PLC/HRF）

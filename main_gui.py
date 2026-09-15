@@ -102,10 +102,30 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.11"
+APP_VERSION = "1.23.12"
 BUILD_DATE = "2026-09-15"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    (
+        "1.23.12",
+        "2026-09-15",
+        [
+            "Reflex Web 版解析 P0 缺陷修复（对齐桌面口径，10 条全部实测复现后修复）",
+            "`_get_validator` 从未定义变量 `p` → 12 种协议「校验报文」全部报「校验出错: name 'p' is not defined」（异常被 verify_frame 兜底吞成文案）；改为复用桌面同一份 `protocol_registry.make_validator()`（该模块无 Qt 依赖，Web 可直接 import），删除 Web 侧 12 项硬编码校验器映射。**校验入参改用与 Web 解析一致的预处理**（清洗 + 头/尾剔除），避免「解析通过、校验失败」自相矛盾；注：桌面 `verify_single` 不做头/尾剔除，两端口径差异已记入 `AGENTS.md §8` 陷阱 31 与父任务子任务 `09-15-web-shared-parse-core`",
+            "批量失败判定只看首行 `result[0][0]` → 解析器把 ❌ 行写在**表中途**的帧被标成「成功」（实测：协议9 `mac_only` 短 MAC 帧输入 `49 5C 2F AA BB CC DD EE` 时行0 是「解析模式」、行1 才是 `❌ 解析失败`，旧判定返回「成功」）；改为全表扫描「以 ❌ 开头的行」并取其说明作摘要，类型列固定「解析失败」（与桌面同列语义）；**顺带统一两侧空表语义**（空表 → 失败，桌面原 `any([])==False` 判成功属缺陷）与异常字面量（Web `错误/解析错误` → `异常`，带帧片段），桌面 `main_gui.parse_batch` 同步改为同一判据",
+            "奇数长度 hex 被静默砍掉末位 nibble（截断/漏字符的报文被当作另一帧解析且无提示）→ 改为直接报错，文案与桌面一致（`输入长度为奇数，十六进制字符串必须是偶数长度！`）",
+            "协议10/11「仅物理块PB」从不下发 `frame_type` → 协议10 实测落「⚠️ 未知帧类型 … 无对应解析逻辑」、协议11 恒按 SOF 解析；新增 `web_utils.parse_kwargs_for`（单帧与批量共用，消除两处重复的 3 段 if/elif）+ 协议10/11 的「PB帧类型」下拉（pb_only 时可见），协议9 补齐缺失的「仅MAC帧(mac_only)」级别与「PB帧类型」下拉（此前 `set_csg_pb_frame_type` 无任何 UI 入口，恒为 sof）",
+            "ED..EE 监控包装「广西台体(gx, 8 字节公共头)」解析错位 1 字节：Web 无格式选择、只能走解析器内置的 PLC2.0 布局；现把桌面 `_detect_ed_wrapper` 的逐帧打分判别**下沉到解析器** `csg_new_gen_parser.detect_ed_wrapper`（+ `_parse_ed_wrapper` 支持双布局、`parse_to_table(ed_wrapper=None)` 可显式指定），桌面改为委托调用（删除重复打分与 `_ED_PB_SIZES` 常量）——**桌面在未勾选 ED 复选框时同样错位，本次两侧同时修好**；摘要侧（Web + 桌面）改按「含 `监控包装头`」判定并区分 `PLC2.0监控包装帧`/`广西台体监控包装帧`",
+            "南网 DI 查询 AFN 列算错：`afn = di3 & 0x0F` 使所有 E8 前缀 DI 都显示 `08H`（实测「添加任务」应为 `02H`）→ 改为 AFN = DI1 并按 `AFN_MAP` 带出名称（与桌面 `main_gui.py:2234` 同口径）",
+            "协议10 查询页数据源错误：此前直接复用协议9 的表（源码自述「后续可补充」）→ 改为读取 `GWNewGenParser` 自有 7 类表 49 条（报文ID/端口/定界符/MSDU/规约/发送类型/广播方向，含安全机制说明），查询列补「说明」列",
+            "协议8 查询页「属性/方法」列恒为 `-` 占位 → 从 `OILookup` 的 `OI_TO_CLASS_ID`+`CLASS_ID_MAP` 填充（与桌面 `_load_oad_map_data` 同口径）",
+            "报文工具 CRC-24 参数错误（`rev=False`，实测 `0xEAC98F`）→ 改为 `rev=True`，与协议9/10/11 三处解析器及桌面报文工具一致（实测 `0xFC4D81`）；CRC-32 经 200 组随机输入实测两端等价，未改动",
+            "新增 `test/test_web_parse_fixes.py`（75 项：纯函数 / ED gx 双布局端到端 / pb_only frame_type 端到端 / 查询页 AFN·协议10·698 属性 / 校验器工厂 / CRC 同口径 / reflex `State(_reflex_internal_init=True)` 真实实例 / **驱动 `parse_batch` 的批量端到端**），登记进 `release_check.py` CORE_TESTS；桌面回归 `test_ed_gx_wrapper`(23)/`test_ed_fallback_fix`(15)/`test_csg_summary`/`test_csg_sequence_model`/`test_csg_batch_prefix`/`test_gw_monitor_summary`(18) 全过",
+            "批量链路同口径化：`mac_only` 级别下 Web 前缀剥离此前走 FC 扫描分支 → 8 字节 MAC 帧整行被丢弃（实测 0 帧），改为与桌面直通（`main_gui.py:4942`）；批量逐帧不再静默裁剪奇数长度（交由 `bytes.fromhex` 报错并记「异常」，摘要带帧片段）；异常状态字面量 `错误/解析错误` → `异常`，完成文案分别统计成功/失败/异常",
+            "审计勘误：原只读审计提出的「Web 剔除不幂等（连点两次 = 二次裁剪）」经实测**不成立**（Web 每次从原始 `frame_hex` 重算，本就幂等；按该结论加缓存反而会让第二次解析拿到未剔除字节，已在实施中撤销），改以纯函数 `strip_frame_bytes` + 「同输入重复调用结果一致」断言把该不变式钉住",
+            "复核（trellis-check 子代理）修复：① **桌面快捷解析小窗的 ED 路径漏传 wrapper** → 广西台体(gx) 帧仍按 PLC2.0 9B 头错位 1 字节（复核实测业务偏移 15 而非 14）；调用点补 `wrapper=self._ed_wrapper_for_frame(...)`，并把 `main_gui._parse_ed_monitor_header` / `_extract_business_from_ed_frame` 的 `wrapper` 默认值由硬编码 `\"plc2\"` 改为「None = 按当前下拉/逐帧自动识别」，`test_ed_gx_wrapper.py` 增 3 条默认路径断言（26 项）。② **打包声明**：`validator/__init__.py` 补齐 `GWNewGenValidator`/`HDC10Validator` 的 re-export（`make_validator` 走 importlib，PyInstaller 静态分析看不到 → 此前桌面 spec 缺 `validator.gw_new_gen_validator`、Web spec 缺 `validator.hdc10_validator`/`hdc10_*`）；`reflex_web_exe.spec` 补 `protocol_registry`/`parser_registry`/`hdc10_parser`/`hdc10_mme_parser`/`validator.hdc10_validator`，`debug_web.spec` 与 `南网协议解析工具.spec` 补 `protocol_registry`/`parser_registry`（后者另补 `validator.gw_new_gen_validator`）。③ 文档：协议10 查询页关键词匹配含「说明」列（Web 为桌面超集，已知差异写入 `AGENTS §8.31`）；AGENTS §1 能力差异描述限定到协议范围、`MyAppVersion` 过期陈述改为随 `--sync-iss` 同步",
+        ],
+    ),
     (
         "1.23.11",
         "2026-09-15",
@@ -5008,56 +5028,18 @@ class MainWindow(QMainWindow):
             return combo.currentData() or "auto"
         return "auto"
 
-    # 常用物理块尺寸（PB 大小候选集，与 csg_new_gen_parser 帧长一致性推断同口径）
-    _ED_PB_SIZES = (16, 40, 72, 136, 264, 520)
-
     def _detect_ed_wrapper(self, frame_bytes: bytes) -> str:
         """自动识别 ED 包装头格式：gx(8B 公共头) / plc2(9B 公共头)
 
-        逐候选格式打分（plc2 优先平局）：
-          +2 剥头后业务帧首字节符合 FC MPDU 特征
-             （bit3 接入指示=1 且 bits0-2 定界符类型 0~3）
-          +1 物理块长度字段(小端)与业务长度自洽：
-             (业务长度-16) 为 pb_len 正整数倍且倍数≤5、pb_len 属常用 PB 尺寸；
-             无业务域（控制报文等）时仅看 pb_len 是否属常用尺寸
-        识别失败（无正分）回退当前下拉手动值。
+        打分算法与解析器共用（csg_new_gen_parser.detect_ed_wrapper）：
+        逐候选格式打分（plc2 优先平局），无正分回退当前下拉手动值。
+        单源化原因：Web 版无下拉，需要同一份判别逻辑；避免第三份实现。
         """
-        fallback = self._ed_wrapper_mode()
-        fallback = "plc2" if fallback == "auto" else fallback
-        n = len(frame_bytes)
-        if n < 8 or frame_bytes[0] != 0xED:
-            return fallback
-        frame_len = frame_bytes[1] | (frame_bytes[2] << 8)
-        if frame_len < 4 or frame_len > 4096:
-            return fallback
-        total = frame_len + 4
-        if total > n or frame_bytes[5] != 0xEF or frame_bytes[total - 1] != 0xEE:
-            return fallback
-        data = frame_bytes[6 : 6 + frame_len - 4]
-        best, best_score = None, 0
-        for wrapper, hdr_len, pb_off in (("plc2", 9, 7), ("gx", 8, 6)):
-            if len(data) < hdr_len:
-                continue
-            business = data[hdr_len:]
-            score = 0
-            if business:
-                fc = business[0]
-                if (fc & 0x08) and (fc & 0x07) <= 3:
-                    score += 2
-                pb_len = int.from_bytes(data[pb_off : pb_off + 2], "little")
-                if pb_len in self._ED_PB_SIZES:
-                    rest = len(business) - 16
-                    if 0 < rest <= pb_len * 5 and rest % pb_len == 0:
-                        score += 1
-            else:
-                pb_len = int.from_bytes(data[pb_off : pb_off + 2], "little")
-                if pb_len in self._ED_PB_SIZES:
-                    score += 1
-            if score > best_score:
-                best, best_score = wrapper, score
-        if best is None or best_score <= 0:
-            return fallback
-        return best
+        from csg_new_gen_parser import detect_ed_wrapper
+
+        mode = self._ed_wrapper_mode()
+        fallback = "plc2" if mode == "auto" else mode
+        return detect_ed_wrapper(frame_bytes, fallback=fallback)
 
     def _ed_wrapper_for_frame(self, frame_bytes: bytes) -> str:
         """单帧 ED 包装格式：下拉 auto 时逐帧自动识别，否则手动指定"""
@@ -5066,18 +5048,24 @@ class MainWindow(QMainWindow):
             return self._detect_ed_wrapper(frame_bytes)
         return mode
 
-    def _parse_ed_monitor_header(self, frame_bytes: bytes, wrapper: str = "plc2"):
+    def _parse_ed_monitor_header(self, frame_bytes: bytes, wrapper: str = None):
         """解析 ED..EE 监控包装头（PLC2.0 / 广西台体两种公共头格式）
 
         包结构: ED(1)+帧长(2,LE)+控制域1(1)+控制域2(1)+EF(1)+数据域(变长)+CS(1)+EE(1)
         数据报文(ctrl1=0x00) ctrl2=0x01/0x02/0x03 的数据域公共头(9字节):
           物理信道(1)+时间戳(4,LE)+物理块个数(1)+保留/CRC(1)+单个物理块长度(2,LE)
 
+        Args:
+            wrapper: "plc2"/"gx"；None 或非法值 → 取当前下拉（auto 时逐帧打分识别）
+                —— 默认不再是硬编码 plc2，避免漏传的调用点把 gx 帧按 9B 头错位解析
+
         Returns:
             (meta_rows, business_bytes, business_offset) 成功时返回前置行列表、业务字节、
                 业务字节在原始帧中的偏移量
             (None, None, None) 帧不是有效的 ED 包装格式
         """
+        if wrapper not in ("plc2", "gx"):
+            wrapper = self._ed_wrapper_for_frame(frame_bytes)
         n = len(frame_bytes)
         if n < 8 or frame_bytes[0] != 0xED:
             return None, None, None
@@ -6943,7 +6931,9 @@ class MainWindow(QMainWindow):
                 "或缺少 EF 数据域起始符 / EE 结束符。" % (declared, len(raw))
             )
             try:
-                rows, business, offset = self._parse_ed_monitor_header(raw)
+                rows, business, offset = self._parse_ed_monitor_header(
+                    raw, wrapper=self._ed_wrapper_for_frame(raw)
+                )
             except Exception:
                 return None, None, err
             if rows is None or business is None:
@@ -7551,16 +7541,19 @@ class MainWindow(QMainWindow):
                     if ed_data_type:
                         summary = f"[ED:{ed_data_type}] {summary}"
 
-                    # 检查解析是否失败（校验错误、长度不匹配等）
-                    is_parse_failed = any(
-                        item[0] == "❌ 解析失败" for item in table_data
+                    # 检查解析是否失败（校验错误、长度不匹配、未产出任何字段）
+                    # 空表 = 解析器没有产出字段 → 失败；❌ 行可能写在表中途
+                    # （如 csg_new_gen_parser.py:754），必须全表扫描
+                    is_parse_failed = (not table_data) or any(
+                        str(item[0]).startswith("❌") for item in table_data if item
                     )
                     if is_parse_failed:
                         status = "失败"
                         fail_count += 1
                         # 提取失败原因作为摘要
+                        summary = "解析无结果（未产出字段）" if not table_data else summary
                         for item in table_data:
-                            if item[0] == "❌ 解析失败":
+                            if item and str(item[0]).startswith("❌"):
                                 summary = item[3] if item[3] else "解析失败"
                                 break
                     else:
@@ -7906,9 +7899,14 @@ class MainWindow(QMainWindow):
         # ── 字段索引：快速定位关键字段 ──
         fields = {item[0]: item for item in table_data}
 
-        # ── ED 监控包装帧（PLC2.0收发机接口格式）──
-        if "── PLC2.0 监控包装头 ──" in fields:
-            parts = ["PLC2.0监控包装帧"]
+        # ── ED 监控包装帧（PLC2.0 / 广西台体两种公共头格式）──
+        ed_hdr = next(
+            (k for k in ("── PLC2.0 监控包装头 ──", "── 广西台体监控包装头 ──")
+             if k in fields),
+            None,
+        )
+        if ed_hdr:
+            parts = ["广西台体监控包装帧" if "广西" in ed_hdr else "PLC2.0监控包装帧"]
             ctrl1 = fields.get("控制域1")
             ctrl2 = fields.get("控制域2")
             if ctrl1:
@@ -8618,7 +8616,7 @@ class MainWindow(QMainWindow):
         return frames
 
     def _extract_business_from_ed_frame(
-        self, hex_str: str, wrapper: str = "plc2"
+        self, hex_str: str, wrapper: str = None
     ) -> tuple:
         """从 ED..EE 监控包装帧中提取业务数据（PLC2.0 9B / 广西台体 8B 公共头）
 
@@ -8626,6 +8624,8 @@ class MainWindow(QMainWindow):
         数据域公共头(9字节): 物理信道(1)+时间戳(4,LE)+物理块个数(1)+保留(1)+物理块长度(2,LE)
 
         注意：监控日志可能在 ED 帧后附加 FF EE 标记，需要正确处理
+        Args:
+            wrapper: "plc2"/"gx"；None/非法 → 按当前下拉（auto 时逐帧打分识别）
 
         Returns:
             (business_hex, data_type_desc) 成功时返回业务数据hex和类型描述
@@ -8636,6 +8636,8 @@ class MainWindow(QMainWindow):
         except ValueError:
             return "", ""
 
+        if wrapper not in ("plc2", "gx"):
+            wrapper = self._ed_wrapper_for_frame(frame_bytes)
         n = len(frame_bytes)
         if n < 8 or frame_bytes[0] != 0xED:
             return "", ""

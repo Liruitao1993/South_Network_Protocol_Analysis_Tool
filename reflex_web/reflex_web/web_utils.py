@@ -39,6 +39,126 @@ def clean_hex_input(text: str, keep_newlines: bool = False) -> str:
     return re.sub(pattern, '', text)
 
 
+def hex_to_bytes_strict(text: str) -> bytes:
+    """清洗 hex 并转 bytes；奇数长度/空输入直接报错（不静默截断）。
+
+    与桌面 main_gui._clean_hex_input + 奇数长度弹窗（main_gui.py:5307-5311）同口径：
+    输入少一个字符时必须让用户看到错误，而不是把半字节砍掉后解析出另一帧。
+    """
+    cleaned = clean_hex_input(text)
+    if not cleaned:
+        raise ValueError("报文为空")
+    if len(cleaned) % 2 != 0:
+        raise ValueError("输入长度为奇数，十六进制字符串必须是偶数长度！")
+    try:
+        return bytes.fromhex(cleaned)
+    except ValueError as e:  # 与桌面同文案前缀
+        raise ValueError(f"十六进制格式错误: {e}")
+
+
+def strip_frame_bytes(frame_bytes: bytes, head: int, tail: int) -> bytes:
+    """剔除报文头/尾指定字节数（协议9/10 的「剔除前/尾」）。
+
+    纯函数：同一输入恒定得到同一输出。调用方每次用**原始**输入重新计算，
+    因此重复点击解析不会二次裁剪（桌面用「回写输入框 + 缓存键」达到同一效果，
+    main_gui.py:5322-5346；Web 不回写输入框，改用纯粹重算，等价且不打断编辑）。
+    """
+    if head <= 0 and tail <= 0:
+        return frame_bytes
+    total = len(frame_bytes)
+    tail_end = total - tail if tail > 0 else total
+    if head >= tail_end:
+        raise ValueError(f"剔除字节数过多（前{head}+尾{tail}），超出总长{total}")
+    return frame_bytes[head:tail_end]
+
+
+def batch_frame_outcome(rows, ok_type_name: str) -> tuple:
+    """批量解析单帧结果 → (status, 类型列, 摘要列)。
+
+    规则（与桌面口径统一，桌面见 main_gui.py:7516-7530 与 _get_frame_type_name:9766-9772）：
+      - 空表 → 失败（解析器未产出任何字段）
+      - 结果表中存在字段名以 "❌" 开头的行 → 失败（失败行可能写在**表中途**，
+        如协议9 mac_only：csg_new_gen_parser.py:843 先写「解析模式」行，
+        `_parse_mac_frame` 再追加 ❌ —— 只看首行会误判成功）
+      - 其余 → 成功，类型/摘要列由调用方给出的 ok_type_name 填充
+    """
+    if not rows:
+        return "失败", "解析失败", "解析无结果（未产出字段）"
+    for item in rows:
+        if item and str(item[0]).startswith("❌"):
+            reason = str(item[3]) if len(item) >= 4 and item[3] else "解析失败"
+            return "失败", "解析失败", reason
+    return "成功", ok_type_name, ok_type_name
+
+
+def parse_kwargs_for(protocol_index: int, parse_level: str = "auto",
+                     pb_frame_type: str = "sof", gw_frame_type: int = 1,
+                     channel: str = "plc") -> dict:
+    """按协议构造 parse_to_table 的解析级别相关 kwargs（单帧与批量共用）。
+
+    - 协议9：parse_level + channel + pb_frame_type（pb 帧类型在 mac_only/pb_only 有意义）
+    - 协议10/11：parse_level + channel，仅 pb_only 下发 frame_type
+      （gw_new_gen_parser.py:159/231-241 无 frame_type 会落「未知帧类型」；
+       hdc10_parser.py:261 缺省恒 SOF）
+    - 其余协议：无附加参数
+    """
+    if protocol_index == 9:
+        return {
+            "parse_level": parse_level,
+            "channel": channel,
+            "pb_frame_type": pb_frame_type,
+        }
+    if protocol_index in (10, 11):
+        kwargs = {"parse_level": parse_level, "channel": channel}
+        if parse_level == "pb_only":
+            kwargs["frame_type"] = gw_frame_type
+        return kwargs
+    return {}
+
+
+# ═══════════════════════════════════════════════════════════════
+# 解析级别 / 物理块帧类型选项（UI 与逻辑共用单一来源）
+# ═══════════════════════════════════════════════════════════════
+
+# 协议9 解析级别（与桌面 main_gui.py:1446-1452 同集合，含 mac_only）
+CSG_PARSE_LEVEL_OPTIONS = [
+    {"label": "自动识别", "value": "auto"},
+    {"label": "FC+PB解析(完整MPDU)", "value": "fc_pb"},
+    {"label": "FC+eFC解析", "value": "fc_efc"},
+    {"label": "仅FC解析", "value": "fc_only"},
+    {"label": "仅物理块PB", "value": "pb_only"},
+    {"label": "仅MAC帧", "value": "mac_only"},
+    {"label": "应用层报文", "value": "app"},
+]
+
+# 协议10/11 解析级别（与桌面 main_gui.py:1535-1543 同集合）
+GW_PARSE_LEVEL_OPTIONS = [
+    {"label": "自动识别", "value": "auto"},
+    {"label": "FC+PB解析(完整MPDU)", "value": "fc_pb"},
+    {"label": "仅FC解析", "value": "fc_only"},
+    {"label": "仅MAC帧", "value": "mac_only"},
+    {"label": "仅物理块PB", "value": "pb_only"},
+    {"label": "FC+MAC头", "value": "fc_mac"},
+    {"label": "应用层报文", "value": "app"},
+]
+
+# 物理块帧类型：协议9 用 sof/beacon/sack/net（csg_new_gen_parser.py:800），
+# 协议10/11 用 1/0/2/3（gw_new_gen_parser.py:234），语义一致：0=信标 1=SOF 2=SACK 3=NET
+CSG_PB_FRAME_TYPE_OPTIONS = [
+    {"label": "SOF帧", "value": "sof"},
+    {"label": "信标帧", "value": "beacon"},
+    {"label": "选择确认帧", "value": "sack"},
+    {"label": "网间协调帧", "value": "net"},
+]
+
+GW_PB_FRAME_TYPE_OPTIONS = [
+    {"label": "SOF帧", "value": "1"},
+    {"label": "信标帧", "value": "0"},
+    {"label": "选择确认帧(SACK)", "value": "2"},
+    {"label": "网间协调帧(NET)", "value": "3"},
+]
+
+
 # ═══════════════════════════════════════════════════════════════
 # 常量
 # ═══════════════════════════════════════════════════════════════
@@ -112,8 +232,10 @@ def strip_csg_new_gen_prefix(text: str, parse_level: str = "auto") -> str:
             out_lines.append(hex_clean)
             continue
 
-        if parse_level == "pb_only":
-            pass  # 直接保留
+        if parse_level in ("pb_only", "mac_only"):
+            # 输入即物理块 / MAC 帧（界面已按层级提示），无 FC 可扫 → 直接保留
+            # （桌面 _strip_csg_new_gen_frame_prefix 同口径，main_gui.py:4942）
+            pass
         elif parse_level == "app":
             # 扫描端口 0x11
             found = False
@@ -408,11 +530,11 @@ def get_csg_new_gen_summary(table_data: List) -> str:
     if "❌" in first_field or "失败" in first_field:
         return str(table_data[0][3]) if len(table_data[0]) >= 4 else "解析失败"
 
-    # ED 包装 / 测试装置控制协议
-    if "PLC2.0" in first_field:
+    # ED 包装 / 测试装置控制协议（PLC2.0 与广西台体两种公共头格式）
+    if "监控包装头" in first_field:
         ctrl1 = _find_field(table_data, "控制域1")
         ctrl2 = _find_field(table_data, "控制域2")
-        parts = ["ED监控包装"]
+        parts = ["广西台体监控包装" if "广西" in first_field else "ED监控包装"]
         if ctrl1:
             parts.append(str(ctrl1[2]))
         if ctrl2:
@@ -847,7 +969,10 @@ def tool_crc24_newgen(text: str) -> str:
         import crcmod
         data = bytes(_parse_hex(text))
         # CRC-24 多项式: x^24 + x^23 + x^6 + x + 1 → 0x1800063
-        crc_func = crcmod.Crc(0x1800063, initCrc=0, rev=False, xorOut=0)
+        # rev 必须与协议9/10/11 解析器及桌面报文工具一致（rev=True）：
+        # csg_new_gen_parser.py:20 / gw_new_gen_parser.py:22 / hdc10_parser.py:22 /
+        # message_tool_widget.py:24
+        crc_func = crcmod.Crc(0x1800063, initCrc=0, rev=True, xorOut=0)
         crc_func.update(data)
         crc_val = crc_func.crcValue & 0xFFFFFF
         # 小端（3字节）

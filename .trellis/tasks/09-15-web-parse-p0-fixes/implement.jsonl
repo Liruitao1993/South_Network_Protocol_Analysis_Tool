@@ -1,0 +1,4 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "新组件/逻辑落点与界面文案一致性约定"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "禁止第三份复刻：先搜索既有实现再落代码"}
+{"file": ".trellis/tasks/09-15-web-parse-alignment/research/web-parse-audit.md", "reason": "P0 各条的证据行号与实测数据"}

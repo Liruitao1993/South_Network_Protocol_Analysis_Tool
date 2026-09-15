@@ -20,6 +20,62 @@ from csg_new_gen_cmd_payloads import parse_command_payload
 _crc24_func = crcmod.mkCrcFun(0x1800063, initCrc=0x000000, rev=True, xorOut=0x000000)
 _crc32_func = crcmod.mkCrcFun(0x104C11DB7, initCrc=0x00000000, rev=True, xorOut=0xffffffff)
 
+# ── ED..EE 监控包装（PLC2.0 台体 / 广西台体）──
+# 两种包装的数据域公共头布局不同：
+#   plc2 = 9 字节：物理信道(1)+时间戳(4)+物理块个数(1)+Payload CRC(1)+物理块长度(2)
+#   gx   = 8 字节：时间戳(4)+物理信道(1)+物理块个数(1)+物理块长度(2)（无 Payload CRC）
+# 常用物理块尺寸（与帧长一致性推断同口径）
+_ED_PB_SIZES = (16, 40, 72, 136, 264, 520)
+
+# (包装名, 数据域公共头长度, 物理块长度字段在数据域内的偏移)
+_ED_WRAPPERS = (("plc2", 9, 7), ("gx", 8, 6))
+
+
+def detect_ed_wrapper(frame_bytes: bytes, fallback: str = "plc2") -> str:
+    """判别 ED..EE 监控包装格式：plc2(9B 公共头) / gx(8B 公共头)。
+
+    逐候选格式打分（平局优先 plc2，无正分回退 fallback）：
+      +2 剥头后业务帧首字节符合 FC MPDU 特征（bit3 接入指示=1 且 bits0-2 定界符 0~3）
+      +1 物理块长度字段（小端）与业务长度自洽：
+         (业务长度-16) 为 pb_len 正整数倍且倍数≤5、pb_len 属常用物理块尺寸；
+         无业务域（控制报文等）时仅看 pb_len 是否属常用尺寸
+    单一实现：桌面 main_gui._detect_ed_wrapper 委托本函数（手动下拉值作 fallback）。
+    """
+    if not fallback or fallback == "auto":
+        fallback = "plc2"
+    n = len(frame_bytes)
+    if n < 8 or frame_bytes[0] != 0xED:
+        return fallback
+    frame_len = frame_bytes[1] | (frame_bytes[2] << 8)
+    if frame_len < 4 or frame_len > 4096:
+        return fallback
+    total = frame_len + 4
+    if total > n or frame_bytes[5] != 0xEF or frame_bytes[total - 1] != 0xEE:
+        return fallback
+    data = frame_bytes[6:6 + frame_len - 4]
+    best, best_score = None, 0
+    for wrapper, hdr_len, pb_off in _ED_WRAPPERS:
+        if len(data) < hdr_len:
+            continue
+        business = data[hdr_len:]
+        score = 0
+        pb_len = int.from_bytes(data[pb_off:pb_off + 2], "little")
+        if business:
+            fc = business[0]
+            if (fc & 0x08) and (fc & 0x07) <= 3:
+                score += 2
+            if pb_len in _ED_PB_SIZES:
+                rest = len(business) - 16
+                if 0 < rest <= pb_len * 5 and rest % pb_len == 0:
+                    score += 1
+        elif pb_len in _ED_PB_SIZES:
+            score += 1
+        if score > best_score:
+            best, best_score = wrapper, score
+    if best is None or best_score <= 0:
+        return fallback
+    return best
+
 
 # ── 常量定义 ──
 
@@ -517,11 +573,17 @@ class CSGNewGenParser:
 
     def _parse_ed_wrapper(self, frame_bytes: bytes, parse_level: str = "auto",
                           pb_frame_type: str = "sof",
-                          channel: str = "auto") -> Optional[list]:
-        """解析完整 ED..EE PLC2.0 监控包装，并继续解析其中业务数据。"""
+                          channel: str = "auto",
+                          wrapper: Optional[str] = None) -> Optional[list]:
+        """解析完整 ED..EE 监控包装（PLC2.0 / 广西台体），并继续解析其中业务数据。
+
+        wrapper=None → 自动识别（detect_ed_wrapper）；"plc2"/"gx" → 按指定布局。
+        """
         n = len(frame_bytes)
         if n < 8 or frame_bytes[0] != 0xED:
             return None
+        if wrapper not in ("plc2", "gx"):
+            wrapper = detect_ed_wrapper(frame_bytes)
 
         def fail(reason: str) -> list:
             return [("❌ 解析失败", "", "", f"ED 监控帧错误：{reason}", 0, n - 1)]
@@ -556,9 +618,13 @@ class CSGNewGenParser:
             0x08: "UL-OFDMA帧(DL-OFDMA的SACK帧)",
         }.get(ctrl2, f"保留(0x{ctrl2:02X})")
 
+        is_gx = wrapper == "gx"
+        hdr_title = "── 广西台体监控包装头 ──" if is_gx else "── PLC2.0 监控包装头 ──"
         rows = [
-            ("── PLC2.0 监控包装头 ──", "", "", "ED..EE 监控设备附加信息（不属于业务帧）", None, None),
-            ("起始符(ED)", f"0x{frame_bytes[0]:02X}", "ED", "PLC2.0 收发机包装起始标识", 0, 0),
+            (hdr_title, "", "", "ED..EE 监控设备附加信息（不属于业务帧）", None, None),
+            ("起始符(ED)", f"0x{frame_bytes[0]:02X}", "ED",
+             "广西台体发射机包装起始标识" if is_gx else "PLC2.0 收发机包装起始标识",
+             0, 0),
             ("帧长", self._hex_space(frame_bytes[1:3]), f"{frame_len} 字节",
              "控制域1+控制域2+EF+数据域+CS(小端)", 1, 2),
             ("控制域1", f"0x{ctrl1:02X}", ctrl1_name,
@@ -570,29 +636,43 @@ class CSGNewGenParser:
              f"字节 {data_start}~{cs_offset - 1}", data_start, cs_offset - 1),
         ]
 
-        if ctrl1 == 0x00 and ctrl2 in (0x01, 0x02, 0x03) and data_len >= 9:
-            ch = data[0]
-            ts = int.from_bytes(data[1:5], "little")
-            pb_cnt = data[5]
-            flag6 = data[6]
-            pb_len = int.from_bytes(data[7:9], "little")
-            business = data[9:]
-            business_offset = data_start + 9
+        hdr_len = 8 if is_gx else 9
+        if ctrl1 == 0x00 and ctrl2 in (0x01, 0x02, 0x03) and data_len >= hdr_len:
+            if is_gx:
+                ts = int.from_bytes(data[0:4], "little")
+                ch = data[4]
+                pb_cnt = data[5]
+                pb_len = int.from_bytes(data[6:8], "little")
+                business = data[8:]
+                business_offset = data_start + 8
+            else:
+                ch = data[0]
+                ts = int.from_bytes(data[1:5], "little")
+                pb_cnt = data[5]
+                flag6 = data[6]
+                pb_len = int.from_bytes(data[7:9], "little")
+                business = data[9:]
+                business_offset = data_start + 9
             rows.extend([
                 ("物理信道", f"0x{ch:02X}", self._plc2_channel_name(ch),
                  "0x01-HPLC 0x02-RF 0x03-HPLC+RF 0x10~0x1C-MIMO 0x20-OFDMA",
-                 data_start, data_start),
+                 data_start + (4 if is_gx else 0), data_start + (4 if is_gx else 0)),
                 ("时间戳", f"0x{ts:08X}", str(ts),
-                 "HW→PC 接收开始时间(小端)", data_start + 1, data_start + 4),
+                 "HW→PC 接收开始时间(小端)",
+                 data_start + (0 if is_gx else 1), data_start + (3 if is_gx else 4)),
                 ("物理块个数", str(pb_cnt), str(pb_cnt), None,
                  data_start + 5, data_start + 5),
-                ("Payload CRC", f"0x{flag6:02X}",
-                 "错误" if ctrl2 == 0x02 and flag6 == 1 else "正确/保留",
-                 "ctrl2=0x02时: 0-正确 1-错误；其余保留",
-                 data_start + 6, data_start + 6),
-                ("单个物理块长度", str(pb_len), f"{pb_len} 字节(小端)", None,
-                 data_start + 7, data_start + 8),
             ])
+            if not is_gx:
+                rows.append(
+                    ("Payload CRC", f"0x{flag6:02X}",
+                     "错误" if ctrl2 == 0x02 and flag6 == 1 else "正确/保留",
+                     "ctrl2=0x02时: 0-正确 1-错误；其余保留",
+                     data_start + 6, data_start + 6))
+            rows.append(
+                ("单个物理块长度", str(pb_len), f"{pb_len} 字节(小端)", None,
+                 data_start + (6 if is_gx else 7),
+                 data_start + (7 if is_gx else 8)))
         else:
             business = data
             business_offset = data_start
@@ -601,7 +681,8 @@ class CSGNewGenParser:
             ("校验(CS)", f"0x{cs:02X}", cs_txt,
              "ED..数据域末所有字节求和取低8bit", cs_offset, cs_offset),
             ("结束符(EE)", f"0x{frame_bytes[total - 1]:02X}", "EE",
-             "PLC2.0 包装结束标识", total - 1, total - 1),
+             "广西台体包装结束标识" if is_gx else "PLC2.0 包装结束标识",
+             total - 1, total - 1),
             ("── 业务帧 ──", "", "",
              "以下为 ED 数据域解析结果", business_offset, cs_offset - 1),
         ])
@@ -632,7 +713,8 @@ class CSGNewGenParser:
         return _crc24_func(data)
 
     def parse_to_table(self, frame_bytes: bytes, parse_level: str = "auto",
-                    pb_frame_type: str = "sof", channel: str = "auto") -> list:
+                    pb_frame_type: str = "sof", channel: str = "auto",
+                    ed_wrapper: Optional[str] = None) -> list:
         """
         解析帧为表格数据格式
         返回: [(字段名, 原始值, 解析值, 说明, byte_start, byte_end), ...]
@@ -648,6 +730,7 @@ class CSGNewGenParser:
 
         Args:
             channel: "plc" (载波), "hrf" (高速无线) 或 "auto" (MPDU级输入自动判别)
+            ed_wrapper: ED..EE 监控包装格式 "plc2"/"gx"，None=自动识别
         """
         self._channel = channel
         self._detected_channel = None
@@ -678,6 +761,7 @@ class CSGNewGenParser:
                 parse_level=parse_level,
                 pb_frame_type=pb_frame_type,
                 channel=channel,
+                wrapper=ed_wrapper,
             )
             if ed_rows is not None:
                 return ed_rows

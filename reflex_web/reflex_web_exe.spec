@@ -136,6 +136,14 @@ hiddenimports = reflex_hidden + [
     "gdw_eb_di_lookup",
     "gdw_eb_di_fields",
 
+    # ---- 项目模块：协议能力注册表 / 校验器工厂 ----
+    # reflex_web.py 的 _get_validator 走 protocol_registry.make_validator（importlib 动态加载），
+    # 打包器无法静态分析 → 必须显式声明；validator/__init__.py 已 re-export 全部 12 个校验器
+    "protocol_registry",
+    "parser_registry",
+    "hdc10_parser",
+    "hdc10_mme_parser",
+
     # ---- 项目模块：校验器 ----
     "validator",
     "validator.base",
@@ -147,6 +155,7 @@ hiddenimports = reflex_hidden + [
     "validator.dl_t698_45_validator",
     "validator.csg_new_gen_validator",
     "validator.gw_new_gen_validator",
+    "validator.hdc10_validator",
 
     # ---- 项目模块：Reflex Web ----
     "reflex_web",

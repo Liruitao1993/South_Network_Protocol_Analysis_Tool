@@ -128,7 +128,10 @@ a = Analysis(
         'gw_new_gen_mme_parser',
         'hdc10_parser',
         'hdc10_mme_parser',
+        'protocol_registry',  # 协议能力注册表（main_gui 顶层 import，显式声明保险）
+        'parser_registry',  # 解析器懒加载（同上）
         'validator.hdc10_validator',
+        'validator.gw_new_gen_validator',  # make_validator 走 importlib，需显式声明
         'obis_lookup',
         'command_lookup',
         'dlt645_di_lookup',

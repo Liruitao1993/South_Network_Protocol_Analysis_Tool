@@ -272,3 +272,32 @@ engine = self._engine_factory()            # 否则才是发给本虚拟表的�
 - 横轴首/末标签若按居中排版会越出画布或压住纵轴刻度 → 首标签左对齐、末标签右对齐，其余居中。
 - 自动适配模式的等分刻度会出现 `47.3275` 这类噪声 → 按分格步长定小数位（`auto_tick_decimals`）后再格式化。
 - 状态行文字较长时在窄窗口会被挤压 → 保留 tooltip 全文，不要为了塞下而删信息。
+
+
+---
+
+## Scenario: Reflex Web 版与桌面版的解析能力对齐（双实现收口）
+
+### 1. Scope / Trigger
+Web 版（`reflex_web/reflex_web/`）与 PySide6 版（`main_gui.py`）**共享 parser/validator，但预处理/帧提取/摘要/DLT645 转表/字段层级/查询数据源各写一份**。任何跨端行为改动、或「Web 上解析结果与桌面不一致」的报障，都落在这个场景。
+
+### 2. 契约（已落地 + 待收口）
+- **解析内核**：`parser_*.py` / `validator/*` 是唯一实现，两端调用；**不要在 Web 侧再包一层同义实现**。
+- **判据进纯函数**：`web_utils.py`（无 Qt / 无 reflex）承载 `hex_to_bytes_strict` / `strip_frame_bytes` / `batch_frame_outcome` / `parse_kwargs_for` / `clean_hex_input` / `strip_*` / `extract_*` / 摘要；`reflex_web.py` 的 State 只做「取状态 → 调纯函数 → 赋值前端字段」。理由：Reflex `State` 不能随便实例化，逻辑留在 State 就等于不可测。测试可用 `State(_reflex_internal_init=True)` 拿真实实例，并可用 `async for _ in st.parse_batch()` 驱动批量链路（见 `test/test_web_parse_fixes.py` §11/§12）。
+- **失败判定唯一口径**：结果表中**存在以 `❌` 开头的行**（解析器会把失败行写在表中途，实测协议9 `mac_only` 短 MAC 帧：`csg_new_gen_parser.py:843` 先写「解析模式」行，`_parse_mac_frame` 再追加 ❌）→ 失败（类型列「解析失败」、摘要取 ❌ 行说明）；**空表 = 失败**。两端一致（Web `batch_frame_outcome`，桌面 `main_gui.parse_batch` + `_get_frame_type_name`）。
+- **输入清洗唯一口径**：奇数长度/空输入**报错**（`输入长度为奇数，十六进制字符串必须是偶数长度！`），禁止 `[:-1]` 静默截断。
+- **解析级别参数**：一律经 `parse_kwargs_for(protocol, parse_level, pb_frame_type, gw_frame_type, channel)`；协议10/11 仅 `pb_only` 下发 `frame_type`（不下发时 `gw_new_gen_parser` 落「未知(None)」、`hdc10_parser` 恒 SOF）。
+- **ED..EE 监控包装格式判别单源**：`csg_new_gen_parser.detect_ed_wrapper` + `_parse_ed_wrapper`（plc2 9B / gx 8B 两套偏移），桌面 `main_gui._detect_ed_wrapper` 只委托（手动下拉值作 fallback）；摘要侧按「字段名含 `监控包装头`」判定，不用 `PLC2.0` 字样（否则 gx 帧掉到兜底分支）。
+- **协议能力元数据**：桌面查 `protocol_registry.ProtocolSpec`；Web 侧尚未接入（子任务 `09-15-web-shared-parse-core`），现阶段改动必须**同时改两侧**。
+
+### 3. 已知漂移清单（改这些逻辑时必须对拍）
+前缀剥离（`strip_gw_new_gen_prefix` 缺 `fc_payload_data := '…'` 跨行状态机、缺 EDA5）、帧提取返回契约（纯字符串 vs `(hex, ed_type, line_no)`）、摘要分派（协议10 曾错用协议9 摘要、`get_hdc10_summary` 的 `业务类型ID` 键名与解析器字段不匹配恒不命中、缺测试模式片段）、查询数据源（协议10 曾抄协议9 表；南网 AFN 曾算成 `di3 & 0x0F`；698 属性/方法曾恒为 `-`）。
+
+### 4. Tests Required
+- Web 侧断言走 `test/test_web_parse_fixes.py` 的范式：纯函数直测 + parser 端到端 + `State(_reflex_internal_init=True)` 真实实例（校验分派/剔除重算/参数下发都能这样测，无需浏览器）。
+- **断言必须能在实现回退时变红**：写「修复前后差异」的判据（例：不下发 `frame_type` 时断言出现 `未知(None)`，下发后断言 `仅PB - SOF帧`），不要只断言「有结果/不抛异常」。
+- 桌面回归网（ED 相关必跑）：`test_ed_gx_wrapper.py` / `test_ed_fallback_fix.py` / `test_csg_summary.py` / `test_csg_batch_prefix.py` / `test_csg_sequence_model.py` / `test_gw_monitor_summary.py` / `test_batch_src_line_jump.py`。
+
+### 5. 方法论陷阱（本次实测）
+- **推断型缺陷结论必须先用真实调用路径复现再改代码**：只读审计曾断言「Web 剔除不幂等（连点两次 = 二次裁剪）」，依据仅是「没有缓存」；实测发现 Web 每次都从**未被回写的** `frame_hex` 重算，本就幂等——按该结论加缓存后第二次解析反而拿到**未剔除**的原始字节（真回归），已撤销。凡结论带「因此/必然/会」的推断，先写 3 行脚本跑一遍。
+- **子代理审计结论要抽检**：本次 4 份审计里 1 条误判、1 条口径偏差（桌面失败判定比 Web 更窄，两侧都不完备），其余成立。抽样复现成本远低于改错成本。
