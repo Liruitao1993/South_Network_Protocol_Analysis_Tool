@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "§6 Web 主题 token 契约（禁裸 hex）+ §7 Reflex 陷阱（style=rx.cond 不落 DOM、State 字段即载荷）——落地页全量自定义 CSS 必须遵守"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "避免复制主题控件/图片路由/下载逻辑，改为抽公共构建器与 State 字段单一来源"}

@@ -21,8 +21,8 @@ import reflex as rx
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
+from . import landing_web, spectrum_web, theme_web, web_utils
 from . import share_model as sm  # noqa: F401  顶部导入：构建期完成 rx.Model 元数据注册
-from . import spectrum_web, theme_web, web_utils
 
 # 批量摘要每页条数选项（值给 rx.el.option 用字符串，State 侧 int(value)）
 PAGE_SIZE_OPTIONS = (100, 200, 500, 1000)
@@ -268,6 +268,7 @@ class State(rx.State):
     # ── 客户端下载 ────────────────────────────────────────────
     download_exe_available: bool = False  # downloads/ 目录是否有 exe
     download_exe_name: str = ""  # exe 文件名
+    download_exe_size_mb: str = ""  # exe 体积（MB，首页 CTA 文案用）
     download_image_available: bool = False  # downloads/ 目录是否有截图
     download_image_data_url: str = ""  # 截图 base64 data URL
     download_readme_available: bool = False  # downloads/ 目录是否有 README
@@ -594,18 +595,27 @@ class State(rx.State):
         """
         if self.current_protocol == 9:
             return web_utils.parse_kwargs_for(
-                9, self.csg_parse_level, self.csg_pb_frame_type,
-                self.gw_pb_frame_type, "auto",
+                9,
+                self.csg_parse_level,
+                self.csg_pb_frame_type,
+                self.gw_pb_frame_type,
+                "auto",
             )
         if self.current_protocol == 10:
             return web_utils.parse_kwargs_for(
-                10, self.gw_parse_level, self.csg_pb_frame_type,
-                self.gw_pb_frame_type, self.gw_channel,
+                10,
+                self.gw_parse_level,
+                self.csg_pb_frame_type,
+                self.gw_pb_frame_type,
+                self.gw_channel,
             )
         if self.current_protocol == 11:
             return web_utils.parse_kwargs_for(
-                11, self.hdc10_parse_level, self.csg_pb_frame_type,
-                self.gw_pb_frame_type, self.hdc10_channel,
+                11,
+                self.hdc10_parse_level,
+                self.csg_pb_frame_type,
+                self.gw_pb_frame_type,
+                self.hdc10_channel,
             )
         return {}
 
@@ -891,7 +901,9 @@ class State(rx.State):
                     # except 记为「异常」（桌面同口径，main_gui.py:7476）
                     frame_bytes = bytes.fromhex(frame_hex)
 
-                    result = self._safe_parse_to_table(parser, frame_bytes, **parse_kwargs)
+                    result = self._safe_parse_to_table(
+                        parser, frame_bytes, **parse_kwargs
+                    )
 
                     # 状态/类型/摘要：全表扫描 ❌ 行 + 空表判定
                     ok_name = get_frame_summary(result, self.current_protocol)
@@ -1666,7 +1678,8 @@ class State(rx.State):
         from dlt645_frame_gen import DLT645FrameGenerator, encode_di
 
         frame = DLT645FrameGenerator().build_frame(
-            addr_bytes, ctrl, encode_di(di) + data_bytes)
+            addr_bytes, ctrl, encode_di(di) + data_bytes
+        )
         self.gen_eb_frame = frame.hex()
         info = lookup.get(di) if lookup else None
         name = info.get("名称", "") if info else ""
@@ -2010,6 +2023,7 @@ class State(rx.State):
         """加载 645 命令下拉（请求/应答/异常三组）"""
         try:
             from dlt645_frame_schema import list_commands
+
             opts, keys = [], []
             for key, group, text in list_commands():
                 opts.append(f"【{group}】{text}")
@@ -2021,7 +2035,8 @@ class State(rx.State):
             self.dlt645_cmd_keys = []
             return
         if self.dlt645_cmd_options and (
-                self.gen_dlt645_cmd_label not in self.dlt645_cmd_options):
+            self.gen_dlt645_cmd_label not in self.dlt645_cmd_options
+        ):
             self.select_dlt645_cmd(self.dlt645_cmd_options[0])
 
     def select_dlt645_cmd(self, label: str):
@@ -2060,6 +2075,7 @@ class State(rx.State):
         """按当前命令 + DI 掩码重建动态字段（与 GUI _rebuild_dlt645_fields 同规则）"""
         from dlt645_frame_gen import DLT645FrameGenerator, describe_control
         from dlt645_frame_schema import build_di_fields, get_command, get_di_info
+
         try:
             spec = get_command((self.gen_dlt645_dir, self.gen_dlt645_func))
         except ValueError:
@@ -2072,20 +2088,30 @@ class State(rx.State):
             derived = build_di_fields(di)
             if self.gen_dlt645_dir == "req" and self.gen_dlt645_func in (0x11, 0x12):
                 derived = [f for f in derived if f.get("type") == "lme_entries"]
-            fields = derived + [f for f in fields if f.get("type") not in
-                                ("di_value", "demand", "demand_time")]
+            fields = derived + [
+                f
+                for f in fields
+                if f.get("type") not in ("di_value", "demand", "demand_time")
+            ]
             info = get_di_info(di)
             self.gen_dlt645_di_label = (
                 f"{info['name']}｜{info['data_type'] or '未声明'}｜{info['length']}B"
-                if info["name"] else "不在映射表，按裸字节填写")
+                if info["name"]
+                else "不在映射表，按裸字节填写"
+            )
         else:
             self.gen_dlt645_di_label = ""
         self.gen_dlt645_fields = [
-            {"name": f["name"], "value": str(f.get("default", "")),
-             "hint": f.get("hint", "")} for f in fields
+            {
+                "name": f["name"],
+                "value": str(f.get("default", "")),
+                "hint": f.get("hint", ""),
+            }
+            for f in fields
         ]
         ctrl = DLT645FrameGenerator.build_control(
-            spec["func"], dir_bit=spec["dir"], err=bool(spec.get("err")))
+            spec["func"], dir_bit=spec["dir"], err=bool(spec.get("err"))
+        )
         self.gen_dlt645_ctrl_label = describe_control(ctrl)
 
     def _load_di_options(self):
@@ -2686,8 +2712,10 @@ class State(rx.State):
             if self.gen_dlt645_di:
                 fv["数据标识 DI"] = self.gen_dlt645_di.upper()
             return DLT645FrameGenerator().generate_frame(
-                (self.gen_dlt645_dir, self.gen_dlt645_func), fv,
-                addr=self.gen_dlt645_addr or None)
+                (self.gen_dlt645_dir, self.gen_dlt645_func),
+                fv,
+                addr=self.gen_dlt645_addr or None,
+            )
 
         raise ValueError(f"协议 {p} 暂不支持组帧")
 
@@ -3167,9 +3195,17 @@ class State(rx.State):
             downloads_dir = here.parent.parent / "downloads"  # reflex_web/downloads/
             if not downloads_dir.exists():
                 downloads_dir = here.parent / "downloads"
+            # 复位放在目录存在性判断**之前**：否则「downloads/ 不存在」这条路径会把
+            # 上一次扫描到的 exe 名/体积/版本/截图留在 State 里（界面显示陈旧数据）
             self.download_exe_available = False
             self.download_exe_name = ""
+            self.download_exe_size_mb = ""
             self.download_image_available = False
+            self.download_image_data_url = ""
+            self.download_version = ""
+            self.download_version_notes = ""
+            self.download_version_date = ""
+            self.download_version_url = ""
             self.download_readme_available = False
             self.download_readme_text = ""
             if downloads_dir.exists():
@@ -3205,9 +3241,13 @@ class State(rx.State):
                 if primary_exe is not None:
                     self.download_exe_available = True
                     self.download_exe_name = primary_exe.name
-                else:
-                    self.download_exe_available = False
-                    self.download_exe_name = ""
+                    try:
+                        self.download_exe_size_mb = str(
+                            round(primary_exe.stat().st_size / 1024 / 1024, 2)
+                        )
+                    except Exception:
+                        self.download_exe_size_mb = ""
+                # 无 exe 时无需复位：三个字段已在函数开头统一清空
                 ss_file = downloads_dir / "client_screenshot.png"
                 if ss_file.exists():
                     self.download_image_available = True
@@ -4170,8 +4210,14 @@ class SpectrumState(rx.State):
         self.sp_markers_svg = spectrum_web.marker_items(markers, params, trace, auto)
         rows = marker_rows(markers, self.sp_ref_index)
         self.sp_marker_rows = [
-            {"label": r[0], "freq": r[1], "level": r[2], "d_freq": r[3], "d_level": r[4],
-             "color": spectrum_web.marker_var(i)}
+            {
+                "label": r[0],
+                "freq": r[1],
+                "level": r[2],
+                "d_freq": r[3],
+                "d_level": r[4],
+                "color": spectrum_web.marker_var(i),
+            }
             for i, r in enumerate(rows)
         ]
         self.sp_marker_count = len(markers)
@@ -4200,7 +4246,9 @@ class SpectrumState(rx.State):
                 bandwidth = units_to_hz(float(raw), self.sp_ibw_unit)
             except ValueError:
                 raise SpectrumInputError(f"积分带宽必须是数值（当前：{raw}）")
-            band, _result = integration_band_for(trace, center, bandwidth, trace.params.rbw_hz)
+            band, _result = integration_band_for(
+                trace, center, bandwidth, trace.params.rbw_hz
+            )
         except SpectrumInputError as exc:
             self.sp_ibw_rect = {}
             self.sp_ibw_text = f"⚠ {exc}"
@@ -4224,7 +4272,9 @@ class SpectrumState(rx.State):
             return
         freq = spectrum_web.band_click_freq(band_index, trace.params)
         idx = nearest_index(trace.freqs, freq)
-        self.sp_readout = readout_text(trace.freqs[idx], trace.levels[idx], trace.params.unit)
+        self.sp_readout = readout_text(
+            trace.freqs[idx], trace.levels[idx], trace.params.unit
+        )
         if len(self._sp_marker_freqs) >= MAX_MARKERS:
             self.sp_msg = f"标记已达上限（M1~M{MAX_MARKERS}），请先删除"
         else:
@@ -4241,7 +4291,10 @@ class SpectrumState(rx.State):
             self.sp_error = "请先绘制图形"
             return
         current = (
-            min(range(trace.n_points), key=lambda i: abs(trace.freqs[i] - self._sp_marker_freqs[-1]))
+            min(
+                range(trace.n_points),
+                key=lambda i: abs(trace.freqs[i] - self._sp_marker_freqs[-1]),
+            )
             if self._sp_marker_freqs
             else 0
         )
@@ -4343,11 +4396,11 @@ class ThemeState(rx.State):
     def apply_choice(self, value: str):
         """主题下拉统一入口：`preset:xxx` / `accent:xxx` / `mode:xxx`。"""
         if value.startswith(theme_web.PRESET_PREFIX):
-            return self.apply_preset(value[len(theme_web.PRESET_PREFIX):])
+            return self.apply_preset(value[len(theme_web.PRESET_PREFIX) :])
         if value.startswith(theme_web.ACCENT_PREFIX):
-            return self.set_dimension("accent", value[len(theme_web.ACCENT_PREFIX):])
+            return self.set_dimension("accent", value[len(theme_web.ACCENT_PREFIX) :])
         if value.startswith(theme_web.MODE_PREFIX):
-            return self.set_mode(value[len(theme_web.MODE_PREFIX):])
+            return self.set_mode(value[len(theme_web.MODE_PREFIX) :])
         return None
 
     def cycle_mode(self):
@@ -4415,7 +4468,6 @@ class ThemeState(rx.State):
             )
 
 
-
 # ═══════════════════════════════════════════════════════════════
 # 全局样式（所有页面共用：基础设计系统 + 主题 token）
 # ═══════════════════════════════════════════════════════════════
@@ -4435,50 +4487,118 @@ def theme_style() -> rx.Component:
 # ═══════════════════════════════════════════════════════════════
 
 
+def _read_published_version() -> str:
+    """读 downloads/version.json 里的发布版本（与客户端下载/首页徽章同一数据源）。
+
+    路径解析与 `State.load_download_info` 一致：先 reflex_web/downloads/，再 reflex_web/reflex_web/downloads/。
+    读不到就返回空串——顶栏宁可不显示版本，也不要显示一个写死的假版本号。
+    """
+    here = Path(__file__).resolve()
+    for candidate in (here.parent.parent / "downloads", here.parent / "downloads"):
+        vj = candidate / "version.json"
+        try:
+            if vj.exists():
+                data = json.loads(vj.read_text(encoding="utf-8"))
+                return str(data.get("version", "") or "")
+        except Exception:
+            continue
+    return ""
+
+
+PUBLISHED_VERSION = _read_published_version()
+
+
+def version_badge() -> rx.Component:
+    """顶栏版本徽章（数据源 = downloads/version.json；无版本信息时不渲染）。"""
+    if not PUBLISHED_VERSION:
+        return rx.fragment()
+    return rx.badge(
+        f"v{PUBLISHED_VERSION}", color_scheme="blue", variant="soft", size="2"
+    )
+
+
+def theme_controls_compact() -> rx.Component:
+    """主题控件（紧凑：一个预设下拉 + 一个模式循环按钮）。
+
+    工具页顶栏与首页顶栏共用同一实现（单一来源）；两边都不再各写一份。
+    """
+    return rx.hstack(
+        rx.el.select(
+            *[
+                rx.el.option(o["label"], value=o["value"])
+                for o in theme_web.preset_options()
+            ],
+            value=ThemeState.theme_choice,
+            on_change=ThemeState.apply_choice,
+            class_name="app-header-select",
+            title="主题：预设 / 强调色 / 模式",
+            data_testid="theme-preset",
+        ),
+        rx.el.button(
+            rx.hstack(
+                rx.icon(ThemeState.mode_button_icon, size=14),
+                ThemeState.mode_button_label,
+                spacing="1",
+            ),
+            on_click=ThemeState.cycle_mode,
+            class_name="app-header-btn",
+            title="切换模式：浅色 → 深色 → 跟随系统",
+            data_testid="theme-mode",
+        ),
+        spacing="2",
+        align="center",
+    )
+
+
 def header(show_parse_controls: bool = True) -> rx.Component:
-    """顶部导航栏
+    """顶部导航栏（仅工具页与独立工具页；首页有自己的营销顶栏）
 
     Args:
-        show_parse_controls: 主页 True（显示协议选择器 + 登录弹窗入口）；
-            独立页面（/feedback 等）传 False，协议选择器换成「返回主页」链接，
-            管理员按钮直接跳转主页（弹窗组件只挂在主页）。
+        show_parse_controls: 工具页 True（显示协议选择器 + 登录弹窗入口）；
+            独立页面（/feedback、/share 等）传 False，协议选择器换成「在线工具」链接，
+            管理员按钮直接跳工具页（登录弹窗只挂在工具页）。
     """
     return rx.box(
         rx.box(
             rx.hstack(
-                # Logo + 标题
-                rx.hstack(
-                    rx.box(
-                        rx.icon("zap", size=20, color="white"),
-                        style={
-                            "width": "38px",
-                            "height": "38px",
-                            "border_radius": "11px",
-                            "background": "rgba(255,255,255,0.16)",
-                            "display": "flex",
-                            "align_items": "center",
-                            "justify_content": "center",
-                            "box_shadow": "inset 0 1px 0 rgba(255,255,255,0.25)",
-                        },
-                    ),
-                    rx.vstack(
-                        rx.heading(
-                            "多协议解析平台",
-                            size="3",
-                            color="white",
-                            font_weight="bold",
+                # Logo + 标题（点击回产品首页）
+                rx.el.a(
+                    rx.hstack(
+                        rx.box(
+                            rx.icon("zap", size=20, color="white"),
+                            style={
+                                "width": "38px",
+                                "height": "38px",
+                                "border_radius": "11px",
+                                "background": "rgba(255,255,255,0.16)",
+                                "display": "flex",
+                                "align_items": "center",
+                                "justify_content": "center",
+                                "box_shadow": "inset 0 1px 0 rgba(255,255,255,0.25)",
+                            },
                         ),
-                        rx.text(
-                            "电力通信协议解析 · 支持 12 种协议",
-                            size="1",
-                            color="rgba(255,255,255,0.72)",
+                        rx.vstack(
+                            rx.heading(
+                                "多协议解析平台",
+                                size="3",
+                                color="white",
+                                font_weight="bold",
+                            ),
+                            rx.text(
+                                "电力通信协议解析 · 支持 12 种协议",
+                                size="1",
+                                color="rgba(255,255,255,0.72)",
+                            ),
+                            spacing="0",
                         ),
-                        spacing="0",
+                        spacing="3",
                     ),
-                    spacing="3",
+                    href=landing_web.INTERNAL_LINKS["home"],
+                    data_testid="nav-brand",
+                    style={"text_decoration": "none"},
                 ),
                 rx.spacer(),
-                # 主页：协议选择器；独立页面：返回主页链接
+                # 工具页：协议选择器；独立页面：回在线工具（首页另有营销顶栏）
                 rx.cond(
                     show_parse_controls,
                     rx.el.select(
@@ -4504,13 +4624,13 @@ def header(show_parse_controls: bool = True) -> rx.Component:
                     ),
                     rx.el.a(
                         rx.hstack(
-                            rx.icon("home", size=14),
-                            "返回主页",
+                            rx.icon("terminal", size=14),
+                            "在线工具",
                             spacing="1",
                         ),
-                        href="/",
+                        href=landing_web.INTERNAL_LINKS["tool"],
                         class_name="app-header-btn",
-                        data_testid="nav-home",
+                        data_testid="nav-tool",
                         style={"text_decoration": "none", "color": "white"},
                     ),
                 ),
@@ -4551,38 +4671,12 @@ def header(show_parse_controls: bool = True) -> rx.Component:
                     data_testid="nav-share",
                     style={"text_decoration": "none", "color": "white"},
                 ),
-                # 版本徽章
-                rx.badge("v1.13.0", color_scheme="blue", variant="soft", size="2"),
-                # ── 主题控件（仅主页；独立页面不渲染，避免挤掉导航按钮）──
+                # 版本徽章（读 downloads/version.json，与首页/客户端下载同源）
+                version_badge(),
+                # ── 主题控件（仅工具页；独立页面不渲染，避免挤掉导航按钮）──
                 rx.cond(
                     show_parse_controls,
-                    rx.hstack(
-                    # ── 主题控件（紧凑：一个下拉 + 一个模式循环按钮）──
-                    rx.el.select(
-                        *[
-                            rx.el.option(o["label"], value=o["value"])
-                            for o in theme_web.preset_options()
-                        ],
-                        value=ThemeState.theme_choice,
-                        on_change=ThemeState.apply_choice,
-                        class_name="app-header-select",
-                        title="主题：预设 / 强调色 / 模式",
-                        data_testid="theme-preset",
-                    ),
-                    rx.el.button(
-                        rx.hstack(
-                            rx.icon(ThemeState.mode_button_icon, size=14),
-                            ThemeState.mode_button_label,
-                            spacing="1",
-                        ),
-                        on_click=ThemeState.cycle_mode,
-                        class_name="app-header-btn",
-                        title="切换模式：浅色 → 深色 → 跟随系统",
-                        data_testid="theme-mode",
-                    ),
-                        spacing="2",
-                        align="center",
-                    ),
+                    theme_controls_compact(),
                     rx.fragment(),
                 ),
                 # 管理员登录/登出按钮（主页开弹窗；独立页面跳回主页弹窗位置）
@@ -4608,7 +4702,7 @@ def header(show_parse_controls: bool = True) -> rx.Component:
                             rx.hstack(
                                 rx.icon("shield", size=14), "管理员登录", spacing="1"
                             ),
-                            href="/",
+                            href=landing_web.INTERNAL_LINKS["tool"],
                             class_name="app-header-btn",
                             data_testid="btn-login-home",
                             style={"text_decoration": "none", "color": "white"},
@@ -5403,7 +5497,9 @@ def batch_parse_tab() -> rx.Component:
                                                 rx.text(
                                                     # 全局序号（跨页连续）
                                                     "#"
-                                                    + (item["id"].to(int) + 1).to_string(),
+                                                    + (
+                                                        item["id"].to(int) + 1
+                                                    ).to_string(),
                                                     size="1",
                                                     font_weight="bold",
                                                 ),
@@ -5430,9 +5526,7 @@ def batch_parse_tab() -> rx.Component:
                                             padding="2",
                                             width="100%",
                                             cursor="pointer",
-                                            _hover={
-                                                "background": "var(--accent-soft)"
-                                            },
+                                            _hover={"background": "var(--accent-soft)"},
                                             # 选中高亮用 class（`style=rx.cond({...})` 在本项目
                                             # 实测不落到 DOM，class_name=rx.cond 是已验证可用的写法）
                                             class_name=rx.cond(
@@ -5467,7 +5561,11 @@ def batch_parse_tab() -> rx.Component:
                                         color="var(--muted)",
                                         size="2",
                                     ),
-                                    rx.text("暂无批量解析结果", color="var(--muted)", size="2"),
+                                    rx.text(
+                                        "暂无批量解析结果",
+                                        color="var(--muted)",
+                                        size="2",
+                                    ),
                                 ),
                                 spacing="2",
                                 padding="8",
@@ -5562,7 +5660,9 @@ def batch_parse_tab() -> rx.Component:
                         ),
                         rx.center(
                             rx.vstack(
-                                rx.icon("mouse_pointer", size=48, color="var(--muted-2)"),
+                                rx.icon(
+                                    "mouse_pointer", size=48, color="var(--muted-2)"
+                                ),
                                 rx.text(
                                     "点击左侧摘要行查看详细解析",
                                     color="var(--muted)",
@@ -7311,7 +7411,9 @@ def frame_gen_tab() -> rx.Component:
                             width="160px",
                             size="2",
                         ),
-                        rx.text(State.gen_dlt645_di_label, size="1", color="var(--muted)"),
+                        rx.text(
+                            State.gen_dlt645_di_label, size="1", color="var(--muted)"
+                        ),
                         spacing="2",
                     ),
                     rx.foreach(
@@ -7327,7 +7429,9 @@ def frame_gen_tab() -> rx.Component:
                             spacing="2",
                         ),
                     ),
-                    rx.text(State.gen_dlt645_ctrl_label, size="1", color="var(--muted)"),
+                    rx.text(
+                        State.gen_dlt645_ctrl_label, size="1", color="var(--muted)"
+                    ),
                     spacing="3",
                 ),
             ),
@@ -7688,7 +7792,9 @@ def frame_gen_tab() -> rx.Component:
             rx.card(
                 rx.vstack(
                     rx.hstack(
-                        rx.icon("square_arrow_out_up_right", size=20, color="var(--ok)"),
+                        rx.icon(
+                            "square_arrow_out_up_right", size=20, color="var(--ok)"
+                        ),
                         rx.heading("生成结果", size="3", font_weight="semibold"),
                         spacing="2",
                     ),
@@ -7711,7 +7817,9 @@ def frame_gen_tab() -> rx.Component:
                             rx.vstack(
                                 rx.icon("building", size=48, color="var(--muted-2)"),
                                 rx.text(
-                                    "点击「生成帧」查看结果", color="var(--muted)", size="2"
+                                    "点击「生成帧」查看结果",
+                                    color="var(--muted)",
+                                    size="2",
                                 ),
                                 spacing="2",
                                 padding="8",
@@ -7870,7 +7978,10 @@ def diff_tab() -> rx.Component:
                             State.diff_explanations,
                             lambda exp: rx.hstack(
                                 rx.icon(
-                                    "info", size=14, color="var(--warn)", flex_shrink="0"
+                                    "info",
+                                    size=14,
+                                    color="var(--warn)",
+                                    flex_shrink="0",
                                 ),
                                 rx.text(exp, size="2"),
                                 spacing="2",
@@ -8336,7 +8447,9 @@ def download_tab() -> rx.Component:
                         rx.center(
                             rx.vstack(
                                 rx.icon("image_off", size=40, color="var(--muted-2)"),
-                                rx.text("暂无界面截图", size="2", color="var(--muted-2)"),
+                                rx.text(
+                                    "暂无界面截图", size="2", color="var(--muted-2)"
+                                ),
                                 spacing="2",
                             ),
                             min_height="200px",
@@ -9081,7 +9194,9 @@ def _fa_item_row(item: dict[str, Any]) -> rx.Component:
                     width="100%",
                 ),
                 rx.hstack(
-                    rx.text("#" + item["id"].to_string(), size="1", color="var(--muted-2)"),
+                    rx.text(
+                        "#" + item["id"].to_string(), size="1", color="var(--muted-2)"
+                    ),
                     rx.text(item["created_at"], size="1", color="var(--muted-2)"),
                     spacing="3",
                 ),
@@ -9248,7 +9363,9 @@ def _fa_detail_dialog() -> rx.Component:
                     rx.hstack(
                         rx.icon("info", size=14, color="var(--muted-2)"),
                         rx.text(
-                            "管理员登录后可修改状态或删除", size="1", color="var(--muted-2)"
+                            "管理员登录后可修改状态或删除",
+                            size="1",
+                            color="var(--muted-2)",
                         ),
                         spacing="1",
                     ),
@@ -9415,9 +9532,12 @@ def feedback_admin_page() -> rx.Component:
                 ),
                 rx.el.a(
                     rx.hstack(
-                        rx.icon("home", size=16), "前往主页 · 问题反馈", spacing="2"
+                        rx.icon("terminal", size=16),
+                        "前往在线工具 · 问题反馈",
+                        spacing="2",
                     ),
-                    href="/",
+                    href=landing_web.INTERNAL_LINKS["tool"],
+                    data_testid="admin-goto-tool",
                     style={
                         "text_decoration": "none",
                         "color": "white",
@@ -9755,7 +9875,9 @@ def _share_submit_dialog() -> rx.Component:
                         ShareState.sf_msg,
                         size="2",
                         color=rx.cond(
-                            ShareState.sf_msg_type == "error", "var(--danger)", "var(--ok)"
+                            ShareState.sf_msg_type == "error",
+                            "var(--danger)",
+                            "var(--ok)",
                         ),
                     ),
                 ),
@@ -9822,7 +9944,8 @@ def share_page() -> rx.Component:
                         rx.hstack(
                             rx.icon("home", size=14), "去解析并分享", spacing="1"
                         ),
-                        href="/",
+                        href=landing_web.INTERNAL_LINKS["tool"],
+                        data_testid="share-goto-tool",
                         class_name="app-header-btn",
                         style={
                             "text_decoration": "none",
@@ -10117,7 +10240,11 @@ def release_tab() -> rx.Component:
                                 size="2",
                                 color="gray",
                             ),
-                            rx.text("支持 .exe，最大 500MB", size="1", color="var(--muted-2)"),
+                            rx.text(
+                                "支持 .exe，最大 500MB",
+                                size="1",
+                                color="var(--muted-2)",
+                            ),
                             spacing="2",
                             align="center",
                             justify="center",
@@ -10214,7 +10341,9 @@ def release_tab() -> rx.Component:
                                 "拖拽截图到此处，或点击选择", size="2", color="gray"
                             ),
                             rx.text(
-                                "支持 png/jpg/jpeg/gif/webp", size="1", color="var(--muted-2)"
+                                "支持 png/jpg/jpeg/gif/webp",
+                                size="1",
+                                color="var(--muted-2)",
                             ),
                             spacing="1",
                             align="center",
@@ -10238,7 +10367,9 @@ def release_tab() -> rx.Component:
                         rx.hstack(
                             rx.icon("check_check", size=16, color="var(--ok)"),
                             rx.text(
-                                "截图已上传，发布时一起更新", size="1", color="var(--ok)"
+                                "截图已上传，发布时一起更新",
+                                size="1",
+                                color="var(--ok)",
                             ),
                             spacing="1",
                         ),
@@ -10861,7 +10992,7 @@ def _sp_field(label: str, name: str, value, width: str = "90px") -> rx.Component
 
 def spectrum_tab() -> rx.Component:
     """频谱图：参数 → trace → SVG 网格图 → 测量 → 积分带宽。"""
-    from spectrum_widget import DETECTORS, LEVEL_UNITS, RBW_UNITS, SpectrumParams
+    from spectrum_widget import DETECTORS, LEVEL_UNITS, RBW_UNITS
 
     return rx.vstack(
         # ── 参数 ──
@@ -11051,17 +11182,23 @@ def spectrum_tab() -> rx.Component:
                         rx.foreach(
                             SpectrumState.sp_grid_v,
                             lambda g: rx.el.line(
-                                x1=g["x"], y1=spectrum_web.PLOT_Y0,
-                                x2=g["x"], y2=spectrum_web.PLOT_Y1,
-                                stroke="var(--grid)", stroke_width="1",
+                                x1=g["x"],
+                                y1=spectrum_web.PLOT_Y0,
+                                x2=g["x"],
+                                y2=spectrum_web.PLOT_Y1,
+                                stroke="var(--grid)",
+                                stroke_width="1",
                             ),
                         ),
                         rx.foreach(
                             SpectrumState.sp_grid_h,
                             lambda g: rx.el.line(
-                                x1=spectrum_web.PLOT_X0, y1=g["y"],
-                                x2=spectrum_web.PLOT_X1, y2=g["y"],
-                                stroke="var(--grid)", stroke_width="1",
+                                x1=spectrum_web.PLOT_X0,
+                                y1=g["y"],
+                                x2=spectrum_web.PLOT_X1,
+                                y2=g["y"],
+                                stroke="var(--grid)",
+                                stroke_width="1",
                             ),
                         ),
                         # 积分带宽带（画在迹线之下：半透明填充 + 两条点划线边沿）
@@ -11111,46 +11248,62 @@ def spectrum_tab() -> rx.Component:
                             SpectrumState.sp_markers_svg,
                             lambda m: rx.el.g(
                                 rx.el.line(
-                                    x1=m["x"], y1=spectrum_web.PLOT_Y0,
-                                    x2=m["x"], y2=spectrum_web.PLOT_Y1,
-                                    stroke=m["color"], stroke_width="1",
+                                    x1=m["x"],
+                                    y1=spectrum_web.PLOT_Y0,
+                                    x2=m["x"],
+                                    y2=spectrum_web.PLOT_Y1,
+                                    stroke=m["color"],
+                                    stroke_width="1",
                                     stroke_dasharray="4 3",
                                 ),
-                                rx.el.circle(cx=m["x"], cy=m["y"], r="3.6",
-                                             fill=m["color"]),
+                                rx.el.circle(
+                                    cx=m["x"], cy=m["y"], r="3.6", fill=m["color"]
+                                ),
                                 rx.el.text(
                                     m["label"],
-                                    x=m["x"], y=spectrum_web.PLOT_Y0 - 6,
-                                    fill=m["color"], font_size="12",
-                                    text_anchor="middle", font_weight="bold",
+                                    x=m["x"],
+                                    y=spectrum_web.PLOT_Y0 - 6,
+                                    fill=m["color"],
+                                    font_size="12",
+                                    text_anchor="middle",
+                                    font_weight="bold",
                                 ),
                             ),
                         ),
                         # 参数注记 / 状态行 / 纵轴标签
                         rx.el.text(
                             SpectrumState.sp_params_note,
-                            x=spectrum_web.PLOT_X0, y="22",
-                            fill="var(--text-2)", font_size="12",
+                            x=spectrum_web.PLOT_X0,
+                            y="22",
+                            fill="var(--text-2)",
+                            font_size="12",
                         ),
                         rx.el.text(
                             SpectrumState.sp_status,
-                            x=spectrum_web.PLOT_X0, y=spectrum_web.VIEW_H - 12,
-                            fill="var(--muted)", font_size="11",
+                            x=spectrum_web.PLOT_X0,
+                            y=spectrum_web.VIEW_H - 12,
+                            fill="var(--muted)",
+                            font_size="11",
                         ),
                         rx.foreach(
                             SpectrumState.sp_y_labels,
                             lambda t: rx.el.text(
                                 t["text"],
-                                x=spectrum_web.PLOT_X0 - 8, y=t["ty"],
-                                fill="var(--text-2)", font_size="11", text_anchor="end",
+                                x=spectrum_web.PLOT_X0 - 8,
+                                y=t["ty"],
+                                fill="var(--text-2)",
+                                font_size="11",
+                                text_anchor="end",
                             ),
                         ),
                         rx.foreach(
                             SpectrumState.sp_x_labels,
                             lambda t: rx.el.text(
                                 t["text"],
-                                x=t["x"], y=t["ty"],
-                                fill="var(--text-2)", font_size="11",
+                                x=t["x"],
+                                y=t["ty"],
+                                fill="var(--text-2)",
+                                font_size="11",
                                 text_anchor=t["anchor"],
                             ),
                         ),
@@ -11161,7 +11314,8 @@ def spectrum_tab() -> rx.Component:
                                 SpectrumState.sp_ibw_short,
                                 x=spectrum_web.PLOT_X1 - 4,
                                 y=spectrum_web.PLOT_Y0 + 14,
-                                fill="var(--accent-ink)", font_size="11",
+                                fill="var(--accent-ink)",
+                                font_size="11",
                                 text_anchor="end",
                             ),
                         ),
@@ -11170,12 +11324,15 @@ def spectrum_tab() -> rx.Component:
                             SpectrumState.sp_bands,
                             lambda b: rx.el.rect(
                                 id=b["id"],
-                                x=b["x"], y=spectrum_web.PLOT_Y0,
+                                x=b["x"],
+                                y=spectrum_web.PLOT_Y0,
                                 width=b["w"],
                                 height=spectrum_web.PLOT_Y1 - spectrum_web.PLOT_Y0,
                                 fill="transparent",
                                 cursor="crosshair",
-                                on_click=lambda: SpectrumState.sp_plot_click(b["index"]),
+                                on_click=lambda: SpectrumState.sp_plot_click(
+                                    b["index"]
+                                ),
                             ),
                         ),
                         id="spectrum-svg",
@@ -11193,22 +11350,39 @@ def spectrum_tab() -> rx.Component:
                 rx.card(
                     rx.vstack(
                         rx.heading("测量", size="2", font_weight="semibold"),
-                        rx.text(SpectrumState.sp_readout, size="1", color="var(--text)"),
+                        rx.text(
+                            SpectrumState.sp_readout, size="1", color="var(--text)"
+                        ),
                         rx.text(SpectrumState.sp_extremes, size="1", color="gray"),
                         rx.text(SpectrumState.sp_delta, size="1", color="var(--text)"),
                         rx.hstack(
-                            rx.button("峰值搜索", on_click=SpectrumState.sp_next_peak,
-                                      size="1", variant="soft"),
-                            rx.button("删除标记", on_click=SpectrumState.sp_del_marker,
-                                      size="1", variant="soft"),
-                            rx.button("清空标记", on_click=SpectrumState.sp_clear_markers,
-                                      size="1", variant="soft"),
+                            rx.button(
+                                "峰值搜索",
+                                on_click=SpectrumState.sp_next_peak,
+                                size="1",
+                                variant="soft",
+                            ),
+                            rx.button(
+                                "删除标记",
+                                on_click=SpectrumState.sp_del_marker,
+                                size="1",
+                                variant="soft",
+                            ),
+                            rx.button(
+                                "清空标记",
+                                on_click=SpectrumState.sp_clear_markers,
+                                size="1",
+                                variant="soft",
+                            ),
                             spacing="2",
                         ),
                         rx.hstack(
                             rx.text("Δ 参考", size="1", color="gray"),
                             rx.el.select(
-                                *[rx.el.option(f"M{i + 1}", value=str(i)) for i in range(6)],
+                                *[
+                                    rx.el.option(f"M{i + 1}", value=str(i))
+                                    for i in range(6)
+                                ],
                                 default_value="0",
                                 on_change=SpectrumState.sp_set_ref_index,
                                 class_name="app-select",
@@ -11241,13 +11415,23 @@ def spectrum_tab() -> rx.Component:
                                         SpectrumState.sp_marker_rows,
                                         lambda r: rx.table.row(
                                             rx.table.cell(
-                                                rx.text(r["label"], color=r["color"],
-                                                        font_weight="bold", size="1")
+                                                rx.text(
+                                                    r["label"],
+                                                    color=r["color"],
+                                                    font_weight="bold",
+                                                    size="1",
+                                                )
                                             ),
                                             rx.table.cell(rx.text(r["freq"], size="1")),
-                                            rx.table.cell(rx.text(r["level"], size="1")),
-                                            rx.table.cell(rx.text(r["d_freq"], size="1")),
-                                            rx.table.cell(rx.text(r["d_level"], size="1")),
+                                            rx.table.cell(
+                                                rx.text(r["level"], size="1")
+                                            ),
+                                            rx.table.cell(
+                                                rx.text(r["d_freq"], size="1")
+                                            ),
+                                            rx.table.cell(
+                                                rx.text(r["d_level"], size="1")
+                                            ),
                                         ),
                                     )
                                 ),
@@ -11257,7 +11441,8 @@ def spectrum_tab() -> rx.Component:
                             ),
                             rx.text(
                                 "点击左侧图形即可添加标记（M1~M6，标记吸附到最近数据点）",
-                                size="1", color="gray",
+                                size="1",
+                                color="gray",
                             ),
                         ),
                         spacing="2",
@@ -11271,7 +11456,9 @@ def spectrum_tab() -> rx.Component:
                             rx.checkbox(
                                 "积分带宽",
                                 checked=SpectrumState.sp_ibw_show,
-                                on_change=lambda v: SpectrumState.sp_set_toggle("ibw_show", v),
+                                on_change=lambda v: SpectrumState.sp_set_toggle(
+                                    "ibw_show", v
+                                ),
                                 size="2",
                             ),
                             rx.spacer(),
@@ -11279,19 +11466,35 @@ def spectrum_tab() -> rx.Component:
                             width="100%",
                         ),
                         rx.hstack(
-                            _sp_field("中心", "ibw_center", SpectrumState.sp_ibw_center, "80px"),
-                            _sp_field("带宽", "ibw_bw", SpectrumState.sp_ibw_bw, "70px"),
+                            _sp_field(
+                                "中心",
+                                "ibw_center",
+                                SpectrumState.sp_ibw_center,
+                                "80px",
+                            ),
+                            _sp_field(
+                                "带宽", "ibw_bw", SpectrumState.sp_ibw_bw, "70px"
+                            ),
                             rx.el.select(
-                                *[rx.el.option(u, value=u) for u in ("kHz", "MHz", "GHz")],
+                                *[
+                                    rx.el.option(u, value=u)
+                                    for u in ("kHz", "MHz", "GHz")
+                                ],
                                 value=SpectrumState.sp_ibw_unit,
-                                on_change=lambda v: SpectrumState.sp_set_select("ibw_unit", v),
+                                on_change=lambda v: SpectrumState.sp_set_select(
+                                    "ibw_unit", v
+                                ),
                                 class_name="app-select",
                             ),
                             spacing="2",
                             align="center",
                             wrap="wrap",
                         ),
-                        rx.text(SpectrumState.sp_ibw_text, size="1", color="var(--accent-ink)"),
+                        rx.text(
+                            SpectrumState.sp_ibw_text,
+                            size="1",
+                            color="var(--accent-ink)",
+                        ),
                         spacing="2",
                         width="100%",
                     ),
@@ -11551,157 +11754,178 @@ body {
 # 项目未启用 Tailwind，Radix 组件通过 .rt-* 类覆盖，自定义类直接定义
 
 
-def index() -> rx.Component:
-    """主页面"""
+def tool_page() -> rx.Component:
+    """在线工具页（原主页，1.23.14 起让位给产品首页，路由改为 /app）"""
     return rx.theme(
         rx.box(
-        theme_style(),
-        header(),
-        rx.box(
-            newgen_controls(),
-            message_banner(),
-            # Tab 导航
-            rx.hstack(
-                rx.el.button(
-                    rx.hstack(rx.icon("file_input", size=16), "单帧解析", spacing="1"),
-                    on_click=lambda: State.set_tab("single"),
-                    class_name=rx.cond(
-                        State.active_tab == "single",
-                        "app-tab app-tab-active",
-                        "app-tab",
-                    ),
-                    data_testid="tab-single",
-                ),
-                rx.el.button(
-                    rx.hstack(rx.icon("list", size=16), "批量解析", spacing="1"),
-                    on_click=lambda: State.set_tab("batch"),
-                    class_name=rx.cond(
-                        State.active_tab == "batch", "app-tab app-tab-active", "app-tab"
-                    ),
-                    data_testid="tab-batch",
-                ),
-                rx.el.button(
-                    rx.hstack(rx.icon("square_pen", size=16), "协议组帧", spacing="1"),
-                    on_click=lambda: State.set_tab("frame"),
-                    class_name=rx.cond(
-                        State.active_tab == "frame", "app-tab app-tab-active", "app-tab"
-                    ),
-                    data_testid="tab-frame",
-                ),
-                rx.el.button(
-                    rx.hstack(rx.icon("git_compare", size=16), "报文对比", spacing="1"),
-                    on_click=lambda: State.set_tab("diff"),
-                    class_name=rx.cond(
-                        State.active_tab == "diff", "app-tab app-tab-active", "app-tab"
-                    ),
-                    data_testid="tab-diff",
-                ),
-                rx.el.button(
-                    rx.hstack(rx.icon("search", size=16), "查询", spacing="1"),
-                    on_click=lambda: State.set_tab("lookup"),
-                    class_name=rx.cond(
-                        State.active_tab == "lookup",
-                        "app-tab app-tab-active",
-                        "app-tab",
-                    ),
-                    data_testid="tab-lookup",
-                ),
-                # 频谱图（常驻，与协议无关；状态在 SpectrumState）
-                rx.el.button(
-                    rx.hstack(rx.icon("chart_spline", size=16), "频谱图", spacing="1"),
-                    on_click=lambda: State.set_tab("spectrum"),
-                    class_name=rx.cond(
-                        State.active_tab == "spectrum",
-                        "app-tab app-tab-active",
-                        "app-tab",
-                    ),
-                    data_testid="tab-spectrum",
-                ),
-                rx.el.button(
-                    rx.hstack(rx.icon("wrench", size=16), "报文工具", spacing="1"),
-                    on_click=lambda: State.set_tab("tool"),
-                    class_name=rx.cond(
-                        State.active_tab == "tool", "app-tab app-tab-active", "app-tab"
-                    ),
-                    data_testid="tab-tool",
-                ),
-                rx.el.button(
-                    rx.hstack(rx.icon("download", size=16), "客户端下载", spacing="1"),
-                    on_click=lambda: State.set_tab("download"),
-                    class_name=rx.cond(
-                        State.active_tab == "download",
-                        "app-tab app-tab-active",
-                        "app-tab",
-                    ),
-                    data_testid="tab-download",
-                ),
-                # 发布管理 tab（仅登录后显示）
-                rx.cond(
-                    State.admin_logged_in,
+            theme_style(),
+            header(),
+            rx.box(
+                newgen_controls(),
+                message_banner(),
+                # Tab 导航
+                rx.hstack(
                     rx.el.button(
-                        rx.hstack(rx.icon("rocket", size=16), "发布管理", spacing="1"),
-                        on_click=lambda: State.set_tab("release"),
+                        rx.hstack(
+                            rx.icon("file_input", size=16), "单帧解析", spacing="1"
+                        ),
+                        on_click=lambda: State.set_tab("single"),
                         class_name=rx.cond(
-                            State.active_tab == "release",
+                            State.active_tab == "single",
                             "app-tab app-tab-active",
                             "app-tab",
                         ),
-                        data_testid="tab-release",
+                        data_testid="tab-single",
                     ),
-                ),
-                # 问题反馈列表 tab（所有人可见；管理操作仅登录后）
-                # on_click 事件链：主 State 切 tab + FeedbackState 拉取列表 ——
-                # Reflex 中各 State 的 delta 随各自事件推送，主 State 事件内
-                # 直接改 FeedbackState 前端收不到，故必须双事件触发
-                rx.el.button(
-                    rx.hstack(
-                        rx.icon("message_square_heart", size=16),
-                        "问题反馈",
-                        spacing="1",
+                    rx.el.button(
+                        rx.hstack(rx.icon("list", size=16), "批量解析", spacing="1"),
+                        on_click=lambda: State.set_tab("batch"),
+                        class_name=rx.cond(
+                            State.active_tab == "batch",
+                            "app-tab app-tab-active",
+                            "app-tab",
+                        ),
+                        data_testid="tab-batch",
                     ),
-                    on_click=[
-                        lambda: State.set_tab("feedback"),
-                        FeedbackState.fa_load,
-                    ],
-                    class_name=rx.cond(
-                        State.active_tab == "feedback",
-                        "app-tab app-tab-active",
-                        "app-tab",
+                    rx.el.button(
+                        rx.hstack(
+                            rx.icon("square_pen", size=16), "协议组帧", spacing="1"
+                        ),
+                        on_click=lambda: State.set_tab("frame"),
+                        class_name=rx.cond(
+                            State.active_tab == "frame",
+                            "app-tab app-tab-active",
+                            "app-tab",
+                        ),
+                        data_testid="tab-frame",
                     ),
-                    data_testid="tab-feedback",
-                ),
-                class_name="app-tabbar",
-                width="100%",
-            ),
-            # Tab 内容
-            rx.cond(
-                State.active_tab == "single",
-                single_parse_tab(),
-                rx.cond(
-                    State.active_tab == "batch",
-                    batch_parse_tab(),
-                    rx.cond(
-                        State.active_tab == "frame",
-                        frame_gen_tab(),
-                        rx.cond(
+                    rx.el.button(
+                        rx.hstack(
+                            rx.icon("git_compare", size=16), "报文对比", spacing="1"
+                        ),
+                        on_click=lambda: State.set_tab("diff"),
+                        class_name=rx.cond(
                             State.active_tab == "diff",
-                            diff_tab(),
+                            "app-tab app-tab-active",
+                            "app-tab",
+                        ),
+                        data_testid="tab-diff",
+                    ),
+                    rx.el.button(
+                        rx.hstack(rx.icon("search", size=16), "查询", spacing="1"),
+                        on_click=lambda: State.set_tab("lookup"),
+                        class_name=rx.cond(
+                            State.active_tab == "lookup",
+                            "app-tab app-tab-active",
+                            "app-tab",
+                        ),
+                        data_testid="tab-lookup",
+                    ),
+                    # 频谱图（常驻，与协议无关；状态在 SpectrumState）
+                    rx.el.button(
+                        rx.hstack(
+                            rx.icon("chart_spline", size=16), "频谱图", spacing="1"
+                        ),
+                        on_click=lambda: State.set_tab("spectrum"),
+                        class_name=rx.cond(
+                            State.active_tab == "spectrum",
+                            "app-tab app-tab-active",
+                            "app-tab",
+                        ),
+                        data_testid="tab-spectrum",
+                    ),
+                    rx.el.button(
+                        rx.hstack(rx.icon("wrench", size=16), "报文工具", spacing="1"),
+                        on_click=lambda: State.set_tab("tool"),
+                        class_name=rx.cond(
+                            State.active_tab == "tool",
+                            "app-tab app-tab-active",
+                            "app-tab",
+                        ),
+                        data_testid="tab-tool",
+                    ),
+                    rx.el.button(
+                        rx.hstack(
+                            rx.icon("download", size=16), "客户端下载", spacing="1"
+                        ),
+                        on_click=lambda: State.set_tab("download"),
+                        class_name=rx.cond(
+                            State.active_tab == "download",
+                            "app-tab app-tab-active",
+                            "app-tab",
+                        ),
+                        data_testid="tab-download",
+                    ),
+                    # 发布管理 tab（仅登录后显示）
+                    rx.cond(
+                        State.admin_logged_in,
+                        rx.el.button(
+                            rx.hstack(
+                                rx.icon("rocket", size=16), "发布管理", spacing="1"
+                            ),
+                            on_click=lambda: State.set_tab("release"),
+                            class_name=rx.cond(
+                                State.active_tab == "release",
+                                "app-tab app-tab-active",
+                                "app-tab",
+                            ),
+                            data_testid="tab-release",
+                        ),
+                    ),
+                    # 问题反馈列表 tab（所有人可见；管理操作仅登录后）
+                    # on_click 事件链：主 State 切 tab + FeedbackState 拉取列表 ——
+                    # Reflex 中各 State 的 delta 随各自事件推送，主 State 事件内
+                    # 直接改 FeedbackState 前端收不到，故必须双事件触发
+                    rx.el.button(
+                        rx.hstack(
+                            rx.icon("message_square_heart", size=16),
+                            "问题反馈",
+                            spacing="1",
+                        ),
+                        on_click=[
+                            lambda: State.set_tab("feedback"),
+                            FeedbackState.fa_load,
+                        ],
+                        class_name=rx.cond(
+                            State.active_tab == "feedback",
+                            "app-tab app-tab-active",
+                            "app-tab",
+                        ),
+                        data_testid="tab-feedback",
+                    ),
+                    class_name="app-tabbar",
+                    width="100%",
+                ),
+                # Tab 内容
+                rx.cond(
+                    State.active_tab == "single",
+                    single_parse_tab(),
+                    rx.cond(
+                        State.active_tab == "batch",
+                        batch_parse_tab(),
+                        rx.cond(
+                            State.active_tab == "frame",
+                            frame_gen_tab(),
                             rx.cond(
-                                State.active_tab == "tool",
-                                message_tool_tab(),
+                                State.active_tab == "diff",
+                                diff_tab(),
                                 rx.cond(
-                                    State.active_tab == "download",
-                                    download_tab(),
+                                    State.active_tab == "tool",
+                                    message_tool_tab(),
                                     rx.cond(
-                                        State.active_tab == "feedback",
-                                        feedback_list_tab(),
+                                        State.active_tab == "download",
+                                        download_tab(),
                                         rx.cond(
-                                            State.active_tab == "release",
-                                            release_tab(),
+                                            State.active_tab == "feedback",
+                                            feedback_list_tab(),
                                             rx.cond(
-                                                State.active_tab == "spectrum",
-                                                spectrum_tab(),
-                                                lookup_tab(),
+                                                State.active_tab == "release",
+                                                release_tab(),
+                                                rx.cond(
+                                                    State.active_tab == "spectrum",
+                                                    spectrum_tab(),
+                                                    lookup_tab(),
+                                                ),
                                             ),
                                         ),
                                     ),
@@ -11710,17 +11934,17 @@ def index() -> rx.Component:
                         ),
                     ),
                 ),
+                class_name="app-container",
+                width="100%",
             ),
-            class_name="app-container",
-            width="100%",
-        ),
-        # 管理员登录对话框
-        admin_login_dialog(),
-        # 分享此帧弹窗（单帧解析结果区按钮触发）
-        _share_submit_dialog(),
-        background="var(--bg)",
-        min_height="100vh",
-        class_name=ThemeState.root_class,
+            # 管理员登录对话框
+            admin_login_dialog(),
+            # 分享此帧弹窗（单帧解析结果区按钮触发）
+            _share_submit_dialog(),
+            background="var(--bg)",
+            min_height="100vh",
+            class_name=ThemeState.root_class,
+            data_testid="tool-root",
         ),
         # Radix 主题包裹：模式交给 html.light/.dark 类（appearance=inherit），
         # 强调色/灰阶/圆角由 ThemeState 驱动 → Radix 组件随之换色
@@ -11734,6 +11958,39 @@ def index() -> rx.Component:
 # ═══════════════════════════════════════════════════════════════
 # 应用入口
 # ═══════════════════════════════════════════════════════════════
+
+
+def landing_page() -> rx.Component:
+    """产品首页（落地页）：介绍桌面客户端 + 在线工具入口。
+
+    页面内容与组件在 `landing_web.py`（纯展示、不依赖 State）；此处只做两件事：
+    把 `State` 的运行时值注入进去，以及套上工具页同一套主题（token + 强调色作用域）。
+    """
+    return rx.theme(
+        rx.box(
+            theme_style(),
+            landing_web.landing_page(
+                version=State.download_version,
+                version_date=State.download_version_date,
+                exe_name=State.download_exe_name,
+                exe_size_mb=State.download_exe_size_mb,
+                exe_available=State.download_exe_available,
+                image_src=State.download_image_data_url,
+                image_available=State.download_image_available,
+                on_download=State.download_client,
+                theme_controls=theme_controls_compact(),
+            ),
+            background="var(--bg)",
+            min_height="100vh",
+            class_name=ThemeState.root_class,
+        ),
+        # Radix 主题包裹（与工具页一致）：模式交给 html.light/.dark 类
+        appearance="inherit",
+        accent_color=ThemeState.accent,
+        gray_color=ThemeState.gray,
+        radius=ThemeState.radius,
+    )
+
 
 app = rx.App(
     theme=rx.theme(
@@ -11749,9 +12006,17 @@ app = rx.App(
 )
 
 app.add_page(
-    index,
+    landing_page,
     route="/",
-    title="多协议解析平台",
+    title="多协议解析平台 - 电力通信协议解析与调试工具",
+    description="支持南网、国网、DLT645、698.45、新一代载波与双模互联互通等 12 种电力通信协议的解析、校验、组帧、串口监控与 TCP 抓包调试工具。",
+    # 读回浏览器本地主题（模式 + 外观）+ 拉取 downloads/ 实况（版本/体积/截图）
+    on_load=[ThemeState.theme_boot, State.load_download_info],
+)
+app.add_page(
+    tool_page,
+    route="/app",
+    title="在线工具 - 多协议解析平台",
     # 读回浏览器本地主题（模式 + 外观）并即时应用
     on_load=ThemeState.theme_boot,
 )

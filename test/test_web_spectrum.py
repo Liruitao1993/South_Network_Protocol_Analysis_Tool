@@ -276,8 +276,8 @@ def test_component_tree():
         return
     tab = app.spectrum_tab()
     check("spectrum_tab() 构建成功", tab is not None)
-    page = str(app.index())
-    check("主页含频谱图 tab", "spectrum-svg" in page or "频谱图" in page,
+    page = str(app.tool_page())
+    check("工具页含频谱图 tab", "spectrum-svg" in page or "频谱图" in page,
           page[:80])
 
 

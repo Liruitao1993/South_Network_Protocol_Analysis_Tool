@@ -85,6 +85,7 @@ CORE_TESTS = [
     "test/test_web_batch_paging.py",
     "test/test_web_spectrum.py",
     "test/test_web_theme.py",
+    "test/test_web_landing.py",
     "test/test_sack_fix.py",
     "test/test_monitor_deframe.py",
     "test/test_monitor_plc2_deframe.py",

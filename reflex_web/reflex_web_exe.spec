@@ -160,6 +160,7 @@ hiddenimports = reflex_hidden + [
     # ---- 项目模块：Reflex Web ----
     "reflex_web",
     "reflex_web.reflex_web",
+    "reflex_web.landing_web",
     "reflex_web.web_utils",
     "reflex_web.lookup_utils",
 ]

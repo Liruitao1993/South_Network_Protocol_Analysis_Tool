@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "复核 token 使用、testid 契约、Reflex 条件样式写法"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "路由/静态图片跨层（landing_web ↔ reflex_web ↔ run_app.py 中间件）契约一致性"}

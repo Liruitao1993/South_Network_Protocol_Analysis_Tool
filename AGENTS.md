@@ -34,7 +34,7 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 
 ## 1. 项目概览
 
-多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.23.13`）。
+多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.23.14`）。
 
 **支持的协议（共 12 种，对应 GUI 协议下拉框 `current_protocol` 索引）：**
 
@@ -53,7 +53,11 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 | 10 | 国网新一代双模通信互联互通 | 国网新一代双模通信互联互通技术规范 | 小端 | CRC-32（MAC帧） |
 | 11 | HDC 1.0 双模互联互通 | Q/GDW 12087.42-2020 | 小端（MAC 地址大端） | CRC-24（FC/PB）+ CRC-32（MAC） |
 
-> 协议覆盖差异：**HDC 1.0（索引 11）在 PySide6 主程序与 Reflex Web 版均支持**（2026-09-15 核实）。Web 版无实时监控器/档案/拓扑；组帧与预设标签页在 Web 存在但协议 9/10/11 均不支持（与桌面一致），协议11 另有「无实时监控器/组帧/预设」的说明见 §8 陷阱 27。**「频谱图」标签页两端都有**（与协议无关，常驻）：桌面 `spectrum_widget.py`（QPainter 自绘），Web `reflex_web/reflex_web/spectrum_web.py`（SVG）——两侧共用同一份纯逻辑层。**Web 另有主题系统**（浅色/深色/跟随系统 + 6 个预设 + 5 个强调色，`reflex_web/reflex_web/theme_web.py`，token 化 CSS）；桌面为 7 套 QSS 主题（`theme_settings.py`，含毛玻璃/云母，Web 无对应）。NiceGUI/TUI 版本已于 2026-08-17 移除。修改协议相关文档/代码时注意区分。
+> 协议覆盖差异：**HDC 1.0（索引 11）在 PySide6 主程序与 Reflex Web 版均支持**（2026-09-15 核实）。Web 版无实时监控器/档案/拓扑；组帧与预设标签页在 Web 存在但协议 9/10/11 均不支持（与桌面一致），协议11 另有「无实时监控器/组帧/预设」的说明见 §8 陷阱 27。**「频谱图」标签页两端都有**（与协议无关，常驻）：桌面 `spectrum_widget.py`（QPainter 自绘），Web `reflex_web/reflex_web/spectrum_web.py`（SVG）——两侧共用同一份纯逻辑层。**Web 另有主题系统**（浅色/深色/跟随系统 + 6 个预设 + 5 个强调色，`reflex_web/reflex_web/theme_web.py`，token 化 CSS）；桌面为 7 套 QSS 主题（`theme_settings.py`，含毛玻璃/云母，Web 无对应）。NiceGUI/TUI 版本已于 2026-08-17 移除。
+
+> **Web 路由（1.23.14 起，改链接前必读）**：`/` = **产品首页**（落地页，介绍桌面客户端：Hero/功能卡/12 协议表/命令行与系统集成/下载区/页脚，实现在 `reflex_web/reflex_web/landing_web.py`）；`/app` = **在线工具**（原主页的 9 个标签页，函数名 `index()` 已更名 `tool_page()`）；`/share`、`/feedback`、`/feedback-admin` 不变。首页数据全部读 `reflex_web/downloads/`（`version.json` 版本、`*.exe` 体积、`client_screenshot.png` 截图，缺图降级占位卡）。**新增/修改站内链接时必须按语义选目标**（回介绍页 `/`、回工具 `/app`），`landing_web.INTERNAL_LINKS` 是落地页侧的唯一来源，`test/test_web_landing.py` 有死链白名单守卫。
+
+修改协议相关文档/代码时注意区分。
 
 ---
 
@@ -105,7 +109,7 @@ python main_gui.py --clipboard
 - Lua 脚本引擎依赖 `lupa`，打包时需作为 hidden import 或确保运行环境已安装
 - 当前主程序 spec 未显式声明 `scapy`；如需把 TCP 监控打包进 exe，需补充 `scapy` 依赖并确保目标机器安装 npcap
 - `docs/Lua脚本使用说明.md` 是 Lua 功能的用户文档
-- Inno Setup 安装脚本 `南网解析工具.iss` / `2222.iss` 的 `MyAppVersion` 用 `python release_check.py --sync-iss` 与 `APP_VERSION` 对齐（当前 1.23.13），发版前务必再跑一次 `python release_check.py`
+- Inno Setup 安装脚本 `南网解析工具.iss` / `2222.iss` 的 `MyAppVersion` 用 `python release_check.py --sync-iss` 与 `APP_VERSION` 对齐（当前 1.23.14），发版前务必再跑一次 `python release_check.py`
 
 ### Reflex Web 离线源码部署（UV）
 
@@ -325,11 +329,20 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
 │   │   ├── quick_parse_panel.py     #   uTools 风格快捷解析小窗（热键唤出/实时解析卡片，1.17.0 起）
 │   │   └── system_settings.py       #   系统集成设置面板与 config.json "system" 段
 │   └── reflex_web/                 # Reflex Web 版（实验性，run_app.py + reflex_web_exe.spec）
-│       ├── reflex_web/reflex_web.py  #   Reflex 单文件应用（含 /feedback 问题反馈页 + 主页反馈列表 Tab，1.19.0 起）
+│       ├── reflex_web/reflex_web.py  #   Reflex 应用：4 条路由 = `/` 落地页(landing_page) / `/app` 工具页(tool_page,
+│       │                             #   原 index，9 标签页) / `/feedback` / `/share`；含反馈列表 Tab，1.19.0 起
+│       ├── reflex_web/landing_web.py #   产品首页内容与纯展示组件（**不 import reflex_web**，运行时值全参数注入；
+│       │                             #   12 协议表/12 功能卡/CLI/系统集成/统计条 + LANDING_CSS，1.23.14 起）
+│       ├── reflex_web/theme_web.py   #   主题系统：6 预设 + 5 强调色 + 深浅 token + theme_controls_compact 复用（1.23.12 起）
+│       ├── reflex_web/spectrum_web.py #  频谱图 SVG 换算（复用桌面 spectrum_widget 纯逻辑层，1.23.12 起）
+│       ├── reflex_web/web_utils.py   #   解析链纯函数（清洗/提帧/摘要/分页/命令行预处理拆分）
+│       ├── reflex_web/lookup_utils.py #  查询页数据源
 │       ├── reflex_web/feedback_model.py #   反馈存储层：FeedbackItem(rx.Model/SQLite，source/sys_info 列) + submit_from_api/parse_multipart/频率限制（GUI API 复用，1.20.0 起）
 │       ├── reflex_web/share_model.py    #   报文分享存储层（frameshare.db）：ShareItem + submit_share/normalize_hex/list_page 搜索（Web /share 页与 GUI 共享，1.21.0 起）
 │       ├── reflex_web/admin_release.py  #   管理员口令（admin_config.json）+ 发布管理（反馈管理页复用口令）
-│       └── data/                   #   反馈运行时数据（feedback.db + uploads/feedback/，gitignore，部署重建时保留）
+│       ├── data/                   #   反馈运行时数据（feedback.db + uploads/feedback/，gitignore，部署重建时保留）
+│       └── downloads/              #   发布产物（首页数据源）：version.json（版本徽章/下载地址）、client_screenshot.png
+│                                   #   （Hero 截图，缺图降级占位卡）、南网协议解析工具*.exe（体积读 stat）、client_readme.md
 │
 ├── 验证引擎 validator/ ── BaseValidator + 各协议 validator，统一 ValidationResult
 │   ├── __init__.py                 # 导出所有 validator
@@ -708,6 +721,7 @@ python test/test_web_parse_fixes.py     # Reflex Web 版解析 P0 修复（75 �
 python test/test_web_batch_paging.py    # Reflex Web 版批量摘要分页与搜索（57 项：paginate/filter 纯函数 + 250 帧端到端翻页/跨页选中/每页条数切换 + 249 行端到端搜索（HEX/类型/#序号）与状态筛选/过滤后翻页/选中清理，1.23.12 起）
 python test/test_web_spectrum.py        # Reflex Web 版频谱图（64 项：复用桌面纯逻辑层守卫 + SVG 几何 + SpectrumState 端到端（联动/标记/峰值/IBW/错误路径）+ 组件树，1.23.12 起）
 python test/test_web_theme.py           # Reflex Web 版主题系统（89 项：预设/维度清单 + token 契约与浅色等价 + CSS 结构 + 标记配色单一来源 + ThemeState 端到端 + 无裸 hex 守卫，1.23.12 起）
+python test/test_web_landing.py         # Reflex Web 版产品首页（100 项：内容不变式 + 与 protocol_registry 逐行对拍防漂移 + CLI 参数对 main_gui 源码 + 组件树/testid 契约 + 缺图降级互斥 + 死链白名单 + 路由与页面搬迁 /→首页 /app→工具，1.23.14 起）
 python test/test_web_feedback.py        # Web 版问题反馈（存储层/截图校验/防穿越/部署 data/ 保留，1.19.0 起）
 python test/test_feedback_api.py        # 反馈提交 API（submit_from_api/parse_multipart/频率限制/旧库迁移，31 项，1.20.0 起）
 python test/test_feedback_dialog.py     # GUI 反馈对话框（URL/config/校验/sys_info/offscreen 冒烟，30 项，1.20.0 起）
@@ -766,6 +780,10 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
     - 已知**有意保留**的差异（勿当 bug 修）：① Web 校验与 Web 解析同预处理（含剔除），桌面 `verify_single` 不做头/尾剔除；② 协议10 查询页 Web 对 4 列（含「说明」）匹配关键词、桌面只匹配 类别/代码/名称（Web 为超集）；③ 南网 DI 页 Web 逐单元格匹配、桌面另含 DI 拼接串搜索。
 32. **ED 包装解析入口的 `wrapper` 默认值**（1.23.12 起）：`main_gui._parse_ed_monitor_header` / `_extract_business_from_ed_frame` 与 `csg_new_gen_parser._parse_ed_wrapper` 的 `wrapper` 默认均为「None = 按当前下拉/逐帧自动识别」，**不要再写成硬编码 `"plc2"`**——快捷解析小窗曾因漏传 wrapper + 硬编码默认值，把广西台体帧按 9B 头错位解析 1 字节（复核实测业务偏移 15 而非 14）。
 33. **预处理命令链的拆分必须走 `pp_cli.split_commands()`**（1.23.13 起）：中文输入法全角状态打出的空格（U+3000）与引号（＂“”‘’）不是 ASCII 字符，`shlex.split` 既不视作分隔符也不视作引号 → 整串被当成一个命令名（`未知命令: find　＂CSG＂`）。桌面 `_run_cli_preprocessor` 与 Web `parse_batch`/`run_preprocess` 三处**不要再直接 `shlex.split`**；该函数只在「首个 token 不是已知命令」时才做全角→半角归一化，以免改写参数里刻意保留的全角字符。命令名含非 ASCII 时 `parse_and_run` 会附码位，便于定位零宽/全角字符。
+34. **Web 路由语义：`/` 是产品首页，工具页在 `/app`**（1.23.14 起）：改 Web 站内链接前先读 §1 的「Web 路由」说明——「回介绍页」用 `/`、「回工具」用 `/app`。工具页函数名已由 `index()` 改为 `tool_page()`（测试里 `app.index()` 引用已同步），登录弹窗与反馈列表 Tab **只挂在工具页**，独立页的「管理员登录」必须跳 `/app`。落地页侧的链接唯一来源是 `landing_web.INTERNAL_LINKS`，`test/test_web_landing.py` 会拦截指向白名单外的站内链接（含锚点）。另注：Reflex 在 JSX 里把非 ASCII 转义成 `\uXXXX`、把 `data_testid=` 渲染为 `"data-testid":"x"`、把 `rx.el.a(href=…)` 编译成路由 `Link`（属性名变 `to:"…"`），写字符串断言时必须按这三种实际形态匹配。
+35. **dev 模式下 Reflex 前端不代理任何后端路径**（1.23.14 实测）：`reflex run --env dev` 时前端（:3000）与后端（:8000）是**跨源、绝对地址**通信（`reflex_web/.web/env.json` 里 `EVENT: ws://localhost:8000/_event`），Vite/react-router **没有** `/api`、`/download`、`/fbimg` 等代理规则——这些路径在 :3000 一律返回 `200 + text/html`（SPA 兜底，约 3.5KB），只有直连 `:8000` 才是真资源。因此 **Web 页面里不能用相对 URL 引用后端静态资源**（`<img src="/api/download/x.png">` 在 dev 必然破图）；`reflex_web.py:11851` 那条「Vite 会把 /api/* 代理到后端」的注释与实测不符。prod（`run_app.py` 单端口挂载）才同源可用。首页 Hero 截图因此沿用 `State.download_image_data_url` 的 base64 data URL（已验证通道）；**遗留缺陷**：`feedback_model.screenshot_url()` 返回相对路径 `/fbimg/<name>`，Web 反馈列表在 dev 下截图同样是破图（prod 正常），待单独修。
+36. **顶栏版本徽章是 import 期快照，不是实时值**（1.23.14 起）：`version_badge()` 读 `reflex_web/downloads/version.json`（`_read_published_version()` 在模块导入时执行一次）→ ① 通过「发布管理」Tab 发布新版本后，**顶栏徽章要重启进程才变**（同页的 `State.download_version` 是实时的，二者会短暂不一致；需要实时就把徽章改成读 State）；② `reflex_web/downloads/version.json` **被 `.gitignore` 排除**（`reflex_web/.gitignore`）→ 任何没有该文件的部署，徽章**直接不渲染**（设计意图：宁可不显示，也不显示写死的假版本，`v1.13.0` 就是这么骗了很久）；③ 首页版本徽章/下载按钮读的是 `version.json`（State，实时），与顶栏同源但刷新时机不同，排查「版本号对不上」先看这两条。
+37. **Web 守卫测试必须能抓住回退，否则是假绿**（1.23.14 复核结论，`test/test_web_landing.py` 已按此改造）：两类踩过的自洽假绿——① **白名单与渲染同源**：`ALLOWED_HREFS` 若由 `INTERNAL_LINKS` 派生、渲染也由它生成，则改错链接值白名单会跟着变，死链断言恒真（改为**字面量白名单** + 读组合层渲染串取 `to:` 目标的**接线断言**）；② **子串存在性被无关代码满足**：`f'"{flag}"' in main_gui_src` 会被 `any(a in ("--parse", …))` 这类元组判断满足，与真实解析分支无关（改为断言 `arg == "--flag"`，并抽出每条命令的**全部** flag）。新增此类守卫后用**变异反证**自检：临时把产品代码改回错误形态，确认测试**变红**再还原。
 
 ---
 
@@ -779,6 +797,7 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
    - [ ] 新建 `validator/xxx_validator.py` 继承 `BaseValidator`，写入 spec 的 `validator_class`
    - [ ] 查询页如有新类型：在 `lookup_builder_method` 映射 + 实现 `_create_*_lookup_content`
    - [ ] 如需 Web 版支持，同步更新 `reflex_web/reflex_web/reflex_web.py` 与 `reflex_web/reflex_web/lookup_utils.py`
+   - [ ] **在 `reflex_web/reflex_web/landing_web.py` 的 `PROTOCOLS` 追加一行**（索引/协议名/标准号/字节序/校验）；`test/test_web_landing.py` 会用 `protocol_registry` 逐行对拍，漏改即测试变红
    - [ ] 同步更新本文件 §1/§3/§5/§6、README；新建 `test/test_xxx.py`
    - [ ] 如需打包，更新 spec 的 `datas`/hiddenimports
 4. **解析器独立性**：parser 之间避免横向耦合；公共逻辑放 `base.py` 或工具模块。
@@ -792,6 +811,13 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 ## 10. 变更日志
 
 > 详细版本变更记录请查看 `main_gui.py:CHANGELOG`（按版本倒序），或运行 `git log --oneline` 查看提交历史。本文档仅保留最近两个版本的摘要。
+
+### 1.23.14 — 2026-09-15
+
+- **Reflex Web 版新增独立产品首页（落地页）**：`/` 改为介绍桌面客户端的首页，原 9 标签页工具页让位到 `/app`（`index()` → `tool_page()`）；`/share`、`/feedback`、`/feedback-admin` 不变。首页含 Hero（版本徽章 + 双 CTA + 窗口拟态截图）、关键数字条、12 张功能卡、12 协议支持表、命令行与系统集成、下载收尾区、页脚；全部走 `theme_web` token（浅/深 + 5 强调色）
+- 新增 `reflex_web/reflex_web/landing_web.py`（**纯内容 + 纯展示组件，不 import `reflex_web`**，运行时值全参数注入 → 可脱离 State/浏览器构建整页断言）；导航改造 4 处站内链接无死链（品牌块 → `/`、「返回主页」→「在线工具」`/app`、独立页管理员登录 → `/app`、share/feedback-admin 回跳 → `/app`）；主题控件抽 `theme_controls_compact()` 两端共用
+- 放弃「截图改 URL + 删 base64 字段」的原设计：实测 **dev 模式 Reflex 前端跨源、不代理任何后端路径**（`:3000` 对 `/api/*`、`/download/*`、`/fbimg/*`、`/ping` 一律返回 SPA HTML）→ 相对路径图片在 dev 必破图，沿用 base64 通道。另修 420px 视口横向溢出（顶栏 `flex-wrap`）与深色下「浅色强调 + 白字」对比度不足（`html.dark` 覆盖改 `var(--bg)` 字色）
+- 新增 `test/test_web_landing.py`（100 项，含与 `protocol_registry` 逐行对拍防漂移、死链白名单 + **跨页面接线断言**（读 `tool_page()`/`share_page()`/`feedback_page()`/`feedback_admin_page()` 渲染串取 `to:` 目标）、路由搬迁断言；已用**变异反证**确认能抓住「链接语义被改回去」与「CLI 解析分支被删」），登记 `release_check.py:CORE_TESTS`；`test_web_spectrum`/`test_web_theme` 的 `app.index()` 同步改名；playwright 用例 goto `/app` + 新增首页冒烟
 
 ### 1.23.13 — 2026-09-15
 

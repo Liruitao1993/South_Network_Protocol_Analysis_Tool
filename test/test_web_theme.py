@@ -228,9 +228,9 @@ def test_component_tree():
     except Exception as e:  # noqa: BLE001
         check("导入 reflex_web.reflex_web", False, f"{type(e).__name__}: {e}")
         return
-    page = str(app.index())
+    page = str(app.tool_page())
     for probe in ("theme-preset", "theme-mode", "spectrum-svg"):
-        check(f"主页含 {probe}", probe in page)
+        check(f"工具页含 {probe}", probe in page)
     check("根容器挂主题 class（ThemeState.root_class）", "root_class" in page, page[:120])
     check("主题 CSS 已注入页面", ":root" in page and "html.dark" in page)
     check("主题下拉含强调色/模式项",

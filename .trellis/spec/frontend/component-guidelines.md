@@ -332,3 +332,109 @@ Web 版（`reflex_web/reflex_web/`）与 PySide6 版（`main_gui.py`）**共享 
 - **推断型缺陷结论必须先用真实调用路径复现再改代码**：只读审计曾断言「Web 剔除不幂等（连点两次 = 二次裁剪）」，依据仅是「没有缓存」；实测发现 Web 每次都从**未被回写的** `frame_hex` 重算，本就幂等——按该结论加缓存后第二次解析反而拿到**未剔除**的原始字节（真回归），已撤销。凡结论带「因此/必然/会」的推断，先写 3 行脚本跑一遍。
 - **子代理审计结论要抽检**：本次 4 份审计里 1 条误判、1 条口径偏差（桌面失败判定比 Web 更窄，两侧都不完备），其余成立。抽样复现成本远低于改错成本。
 - **浏览器里验证 Web 交互时按 placeholder 定位控件**：多个 tab 面板同时挂载，`querySelectorAll("textarea")[0/1]` 会选中别的面板的输入框（本次两次踩到：一次把工具输入填进了批量框，一次把 250 行日志填成了空行）；`tab.run(fn, {args:[...]})` 的参数要放进 `args`，否则回调收到 `undefined`。
+
+---
+
+## Scenario: Web 产品首页（落地页）与路由搬迁（1.23.14 起）
+
+> 源任务 `09-15-web-landing-page`。参考实现：`reflex_web/reflex_web/landing_web.py`（纯展示）+ `reflex_web/reflex_web/reflex_web.py`（State 注入 + 路由），测试 `test/test_web_landing.py`（100 项）。
+
+### 1. Scope / Trigger
+
+Web 版需要一条**对外介绍型页面**（宣传桌面客户端 + 下载/在线入口），并把干活用的工具页从 `/` 让位。触发条件：新增/搬迁顶层路由、页面里出现图片等**后端静态资源**、或新增站内链接。跨层契约（路由 ↔ 导航 ↔ 打包 ↔ 测试）必须写清，否则出现死链或 dev/prod 行为分叉。
+
+### 2. Signatures
+
+```python
+# reflex_web/reflex_web/landing_web.py（纯展示层：不 import reflex_web）
+INTERNAL_LINKS = {"home": "/", "tool": "/app", "feedback": "/feedback", "share": "/share"}
+SECTION_IDS = ("features", "protocols", "quickstart", "download")
+ANCHORS = {k: f"#{k}" for k in SECTION_IDS}
+ALLOWED_HREFS = set(INTERNAL_LINKS.values()) | set(ANCHORS.values())
+PROTOCOLS: list[dict[str, str]]      # 12 项 index/name/standard/endian/check
+FEATURES: list[dict[str, str]]       # 12 项 icon/title/desc
+CLI_ACTIONS: list[dict[str, str]]    # 4 项 label/cmd（cmd 里的参数名对 main_gui 源码对拍）
+SYSTEM_INTEGRATIONS: list[dict[str, str]]
+HERO_STATS: list[dict[str, str]]     # _key == "protocols" 的项取 len(PROTOCOLS)
+LANDING_CSS: str
+
+def landing_page(*, version="", version_date="", exe_name="", exe_size_mb="",
+                 exe_available=False, image_src="", image_available=False,
+                 on_download=None, theme_controls=None) -> rx.Component: ...
+
+# reflex_web/reflex_web/reflex_web.py（组合层）
+def tool_page() -> rx.Component: ...        # 原 index()，挂 /app
+def landing_page() -> rx.Component: ...     # 挂 /，注入 State + ThemeState
+def theme_controls_compact() -> rx.Component: ...   # 工具页与首页共用
+
+app.add_page(landing_page, route="/", on_load=[ThemeState.theme_boot, State.load_download_info])
+app.add_page(tool_page, route="/app", on_load=ThemeState.theme_boot)
+```
+
+### 3. Contracts
+
+- **路由语义**：`/` = 产品首页；`/app` = 在线工具；`/share` `/feedback` `/feedback-admin` 不变。**回介绍页用 `/`，回工具用 `/app`**；登录弹窗与反馈列表 Tab 只挂在工具页 → 独立页的「管理员登录」必须跳 `/app`。
+- **依赖方向**：`landing_web.py` **不得 import `reflex_web`**（与 `web_utils`/`theme_web` 同向）；运行时值一律参数注入。收益：整页可脱离 `State` 与浏览器构建并断言。
+- **静态分支模式**：形参既可能是编译期字面量（纯逻辑测试）也可能是 `rx.Var`（生产）。需要分支时走
+  `if isinstance(v, bool): 取 Python 分支 else: rx.cond(...)`（`_either()` 封装）——既少一层运行期 cond，又让「缺图降级」这类行为能被**字符串断言**验证（`rx.cond` 会把两个分支都编进 JSX）。
+- **testid 契约**：`landing-root / nav-brand / nav-online / theme-preset / theme-mode / hero-title / hero-download / hero-online / hero-shot | hero-shot-placeholder（互斥）/ feature-grid / protocol-table / quickstart-cli / cta-download / cta-online / landing-footer`。
+- **首页数据源**（`reflex_web/downloads/`，由 `State.load_download_info` 读）：`version.json`（版本号/日期/下载地址）、`*.exe`（`stat().st_size`→`download_exe_size_mb`）、`client_screenshot.png`（缺失时降级占位卡）。
+- **主题**：首页复用 `theme_style()` + `ThemeState.root_class` + `rx.theme(appearance="inherit", …)`；顶栏控件复用 `theme_controls_compact()`（不要复制第二份）。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 行为 |
+|---|---|
+| 无 exe（`download_exe_available=False`） | 下载按钮 `disabled` 且文案改「客户端 exe 未就绪」（**不隐藏**，避免用户找不到入口） |
+| 无截图（`download_image_available=False`） | 渲染 `hero-shot-placeholder`，**不得**出现 `src=""` 的 `<img>` |
+| `version.json` 缺失/字段空 | 徽章退回平台文案（`Windows 10 / 11 桌面客户端`），体积显示「体积待统计」 |
+| `<900px` 视口 | Hero/快速上手单列、锚点导航隐藏、**顶栏允许换行**（不换行会横向溢出：实测 420px 下 `.landing-nav-actions` 宽 389px 而父级 `overflow: visible`，页面 `scrollWidth` 484 > 420） |
+| 深色 + 浅色强调色（`ACCENT_OVERRIDES_DARK`） | 强调色表面上的文字改 `var(--bg)`（`html.dark .landing-btn-primary / .landing-cta-inner / …`）——否则白字落在浅底上对比度不足 |
+| 站内链接不在 `ALLOWED_HREFS` | `test/test_web_landing.py` 死链守卫变红 |
+
+### 5. Good/Base/Bad Cases
+
+- **Good**：`/` 渲染落地页（12 协议行 + 12 功能卡 + Hero 截图 `naturalWidth>0` + 零 console error/4xx），点 `nav-online` 落到 `/app` 且单帧解析出结果，点工具页 `nav-brand` 回 `/`。
+- **Base**：`downloads/` 缺 exe/截图 → 页面仍完整，按钮禁用、截图占位，无破图。
+- **Bad**：
+  - 用相对 URL 引后端静态资源（`<img src="/api/download/x.png">`）→ **dev 下必破图**（见 §7 陷阱）。
+  - 只改 `add_page(route=…)` 不改导航 href → 死链（老 `/` 语义已变）。
+  - 在 `landing_web.py` 里 `import reflex_web` 取 `State` → 循环导入。
+
+### 6. Tests Required
+
+`test/test_web_landing.py`（脚本式 `check()` 计数，**不启服务**）断言点：
+
+1. 内容不变式：12 协议（`index` 连续唯一）、12 功能卡（title 唯一/icon 非空）、4 CLI、≥5 系统集成、≥3 统计条。
+2. **防漂移对拍**：`len(PROTOCOLS) == protocol_registry.protocol_count()`，且**逐行**「`name` 首个关键词 ∈ 同索引的 `combo_labels()[i]`」（本次即靠它抓出协议10 少写「通信」二字）；`CLI_ACTIONS` 里的 `--xxx` 必须在 `main_gui.py` 源码中出现。
+3. 组件树：无参 + 带假数据都能构建；全部 testid 存在；12 协议名/12 功能卡标题出现在（反转义后的）渲染串里。
+4. 缺图降级互斥（`image_available` 真/假两个方向都断言）。
+5. 死链守卫：扫 `to:"/…"` **且断言集合非空**（正则失效不得变成假绿）。
+6. 路由搬迁：`app._unevaluated_pages` 含 `/`（键为 `index`）与 `/app`；`index` 函数名已不存在；`tool_page()` 仍含 9 个 tab testid。
+
+浏览器验收（人工/自动化）：浅色 + 深色 + 至少 1 个强调色截图；360/420/768/1024/1440/1920 六档 `scrollWidth == innerWidth`；`nav-online`/`hero-online` → `/app`；`/app` 单帧解析实测；「客户端下载」Tab 截图仍显示（防图片通道回归）。
+
+### 7. Wrong vs Correct
+
+#### Wrong
+```python
+# ① 首页 Hero 用相对 URL 引后端静态资源（dev 必破图：:3000 不代理 /api/*）
+rx.el.img(src="/api/download/client_screenshot.png")
+# ② 只改路由不改导航：老 / 语义已变，独立页的「返回主页」href="/" 变成"回首页"
+app.add_page(tool_page, route="/app")          # href="/" 未同步
+# ③ 在纯展示模块里反向 import 组合层
+from .reflex_web import State                  # 循环导入
+```
+
+#### Correct
+```python
+# ① 用已验证的图片通道（base64 data URL，dev/prod 都成立）
+rx.el.img(src=State.download_image_data_url)
+# ② 链接单一来源 + 语义化改指
+INTERNAL_LINKS = {"home": "/", "tool": "/app"}
+rx.el.a("在线工具", href=INTERNAL_LINKS["tool"])   # 独立页/顶栏
+# ③ 依赖单向：展示层只收参数
+def landing_page(*, version: Any = "", exe_available: Any = False, ...) -> rx.Component: ...
+```
+
+> **Warning（dev/prod 分叉）**：`reflex run --env dev` 时前端(:3000)与后端(:8000)是**跨源绝对地址**通信，**没有任何代理规则**——`:3000/api/*`、`/download/*`、`/fbimg/*`、`/ping` 全部返回 `200 + text/html`（SPA 兜底），只有直连 `:8000` 才是真资源（`.web/env.json` 的 `EVENT: ws://localhost:8000/_event` 是判据）。**Web 页面里不要用相对 URL 引用后端静态资源**；prod（`run_app.py` 单端口挂载）才同源可用。相关遗留缺陷见 `AGENTS.md §8` 陷阱 35。

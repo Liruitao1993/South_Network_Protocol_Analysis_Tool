@@ -1,13 +1,13 @@
 # 南网协议解析工具
 
-[![Version](https://img.shields.io/badge/version-1.23.13-blue)]()
+[![Version](https://img.shields.io/badge/version-1.23.14-blue)]()
 [![Python](https://img.shields.io/badge/Python-3.8%2B-brightgreen)]()
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)]()
 [![License](https://img.shields.io/badge/License-MIT-green)]()
 
 一个面向电力通信现场调试的多协议解析工具，基于 Python / PySide6 开发，支持 12 种电力通信协议，覆盖单帧解析、批量解析、协议校验、帧生成、串口通信、虚拟表、通信时序图、测试方案、Lua 脚本、实时监控与 TCP 抓包等工作流。
 
-当前版本为 `1.23.13`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
+当前版本为 `1.23.14`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
 
 ## 功能总览
 
@@ -90,6 +90,8 @@ python main_gui.py
 # Reflex Web 版（实验性）
 python reflex_web/run_app.py
 ```
+
+**Web 路由（1.23.14 起）**：`/` = **产品首页**（介绍桌面客户端：Hero、功能卡、12 协议表、命令行/系统集成、下载入口、页脚；`reflex_web/reflex_web/landing_web.py`）；`/app` = **在线工具**（原主页的 9 个标签页，含单帧/批量/组帧/对比/查询/频谱图/报文工具/客户端下载/问题反馈）；`/share`、`/feedback`、`/feedback-admin` 不变。首页的截图/版本/体积读 `reflex_web/downloads/`（`client_screenshot.png`、`version.json`、`*.exe`），换图换版本无需改代码；缺图时降级为占位卡。
 
 **Reflex Web 版组帧**：南网(0)/国网(7)/698.45(8)/DLT645(6) 四种协议组帧与 GUI 完全对齐——预定字段（uint/enum/bytes/ascii/bcd/oi/oad_list/list/sub_fields 按类型分派）、自定义模板（含校验和回填）、698.45 A-XDR 数据编辑器；实时回读解析预览；预设命令按钮（NW_command.json / GW_command.json / DLT645_command.json 等）一键填入与保存。启动前先编译前端：`cd reflex_web && reflex export --frontend-only --env prod --no-zip`，再 `python reflex_web/run_app.py`。
 
@@ -435,6 +437,7 @@ python test/test_app_exit.py               # 关闭/托盘退出进程不残留
 python test/test_statusbar_stats.py        # 状态栏 CPU/内存
 python test/test_auto_updater.py           # 自动更新
 python test/test_web_frame_gen_utils.py    # Reflex Web 组帧纯逻辑
+python test/test_web_landing.py            # Web 产品首页（内容不变式/防漂移/死链接线/路由搬迁，100 项）
 ```
 
 > **约定**：所有测试文件一律放入 `test/` 目录（项目根目录禁止新增 `test_*.py`）。新测试文件头需 `import _path_setup`（详见 `test/_path_setup.py` 说明与 `AGENTS.md` §7）。
