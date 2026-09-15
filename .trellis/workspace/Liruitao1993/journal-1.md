@@ -403,3 +403,24 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Status
 
 [OK] **Completed**
+
+
+## Session 15: Web 版产品首页（落地页）+ 路由搬迁
+
+**Date**: 2026-09-15
+**Task**: Web 版产品首页（落地页）+ 路由搬迁
+**Branch**: `main`
+
+### Summary
+
+新增 landing_web.py（纯内容+纯展示，不 import reflex_web）：Hero/统计条/12 功能卡/12 协议表/CLI 与系统集成/下载区/页脚，全 token 化（浅深+5 强调色）。路由 /→首页、/app→工具（index 更名 tool_page），4 处语义链接改指、品牌块回首页、主题控件抽 theme_controls_compact 共用。修：顶栏版本徽章写死 v1.13.0→读 version.json；load_download_info 复位上提消除陈旧字段；420px 横向溢出；深色下浅色强调白字对比度。放弃截图改 URL 方案（实测 dev 前端不代理后端路径，相对 URL 必破图）。新增 test/test_web_landing.py 100 项（含变异反证过的死链接线与 CLI 守卫）；release_check PASS=56 FAIL=0。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b1aecdc` | (see git log) |
+
+### Status
+
+[OK] **Completed**
