@@ -76,6 +76,7 @@ CORE_TESTS = [
     "test/test_pp_cli.py",
     "test/test_batch_src_line_jump.py",
     "test/test_batch_snapshot_locate.py",
+    "test/test_gui_batch_perf.py",
     "test/test_csg_sequence_model.py",
     "test/test_app_paths.py",
     "test/test_nanwang_custom_di.py",

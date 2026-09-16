@@ -488,10 +488,7 @@ def test_end_to_end_cancel_path():
             pump(2)
         ticks_during = len(tick_times)
         max_gap_ms = (
-            max(
-                (b - a) * 1000
-                for a, b in zip(tick_times, tick_times[1:])
-            )
+            max((b - a) * 1000 for a, b in zip(tick_times, tick_times[1:]))
             if len(tick_times) > 1
             else 0.0
         )
@@ -865,7 +862,9 @@ def _filter_oracle(win, keyword: str, status_filter: str) -> list[int]:
     关键词（已小写）匹配「摘要」或第 3 列文本或 `_input`。
     """
     table = win.batch_summary_table
-    want_status = {"success": "成功", "fail": "失败", "error": "异常"}.get(status_filter)
+    want_status = {"success": "成功", "fail": "失败", "error": "异常"}.get(
+        status_filter
+    )
     kw = keyword.strip().lower()
     rows = []
     for row in range(table.rowCount()):
@@ -945,11 +944,7 @@ def test_filter_matches_oracle_and_fast():
             f"过滤结果与契约一致（{label}）",
             got == want,
             f"实际 {len(got)} 行 / 期望 {len(want)} 行"
-            + (
-                ""
-                if got == want
-                else f"  差异前5={sorted(set(got) ^ set(want))[:5]}"
-            ),
+            + ("" if got == want else f"  差异前5={sorted(set(got) ^ set(want))[:5]}"),
         )
 
     # 最坏形态：无任何条件时全表重算
