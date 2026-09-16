@@ -3323,28 +3323,45 @@ class State(rx.State):
         except Exception as e:
             self.download_msg = f"扫描失败: {e}"
 
-    def download_client(self):
-        """触发客户端 exe 下载
+    def _download_origin(self, fallback: str = "") -> str:
+        """下载路由所在的主机（`host[:port]`）。
 
-        优先使用 version.json 中的 url（管理员发布时配置的下载地址），
-        没有 version.json 时回退到本地 /api/download/ 路径（开发/生产均可用）。
-        兼容 /downloads/ 旧写法，自动修正为 /download/。
+        取**当前请求的真实 host**（Reflex 的 router headers）——生产单端口部署就是浏览器正在访问的
+        `服务器:8091`，开发态是后端 `localhost:8000`（下载路由在后端）。拿不到请求上下文时用
+        `fallback`，再没有就返回空（调用方回落相对路径）。
+        """
+        try:
+            host = (getattr(self.router.headers, "host", "") or "").strip()
+        except Exception:
+            host = ""
+        return host or (fallback or "").strip()
+
+    def _download_target_url(self) -> str:
+        """本次点击「下载客户端」该跳到哪里（判定见 `web_utils.resolve_download_target`）。
+
+        单独成方法：URL 决策可在测试里直接断言（`call_script` 的实参在 EventSpec 里只是占位符）。
+        """
+        return web_utils.resolve_download_target(
+            self.download_version_url,
+            self.download_exe_name,
+            host=self._download_origin(),
+            same_origin_serving=web_utils.is_same_origin_serving(),
+        )
+
+    def download_client(self):
+        """触发客户端 exe 下载。
+
+        目标地址：同源单端口部署走相对路径 `/download/<exe>`（部署在 8091 或任意端口都对，并顺带
+        修正历史 `version.json` 里写死的错误端口）；`version.json` 指向**别的主机**（外部托管）
+        时原样使用；开发态（前端 3000 / 后端 8000）带后端主机，因为 Vite 不代理下载路由。
         """
         if not self.download_exe_available:
             self.download_msg = "客户端 exe 未就绪"
             return
-        import urllib.parse
-
-        # 如果 version.json 里配置了下载地址，直接跳转
-        if self.download_version_url:
-            url = self.download_version_url
-        else:
-            name = urllib.parse.quote(self.download_exe_name)
-            url = f"/api/download/{name}"
-        # 兼容旧写法：/downloads/ → /download/（下载路由是单数）
-        url = url.replace("/downloads/", "/download/")
         # 用 json.dumps 自动转义，避免特殊字符导致 JS 语法错误
-        return rx.call_script(f"window.location.href = {json.dumps(url)};")
+        return rx.call_script(
+            f"window.location.href = {json.dumps(self._download_target_url())};"
+        )
 
     # ── 管理员发布管理 ────────────────────────────────────────
 
@@ -3532,30 +3549,13 @@ class State(rx.State):
                     self.release_version = ".".join(parts)
             if not self.release_url and cur and cur.url:
                 self.release_url = cur.url.replace("/downloads/", "/download/")
-            # 如果还是空的，自动生成一个下载地址
+            # 如果还是空的，用**当前访问的真实 host** 生成默认下载地址
+            # （曾用 rx.config 的 backend_port + socket 猜 IP ⇒ 单端口部署时会写成 host:8000）
             if not self.release_url:
-                import socket
-                from urllib.parse import quote
-
-                import reflex as rx
-
-                try:
-                    config = rx.config.get_config()
-                    backend_port = getattr(config, "backend_port", 8000)
-                    # 尝试获取本机 IP
-                    try:
-                        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                        s.connect(("8.8.8.8", 80))
-                        host_ip = s.getsockname()[0]
-                        s.close()
-                    except Exception:
-                        host_ip = "127.0.0.1"
-                    exe_name = self.release_upload_name or "南网协议解析工具.exe"
-                    self.release_url = (
-                        f"http://{host_ip}:{backend_port}/download/{quote(exe_name)}"
-                    )
-                except Exception:
-                    pass
+                exe_name = self.release_upload_name or web_utils.DEFAULT_EXE_NAME
+                self.release_url = web_utils.release_absolute_url(
+                    self._download_origin(), exe_name
+                )
             # 读取 README 内容（供编辑）
             mgr2 = self._get_release_mgr()
             if mgr2:
@@ -3570,43 +3570,6 @@ class State(rx.State):
                         pass
         except Exception as e:
             self.release_status = f"加载失败: {e}"
-
-    def set_release_url_from_host(self, host: str):
-        """从前端传来的 host 设置默认下载 URL
-
-        开发模式下自动替换为后端端口（Vite 不代理下载路由）。
-        文件名优先使用用户上传的文件名。
-        """
-        if not host:
-            return
-        from urllib.parse import quote
-
-        import reflex as rx
-
-        exe_name = self.release_upload_name or "南网协议解析工具.exe"
-
-        # 开发模式：前端端口和后端端口不一致，下载走后端端口
-        # 生产模式：前后端共用一个端口，直接用 host
-        config = rx.config.get_config()
-        try:
-            frontend_port = getattr(config, "frontend_port", None)
-            backend_port = getattr(config, "backend_port", None)
-            # 如果 host 里的端口是前端端口，替换成后端端口
-            if frontend_port and backend_port and frontend_port != backend_port:
-                import re
-
-                host_with_backend = re.sub(r":\d+$", f":{backend_port}", host)
-                if host_with_backend == host:
-                    # host 里没有端口号，补上后端端口
-                    host_with_backend = f"{host}:{backend_port}"
-                self.release_url = (
-                    f"http://{host_with_backend}/download/{quote(exe_name)}"
-                )
-                return
-        except Exception:
-            pass
-
-        self.release_url = f"http://{host}/download/{quote(exe_name)}"
 
     async def handle_release_upload(self, files: list[rx.UploadFile]):
         """处理上传的 exe 文件（内容存后端）"""
@@ -3648,26 +3611,8 @@ class State(rx.State):
         from urllib.parse import quote
 
         if not self.release_url:
-            # URL 为空，自动生成
-            import socket
-
-            import reflex as rx
-
-            try:
-                config = rx.config.get_config()
-                backend_port = getattr(config, "backend_port", 8000)
-                try:
-                    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                    s.connect(("8.8.8.8", 80))
-                    host_ip = s.getsockname()[0]
-                    s.close()
-                except Exception:
-                    host_ip = "127.0.0.1"
-                self.release_url = (
-                    f"http://{host_ip}:{backend_port}/download/{quote(name)}"
-                )
-            except Exception:
-                self.release_url = f"/download/{quote(name)}"
+            # URL 为空：用当前访问的真实 host 生成（不再用 config 端口 / 猜 IP）
+            self.release_url = web_utils.release_absolute_url(self._download_origin(), name)
             return
 
         # 替换 /download/ 后面的文件名

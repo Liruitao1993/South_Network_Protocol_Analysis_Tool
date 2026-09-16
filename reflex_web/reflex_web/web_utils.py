@@ -1204,3 +1204,80 @@ def export_frames_to_csv(batch_results: List[Dict[str, Any]]) -> str:
             len(item.get("result", []) or []),
         ])
     return "\ufeff" + buf.getvalue()
+
+# ═══════════════════════════════════════════════════════════════
+# 对外 URL（下载地址）—— 与主机/端口解耦
+# ═══════════════════════════════════════════════════════════════
+#
+# 背景（1.23.14 修复）：下载地址曾用 `rx.config.get_config()` 的 frontend_port/backend_port
+# 拼绝对 URL。那两个是**构建期**配置（rxconfig.py: 3000/8000），而 run_app.py 是单端口部署
+# （如 8091）⇒ 地址被改写成 `host:8000` 并写进 version.json，首页「下载客户端」就跳错了。
+# 现在：**对外发出去的地址只允许用「当前请求的真实 host」或「同源相对路径」**。
+
+DOWNLOAD_ROUTE = "/download/"
+DEFAULT_EXE_NAME = "南网协议解析工具.exe"
+
+
+def release_download_path(exe_name: str) -> str:
+    """下载路由的同源相对路径（URL 编码文件名）。"""
+    from urllib.parse import quote
+
+    name = (exe_name or "").strip() or DEFAULT_EXE_NAME
+    return f"{DOWNLOAD_ROUTE}{quote(name)}"
+
+
+def release_absolute_url(host: str, exe_name: str) -> str:
+    """发布到 version.json 的绝对地址（GUI 客户端自动更新要用绝对地址直连）。
+
+    `host` 为空（拿不到请求上下文）时回落相对路径——宁可不完整，也不要写一个猜来的主机端口。
+    """
+    path = release_download_path(exe_name)
+    host = (host or "").strip()
+    return f"http://{host}{path}" if host else path
+
+
+def is_same_origin_serving(env: Optional[dict] = None) -> bool:
+    """当前是否「单端口同源」部署（前端静态与 API/下载路由同端口）。
+
+    `run_app.py` 会设置 `REFLEX_ENV=prod` 与 `__REFLEX_MOUNT_FRONTEND_COMPILED_APP=true`；
+    `reflex run --env dev` 下前端(3000)/后端(8000)分端口 ⇒ 不是同源，下载必须带后端主机。
+    """
+    e = env if env is not None else __import__("os").environ
+    prod = str(e.get("REFLEX_ENV", "")).strip().lower() == "prod"
+    mounted = str(e.get("__REFLEX_MOUNT_FRONTEND_COMPILED_APP", "")).strip().lower() == "true"
+    return prod or mounted
+
+
+def _hostname_of(url_or_host: str) -> str:
+    """取主机名（忽略协议、端口、用户信息、路径）。"""
+    s = (url_or_host or "").strip()
+    if not s:
+        return ""
+    if "//" in s:
+        s = s.split("//", 1)[1]
+    s = s.split("/", 1)[0].split("@")[-1]
+    if s.startswith("["):  # IPv6 字面量 [::1]:8091
+        return s.split("]", 1)[0].lstrip("[").lower()
+    return s.split(":", 1)[0].lower()
+
+
+def resolve_download_target(
+    stored_url: str, exe_name: str, *, host: str = "", same_origin_serving: bool = False
+) -> str:
+    """浏览器点击「下载客户端」时的目标地址。
+
+    规则（按优先级）：
+      1. version.json 里的地址指向**别的主机** → 原样使用（exe 托管在外部服务器，尊重管理员配置）；
+      2. 同源单端口部署，或拿不到当前 host → 相对路径 `/download/<名>`
+         （任意 host/port 都对；也顺带修正历史 version.json 里写死的错误端口，如 `:8000`）；
+      3. 开发态（前端 3000 / 后端 8000 分端口）→ `http://<host>/download/<名>`（host 为后端）。
+    """
+    stored = (stored_url or "").strip()
+    stored_host = _hostname_of(stored)
+    current_host = _hostname_of(host)
+    if stored and stored_host and current_host and stored_host != current_host:
+        return stored
+    path = release_download_path(exe_name)
+    if same_origin_serving or not current_host:
+        return path
+    return f"http://{host.strip()}{path}"
