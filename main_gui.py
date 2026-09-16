@@ -111,7 +111,7 @@ from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
 APP_VERSION = "1.23.16"
-BUILD_DATE = "2026-09-15"  # 编译日期，每次打包前更新
+BUILD_DATE = "2026-09-16"  # 编译日期，每次打包前更新
 
 # 窗口状态持久化（config.json 顶层 "window" 段）的表格清单：
 # 只收「用户拖动列宽才有意义」的主表；弹窗/克隆表不做持久化（见任务 PRD 的
@@ -140,6 +140,8 @@ CHANGELOG = [
             "**修掉本特性引入的“测试污染真实配置”副作用**（重要）：窗口退出时会写 `config.json`，而测试会构造并关闭主窗口 → 把 offscreen 合成出来的几何（实测 684×666 这类尺寸）写进**开发机的真实 `config.json`**，用户下次启动即被套用。两道防线：① `closeEvent` 增加 `_window_shown_once` 守卫——**从未真正显示过的窗口不写盘**（覆盖所有“构造即关闭”的测试路径与 `--parse/--file/--clipboard` 路径）；② 新增共享沙箱 `test/_config_sandbox.py`，接线到实测会写盘的 `test_app_exit.py` / `test_theme_settings.py`，并在 `test_pp_cli.py` 补上 `app_paths.data_path` 的 patch（`llm_preprocess_widget.save_config()` 走的是 `from app_paths import data_path` 那份绑定，只 patch `main_gui.data_path` 盖不住它）——该测试原有的「真实 config.json 未被改写」md5 断言因此恢复成立",
             "测试：新增 `test/test_window_state.py`（93 项：采集契约 / 内存往返 / 配置通道 / 12 组坏值容错 / 列数不匹配 / 屏外回落（打桩 `_is_rect_visible` 双向验证判据真的参与决策）/ 恢复默认 / 12 协议切换 / 退出→重启端到端），登记 `release_check.py:CORE_TESTS`；已用**变异反证**自检：把 `_apply_window_state` 改成空实现 → 测试变红 8 项，还原后全绿",
             "顺带：3 个测试文件的 `import _path_setup` 补上 `F401` 抑制（`# noqa: E402` 不压制 F401，任何 `ruff check --fix` 都会删掉这行 → `ModuleNotFoundError: No module named 'main_gui'`；约定已写入 `AGENTS.md §7`）；`test_theme_settings.py` 删除未使用的 `QDialog` 导入",
+            "**GUI 死代码清理（任务 09-15-gui-dead-code-cleanup，纯删除 `main_gui.py` -301 行）**：删掉 5 组**重名方法**的死版本（Python 语义是后定义覆盖前定义，故删前面那批：`_refresh_serial_ports` / `_on_serial_open_clicked` / `_on_serial_connection_changed` / `_on_serial_error` / `_clear_layout`；逐组 diff 后确认前者或逐字相同、或为 `f58c863`「串口配置持久化」提交的有意重写且伴随占位项成对移除）；6 个零引用方法/函数（`_get_git_changelog` / `create_di_lookup_tab` / `load_example` / `export_single` / `_extract_direction_from_table` / `show_detail_dialog`）；10 个已跟踪根目录临时脚本（792 行）+ 3 个未跟踪临时脚本（`_generated_mapping*.py` 的数据已核对活在 `protocol_parser._get_f0_32_entry_name` 里，删除无损失）。删前逐项做了 `getattr` 动态派发扇扫（40+ 处全是读属性、无一取方法名）+ 注册表映射核对 + 全仓（含 spec/iss/json）零引用确认",
+            "**修 `配置→模型API管理` 菜单失效**（清理时发现的真实功能回归）：该菜单项的 `.triggered.connect(self._show_llm_api_manager)` 被 `e1dd85e`（2026-08-21 协议11 提交）误删，菜单项从此点了没反应，而方法因「零引用」几乎被当死代码删掉。已恢复接线，并新增 `test/test_menu_wiring.py`（13 项行为式断言：类级打桩 + 真实 `action.trigger()`，断言每个菜单项都调用到对应方法；**变异反证**：拿掉 connect → 该用例变红）",
         ],
     ),
     (

@@ -34,7 +34,7 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 
 ## 1. 项目概览
 
-多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.23.15`）。
+多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.23.16`）。
 
 **支持的协议（共 12 种，对应 GUI 协议下拉框 `current_protocol` 索引）：**
 
@@ -109,7 +109,7 @@ python main_gui.py --clipboard
 - Lua 脚本引擎依赖 `lupa`，打包时需作为 hidden import 或确保运行环境已安装
 - 当前主程序 spec 未显式声明 `scapy`；如需把 TCP 监控打包进 exe，需补充 `scapy` 依赖并确保目标机器安装 npcap
 - `docs/Lua脚本使用说明.md` 是 Lua 功能的用户文档
-- Inno Setup 安装脚本 `南网解析工具.iss` / `2222.iss` 的 `MyAppVersion` 用 `python release_check.py --sync-iss` 与 `APP_VERSION` 对齐（当前 1.23.14），发版前务必再跑一次 `python release_check.py`
+- Inno Setup 安装脚本 `南网解析工具.iss` / `2222.iss` 的 `MyAppVersion` 用 `python release_check.py --sync-iss` 与 `APP_VERSION` 对齐（当前 1.23.16），发版前务必再跑一次 `python release_check.py`
 
 ### Reflex Web 离线源码部署（UV）
 

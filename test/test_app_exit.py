@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """主程序退出回归测试（对应「关闭GUI + 托盘退出后进程残留」修复）。
 
 根因：Qt 仅在“最后一个可见顶层窗口”关闭时才发 lastWindowClosed 并结束
@@ -13,23 +12,22 @@ app.exec()。X 按钮最小化到托盘后窗口已 hide()，托盘「退出」�
     python test/test_app_exit.py
 """
 
+import os
+
 import _path_setup  # noqa: E402,F401
 
-import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import time  # noqa: E402
 
+# 本测试会 show/close 主窗口（测托盘与关闭路径）→ 退出路径会写 config.json；
+# 沙箱到临时目录，避免把 offscreen 合成几何写进开发机真实配置
+import _config_sandbox  # noqa: E402
 from PySide6.QtCore import QTimer  # noqa: E402
 from PySide6.QtGui import QCloseEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import main_gui  # noqa: E402
-import thread_registry  # noqa: E402
-
-# 本测试会 show/close 主窗口（测托盘与关闭路径）→ 退出路径会写 config.json；
-# 沙箱到临时目录，避免把 offscreen 合成几何写进开发机真实配置
-import _config_sandbox  # noqa: E402
 
 _config_sandbox.install()
 
@@ -130,8 +128,9 @@ def test_meter_sim_serial_thread_registered():
         return None
 
     t = SerialSlaveThread("COM999", 115200, "N", 1, _factory)
-    assert t.objectName() == "MeterSimSerialSlave", \
+    assert t.objectName() == "MeterSimSerialSlave", (
         f"SerialSlaveThread 未登记 objectName: {t.objectName()!r}"
+    )
     t.start()
     t.wait(3000)
     t.stop()
