@@ -40,6 +40,7 @@ FRONTEND_CLIENT = REFLEX_WEB / ".web" / "build" / "client"
 # 局域网服务绑定地址（写入启动脚本）：需内网其他机器访问，故为所有接口；
 # 规则 no-server-bind-wildcard 误报豁免：此为字符串模板而非运行时 socket 绑定
 BIND_HOST = "0.0." + "0.0"
+DEFAULT_PORT = 8080  # 启动脚本默认监听端口（构建时可用 --port 固化）
 
 
 def run_command(command: list[str], cwd: Path | None = None) -> None:
@@ -171,7 +172,8 @@ def build_relocatable_venv(out_dir: Path, python_version: str) -> Path:
     return venv_python
 
 
-def write_launchers(out_dir: Path, venv_python: Path) -> None:
+def write_launchers(out_dir: Path, venv_python: Path, port: int = DEFAULT_PORT) -> None:
+    """写启动脚本（`port` 会被固化进三份脚本，命令行仍可 --port 覆盖）。"""
     host = BIND_HOST
     if sys.platform == "win32":
         venv_python_rel = ".venv\\Scripts\\python.exe"
@@ -179,14 +181,14 @@ def write_launchers(out_dir: Path, venv_python: Path) -> None:
             "@echo off\r\n"
             'cd /d "%~dp0"\r\n'
             f"{deploy_common.data_env_cmd()}"
-            f'"{venv_python_rel}" "reflex_web\\run_app.py" --host {host} --port 8080 %*\r\n',
+            f'"{venv_python_rel}" "reflex_web\\run_app.py" --host {host} --port {port} %*\r\n',
             encoding="utf-8",
         )
         # PowerShell 启动脚本（调用外部程序需 & 运算符）
         out_dir.joinpath("start_web.ps1").write_text(
             "Set-Location $PSScriptRoot\r\n"
             f"{deploy_common.data_env_ps1()}"
-            f"& .\\.venv\\Scripts\\python.exe .\\reflex_web\\run_app.py --host {host} --port 8080 $args\r\n",
+            f"& .\\.venv\\Scripts\\python.exe .\\reflex_web\\run_app.py --host {host} --port {port} $args\r\n",
             encoding="utf-8",
         )
         readable_python = ".venv\\Scripts\\python.exe"
@@ -198,7 +200,7 @@ def write_launchers(out_dir: Path, venv_python: Path) -> None:
         "set -e\n"
         'cd "$(dirname "$0")"\n'
         f"{deploy_common.data_env_sh()}"
-        f'exec ".venv/bin/python" "reflex_web/run_app.py" --host {host} --port 8080 "$@"\n',
+        f'exec ".venv/bin/python" "reflex_web/run_app.py" --host {host} --port {port} "$@"\n',
         encoding="utf-8",
     )
 
@@ -214,8 +216,8 @@ def write_launchers(out_dir: Path, venv_python: Path) -> None:
         "  Windows PowerShell:  .\\start_web.ps1\n"
         "  Linux:          ./start_web.sh\n"
         "也可以手动运行（PowerShell 调用外部程序需 & 运算符）：\n"
-        f"  & {readable_python} reflex_web/run_app.py --host {host} --port 8080\n"
-        "访问：http://服务器IP:8080\n"
+        f"  & {readable_python} reflex_web/run_app.py --host {host} --port {port}\n"
+        f"访问：http://服务器IP:{port}\n"
         "升级：本目录整体替换即可，运行数据在上一级 nw_web_data/ 中不受影响。\n"
         f"{deploy_common.data_dir_note()}",
         encoding="utf-8",
@@ -230,6 +232,12 @@ def main() -> None:
         "--python-version",
         default="3.12",
         help="目标服务器使用的 Python 版本（默认 3.12）",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=DEFAULT_PORT,
+        help=f"启动脚本里固化的监听端口（默认 {DEFAULT_PORT}）",
     )
     parser.add_argument(
         "--output",
@@ -254,7 +262,7 @@ def main() -> None:
 
     copy_runtime_files(out_dir)
     venv_python = build_relocatable_venv(out_dir, args.python_version)
-    write_launchers(out_dir, venv_python)
+    write_launchers(out_dir, venv_python, port=args.port)
 
     print(f"\n离线部署目录已生成: {out_dir}")
     print("请把该目录整体复制到目标服务器，然后运行 start_web.cmd 或 start_web.sh。")

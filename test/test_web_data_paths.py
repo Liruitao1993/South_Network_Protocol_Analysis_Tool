@@ -589,12 +589,21 @@ def test_launchers():
             "运行数据目录" in note and "nw_web_data" in note,
             note[:80],
         )
+        # 端口固化（局域网只开放某端口时用；见 docs/Web版局域网部署教程.md）
+        bod.write_launchers(out, Path(td) / "fake_python", port=8091)
+        for name in ("start_web.cmd", "start_web.ps1", "start_web.sh"):
+            f = out / name
+            if f.exists():
+                check(
+                    f"offline {name} 固化端口 8091",
+                    "--port 8091" in f.read_text(encoding="utf-8"),
+                )
 
     for is_win in (True, False):
         with tempfile.TemporaryDirectory(prefix="nwdata_launch2_") as td:
             out = Path(td) / "deploy"
             out.mkdir()
-            bed.write_launchers(out, Path(td) / "fake_python", is_win)
+            bed.write_launchers(out, Path(td) / "fake_python", is_win, port=8091)
             target = "start_web.cmd" if is_win else "start_web.sh"
             path = out / target
             check(
@@ -605,6 +614,14 @@ def test_launchers():
                     f"embedded {target} 含 {var}",
                     var in path.read_text(encoding="utf-8"),
                 )
+            for other in (out / "start_web.cmd", out / "start_web.ps1", out / "start_web.sh"):
+                if other.exists():
+                    check(
+                        f"embedded {other.name} 固化端口 8091",
+                        "--port 8091" in other.read_text(encoding="utf-8"),
+                    )
+            note = (out / "部署说明.txt").read_text(encoding="utf-8")
+            check("embedded 部署说明写的是 8091", "8091" in note, note[:120])
             mig = out / ("迁移数据.cmd" if is_win else "迁移数据.sh")
             check(
                 f"embedded({'win' if is_win else 'linux'}) 生成迁移脚本 {mig.name}",

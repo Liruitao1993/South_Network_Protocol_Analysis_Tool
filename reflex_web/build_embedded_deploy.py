@@ -40,6 +40,7 @@ FRONTEND_CLIENT = REFLEX_WEB / ".web" / "build" / "client"
 # 局域网服务绑定地址（写入启动脚本）：需内网其他机器访问，故为所有接口；
 # 规则 no-server-bind-wildcard 误报豁免：此为字符串模板而非运行时 socket 绑定
 BIND_HOST = "0.0." + "0.0"
+DEFAULT_PORT = 8080  # 启动脚本默认监听端口（构建时可用 --port 固化）
 
 # 本地缓存目录（避免重复下载）
 CACHE_DIR = ROOT / "dist" / ".build_cache"
@@ -307,8 +308,14 @@ def install_embedded_python_linux(out_dir: Path, python_version: str) -> Path:
     return python_bin
 
 
-def write_launchers(out_dir: Path, python_exe: Path, is_windows: bool) -> None:
-    """Create startup scripts for the embedded deployment."""
+def write_launchers(
+    out_dir: Path, python_exe: Path, is_windows: bool, port: int = DEFAULT_PORT
+) -> None:
+    """Create startup scripts for the embedded deployment.
+
+    Args:
+        port: 启动脚本里固化的监听端口（局域网部署常用固定端口；命令行仍可 --port 覆盖）。
+    """
     host = BIND_HOST
     if is_windows:
         # Windows CMD launcher
@@ -317,7 +324,7 @@ def write_launchers(out_dir: Path, python_exe: Path, is_windows: bool) -> None:
             "@echo off\r\n"
             'cd /d "%~dp0"\r\n'
             f"{deploy_common.data_env_cmd()}"
-            f'"{python_rel}" "reflex_web\\run_app.py" --host {host} --port 8080 %*\r\n',
+            f'"{python_rel}" "reflex_web\\run_app.py" --host {host} --port {port} %*\r\n',
             encoding="utf-8",
         )
 
@@ -325,7 +332,7 @@ def write_launchers(out_dir: Path, python_exe: Path, is_windows: bool) -> None:
         out_dir.joinpath("start_web.ps1").write_text(
             "Set-Location $PSScriptRoot\r\n"
             f"{deploy_common.data_env_ps1()}"
-            f"& .\\python\\python.exe .\\reflex_web\\run_app.py --host {host} --port 8080 $args\r\n",
+            f"& .\\python\\python.exe .\\reflex_web\\run_app.py --host {host} --port {port} $args\r\n",
             encoding="utf-8",
         )
 
@@ -337,7 +344,7 @@ def write_launchers(out_dir: Path, python_exe: Path, is_windows: bool) -> None:
             "set -e\n"
             'cd "$(dirname "$0")"\n'
             f"{deploy_common.data_env_sh()}"
-            f'exec "./python/bin/python" "reflex_web/run_app.py" --host {host} --port 8080 "$@"\n',
+            f'exec "./python/bin/python" "reflex_web/run_app.py" --host {host} --port {port} "$@"\n',
             encoding="utf-8",
         )
         out_dir.joinpath("start_web.sh").chmod(0o755)
@@ -356,10 +363,10 @@ def write_launchers(out_dir: Path, python_exe: Path, is_windows: bool) -> None:
         f"  Windows PowerShell: .\\start_web.ps1\n"
         f"  Linux/Mac:         ./start_web.sh\n\n"
         "也可以手动运行：\n"
-        f"  {readable_python} reflex_web/run_app.py --host {host} --port 8080\n\n"
-        "访问地址：http://服务器IP:8080\n\n"
+        f"  {readable_python} reflex_web/run_app.py --host {host} --port {port}\n\n"
+        f"访问地址：http://服务器IP:{port}\n\n"
         "修改端口：\n"
-        f"  start_web.cmd --port 9000\n\n"
+        f"  start_web.cmd --port 9000   （覆盖默认 {port}）\n\n"
         "升级：本目录整体替换即可，运行数据在上一级 nw_web_data/ 中不受影响。\n"
         "注意事项：\n"
         "- 本部署目录仅支持 Windows (amd64)\n"
@@ -384,6 +391,12 @@ def main() -> None:
         type=Path,
         default=DEFAULT_OUTPUT,
         help="Output directory (default: dist/reflex_web_embedded)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=DEFAULT_PORT,
+        help=f"启动脚本里固化的监听端口（默认 {DEFAULT_PORT}；局域网只开某端口时改这里）",
     )
     parser.add_argument(
         "--skip-deps",
@@ -464,7 +477,7 @@ def main() -> None:
 
     # Create launchers
     print("\n[3/4] 创建启动脚本...")
-    write_launchers(out_dir, python_exe, is_windows)
+    write_launchers(out_dir, python_exe, is_windows, port=args.port)
 
     # Summary
     print("\n[4/4] 构建完成！")
@@ -478,7 +491,7 @@ def main() -> None:
     print("  部署步骤:")
     print("    1. 把 " + out_dir.name + " 整个目录复制到目标机器")
     print("    2. 运行 start_web.cmd (Windows) 或 ./start_web.sh (Linux)")
-    print("    3. 浏览器访问 http://服务器IP:8080")
+    print(f"    3. 浏览器访问 http://服务器IP:{args.port}")
     print()
     print("  升级：替换部署目录即可，数据在部署目录之外不受影响；")
     print("        旧版本数据用产物里的 迁移数据 脚本搬到数据目录。")

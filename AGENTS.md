@@ -195,6 +195,16 @@ python reflex_web/build_embedded_deploy.py --python-version 3.12
 - 升级 = 替换部署目录，数据在目录外不受影响；产物内附 `迁移数据.cmd/sh` 用于把旧版（数据在代码目录内）的数据搬到 `nw_web_data/`。
 - 详见 `reflex_web/离线部署.md` 与 `AGENTS.md §8` 陷阱 38。
 
+**端口固化（局域网部署常用）：** 两个构建脚本都支持 `--port N`（默认 8080），会把端口写进三份启动脚本与 `部署说明.txt`（命令行仍可 `start_web.cmd --port 9000` 覆盖）：
+
+```bash
+python reflex_web/build_embedded_deploy.py --skip-deps --port 8091   # 内嵌 Python 包
+python reflex_web/build_offline_deploy.py --port 8091                # UV 包
+```
+
+> 目标服务器只对外开放某个端口（如 8091）时**必须**用它，否则双击启动会跑默认 8080。
+> Windows 服务器从零到上线（防火墙、开机自启、备份、升级、排错）见 **`docs/Web版局域网部署教程.md`**。
+
 **编译原则（exe打包）：**
 
 1. **窗口标题包含编译日期**：每次打包前必须更新 `main_gui.py` 中的 `BUILD_DATE` 变量为当前日期（格式：`YYYY-MM-DD`）
