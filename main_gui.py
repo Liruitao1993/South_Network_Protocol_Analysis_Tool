@@ -110,7 +110,7 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.17"
+APP_VERSION = "1.23.18"
 BUILD_DATE = "2026-09-16"  # 编译日期，每次打包前更新
 
 # 窗口状态持久化（config.json 顶层 "window" 段）的表格清单：
@@ -131,6 +131,18 @@ _WINDOW_STATE_TABLES = (
 )
 
 CHANGELOG = [
+    (
+        "1.23.18",
+        "2026-09-16",
+        [
+            "**应用层报文批量摘要显示业务功能与关键业务字段**（用户反馈：协议11 批量解析选「应用层报文」时摘要只有 `端口:18 | 报文:0x0030`，同一批 21 帧完全相同、无法扫读，而详情里其实有「开始升级/升级ID/升级时间窗/…」）",
+            "新增统一提取规则 `_gw_app_biz_summary`（桌面 `main_gui` 与 Web `web_utils` 各一份、规则逐字一致）：**业务名**按两优先级取（① `── 业务数据 ──` 区头之后首个带缩进行的字段名——协议11 布局；② 「报文ID」解析值非 hex 时即业务名——协议10 布局）；**关键业务字段**取带缩进、非元数据、非分隔/业务名行、解析值非空且非「N字节」占位的前 2 个（`_GW_APP_SUMMARY_KEY_FIELDS` 常量可调）",
+            "元数据黑名单 `_GW_APP_META_FIELDS` 收两协议字段名并集（端口号/报文ID/安全模式·安全机制/业务报文ID/报文控制字/协议版本号/报文头长度/控制·保留/数据长度/转发数据规约类型/转发数据长度/报文序号/规约类型/发送类型/MSDU类型），**不占**关键字段位；**关键字段扫描限定在「业务数据 / 应用层报文」段窗口内**（起点=区头行+1，终点=起点之后首个顶层行）——仅靠「有应用层才提取」的守门不够：真实 MPDU 在默认 auto/fc_pb 级别下 FC/MAC 字段（`版本`/`原始源TEI`/`定界符类型`/`网络类型`）排在应用层之前会占满关键字段位（复核用 `test/hdc10_real_frames.pkl` 实测：修复前 6/6 带应用层的表全部中招，修复后 0/6）",
+            "摘要效果（现场帧）：协议11 `端口:18 | 报文:0x0030 | 开始升级 | 升级ID:2075013183 | 升级时间窗:120分钟`；协议10 `端口:升级业务 | 报文:开始升级(下行) | 升级ID:2075013183 | 升级时间窗:120分钟`（业务名已含于报文段时不重复追加）；物理层/网络层/测试模式摘要与失败帧摘要**逐字符不变**",
+            "**Web 协议10 的分派按表类型分流**（原 `protocol_index in (9, 10)` 让协议10 整体走协议9 摘要函数——AGENTS §8 陷阱 31 记录的漂移）：**应用层报文**走与协议11 同一实现（本任务增强范围），**物理层/网络层帧保持原路径**（协议9 摘要函数对 TEI/发送类型等段覆盖更全，整包切换会让 104/120 张真实表摘要丢信息，实测后按表类型分流、不退化为准）→ 两端物理层段全量对齐属 `09-15-web-shared-parse-core`。该函数应用层段与桌面同口径（端口/报文ID 取解析值而非 comment 整句、补业务段与序号/规约/数据长度），**Web 应用层摘要文案因此变化**（如 `端口:升级业务`→`端口:18`、`报文ID:安全模式: …`→`报文:0x0030`）",
+            "测试：新增 `test/test_gw_app_summary_detail.py`（42 项：纯函数两协议布局 / 协议11·10 端到端精确文案 / **用户 20 行样本真实批量解析**（每条带各自分钟数、摘要种类数==不同分钟数种类数）/ 元数据排除 / 网络层·空表·失败帧回归 / 两端对拍 / **真实夹具 auto·fc_pb·app 三级别**（关键字段不得混入 FC/MAC 头字段）/ Web 协议10 非应用层表不退化），登记 `release_check.py:CORE_TESTS`；**变异反证**：关键字段数置 0 / 提取短路 / 不排除元数据 三种变异均使断言变红（退出码 1；FAIL 分别 9 / 14 / 4，复核用等价旧版实现替换法测得 8 / 13 / 3），还原后 PASS=42",
+        ],
+    ),
     (
         "1.23.17",
         "2026-09-16",
@@ -1046,6 +1058,148 @@ def _gw_app_port_prefixes(protocol_index: int) -> tuple:
     except Exception:
         # 解析器模块不可用（打包缺失等）时回落内置三元组，不让 GUI 抛异常
         return _GW_APP_PORT_PREFIXES_FALLBACK
+
+
+# ── 应用层报文摘要：业务名 + 关键业务字段（协议10/11 共用同一规则）─────────────
+# 应用层报文表的业务信息分布两种布局：协议11 的业务名在「── 业务数据 ──」区头行
+# （字段名自带，如 `  开始升级`）、业务字段在其下（`    升级ID` 等）；协议10 无区头，
+# 业务名已作为「报文ID」的解析值给出（`开始升级`），业务字段与元数据平铺（`  升级ID`）。
+# 两条规则合并后即可用同一份代码覆盖两协议（详见 AGENTS §8 相关条目）。
+#
+# _GW_APP_META_FIELDS：元数据字段（非业务语义），**不占**关键字段位；收两协议字段名
+# 的并集，避免漏排（如协议10 的「安全机制」vs 协议11 的「安全模式」）。
+_GW_APP_META_FIELDS = (
+    "报文端口号",
+    "报文ID",
+    "安全模式",
+    "安全机制",
+    "业务报文ID",
+    "报文控制字",
+    "协议版本号",
+    "报文头长度",
+    "控制/保留",
+    "数据长度",
+    "报文序号",
+    "转发数据规约类型",
+    "转发数据长度",
+    "规约类型",
+    "发送类型",
+    "MSDU类型",
+)
+# 关键业务字段个数（用户选定 2；调这里即可改变摘要长度）
+_GW_APP_SUMMARY_KEY_FIELDS = 2
+
+
+def _gw_app_biz_summary(table_data) -> tuple:
+    """从应用层报文表中提取 (业务名, [关键业务字段…])。
+
+    业务名（按优先级）：
+      ① `── 业务数据` 区头之后的首个普通行字段名（协议11 布局，如 `开始升级`）；
+      ② 「报文ID」解析值——**仅当它不是 hex 形式**时视为业务名（协议10 布局）；
+      都不命中时返回空串（摘要退化为现状，不报错）。
+
+    关键业务字段：在**应用层/业务数据段窗口内**（见下），字段名带前导空格（业务/子字段层）、
+    非元数据、非分隔行/业务名行、解析值非空且不是「N字节」占位符，按顺序取前
+    `_GW_APP_SUMMARY_KEY_FIELDS` 个，格式 `字段名:解析值`。
+
+    扫描窗口：起点 = `── 业务数据` 行 +1（协议11 布局）；无该区头时 = 顶层
+    「应用层报文」行 +1（协议10/auto 布局）；终点 = 起点之后首个**顶层行**（无缩进）
+    或表尾。**不能全表扫描**：真实 MPDU 在 auto/fc_pb 级别下 FC/MAC 字段
+    （`版本`/`原始源TEI`/`定界符类型`/`网络类型`）排在应用层之前，会被当成业务字段。
+    """
+    import re
+
+    if not table_data:
+        return "", []
+
+    def _raw_name(item):
+        return str(item[0]) if item and item[0] is not None else ""
+
+    def _name(item):
+        return _raw_name(item).strip()
+
+    def _parsed(item):
+        if not item or len(item) <= 2 or item[2] in (None, ""):
+            return ""
+        return str(item[2]).strip()
+
+    def _is_meta(name):
+        return any(
+            name == meta or name.startswith(meta) for meta in _GW_APP_META_FIELDS
+        )
+
+    def _is_skippable(name):
+        return (
+            not name
+            or name.startswith("──")
+            or name.startswith("❌")
+            or name.startswith("⚠")
+        )
+
+    # ── 扫描窗口：限定在「应用层报文 / 业务数据」段内 ──
+    # 不能全表扫描：真实 MPDU 在 auto/fc_pb 级别下 FC/MAC 字段（`版本`/`原始源TEI`/
+    # `定界符类型`/`网络类型`）排在应用层之前，会被当成业务字段（实测 6/6 真实帧中招）。
+    window_start, window_end, from_biz_section = -1, -1, False
+    # ① 优先：业务数据区（协议11 布局——业务名与业务字段都在区内，
+    #    必须先于「应用层报文」区头检查：两个区头在同一表里按先后出现）
+    for i, item in enumerate(table_data):
+        if _name(item).startswith("── 业务数据"):
+            window_start, from_biz_section = i + 1, True
+            break
+    # ② 回退：顶层「应用层报文」行（协议10/auto 布局，无业务数据区）
+    if window_start < 0:
+        for i, item in enumerate(table_data):
+            name, raw_name = _name(item), _raw_name(item)
+            if not raw_name.startswith(" ") and "应用层报文" in name:
+                window_start = i + 1
+                break
+    if window_start < 0:
+        return "", []
+    for j in range(window_start, len(table_data)):
+        if not _raw_name(table_data[j]).startswith(" "):  # 下一个顶层行 = 段结束
+            window_end = j
+            break
+    window = table_data[window_start : window_end if window_end >= 0 else len(table_data)]
+
+    # ── 业务名 ──
+    biz_name = ""
+    biz_row_idx = -1
+    if from_biz_section:
+        # 协议11：`── 业务数据 ──` 之后首个带缩进的普通行，其字段名即业务名
+        for k, item in enumerate(window):
+            if not _raw_name(item).startswith(" ") or _is_skippable(_name(item)):
+                continue
+            biz_name, biz_row_idx = _name(item), window_start + k
+            break
+    if not biz_name:
+        # 协议10：无业务数据区，业务名由「报文ID」解析值给出（非 hex 形式）
+        for item in table_data:
+            if _name(item) != "报文ID":
+                continue
+            parsed = _parsed(item)
+            if parsed and not re.fullmatch(r"(0[xX])?[0-9A-Fa-f]+", parsed):
+                biz_name = parsed
+            break
+
+    # ── 关键业务字段（只在窗口内扫描）──
+    fields = []
+    for i, item in enumerate(window):
+        raw_name = _raw_name(item)
+        name, parsed = _name(item), _parsed(item)
+        if window_start + i == biz_row_idx or not parsed:
+            continue
+        # 只取带前导空格的字段行（顶层行不是业务字段）
+        if not raw_name.startswith(" "):
+            continue
+        if _is_skippable(name) or _is_meta(name):
+            continue
+        if re.fullmatch(r"\d+字节", parsed):  # 字节数占位（区头/长度行）
+            continue
+        fields.append(f"{name}:{parsed}")
+        if len(fields) >= _GW_APP_SUMMARY_KEY_FIELDS:
+            break
+
+    return biz_name, fields
 
 
 # 配置文件路径标签映射
@@ -8538,6 +8692,16 @@ class MainWindow(QMainWindow):
             parts.append(
                 f"报文:{msg_id}({direction})" if direction else f"报文:{msg_id}"
             )
+        # 业务名 + 关键业务字段：应用层报文的核心内容（协议11 的业务名在
+        # 「── 业务数据 ──」区头行，协议10 已由「报文ID」解析值给出）——
+        # 现场反馈：缺少这两段时同一批升级帧摘要完全相同，无法扫读。
+        # 仅应用层报文（有端口号/报文ID）才提取：网络层/物理层帧没有业务语义，
+        # 否则 `定界符类型`/`网络类型` 之类的帧字段会被当成业务字段混进摘要。
+        if port or msg_id:
+            biz_name, biz_fields = _gw_app_biz_summary(table_data)
+            if biz_name and biz_name != msg_id and biz_name not in " | ".join(parts):
+                parts.append(biz_name)
+            parts.extend(biz_fields)
         # 报文序号（STA 应答时返回）
         msg_seq = val("报文序号")
         if msg_seq:

@@ -34,7 +34,7 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 
 ## 1. 项目概览
 
-多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.23.17`）。
+多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.23.18`）。
 
 **支持的协议（共 12 种，对应 GUI 协议下拉框 `current_protocol` 索引）：**
 
@@ -109,7 +109,7 @@ python main_gui.py --clipboard
 - Lua 脚本引擎依赖 `lupa`，打包时需作为 hidden import 或确保运行环境已安装
 - 当前主程序 spec 未显式声明 `scapy`；如需把 TCP 监控打包进 exe，需补充 `scapy` 依赖并确保目标机器安装 npcap
 - `docs/Lua脚本使用说明.md` 是 Lua 功能的用户文档
-- Inno Setup 安装脚本 `南网解析工具.iss` / `2222.iss` 的 `MyAppVersion` 用 `python release_check.py --sync-iss` 与 `APP_VERSION` 对齐（当前 1.23.17），发版前务必再跑一次 `python release_check.py`
+- Inno Setup 安装脚本 `南网解析工具.iss` / `2222.iss` 的 `MyAppVersion` 用 `python release_check.py --sync-iss` 与 `APP_VERSION` 对齐（当前 1.23.18），发版前务必再跑一次 `python release_check.py`
 
 ### Reflex Web 离线源码部署（UV）
 
@@ -837,6 +837,13 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
     - app 级别的帧起始判据是**应用层端口集合** `{0x11, 0x12, 0x1A}`，集合**取自解析器端口表**（`hdc10_parser.APP_PORTS` / `gw_new_gen_parser.GWNewGenParser.PORT_NAMES`）；依据《双模通信互联互通技术规范 第4-3部分：应用层通信协议》§5.2.2（升级业务 0x12、其他业务 0x11）。**不要再硬编码只认 `11`**；
     - Web 侧 `web_utils.strip_gw_new_gen_prefix(text, parse_level, protocol_index)` 与桌面**同判据同来源**，`test/test_hdc10_batch_strip_level.py` 内有对拍断言防漂移（含「端口集合必须含 0x12」与「协议10 残留 app 不影响协议11」两条回归，已用变异反证确认能抓住回退）。
     - **新增调用方注意**：`_strip_gw_new_gen_prefix` 现在依赖 `_current_parse_params()`，而后者在 `family ∈ {gw, hdc10}` 且级别为 `pb_only` 时会读控件 `gw_pb_frame_type_combo`。目前只有 `_prepare_batch_input` 的两个主线程调用点（UI 已就绪，安全）；**无控件上下文的调用方**（Host/headless 测试、命令行路径）必须**显式传 `parse_level`**，否则会 `AttributeError`。
+44. **协议10/11 应用层摘要 = 业务名 + 前 2 个关键业务字段；提取规则单一来源、两端同规则**（1.23.18 起）：批量摘要的「应用层报文」段由 `_gw_app_biz_summary`（桌面 `main_gui` 与 Web `web_utils` 各一份，**规则逐字一致**）产出——**业务名**两优先级：① `── 业务数据 ──` 区头之后首个带缩进行的字段名（协议11 布局，如 `开始升级`）；② 「报文ID」解析值非 hex 时即业务名（协议10 布局）；**关键字段**取**应用层/业务数据段窗口内**带缩进、非元数据、非分隔/业务名行、解析值非空且非「N字节」占位的前 `_GW_APP_SUMMARY_KEY_FIELDS`（=2）个。改这块时注意：
+    - **扫描窗口是必需的，不是优化**：起点 = `── 业务数据` 行 +1（优先；协议11 业务名与业务字段都在该区内），无该区头时 = 顶层「应用层报文」行 +1（协议10/auto 布局）；终点 = 起点之后首个**顶层行**（无缩进）或表尾。**全表扫描会中招**：真实 MPDU 在默认 auto/fc_pb 级别下 FC/MAC 字段（`版本`/`原始源TEI`/`定界符类型`/`网络类型`）排在应用层之前会占满关键字段位（复核用 `test/hdc10_real_frames.pkl` 实测修复前 6/6 带应用层的表全中、修复后 0/6）；
+    - **仅应用层报文（有 `报文端口号` 或 `报文ID`）才提取**（第二道守门）：纯网络层/物理层帧不该出现业务段；
+    - 元数据黑名单 `_GW_APP_META_FIELDS` 是**两协议字段名并集**（协议10 叫「安全机制」、协议11 叫「安全模式」；含 `转发数据长度`/`转发数据规约类型`）——新增协议字段名时必须补进去，否则它会挤掉真正的业务字段位（注意 `startswith` 方向：`转发数据长度` 不以 `数据长度` 开头，必须单独列出）；
+    - 桌面口径是「去缩进后字段名精确相等」（`val()`）；Web 的 `_find_field` 是**子串包含**（会把「业务报文ID」当「报文ID」）→ Web 侧业务段改用 `_field_value`/`_field_comment` 保持同语义，两端才能逐字符对拍；
+    - Web `get_frame_summary` 对协议10 **按表类型分流**：应用层报文走 `get_hdc10_summary`（与协议11 同一实现），物理层/网络层帧**保持原路径**（协议9 摘要函数——它对 TEI/发送类型等段覆盖更全，整包切换会让 105/118 张真实表摘要丢信息）；物理层段全量对齐属 `09-15-web-shared-parse-core`。业务名已含于 `报文:{报文ID}` 段时**不重复追加**（协议10 的 `报文:开始升级`）；
+    - 对拍范围**只限应用层表**（物理层/MSDU/MME 段两端文案差异属共享核心任务），回归套件 `test/test_gw_app_summary_detail.py`（42 项，含**真实夹具 auto/fc_pb/app 三级别**不得混入 FC/MAC 字段的断言、真实批量解析 20 帧可区分性、Web 协议10 非应用层表不退化、变异反证）。
 
 ---
 
@@ -864,6 +871,10 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 ## 10. 变更日志
 
 > 详细版本变更记录请查看 `main_gui.py:CHANGELOG`（按版本倒序），或运行 `git log --oneline` 查看提交历史。本文档仅保留最近两个版本的摘要。
+
+### 1.23.18 — 2026-09-16
+
+- **应用层报文批量摘要显示业务功能与关键业务字段**：原先协议11 选「应用层报文」时摘要只有 `端口:18 | 报文:0x0030`（同一批 21 帧完全相同），现为 `端口:18 | 报文:0x0030 | 开始升级 | 升级ID:2075013183 | 升级时间窗:120分钟`。新增统一规则 `_gw_app_biz_summary`（业务名两优先级兼容协议10/11 两种表布局 + 关键字段元数据黑名单），桌面与 Web 两端同规则 + 对拍；**顺带修掉 Web 协议10 摘要误走协议9 函数**的漂移（详见 §8 陷阱 44）
 
 ### 1.23.17 — 2026-09-16
 

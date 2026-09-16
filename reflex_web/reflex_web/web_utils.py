@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Reflex Web 版工具函数
 
 纯函数工具集，供 State 类调用。包括：
@@ -10,7 +9,7 @@
 import re
 import sys
 from pathlib import Path
-from typing import List, Dict, Any, Tuple, Optional
+from typing import Any
 
 # 确保项目根目录在路径中
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -116,6 +115,18 @@ def parse_kwargs_for(protocol_index: int, parse_level: str = "auto",
     return {}
 
 
+def _as_int(value, default: int = 0) -> int:
+    """容错整数转换。
+
+    Web State 里的值可能来自前端 JSON（字符串/None），直接 int() 会抛 ValueError 并
+    中断整页渲染；这里统一回落默认值。正常路径（int 入参）行为与 int() 完全一致。
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 # 批量摘要状态筛选：下拉值 → 结果表状态字面量
 BATCH_STATUS_FILTERS = (
     ("all", "全部"),
@@ -145,7 +156,7 @@ def filter_batch_summaries(summaries: list, keyword: str = "", status: str = "al
                     str(row.get("summary", "")),
                     str(row.get("proto", "")),
                     str(row.get("hex", "")),
-                    "#" + str(int(row.get("id", 0)) + 1),
+                    "#" + str(_as_int(row.get("id", 0)) + 1),
                 )
             ).lower()
             if kw not in hay:
@@ -166,7 +177,7 @@ def paginate(items: list, page: int, page_size: int) -> tuple:
         page_size = 1
     total = len(items or [])
     page_count = max(1, (total + page_size - 1) // page_size)
-    page = max(0, min(int(page or 0), page_count - 1))
+    page = max(0, min(_as_int(page or 0), page_count - 1))
     start = page * page_size
     return (items or [])[start:start + page_size], page_count
 
@@ -175,7 +186,7 @@ def page_of(page: int, page_count: int) -> int:
     """把页码夹取到合法范围（与 paginate 同一规则，供 State 单独校正页码用）。"""
     if page_count <= 0:
         return 0
-    return max(0, min(int(page or 0), page_count - 1))
+    return max(0, min(_as_int(page or 0), page_count - 1))
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -410,7 +421,7 @@ def strip_gw_new_gen_prefix(
 # 帧提取
 # ═══════════════════════════════════════════════════════════════
 
-def extract_68_frames(clean: str) -> List[str]:
+def extract_68_frames(clean: str) -> list[str]:
     """提取 68 格式帧（南网/国网 FT1.2）"""
     frames = []
     i = 0
@@ -444,7 +455,7 @@ def extract_68_frames(clean: str) -> List[str]:
     return frames
 
 
-def extract_69845_frames(clean: str) -> List[str]:
+def extract_69845_frames(clean: str) -> list[str]:
     """提取 698.45 格式帧"""
     frames = []
     i = 0
@@ -479,7 +490,7 @@ def extract_69845_frames(clean: str) -> List[str]:
     return frames
 
 
-def extract_hdlc_frames(clean: str) -> List[str]:
+def extract_hdlc_frames(clean: str) -> list[str]:
     """提取 HDLC 帧（7E 开头 7E 结束）"""
     frames = []
     i = 0
@@ -497,7 +508,7 @@ def extract_hdlc_frames(clean: str) -> List[str]:
     return frames
 
 
-def extract_wrapper_frames(text: str) -> List[str]:
+def extract_wrapper_frames(text: str) -> list[str]:
     """提取 DLMS Wrapper 帧"""
     frames = []
     for line in text.splitlines():
@@ -526,7 +537,7 @@ def extract_wrapper_frames(text: str) -> List[str]:
     return frames if frames else [re.sub(r'[^0-9A-Fa-f]', '', text).upper()]
 
 
-def extract_csg_new_gen_frames(text: str) -> List[str]:
+def extract_csg_new_gen_frames(text: str) -> list[str]:
     """提取新一代载波协议帧（按行）"""
     frames = []
     for line in text.splitlines():
@@ -542,7 +553,7 @@ def extract_csg_new_gen_frames(text: str) -> List[str]:
     return frames
 
 
-def extract_68_from_raw(text: str) -> List[str]:
+def extract_68_from_raw(text: str) -> list[str]:
     """从原始文本中直接匹配 68...16 帧模式"""
     frames = []
     seen = set()
@@ -565,7 +576,7 @@ def extract_68_from_raw(text: str) -> List[str]:
     return frames
 
 
-def extract_generic_frames(clean: str, min_len: int = 4, max_len: int = 256) -> List[str]:
+def extract_generic_frames(clean: str, min_len: int = 4, max_len: int = 256) -> list[str]:
     """通用帧提取（整段 hex 作为单帧判断）
 
     与 GUI 版 _extract_generic_frames 行为一致：
@@ -577,7 +588,7 @@ def extract_generic_frames(clean: str, min_len: int = 4, max_len: int = 256) -> 
     return []
 
 
-def extract_frames_for_protocol(text: str, protocol_index: int) -> List[str]:
+def extract_frames_for_protocol(text: str, protocol_index: int) -> list[str]:
     """根据协议类型提取帧（与 GUI 版 _extract_frames_for_protocol 行为一致）
 
     调用前建议先用 clean_hex_input(text, keep_newlines=True) 清洗输入，
@@ -603,9 +614,7 @@ def extract_frames_for_protocol(text: str, protocol_index: int) -> List[str]:
         return extract_69845_frames(clean)
     elif protocol_index == 9:  # 新一代载波协议(通感一体化)：按行提取，过滤无效短帧
         return extract_csg_new_gen_frames(text)
-    elif protocol_index == 10:  # 国网新一代双模：按行提取，每行一帧
-        return [f.strip() for f in text.splitlines() if f.strip() and len(f.strip()) >= 4]
-    elif protocol_index == 11:  # HDC 1.0 双模互联互通：按行提取，每行一帧
+    elif protocol_index == 10 or protocol_index == 11:  # 国网新一代双模：按行提取，每行一帧
         return [f.strip() for f in text.splitlines() if f.strip() and len(f.strip()) >= 4]
     else:
         return [f.strip() for f in text.splitlines() if f.strip()]
@@ -615,7 +624,7 @@ def extract_frames_for_protocol(text: str, protocol_index: int) -> List[str]:
 # 摘要提取
 # ═══════════════════════════════════════════════════════════════
 
-def _find_field(table_data: List, field_keyword: str) -> Optional[tuple]:
+def _find_field(table_data: list, field_keyword: str) -> tuple | None:
     """在表格数据中查找含关键字的字段行"""
     for row in table_data:
         if len(row) >= 4 and row[0] and field_keyword in str(row[0]):
@@ -623,7 +632,7 @@ def _find_field(table_data: List, field_keyword: str) -> Optional[tuple]:
     return None
 
 
-def get_csg_new_gen_summary(table_data: List) -> str:
+def get_csg_new_gen_summary(table_data: list) -> str:
     """新一代载波协议摘要提取"""
     if not table_data:
         return "空"
@@ -718,7 +727,7 @@ def get_csg_new_gen_summary(table_data: List) -> str:
     return "; ".join(parts) if parts else (str(table_data[0][0]) if table_data[0] else "空")
 
 
-def extract_csg_core_content(table_data: List) -> str:
+def extract_csg_core_content(table_data: list) -> str:
     """提取新一代载波核心内容"""
     # 帧类型
     frame_type_row = _find_field(table_data, "帧类型")
@@ -774,7 +783,151 @@ def extract_csg_core_content(table_data: List) -> str:
     return ""
 
 
-def get_hdc10_summary(table_data: List) -> str:
+# ══════════════════════════════════════════════════════════════
+# 应用层报文摘要：业务名 + 关键业务字段（与桌面 main_gui 同规则、同口径）
+#
+# 为什么不复用 `_find_field`：它是**子串包含**匹配（`keyword in row[0]`），
+# 会把「业务报文ID」当成「报文ID」、也拿不到业务数据区的业务名；
+# 桌面 `_get_gw_new_gen_summary` 的 `val()` 是「去缩进后字段名精确相等」，
+# 这里用 `_field_value` / `_field_comment` 保持同语义，两端才能逐字符对拍一致。
+# 规则细节（业务名两优先级、扫描窗口、元数据黑名单、关键字段双约束）见
+# main_gui._gw_app_biz_summary 注释与 AGENTS §8 陷阱 44。
+_GW_APP_META_FIELDS = (
+    "报文端口号",
+    "报文ID",
+    "安全模式",
+    "安全机制",
+    "业务报文ID",
+    "报文控制字",
+    "协议版本号",
+    "报文头长度",
+    "控制/保留",
+    "数据长度",
+    "转发数据规约类型",
+    "转发数据长度",
+    "报文序号",
+    "规约类型",
+    "发送类型",
+    "MSDU类型",
+)
+_GW_APP_SUMMARY_KEY_FIELDS = 2
+
+
+def _field_value(table_data: list, name: str) -> str:
+    """按「去缩进后字段名精确相等」取首个匹配行的解析值（与桌面 `val()` 同语义）"""
+    for row in table_data:
+        if len(row) >= 3 and row[0] is not None and str(row[0]).strip() == name:
+            value = row[2]
+            return str(value).strip() if value not in (None, "") else ""
+    return ""
+
+
+def _field_comment(table_data: list, name: str) -> str:
+    """按「去缩进后字段名精确相等」取首个匹配行的说明（与桌面 `cmt()` 同语义）"""
+    for row in table_data:
+        if len(row) >= 4 and row[0] is not None and str(row[0]).strip() == name:
+            value = row[3]
+            return str(value).strip() if value not in (None, "") else ""
+    return ""
+
+
+def _gw_app_biz_summary(table_data: list) -> tuple:
+    """从应用层报文表中提取 (业务名, [关键业务字段…])。规则与桌面逐字一致。
+
+    扫描窗口：起点 = `── 业务数据` 行 +1（协议11 布局，优先）；无该区头时 = 顶层
+    「应用层报文」行 +1（协议10/auto 布局）；终点 = 起点之后首个**顶层行**或表尾。
+    **不能全表扫描**：真实 MPDU 在 auto/fc_pb 级别下 FC/MAC 字段（`版本`/`原始源TEI`/
+    `定界符类型`/`网络类型`）排在应用层之前，会被当成业务字段。
+    """
+    if not table_data:
+        return "", []
+
+    def _raw_name(item):
+        return str(item[0]) if item and item[0] is not None else ""
+
+    def _name(item):
+        return _raw_name(item).strip()
+
+    def _parsed(item):
+        if not item or len(item) <= 2 or item[2] in (None, ""):
+            return ""
+        return str(item[2]).strip()
+
+    def _is_meta(name):
+        return any(
+            name == meta or name.startswith(meta) for meta in _GW_APP_META_FIELDS
+        )
+
+    def _is_skippable(name):
+        return (
+            not name
+            or name.startswith("──")
+            or name.startswith("❌")
+            or name.startswith("⚠")
+        )
+
+    # ── 扫描窗口：限定在「业务数据 / 应用层报文」段内 ──
+    window_start, window_end, from_biz_section = -1, -1, False
+    # ① 优先：业务数据区（协议11 布局——业务名与业务字段都在区内；
+    #    必须先于「应用层报文」区头检查：两个区头在同一表里按先后出现）
+    for i, item in enumerate(table_data):
+        if _name(item).startswith("── 业务数据"):
+            window_start, from_biz_section = i + 1, True
+            break
+    # ② 回退：顶层「应用层报文」行（协议10/auto 布局，无业务数据区）
+    if window_start < 0:
+        for i, item in enumerate(table_data):
+            name, raw_name = _name(item), _raw_name(item)
+            if not raw_name.startswith(" ") and "应用层报文" in name:
+                window_start = i + 1
+                break
+    if window_start < 0:
+        return "", []
+    for j in range(window_start, len(table_data)):
+        if not _raw_name(table_data[j]).startswith(" "):  # 下一个顶层行 = 段结束
+            window_end = j
+            break
+    window = table_data[window_start : window_end if window_end >= 0 else len(table_data)]
+
+    # ── 业务名 ──
+    biz_name = ""
+    biz_row_idx = -1
+    if from_biz_section:
+        for k, item in enumerate(window):
+            if not _raw_name(item).startswith(" ") or _is_skippable(_name(item)):
+                continue
+            biz_name, biz_row_idx = _name(item), window_start + k
+            break
+    if not biz_name:
+        for item in table_data:
+            if _name(item) != "报文ID":
+                continue
+            parsed = _parsed(item)
+            if parsed and not re.fullmatch(r"(0[xX])?[0-9A-Fa-f]+", parsed):
+                biz_name = parsed
+            break
+
+    # ── 关键业务字段（只在窗口内扫描）──
+    fields = []
+    for i, item in enumerate(window):
+        raw_name = _raw_name(item)
+        name, parsed = _name(item), _parsed(item)
+        if window_start + i == biz_row_idx or not parsed:
+            continue
+        if not raw_name.startswith(" "):
+            continue
+        if _is_skippable(name) or _is_meta(name):
+            continue
+        if re.fullmatch(r"\d+字节", parsed):
+            continue
+        fields.append(f"{name}:{parsed}")
+        if len(fields) >= _GW_APP_SUMMARY_KEY_FIELDS:
+            break
+
+    return biz_name, fields
+
+
+def get_hdc10_summary(table_data: list) -> str:
     """HDC 1.0 双模互联互通摘要提取"""
     if not table_data:
         return "空"
@@ -809,23 +962,37 @@ def get_hdc10_summary(table_data: List) -> str:
         name = str(mmtype_row[3]) if len(mmtype_row) >= 4 and mmtype_row[3] else str(mmtype_row[2])
         parts.append(f"MME:{name}")
 
-    # 应用层报文：端口号 + 报文ID + 业务类型ID
-    port_row = _find_field(table_data, "报文端口号")
-    if port_row:
-        port = str(port_row[3]) if len(port_row) >= 4 and port_row[3] else str(port_row[2])
+    # 应用层报文：端口号 + 报文ID(含方向) + 业务名 + 关键业务字段 + 序号/规约/数据长度
+    # （与桌面 `main_gui._get_gw_new_gen_summary` 逐段同口径；对拍见
+    #   test/test_gw_app_summary_detail.py。原实现取 comment 整句，
+    #   会得到 `端口:升级业务`、`报文ID:安全模式: …`，与桌面不一致）
+    port = _field_value(table_data, "报文端口号")
+    if port:
         parts.append(f"端口:{port}")
-    msg_id_row = _find_field(table_data, "报文ID")
-    if msg_id_row:
-        name = str(msg_id_row[3]) if len(msg_id_row) >= 4 and msg_id_row[3] else str(msg_id_row[2])
-        parts.append(f"报文ID:{name}")
-    biz_row = _find_field(table_data, "业务类型ID")
-    if biz_row:
-        biz = str(biz_row[3]) if len(biz_row) >= 4 and biz_row[3] else str(biz_row[2])
-        parts.append(f"业务:{biz}")
-    proto_row = _find_field(table_data, "转发数据规约类型")
-    if proto_row:
-        proto = str(proto_row[3]) if len(proto_row) >= 4 and proto_row[3] else str(proto_row[2])
-        parts.append(proto)
+    msg_id = _field_value(table_data, "报文ID")
+    if msg_id:
+        app_cmt = _field_comment(table_data, "应用层报文")
+        direction = ""
+        for d in ("下行", "上行"):
+            if d in app_cmt:
+                direction = d
+                break
+        parts.append(f"报文:{msg_id}({direction})" if direction else f"报文:{msg_id}")
+    # 仅应用层报文（端口号/报文ID 解析值非空）才提取业务段：网络层/物理层帧没有业务语义
+    if port or msg_id:
+        biz_name, biz_fields = _gw_app_biz_summary(table_data)
+        if biz_name and biz_name != msg_id and biz_name not in " | ".join(parts):
+            parts.append(biz_name)
+        parts.extend(biz_fields)
+    msg_seq = _field_value(table_data, "报文序号")
+    if msg_seq:
+        parts.append(f"序号:{msg_seq}")
+    rule_type = _field_value(table_data, "规约类型")
+    if rule_type:
+        parts.append(f"规约:{rule_type.replace('DL/T ', '')}")
+    data_len = _field_value(table_data, "转发数据长度")
+    if data_len:
+        parts.append(f"数据:{data_len}")
 
     # 兜底：取前几个非冗余字段
     if not parts:
@@ -837,16 +1004,33 @@ def get_hdc10_summary(table_data: List) -> str:
     return " | ".join([p for p in parts if p]) if parts else (str(table_data[0][0]) if table_data[0] else "空")
 
 
-def get_frame_summary(table_data: List, protocol_index: int) -> str:
+def get_frame_summary(table_data: list, protocol_index: int) -> str:
     """统一摘要提取入口"""
     if not table_data:
         return "空"
 
-    if protocol_index in (9, 10):
+    if protocol_index == 9:
         return get_csg_new_gen_summary(table_data)
 
     if protocol_index == 11:
         return get_hdc10_summary(table_data)
+
+    # 协议10（国网新一代）：**应用层报文**（本任务增强范围）走与协议11 同一实现
+    # （两协议应用层字段同构）；物理层/网络层帧保持既有行为——它们原先走协议9
+    # 摘要函数，而该函数对 TEI/发送类型等段的覆盖比 get_hdc10_summary 更全，
+    # 直接整包切换会让这些摘要丢信息（复核实测 104/120 张真实表内容变化）。
+    # 两端物理层段全量对齐属 09-15-web-shared-parse-core。
+    if protocol_index == 10:
+        if any(
+            row
+            and row[0] is not None
+            and str(row[0]).strip() in ("报文端口号", "报文ID")
+            and len(row) > 2
+            and row[2] not in (None, "")
+            for row in table_data
+        ):
+            return get_hdc10_summary(table_data)
+        return get_csg_new_gen_summary(table_data)
 
     # 其他协议：找 AFN/帧类型/功能码/业务标识 字段
     for row in table_data:
@@ -866,7 +1050,7 @@ def get_frame_summary(table_data: List, protocol_index: int) -> str:
 # 报文工具函数
 # ═══════════════════════════════════════════════════════════════
 
-def _parse_hex(text: str) -> List[int]:
+def _parse_hex(text: str) -> list[int]:
     """从文本中解析字节列表，容忍空格/逗号/0x前缀"""
     cleaned = re.sub(r'[^0-9A-Fa-f]', '', text).upper()
     if len(cleaned) % 2 != 0:
@@ -874,7 +1058,7 @@ def _parse_hex(text: str) -> List[int]:
     return [int(cleaned[i:i+2], 16) for i in range(0, len(cleaned), 2)]
 
 
-def _bytes_to_hex(data: List[int], sep: str = " ") -> str:
+def _bytes_to_hex(data: list[int], sep: str = " ") -> str:
     """字节列表转空格分隔 HEX"""
     return sep.join(f"{b:02X}" for b in data)
 
@@ -1200,7 +1384,7 @@ def run_tool(tool_id: str, input_text: str) -> str:
 # 批量结果导出
 # ═══════════════════════════════════════════════════════════════
 
-def _result_row_to_dict(item: Dict[str, Any]) -> Dict[str, Any]:
+def _result_row_to_dict(item: dict[str, Any]) -> dict[str, Any]:
     """将批量结果条目转换为可序列化 dict"""
     return {
         "序号": (item.get("id", 0) or 0) + 1,
@@ -1221,14 +1405,14 @@ def _result_row_to_dict(item: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def export_frames_to_json(batch_results: List[Dict[str, Any]]) -> str:
+def export_frames_to_json(batch_results: list[dict[str, Any]]) -> str:
     """批量结果 → JSON 字符串"""
     import json
     data = [_result_row_to_dict(item) for item in batch_results]
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
-def export_frames_to_csv(batch_results: List[Dict[str, Any]]) -> str:
+def export_frames_to_csv(batch_results: list[dict[str, Any]]) -> str:
     """批量结果 → CSV 字符串（UTF-8 BOM，Excel 可直接打开）"""
     import csv
     import io
@@ -1277,7 +1461,7 @@ def release_absolute_url(host: str, exe_name: str) -> str:
     return f"http://{host}{path}" if host else path
 
 
-def is_same_origin_serving(env: Optional[dict] = None) -> bool:
+def is_same_origin_serving(env: dict | None = None) -> bool:
     """当前是否「单端口同源」部署（前端静态与 API/下载路由同端口）。
 
     `run_app.py` 会设置 `REFLEX_ENV=prod` 与 `__REFLEX_MOUNT_FRONTEND_COMPILED_APP=true`；

@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/09-16-gw-app-summary-detail/prd.md", "reason": "对照 7 条验收逐条取证：精确摘要文案、20 帧可区分性、协议10 不重复业务名、网络层/测试模式不回归、两端对拍、套件全绿、变异反证"}
+{"file": ".trellis/tasks/09-16-gw-app-summary-detail/design.md", "reason": "复核实现是否越界：是否只动「应用层段 + 协议10 分派」；对拍是否限定在应用层表（物理层差异属另案）；元数据黑名单是否两协议并集"}
+{"file": ".trellis/tasks/09-16-gw-app-summary-detail/implement.md", "reason": "复核 8 步是否按序落地、变异反证是否真做过（先红后绿）、是否残留变异改动（上一轮踩过的坑）"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复核提取规则与元数据黑名单是否只有一份定义（没有在桌面/Web 各写一套不同的排除表）"}
+{"file": "AGENTS.md", "reason": "§8 陷阱 31（两端漂移）、陷阱 38（变异反证）、§3/§4 摘要函数归属与中文键名约定"}

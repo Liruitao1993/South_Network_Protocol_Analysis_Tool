@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/09-16-gw-app-summary-detail/prd.md", "reason": "需求与验收基准：协议10/11 应用层表结构实测证据（业务名位置、业务字段布局、元数据行）、6 项需求、7 条验收、范围外项"}
+{"file": ".trellis/tasks/09-16-gw-app-summary-detail/design.md", "reason": "技术设计：D1 单一提取规则（业务名两优先级 + 关键字段双约束）、D2 拼接与去重、D4 Web 复刻与协议10 分派修正、D5 对拍范围边界、接口契约与验证矩阵"}
+{"file": ".trellis/tasks/09-16-gw-app-summary-detail/implement.md", "reason": "实施计划：8 步（基线与表结构取证 → 纯函数 → 接入 → Web 同步 → 测试 → 变异反证 → 全量回归 → 文档/提交），含每步验证命令与回滚点"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "本需求要在协议10/11 两种布局上复用同一条提取规则（而非按业务类型各写一份），并把元数据黑名单收敛为单一定义"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "跨层一致性：桌面 main_gui 与 Web web_utils 各有一份摘要实现（AGENTS §8 陷阱 31 的复刻风险），必须同规则 + 对拍断言"}
+{"file": "AGENTS.md", "reason": "§8 陷阱 31（Web/桌面解析链漂移，含协议10 摘要误用协议9 的已知记录）、§8 陷阱 38（守卫测试需变异反证）、§7 测试规则（_path_setup noqa、登记 release_check.py:CORE_TESTS）、§9 新增协议 checklist 中的文档同步要求"}
