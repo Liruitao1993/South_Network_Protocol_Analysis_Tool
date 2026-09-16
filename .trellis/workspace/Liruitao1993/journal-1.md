@@ -424,3 +424,24 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Status
 
 [OK] **Completed**
+
+
+## Session 16: Web 运行时数据外置（升级不再丢库/发布产物/口令）
+
+**Date**: 2026-09-16
+**Task**: Web 运行时数据外置（升级不再丢库/发布产物/口令）
+**Branch**: `main`
+
+### Summary
+
+新增 app_data.py 作为运行时路径唯一来源（NW_WEB_DATA_DIR → 冻结态 exe 同级 nw_web_data → 回落代码目录），数据根默认在部署目录上一级、启动脚本注入（已设不覆盖）；feedback_model/share_model/reflex_web 六处/run_app 中间件全部收口，删 FEEDBACK_DATA_DIR/FRAMESHARE_DATA_DIR。构建侧新增 deploy_common.py：downloads 白名单（随包资产进包、运行时产物与 build/dist 排除）、生成 迁移数据.cmd/sh、启动脚本注入变量；删除从未生效的 preserve_data_* 与错误承诺。修 onefile exe 数据写 _MEIPASS（重启清零）、迁移改递归按条目搬（不覆盖/幂等/空骨架可补/失败只告警）且不搬随包资产。复核（trellis-check，10 条含 2 个 P1）逐条修复：迁移脚本 set -eu 不可用、downloads 漏 build/dist 25MB、随包资产被迁移遮蔽、cmd 不判 robocopy 致命码、PS 下的 set 语法、cmd 编码 GBK、守卫缺口、启动不可写无指引。测试 test/test_web_data_paths.py 118 项 + release_check PASS=56 FAIL=0 + 两条真实部署 E2E（删目录重建数据仍在 / 旧版自动迁移）。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c70a1c8` | (see git log) |
+
+### Status
+
+[OK] **Completed**

@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 15
-- **Last Active**: 2026-09-15
+- **Total Sessions**: 16
+- **Last Active**: 2026-09-16
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~426 | Active |
+| `journal-1.md` | ~447 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 16 | 2026-09-16 | Web 运行时数据外置（升级不再丢库/发布产物/口令） | `c70a1c8` | `main` |
 | 15 | 2026-09-15 | Web 版产品首页（落地页）+ 路由搬迁 | `b1aecdc` | `main` |
 | 14 | 2026-09-15 | Web 批量解析结果搜索/筛选（接分页） | `7dc5ac5` | `main` |
 | 13 | 2026-09-15 | Web 主题系统（明暗模式 + 预设 + token 化 + 频谱图跟随）+ 用户报障修复 | `20f2c8c` | `main` |
