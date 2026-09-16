@@ -487,3 +487,26 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Status
 
 [OK] **Completed**
+
+
+## Session 19: GUI 批量解析后台化 + 详情按需 + 过滤提速（1.23.15）
+
+**Date**: 2026-09-16
+**Task**: GUI 批量解析后台化 + 详情按需 + 过滤提速（1.23.15）
+**Branch**: `main`
+
+### Summary
+
+任务 09-15-gui-batch-parse-perf 完成并归档。批量解析从「主线程同步 21s 冻结」改为「主线程同步预处理 + BatchParseWorker 后台分片解析」：工具栏进度条 + 取消（实测 10~15ms 停止）、取消落分片中途不再丢未满一片的结果；batch_results 去 _table_data 常驻缓存，229.4MB → 20.6MB，详情/导出/复制/时序图改走 _get_frame_table_data(index) LRU(50) 按需重解析；摘要过滤 0.87s → 0.012s（setUpdatesEnabled + 250ms 去抖）。对拍：协议9 真实日志 49,532 帧与协议11 13,763 帧「HEAD vs 当前」全量 0 差异（含导出「包含表格数据」列）；修详情重解析与批量不一致 934 帧（根因=解析器跨帧可变状态，用 _ctx 锁存+apply_cross_frame_state 还原，未改解析器算法）。新增 test/test_gui_batch_perf.py（99 项）并登记 CORE_TESTS；4 个既有批量测试迁移到 wait_batch。release_check PASS=57 FAIL=0 WARN=2（WARN 为 HEAD 基线）。顺带查出并修：3 个测试文件丢了 import _path_setup（# noqa: E402 不抑制 F401 → ruff --fix 会删掉它），已补 F401 并写入 AGENTS §7 约定。遗留：解析器入口未重置跨帧状态（陷阱 41）、协议10 无真实对拍、enhanced_batch_export.py 是被 gitignore 的孤立副本。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `560df22` | (see git log) |
+| `41a9935` | (see git log) |
+| `1c5b13a` | (see git log) |
+
+### Status
+
+[OK] **Completed**
