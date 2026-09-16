@@ -22,7 +22,7 @@ ROOT = Path(_path_setup.__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 _TMP = Path(tempfile.mkdtemp(prefix="fb_api_test_"))
-os.environ["FEEDBACK_DATA_DIR"] = str(_TMP / "data")
+os.environ["NW_WEB_DATA_DIR"] = str(_TMP / "data")
 
 from reflex_web import feedback_model as fm  # noqa: E402
 
@@ -224,7 +224,8 @@ def main():
     print("== 旧库迁移（缺列自动补） ==")
     import sqlite3
 
-    old_db = _TMP / "old" / "feedback.db"
+    # 数据根 = _TMP/old，库落在其 data/ 下（NW_WEB_DATA_DIR 指向的是数据根，不是 data/ 本身）
+    old_db = _TMP / "old" / "data" / "feedback.db"
     old_db.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(str(old_db))
     con.execute(
@@ -237,7 +238,7 @@ def main():
     )
     con.commit()
     con.close()
-    os.environ["FEEDBACK_DATA_DIR"] = str(_TMP / "old")
+    os.environ["NW_WEB_DATA_DIR"] = str(_TMP / "old")
     fm.FeedbackStore.reset()
     s2 = fm.FeedbackStore.instance()  # 触发迁移
     con = sqlite3.connect(str(old_db))

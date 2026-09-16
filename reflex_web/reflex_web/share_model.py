@@ -4,7 +4,7 @@
 分享人 + 说明 + 来源（web/gui）。Web /share 页面浏览与搜索；GUI 通过
 POST /api/frameshare（JSON）提交，两端共享同一数据库。
 
-测试可通过环境变量 FRAMESHARE_DATA_DIR 重定向数据目录。
+数据落盘位置由 `app_data` 统一决定（与反馈库同目录；`NW_WEB_DATA_DIR` 可重定向数据根）。
 
 运行表自动建库（sqlmodel create_all 幂等）；本表 1.21.0 首次引入，
 无历史迁移需求。
@@ -12,13 +12,14 @@ POST /api/frameshare（JSON）提交，两端共享同一数据库。
 
 from __future__ import annotations
 
-import os
 import re
 from datetime import datetime
 from pathlib import Path
 
 import reflex as rx
 import sqlmodel
+
+from . import app_data
 
 # ── 常量（与 GUI 侧 share_dialog 保持一致的约束） ──────────────
 
@@ -52,15 +53,8 @@ _HEX_CLEAN_RE = re.compile(r"[^0-9A-Fa-f]")
 
 
 def data_dir() -> Path:
-    """分享数据根目录 reflex_web/data/（环境变量 FRAMESHARE_DATA_DIR 可覆盖）。
-
-    __file__ 位于 reflex_web/reflex_web/share_model.py（内层包），
-    parent.parent 即外层 reflex_web/ 包目录，data/ 与 downloads/ 同级。
-    """
-    override = os.environ.get("FRAMESHARE_DATA_DIR")
-    if override:
-        return Path(override)
-    return Path(__file__).resolve().parent.parent / "data"
+    """分享数据目录 `<数据根>/data/`（与反馈库同目录；数据根解析见 `app_data`）。"""
+    return app_data.feedback_dir()
 
 
 def db_path() -> Path:

@@ -5,8 +5,7 @@
 - generate_filename：服务端重生成文件名（不含用户原始名）+ 防穿越模式
 - delete_screenshots：正常清理 / 路径穿越拒绝 / 保留非 fb_* 文件
 - FeedbackStore CRUD：add / list_all 分页 / count_pending / update_status / delete
-- 部署脚本：build_offline_deploy.preserve_data_dir / restore_data_dir
-           build_embedded_deploy.preserve_data_dirs / restore_data_dirs
+- 数据目录：NW_WEB_DATA_DIR 重定向数据根（部署脚本的重建保留契约见 test_web_data_paths.py）
 - run_app.py：py_compile 语法验证（fbimg 路由接入）
 
 运行（项目根）：
@@ -30,7 +29,7 @@ sys.path.insert(0, str(ROOT))
 
 # 数据目录重定向到临时目录（必须在 import feedback_model 前设置）
 _TMP = Path(tempfile.mkdtemp(prefix="fb_test_"))
-os.environ["FEEDBACK_DATA_DIR"] = str(_TMP / "data")
+os.environ["NW_WEB_DATA_DIR"] = str(_TMP / "data_root")  # 数据根（运行数据落在其 data/ 下）
 
 from reflex_web import feedback_model as fm  # noqa: E402
 
@@ -222,53 +221,6 @@ def test_store_crud():
 # ── 部署脚本 data/ 保留 ─────────────────────────────────────
 
 
-def test_deploy_preserve():
-    print("test_deploy_preserve:")
-    import build_embedded_deploy as bed
-    import build_offline_deploy as bod
-
-    base = _TMP / "deploy"
-    out = base / "reflex_web_embedded"
-    (out / "data" / "uploads" / "feedback").mkdir(parents=True)
-    (out / "data" / "feedback.db").write_text("OLD_DB")
-    (out / "data" / "uploads" / "feedback" / "fb_1.png").write_bytes(b"png")
-
-    # offline
-    moved = bod.preserve_data_dir(out)
-    check("offline moves data/", moved is not None and moved.name == "data")
-    check("data/ gone from out_dir", not (out / "data").exists())
-    shutil.rmtree(out)
-    out.mkdir()
-    bod.restore_data_dir(out, moved)
-    check("offline restores db", (out / "data" / "feedback.db").read_text() == "OLD_DB")
-    check(
-        "offline restores screenshot",
-        (out / "data" / "uploads" / "feedback" / "fb_1.png").is_file(),
-    )
-
-    # embedded
-    moved2 = bed.preserve_data_dirs(out)
-    check("embedded moves data/", len(moved2) == 1)
-    shutil.rmtree(out)
-    out.mkdir()
-    bed.restore_data_dirs(out, moved2)
-    check(
-        "embedded restores db", (out / "data" / "feedback.db").read_text() == "OLD_DB"
-    )
-
-    # 无 data/ 场景
-    fresh = base / "fresh_out"
-    fresh.mkdir()
-    check("embedded no-data returns []", bed.preserve_data_dirs(fresh) == [])
-    check("offline no-data returns None", bod.preserve_data_dir(fresh) is None)
-    bed.restore_data_dirs(fresh, [])
-    bod.restore_data_dir(fresh, None)
-    check("restore with nothing is no-op", True)
-
-
-# ── run_app.py / 模块编译验证 ────────────────────────────────
-
-
 def test_compile():
     print("test_compile:")
     for f in [
@@ -290,11 +242,10 @@ def main():
         test_save_screenshot_rejects()
         test_delete_screenshots()
         test_store_crud()
-        test_deploy_preserve()
         test_compile()
     finally:
         shutil.rmtree(_TMP, ignore_errors=True)
-        os.environ.pop("FEEDBACK_DATA_DIR", None)
+        os.environ.pop("NW_WEB_DATA_DIR", None)
     print(f"\n{'=' * 40}")
     print(f"PASS: {PASS}  FAIL: {FAIL}")
     sys.exit(1 if FAIL else 0)

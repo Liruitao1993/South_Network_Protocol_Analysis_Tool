@@ -26,6 +26,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import deploy_common  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 REFLEX_WEB = ROOT / "reflex_web"
 DEFAULT_OUTPUT = ROOT / "dist" / "reflex_web_offline"
@@ -133,35 +137,8 @@ def copy_runtime_files(out_dir: Path) -> None:
         shutil.copytree(validator_src, out_dir / "validator", dirs_exist_ok=True)
 
     web_dest = out_dir / "reflex_web"
-
-    _BASE_IGNORE = {
-        "__pycache__",
-        ".states",
-        ".tests",
-        "tests",
-        "reflex.lock",
-        "uploaded_files",
-    }
-
-    def _ignore_web_only(src: str, names: list[str]) -> set[str]:
-        """忽略任意层级的缓存/测试/锁文件；reflex_web 顶层额外忽略 PyInstaller 中间产物 build/dist。"""
-        src_path = Path(src)
-        ignored = set(_BASE_IGNORE)
-        # 任意层级忽略 .spec 与 .pyc
-        for name in names:
-            if name.endswith(".spec") or name.endswith(".pyc"):
-                ignored.add(name)
-        if src_path.resolve() == REFLEX_WEB.resolve():
-            for name in names:
-                if name in {"build", "dist"}:
-                    ignored.add(name)
-        return ignored
-
-    shutil.copytree(
-        REFLEX_WEB,
-        web_dest,
-        ignore=_ignore_web_only,
-    )
+    # 忽略规则（含**运行时数据**：data/ downloads/ admin_config.json）在 deploy_common 单一来源
+    shutil.copytree(REFLEX_WEB, web_dest, ignore=deploy_common.ignored_web_entries)
 
 
 def build_relocatable_venv(out_dir: Path, python_version: str) -> Path:
@@ -201,12 +178,14 @@ def write_launchers(out_dir: Path, venv_python: Path) -> None:
         out_dir.joinpath("start_web.cmd").write_text(
             "@echo off\r\n"
             'cd /d "%~dp0"\r\n'
+            f"{deploy_common.data_env_cmd()}"
             f'"{venv_python_rel}" "reflex_web\\run_app.py" --host {host} --port 8080 %*\r\n',
             encoding="utf-8",
         )
         # PowerShell 启动脚本（调用外部程序需 & 运算符）
         out_dir.joinpath("start_web.ps1").write_text(
             "Set-Location $PSScriptRoot\r\n"
+            f"{deploy_common.data_env_ps1()}"
             f"& .\\.venv\\Scripts\\python.exe .\\reflex_web\\run_app.py --host {host} --port 8080 $args\r\n",
             encoding="utf-8",
         )
@@ -218,9 +197,13 @@ def write_launchers(out_dir: Path, venv_python: Path) -> None:
         "#!/usr/bin/env sh\n"
         "set -e\n"
         'cd "$(dirname "$0")"\n'
+        f"{deploy_common.data_env_sh()}"
         f'exec ".venv/bin/python" "reflex_web/run_app.py" --host {host} --port 8080 "$@"\n',
         encoding="utf-8",
     )
+
+    # 旧版本数据搬迁辅助（一次性）：把 <部署>/reflex_web/{data,downloads,admin_config.json} 拷到数据根
+    deploy_common.write_migration_helper(out_dir, is_windows=sys.platform == "win32")
 
     out_dir.joinpath("部署说明.txt").write_text(
         "南网协议解析工具 Reflex Web 离线部署目录\n"
@@ -232,40 +215,11 @@ def write_launchers(out_dir: Path, venv_python: Path) -> None:
         "  Linux:          ./start_web.sh\n"
         "也可以手动运行（PowerShell 调用外部程序需 & 运算符）：\n"
         f"  & {readable_python} reflex_web/run_app.py --host {host} --port 8080\n"
-        "访问：http://服务器IP:8080\n",
+        "访问：http://服务器IP:8080\n"
+        "升级：本目录整体替换即可，运行数据在上一级 nw_web_data/ 中不受影响。\n"
+        f"{deploy_common.data_dir_note()}",
         encoding="utf-8",
     )
-
-
-def preserve_data_dir(out_dir: Path) -> Path | None:
-    """重建 out_dir 前把 data/（反馈数据）移出到临时位置，返回原路径或 None。
-
-    失败（磁盘错误等）直接抛异常终止构建 —— 数据丢失比构建失败更严重。
-    """
-    data_src = out_dir / "data"
-    if not data_src.exists():
-        return None
-    tmp = out_dir.with_name(out_dir.name + ".datatmp")
-    try:
-        if tmp.exists():
-            shutil.rmtree(tmp)
-        shutil.move(str(data_src), str(tmp))
-    except OSError as exc:
-        raise SystemExit(f"备份 data/ 失败，为避免数据丢失已终止构建: {exc}") from exc
-    return data_src
-
-
-def restore_data_dir(out_dir: Path, orig: Path | None) -> None:
-    """把 preserve_data_dir 移出的 data/ 移回重建后的 out_dir。"""
-    if orig is None:
-        return
-    tmp = out_dir.with_name(out_dir.name + ".datatmp")
-    if not tmp.exists():
-        raise SystemExit("data/ 备份目录丢失，请检查磁盘状态")
-    try:
-        shutil.move(str(tmp), str(orig))
-    except OSError as exc:
-        raise SystemExit(f"回填 data/ 失败: {exc}（备份仍在 {tmp}）") from exc
 
 
 def main() -> None:
@@ -290,9 +244,8 @@ def main() -> None:
     compile_lockfile(args.python_version)
     ensure_frontend()
 
-    data_orig: Path | None = None
+    # 运行数据不在本目录内（见 deploy_common 说明），重建产物无需保留任何东西
     if out_dir.exists():
-        data_orig = preserve_data_dir(out_dir)
         try:
             shutil.rmtree(out_dir)
         except OSError as exc:
@@ -300,14 +253,16 @@ def main() -> None:
     out_dir.mkdir(parents=True)
 
     copy_runtime_files(out_dir)
-    restore_data_dir(out_dir, data_orig)
-    if data_orig is not None:
-        print("    保留 data/（用户反馈数据库与截图）")
     venv_python = build_relocatable_venv(out_dir, args.python_version)
     write_launchers(out_dir, venv_python)
 
     print(f"\n离线部署目录已生成: {out_dir}")
     print("请把该目录整体复制到目标服务器，然后运行 start_web.cmd 或 start_web.sh。")
+    print(
+        "运行数据默认落在部署目录的上一级: "
+        f"{out_dir.parent / deploy_common.RUNTIME_DATA_DIRNAME}"
+    )
+    print("升级：替换本目录即可，数据不受影响；旧版本数据用产物里的 迁移数据 脚本搬过去。")
 
 
 if __name__ == "__main__":

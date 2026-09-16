@@ -34,7 +34,7 @@ sys.path.insert(0, str(ROOT / "reflex_web"))
 
 # 数据目录重定向（必须在 import share_model / feedback_dialog 前）
 _TMP = Path(tempfile.mkdtemp(prefix="fshare_test_"))
-os.environ["FRAMESHARE_DATA_DIR"] = str(_TMP / "data")
+os.environ["NW_WEB_DATA_DIR"] = str(_TMP / "data")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import feedback_dialog as fd  # noqa: E402  (config 路径注入后再 import share_dialog)
@@ -402,7 +402,7 @@ def main():
         test_gui_dialog_smoke()
     finally:
         shutil.rmtree(_TMP, ignore_errors=True)
-        os.environ.pop("FRAMESHARE_DATA_DIR", None)
+        os.environ.pop("NW_WEB_DATA_DIR", None)
     print(f"\n{'=' * 40}")
     print(f"PASS: {PASS}  FAIL: {FAIL}")
     sys.exit(1 if FAIL else 0)

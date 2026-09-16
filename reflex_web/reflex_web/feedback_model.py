@@ -5,17 +5,17 @@
 - FeedbackStore: 存取单例（懒加载 engine，create_all 幂等建表）
 - save_screenshot / delete_screenshots: 截图文件保存与清理（服务端校验 + 防穿越）
 
-数据落盘位置（与 downloads/、admin_config.json 同级策略）：
-    reflex_web/data/feedback.db           # SQLite
-    reflex_web/data/uploads/feedback/     # 截图
+数据落盘位置由 `app_data` 统一决定（默认 `<repo>/reflex_web/data/`，部署态见 `NW_WEB_DATA_DIR`）：
+    <数据根>/data/feedback.db           # SQLite
+    <数据根>/data/uploads/feedback/     # 截图
+    <数据根>/downloads/                 # 发布管理（不在本模块）
+    <数据根>/admin_config.json          # 管理员口令（不在本模块）
 
-部署后位于 <部署目录>/reflex_web/data/，两个部署脚本重建时保留 data/。
-测试可通过环境变量 FEEDBACK_DATA_DIR 重定向数据目录。
+测试通过环境变量 `NW_WEB_DATA_DIR` 重定向数据根（见 `test/_path_setup.py` 同级用法）。
 """
 
 from __future__ import annotations
 
-import os
 import re
 import secrets
 from datetime import datetime
@@ -24,6 +24,8 @@ from pathlib import Path
 import reflex as rx
 import sqlmodel
 from sqlalchemy import desc as sa_desc
+
+from . import app_data
 
 # ── 业务常量 ──────────────────────────────────────────────
 
@@ -52,20 +54,13 @@ _FILENAME_PATTERN = re.compile(r"^fb_\d{8}_\d{6}_[0-9a-f]{8}\.(?:png|jpe?g|webp)
 
 
 def data_dir() -> Path:
-    """反馈数据根目录 reflex_web/data/（环境变量 FEEDBACK_DATA_DIR 可覆盖，供测试）。
-
-    本文件位于 reflex_web/reflex_web/（内层包），数据目录在其上级：
-    与 downloads/、admin_config.json 同级，部署脚本重建时保留。
-    """
-    override = os.environ.get("FEEDBACK_DATA_DIR")
-    if override:
-        return Path(override)
-    return Path(__file__).resolve().parent.parent / "data"
+    """反馈数据目录 `<数据根>/data/`（数据根解析见 `app_data`）。"""
+    return app_data.feedback_dir()
 
 
 def uploads_dir() -> Path:
-    """截图目录 reflex_web/data/uploads/feedback/。"""
-    return data_dir() / "uploads" / "feedback"
+    """截图目录 `<数据根>/data/uploads/feedback/`。"""
+    return app_data.uploads_dir()
 
 
 def db_path() -> Path:

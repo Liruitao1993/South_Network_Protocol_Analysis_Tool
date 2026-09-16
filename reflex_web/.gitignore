@@ -11,3 +11,5 @@ downloads/*.exe
 downloads/version.json
 downloads/archive/
 downloads/*.exe.*
+# 外置运行数据根（部署目录上一级；开发机设了 NW_WEB_DATA_DIR 时可能落在仓库内）
+nw_web_data/

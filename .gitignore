@@ -32,8 +32,10 @@ reflex_web/.web/
 reflex_web/.states/
 reflex.lock/
 reflex_web/.tests/
-# 反馈运行时数据（SQLite + 截图，部署脚本重建时保留）
+# 反馈运行时数据（SQLite + 截图；开发态路径，部署态见 nw_web_data/）
 reflex_web/data/
+# 外置运行数据根（1.23.14 起：NW_WEB_DATA_DIR 默认指向部署目录上一级；开发机若设了同名变量也忽略）
+nw_web_data/
 Output/
 # 依赖与工具目录
 node_modules/

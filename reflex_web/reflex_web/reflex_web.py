@@ -21,7 +21,13 @@ import reflex as rx
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
-from . import landing_web, spectrum_web, theme_web, web_utils
+from . import (
+    app_data,
+    landing_web,
+    spectrum_web,
+    theme_web,
+    web_utils,
+)
 from . import share_model as sm  # noqa: F401  顶部导入：构建期完成 rx.Model 元数据注册
 
 # 批量摘要每页条数选项（值给 rx.el.option 用字符串，State 侧 int(value)）
@@ -3186,15 +3192,12 @@ class State(rx.State):
 
     # ── 客户端下载 ────────────────────────────────────────────
     def load_download_info(self):
-        """扫描 downloads/ 目录，获取 exe 与截图信息"""
+        """扫描数据根的 downloads/ 目录，获取 exe 与截图信息"""
         try:
             from pathlib import Path
 
-            # 部署目录: reflex_web/downloads/（开发时相对 reflex_web 包）
-            here = Path(__file__).resolve()
-            downloads_dir = here.parent.parent / "downloads"  # reflex_web/downloads/
-            if not downloads_dir.exists():
-                downloads_dir = here.parent / "downloads"
+            # 发布产物目录由 app_data 统一决定（部署态在部署目录之外）
+            downloads_dir = app_data.downloads_dir()
             # 复位放在目录存在性判断**之前**：否则「downloads/ 不存在」这条路径会把
             # 上一次扫描到的 exe 名/体积/版本/截图留在 State 里（界面显示陈旧数据）
             self.download_exe_available = False
@@ -3248,7 +3251,9 @@ class State(rx.State):
                     except Exception:
                         self.download_exe_size_mb = ""
                 # 无 exe 时无需复位：三个字段已在函数开头统一清空
-                ss_file = downloads_dir / "client_screenshot.png"
+                # 界面截图：数据根优先，缺失时回落「随包资源」（部署产物不含运行时 exe，
+                # 但这两样静态资源要随包走，否则新部署的首页 Hero 与客户端说明永久缺失）
+                ss_file = app_data.resolve_download_asset("client_screenshot.png")
                 if ss_file.exists():
                     self.download_image_available = True
                     try:
@@ -3258,9 +3263,9 @@ class State(rx.State):
                         self.download_image_data_url = f"data:image/png;base64,{base64.b64encode(img_data).decode('ascii')}"
                     except Exception:
                         pass
-                # 客户端 README（README.md 或 client_readme.md）
+                # 客户端 README（README.md 或 client_readme.md）——同样带回落
                 for readme_name in ("client_readme.md", "README.md"):
-                    readme_file = downloads_dir / readme_name
+                    readme_file = app_data.resolve_download_asset(readme_name)
                     if readme_file.exists():
                         try:
                             self.download_readme_text = readme_file.read_text(
@@ -3350,11 +3355,8 @@ class State(rx.State):
         try:
             from .admin_release import ReleaseManager
 
-            here = Path(__file__).resolve()
-            downloads_dir = here.parent.parent / "downloads"
-            if not downloads_dir.exists():
-                downloads_dir = here.parent / "downloads"
-            self._release_mgr = ReleaseManager(downloads_dir)
+            # 发布产物目录由 app_data 统一决定（部署态在部署目录之外）
+            self._release_mgr = ReleaseManager(app_data.downloads_dir())
         except Exception as e:
             self.admin_msg = f"初始化发布管理器失败: {e}"
             self._release_mgr = None
@@ -3367,12 +3369,8 @@ class State(rx.State):
         try:
             from .admin_release import AdminConfig
 
-            here = Path(__file__).resolve()
-            config_dir = here.parent.parent
-            if not (config_dir / "downloads").exists():
-                config_dir = here.parent
-            config_path = config_dir / "admin_config.json"
-            self._admin_cfg = AdminConfig(config_path)
+            # 口令文件与 downloads/ 同在数据根（由 app_data 统一决定）
+            self._admin_cfg = AdminConfig(app_data.admin_config_path())
         except Exception as e:
             self.admin_msg = f"初始化配置失败: {e}"
             self._admin_cfg = None
@@ -4488,20 +4486,18 @@ def theme_style() -> rx.Component:
 
 
 def _read_published_version() -> str:
-    """读 downloads/version.json 里的发布版本（与客户端下载/首页徽章同一数据源）。
+    """读数据根 downloads/version.json 里的发布版本（与客户端下载/首页徽章同一数据源）。
 
-    路径解析与 `State.load_download_info` 一致：先 reflex_web/downloads/，再 reflex_web/reflex_web/downloads/。
+    路径由 `app_data.downloads_dir()` 唯一决定（部署态在部署目录之外）。
     读不到就返回空串——顶栏宁可不显示版本，也不要显示一个写死的假版本号。
     """
-    here = Path(__file__).resolve()
-    for candidate in (here.parent.parent / "downloads", here.parent / "downloads"):
-        vj = candidate / "version.json"
-        try:
-            if vj.exists():
-                data = json.loads(vj.read_text(encoding="utf-8"))
-                return str(data.get("version", "") or "")
-        except Exception:
-            continue
+    vj = app_data.downloads_dir() / "version.json"
+    try:
+        if vj.exists():
+            data = json.loads(vj.read_text(encoding="utf-8"))
+            return str(data.get("version", "") or "")
+    except Exception:
+        pass
     return ""
 
 
@@ -12047,12 +12043,8 @@ app.add_page(
 
 
 def _get_downloads_dir() -> Path:
-    """获取 downloads 目录路径"""
-    here = Path(__file__).resolve()
-    d = here.parent.parent / "downloads"
-    if d.exists():
-        return d
-    return here.parent / "downloads"
+    """发布产物目录（由 `app_data` 统一决定；部署态在部署目录之外）。"""
+    return app_data.downloads_dir()
 
 
 async def _dev_download_handler(request):
@@ -12125,13 +12117,8 @@ app._api.routes.insert(
 
 
 def _get_fbimg_dir() -> Path:
-    """反馈截图目录 reflex_web/data/uploads/feedback/"""
-    try:
-        from . import feedback_model
-
-        return feedback_model.uploads_dir()
-    except Exception:
-        return Path(__file__).resolve().parent.parent / "data" / "uploads" / "feedback"
+    """反馈截图目录 `<数据根>/data/uploads/feedback/`（由 `app_data` 统一决定）。"""
+    return app_data.uploads_dir()
 
 
 async def _dev_fbimg_handler(request):

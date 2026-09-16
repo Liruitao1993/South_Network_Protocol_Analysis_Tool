@@ -26,6 +26,10 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import deploy_common  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 REFLEX_WEB = ROOT / "reflex_web"
 DEFAULT_OUTPUT = ROOT / "dist" / "reflex_web_embedded"
@@ -159,40 +163,6 @@ def ensure_frontend(*, force: bool = False) -> None:
     )
 
 
-def preserve_data_dirs(out_dir: Path) -> list[Path]:
-    """重建 out_dir 前把需保留的运行时数据目录移出到临时位置。
-
-    返回被移出的目录列表（原路径），供 restore_data_dirs 移回。
-    目前保留：data/（反馈数据库与截图）。
-    失败直接终止构建 —— 数据丢失比构建失败更严重。
-    """
-    moved: list[Path] = []
-    data_src = out_dir / "data"
-    if not data_src.exists():
-        return moved
-    tmp = out_dir.with_name(out_dir.name + ".datatmp")
-    try:
-        if tmp.exists():
-            shutil.rmtree(tmp)
-        shutil.move(str(data_src), str(tmp))
-    except OSError as exc:
-        raise SystemExit(f"备份 data/ 失败，为避免数据丢失已终止构建: {exc}") from exc
-    moved.append(data_src)
-    return moved
-
-
-def restore_data_dirs(out_dir: Path, moved: list[Path]) -> None:
-    """把 preserve_data_dirs 移出的目录移回重建后的 out_dir。"""
-    for orig in moved:
-        tmp = out_dir.with_name(out_dir.name + ".datatmp")
-        if not tmp.exists():
-            raise SystemExit("data/ 备份目录丢失，请检查磁盘状态")
-        try:
-            shutil.move(str(tmp), str(orig))
-        except OSError as exc:
-            raise SystemExit(f"回填 data/ 失败: {exc}（备份仍在 {tmp}）") from exc
-
-
 def copy_runtime_files(out_dir: Path) -> None:
     """Copy protocol parsers, data files, and web app to deployment directory."""
     # Copy root-level Python files and JSON data
@@ -207,30 +177,10 @@ def copy_runtime_files(out_dir: Path) -> None:
     if validator_src.exists():
         shutil.copytree(validator_src, out_dir / "validator", dirs_exist_ok=True)
 
-    # Copy reflex_web directory (excluding build artifacts)
+    # Copy reflex_web directory (excluding build artifacts **and runtime data**)
     web_dest = out_dir / "reflex_web"
-    _BASE_IGNORE = {
-        "__pycache__",
-        ".states",
-        ".tests",
-        "tests",
-        "reflex.lock",
-        "uploaded_files",
-    }
-
-    def _ignore_web_only(src: str, names: list[str]) -> set[str]:
-        src_path = Path(src)
-        ignored = set(_BASE_IGNORE)
-        for name in names:
-            if name.endswith(".spec") or name.endswith(".pyc"):
-                ignored.add(name)
-        if src_path.resolve() == REFLEX_WEB.resolve():
-            for name in names:
-                if name in {"build", "dist"}:
-                    ignored.add(name)
-        return ignored
-
-    shutil.copytree(REFLEX_WEB, web_dest, ignore=_ignore_web_only)
+    # 忽略规则（含运行时数据 data/ downloads/ admin_config.json）在 deploy_common 单一来源
+    shutil.copytree(REFLEX_WEB, web_dest, ignore=deploy_common.ignored_web_entries)
 
 
 def install_embedded_python_windows(out_dir: Path, python_version: str) -> Path:
@@ -366,6 +316,7 @@ def write_launchers(out_dir: Path, python_exe: Path, is_windows: bool) -> None:
         out_dir.joinpath("start_web.cmd").write_text(
             "@echo off\r\n"
             'cd /d "%~dp0"\r\n'
+            f"{deploy_common.data_env_cmd()}"
             f'"{python_rel}" "reflex_web\\run_app.py" --host {host} --port 8080 %*\r\n',
             encoding="utf-8",
         )
@@ -373,6 +324,7 @@ def write_launchers(out_dir: Path, python_exe: Path, is_windows: bool) -> None:
         # PowerShell launcher
         out_dir.joinpath("start_web.ps1").write_text(
             "Set-Location $PSScriptRoot\r\n"
+            f"{deploy_common.data_env_ps1()}"
             f"& .\\python\\python.exe .\\reflex_web\\run_app.py --host {host} --port 8080 $args\r\n",
             encoding="utf-8",
         )
@@ -384,11 +336,15 @@ def write_launchers(out_dir: Path, python_exe: Path, is_windows: bool) -> None:
             "#!/usr/bin/env bash\n"
             "set -e\n"
             'cd "$(dirname "$0")"\n'
+            f"{deploy_common.data_env_sh()}"
             f'exec "./python/bin/python" "reflex_web/run_app.py" --host {host} --port 8080 "$@"\n',
             encoding="utf-8",
         )
         out_dir.joinpath("start_web.sh").chmod(0o755)
         readable_python = "./python/bin/python"
+
+    # 旧版本数据搬迁辅助（一次性）
+    deploy_common.write_migration_helper(out_dir, is_windows=is_windows)
 
     # Deployment instructions
     out_dir.joinpath("部署说明.txt").write_text(
@@ -404,9 +360,11 @@ def write_launchers(out_dir: Path, python_exe: Path, is_windows: bool) -> None:
         "访问地址：http://服务器IP:8080\n\n"
         "修改端口：\n"
         f"  start_web.cmd --port 9000\n\n"
+        "升级：本目录整体替换即可，运行数据在上一级 nw_web_data/ 中不受影响。\n"
         "注意事项：\n"
         "- 本部署目录仅支持 Windows (amd64)\n"
-        "- 如需 Linux 版本，请在 Linux 机器上重新构建\n",
+        "- 如需 Linux 版本，请在 Linux 机器上重新构建\n"
+        f"{deploy_common.data_dir_note()}",
         encoding="utf-8",
     )
 
@@ -455,12 +413,10 @@ def main() -> None:
     ensure_frontend()
 
     # 输出目录清理与增量保留
-    # 增量模式：保留已装好的 python/（解释器 + site-packages）与 data/（反馈数据），仅重建其余源码层。
-    # 完整模式：重建全部，但 data/（用户反馈数据）依然保留。
-    # 这样重复构建只复制改动的源码/数据文件，秒级完成，无需重新下载解释器和依赖。
-    data_backup: list[Path] = []
+    # 增量模式：保留已装好的 python/（解释器 + site-packages），仅重建其余源码层。
+    # 运行数据**不在本目录内**（见 deploy_common 说明：数据根在部署目录上一级的 nw_web_data/），
+    # 故本步骤不再需要保留任何数据目录。
     if out_dir.exists():
-        data_backup = preserve_data_dirs(out_dir)
         keep_python = args.skip_deps and (out_dir / "python").exists()
         try:
             if keep_python:
@@ -490,11 +446,9 @@ def main() -> None:
     # Copy runtime files
     print("\n[1/4] 复制运行时文件...")
     copy_runtime_files(out_dir)
-
-    # 回填反馈数据目录（必须在源码复制后，避免被空 data/ 覆盖语义混乱）
-    if data_backup:
-        restore_data_dirs(out_dir, data_backup)
-        print("    保留 data/（用户反馈数据库与截图）")
+    print(
+        "    运行数据（data/ downloads/ admin_config.json）不在产物内，见下方数据目录说明"
+    )
 
     # Install embedded Python（增量模式若 python/ 已有效则跳过）
     print("\n[2/4] 安装内嵌 Python...")
@@ -517,11 +471,17 @@ def main() -> None:
     print()
     print("=" * 60)
     print(f"  部署目录: {out_dir}")
+    print(
+        f"  数据目录: {out_dir.parent / deploy_common.RUNTIME_DATA_DIRNAME}（默认，部署目录的上一级）"
+    )
     print()
     print("  部署步骤:")
     print("    1. 把 " + out_dir.name + " 整个目录复制到目标机器")
     print("    2. 运行 start_web.cmd (Windows) 或 ./start_web.sh (Linux)")
     print("    3. 浏览器访问 http://服务器IP:8080")
+    print()
+    print("  升级：替换部署目录即可，数据在部署目录之外不受影响；")
+    print("        旧版本数据用产物里的 迁移数据 脚本搬到数据目录。")
     print()
     if args.skip_deps:
         print("  本次为增量构建，python/ 依赖目录未被重建。")

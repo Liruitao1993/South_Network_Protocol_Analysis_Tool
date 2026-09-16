@@ -95,6 +95,31 @@ def main():
     if str(resource_dir) not in sys.path:
         sys.path.insert(0, str(resource_dir))
 
+    # ===== 运行时数据目录（必须在导入应用之前准备好）=====
+    # 数据根由 reflex_web/app_data.py 唯一决定（NW_WEB_DATA_DIR → 冻结态 exe 同级 → 代码目录）。
+    # 顺序要紧：**先迁移旧版树内数据，再建目录骨架**——否则空目录会被当成"目标已占用"而跳过迁移。
+    from reflex_web import app_data
+
+    paths = app_data.resolve_paths()
+    print(f"[data] 运行数据目录: {paths.data_root}")
+    try:
+        for note in app_data.migrate_legacy():
+            print(f"[data] {note}")
+        app_data.ensure_dirs(paths)
+    except OSError as exc:
+        # 冻结态的数据根是「exe 同级目录」（不再是可以随手写的临时目录），
+        # 若放在 C:\Program Files 这类受保护位置就会不可写 → 给出可执行的指引而不是裸栈。
+        print(
+            f"[data] 数据目录不可写: {paths.data_root}（{exc}）\n"
+            f"[data] 请把 {app_data.ENV_VAR} 指到可写位置后重启，例如：\n"
+            f"[data]   CMD:        set {app_data.ENV_VAR}=D:\\nw_web_data\n"
+            f"[data]   PowerShell: $env:{app_data.ENV_VAR} = 'D:\\nw_web_data'",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    print(f"[data]   data/     -> {paths.feedback_dir}")
+    print(f"[data]   downloads/-> {paths.downloads_dir}")
+
     # 延迟导入（环境变量设置后）
     import uvicorn
 
@@ -215,8 +240,8 @@ def main():
         """服务 downloads/ 目录下的 exe 与截图（/download/ 前缀路由）"""
         from urllib.parse import unquote
 
-        # downloads 目录: reflex_web/downloads/（resource_dir 是 reflex_web/）
-        downloads_dir = resource_dir / "downloads"
+        # downloads 目录由 app_data 统一决定（部署态在部署目录之外）
+        downloads_dir = paths.downloads_dir
         # 支持 /download/ 和 /api/download/ 两种前缀
         if path.startswith("/api/download/"):
             filename = unquote(path[len("/api/download/") :])
@@ -292,8 +317,8 @@ def main():
         import mimetypes
         from urllib.parse import unquote
 
-        # 截图目录: reflex_web/data/uploads/feedback/（resource_dir 是 reflex_web/）
-        fb_dir = (resource_dir / "data" / "uploads" / "feedback").resolve()
+        # 截图目录由 app_data 统一决定（部署态在部署目录之外）
+        fb_dir = paths.uploads_dir.resolve()
         if path.startswith("/api/fbimg/"):
             filename = unquote(path[len("/api/fbimg/") :])
         else:

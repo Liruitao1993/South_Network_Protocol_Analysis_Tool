@@ -182,10 +182,18 @@ python reflex_web/build_embedded_deploy.py --python-version 3.12
   python reflex_web/build_embedded_deploy.py --python-version 3.12
   ```
 
-- 增量模式逻辑：先移走 `out_dir/python/`，重建其余目录，再移回——保留解释器与依赖，仅刷新源码/数据/前端。
+- 增量模式逻辑：先移走 `out_dir/python/`，重建其余目录，再移回——保留解释器与依赖，仅刷新源码/前端。**运行数据不在部署目录内**（见下），故重建无需保留任何数据目录。
 - `--skip-deps` 的前提是目标部署目录 `dist/reflex_web_embedded/python/` 已存在且完整（来自上次完整构建）。
 - 依赖锁文件 `requirements.lock` 存在且不旧于 `requirements.in` 时，uv 编译自动跳过（依赖未变则复用）。
 - 若不慎删了 `dist/reflex_web_embedded/python/`，需回到完整模式重建一次。
+
+**Web 运行数据目录（1.23.14 起，改部署/存储前必读）：**
+
+运行时会写盘的东西（`data/feedback.db`、`data/frameshare.db`、`data/uploads/feedback/`、`downloads/`、`admin_config.json`）**不在部署目录内**，默认落在**部署目录的上一级** `nw_web_data/`，由启动脚本注入环境变量 `NW_WEB_DATA_DIR` 指定（已设则不覆盖）；路径解析的唯一来源是 `reflex_web/reflex_web/app_data.py`（解析顺序：`NW_WEB_DATA_DIR` → 冻结态 exe 同级 `nw_web_data/` → 回落代码目录 = 开发态现状）。
+
+- 两个构建脚本的忽略规则（`reflex_web/deploy_common.py::ignored_web_entries`）**必须**排除 `data/`、`admin_config.json`，以及 `downloads/` 里的**运行时产物**（`*.exe`、`version.json`、`archive/`）；`downloads/` 下的**随包静态资源**（`client_screenshot.png` / `client_readme.md` / `README.md`）反而必须保留——`downloads/` 用**白名单**（`deploy_common.DOWNLOADS_ASSETS`，取自 `app_data.PACKAGED_DOWNLOAD_ASSETS`），黑名单会漏掉 `build/`、`dist/` 这类开发机产物（实测曾漏约 25MB）。
+- 升级 = 替换部署目录，数据在目录外不受影响；产物内附 `迁移数据.cmd/sh` 用于把旧版（数据在代码目录内）的数据搬到 `nw_web_data/`。
+- 详见 `reflex_web/离线部署.md` 与 `AGENTS.md §8` 陷阱 38。
 
 **编译原则（exe打包）：**
 
@@ -339,10 +347,16 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
 │       ├── reflex_web/lookup_utils.py #  查询页数据源
 │       ├── reflex_web/feedback_model.py #   反馈存储层：FeedbackItem(rx.Model/SQLite，source/sys_info 列) + submit_from_api/parse_multipart/频率限制（GUI API 复用，1.20.0 起）
 │       ├── reflex_web/share_model.py    #   报文分享存储层（frameshare.db）：ShareItem + submit_share/normalize_hex/list_page 搜索（Web /share 页与 GUI 共享，1.21.0 起）
-│       ├── reflex_web/admin_release.py  #   管理员口令（admin_config.json）+ 发布管理（反馈管理页复用口令）
-│       ├── data/                   #   反馈运行时数据（feedback.db + uploads/feedback/，gitignore，部署重建时保留）
-│       └── downloads/              #   发布产物（首页数据源）：version.json（版本徽章/下载地址）、client_screenshot.png
+│       ├── reflex_web/app_data.py    #   运行时数据路径唯一来源（纯 stdlib）：NW_WEB_DATA_DIR → 冻结态 exe 同级
+│       │                             #   nw_web_data/ → 回落代码目录（开发态现状）；含 ensure_dirs/migrate_legacy（1.23.14 起）
+│       ├── deploy_common.py         #   两个部署构建脚本共用：忽略规则（排除 data/downloads/admin_config.json）、
+│       │                             #   启动脚本注入 NW_WEB_DATA_DIR、迁移数据脚本生成（1.23.14 起）
+│       ├── reflex_web/admin_release.py  #   管理员口令（admin_config.json，路径由 app_data 决定）+ 发布管理
+│       ├── data/                   #   开发态运行数据（feedback.db/frameshare.db + uploads/feedback/，gitignore）
+│       └── downloads/              #   开发态发布产物（首页数据源）：version.json（版本徽章/下载地址）、client_screenshot.png
 │                                   #   （Hero 截图，缺图降级占位卡）、南网协议解析工具*.exe（体积读 stat）、client_readme.md
+│                                   #   ※ 部署态：data/、admin_config.json 与 downloads/ 里的运行时产物位于部署目录**之外**的
+│                                   #     <部署上级>/nw_web_data/；downloads/ 里的随包资产仍随代码走。见 §2 与 §8 陷阱 38
 │
 ├── 验证引擎 validator/ ── BaseValidator + 各协议 validator，统一 ValidationResult
 │   ├── __init__.py                 # 导出所有 validator
@@ -722,7 +736,8 @@ python test/test_web_batch_paging.py    # Reflex Web 版批量摘要分页与搜
 python test/test_web_spectrum.py        # Reflex Web 版频谱图（64 项：复用桌面纯逻辑层守卫 + SVG 几何 + SpectrumState 端到端（联动/标记/峰值/IBW/错误路径）+ 组件树，1.23.12 起）
 python test/test_web_theme.py           # Reflex Web 版主题系统（89 项：预设/维度清单 + token 契约与浅色等价 + CSS 结构 + 标记配色单一来源 + ThemeState 端到端 + 无裸 hex 守卫，1.23.12 起）
 python test/test_web_landing.py         # Reflex Web 版产品首页（100 项：内容不变式 + 与 protocol_registry 逐行对拍防漂移 + CLI 参数对 main_gui 源码 + 组件树/testid 契约 + 缺图降级互斥 + 死链白名单 + 路由与页面搬迁 /→首页 /app→工具，1.23.14 起）
-python test/test_web_feedback.py        # Web 版问题反馈（存储层/截图校验/防穿越/部署 data/ 保留，1.19.0 起）
+python test/test_web_data_paths.py      # Web 运行时数据外置（数据根解析矩阵 env/冻结态/默认 + 消费方单一来源 + 迁移幂等不覆盖 + 构建产物排除 data/downloads/admin_config.json 端到端 + 启动脚本注入 NW_WEB_DATA_DIR，1.23.14 起）
+python test/test_web_feedback.py        # Web 版问题反馈（存储层/截图校验/防穿越/run_app 语法，1.19.0 起）
 python test/test_feedback_api.py        # 反馈提交 API（submit_from_api/parse_multipart/频率限制/旧库迁移，31 项，1.20.0 起）
 python test/test_feedback_dialog.py     # GUI 反馈对话框（URL/config/校验/sys_info/offscreen 冒烟，30 项，1.20.0 起）
 python test/test_frame_share.py         # 报文分享（normalize_hex/submit_share/Store 分页搜索/GUI payload+offscreen，57 项，1.21.0 起）
@@ -784,6 +799,13 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 35. **dev 模式下 Reflex 前端不代理任何后端路径**（1.23.14 实测）：`reflex run --env dev` 时前端（:3000）与后端（:8000）是**跨源、绝对地址**通信（`reflex_web/.web/env.json` 里 `EVENT: ws://localhost:8000/_event`），Vite/react-router **没有** `/api`、`/download`、`/fbimg` 等代理规则——这些路径在 :3000 一律返回 `200 + text/html`（SPA 兜底，约 3.5KB），只有直连 `:8000` 才是真资源。因此 **Web 页面里不能用相对 URL 引用后端静态资源**（`<img src="/api/download/x.png">` 在 dev 必然破图）；`reflex_web.py:11851` 那条「Vite 会把 /api/* 代理到后端」的注释与实测不符。prod（`run_app.py` 单端口挂载）才同源可用。首页 Hero 截图因此沿用 `State.download_image_data_url` 的 base64 data URL（已验证通道）；**遗留缺陷**：`feedback_model.screenshot_url()` 返回相对路径 `/fbimg/<name>`，Web 反馈列表在 dev 下截图同样是破图（prod 正常），待单独修。
 36. **顶栏版本徽章是 import 期快照，不是实时值**（1.23.14 起）：`version_badge()` 读 `reflex_web/downloads/version.json`（`_read_published_version()` 在模块导入时执行一次）→ ① 通过「发布管理」Tab 发布新版本后，**顶栏徽章要重启进程才变**（同页的 `State.download_version` 是实时的，二者会短暂不一致；需要实时就把徽章改成读 State）；② `reflex_web/downloads/version.json` **被 `.gitignore` 排除**（`reflex_web/.gitignore`）→ 任何没有该文件的部署，徽章**直接不渲染**（设计意图：宁可不显示，也不显示写死的假版本，`v1.13.0` 就是这么骗了很久）；③ 首页版本徽章/下载按钮读的是 `version.json`（State，实时），与顶栏同源但刷新时机不同，排查「版本号对不上」先看这两条。
 37. **Web 守卫测试必须能抓住回退，否则是假绿**（1.23.14 复核结论，`test/test_web_landing.py` 已按此改造）：两类踩过的自洽假绿——① **白名单与渲染同源**：`ALLOWED_HREFS` 若由 `INTERNAL_LINKS` 派生、渲染也由它生成，则改错链接值白名单会跟着变，死链断言恒真（改为**字面量白名单** + 读组合层渲染串取 `to:` 目标的**接线断言**）；② **子串存在性被无关代码满足**：`f'"{flag}"' in main_gui_src` 会被 `any(a in ("--parse", …))` 这类元组判断满足，与真实解析分支无关（改为断言 `arg == "--flag"`，并抽出每条命令的**全部** flag）。新增此类守卫后用**变异反证**自检：临时把产品代码改回错误形态，确认测试**变红**再还原。
+38. **Web 运行时数据必须在部署目录之外，且构建产物必须排除它**（1.23.14 起，改部署/存储/paths 前必读）：
+    - **位置**：`data/`（feedback.db + frameshare.db + uploads/feedback/）、`downloads/`（发布管理上传的 exe）、`admin_config.json`（管理员口令）。运行时路径**唯一来源**是 `reflex_web/reflex_web/app_data.py`：`NW_WEB_DATA_DIR` → 冻结态 exe 同级 `nw_web_data/` → 回落代码目录（开发态现状）。**不要再在别处拼路径**（`load_download_info` 曾用「两候选目录猜测」，`run_app.py` 中间件曾用 `resource_dir/"data"`，都已被单一来源取代）。
+    - **为什么必须外置**：升级最常见的方式是「删掉旧部署目录 → 拷新包」，数据在代码目录内会**在新程序启动前**就被删除，任何「启动时自动迁移」都来不及 → 数据根放**部署目录的上一级** `<parent>/nw_web_data`，由启动脚本注入变量，替换部署目录天然不动它。
+    - **构建必须排除**：两个构建脚本共用 `reflex_web/deploy_common.py::ignored_web_entries`，排除 `data/`、`admin_config.json`（整目录/文件）以及 `downloads/` 里的**运行时产物**（`*.exe`、`version.json`、`archive/`）——否则会把**构建机的开发库**打进部署包，合并式拷贝时用开发数据顶掉服务器生产数据（比丢掉更难发现）。
+    - **`downloads/` 里混着两类东西，规则不同**：`client_screenshot.png` / `client_readme.md` 是**随包静态资源**（必须进包，否则新部署开箱看不到截图/说明；管理员也可在「发布管理」Tab 上传覆盖——那份写数据根、优先级更高）；忽略规则用**白名单** `deploy_common.DOWNLOADS_ASSETS`（取自 `app_data.PACKAGED_DOWNLOAD_ASSETS`），黑名单会漏 `build`/`dist`（实测漏 25MB）；`*.exe` / `version.json` / `archive/` 是**运行时发布产物**（只从数据根读）。程序侧用 `app_data.resolve_download_asset(name)`：**数据根优先、缺失回落随包资源**。改 `load_download_info` 的截图/README 两处或忽略规则时不要把这条弄丢。
+    - **单文件 exe 的坑**：`reflex_web_exe.spec` 是 onefile，`sys._MEIPASS` 每次启动解包、退出即删 ⇒ **绝不能**把数据写在 `_MEIPASS` 下（`run_app.py` 曾把 `resource_dir` 取成 `_MEIPASS` 用于数据路径，等于每次重启清零）；冻结态取 `Path(sys.executable).parent / "nw_web_data"`。
+    - **迁移**：`app_data.migrate_legacy()` 只搬「旧有、新无」，**绝不覆盖**，失败只告警不阻断启动；`downloads/` 里的随包资产**不搬**（否则数据根会永久压住后续版本的随包更新）；产物内附 `迁移数据.cmd/sh` 供「先删旧目录」式升级手工搬。文档不得再承诺「重建时自动保留 data/」（旧的 `preserve_data_dir` 逻辑保护的是 `<out_dir>/data`，而真实路径是 `<out_dir>/reflex_web/data` ⇒ 该保护从未生效）。
 
 ---
 
@@ -818,6 +840,8 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 - 新增 `reflex_web/reflex_web/landing_web.py`（**纯内容 + 纯展示组件，不 import `reflex_web`**，运行时值全参数注入 → 可脱离 State/浏览器构建整页断言）；导航改造 4 处站内链接无死链（品牌块 → `/`、「返回主页」→「在线工具」`/app`、独立页管理员登录 → `/app`、share/feedback-admin 回跳 → `/app`）；主题控件抽 `theme_controls_compact()` 两端共用
 - 放弃「截图改 URL + 删 base64 字段」的原设计：实测 **dev 模式 Reflex 前端跨源、不代理任何后端路径**（`:3000` 对 `/api/*`、`/download/*`、`/fbimg/*`、`/ping` 一律返回 SPA HTML）→ 相对路径图片在 dev 必破图，沿用 base64 通道。另修 420px 视口横向溢出（顶栏 `flex-wrap`）与深色下「浅色强调 + 白字」对比度不足（`html.dark` 覆盖改 `var(--bg)` 字色）
 - 新增 `test/test_web_landing.py`（100 项，含与 `protocol_registry` 逐行对拍防漂移、死链白名单 + **跨页面接线断言**（读 `tool_page()`/`share_page()`/`feedback_page()`/`feedback_admin_page()` 渲染串取 `to:` 目标）、路由搬迁断言；已用**变异反证**确认能抓住「链接语义被改回去」与「CLI 解析分支被删」），登记 `release_check.py:CORE_TESTS`；`test_web_spectrum`/`test_web_theme` 的 `app.index()` 同步改名；playwright 用例 goto `/app` + 新增首页冒烟
+
+- **Web 运行时数据外置（任务 09-16-web-data-externalization）**：反馈库/分享库/截图、发布管理上传的 exe、管理员口令原先都在代码目录内（升级替换目录即丢，且构建脚本会把**构建机的开发库**打进包）→ 新增 `reflex_web/reflex_web/app_data.py` 作为运行时路径唯一来源，数据根默认放**部署目录的上一级** `nw_web_data/`（`NW_WEB_DATA_DIR` 由启动脚本注入、可覆盖），两个构建脚本共用 `reflex_web/deploy_common.py`（忽略规则排除运行时数据 + 生成 `迁移数据.cmd/sh`），并修掉 onefile exe 把数据写进 `_MEIPASS`（每次重启清零）的缺陷；删除从未生效的 `preserve_data_*`/`restore_data_*` 与「重建时自动保留 data/」的错误承诺，新增 `test/test_web_data_paths.py`
 
 ### 1.23.13 — 2026-09-15
 

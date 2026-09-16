@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """发布前自检：版本对齐 + 关键数据文件 + 核心测试一键跑。
 
 用法（项目根执行）：
@@ -86,6 +85,7 @@ CORE_TESTS = [
     "test/test_web_spectrum.py",
     "test/test_web_theme.py",
     "test/test_web_landing.py",
+    "test/test_web_data_paths.py",
     "test/test_sack_fix.py",
     "test/test_monitor_deframe.py",
     "test/test_monitor_plc2_deframe.py",
@@ -137,10 +137,8 @@ def read_app_meta() -> tuple[str, str, list[str]]:
         raise RuntimeError("无法从 main_gui.py 解析 APP_VERSION / BUILD_DATE")
     version = vm.group(1)
     build_date = bm.group(1)
-    # CHANGELOG 顶层 ("x.y.z", ...) 
-    changelog_versions = re.findall(
-        r'^\s*\(\s*"(\d+\.\d+\.\d+)"\s*,', text, re.M
-    )
+    # CHANGELOG 顶层 ("x.y.z", ...)
+    changelog_versions = re.findall(r'^\s*\(\s*"(\d+\.\d+\.\d+)"\s*,', text, re.M)
     return version, build_date, changelog_versions
 
 
@@ -278,7 +276,9 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="南网协议解析工具 发布前自检")
     ap.add_argument("--skip-tests", action="store_true", help="不跑测试")
     ap.add_argument("--with-gui", action="store_true", help="核心测试 + offscreen GUI")
-    ap.add_argument("--sync-iss", action="store_true", help="同步 Inno Setup MyAppVersion")
+    ap.add_argument(
+        "--sync-iss", action="store_true", help="同步 Inno Setup MyAppVersion"
+    )
     args = ap.parse_args(argv)
 
     print(f"release_check @ {ROOT}")
@@ -294,9 +294,7 @@ def main(argv=None) -> int:
         check_tests(rep, args.with_gui)
 
     print()
-    print(
-        f"结果: PASS={len(rep.oks)}  FAIL={len(rep.fails)}  WARN={len(rep.warns)}"
-    )
+    print(f"结果: PASS={len(rep.oks)}  FAIL={len(rep.fails)}  WARN={len(rep.warns)}")
     if rep.fails:
         print("失败项:")
         for f in rep.fails:
