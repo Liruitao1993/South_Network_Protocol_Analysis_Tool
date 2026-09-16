@@ -552,3 +552,24 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Status
 
 [OK] **Completed**
+
+
+## Session 22: 收口 GUI 优化批次步骤 5/6 + 归档父容器（1.23.16）
+
+**Date**: 2026-09-16
+**Task**: 收口 GUI 优化批次步骤 5/6 + 归档父容器（1.23.16）
+**Branch**: `main`
+
+### Summary
+
+把 09-15-gui-batch-parse-perf 的步骤 5/6 真正做完并关掉待办（此前只是忘标完成）：步骤 5 核对确认已完备（test_gui_batch_perf.py 99 项全过 + 已登记 CORE_TESTS；4 个迁移/既有批量测试在门槛内均 [PASS]）；步骤 6 补齐 4 处真实缺口——CHANGELOG 1.23.16 补记死代码清理（main_gui.py -301 行）与「配置→模型API管理」菜单接线失效修复、AGENTS.md 两处版本陈述滞后修正（§1 现 1.23.15→1.23.16、§2 Inno Setup 段 1.23.14→1.23.16）、BUILD_DATE 2026-09-15→2026-09-16。门槛从 PASS=60/FAIL=0/WARN=1 变成 PASS=61/FAIL=0/WARN=0 —— 归档时 DoD 写的「无 FAIL/WARN」到这一刻才字面成立。另：提交后 pi-lens 自动格式化了 3 个已提交文件（README 空行、test_app_exit 的 import 重排与未用 thread_registry 移除、test_theme_settings 重排），逐项核对无实质损失（断言失败消息未丢、thread_registry 确实只出现在字符串/注释中）后纳入 0f010a6。最后把父容器 09-15-gui-optimization 归档，并在其 prd.md 追加「跨子任务验收结果」记录（3 个子任务的提交/版本、5 条验收标准逐条核对、复核阶段另发现的 3 个真实缺陷、已知偏差与遗留）。至此 GUI 优化批次三子任务全部完成并归档，活跃任务里已无 gui-* 条目。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0f010a6` | (see git log) |
+
+### Status
+
+[OK] **Completed**

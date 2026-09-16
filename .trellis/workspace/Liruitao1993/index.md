@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 21
+- **Total Sessions**: 22
 - **Last Active**: 2026-09-16
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~554 | Active |
+| `journal-1.md` | ~575 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 22 | 2026-09-16 | 收口 GUI 优化批次步骤 5/6 + 归档父容器（1.23.16） | `0f010a6` | `main` |
 | 21 | 2026-09-16 | GUI 死代码清理 + 修模型API管理菜单失效（1.23.16） | `58f9ad6` | `main` |
 | 20 | 2026-09-16 | GUI 窗口/分栏/列宽状态持久化（1.23.16） | `adb7064` | `main` |
 | 19 | 2026-09-16 | GUI 批量解析后台化 + 详情按需 + 过滤提速（1.23.15） | `560df22`, `41a9935`, `1c5b13a` | `main` |
