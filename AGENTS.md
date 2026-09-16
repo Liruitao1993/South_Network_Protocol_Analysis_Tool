@@ -425,7 +425,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
     ├── NW_command.json             # 南网预设命令
     ├── GW_command.json             # 国网预设命令
     ├── command.json                # PLC RF 命令字
-    ├── config.json                 # 串口配置
+    ├── config.json                 # 串口配置 + 顶层 window 段（窗口几何/分栏/列宽，见 §8 陷阱 42）
     ├── test_plan.json              # 测试方案（自动持久化）
     ├── archive_data.json           # 档案数据（持久化）
     ├── lme_all_tables.json         # LME 全表数据（解析缓存）
@@ -826,6 +826,11 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
     - **迁移**：`app_data.migrate_legacy()` 只搬「旧有、新无」，**绝不覆盖**，失败只告警不阻断启动；`downloads/` 里的随包资产**不搬**（否则数据根会永久压住后续版本的随包更新）；产物内附 `迁移数据.cmd/sh` 供「先删旧目录」式升级手工搬。文档不得再承诺「重建时自动保留 data/」（旧的 `preserve_data_dir` 逻辑保护的是 `<out_dir>/data`，而真实路径是 `<out_dir>/reflex_web/data` ⇒ 该保护从未生效）。
 40. **批量解析已后台化：批量路径不得再假设它同步完成**（1.23.15 起，改批量/详情/导出前必读）：`parse_batch()` 现在**立即返回**，逐帧解析在 `batch_parse_worker.BatchParseWorker` 线程跑、结果按 200 帧/片经信号回填。因此：① **测试**里 `win.parse_batch()` 之后必须 `wait_batch(win)`（`test/_batch_wait.py`）再断言 `batch_results`，否则读到空集；② **详情/导出/复制/时序图不得再直接读 `result["_table_data"]`**——记录里已没有它（改为 `_has_detail`/`_ed_type`），一律走 `MainWindow._get_frame_table_data(index)`（LRU 50 帧）或给导出函数传 `table_data_resolver=`（`sequence_diagram_widget.build_sequence_model_csg` 同理）；③ 新增 QThread 必须 `thread_registry.track(self, 名称)`；④ worker 内**禁止触碰 widget**，解析参数一律由 `_current_parse_params()` 快照传入。
 41. **解析器带「跟帧可变状态」，同一帧在不同解析历史下结果可能不同**（1.23.15 实测 934/49,532 帧不一致）：`csg_new_gen_parser.parse_to_table` 只在特定分支写 `_efc_symbol_count`/`_ofdma_frame_type`/`_ofdma_station_count`，**未在入口重置** ⇒ 前序帧影响当前帧的解析结果；单帧页、批量解析、详情重解析三者历史不同 → 表格差 1 行。批量侧现用 `capture/apply_cross_frame_state`（记录字段 `_ctx`，仅非默认值时存）锁存「帧前状态」并在重解析前复原。**任何「同一帧在两处解析结果必须相同」的功能（详情/对比/导出/时序图）都要考虑这条**；根治需在解析器入口重置全部状态，但那会改变批量结果本身 ⇒ 属独立任务。
+42. **窗口/分栏/列宽状态持久化只走 `_save_app_config`（1.23.16 起）**：几何/分栏/列宽存 **`config.json` 顶层 `window` 段**（`_collect_window_state` 采集、`_apply_window_state` 套用、`_reset_window_layout` 清空）。改这块时注意：
+    - **不要塞进 `ui` 段**：该段每次保存都由 `ThemeManager.to_config` **整体重建**，塞进去会被下一次保存抹掉；也不要在 `closeEvent` 里另写一份 JSON（保存统一走 `_save_app_config`）。
+    - **写出时机只有 `closeEvent` 的真实退出路径**（含托盘「退出」与自动更新重启）；最小化到托盘（`event.ignore()` 分支）不写。`_save_app_config` 其它调用点沿用载入值，空则删键（避免把中途布局当退出布局）。
+    - **恢复必须容错**：几何与任一 `QScreen.availableGeometry()` 无交集（换显示器/降分辨率）或 base64 损坏 → 回落默认居中尺寸；列宽按**表名 + 列数**匹配，列数不符（协议切换重建查询页）即丢弃该表。
+    - **测试不得污染真实 `config.json`**：`MainWindow` 关闭时会写出该段，offscreen 测试必须先沙箱——`main_gui.data_path` **与** `app_paths.data_path` 都要 patch（`llm_preprocess_widget.save_config()` 内部是 `from app_paths import data_path`，只 patch 前者会把真实配置写掉，`test_pp_cli.py` 的「真实 config.json 未被测试改写」断言就是这么抓到的）；样板见 `test/test_window_state.py` 的 `Sandbox`（1.23.16 起）。
 
 ---
 

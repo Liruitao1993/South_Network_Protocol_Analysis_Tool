@@ -13,7 +13,7 @@ app.exec()。X 按钮最小化到托盘后窗口已 hide()，托盘「退出」�
     python test/test_app_exit.py
 """
 
-import _path_setup  # noqa: E402
+import _path_setup  # noqa: E402,F401
 
 import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -26,6 +26,12 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import main_gui  # noqa: E402
 import thread_registry  # noqa: E402
+
+# 本测试会 show/close 主窗口（测托盘与关闭路径）→ 退出路径会写 config.json；
+# 沙箱到临时目录，避免把 offscreen 合成几何写进开发机真实配置
+import _config_sandbox  # noqa: E402
+
+_config_sandbox.install()
 
 
 class _FakeTray:

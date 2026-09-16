@@ -8,6 +8,7 @@ import sys
 
 # 在导入 PySide6 之前屏蔽 Qt DirectWrite 字体回退警告（无害噪音）
 os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.fonts=false")
+import base64
 import json
 import subprocess
 from collections import OrderedDict
@@ -110,10 +111,38 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.15"
+APP_VERSION = "1.23.16"
 BUILD_DATE = "2026-09-15"  # 编译日期，每次打包前更新
 
+# 窗口状态持久化（config.json 顶层 "window" 段）的表格清单：
+# 只收「用户拖动列宽才有意义」的主表；弹窗/克隆表不做持久化（见任务 PRD 的
+# Out of Scope）。恢复时按表名 + 当前列数匹配，列数不符即丢弃（协议切换会重建
+# 查询页表格且列数不同）。
+_WINDOW_STATE_TABLES = (
+    "result_table_widget",
+    "batch_summary_table",
+    "batch_detail_table",
+    "di_table",
+    "obis_table",
+    "dlt645_di_table",
+    "cmd_table",
+    "gdw_table",
+    "eb_di_table",
+    "oad_table",
+)
+
 CHANGELOG = [
+    (
+        "1.23.16",
+        "2026-09-16",
+        [
+            "**窗口 / 分栏 / 列宽状态持久化（任务 09-15-gui-window-state-persist）**：主窗口几何、`result_splitter` 比例、10 张关键表格的列宽在退出时存入 `config.json`、启动时恢复；配置菜单新增「恢复默认窗口布局」；带**屏外回落**（拔掉外接显示器后恢复的坐标不再可见 → 回落默认居中，不再出现“窗口跑到屏幕外”）与**非法值容错**（`config.json` 被手改成非法值时逐项跳过、不阻断启动）",
+            "存储归属与写盘时机：状态存在**顶层 `window` 段**而不是 `ui` 段——`ui` 段每次都由 `ThemeManager.to_config()` **整体重建**，写进去会被下一次保存抹掉；只在 `closeEvent` 的**真实退出**路径写（最小化到托盘的分支提前 `return`，不写）。列宽按**列数校验**后套用（列数变了则丢弃旧值，避免按错位的宽度恢复），单列宽限 10~4000 整数",
+            "**修掉本特性引入的“测试污染真实配置”副作用**（重要）：窗口退出时会写 `config.json`，而测试会构造并关闭主窗口 → 把 offscreen 合成出来的几何（实测 684×666 这类尺寸）写进**开发机的真实 `config.json`**，用户下次启动即被套用。两道防线：① `closeEvent` 增加 `_window_shown_once` 守卫——**从未真正显示过的窗口不写盘**（覆盖所有“构造即关闭”的测试路径与 `--parse/--file/--clipboard` 路径）；② 新增共享沙箱 `test/_config_sandbox.py`，接线到实测会写盘的 `test_app_exit.py` / `test_theme_settings.py`，并在 `test_pp_cli.py` 补上 `app_paths.data_path` 的 patch（`llm_preprocess_widget.save_config()` 走的是 `from app_paths import data_path` 那份绑定，只 patch `main_gui.data_path` 盖不住它）——该测试原有的「真实 config.json 未被改写」md5 断言因此恢复成立",
+            "测试：新增 `test/test_window_state.py`（93 项：采集契约 / 内存往返 / 配置通道 / 12 组坏值容错 / 列数不匹配 / 屏外回落（打桩 `_is_rect_visible` 双向验证判据真的参与决策）/ 恢复默认 / 12 协议切换 / 退出→重启端到端），登记 `release_check.py:CORE_TESTS`；已用**变异反证**自检：把 `_apply_window_state` 改成空实现 → 测试变红 8 项，还原后全绿",
+            "顺带：3 个测试文件的 `import _path_setup` 补上 `F401` 抑制（`# noqa: E402` 不压制 F401，任何 `ruff check --fix` 都会删掉这行 → `ModuleNotFoundError: No module named 'main_gui'`；约定已写入 `AGENTS.md §7`）；`test_theme_settings.py` 删除未使用的 `QDialog` 导入",
+        ],
+    ),
     (
         "1.23.15",
         "2026-09-16",
@@ -1898,6 +1927,12 @@ class MainWindow(QMainWindow):
 
         # 恢复上次使用的协议（持久化：方便用户下次启动免选择）
         self._restore_saved_protocol()
+        # 「窗口曾被真正显示过」标志：只有显示过的窗口才值得保存几何。
+        # 否则每次构造即关闭的调用方（测试、单帧/命令行解析路径）都会把
+        # 一个从未示人的合成几何写进用户 config.json，下次启动就套用上去。
+        self._window_shown_once = False
+        # 套用上次退出时保存的窗口几何 / 分栏 / 列宽（缺失/损坏/屏外均回落默认）
+        self._apply_window_state()
         self._ui_ready = True  # UI 构造完成，此后协议切换才写盘
 
         # 分隔条拖动/尺寸变化后，子控件旧位置可能残留像素（Windows DWM 合成
@@ -3598,6 +3633,10 @@ class MainWindow(QMainWindow):
             self.tab_widget.setTabText(lookup_tab_index, spec.lookup_tab_title)
         if builder_name:
             getattr(self, builder_name)(self.protocol_lookup_tab_layout)
+        # 查询页表格刚重建（持有代码默认列宽）：先快照默认值，再套用保存的列宽。
+        # 否则切协议后用户调过的列宽会回到代码默认。
+        self._snapshot_default_column_widths()
+        self._apply_saved_column_widths()
 
     def _create_oad_lookup_content(self, layout):
         """创建698.45协议OAD查询页面内容"""
@@ -5944,6 +5983,9 @@ class MainWindow(QMainWindow):
         llm_api_action = config_menu.addAction("模型API管理(&M)...")
         update_act = config_menu.addAction("更新设置(&U)...")
         update_act.triggered.connect(self._show_update_settings_dialog)
+        config_menu.addSeparator()
+        reset_layout_act = config_menu.addAction("恢复默认窗口布局(&W)")
+        reset_layout_act.triggered.connect(self._reset_window_layout)
 
         help_menu = menubar.addMenu("帮助(&H)")
 
@@ -6628,6 +6670,8 @@ class MainWindow(QMainWindow):
     def showEvent(self, event):
         """主窗口显示（含从托盘恢复）：恢复周期更新检查。"""
         super().showEvent(event)
+        # 只有真正显示过的窗口才在退出时保存布局（见 closeEvent）
+        self._window_shown_once = True
         if self._update_settings.get(
             "check_on_start", True
         ) and self._update_settings.get("enabled", True):
@@ -6656,6 +6700,18 @@ class MainWindow(QMainWindow):
                 timer.stop()
             self._tray_manager.show_hint_once()
             return
+        # 真实退出（含托盘「退出」与自动更新重启）：先把窗口几何/分栏/列宽收进
+        # config.json 再销毁 UI（最小化到托盘的分支已在上面 return，不写）。
+        # 统一走 _save_app_config，不要在这里另写一份 JSON。
+        # 仅在窗口**真正显示过**时保存：测试与 --parse/--file/--clipboard 路径
+        # 构造的窗口从未示人，其几何是合成值，写进去会污染用户配置并在下次
+        # 启动被套用（本特性的真实副作用，实测会写入 684×666 这类 offscreen 尺寸）。
+        if getattr(self, "_window_shown_once", False):
+            try:
+                self._window_state = self._collect_window_state()
+                self._save_app_config()
+            except Exception as e:  # noqa: BLE001 - 保存失败不得阻断退出
+                print(f"[窗口状态保存失败] {e}")
         # 关闭流程开始：拦截后台更新检查线程在退出途中排队投递的回调弹窗
         self._is_closing = True
         # 回收虚拟表串口监听线程
@@ -10764,6 +10820,9 @@ class MainWindow(QMainWindow):
 
     def _load_app_config(self):
         """加载应用配置（串口 + 文件路径）"""
+        # 窗口几何/分栏/列宽状态（顶层 "window" 段）先置空：文件缺失/损坏时
+        # 保持默认布局（见 _apply_window_state）
+        self._window_state: dict[str, Any] = {}
         if not self._config_path.exists():
             self._app_config = {}
             self._file_paths = {}
@@ -10790,6 +10849,249 @@ class MainWindow(QMainWindow):
         except (TypeError, ValueError):
             self._saved_protocol = 0
         # 同步到 combo（combo 在 create_single_parse_tab 中创建，稍后初始化时设置）
+
+        # 窗口几何 / 分栏 / 列宽（顶层 "window" 段，由 closeEvent 真实退出路径写出）。
+        # 只解析成数据，不碰 widget（此时 UI 还未建）；套用在 __init__ 末尾
+        # 与 _update_protocol_lookup_tab 里。结构不合法则置空 → 回落默认布局。
+        win_cfg = self._app_config.get("window", {})
+        self._window_state = win_cfg if isinstance(win_cfg, dict) else {}
+
+    # ==================== 窗口状态持久化：几何 / 分栏 / 列宽 ====================
+    # 存储：config.json 顶层 "window" 段（**不要**塞进 "ui" 段——该段每次保存都由
+    # ThemeManager.to_config 整体重建，塞进去会被下一次保存抹掉）。
+    # 时机：载入（_load_app_config）只解析成 self._window_state；套用在 __init__ 末尾
+    # （_apply_window_state）与查询页重建后（_update_protocol_lookup_tab）；写出只在
+    # closeEvent 的真实退出路径（最小化到托盘不写）。
+    # 容错：任何键缺失 / 类型错误 / base64 损坏 / 列数不匹配 → 静默回落默认布局。
+
+    def _collect_window_state(self) -> dict:
+        """收集当前窗口几何 / 分栏 / 关键表格列宽（退出时写入 config.json）。"""
+        state: dict[str, Any] = {}
+        try:
+            state["geometry"] = base64.b64encode(bytes(self.saveGeometry())).decode(
+                "ascii"
+            )
+        except Exception:
+            pass
+
+        splitter = getattr(self, "result_splitter", None)
+        if splitter is not None:
+            try:
+                state["splitter"] = base64.b64encode(
+                    bytes(splitter.saveState())
+                ).decode("ascii")
+            except Exception:
+                pass
+            try:
+                state["splitter_sizes"] = [int(s) for s in splitter.sizes()]
+            except Exception:
+                pass
+
+        columns: list[dict[str, Any]] = []
+        for name in _WINDOW_STATE_TABLES:
+            table = getattr(self, name, None)
+            if table is None:
+                continue
+            try:
+                header = table.horizontalHeader()
+                count = int(header.count())
+                if count <= 0:
+                    continue
+                columns.append(
+                    {
+                        "name": name,
+                        "count": count,
+                        "sizes": [int(header.sectionSize(i)) for i in range(count)],
+                    }
+                )
+            except Exception:
+                continue
+        if columns:
+            state["columns"] = columns
+        return state
+
+    @staticmethod
+    def _is_rect_visible(rect) -> bool:
+        """rect 是否与任一屏幕的可用区相交（防换显示器/降分辨率后窗口丢到屏外）。"""
+        try:
+            screens = QGuiApplication.screens()
+        except Exception:
+            return True
+        if not screens:
+            return True  # 拿不到屏幕信息时不做判断，宁可不丢保存值
+        try:
+            return any(
+                screen.availableGeometry().intersects(rect) for screen in screens
+            )
+        except Exception:
+            return True
+
+    @staticmethod
+    def _default_window_rect() -> QRect:
+        """默认窗口矩形：主屏可用区内居中，尺寸不超出屏幕（低分屏不溢出）。"""
+        screen = QGuiApplication.primaryScreen()
+        if screen is None:
+            return QRect(0, 0, 1000, 700)
+        avail = screen.availableGeometry()
+        width = min(1000, int(avail.width()))
+        height = min(700, int(avail.height()))
+        x = avail.x() + max(0, (int(avail.width()) - width) // 2)
+        y = avail.y() + max(0, (int(avail.height()) - height) // 2)
+        return QRect(x, y, width, height)
+
+    def _apply_default_geometry(self):
+        """恢复默认尺寸并居中（保存值缺失/损坏/屏外时使用）。"""
+        rect = self._default_window_rect()
+        self.resize(rect.width(), rect.height())
+        self.move(rect.x(), rect.y())
+
+    def _snapshot_default_column_widths(self):
+        """快照「代码默认列宽」，供 _reset_window_layout 回落。
+
+        必须在**套用保存值之前**调用：查询页表格刚由 builder 重建、持有硬编码
+        setColumnWidth 的结果时记录。已记录过的表不覆盖（setdefault 语义），
+        避免把套用后的值当成默认值。
+        """
+        store = getattr(self, "_default_column_widths", None)
+        if store is None:
+            store = {}
+            self._default_column_widths = store
+        for name in _WINDOW_STATE_TABLES:
+            if name in store:
+                continue
+            table = getattr(self, name, None)
+            if table is None:
+                continue
+            try:
+                header = table.horizontalHeader()
+                count = int(header.count())
+                if count <= 0:
+                    continue
+                store[name] = [int(header.sectionSize(i)) for i in range(count)]
+            except Exception:
+                continue
+
+    @staticmethod
+    def _column_sizes_valid(sizes, count: int) -> bool:
+        """列宽数组必须与列数等长、且为 10~4000 的整数（坏值一律丢弃）。"""
+        if not isinstance(sizes, list) or len(sizes) != count:
+            return False
+        for width in sizes:
+            if isinstance(width, bool) or not isinstance(width, int):
+                return False
+            if not 10 <= width <= 4000:
+                return False
+        return True
+
+    def _apply_saved_column_widths(self):
+        """套用保存的列宽；表不存在 / 列数不匹配（协议切换重建）则跳过该表。"""
+        state = getattr(self, "_window_state", None)
+        block = state.get("columns") if isinstance(state, dict) else None
+        if not isinstance(block, list):
+            return
+        for entry in block:
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get("name")
+            if name not in _WINDOW_STATE_TABLES:
+                continue
+            table = getattr(self, name, None)
+            if table is None:
+                continue
+            try:
+                header = table.horizontalHeader()
+                count = int(header.count())
+                if entry.get("count") != count:
+                    continue
+                sizes = entry.get("sizes")
+                if not self._column_sizes_valid(sizes, count):
+                    continue
+                for i, width in enumerate(sizes):
+                    table.setColumnWidth(i, int(width))
+            except Exception:
+                continue
+
+    def _apply_window_state(self):
+        """把 self._window_state 套到窗口上（全程容错，异常即保持默认布局）。"""
+        # 列宽：先快照代码默认值，再套用保存值（顺序不可颠倒，否则「恢复默认
+        # 布局」会把套用后的宽度当作默认值）
+        self._snapshot_default_column_widths()
+        self._apply_saved_column_widths()
+
+        state = getattr(self, "_window_state", None)
+        if not isinstance(state, dict):
+            state = {}
+
+        # 分栏比例：优先 saveState 的 base64，退回 sizes 列表
+        splitter = getattr(self, "result_splitter", None)
+        if splitter is not None:
+            restored = False
+            blob = state.get("splitter")
+            if isinstance(blob, str) and blob:
+                try:
+                    raw = base64.b64decode(blob.encode("ascii"), validate=True)
+                    restored = bool(raw) and bool(splitter.restoreState(raw))
+                except Exception:
+                    restored = False
+            if not restored:
+                sizes = state.get("splitter_sizes")
+                try:
+                    if (
+                        isinstance(sizes, list)
+                        and len(sizes) == splitter.count()
+                        and all(
+                            isinstance(s, int) and not isinstance(s, bool) and s >= 0
+                            for s in sizes
+                        )
+                    ):
+                        splitter.setSizes([int(s) for s in sizes])
+                except Exception:
+                    pass
+
+        # 窗口几何：保存值缺失 / 损坏 / 落在所有屏幕之外 → 回退默认居中尺寸
+        # （多屏拔掉外接显示器是常见场景，绝不能把窗口丢到屏幕外）
+        geo = state.get("geometry")
+        if isinstance(geo, str) and geo:
+            applied = False
+            try:
+                raw = base64.b64decode(geo.encode("ascii"), validate=True)
+                applied = bool(raw) and bool(self.restoreGeometry(raw))
+            except Exception:
+                applied = False
+            if applied:
+                try:
+                    applied = self._is_rect_visible(self.geometry())
+                except Exception:
+                    applied = False
+            if not applied:
+                self._apply_default_geometry()
+
+    def _reset_window_layout(self):
+        """配置菜单「恢复默认窗口布局」：清掉保存状态并立即回落默认布局。"""
+        self._window_state = {}
+        self._app_config.pop("window", None)
+        self._save_app_config()  # 立即写盘：清空顶层 "window" 段
+        self._apply_default_geometry()
+        splitter = getattr(self, "result_splitter", None)
+        if splitter is not None:
+            try:
+                splitter.setSizes([450, 550])
+            except Exception:
+                pass
+        for name, sizes in dict(getattr(self, "_default_column_widths", {})).items():
+            table = getattr(self, name, None)
+            if table is None:
+                continue
+            try:
+                count = int(table.horizontalHeader().count())
+                for i in range(min(count, len(sizes))):
+                    table.setColumnWidth(i, int(sizes[i]))
+            except Exception:
+                continue
+        try:
+            self.statusBar().showMessage("已恢复默认窗口布局", 3000)
+        except Exception:
+            pass
 
     def _load_system_settings(self):
         """加载系统集成设置（config.json "system" 段）"""
@@ -10886,6 +11188,15 @@ class MainWindow(QMainWindow):
         parse_cfg["gw_channel"] = getattr(self, "_gw_channel", "plc")
         parse_cfg["protocol"] = getattr(self, "current_protocol", 0)
         config["parse"] = parse_cfg
+
+        # 窗口几何/分栏/列宽（顶层 "window" 段）。只有 closeEvent 的真实退出路径
+        # 会把 _window_state 填成最新值（_collect_window_state）；其余保存点沿用
+        # 载入值，避免切协议/改串口配置时把中途布局当退出布局写盘。空则删键。
+        win_state = getattr(self, "_window_state", None)
+        if isinstance(win_state, dict) and win_state:
+            config["window"] = win_state
+        else:
+            config.pop("window", None)
 
         try:
             with open(self._config_path, "w", encoding="utf-8") as f:

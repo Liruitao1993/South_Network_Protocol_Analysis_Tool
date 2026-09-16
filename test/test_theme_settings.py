@@ -10,7 +10,7 @@
 使用 offscreen 平台，无需显示器。
 """
 
-import _path_setup  # noqa: E402
+import _path_setup  # noqa: E402,F401
 
 import os
 import sys
@@ -18,13 +18,20 @@ import traceback
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QStyleFactory, QDialog
+from PySide6.QtWidgets import QApplication, QStyleFactory
 
 from theme_settings import (
     THEMES, get_theme, is_dark,
     ThemeManager, ThemeSettingsDialog,
     build_glass_qss, build_mica_qss, button_qss_for_theme, GLASS_DEFAULTS,
 )
+
+# 本测试会 show 主窗口并关闭各对话框 → 退出路径会写 config.json；
+# 沙箱到临时目录，避免把 offscreen 合成几何写进开发机真实配置。
+# 放在 import 块**之后**：install() 是语句，插在 import 之间会让后续 import 触发 E402。
+import _config_sandbox  # noqa: E402
+
+_config_sandbox.install()
 
 app = QApplication(sys.argv)
 
