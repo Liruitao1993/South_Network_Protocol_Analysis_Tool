@@ -531,3 +531,24 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Status
 
 [OK] **Completed**
+
+
+## Session 21: GUI 死代码清理 + 修模型API管理菜单失效（1.23.16）
+
+**Date**: 2026-09-16
+**Task**: GUI 死代码清理 + 修模型API管理菜单失效（1.23.16）
+**Branch**: `main`
+
+### Summary
+
+任务 09-15-gui-dead-code-cleanup 完成并归档。纯删除 main_gui.py -301 行（0 插入）：5 组重名方法的死版本（后定义覆盖前定义，故删前面那批；逐组 diff 确认 _clear_layout 逐字相同、其余为 f58c863「串口配置持久化」的有意重写且伴随占位项成对移除）+ 6 个零引用方法/函数（先做 getattr 动态派发扫描 40+ 处、注册表映射核对、全仓含 spec/iss/json 0 引用确认）+ 10 个已跟踪根临时脚本（792 行）+ 3 个未跟踪临时脚本 + 连带 import subprocess。_generated_mapping*.py 的数据核对后确认已活在 protocol_parser._get_f0_32_entry_name（v1 130 键 ⊂ 现 145、v2 == 现），删除无损失。复核中发现真实功能回归：「配置→模型API管理」菜单项的 triggered.connect 被 e1dd85e（2026-08-21 协议11 功能提交）误删 → 菜单项点了没反应，且方法因零引用几乎被当死代码删掉；已恢复接线并新增守卫 test/test_menu_wiring.py（13 项行为式断言：类级打桩 + 真实 action.trigger()；变异反证拿掉 connect → 变红）。顺带修掉 release_check 的 README 徽章 WARN（1.23.14→1.23.16）。验证：AST 重名组 0（MainWindow 262/262）、ruff 保持基线 10、release_check PASS=59 FAIL=0 WARN=2、真实 config.json 全程未被测试污染。注：确认 QAction 生命周期坑——[a.menu() for a in menubar.actions()] 取到的 QMenu 包装会当场失效（shiboken），必须用 menubar.findChildren(QMenu) 持强引用。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `58f9ad6` | (see git log) |
+
+### Status
+
+[OK] **Completed**

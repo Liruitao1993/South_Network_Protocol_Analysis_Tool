@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 20
+- **Total Sessions**: 21
 - **Last Active**: 2026-09-16
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~533 | Active |
+| `journal-1.md` | ~554 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 21 | 2026-09-16 | GUI 死代码清理 + 修模型API管理菜单失效（1.23.16） | `58f9ad6` | `main` |
 | 20 | 2026-09-16 | GUI 窗口/分栏/列宽状态持久化（1.23.16） | `adb7064` | `main` |
 | 19 | 2026-09-16 | GUI 批量解析后台化 + 详情按需 + 过滤提速（1.23.15） | `560df22`, `41a9935`, `1c5b13a` | `main` |
 | 18 | 2026-09-16 | 下载地址端口错乱修复（8091 却跳 host:8000） | `9d059f4` | `main` |
