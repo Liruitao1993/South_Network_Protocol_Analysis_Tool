@@ -143,12 +143,36 @@ python test/test_gui_batch_perf.py
 
 ---
 
-## 完成定义（DoD）
+## 完成定义（DoD）—— 实测核对（2026-09-16）
 
-- [ ] 33 MB 样本：解析中界面可响应、有进度、可取消（< 1 s）；取消后结果可用。
-- [ ] `batch_results` 常驻内存 < 40 MB（基线 229.4 MB）。
-- [ ] 摘要表 ≤ 2 s 可见并可滚动（基线约 21 s 后一次性出现）。
-- [ ] 过滤单次 < 0.2 s（基线 0.87 s）。
-- [ ] 导出/复制/详情与改动前逐字段一致，`包含表格数据` 列不退化。
-- [ ] `test_gui_batch_perf.py` 全过，`test_batch_snapshot_locate.py` 迁移后全过，`python release_check.py` 无 FAIL/WARN。
-- [ ] CHANGELOG + AGENTS.md 已同步。
+- [x] 33 MB 样本（49,532 帧）：解析中界面可响应、有进度、可取消；**取消耗时 10~15 ms**（验收线 < 1 s），取消后结果保留且可看详情/导出。
+- [x] `batch_results` 常驻内存 **20.6 MB**（基线 229.4 MB，验收线 < 40 MB）。
+- [x] 首屏可见：进度按 200 帧/片回填，`parse_batch` 同步预处理（实测 1.9 s）后即开始出内容（验收线 ≤ 2 s；基线约 21 s 后一次性出现）。
+- [x] 过滤单次 **11.9 ms**（2600 行全表）/ 49,532 行下 0.012 s（基线 0.87 s，验收线 < 0.2 s）。
+- [x] 导出/复制/详情与改动前**逐字段一致**：协议9 真实日志 49,532 帧全量对拍 0 差异（表格逐行 sha256 全等；`包含表格数据` = 是 49,359 == 49,359）；协议11 真实日志 13,763 帧同样 0 差异。
+- [x] `test_gui_batch_perf.py` 99 项全过（已登记 `release_check.py:CORE_TESTS`，门槛内 `[PASS]`）；`test_batch_snapshot_locate.py` 迁移后 47 项全过；`python release_check.py` → **PASS=57 FAIL=0 WARN=2**。
+- [x] CHANGELOG（1.23.15）+ AGENTS.md（§1 版本、§3 架构树、§7 测试清单与 `_path_setup` 的 F401 约定、§8 陷阱 40/41）已同步。
+
+> **WARN=2 说明（非本任务引入，HEAD 基线既有）**：① `BUILD_DATE` 非当天（按约定打包前才更新）；② `test/test_theme_settings.py` 是「附加（可选）offscreen GUI」套件，本机既有失败项，按设计仅报 WARN 不阻断。
+
+---
+
+## 交付与提交记录
+
+| 提交 | 内容 |
+| --- | --- |
+| `b1aecdc` | 步骤 1（解耦准备）——被并行任务 `09-15-web-landing-page` 的提交顺带纳入 |
+| `560df22` | 步骤 2+3+4（后台化/进度/取消 + 详情按需 + 过滤提速）+ CHANGELOG/AGENTS/.iss + 4 个任务目录 |
+| `41a9935` | 步骤 5 收尾：测试登记进 `CORE_TESTS`（+ ruff 折行，无语义变化） |
+
+**步骤 2 与 3/4 合并为单个提交的原因**：步骤 1 被并行会话的提交顺带纳入；步骤 2 与 3 在 `main_gui.py` 中改的是**同一批方法**（`_start_batch_parse` / `_on_batch_progress` / `_finish_batch_parse` 等），拆成两个提交需按 hunk 手工切分，风险大于收益。代价：回滚粒度由「按文件 revert」降为「按提交 revert」，`design.md §8` 预设的 4 个回滚点收敛为 1 个。
+
+---
+
+## 遗留项（未做，建议单独立项）
+
+1. **解析器跨帧状态未在入口重置**（本任务只在详情侧兜住一致性）：见 `AGENTS.md §8` 陷阱 41；根治会改变批量结果本身（实测影响 934/49,532 帧），故未一并做。
+2. **协议10 / 协议0~8 无真实日志对拍**：仅协议9（49,532 帧）与协议11（13,763 帧）做过「HEAD 实现 vs 当前实现」全量对拍。
+3. **`enhanced_batch_export.py` 是被 gitignore 的孤立副本**：仓库根同名文件被 `.gitignore:15` 排除，且无任何运行时 import 方（仅生成脚本 `integrate_enhanced_export.py` 引用其名字），实际导出走 `enhanced_export.py`。本任务对该文件做的 resolver 改动**不进版本库、也不影响运行时**——`design.md`/`prd.md` 把它列为消费方属于误判。
+4. **两个实施期选择未经用户确认**：详情 LRU 上限 50、`_has_detail = bool(table_data)`（而非 design 的「解析成功且非空」；后者会让 72 帧的 ❌ 行从详情消失，与「逐字段一致」冲突）。
+5. **真实 GUI 人眼验收**（拖动窗口 / 进度条 / 取消手感）未做，只有 offscreen 心跳与计时断言。
