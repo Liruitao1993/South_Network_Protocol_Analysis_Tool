@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 16
+- **Total Sessions**: 17
 - **Last Active**: 2026-09-16
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~447 | Active |
+| `journal-1.md` | ~468 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 17 | 2026-09-16 | Windows 局域网部署：--port 固化 + 教程 + 内嵌离线包构建 | `2a717fd` | `main` |
 | 16 | 2026-09-16 | Web 运行时数据外置（升级不再丢库/发布产物/口令） | `c70a1c8` | `main` |
 | 15 | 2026-09-15 | Web 版产品首页（落地页）+ 路由搬迁 | `b1aecdc` | `main` |
 | 14 | 2026-09-15 | Web 批量解析结果搜索/筛选（接分页） | `7dc5ac5` | `main` |

@@ -445,3 +445,24 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Status
 
 [OK] **Completed**
+
+
+## Session 17: Windows 局域网部署：--port 固化 + 教程 + 内嵌离线包构建
+
+**Date**: 2026-09-16
+**Task**: Windows 局域网部署：--port 固化 + 教程 + 内嵌离线包构建
+**Branch**: `main`
+
+### Summary
+
+两个部署构建脚本新增 --port（默认 8080，写入三份启动脚本与部署说明，命令行可覆盖）；新增 docs/Web版局域网部署教程.md（防火墙放行/启动验证/首次配置/任务计划与NSSM常驻/备份升级/排错表）；以 --skip-deps --port 8091 增量构建 dist/reflex_web_embedded（前端重编译），并真实起服务验收 27 项全通过（无运行时数据、脚本固化 8091、GET / 与 /app 可用、反馈写入外部数据根）；生成 dist/reflex_web_embedded_8091.zip（103MB）供拷到服务器。测试 126 项 + release_check PASS=56 FAIL=0。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2a717fd` | (see git log) |
+
+### Status
+
+[OK] **Completed**
