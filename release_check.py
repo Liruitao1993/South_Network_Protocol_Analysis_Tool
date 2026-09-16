@@ -64,6 +64,7 @@ CORE_TESTS = [
     "test/test_gw_batch_parse.py",
     "test/test_gdw_fujian.py",
     "test/test_hdc10.py",
+    "test/test_hdc10_batch_strip_level.py",
     "test/test_dlt645_frame_gen.py",
     "test/test_dlt645_lme.py",
     "test/test_dlt645_sim.py",

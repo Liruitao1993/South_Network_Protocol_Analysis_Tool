@@ -873,9 +873,13 @@ class State(rx.State):
             if self.current_protocol == 9:
                 input_text = strip_csg_new_gen_prefix(input_text, self.csg_parse_level)
             elif self.current_protocol == 10:
-                input_text = strip_gw_new_gen_prefix(input_text, self.gw_parse_level)
+                input_text = strip_gw_new_gen_prefix(
+                    input_text, self.gw_parse_level, 10
+                )
             elif self.current_protocol == 11:
-                input_text = strip_gw_new_gen_prefix(input_text, self.hdc10_parse_level)
+                input_text = strip_gw_new_gen_prefix(
+                    input_text, self.hdc10_parse_level, 11
+                )
 
             # 步骤1.5：全局 hex 清洗（对齐 GUI 的 _clean_hex_input(keep_newlines=True)）
             input_text = clean_hex_input(input_text, keep_newlines=True)

@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/09-16-hdc10-batch-strip-level/prd.md", "reason": "对照 7 条验收标准逐条取证：级别来源回归、app 端口判据、协议10 行为、非 app 级别不变、两端对拍、测试全绿、变异反证"}
+{"file": ".trellis/tasks/09-16-hdc10-batch-strip-level/implement.md", "reason": "复核 8 步是否按序落地（含回滚点）、变异反证是否真的做过（先红后绿）、文档与版本号是否同步"}
+{"file": ".trellis/tasks/09-16-hdc10-batch-strip-level/design.md", "reason": "复核改动是否越界到 D4「明确不动的部分」（协议9 strip、重复剥离、解析器与摘要逻辑）"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复核端口集合与级别来源是否真的只留一份权威（没有新增第三份硬编码端口副本）"}
+{"file": "AGENTS.md", "reason": "§8 陷阱 38（守卫测试必须能用变异反证抓住回退，否则是假绿）、陷阱 31（Web/桌面解析链漂移风险）"}

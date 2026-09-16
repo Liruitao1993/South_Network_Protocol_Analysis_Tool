@@ -34,7 +34,7 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 
 ## 1. 项目概览
 
-多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.23.16`）。
+多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.23.17`）。
 
 **支持的协议（共 12 种，对应 GUI 协议下拉框 `current_protocol` 索引）：**
 
@@ -109,7 +109,7 @@ python main_gui.py --clipboard
 - Lua 脚本引擎依赖 `lupa`，打包时需作为 hidden import 或确保运行环境已安装
 - 当前主程序 spec 未显式声明 `scapy`；如需把 TCP 监控打包进 exe，需补充 `scapy` 依赖并确保目标机器安装 npcap
 - `docs/Lua脚本使用说明.md` 是 Lua 功能的用户文档
-- Inno Setup 安装脚本 `南网解析工具.iss` / `2222.iss` 的 `MyAppVersion` 用 `python release_check.py --sync-iss` 与 `APP_VERSION` 对齐（当前 1.23.16），发版前务必再跑一次 `python release_check.py`
+- Inno Setup 安装脚本 `南网解析工具.iss` / `2222.iss` 的 `MyAppVersion` 用 `python release_check.py --sync-iss` 与 `APP_VERSION` 对齐（当前 1.23.17），发版前务必再跑一次 `python release_check.py`
 
 ### Reflex Web 离线源码部署（UV）
 
@@ -832,6 +832,11 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
     - **写出时机只有 `closeEvent` 的真实退出路径**（含托盘「退出」与自动更新重启）；最小化到托盘（`event.ignore()` 分支）不写。`_save_app_config` 其它调用点沿用载入值，空则删键（避免把中途布局当退出布局）。
     - **恢复必须容错**：几何与任一 `QScreen.availableGeometry()` 无交集（换显示器/降分辨率）或 base64 损坏 → 回落默认居中尺寸；列宽按**表名 + 列数**匹配，列数不符（协议切换重建查询页）即丢弃该表。
     - **测试不得污染真实 `config.json`**：`MainWindow` 关闭时会写出该段，offscreen 测试必须先沙箱——`main_gui.data_path` **与** `app_paths.data_path` 都要 patch（`llm_preprocess_widget.save_config()` 内部是 `from app_paths import data_path`，只 patch 前者会把真实配置写掉，`test_pp_cli.py` 的「真实 config.json 未被测试改写」断言就是这么抓到的）；样板见 `test/test_window_state.py` 的 `Sandbox`（1.23.16 起）。
+43. **协议10/11 共用「解析级别」下拉但属性独立；批量前缀剥离必须与解析侧同源取级别**（1.23.17 起）：`main_gui._strip_gw_new_gen_prefix` 早期硬读 `_gw_parse_level`（协议10 的值），而协议11 的级别在 `_hdc10_parse_level`（`_on_gw_parse_level_changed` 按 `current_protocol` 写不同属性，界面共用同一个 `gw_parse_level_combo`）。后果：在协议10 下选过「应用层报文(app)」后切到协议11，**界面显示「自动识别」而批量剥离却按 app 过滤**；`12` 开头的 HDC 1.0 升级业务帧（端口 `0x12`）里没有偶字节 `11` → 整批被丢弃，弹「预处理后未保留有效报文内容！」（用户现场报障：`Line NNNN: 时间戳: B1D[3] mrd:ar[24]:<hex>` 一帧都解析不出）。规则：
+    - 级别**只能**经 `_current_parse_params()` 取（`parse_level=None` 的默认分支已如此实现），**不要**在剥离函数里再写第二份 `if current_protocol == 11` 分派；
+    - app 级别的帧起始判据是**应用层端口集合** `{0x11, 0x12, 0x1A}`，集合**取自解析器端口表**（`hdc10_parser.APP_PORTS` / `gw_new_gen_parser.GWNewGenParser.PORT_NAMES`）；依据《双模通信互联互通技术规范 第4-3部分：应用层通信协议》§5.2.2（升级业务 0x12、其他业务 0x11）。**不要再硬编码只认 `11`**；
+    - Web 侧 `web_utils.strip_gw_new_gen_prefix(text, parse_level, protocol_index)` 与桌面**同判据同来源**，`test/test_hdc10_batch_strip_level.py` 内有对拍断言防漂移（含「端口集合必须含 0x12」与「协议10 残留 app 不影响协议11」两条回归，已用变异反证确认能抓住回退）。
+    - **新增调用方注意**：`_strip_gw_new_gen_prefix` 现在依赖 `_current_parse_params()`，而后者在 `family ∈ {gw, hdc10}` 且级别为 `pb_only` 时会读控件 `gw_pb_frame_type_combo`。目前只有 `_prepare_batch_input` 的两个主线程调用点（UI 已就绪，安全）；**无控件上下文的调用方**（Host/headless 测试、命令行路径）必须**显式传 `parse_level`**，否则会 `AttributeError`。
 
 ---
 
@@ -859,6 +864,10 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 ## 10. 变更日志
 
 > 详细版本变更记录请查看 `main_gui.py:CHANGELOG`（按版本倒序），或运行 `git log --oneline` 查看提交历史。本文档仅保留最近两个版本的摘要。
+
+### 1.23.17 — 2026-09-16
+
+- **修复协议11（HDC 1.0）批量解析一帧都解析不出**（现场：粘贴 `Line NNNN: 时间戳: B1D[3] mrd:ar[24]:<hex>` 弹「预处理后未保留有效报文内容！」）：`_strip_gw_new_gen_prefix` 硬读协议10 的 `_gw_parse_level`（协议11 应用 `_hdc10_parse_level`）→ 协议10 残留的 app 级别把 `12` 开头升级业务帧整批丢弃；app 判据又只认端口 `11`（漏 `0x12`/`0x1A`）。现级别取 `_current_parse_params()`（与解析侧同源），app 判据改为**取自解析器端口表**的端口集合，桌面与 Web 两端同步 + 对拍断言（详见 §8 陷阱 43）
 
 ### 1.23.14 — 2026-09-15
 

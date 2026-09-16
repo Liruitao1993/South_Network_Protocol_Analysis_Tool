@@ -330,11 +330,51 @@ def strip_csg_new_gen_prefix(text: str, parse_level: str = "auto") -> str:
     return '\n'.join(out_lines)
 
 
-def strip_gw_new_gen_prefix(text: str, parse_level: str = "auto") -> str:
+# ── 国网新一代(索引10) / HDC 1.0(索引11) 应用层端口号 ─────────────────────
+# 依据《双模通信互联互通技术规范 第4-3部分：应用层通信协议》§5.2.2「报文端口号」：
+#   升级业务取值为 0x12，其他业务取值为 0x11；鉴权安全为 0x1A。
+# 权威来源是**解析器端口表**（hdc10_parser.APP_PORTS / gw_new_gen_parser.PORT_NAMES），
+# 这里只在 import 失败时回落；桌面 `main_gui._gw_app_port_prefixes` 同口径同来源。
+# （AGENTS §8 陷阱 43：app 判据只认 '11' 会整批丢掉 0x12 开头的升级业务帧）
+_GW_APP_PORT_PREFIXES_FALLBACK = ("11", "12", "1A")
+
+
+def gw_app_port_prefixes(protocol_index: int = 10) -> tuple:
+    """按协议返回应用层端口号（大写 hex 字符串）集合，取自解析器端口表。
+
+    Args:
+        protocol_index: 10=国网新一代 / 11=HDC 1.0
+
+    Returns:
+        tuple[str, ...]：如 ("11", "12", "1A")
+    """
+    try:
+        if protocol_index == 11:
+            import hdc10_parser
+
+            ports = hdc10_parser.APP_PORTS
+        else:
+            import gw_new_gen_parser
+
+            ports = gw_new_gen_parser.GWNewGenParser.PORT_NAMES
+        return tuple(f"{port:02X}" for port in ports)
+    except Exception:
+        return _GW_APP_PORT_PREFIXES_FALLBACK
+
+
+def strip_gw_new_gen_prefix(
+    text: str, parse_level: str = "auto", protocol_index: int = 10
+) -> str:
     """剥离国网新一代双模协议日志前缀
 
     - 找到最后一个冒号，其后为 hex
-    - app 级别扫描 '11' 定位应用层
+    - app 级别扫描应用层端口（0x11/0x12/0x1A，按 protocol_index 取解析器端口表）
+      定位应用层起始
+
+    Args:
+        text: 原始日志文本（可含多行）
+        parse_level: 解析级别（auto / app / pb_only / mac_only ...）
+        protocol_index: 10=国网新一代 / 11=HDC 1.0（决定应用层端口集合）
     """
     out_lines = []
     for line in text.splitlines():
@@ -351,10 +391,11 @@ def strip_gw_new_gen_prefix(text: str, parse_level: str = "auto") -> str:
             continue
 
         if parse_level == 'app':
+            app_prefixes = gw_app_port_prefixes(protocol_index)
             found = False
             i = 0
             while i < len(hex_clean) - 1:
-                if hex_clean[i:i+2] == '11' and len(hex_clean) - i >= 8:
+                if hex_clean[i:i+2] in app_prefixes and len(hex_clean) - i >= 8:
                     hex_clean = hex_clean[i:]
                     found = True
                     break

@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/09-16-hdc10-batch-strip-level/design.md", "reason": "技术设计：级别来源单一化（复用 _current_parse_params 分派）、app 端口集合取自解析器端口表、两端同步策略、明确不动的部分、接口契约与回滚"}
+{"file": ".trellis/tasks/09-16-hdc10-batch-strip-level/implement.md", "reason": "实施计划：8 步顺序、每步验证命令与回滚点、变异反证要求、文档与版本收口清单"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "本 bug 的根因是同一端口口径存在多份副本（桌面 strip 只认 11、Web strip 只认 11、解析器端口表 11/12/1A）后发生漂移；按该指南把判据收敛为解析器表单一来源"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "跨层一致性：桌面 main_gui 与 Web web_utils 各有一份 strip 实现（AGENTS §8 陷阱 31 的复刻风险），必须同判据同来源并有对拍断言"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "项目硬约束：GUI 与 Web 双端契约、「改一侧必须同步另一侧」的要求"}
+{"file": "AGENTS.md", "reason": "§7 测试规则（_path_setup noqa、登记 release_check.py:CORE_TESTS）、§8 陷阱 40（批量解析已后台化，测试必须 wait_batch）、陷阱 42（offscreen 测试双 patch data_path 防污染真实 config.json）"}

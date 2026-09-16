@@ -110,7 +110,7 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.16"
+APP_VERSION = "1.23.17"
 BUILD_DATE = "2026-09-16"  # 编译日期，每次打包前更新
 
 # 窗口状态持久化（config.json 顶层 "window" 段）的表格清单：
@@ -131,6 +131,17 @@ _WINDOW_STATE_TABLES = (
 )
 
 CHANGELOG = [
+    (
+        "1.23.17",
+        "2026-09-16",
+        [
+            "**修复协议11（HDC 1.0）批量解析解析不出前场日志行**（用户报障：粘贴 `Line NNNN: 时间戳: B1D[3] mrd:ar[24]:<hex>` 后弹「预处理后未保留有效报文内容！」，一帧都解析不出，而同样输入单帧解析正常）",
+            "根因两个，都在批量解析的前缀剥离函数 `_strip_gw_new_gen_prefix` 里：① **解析级别来源读错**——它硬读协议10 的 `_gw_parse_level`，而协议11 的级别存在 `_hdc10_parse_level`（两个属性相互独立、界面共用同一个下拉框，见 `_on_gw_parse_level_changed`）；只要曾在协议10 下选过「应用层报文(app)」，切到协议11 后界面显示「自动识别」、批量剥离却按 app 规则过滤，而用户样本帧（`12` 开头）里没有偶字节 `11` → **整批被丢弃**。② **app 判据端口集过窄**——只认端口 `11`，而 HDC 1.0 应用层还有 `0x12`（升级业务，本批帧正是它）与 `0x1A`（鉴权安全），即便级别传对也会丢",
+            "修复：`_strip_gw_new_gen_prefix(text, parse_level=None)` 新增级别形参，`None` 时取 `_current_parse_params()`（与**真正用于解析的级别同源**：协议10→`_gw_parse_level`、协议11→`_hdc10_parse_level`，单一分派点）；app 判据改为**端口集合**，集合按当前协议**取自解析器端口表**（`hdc10_parser.APP_PORTS` / `gw_new_gen_parser.GWNewGenParser.PORT_NAMES`）而非再写一份硬编码副本，import 失败才回落内置三元组——依据《双模通信互联互通技术规范 第4-3部分：应用层通信协议》§5.2.2「升级业务取值为 0x12，其他业务取值为 0x11」",
+            "Web 端同步（`reflex_web/web_utils.py::strip_gw_new_gen_prefix` 增 `protocol_index` 形参 + 同一判据与同一来源；`reflex_web.py` 两处调用点传协议号）——Web 侧级别分派本来就是对的，只有 app 判据同病；新增**两端对拍断言**（同输入 × 协议10/11 × auto/app/pb_only/fc_only 输出逐字符相等）防再次漂移",
+            "测试：新增 `test/test_hdc10_batch_strip_level.py`（29 项：纯函数矩阵 / 级别来源两向隔离 / 端口集合与解析器表对拍（含「必须含 0x12」防退回只认 11）/ 两端对拍 / **用户 20 行现场样本端到端**（协议11 + 协议10 残留 app → 20 帧全成功、不弹空内容警告）/ 协议10 回归 / 非 app 级别行为不变 / 真实 config.json 未被改写），登记 `release_check.py:CORE_TESTS`；已用**变异反证**自检：端口集合退回只认 `11` → 变红 9 项；级别来源退回 `_gw_parse_level` → 变红 1 项（核心回归断言）；两处同时退回时用户样本端到端精确复现现场缺陷（弹空内容警告、0 帧，FAIL=16），依次还原后全绿",
+        ],
+    ),
     (
         "1.23.16",
         "2026-09-16",
@@ -1002,6 +1013,39 @@ def _format_tree_field(name: str, level: int):
         return stripped, 0
     indent = "    " * (level - 1)
     return f"{indent}  └ {stripped}", level
+
+
+# ── 国网新一代(索引10) / HDC 1.0(索引11) 应用层端口号 ──────────────────────────
+# 依据《双模通信互联互通技术规范 第4-3部分：应用层通信协议》§5.2.2「报文端口号」：
+#   升级业务取值为 0x12，其他业务取值为 0x11；鉴权安全为 0x1A。
+# 权威来源是**解析器端口表**（hdc10_parser.APP_PORTS / gw_new_gen_parser.PORT_NAMES），
+# 这里只在 import 失败时回落，避免再出现第三份硬编码端口副本——早期 app 级别判据
+# 只认 '11'，把 0x12 开头的升级业务帧整批丢掉（AGENTS §8 陷阱 43）。
+_GW_APP_PORT_PREFIXES_FALLBACK = ("11", "12", "1A")
+
+
+def _gw_app_port_prefixes(protocol_index: int) -> tuple:
+    """按协议返回应用层端口号（大写 hex 字符串）集合，取自解析器端口表。
+
+    Args:
+        protocol_index: 10=国网新一代 / 11=HDC 1.0
+
+    Returns:
+        tuple[str, ...]：如 ("11", "12", "1A")
+    """
+    try:
+        if protocol_index == 11:
+            import hdc10_parser
+
+            ports = hdc10_parser.APP_PORTS
+        else:
+            import gw_new_gen_parser
+
+            ports = gw_new_gen_parser.GWNewGenParser.PORT_NAMES
+        return tuple(f"{port:02X}" for port in ports)
+    except Exception:
+        # 解析器模块不可用（打包缺失等）时回落内置三元组，不让 GUI 抛异常
+        return _GW_APP_PORT_PREFIXES_FALLBACK
 
 
 # 配置文件路径标签映射
@@ -4761,8 +4805,10 @@ class MainWindow(QMainWindow):
         self._last_strip_line_map = out_map
         return "\n".join(out_lines)
 
-    def _strip_gw_new_gen_prefix(self, text: str) -> str:
-        """剥离国网新一代双模协议日志前缀（仅在协议10批量解析时调用）
+    def _strip_gw_new_gen_prefix(
+        self, text: str, parse_level: str | None = None
+    ) -> str:
+        """剥离国网新一代(索引10)/HDC 1.0(索引11)双模协议日志前缀
 
         日志格式示例:
             Line 339: 260718-111145-349: B1D[3] mrd:ar[75]:110300000132F303420D2305683D0043...
@@ -4771,14 +4817,25 @@ class MainWindow(QMainWindow):
           1. 以 fc_payload_data := ' 开头，' 后跟空白或 } 结尾为一个完整帧
           2. 帧可能跨多行，中间所有 hex 拼接为一个完整帧
           3. 无引号包裹的行：取最后一个冒号后的 hex
-          4. 清理非 hex 字符，若解析级别为 app 则扫描 '11' 定位应用层起始
+          4. 清理非 hex 字符，若解析级别为 app 则扫描应用层端口
+             (0x11/0x12/0x1A，见 `_gw_app_port_prefixes`) 定位应用层起始
           5. 过短（<4 hex字符）的帧丢弃
+
+        解析级别来源（**不要**改回硬编码 `_gw_parse_level`）:
+          `parse_level=None`（默认）时取 `_current_parse_params()` 的级别——协议10 用
+          `_gw_parse_level`、协议11 用 `_hdc10_parse_level`。这两个属性相互独立
+          （见 `_on_gw_parse_level_changed`），但界面共用同一个下拉框：早期版本在这里
+          硬读 `_gw_parse_level`，于是协议11 批量解析被**协议10 的残留级别**（如 app）
+          过滤成空，弹「预处理后未保留有效报文内容！」（AGENTS §8 陷阱 43）。
 
         注意：必须在 _clean_hex_input 之前调用，否则前缀中的数字会被误当作 hex 数据。
         """
         import re
 
-        parse_level = getattr(self, "_gw_parse_level", "auto")
+        if parse_level is None:
+            parse_level = self._current_parse_params().get("parse_level") or "auto"
+        # app 级别的帧起始判据：应用层端口集合（按当前协议取自解析器端口表）
+        app_prefixes = _gw_app_port_prefixes(getattr(self, "current_protocol", 10))
         out_lines = []
         out_map = []
 
@@ -4854,7 +4911,7 @@ class MainWindow(QMainWindow):
                 found = False
                 i = 0
                 while i < len(hex_clean) - 1:
-                    if hex_clean[i : i + 2] == "11" and len(hex_clean) - i >= 8:
+                    if hex_clean[i : i + 2] in app_prefixes and len(hex_clean) - i >= 8:
                         hex_clean = hex_clean[i:]
                         found = True
                         break
@@ -7375,9 +7432,10 @@ class MainWindow(QMainWindow):
             )
             self._debug_log(f"  前200字符:\n{input_text[:200]}")
 
-        # 国网新一代双模协议(索引10)：剥离日志前缀（在 hex 清洗前处理原始文本）
+        # 国网新一代(索引10)/HDC 1.0(索引11)：剥离日志前缀（在 hex 清洗前处理原始文本）
         # 日志格式: "Line XXX: timestamp: metadata:hex_data"
-        # 取最后一个冒号后的 hex 数据，app 级别时扫描 '11' 定位应用层起始
+        # 取最后一个冒号后的 hex 数据；解析级别由函数内部按当前协议自取
+        # （协议10 → _gw_parse_level，协议11 → _hdc10_parse_level，见 AGENTS §8 陷阱 43）
         if self.current_protocol in (10, 11):
             before = len(input_text)
             input_text = self._strip_gw_new_gen_prefix(input_text)
