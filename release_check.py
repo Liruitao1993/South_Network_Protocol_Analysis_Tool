@@ -81,6 +81,7 @@ CORE_TESTS = [
     "test/test_app_paths.py",
     "test/test_nanwang_custom_di.py",
     "test/test_window_state.py",
+    "test/test_menu_wiring.py",
     "test/test_web_frame_gen_utils.py",
     "test/test_web_parse_fixes.py",
     "test/test_web_batch_paging.py",

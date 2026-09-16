@@ -3,7 +3,7 @@
   "name": "gui-dead-code-cleanup",
   "title": "GUI 死代码清理（重复方法/未调用方法/临时脚本）",
   "description": "",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

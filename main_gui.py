@@ -10,7 +10,6 @@ import sys
 os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.fonts=false")
 import base64
 import json
-import subprocess
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any
@@ -1001,37 +1000,6 @@ def _format_tree_field(name: str, level: int):
         return stripped, 0
     indent = "    " * (level - 1)
     return f"{indent}  └ {stripped}", level
-
-
-def _get_git_changelog() -> list:
-    """从git日志获取变更记录，用于动态追加到CHANGELOG"""
-    try:
-        result = subprocess.run(
-            ["git", "log", "--format=%ai | %s", "-30"],
-            capture_output=True,
-            timeout=5,
-            cwd=str(Path(__file__).parent),
-        )
-        if result.returncode != 0:
-            return []
-        for enc in ("utf-8", "gbk", "latin-1"):
-            try:
-                output = result.stdout.decode(enc)
-                break
-            except (UnicodeDecodeError, UnicodeError):
-                continue
-        else:
-            output = result.stdout.decode("utf-8", errors="replace")
-        entries = []
-        for line in output.strip().splitlines():
-            if " | " in line:
-                date_msg = line.split(" | ", 1)
-                date = date_msg[0][:10]
-                msg = date_msg[1]
-                entries.append((date, msg))
-        return entries
-    except Exception:
-        return []
 
 
 # 配置文件路径标签映射
@@ -2300,71 +2268,6 @@ class MainWindow(QMainWindow):
             )
             table.resize(table.width(), orig_h)
 
-    def create_di_lookup_tab(self) -> QWidget:
-        """创建DI查询标签页"""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setSpacing(10)
-
-        # 搜索栏
-        search_layout = QHBoxLayout()
-        search_label = QLabel("搜索：")
-        search_label.setFixedWidth(45)
-        self.di_search_input = QLineEdit()
-        self.di_search_input.setPlaceholderText(
-            "输入DI编码(如E8020201)或中文关键词(如添加任务)搜索..."
-        )
-        self.di_search_input.setClearButtonEnabled(True)
-        self.di_search_input.textChanged.connect(self._filter_di_table)
-        search_layout.addWidget(search_label)
-        search_layout.addWidget(self.di_search_input)
-        layout.addLayout(search_layout)
-
-        # 统计标签
-        self.di_stats_label = self._make_stats_label()
-        layout.addWidget(self.di_stats_label)
-
-        # 表格
-        self.di_table = ZoomableTableWidget()
-        self.di_table.setColumnCount(6)
-        self.di_table.setHorizontalHeaderLabels(
-            ["DI3", "DI2", "DI1", "DI0", "AFN", "中文含义"]
-        )
-        header = self.di_table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setStretchLastSection(True)
-        self.di_table.setColumnWidth(0, 60)
-        self.di_table.setColumnWidth(1, 60)
-        self.di_table.setColumnWidth(2, 60)
-        self.di_table.setColumnWidth(3, 60)
-        self.di_table.setColumnWidth(4, 200)
-        self.di_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.di_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.di_table.setAlternatingRowColors(True)
-        self.di_table.verticalHeader().hide()
-        self.di_table.verticalHeader().setDefaultSectionSize(20)
-        table_font = self._ui_font(-2)
-        self.di_table.setFont(table_font)
-        layout.addWidget(self.di_table)
-
-        # 按钮栏
-        btn_layout = QHBoxLayout()
-        add_di_btn = QPushButton("添加自定义DI")
-        add_di_btn.clicked.connect(self._add_custom_di)
-        btn_layout.addWidget(add_di_btn)
-
-        del_di_btn = QPushButton("删除选中自定义DI")
-        del_di_btn.clicked.connect(self._del_custom_di)
-        btn_layout.addWidget(del_di_btn)
-
-        btn_layout.addStretch()
-        layout.addLayout(btn_layout)
-
-        # 加载数据
-        self._load_di_map_data()
-
-        return tab
-
     def _load_di_map_data(self):
         """从解析器加载DI组合MAP数据到表格（含自定义标记）"""
         self._di_data = []
@@ -2981,66 +2884,6 @@ class MainWindow(QMainWindow):
         self.stats_label.setVisible(False)
 
         return tab
-
-    # ==================== 串口功能 ====================
-
-    def _refresh_serial_ports(self):
-        """刷新可用串口列表"""
-        self.serial_port_combo.clear()
-        ports = SerialWorker.list_ports()
-        if not ports:
-            self.serial_port_combo.addItem("无可用串口")
-            self.serial_port_combo.setEnabled(False)
-        else:
-            for p in ports:
-                self.serial_port_combo.addItem(p)
-            self.serial_port_combo.setEnabled(True)
-
-    def _on_serial_open_clicked(self):
-        """打开/关闭串口按钮点击"""
-        if self.serial_worker.is_open():
-            self.serial_worker.close_port()
-            self.serial_open_btn.setText("打开串口")
-            set_btn(self.serial_open_btn, "success")
-            self.serial_port_combo.setEnabled(True)
-            self.serial_baud_combo.setEnabled(True)
-            self.serial_parity_combo.setEnabled(True)
-        else:
-            port = self.serial_port_combo.currentText()
-            if not port or port == "无可用串口":
-                QMessageBox.warning(self, "警告", "请选择一个有效的串口")
-                return
-            baud = self._get_baud_value()
-            if baud is None:
-                return
-            parity = self.serial_parity_combo.currentText()
-            self.serial_worker.configure(port, baudrate=baud, parity=parity)
-            if self.serial_worker.open_port():
-                self.serial_open_btn.setText("关闭串口")
-                set_btn(self.serial_open_btn, "danger")
-                self.serial_port_combo.setEnabled(False)
-                self.serial_baud_combo.setEnabled(False)
-                self.serial_parity_combo.setEnabled(False)
-
-    def _on_serial_connection_changed(self, connected: bool):
-        """串口连接状态变化回调"""
-        if connected:
-            self.serial_status_label.setText("已连接")
-            self.serial_status_label.setStyleSheet(
-                self._serial_status_style("#4CAF50", bold=True)
-            )
-        else:
-            self.serial_status_label.setText("未连接")
-            self.serial_status_label.setStyleSheet(self._serial_status_style("#999"))
-            self.serial_open_btn.setText("打开串口")
-            set_btn(self.serial_open_btn, "success")
-            self.serial_port_combo.setEnabled(True)
-            self.serial_baud_combo.setEnabled(True)
-            self.serial_parity_combo.setEnabled(True)
-
-    def _on_serial_error(self, msg: str):
-        """串口错误回调"""
-        QMessageBox.warning(self, "串口错误", msg)
 
     # ==================== 预设按钮功能 ====================
 
@@ -4828,10 +4671,6 @@ class MainWindow(QMainWindow):
             channel=params["channel"],
         )
 
-    def load_example(self, data: str):
-        """加载示例数据"""
-        self.single_input.setText(data)
-
     @staticmethod
     def _clean_hex_input(text: str, keep_newlines: bool = False) -> str:
         """预处理报文输入：去除空格、逗号、换行等分隔符，支持0x前缀，仅保留十六进制字符
@@ -5845,48 +5684,6 @@ class MainWindow(QMainWindow):
         if hasattr(self, "verify_group"):
             self.verify_group.setStyleSheet("")
 
-    def export_single(self):
-        """导出单帧解析结果"""
-        if not hasattr(self, "current_result") or not self.current_result:
-            QMessageBox.warning(self, "警告", "没有可导出的解析结果！")
-            return
-
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "保存解析结果", "parse_result.txt", "文本文件 (*.txt)"
-        )
-
-        if file_path:
-            try:
-                # 使用当前选中的解析器
-                current_parser = self._get_current_parser()
-                table_data = current_parser.parse_to_table(self.current_result)
-                with open(file_path, "w", encoding="utf-8") as f:
-                    f.write("字段\t原始值\t解析值\t说明\n")
-                    for (
-                        field_name,
-                        raw_value,
-                        parsed_value,
-                        comment,
-                        _,
-                        _,
-                    ) in table_data:
-                        f.write(
-                            f"{field_name}\t{raw_value}\t{parsed_value}\t{comment}\n"
-                        )
-                QMessageBox.information(self, "成功", f"结果已保存到：{file_path}")
-            except Exception as e:
-                QMessageBox.critical(self, "错误", f"保存失败：{str(e)}")
-
-    @staticmethod
-    def _clear_layout(layout):
-        """递归清除layout中的所有子layout和widget"""
-        while layout.count():
-            child = layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
-            elif child.layout():
-                MainWindow._clear_layout(child.layout())
-
     def _setup_table_copy_menu(self, table: QTableWidget):
         """为解析结果表格设置右键复制菜单和 Ctrl+C 快捷键"""
         table.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -5981,6 +5778,10 @@ class MainWindow(QMainWindow):
         sys_action = config_menu.addAction("系统集成设置(&S)...")
         sys_action.triggered.connect(self._show_system_settings_dialog)
         llm_api_action = config_menu.addAction("模型API管理(&M)...")
+        # 这行曾被 e1dd85e（协议11 功能提交）误删 → 菜单项点了没反应，且
+        # `_show_llm_api_manager` 因此被误判为「零引用死代码」（任务
+        # 09-15-gui-dead-code-cleanup 复核时发现）。已有守卫：test/test_menu_wiring.py
+        llm_api_action.triggered.connect(self._show_llm_api_manager)
         update_act = config_menu.addAction("更新设置(&U)...")
         update_act.triggered.connect(self._show_update_settings_dialog)
         config_menu.addSeparator()
@@ -8015,24 +7816,6 @@ class MainWindow(QMainWindow):
                 return []
 
         return _resolve
-
-    def _extract_direction_from_table(self, table_data: list) -> str:
-        """从南网/国网协议表格数据中提取传输方向"""
-        # table_data 格式: (field_name, raw_value, parsed_value, comment, byte_start, byte_end)
-        # 控制域子字段"传输方向"的 field_name 为"  传输方向"或"  传输方向(DIR)"（带前缀空格）
-        for item in table_data:
-            field_name = item[0]
-            parsed_val = item[2]
-            # 查找传输方向字段（去除空格后匹配）
-            if "传输方向" in field_name or "DIR" in field_name:
-                dir_code = str(parsed_val).strip()
-                if dir_code == "0":
-                    return "下行帧(集中器→模块)"
-                elif dir_code == "1":
-                    return "上行帧(模块→集中器)"
-                else:
-                    return f"未知({dir_code})"
-        return "-"
 
     def _get_summary_from_table_data(
         self, table_data: list, protocol_index: int = None
@@ -10095,86 +9878,6 @@ class MainWindow(QMainWindow):
             dialog.reject
         )
         layout.addWidget(button_box)
-
-        dialog.exec()
-
-    def show_detail_dialog(self, row, col):
-        """单击列表行时弹出详细解析窗口（表格形式）"""
-        if row < 0 or row >= len(self.batch_results):
-            return
-
-        result = self.batch_results[row]
-
-        dialog = QDialog(self)
-        dialog.setWindowTitle(f"解析详情 - 第 {row + 1} 帧")
-        dialog.setMinimumSize(800, 500)
-
-        layout = QVBoxLayout(dialog)
-
-        # 原始数据
-        raw_hex = result.get("_input", result.get("原始数据", ""))
-        if raw_hex:
-            hex_display = " ".join(
-                raw_hex[j : j + 2] for j in range(0, len(raw_hex), 2)
-            )
-            raw_label = QLabel(f"原始报文：{hex_display}")
-            raw_label.setFont(self._ui_font(0, family="Consolas"))
-            raw_label.setTextInteractionFlags(
-                Qt.TextInteractionFlag.TextSelectableByMouse
-            )
-            raw_label.setWordWrap(True)
-            layout.addWidget(raw_label)
-
-        # 用表格显示解析结果
-        if "_input" in result and result.get("_status") != "异常":
-            try:
-                # 详情按需：命中 LRU / 批量时锁存的表格数据 / 按快照重解析
-                table_data = self._get_frame_table_data(row)
-
-                detail_table = ZoomableTableWidget()
-                detail_table.setColumnCount(4)
-                detail_table.setHorizontalHeaderLabels(
-                    ["字段", "原始值", "解析值", "说明"]
-                )
-                header = detail_table.horizontalHeader()
-                header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-                header.setStretchLastSection(True)
-                detail_table.setColumnWidth(0, 160)
-                detail_table.setColumnWidth(1, 120)
-                detail_table.setColumnWidth(2, 180)
-                detail_table.setEditTriggers(QTableWidget.NoEditTriggers)
-                detail_table.setSelectionBehavior(QTableWidget.SelectRows)
-                detail_table.setAlternatingRowColors(True)
-                detail_table.verticalHeader().hide()
-                detail_table.verticalHeader().setDefaultSectionSize(20)
-                table_font = self._ui_font(-2)
-                detail_table.setFont(table_font)
-
-                detail_table.setRowCount(len(table_data))
-                for r, item in enumerate(table_data):
-                    detail_table.setItem(r, 0, QTableWidgetItem(str(item[0])))
-                    detail_table.setItem(r, 1, QTableWidgetItem(str(item[1])))
-                    detail_table.setItem(r, 2, QTableWidgetItem(str(item[2])))
-                    detail_table.setItem(r, 3, QTableWidgetItem(str(item[3])))
-
-                layout.addWidget(detail_table)
-            except Exception:
-                # 回退到JSON显示
-                text_edit = QTextEdit()
-                text_edit.setReadOnly(True)
-                text_edit.setFont(self._ui_font(0, family="Consolas"))
-                text_edit.setText(json.dumps(result, ensure_ascii=False, indent=2))
-                layout.addWidget(text_edit)
-        else:
-            # 异常帧，显示错误信息
-            error_text = result.get(
-                "错误", json.dumps(result, ensure_ascii=False, indent=2)
-            )
-            text_edit = QTextEdit()
-            text_edit.setReadOnly(True)
-            text_edit.setFont(self._ui_font(0, family="Consolas"))
-            text_edit.setText(error_text)
-            layout.addWidget(text_edit)
 
         dialog.exec()
 

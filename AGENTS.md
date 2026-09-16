@@ -238,7 +238,8 @@ python reflex_web/build_offline_deploy.py --port 8091                # UV 包
 
 ```
 main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+ 行，MainWindow 类
-│                                #  - APP_VERSION、CHANGELOG（手写）+ _get_git_changelog()（动态）
+│                                #  - APP_VERSION、CHANGELOG（手写列表；原 _get_git_changelog() 已于 2026-09-15
+│                                #    死代码清理中移除，改动前已从 About 对话框断开）
 │                                #  - current_protocol 硬编码索引(0~10)，见 §6
 │                                #  - ConfigDialog：配置文件路径管理（自定义 JSON 路径）
 │
