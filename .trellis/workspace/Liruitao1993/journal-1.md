@@ -466,3 +466,24 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Status
 
 [OK] **Completed**
+
+
+## Session 18: 下载地址端口错乱修复（8091 却跳 host:8000）
+
+**Date**: 2026-09-16
+**Task**: 下载地址端口错乱修复（8091 却跳 host:8000）
+**Branch**: `main`
+
+### Summary
+
+根因：发布页/首页按钮用 rx.config 构建期端口(3000/8000)+socket 猜 IP 拼绝对下载地址，单端口 8091 部署后写成 host:8000 并进 version.json（GUI 自动更新也读它）。修法：web_utils 新增 resolve_download_target/release_absolute_url/release_download_path/is_same_origin_serving 收口——网页按钮同源相对路径（自愈历史 :8000、外部托管原样保留），发布页默认地址/version.json 用真实请求 host；删两处重复实现与死代码 set_release_url_from_host。新增 test/test_web_download_url.py 35 项并登记 CORE_TESTS；重建 8091 内嵌包并 32 项产物验收通过（含修复进包断言）；重打 zip 103MB。过程中我的脚本用 s.index 找锚点误命中字段区同名注释，导致 reflex_web.py 被整段复制（12393→15400 行，语法有效测试也过）——已回滚重做并加护栏（行数突变/重复 def 断言）。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9d059f4` | (see git log) |
+
+### Status
+
+[OK] **Completed**
