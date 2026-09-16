@@ -510,3 +510,24 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Status
 
 [OK] **Completed**
+
+
+## Session 20: GUI 窗口/分栏/列宽状态持久化（1.23.16）
+
+**Date**: 2026-09-16
+**Task**: GUI 窗口/分栏/列宽状态持久化（1.23.16）
+**Branch**: `main`
+
+### Summary
+
+任务 09-15-gui-window-state-persist 完成并归档。主窗口几何/result_splitter 比例/10 张关键表列宽持久化到 config.json 顶层 window 段（不用 QSettings；不塞 ui 段——那份每次由 ThemeManager.to_config 整体重建会被抹掉），只在 closeEvent 真实退出路径写；带屏外回落与非法值容错，配置菜单加「恢复默认窗口布局」。复核中发现并修掉本特性引入的真实副作用：测试构造并关闭主窗口时会把 offscreen 合成几何（实测 684x666）写进开发机真实 config.json，下次启动被套用 —— 两道防线：① closeEvent 的 _window_shown_once 守卫（从未 show 过的窗口不写盘，覆盖所有「构造即关闭」测试路径与 --parse/--file/--clipboard 路径）；② 新增共享沙箱 test/_config_sandbox.py（同时 patch app_paths.data_path 与 main_gui.data_path——后者是 from app_paths import data_path 绑进模块命名空间的那份），接线到实测会写盘的 test_app_exit/test_theme_settings，并给 test_pp_cli 补 app_paths.data_path 的 patch，其原有「真实 config.json 未被改写」md5 断言因此恢复成立。实测：5 个测试 + 整轮 release_check 跑完后真实 config.json 顶层键仍为 11 个、无 window 残留。新增 test/test_window_state.py（93 项）登记 CORE_TESTS，变异反证（_apply_window_state 改空实现 → 变红 8 项）。顺带给 3 个测试文件的 import _path_setup 补 F401 抑制（# noqa: E402 不压 F401，ruff --fix 会删掉该行导致 ModuleNotFoundError）。release_check PASS=58 FAIL=0 WARN=2（WARN 为 HEAD 基线）。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `adb7064` | (see git log) |
+
+### Status
+
+[OK] **Completed**

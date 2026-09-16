@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 19
+- **Total Sessions**: 20
 - **Last Active**: 2026-09-16
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~512 | Active |
+| `journal-1.md` | ~533 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 20 | 2026-09-16 | GUI 窗口/分栏/列宽状态持久化（1.23.16） | `adb7064` | `main` |
 | 19 | 2026-09-16 | GUI 批量解析后台化 + 详情按需 + 过滤提速（1.23.15） | `560df22`, `41a9935`, `1c5b13a` | `main` |
 | 18 | 2026-09-16 | 下载地址端口错乱修复（8091 却跳 host:8000） | `9d059f4` | `main` |
 | 17 | 2026-09-16 | Windows 局域网部署：--port 固化 + 教程 + 内嵌离线包构建 | `2a717fd` | `main` |
