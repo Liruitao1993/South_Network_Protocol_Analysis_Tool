@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/09-15-gui-dead-code-cleanup/prd.md", "reason": "删除清单与 verify-before-delete 要求（重复方法/零引用方法/根目录临时脚本，含不可 import 的 _generated_mapping*.py）"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "删除前确认无既有复用点（尤其查询页 builder 走 protocol_registry.lookup_builder_method 动态派发）"}
+{"file": "AGENTS.md", "reason": "§7 根目录禁止新增 test_*.py 的目录治理约定、§3 数据文件清单（判断临时脚本是否产出仍被引用的数据）、§5 各协议文档映射"}

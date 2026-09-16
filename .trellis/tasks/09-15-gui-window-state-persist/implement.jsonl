@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/09-15-gui-window-state-persist/implement.md", "reason": "实施计划：config.json ui.window 契约、载入/套用分离、列宽键=表名+列数、屏外可见性回落、查询页重建后二次套用"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "窗口/分栏/列宽属 UI 状态，需与 ThemeManager.to_config 的 ui 段归属一致，避免双写口径"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复用既有 _save_app_config / app_paths.data_path 持久化通道，不引入 QSettings 或第二份配置文件"}
+{"file": "AGENTS.md", "reason": "§8 陷阱 20b（真实退出路径含托盘退出/自动更新重启）、§3 可写数据文件一律经 app_paths 定位（frozen 落 exe 目录）"}

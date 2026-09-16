@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/09-15-gui-batch-parse-perf/prd.md", "reason": "对照验收：内存 <40MB、首屏 ≤2s、过滤 <0.2s、取消 ≤1s、导出/详情逐字段一致"}
+{"file": ".trellis/tasks/09-15-gui-batch-parse-perf/design.md", "reason": "对照契约复核实现：200 帧分片、取消响应、不持有 _table_data、异常行 _type_name 缺陷已修、收尾顺序不变"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查批次结果在 worker→槽→表格→导出 链路上的字段与行↔索引映射（Qt.UserRole）未漂移"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "质量门槛：线程回收、异常不外泄到 UI、无阻塞关闭"}
+{"file": "test/test_batch_snapshot_locate.py", "reason": "该套件直接同步调用 parse_batch 并断言行号/快照，后台化后必须复核语义未变（迁移只是等待方式改变）"}

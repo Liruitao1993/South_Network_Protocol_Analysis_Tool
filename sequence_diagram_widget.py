@@ -102,9 +102,7 @@ def _make_node(tei: int) -> SequenceNode:
         return SequenceNode(
             key=f"TEI:{tei}", tei=tei, label="未入网站点", role="UNASSOC"
         )
-    return SequenceNode(
-        key=f"TEI:{tei}", tei=tei, label=f"STA-{tei:04X}", role="STA"
-    )
+    return SequenceNode(key=f"TEI:{tei}", tei=tei, label=f"STA-{tei:04X}", role="STA")
 
 
 def _truncate(text: str, max_len: int = _LABEL_MAX_LEN) -> str:
@@ -144,7 +142,9 @@ def _tei_item(fields: dict, kind: str):
     return None
 
 
-def build_sequence_model_csg(batch_results, frame_indices=None) -> SequenceModel:
+def build_sequence_model_csg(
+    batch_results, frame_indices=None, table_data_resolver=None
+) -> SequenceModel:
     """协议9/10/11 批量解析结果 → 时序图模型（通用提取管道）。
 
     三协议解析器字段同构（定界符类型/源TEI/目的TEI/发送类型/MMTYPE），
@@ -171,6 +171,9 @@ def build_sequence_model_csg(batch_results, frame_indices=None) -> SequenceModel
         frame_indices: 与 batch_results 等长的原始索引列表（勾选子集时
             保持 frame_idx 与 #N 为 batch_results 原始序号）；None 时用
             位置序号（全部帧场景）。
+        table_data_resolver: 详情按需解析器 ``(result) -> list``；任务
+            09-15-gui-batch-parse-perf 步骤 3 起 ``batch_results`` 不再常驻
+            ``_table_data``，未注入时旧行为不变（只读记录自带字段）。
     """
     if frame_indices is not None and len(frame_indices) != len(batch_results):
         raise ValueError("frame_indices 长度必须与 batch_results 一致")
@@ -200,7 +203,12 @@ def build_sequence_model_csg(batch_results, frame_indices=None) -> SequenceModel
             skipped += 1
             continue
 
-        table_data = result.get("_table_data") or []
+        # 详情按需：命中记录自带的 _table_data（兼容旧路径/测试）或交给
+        # 注入的 resolver（main_gui._batch_detail_resolver → _get_frame_table_data）
+        table_data = result.get("_table_data")
+        if table_data is None and table_data_resolver is not None:
+            table_data = table_data_resolver(result)
+        table_data = table_data or []
         # 字段名 → 行 索引（同 _get_csg_new_gen_summary 的做法）；
         # ED 包装帧的「── PLC2.0 监控包装头 ──」等分段行不会与字段名冲突
         # 去缩进索引（协议10/11 字段名带缩进；首个出现优先：FC 在 MAC/应用层之前）
@@ -224,13 +232,15 @@ def build_sequence_model_csg(batch_results, frame_indices=None) -> SequenceModel
             b_src_item = _tei_item(fields, "源")
             b_src = _to_int(b_src_item[2]) if b_src_item is not None else None
             # 信标源TEI 缺省/为0(协议9信标载荷无有效源TEI)时归 CCO
-            src = ensure_node(
-                b_src if b_src not in (None, UNASSOC_TEI) else CCO_TEI
-            )
+            src = ensure_node(b_src if b_src not in (None, UNASSOC_TEI) else CCO_TEI)
             messages.append(
                 SequenceMessage(
-                    frame_idx, src.key, None,
-                    _msg_label(frame_idx, "beacon", summary), "beacon", summary,
+                    frame_idx,
+                    src.key,
+                    None,
+                    _msg_label(frame_idx, "beacon", summary),
+                    "beacon",
+                    summary,
                 )
             )
             continue
@@ -251,15 +261,23 @@ def build_sequence_model_csg(batch_results, frame_indices=None) -> SequenceModel
                 dst = ensure_node(sack_dst_tei)
                 messages.append(
                     SequenceMessage(
-                        frame_idx, src.key, dst.key,
-                        _msg_label(frame_idx, "sack", summary), "sack", summary,
+                        frame_idx,
+                        src.key,
+                        dst.key,
+                        _msg_label(frame_idx, "sack", summary),
+                        "sack",
+                        summary,
                     )
                 )
             else:
                 messages.append(
                     SequenceMessage(
-                        frame_idx, src.key, None,
-                        _msg_label(frame_idx, "sack", summary), "sack", summary,
+                        frame_idx,
+                        src.key,
+                        None,
+                        _msg_label(frame_idx, "sack", summary),
+                        "sack",
+                        summary,
                     )
                 )
             continue
@@ -289,9 +307,12 @@ def build_sequence_model_csg(batch_results, frame_indices=None) -> SequenceModel
             if is_broadcast:
                 messages.append(
                     SequenceMessage(
-                        frame_idx, src.key, None,
+                        frame_idx,
+                        src.key,
+                        None,
                         _msg_label(frame_idx, "broadcast", summary),
-                        "broadcast", summary,
+                        "broadcast",
+                        summary,
                     )
                 )
             else:
@@ -301,9 +322,13 @@ def build_sequence_model_csg(batch_results, frame_indices=None) -> SequenceModel
                     marker = f"入网→STA-{dst_tei:04X}"
                 messages.append(
                     SequenceMessage(
-                        frame_idx, src.key, dst.key,
+                        frame_idx,
+                        src.key,
+                        dst.key,
                         _msg_label(frame_idx, "unicast", summary),
-                        "unicast", summary, marker,
+                        "unicast",
+                        summary,
+                        marker,
                     )
                 )
                 if _ASSOC_REQ_KEYWORD in mm_comment:
@@ -344,15 +369,19 @@ def build_sequence_model_csg(batch_results, frame_indices=None) -> SequenceModel
         phases.append((i_req, "阶段② 关联入网"))
         if cnf_idxs and cnf_idxs[0] + 1 < len(messages):
             phases.append((cnf_idxs[0] + 1, "阶段③ 业务测试"))
-    return SequenceModel(
-        nodes=nodes, messages=messages, skipped=skipped, phases=phases
-    )
+    return SequenceModel(nodes=nodes, messages=messages, skipped=skipped, phases=phases)
 
 
-def build_sequence_model(batch_results, protocol: int, frame_indices=None):
+def build_sequence_model(
+    batch_results, protocol: int, frame_indices=None, table_data_resolver=None
+):
     """时序图模型分派入口：协议 9/10/11 字段同构，共用通用提取管道；其余返回 None"""
     if protocol in (9, 10, 11):
-        return build_sequence_model_csg(batch_results, frame_indices=frame_indices)
+        return build_sequence_model_csg(
+            batch_results,
+            frame_indices=frame_indices,
+            table_data_resolver=table_data_resolver,
+        )
     return None
 
 
@@ -583,9 +612,7 @@ if _QT_AVAILABLE:
                     self.palette().color(QPalette.ColorRole.PlaceholderText)
                 )
                 self._scene.addItem(hint)
-                self._scene.setSceneRect(
-                    hint.boundingRect().adjusted(-20, -20, 20, 20)
-                )
+                self._scene.setSceneRect(hint.boundingRect().adjusted(-20, -20, 20, 20))
                 if model is None:
                     self.status_label.setText("未生成")
                 else:
@@ -634,9 +661,7 @@ if _QT_AVAILABLE:
                 text.setBrush(text_color)
                 self._scene.addItem(text)
 
-                lifeline = QGraphicsLineItem(
-                    x, NODE_TOP + NODE_H, x, scene_bottom
-                )
+                lifeline = QGraphicsLineItem(x, NODE_TOP + NODE_H, x, scene_bottom)
                 lifeline.setPen(lifeline_pen)
                 lifeline.setZValue(-1)  # 生命线压底，不挡消息
                 self._scene.addItem(lifeline)

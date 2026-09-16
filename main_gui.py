@@ -10,6 +10,7 @@ import sys
 os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.fonts=false")
 import json
 import subprocess
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +51,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QSpinBox,
@@ -70,6 +72,12 @@ import proc_stats
 import protocol_registry as protocol_registry
 import thread_registry
 from app_paths import app_data_dir, data_path, resource_path
+from batch_parse_worker import (
+    BatchParseWorker,
+    apply_cross_frame_state,
+    parse_one_frame,
+    resolve_ed_wrapper,
+)
 from command_lookup import get_command_lookup
 from diff_widget import DiffWidget
 from dlt645_di_lookup import get_dlt645_di_lookup
@@ -89,7 +97,7 @@ from message_tool_widget import MessageToolWidget
 from meter_sim_widget import VirtualMeterWidget
 from monitor_widget import RealtimeMonitorWidget
 from obis_lookup import get_obis_lookup
-from parser_registry import get_parser
+from parser_registry import get_parser, get_parser_class
 from preset_buttons import PresetButtonWidget
 from serial_worker import SerialWorker
 from spectrum_widget import SpectrumWidget
@@ -102,10 +110,23 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.14"
+APP_VERSION = "1.23.15"
 BUILD_DATE = "2026-09-15"  # 编译日期，每次打包前更新
 
 CHANGELOG = [
+    (
+        "1.23.15",
+        "2026-09-16",
+        [
+            "**批量解析后台化（任务 09-15-gui-batch-parse-perf）**：原先点「批量解析」后剥离/提取/逐帧解析/逐行上表全在 UI 线程同步跑，33 MB 真实日志（49,532 帧）冻结窗口约 21 s 且无进度无取消。现拆为「主线程同步预处理（快照/行映射/前缀剥离/清洗/提取，~1.5 s）+ 后台线程逐帧解析」，新增 `batch_parse_worker.py`（`BatchParseWorker`，200 帧/片、背压回执、异常按帧隔离），工具栏加**进度条**与**取消**按钮（实测取消 10～15 ms 停止，远低于 1 s 验收线），取消后已完成结果保留且可看详情/导出",
+            "批量解析 UX 修复（复核中实测）：取消落在**分片中途**时，已解析未满一片的结果原先被静默丢弃 → 状态栏「已解析 N」大于表格行数（N 不诚实）且这些帧白解析；新增 `_emit_cancelled()` 统一回传后再发取消",
+            "**详情按需，常驻内存 229.4 MB → 20.6 MB**：`batch_results` 不再缓存每帧完整解析表（`_table_data`），改存 `_has_detail`/`_ed_type`（帧 hex 直接复用 `_input`，不额外存 `_frame_bytes`）；详情/导出/复制/时序图改走 `_get_frame_table_data(index)`（LRU 50 帧）按需重解析（实测 0.11 ms/帧，全量重建 5.55 s）",
+            "**修详情重解析与批量解析不一致（实测 934/49,532 帧表格差 1 行）**：根因是解析器**跟帧可变状态**（`_efc_symbol_count`/`_ofdma_frame_type`/`_ofdma_station_count` 仅在特定分支被写，`parse_to_table` 未在入口重置）——同一帧在不同解析历史下结果不同。解法：worker 把「帧前状态」锁进记录 `_ctx`（仅非默认值时存，约 47% 帧），重解析前 `apply_cross_frame_state()` 复原（`None` = 写回默认值，清掉实例残留历史）。**未改解析器内部算法**（属 Out of Scope）",
+            "**摘要过滤提速（0.87 s → 0.012 s / 次）**：`_on_batch_filter_changed` 整段用 `setUpdatesEnabled(False/True)` 包裹（`finally` 保证异常时也恢复重绘，代价几乎全在重绘而非循环）+ 行对象只取一次；关键词输入**250 ms 去抖**（`QTimer` restart 模式），状态下拉仍即时生效",
+            "配套收口：`parse_batch` 拆为 `_prepare_batch_input()`（主线程同步，含快照与行号映射，语义不变）与 `_start_batch_parse()`；循环内 `_get_current_parser()` 提到循环外、worker 用**自有解析器实例**（`get_parser_class()()` + `build_gui_parser()`，不用共享单例，避免与单帧页/实时监控竞争）；单帧解析主体提为模块级 `parse_one_frame()` 供 worker 与详情路径**共用**；修异常行 `_type_name` 缺值导致「协议/类型」列读到上一帧残留的缺陷；`window.disconnect(worker)` 修正为 `disconnect(self)`（前者实为无效断连）",
+            "测试：新增 `test/test_gui_batch_perf.py`（99 项：worker 分片/中途取消不丢结果/异常隔离/失败判定/记录形状/跨帧状态 helper/详情 LRU 与对拍/导出「包含表格数据」列/过滤 oracle 对拍+耗时+去抖+UI 心跳），登记 `release_check.py:CORE_TESTS`；`test_batch_snapshot_locate`、`test_batch_src_line_jump`、`test_ed_fallback_fix`、`test_ofdma_batch` 的同步假设改为 `test/_batch_wait.py::wait_batch()`（断言语义未变）",
+        ],
+    ),
     (
         "1.23.14",
         "2026-09-15",
@@ -122,12 +143,8 @@ CHANGELOG = [
             "两个构建脚本（UV 离线 / 内嵌 Python）新增共用模块 `reflex_web/deploy_common.py`：忽略规则单一来源（排除 `data/`、`admin_config.json` 与 `downloads/` 里的运行时产物；`downloads/` 下的随包静态资源用**白名单**放行）、启动脚本片段（cmd/ps1/sh 三份都注入 `NW_WEB_DATA_DIR`）、`迁移数据.cmd/sh` 生成；删除失效的 `preserve_data_*`/`restore_data_*`——它搬的是 `<out_dir>/data`，而运行时真实路径是 `<out_dir>/reflex_web/data`，**该保护从未生效**（`离线部署.md` 里「重建时自动保留 data/」的承诺一并改写）",
             '顺带修掉单文件 exe 的数据清零问题（缺陷 C）：`reflex_web_exe.spec` 是 onefile，`sys._MEIPASS` 每次启动解包、退出即删，而 `run_app.py` 曾把它当作数据根 ⇒ 反馈库/分享库/downloads/口令**每次重启全部丢失**；冻结态现改为 `Path(sys.executable).parent / "nw_web_data"`（exe 同级，升级只换 exe）',
             "新增 `test/test_web_data_paths.py`（解析矩阵 env/冻结态/默认 + 消费方单一来源与源码级接线守卫 + 迁移幂等且绝不覆盖 + 构建产物排除运行时数据的 copytree 端到端 + 启动/迁移脚本模板注入与 `${VAR}` 无 `$` 回归守卫，登记 `release_check.py:CORE_TESTS`）；另附真实部署目录端到端验收：产物不含运行时数据 → 启动后反馈落在数据根 → **删除整个部署目录、重新生成一份、重启，反馈仍在**",
+            "修复下载地址端口错乱（用户报障：部署在 8091 的实例点「下载客户端」跳到 `host:8000`）：根因是发布管理页/首页按钮用 `rx.config.get_config()` 的**构建期**端口（frontend 3000 / backend 8000）加 `socket` 猜本机 IP 拼绝对下载地址，单端口部署后端口被改错并写进 `version.json`（该 url 还被 GUI 自动更新读取，必须绝对地址）。修法：判定收口到 `web_utils.resolve_download_target` / `release_absolute_url` / `is_same_origin_serving`——**网页按钮走同源相对路径** `/download/<exe>`（任意 host/port 都对，且**自愈**历史 version.json 里写死的 `:8000`；仅当地址指向别的主机即外部托管时原样使用），**发布页默认地址/version.json 用当前请求的真实 host**（`self.router.headers.host`，不再猜 IP/端口）；删除两份重复实现与全仓无调用方的死代码 `set_release_url_from_host`；新增 `test/test_web_download_url.py`（35 项：纯函数矩阵 + 真实 State 的 `_download_target_url` + 源码守卫）",
             "部署易用性：两个部署构建脚本新增 `--port`（默认 8080），把端口固化进 cmd/ps1/sh 三份启动脚本与 `部署说明.txt`（目标服务器只对外开放某端口时双击即用，避免默认 8080 让人误判「部署失败」；命令行仍可 `--port` 覆盖）；新增 `docs/Web版局域网部署教程.md`（Windows 服务器·固定端口：防火墙放行、验证清单、首次配置、任务计划/NSSM 常驻、备份与升级、排错表），`reflex_web/离线部署.md`/README/AGENTS 同步指引",
-            "自查修掉一处本次引入的 UX 回归：`downloads/` 若整目录排除，新部署站的**首页 Hero 截图与客户端说明会永久缺失**（这两样没有后台上传入口）→ 改为区分「随包静态资源」（`client_screenshot.png` / `client_readme.md` / `README.md` 进包）与「运行时发布产物」（`*.exe` / `version.json` / `archive/` 不进包），程序侧新增 `app_data.resolve_download_asset()`（数据根优先、缺失回落随包资源）并接入 `load_download_info` 的截图/README 两处",
-            "**Web 运行时数据外置（任务 09-16-web-data-externalization）**：反馈库/分享库/上传截图、发布管理上传的 exe（`downloads/`）、管理员口令（`admin_config.json`）原先都写在**代码目录内**（`<部署>/reflex_web/`），而升级多为「删掉旧部署目录 → 拷新包」⇒ 数据在**新程序启动前**就被删除；更糟的是两个构建脚本未排除运行时数据，会把**构建机的开发库**打进部署包（合并式拷贝时用开发数据顶掉服务器生产数据）。现新增 `reflex_web/reflex_web/app_data.py` 作为运行时路径**唯一来源**（`NW_WEB_DATA_DIR` → 冻结态 exe 同级 `nw_web_data/` → 回落代码目录=开发态现状），数据根默认位于**部署目录的上一级** `nw_web_data/`，由启动脚本注入变量（已设则不覆盖，可指到别的盘）；`feedback_model`/`share_model`/`reflex_web.py` 四处 getter/`run_app.py` 两个中间件全部改为消费它，删除 `FEEDBACK_DATA_DIR`/`FRAMESHARE_DATA_DIR` 两个测试专用变量（收敂为同一个）",
-            "两个构建脚本（UV 离线 / 内嵌 Python）新增共用模块 `reflex_web/deploy_common.py`：忽略规则单一来源（排除 `data/`、`admin_config.json` 与 `downloads/` 里的运行时产物；`downloads/` 下的随包静态资源用**白名单**放行）、启动脚本片段（cmd/ps1/sh 三份都注入 `NW_WEB_DATA_DIR`）、`迁移数据.cmd/sh` 生成；删除失效的 `preserve_data_*`/`restore_data_*`——它搬的是 `<out_dir>/data`，而运行时真实路径是 `<out_dir>/reflex_web/data`，**该保护从未生效**（`离线部署.md` 里「重建时自动保留 data/」的承诺一并改写）",
-            '顺带修掉单文件 exe 的数据清零问题（缺陷 C）：`reflex_web_exe.spec` 是 onefile，`sys._MEIPASS` 每次启动解包、退出即删，而 `run_app.py` 曾把它当作数据根 ⇒ 反馈库/分享库/downloads/口令**每次重启全部丢失**；冻结态现改为 `Path(sys.executable).parent / "nw_web_data"`（exe 同级，升级只换 exe）',
-            "新增 `test/test_web_data_paths.py`（解析矩阵 env/冻结态/默认 + 消费方单一来源与源码级接线守卫 + 迁移幂等且绝不覆盖 + 构建产物排除运行时数据的 copytree 端到端 + 启动/迁移脚本模板注入与 `${VAR}` 无 `$` 回归守卫，登记 `release_check.py:CORE_TESTS`）；另附真实部署目录端到端验收：产物不含运行时数据 → 启动后反馈落在数据根 → **删除整个部署目录、重新生成一份、重启，反馈仍在**",
             "自查修掉一处本次引入的 UX 回归：`downloads/` 若整目录排除，新部署站的**首页 Hero 截图与客户端说明会永久缺失**（这两样没有后台上传入口）→ 改为区分「随包静态资源」（`client_screenshot.png` / `client_readme.md` / `README.md` 进包）与「运行时发布产物」（`*.exe` / `version.json` / `archive/` 不进包），程序侧新增 `app_data.resolve_download_asset()`（数据根优先、缺失回落随包资源）并接入 `load_download_info` 的截图/README 两处",
             "测试与文档：新增 `test/test_web_landing.py`（100 项：内容不变式 / 与 `protocol_registry` 逐行对拍防漂移 / CLI 参数对 `main_gui` 真实解析分支 / 组件树与 testid 契约 / 缺图降级互斥 / 死链白名单 + **跨页面接线断言**（死链与 CLI 两条守卫均以**变异反证**确认能抓住回退——旧写法是「渲染由常量生成、白名单由同一常量派生」的自洽假绿，以及「`--parse` 子串存在性」被 `sys.argv` 元组判断满足的假绿）），登记 `release_check.py:CORE_TESTS`；`test_web_spectrum.py`、`test_web_theme.py` 的 `app.index()` → `app.tool_page()`；`reflex_web/tests/test_reflex_app.py` 的 7 处 goto 改 `/app` 并新增首页冒烟与「首页 → 在线工具」跳转用例；`reflex_web_exe.spec` hiddenimports 补 `reflex_web.landing_web`。**注**：`downloads/client_screenshot.png`（v1.12.0 空态）与 `downloads/version.json`（停在 1.14.13）建议随发布更新，首页直接读取",
         ],
@@ -1334,6 +1351,30 @@ class MainWindow(QMainWindow):
 
         # 批量解析结果缓存
         self.batch_results: list[dict[str, Any]] = []
+        # 批量解析后台线程（任务 09-15-gui-batch-parse-perf 步骤 2）：
+        # 逐帧解析在工作线程跑，UI 线程只做剥离/清洗/提取（同步）与攒批回填；
+        # _batch_strip_map = 待交给 worker 的前缀剥离行映射快照
+        self._batch_worker: BatchParseWorker | None = None
+        self._batch_total: int = 0
+        self._batch_strip_map: list[int] | None = None
+        self._batch_cancelling: bool = False
+        # 详情按需（步骤 3）：batch_results 不再常驻每帧完整解析表
+        # （49,532 帧 = 229 MB → 约 4 MB），详情/导出/时序图按需重解析并走
+        # LRU（上限 50 帧）；`_batch_parse_params` / `_batch_ed_wrapper` 是
+        # 启动解析时的参数快照，重解析必须用同一套参数否则与批量结果不一致
+        self._detail_cache: OrderedDict[int, list] = OrderedDict()
+        self._detail_cache_max: int = 50
+        self._batch_parse_params: dict | None = None
+        self._batch_ed_wrapper: str = "auto"
+        # 详情重解析专用解析器实例（不与共享单例混用；参数变化时重建）
+        self._detail_parser_obj: Any = None
+        self._detail_parser_key: tuple | None = None
+        # 步骤 4：关键词过滤去抖（250 ms）——连续按键不再各跑一次全表 setRowHidden
+        # （实测 49,532 行下 0.87 s/按键）；状态下拉不走去抖（点一下应立刻生效）
+        self._batch_filter_timer = QTimer(self)
+        self._batch_filter_timer.setSingleShot(True)
+        self._batch_filter_timer.setInterval(250)
+        self._batch_filter_timer.timeout.connect(self._on_batch_filter_changed)
 
         # 批量输入原始日志快照（拖入/打开/粘贴时建立；回填式预处理只改输入框
         # 不改快照；摘要表右键「转到原始报文位置」在快照中定位，09-10 任务）
@@ -2495,6 +2536,27 @@ class MainWindow(QMainWindow):
         self.clear_batch_btn.clicked.connect(self.clear_batch)
         row0.addWidget(self.clear_batch_btn)
 
+        # 后台批量解析进度 + 取消（仅解析中可见；任务 09-15-gui-batch-parse-perf）
+        self.batch_progress_bar = QProgressBar()
+        self.batch_progress_bar.setMinimumHeight(18)
+        self.batch_progress_bar.setMinimumWidth(180)
+        self.batch_progress_bar.setTextVisible(True)
+        self.batch_progress_bar.setRange(0, 1)
+        self.batch_progress_bar.setValue(0)
+        self.batch_progress_bar.setToolTip("批量解析进度（后台执行，可取消）")
+        self.batch_progress_bar.setVisible(False)
+        row0.addWidget(self.batch_progress_bar)
+
+        self.batch_cancel_btn = self._make_toolbar_btn("取消", min_width=70)
+        self.batch_cancel_btn.setToolTip(
+            "停止批量解析（已解析完的结果保留，仍可看详情与导出）"
+        )
+        set_btn_icon(self.batch_cancel_btn, "stop")
+        self.batch_cancel_btn.clicked.connect(self._cancel_batch_parse)
+        self.batch_cancel_btn.setEnabled(False)
+        self.batch_cancel_btn.setVisible(False)
+        row0.addWidget(self.batch_cancel_btn)
+
         row0.addStretch()
         # 帧计数徽章右对齐（窄屏时不会被挤出可视区）
         self.batch_frame_count_label = QLabel("共 0 帧")
@@ -2709,7 +2771,8 @@ class MainWindow(QMainWindow):
         self.batch_search_edit.setPlaceholderText("输入关键词过滤（摘要/类型/TEI…）")
         self.batch_search_edit.setFont(self._ui_font(-1))
         self.batch_search_edit.setClearButtonEnabled(True)
-        self.batch_search_edit.textChanged.connect(self._on_batch_filter_changed)
+        # 关键词去抖：250 ms 内连续输入只跑一次过滤（状态下拉仍即时生效）
+        self.batch_search_edit.textChanged.connect(self._on_batch_search_text_changed)
         filter_bar.addWidget(self.batch_search_edit, 1)
 
         status_label = QLabel("状态：")
@@ -5107,11 +5170,12 @@ class MainWindow(QMainWindow):
         return detect_ed_wrapper(frame_bytes, fallback=fallback)
 
     def _ed_wrapper_for_frame(self, frame_bytes: bytes) -> str:
-        """单帧 ED 包装格式：下拉 auto 时逐帧自动识别，否则手动指定"""
-        mode = self._ed_wrapper_mode()
-        if mode == "auto":
-            return self._detect_ed_wrapper(frame_bytes)
-        return mode
+        """单帧 ED 包装格式：下拉 auto 时逐帧自动识别，否则手动指定
+
+        判别实现单源在 `batch_parse_worker.resolve_ed_wrapper`（后台批量解析线程
+        必须用同一份口径，但不能读下拉控件）。
+        """
+        return resolve_ed_wrapper(frame_bytes, self._ed_wrapper_mode())
 
     def _parse_ed_monitor_header(self, frame_bytes: bytes, wrapper: str = None):
         """解析 ED..EE 监控包装头（PLC2.0 / 广西台体两种公共头格式）
@@ -6714,7 +6778,32 @@ class MainWindow(QMainWindow):
             except RuntimeError:
                 pass
 
-        # 9) 兜底：注册表中仍存活的 QThread 统一请求中断 + quit + 等待
+        # 9) 批量解析后台线程：先断信号（避免关闭途中回投 UI 槽）+ 取消 + 有限等待
+        bw = getattr(self, "_batch_worker", None)
+        if bw is not None:
+            try:
+                bw.disconnect(self)
+            except (RuntimeError, TypeError):
+                pass
+            try:
+                bw.cancel()
+            except Exception:
+                pass
+            _safe_wait(bw, 2000)
+            # 先置空引用：队列里残留的 progress/cancelled 信号会变成陈旧信号
+            # （否则 `_on_batch_progress` 会对已 deleteLater 的 C++ 对象调 ack()）。
+            # 代价是 `_finish_batch_parse` 不再走收尾 → 此处自行复位控件状态，
+            # 避免「批量解析」按钮/协议下拉停在禁用、进度条停在解析中
+            # （步骤 2 复核遗留：仅真退出路径可达）
+            self._batch_worker = None
+            self._batch_cancelling = False
+            try:
+                self.batch_summary_table.setUpdatesEnabled(True)
+                self._set_batch_parsing_state(False)
+            except RuntimeError:
+                pass
+
+        # 10) 兜底：注册表中仍存活的 QThread 统一请求中断 + quit + 等待
         for qt in thread_registry.qthreads_alive():
             try:
                 if qt.isRunning():
@@ -7377,7 +7466,28 @@ class MainWindow(QMainWindow):
         return frames
 
     def parse_batch(self):
-        """批量解析 - 支持所有协议"""
+        """批量解析入口（后台执行，立即返回，不阻塞界面）
+
+        只做主线程同步的预处理（快照/行映射/剥离/清洗/提取，约 1.5 s）与后台
+        任务启动；逐帧解析在 `BatchParseWorker` 线程执行，通过信号攒批回填摘要表。
+        """
+        prep = self._prepare_batch_input()
+        if prep is None:
+            return
+        frames, params = prep
+        self._start_batch_parse(frames, params)
+
+    def _prepare_batch_input(self):
+        """批量解析主线程预处理：快照 / 行映射 / 前缀剥离 / 清洗 / 帧提取。
+
+        这些步骤**必须留在主线程同步完成**（设计 §7.2）：`_batch_lead_lines`、
+        前缀剥离行映射与原始日志快照是摘要行号（`_src_line`）与「转到原始报文位置」
+        的依据，解析开始前就要就绪；线程化会引入「快照未就绪但已开始解析」的竞态。
+
+        Returns:
+            (frames, params)：frames = 提取到的帧列表，params = 解析参数快照
+            None：无有效输入或未提取到帧（已弹告警，行为与改动前一致）
+        """
         full_text = self.batch_input.toPlainText()
         # 快照兜底：用户未走 拖入/打开/粘贴 入口（手敲/程序注入）且尚无快照时，
         # 以解析瞬间的输入框全文为原始日志快照（此后回填式预处理不覆盖它）
@@ -7464,6 +7574,8 @@ class MainWindow(QMainWindow):
         frames = self._extract_frames_for_protocol(input_text, self.current_protocol)
         strip_map = getattr(self, "_last_strip_line_map", None)
         self._last_strip_line_map = None
+        # 行映射快照交给后台 worker（下次解析会覆盖 _last_strip_line_map）
+        self._batch_strip_map = strip_map
         self._debug_log(f"_extract_frames_for_protocol: 找到 {len(frames)} 帧")
         for i, f in enumerate(frames[:5], 1):
             fhex = f[0] if isinstance(f, tuple) else f
@@ -7486,8 +7598,66 @@ class MainWindow(QMainWindow):
             )
             return
 
+        # 交给后台解析（本函数只负责同步预处理，不改结果集与控件状态）
+        return frames, self._current_parse_params()
+
+    # ==================== 批量解析后台执行（任务 09-15-gui-batch-parse-perf）====================
+
+    def _batch_ed_parser(self, ed_wrapper_mode: str):
+        """后台线程使用的 ED 包装头解析回调（widget-free）。
+
+        `ed_wrapper_mode` 是启动解析时「ED 包装格式」下拉的快照（UI 线程读取）；
+        闭包内只调用不读控件的 `_parse_ed_monitor_header`，且每帧只判一次格式。
+        """
+
+        def _parse(frame_bytes: bytes):
+            # 归一化：本回调在工作线程内执行，绝不能回落到读控件
+            # （`_parse_ed_monitor_header` 的 wrapper=None 分支会读下拉，跨线程不安全）
+            mode = ed_wrapper_mode if ed_wrapper_mode in ("plc2", "gx") else "auto"
+            wrapper = resolve_ed_wrapper(frame_bytes, mode)
+            rows, business, offset = self._parse_ed_monitor_header(
+                frame_bytes, wrapper=wrapper
+            )
+            return wrapper, rows, business, offset
+
+        return _parse
+
+    def _start_batch_parse(self, frames: list, params: dict):
+        """启动后台批量解析：清空旧结果 → 建 worker → 进入「解析中」状态机。
+
+        Args:
+            frames: `_prepare_batch_input` 提取到的帧列表
+            params: `_current_parse_params()` 的解析参数快照
+        """
+        # 防御：上一任务仍在跑（按钮已禁用，仅程序化重复调用能走到）→ 先断信号
+        # （否则旧任务的 progress/cancelled 会投递到已清空的新结果集上）再取消
+        worker = self._batch_worker
+        if worker is not None:
+            try:
+                # 断开「worker → 本窗口」的全部连接（传 self 才是有效断连；
+                # 曾误写 worker.disconnect(worker)，语义是「断开 worker→worker」
+                # 实际返回 False、什么都没断，靠 _is_stale_batch_signal 兜底）
+                worker.disconnect(self)
+            except (RuntimeError, TypeError):
+                pass
+            self._batch_worker = None
+            try:
+                worker.cancel()
+            except RuntimeError:
+                pass
+            try:
+                worker.wait(2000)
+            except RuntimeError:
+                pass
+
         # 清空之前的结果
+        self._batch_cancelling = False
+        self.batch_summary_table.setUpdatesEnabled(True)
         self.batch_results = []
+        # 详情 LRU 与新一批的解析参数快照（重解析必须与批量解析同参数）
+        self._detail_cache.clear()
+        self._batch_parse_params = dict(params)
+        self._batch_ed_wrapper = self._ed_wrapper_mode()
         self.batch_summary_table.setRowCount(0)
         self.batch_detail_table.setRowCount(0)
         self.batch_detail_hex.clear()
@@ -7495,206 +7665,164 @@ class MainWindow(QMainWindow):
         if getattr(self, "seq_diagram_tab", None) is not None:
             self.seq_diagram_tab.set_model(None)
 
-        # 解析器实例只建一次：此前写在逐帧循环内，本批 49532 帧需重建 49532 次
-        # registry 查表 + build_gui_parser 包装对象（纯浪费；任务 09-15-gui-batch-parse-perf）
-        current_parser = self._get_current_parser()
+        total = len(frames)
+        self._batch_total = total
+        worker = BatchParseWorker(
+            frames,
+            protocol_index=params["index"],
+            parse_level=params["parse_level"],
+            frame_type=params["frame_type"],
+            channel=params["channel"],
+            lead_lines=self._batch_lead_lines,
+            strip_map=self._batch_strip_map,
+            summary_fn=self._get_summary_from_table_data,
+            type_name_fn=self._get_frame_type_name,
+            ed_parse_fn=self._batch_ed_parser(self._batch_ed_wrapper),
+            log_fn=self._debug_log,
+        )
+        self._batch_strip_map = None
+        worker.progress.connect(self._on_batch_progress)
+        worker.finished_ok.connect(self._on_batch_finished)
+        worker.cancelled.connect(self._on_batch_cancelled)
+        worker.failed.connect(self._on_batch_failed)
+        # run() 返回（QThread::finished）后再删 C++ 对象，避免「线程仍在运行即析构」
+        worker.finished.connect(worker.deleteLater)
+        self._batch_worker = worker
 
-        success_count = 0
-        fail_count = 0
+        self._set_batch_parsing_state(True, total)
+        worker.start()
 
-        for i, frame_item in enumerate(frames):
-            # 协议9返回元组(frame_hex, ed_data_type, line_no)，行式协议返回
-            # (hex, "", line_no)，流式扫描协议返回纯字符串（无行号）
-            src_line_raw = -1
-            if isinstance(frame_item, tuple):
-                if len(frame_item) >= 3:
-                    frame_hex, ed_data_type, src_line_raw = frame_item[:3]
-                else:
-                    frame_hex, ed_data_type = frame_item
+    def _set_batch_parsing_state(self, parsing: bool, total: int = 0):
+        """批量解析状态机：解析中禁用解析入口与协议下拉，空闲时隐藏进度控件。"""
+        btn = getattr(self, "batch_parse_btn", None)
+        if btn is not None:
+            btn.setEnabled(not parsing)
+        combo = getattr(self, "protocol_combo", None)
+        if combo is not None:
+            combo.setEnabled(not parsing)
+        bar = getattr(self, "batch_progress_bar", None)
+        if bar is not None:
+            if parsing:
+                bar.setRange(0, total)
+                bar.setValue(0)
+                bar.setFormat(f"解析中 0 / {total}")
+                bar.setVisible(True)
             else:
-                frame_hex = frame_item
-                ed_data_type = ""
-            # 回跳显示日志行号 = 首部空白偏移 + 前缀剥离行映射
-            src_line = -1
-            if src_line_raw >= 0:
-                if strip_map and 0 <= src_line_raw < len(strip_map):
-                    src_line = self._batch_lead_lines + strip_map[src_line_raw]
+                bar.setVisible(False)
+        cancel = getattr(self, "batch_cancel_btn", None)
+        if cancel is not None:
+            cancel.setEnabled(parsing)
+            cancel.setVisible(parsing)
+        if parsing:
+            self.batch_status_bar.setText(f"批量解析中… 0 / {total} 帧")
+
+    def _is_stale_batch_signal(self) -> bool:
+        """当前槽收到的信号是否来自**已被替换的旧任务**（跨任务残留交付）。
+
+        旧 worker 的批量结果/收尾信号可能还在队列里，而新任务已启动（如解析中又
+        拖入 pcap 触发 parse_batch）：此时旧信号若照常处理，会把新任务的
+        `_batch_worker` 清空、控件状态改回「空闲」，新任务从此不可取消。
+        用 sender 与当前 worker 比对到即丢弃（直接调用本方法时 sender 为 None）。
+        """
+        sender = self.sender()
+        return sender is not None and sender is not self._batch_worker
+
+    def _on_batch_progress(
+        self, done: int, total: int, ok: int, fail: int, batch: list
+    ):
+        """工作线程攒批回填（按批而非逐帧，保证拖动/点击可响应）"""
+        if self._is_stale_batch_signal():
+            return
+        table = self.batch_summary_table
+        # 抑制逐行重绘：49k 行逐帧 insert+setItem 会明显卡顿
+        table.setUpdatesEnabled(False)
+        try:
+            start = len(self.batch_results)
+            self.batch_results.extend(batch)
+            for offset, result in enumerate(batch):
+                row = table.rowCount()
+                table.insertRow(row)
+                index = start + offset
+                status = result.get("_status", "")
+
+                # 序号（第 0 列 UserRole 存 batch_results 的全局原始索引，
+                # 过滤/排序后行号≠索引，「转到原始报文位置」与详情都依赖它）
+                num_item = QTableWidgetItem(str(index + 1))
+                num_item.setTextAlignment(Qt.AlignCenter)
+                num_item.setData(Qt.UserRole, index)
+                table.setItem(row, 0, num_item)
+
+                # 状态（emoji）
+                status_item = QTableWidgetItem("✅" if status == "成功" else "❌")
+                status_item.setTextAlignment(Qt.AlignCenter)
+                if status == "成功":
+                    status_item.setForeground(Qt.darkGreen)
                 else:
-                    src_line = self._batch_lead_lines + src_line_raw
+                    status_item.setForeground(Qt.red)
+                table.setItem(row, 1, status_item)
 
-            # 前 5 帧打印 debug 日志
-            if i < 5:
-                self._debug_log(
-                    f"解析帧{i + 1}: [{len(frame_hex) // 2:3d}B] "
-                    f"开始={frame_hex[:4]}... "
-                    f"ed_type={ed_data_type or '无'}"
-                )
+                # 长度
+                frame_hex = result.get("_input", "")
+                len_item = QTableWidgetItem(str(len(frame_hex) // 2))
+                len_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                table.setItem(row, 2, len_item)
 
-            table_data = []
-            try:
-                frame_bytes = bytes.fromhex(frame_hex)
-                # 协议9：ED 开头但提取失败（报文不完整/格式错误）→ 明确报错，
-                # 绝不把 ED 首字节当 FC 起始符送解析器
-                if (
-                    self.current_protocol == 9
-                    and frame_hex.startswith("ED")
-                    and not ed_data_type
-                ):
-                    table_data = [
-                        (
-                            "❌ 解析失败",
-                            "",
-                            "",
-                            "ED 监控帧解析失败：报文不完整或格式错误，"
-                            "首字节 ED 不能作为业务帧起始符解析",
-                            None,
-                            None,
-                        )
-                    ]
-                    summary = "ED 帧解析失败（报文不完整或格式错误）"
-                    status = "失败"
-                    fail_count += 1
-                # 协议9：合法 ED 帧但无业务数据（控制报文、空数据报文等）
-                # 直接解析监控头，不送 CSGNewGenParser
-                elif (
-                    self.current_protocol == 9
-                    and ed_data_type
-                    and ed_data_type.startswith("ED:")
-                    and frame_hex.startswith("ED")
-                ):
-                    meta_rows, business_bytes, business_offset = (
-                        self._parse_ed_monitor_header(
-                            frame_bytes,
-                            wrapper=self._ed_wrapper_for_frame(frame_bytes),
-                        )
-                    )
-                    if meta_rows is not None:
-                        # 去掉最后一行"── 业务帧 ──"，因为没有业务数据
-                        if meta_rows and meta_rows[-1][0].startswith("── 业务帧"):
-                            meta_rows = meta_rows[:-1]
-                        meta_rows.append(
-                            (
-                                "── 业务帧 ──",
-                                "",
-                                "",
-                                f"无业务数据（{ed_data_type[3:]}）",
-                                business_offset,
-                                business_offset,
-                            )
-                        )
-                        table_data = meta_rows
-                        ed_wrap_name = (
-                            "广西台体监控包装帧"
-                            if self._ed_wrapper_for_frame(frame_bytes) == "gx"
-                            else "PLC2.0监控包装帧"
-                        )
-                        summary = f"[ED:{ed_data_type[3:]}] {ed_wrap_name}"
-                        status = "成功"
-                        success_count += 1
-                    else:
-                        table_data = [
-                            ("❌ 解析失败", "", "", "ED 监控帧格式错误", None, None)
-                        ]
-                        summary = "ED 帧格式错误"
-                        status = "失败"
-                        fail_count += 1
-                else:
-                    # 调用parse_to_table生成表格数据（parser 实例已在循环外建好）
-                    table_data = current_parser.parse_to_table(frame_bytes)
+                # 协议/类型：_type_name 已对成功/失败/异常三种情况都写入，
+                # 不再回落到可能残留上一帧的 table_data（原缺陷：异常行显示上帧类型）
+                proto_item = QTableWidgetItem(result.get("_type_name") or "-")
+                if status != "成功":
+                    proto_item.setForeground(Qt.red)
+                table.setItem(row, 3, proto_item)
 
-                    # 从表格数据生成摘要
-                    summary = self._get_summary_from_table_data(table_data)
-                    # ED 监控帧数据来源标记
-                    if ed_data_type:
-                        summary = f"[ED:{ed_data_type}] {summary}"
+                # 摘要
+                table.setItem(row, 4, QTableWidgetItem(result.get("摘要", "")))
+        finally:
+            # 取消中保持抑制（由 _finish_batch_parse 统一恢复）：已解析批次还在信号
+            # 队列里，逐批恢复重绘会把整表重绘 N 次，用户会感觉「取消没停下来」
+            table.setUpdatesEnabled(not self._batch_cancelling)
 
-                    # 检查解析是否失败（校验错误、长度不匹配、未产出任何字段）
-                    # 空表 = 解析器没有产出字段 → 失败；❌ 行可能写在表中途
-                    # （如 csg_new_gen_parser.py:754），必须全表扫描
-                    is_parse_failed = (not table_data) or any(
-                        str(item[0]).startswith("❌") for item in table_data if item
-                    )
-                    if is_parse_failed:
-                        status = "失败"
-                        fail_count += 1
-                        # 提取失败原因作为摘要
-                        summary = (
-                            "解析无结果（未产出字段）" if not table_data else summary
-                        )
-                        for item in table_data:
-                            if item and str(item[0]).startswith("❌"):
-                                summary = item[3] if item[3] else "解析失败"
-                                break
-                    else:
-                        status = "成功"
-                        success_count += 1
+        bar = getattr(self, "batch_progress_bar", None)
+        if bar is not None:
+            bar.setRange(0, total)
+            bar.setValue(done)
+            bar.setFormat(f"解析中 {done} / {total}")
+        self.batch_status_bar.setText(
+            f"批量解析中… {done} / {total} 帧（✅ {ok}，❌ {fail}）"
+        )
+        # 背压回执：告知 worker 可以继续下一片（避免信号队列积压大量回填任务，
+        # 否则 processEvents() 会一次连续回填上百批，界面成段卡顿）
+        worker = self._batch_worker
+        if worker is not None:
+            worker.ack()
 
-                # 保存结果（表格数据可以在详情查看时使用；_type_name 供「按类型全选」）
-                proto_type = self._get_frame_type_name(table_data, status)
-                self.batch_results.append(
-                    {
-                        "_input": frame_hex,
-                        "_status": status,
-                        "_table_data": table_data,
-                        "_type_name": proto_type,
-                        "_src_line": src_line,
-                        "摘要": summary,
-                    }
-                )
+    def _on_batch_finished(self, ok: int, fail: int):
+        """工作线程全部完成"""
+        self._finish_batch_parse(ok, fail, cancelled=False)
 
-            except Exception as e:
-                status = "异常"
-                summary = str(e)[:50]
-                fail_count += 1
-                self.batch_results.append(
-                    {
-                        "_input": frame_hex,
-                        "_status": status,
-                        "_type_name": "异常",  # 必须给值：否则下方表格填充回落到上一帧的 table_data
-                        "_src_line": src_line,
-                        "错误": str(e),
-                        "摘要": summary,
-                    }
-                )
+    def _on_batch_cancelled(self, ok: int, fail: int):
+        """用户取消：已解析部分保留且可用（可看详情、可导出）"""
+        self._finish_batch_parse(ok, fail, cancelled=True)
 
-            # 添加到摘要表格
-            row = self.batch_summary_table.rowCount()
-            self.batch_summary_table.insertRow(row)
+    def _on_batch_failed(self, message: str):
+        """不可恢复错误（如构建解析器失败）"""
+        if self._is_stale_batch_signal():
+            return
+        self._finish_batch_parse(0, 0, cancelled=True)
+        self.batch_status_bar.setText(f"批量解析失败：{message}")
 
-            # 序号
-            num_item = QTableWidgetItem(str(i + 1))
-            num_item.setTextAlignment(Qt.AlignCenter)
-            num_item.setData(Qt.UserRole, i)  # 存储原始 batch_results 索引
-            self.batch_summary_table.setItem(row, 0, num_item)
-
-            # 状态（emoji）
-            status_emoji = "✅" if status == "成功" else "❌"
-            status_item = QTableWidgetItem(status_emoji)
-            status_item.setTextAlignment(Qt.AlignCenter)
-            if status == "成功":
-                status_item.setForeground(Qt.darkGreen)
-            else:
-                status_item.setForeground(Qt.red)
-            self.batch_summary_table.setItem(row, 1, status_item)
-
-            # 长度
-            len_item = QTableWidgetItem(str(len(frame_hex) // 2))
-            len_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            self.batch_summary_table.setItem(row, 2, len_item)
-
-            # 协议/类型：_type_name 已对成功/失败/异常三种情况都写入，
-            # 不再回落到可能残留上一帧的 table_data（原缺陷：异常行显示上帧类型）
-            proto_type = self.batch_results[-1].get("_type_name") or "-"
-            proto_item = QTableWidgetItem(proto_type)
-            if status != "成功":
-                proto_item.setForeground(Qt.red)
-            self.batch_summary_table.setItem(row, 3, proto_item)
-
-            # 摘要
-            self.batch_summary_table.setItem(row, 4, QTableWidgetItem(summary))
-
-        # 更新状态栏
-        self._update_status_bar(success_count, fail_count, len(frames))
+    def _finish_batch_parse(self, ok: int, fail: int, cancelled: bool = False):
+        """收尾（完成/取消/失败共用）：状态栏 → 类型下拉 → 选中首行 → 恢复控件。"""
+        if self._is_stale_batch_signal():
+            return
+        total = self._batch_total
+        self._update_status_bar(ok, fail, total)
+        if cancelled:
+            self.batch_status_bar.setText(
+                f"已取消 — 已解析 {ok + fail} / {total} 帧（✅ {ok} 成功，❌ {fail} 失败）"
+            )
+        bar = getattr(self, "batch_progress_bar", None)
+        if bar is not None:
+            bar.setValue(0 if cancelled else total)
 
         # 刷新「按类型全选」下拉（信标帧等类型一键勾选的来源）
         if hasattr(self, "batch_type_combo"):
@@ -7706,6 +7834,131 @@ class MainWindow(QMainWindow):
         if self.batch_summary_table.rowCount() > 0:
             self.batch_summary_table.selectRow(0)
             self._on_batch_row_selected()
+
+        self._set_batch_parsing_state(False)
+        self._batch_cancelling = False
+        self.batch_summary_table.setUpdatesEnabled(True)
+        self._batch_worker = None
+
+    def _cancel_batch_parse(self):
+        """「取消」按钮：停止后台解析（分片边界返回，已完成结果保留）"""
+        worker = self._batch_worker
+        if worker is None:
+            return
+        worker.cancel()
+        # 取消即停止解析（worker 在下一个分片边界返回，实测 <1ms）；已解析批次还在
+        # 信号队列里，先抑制表格重绘直到收尾，避免「取消后表格还在刷」的观感
+        self._batch_cancelling = True
+        self.batch_summary_table.setUpdatesEnabled(False)
+        self.batch_status_bar.setText("批量解析取消中…（已完成结果保留）")
+
+    # ── 详情按需（步骤 3：去 `_table_data` 常驻缓存）────────────────
+
+    def _detail_parser_for(self, params: dict):
+        """详情重解析用的解析器实例（本窗口自建，参数变化时重建）。
+
+        不用 ``parser_registry.get_parser`` 的共享单例：解析器带帧级可变状态
+        （如 ``csg_new_gen_parser`` 的 ``_pb_size``/``_cmt_index``/``_pb_count``），
+        与单帧解析页/实时监控共享会被相互污染。本实例只在 UI 线程的详情路径用。
+        """
+        key = (
+            params["index"],
+            params["parse_level"],
+            repr(params["frame_type"]),
+            params["channel"],
+        )
+        if self._detail_parser_obj is None or self._detail_parser_key != key:
+            spec = protocol_registry.get_protocol(params["index"])
+            base = get_parser_class(spec.parser_key)()
+            self._detail_parser_obj = protocol_registry.build_gui_parser(
+                params["index"],
+                base,
+                parse_level=params["parse_level"],
+                frame_type=params["frame_type"],
+                channel=params["channel"],
+            )
+            self._detail_parser_key = key
+        return self._detail_parser_obj
+
+    def _reparse_frame_detail(self, result: dict) -> list:
+        """按锁存的参数快照重解析单帧，返回其完整表格数据（失败时返回 []）。
+
+        与批量解析共用 ``batch_parse_worker.parse_one_frame``（单一实现），
+        入参用记录里锁存的 ``_input``（即提取后的原始帧 hex）与 ``_ed_type``
+        （决定协议9 ED 三分支的走向）→ 逐字段等于批量解析当时的 ``_table_data``。
+        """
+        params = self._batch_parse_params or self._current_parse_params()
+        parser = self._detail_parser_for(params)
+        # 帧前跨帧状态必须还原：解析器实例带「A 帧赋值、B 帧读取」的属性
+        # （协议9 为 `_CROSS_FRAME_STATE` 登记的三个），不还原时详情重解析的
+        # 分支判定会与批量解析不同（实测 934/49,532 帧差一行 `⚠️ eFC数据不足`）；
+        # 记录里没有 `_ctx` 时显式写回默认值，清掉本实例的历史残留
+        apply_cross_frame_state(parser, params["index"], result.get("_ctx"))
+        record = parse_one_frame(
+            (result.get("_input", ""), result.get("_ed_type") or "", 0),
+            0,
+            protocol_index=params["index"],
+            parser=parser,
+            summary_fn=self._get_summary_from_table_data,
+            type_name_fn=self._get_frame_type_name,
+            ed_parse_fn=self._batch_ed_parser(self._batch_ed_wrapper),
+            lead_lines=0,
+            strip_map=None,
+            log_fn=None,
+        )
+        return list(record.get("_table_data") or [])
+
+    def _get_frame_table_data(self, index: int) -> list:
+        """取第 ``index`` 帧的详情表格数据（详情按需 + LRU，上限 50 帧）。
+
+        顺序：LRU 命中 → 记录里仍带 ``_table_data``（兼容旧路径/测试）→
+        按 ``_has_detail`` 判据重解析。失败/异常帧（无可展示表格）返回 []，
+        与去缓存前 ``result.get("_table_data", [])`` 的取值一致。
+        任何异常都兜住返回 []（详情面板不能因一帧崩掉）。
+        """
+        try:
+            if index < 0 or index >= len(self.batch_results):
+                return []
+            cached = self._detail_cache.get(index)
+            if cached is not None:
+                self._detail_cache.move_to_end(index)
+                return cached
+            result = self.batch_results[index]
+            if "_table_data" in result:
+                table_data = list(result.get("_table_data") or [])
+            elif result.get("_has_detail"):
+                table_data = self._reparse_frame_detail(result)
+            else:
+                table_data = []
+        except Exception:  # noqa: BLE001 —— 详情路径不得因单帧异常影响界面
+            table_data = []
+        self._detail_cache[index] = table_data
+        self._detail_cache.move_to_end(index)
+        while len(self._detail_cache) > self._detail_cache_max:
+            self._detail_cache.popitem(last=False)
+        return table_data
+
+    def _batch_detail_resolver(self):
+        """返回「结果 dict → 详情表格数据」的解析器闭包（供导出/时序图注入）。
+
+        导出/时序图拿到的是 ``self.batch_results`` 里的**同一批 dict**（含选中子集），
+        故用 ``id() → 全局下标`` 映射回 ``_get_frame_table_data``，避免 O(n) 的
+        ``list.index`` 或修改记录键集；逐条取用、用完即弃，不把整批详情物化成
+        一个大 list（49,532 帧会重新回到 229 MB）。映射外的 dict（如测试自造）
+        回落到其自带的 ``_table_data``。
+        """
+        index_by_id = {id(r): i for i, r in enumerate(self.batch_results)}
+
+        def _resolve(result) -> list:
+            idx = index_by_id.get(id(result))
+            if idx is None:
+                return list(result.get("_table_data") or [])
+            try:
+                return self._get_frame_table_data(idx)
+            except Exception:  # noqa: BLE001 —— 导出不得因一帧异常整批失败
+                return []
+
+        return _resolve
 
     def _extract_direction_from_table(self, table_data: list) -> str:
         """从南网/国网协议表格数据中提取传输方向"""
@@ -9575,6 +9828,9 @@ class MainWindow(QMainWindow):
             if selected_only
             else self.batch_results
         )
+        # 详情按需（步骤 3）：batch_results 不再常驻 _table_data，导出侧注入
+        # 「结果 dict → 详情表格」解析器（逐条取用，不物化整批详情）
+        detail_resolver = self._batch_detail_resolver()
 
         # 获取协议名称
         protocol_names = [
@@ -9616,11 +9872,17 @@ class MainWindow(QMainWindow):
 
                 if fmt == "excel":
                     result_path = exporter.export_to_excel(
-                        self.batch_results, protocol_name, output_file=file_path
+                        self.batch_results,
+                        protocol_name,
+                        output_file=file_path,
+                        table_data_resolver=detail_resolver,
                     )
                 else:
                     result_path = exporter.export_to_json(
-                        self.batch_results, protocol_name, output_file=file_path
+                        self.batch_results,
+                        protocol_name,
+                        output_file=file_path,
+                        table_data_resolver=detail_resolver,
                     )
 
                 QMessageBox.information(
@@ -9753,11 +10015,17 @@ class MainWindow(QMainWindow):
 
                 if excel_radio.isChecked():
                     result_path = exporter.export_to_excel(
-                        export_pool, protocol_name, output_file=file_path
+                        export_pool,
+                        protocol_name,
+                        output_file=file_path,
+                        table_data_resolver=detail_resolver,
                     )
                 else:
                     result_path = exporter.export_to_json(
-                        export_pool, protocol_name, output_file=file_path
+                        export_pool,
+                        protocol_name,
+                        output_file=file_path,
+                        table_data_resolver=detail_resolver,
                     )
                 QMessageBox.information(
                     self, "导出成功", f"结果已保存到:\n{result_path}"
@@ -9804,14 +10072,8 @@ class MainWindow(QMainWindow):
         # 用表格显示解析结果
         if "_input" in result and result.get("_status") != "异常":
             try:
-                # 优先使用批量解析时已保存的表格数据
-                if "_table_data" in result:
-                    table_data = result["_table_data"]
-                else:
-                    # 否则重新用当前协议解析器解析
-                    frame_bytes = bytes.fromhex(result["_input"])
-                    current_parser = self._get_current_parser()
-                    table_data = current_parser.parse_to_table(frame_bytes)
+                # 详情按需：命中 LRU / 批量时锁存的表格数据 / 按快照重解析
+                table_data = self._get_frame_table_data(row)
 
                 detail_table = ZoomableTableWidget()
                 detail_table.setColumnCount(4)
@@ -9948,59 +10210,77 @@ class MainWindow(QMainWindow):
             # 取值完全一致）；不能读 protocol_combo —— 后台线程禁止触碰 widget。
             return protocol_registry.get_protocol(proto).name.split(" ")[0]
 
+    def _on_batch_search_text_changed(self):
+        """关键词输入去抖入口（250 ms）。
+
+        连续按键只跑一次全表过滤；计时器 `timeout` 仍接 `_on_batch_filter_changed`，
+        所以「最终态」与直接调用完全一致（仅延迟 250 ms）。
+        """
+        self._batch_filter_timer.start()
+
     def _on_batch_filter_changed(self):
-        """批量解析结果搜索过滤（关键词 + 状态）"""
+        """批量解析结果搜索过滤（关键词 + 状态）
+
+        性能：49,532 行逐行 `setRowHidden` 的代价几乎全在重绘（实测 0.87 s/按键），
+        关掉重绘后同一循环 0.02 s。`finally` 保证异常时也恢复重绘。
+        过滤字面量、匹配范围、计数文案、选中行回落行为均与改动前逐字一致。
+        """
         if not hasattr(self, "batch_results") or not self.batch_results:
             return
         keyword = self.batch_search_edit.text().strip().lower()
         status_filter = self.batch_status_filter.currentData()
         visible_count = 0
-        total = self.batch_summary_table.rowCount()
-        for row in range(total):
-            item = self.batch_summary_table.item(row, 0)
-            if item is None:
-                continue
-            orig_idx = item.data(Qt.UserRole)
-            if orig_idx is None or orig_idx >= len(self.batch_results):
-                continue
-            result = self.batch_results[orig_idx]
-            status = result.get("_status", "")
-            # 状态过滤
-            if status_filter == "success" and status != "成功":
-                self.batch_summary_table.setRowHidden(row, True)
-                continue
-            if status_filter == "fail" and status != "失败":
-                self.batch_summary_table.setRowHidden(row, True)
-                continue
-            if status_filter == "error" and status != "异常":
-                self.batch_summary_table.setRowHidden(row, True)
-                continue
-            # 关键词过滤（匹配摘要 + 协议类型 + 原始HEX）
-            if keyword:
-                summary = str(result.get("摘要", "")).lower()
-                proto_item = self.batch_summary_table.item(row, 3)
-                proto = proto_item.text().lower() if proto_item else ""
-                raw_hex = str(result.get("_input", "")).lower()
-                if (
-                    keyword not in summary
-                    and keyword not in proto
-                    and keyword not in raw_hex
-                ):
-                    self.batch_summary_table.setRowHidden(row, True)
+        table = self.batch_summary_table
+        total = table.rowCount()
+        table.setUpdatesEnabled(False)
+        try:
+            for row in range(total):
+                item = table.item(row, 0)
+                if item is None:
                     continue
-            self.batch_summary_table.setRowHidden(row, False)
-            visible_count += 1
+                orig_idx = item.data(Qt.UserRole)
+                if orig_idx is None or orig_idx >= len(self.batch_results):
+                    continue
+                result = self.batch_results[orig_idx]
+                status = result.get("_status", "")
+                # 状态过滤
+                if status_filter == "success" and status != "成功":
+                    table.setRowHidden(row, True)
+                    continue
+                if status_filter == "fail" and status != "失败":
+                    table.setRowHidden(row, True)
+                    continue
+                if status_filter == "error" and status != "异常":
+                    table.setRowHidden(row, True)
+                    continue
+                # 关键词过滤（匹配摘要 + 协议类型 + 原始HEX）
+                if keyword:
+                    summary = str(result.get("摘要", "")).lower()
+                    proto_item = table.item(row, 3)
+                    proto = proto_item.text().lower() if proto_item else ""
+                    raw_hex = str(result.get("_input", "")).lower()
+                    if (
+                        keyword not in summary
+                        and keyword not in proto
+                        and keyword not in raw_hex
+                    ):
+                        table.setRowHidden(row, True)
+                        continue
+                table.setRowHidden(row, False)
+                visible_count += 1
+        finally:
+            table.setUpdatesEnabled(True)
         # 更新计数
         if keyword or status_filter != "all":
             self.batch_filter_count.setText(f"显示 {visible_count} / {total}")
         else:
             self.batch_filter_count.setText("")
         # 如果当前选中行被隐藏，选中第一条可见行
-        current = self.batch_summary_table.currentRow()
-        if current < 0 or self.batch_summary_table.isRowHidden(current):
+        current = table.currentRow()
+        if current < 0 or table.isRowHidden(current):
             for r in range(total):
-                if not self.batch_summary_table.isRowHidden(r):
-                    self.batch_summary_table.selectRow(r)
+                if not table.isRowHidden(r):
+                    table.selectRow(r)
                     break
 
     def _generate_sequence_diagram(self):
@@ -10029,7 +10309,11 @@ class MainWindow(QMainWindow):
         from sequence_diagram_widget import build_sequence_model
 
         model = build_sequence_model(
-            results, self.current_protocol, frame_indices=frame_indices
+            results,
+            self.current_protocol,
+            frame_indices=frame_indices,
+            # 详情按需（步骤 3）：时序图提取需要每帧字段表，按需重解析
+            table_data_resolver=self._batch_detail_resolver(),
         )
         if model is None:
             QMessageBox.information(self, "提示", "当前协议暂不支持时序图。")
@@ -10155,7 +10439,9 @@ class MainWindow(QMainWindow):
             self.batch_detail_table.setItem(0, 0, err_item)
             return
 
-        table_data = result.get("_table_data", [])
+        # 详情按需（步骤 3）：不再依赖常驻的 _table_data；命中缓存时 0 开销，
+        # 否则用批量解析锁存的帧字节与参数快照重解析一次
+        table_data = self._get_frame_table_data(index)
         if not table_data:
             return
 

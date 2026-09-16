@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """批量解析结果 → 输入日志行回跳 offscreen 回归测试
 
 覆盖：
@@ -11,9 +10,9 @@
 直接运行: python test_batch_src_line_jump.py
 """
 
-import _path_setup  # noqa: E402
-
 import os
+
+import _path_setup  # noqa: E402,F401
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -40,9 +39,11 @@ def main():
 
     app = QApplication.instance() or QApplication([])
 
-    import main_gui
+    from _batch_wait import wait_batch
     from test_csg_sequence_model import SOF_DOWN, SOF_UP
     from test_ed_gx_wrapper import _build_gx_frame
+
+    import main_gui
 
     win = main_gui.MainWindow()
     win.current_protocol = 9
@@ -52,16 +53,16 @@ def main():
 
     # ── 1+5: 首部空行 + 噪声行 + 空行 + ED 包装行 ──
     lines = [
-        "",                                   # 0 首部空行（lead 偏移）
+        "",  # 0 首部空行（lead 偏移）
         "260908-193711-079: 900[1] BOOT: boot start",  # 1 噪声
-        _spaced(SOF_DOWN.hex().upper()),     # 2 帧1
-        "",                                   # 3 空行
-        _spaced(SOF_UP.hex().upper()),       # 4 帧2
-        _spaced(gx_frame.hex().upper()),     # 5 ED 广西台体包装行
+        _spaced(SOF_DOWN.hex().upper()),  # 2 帧1
+        "",  # 3 空行
+        _spaced(SOF_UP.hex().upper()),  # 4 帧2
+        _spaced(gx_frame.hex().upper()),  # 5 ED 广西台体包装行
     ]
     win.batch_input.setPlainText("\n".join(lines))
     win.parse_batch()
-    app.processEvents()
+    wait_batch(win)
 
     check("解析 3 帧", len(win.batch_results) == 3, f"n={len(win.batch_results)}")
     src_lines = [r.get("_src_line") for r in win.batch_results]
@@ -93,13 +94,19 @@ def main():
 
     # ── 4: 监控前缀日志行（strip 行映射）──
     mon_lines = [
-        "15:49:51 254  -> 接收机 Has Get " + _spaced("EDA5000002EF017E4E9786010088" "00") + " " + _spaced(SOF_DOWN.hex().upper()),
+        "15:49:51 254  -> 接收机 Has Get "
+        + _spaced("EDA5000002EF017E4E978601008800")
+        + " "
+        + _spaced(SOF_DOWN.hex().upper()),
         "noise line",
-        "15:49:52 255  -> 接收机 Has Get " + _spaced("EDA5000002EF017E4E9786010088" "00") + " " + _spaced(SOF_UP.hex().upper()),
+        "15:49:52 255  -> 接收机 Has Get "
+        + _spaced("EDA5000002EF017E4E978601008800")
+        + " "
+        + _spaced(SOF_UP.hex().upper()),
     ]
     win.batch_input.setPlainText("\n".join(mon_lines))
     win.parse_batch()
-    app.processEvents()
+    wait_batch(win)
     src2 = [r.get("_src_line") for r in win.batch_results]
     check("监控前缀行映射", src2 == [0, 2], f"src2={src2}")
     if src2 == [0, 2]:

@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/09-15-gui-dead-code-cleanup/prd.md", "reason": "对照验收：grep 各只命中 1 处、AST 无重名、7 个符号 0 命中、根目录无 _*.py"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "复核删除后仍满足质量门槛（无残留引用、无 AttributeError 路径）"}

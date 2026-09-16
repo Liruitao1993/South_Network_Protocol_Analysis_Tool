@@ -1,15 +1,21 @@
-# -*- coding: utf-8 -*-
 """模拟完整 parse_batch，输入完整 EDA5 帧"""
 
-import _path_setup  # noqa: E402
-
 import os
+
+import _path_setup  # noqa: E402,F401
+
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 import sys
-sys.path.insert(0, ".")
-sys.stdout.reconfigure(encoding="utf-8")
 
+sys.path.insert(0, ".")
+if hasattr(
+    sys.stdout, "reconfigure"
+):  # 类型存根把 sys.stdout 看作 TextIO（无 reconfigure）
+    sys.stdout.reconfigure(encoding="utf-8")
+
+from _batch_wait import wait_batch
 from PySide6.QtWidgets import QApplication
+
 from main_gui import MainWindow
 
 app = QApplication([])
@@ -20,11 +26,12 @@ hex_str = "EDA5000002EF0100000000010088000901F0FFFE0000417804205B100000000000000
 
 w.batch_input.setPlainText(hex_str)
 w.parse_batch()
+wait_batch(w)
 
 print(f"batch_results 数量: {len(w.batch_results)}")
 for i, r in enumerate(w.batch_results):
     print(f"\n帧{i}: status={r.get('_status')} 摘要={r.get('摘要')}")
-    td = r.get("_table_data", [])
+    td = w._get_frame_table_data(i)  # 详情按需（步骤 3，不再常驻 _table_data）
     if td:
         # 找失败行
         fails = [x for x in td if "失败" in str(x[0]) or "异常" in str(x[0])]

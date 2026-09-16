@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """批量解析「原始日志快照」右键定位 回归测试（任务 09-10-batch-snapshot-locate）
 
 覆盖：
@@ -15,9 +14,10 @@
 
 直接运行: python test/test_batch_snapshot_locate.py
 """
-import _path_setup  # noqa: E402
 
 import os
+
+import _path_setup  # noqa: E402,F401
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -37,6 +37,8 @@ def check(name, cond, detail=""):
 
 # ============================ [1] 纯逻辑层 ============================
 
+from _batch_wait import wait_batch  # noqa: E402
+
 import batch_source_view as bsv  # noqa: E402
 
 F1 = "ED0700000000010001E80005EF16"  # 14B 样本帧
@@ -49,11 +51,12 @@ snap = (
     + " ".join(f"{i:02X}" for i in range(15))
     + "\n"
     "ED 07 00 00 00 00 01 00 01 E8 00 05 EF 16\n"
-    "====== separator ======\n"
-    + F2.lower()
-    + "\n"
+    "====== separator ======\n" + F2.lower() + "\n"
 )
-check("单行命中（帧体在第1行，行首时间戳不混入）", bsv.find_frame_in_text(snap, F1) == [(1, 1)])
+check(
+    "单行命中（帧体在第1行，行首时间戳不混入）",
+    bsv.find_frame_in_text(snap, F1) == [(1, 1)],
+)
 check("小写帧 hex 命中第3行", bsv.find_frame_in_text(snap, F2) == [(3, 3)])
 
 # 跨行帧：续行行首时间戳剥离后帧体在流中连续
@@ -64,17 +67,25 @@ cross = (
 check("跨行帧命中 (0,1)", bsv.find_frame_in_text(cross, F1) == [(0, 1)])
 
 dup = f"{F1}\nnoise\n{F1}\nnoise\n{F1}\n"
-check("重发帧 3 命中非重叠", bsv.find_frame_in_text(dup, F1) == [(0, 0), (2, 2), (4, 4)])
+check(
+    "重发帧 3 命中非重叠", bsv.find_frame_in_text(dup, F1) == [(0, 0), (2, 2), (4, 4)]
+)
 check(
     "帧内重叠不产生假命中",
     bsv.find_frame_in_text("AAAABBBBCCCCDDDD" + F1 + "\n", F1) == [(0, 0)],
 )
 
 check("短输入(<2B)拒绝", bsv.find_frame_in_text(snap, "ABCD") == [])
-check("未命中返回空", bsv.find_frame_in_text(snap, "A1B2C3D4E5F60718293A4B5C6D7E8F90") == [])
+check(
+    "未命中返回空",
+    bsv.find_frame_in_text(snap, "A1B2C3D4E5F60718293A4B5C6D7E8F90") == [],
+)
 
 stream, line_of = bsv.hex_stream(snap)
-check("hex_stream 流长与行映射一致", len(stream) == len(line_of) and stream == stream.upper())
+check(
+    "hex_stream 流长与行映射一致",
+    len(stream) == len(line_of) and stream == stream.upper(),
+)
 check(
     "find_frame_in_stream 与一次性版一致",
     bsv.find_frame_in_stream(stream, line_of, F1) == [(1, 1)],
@@ -87,7 +98,10 @@ monitor_line_text = (
     "ED A5 00 00 02 EF 01 7E 4E 97 86 01 00 88 00 "
     "68 11 01 01 00 00 00 00 01 00 01 00 00"
 )
-check("监控行帧体命中", bsv.find_frame_in_text(monitor_line_text, monitor_body) == [(0, 0)])
+check(
+    "监控行帧体命中",
+    bsv.find_frame_in_text(monitor_line_text, monitor_body) == [(0, 0)],
+)
 
 
 # ============================ [2][3] GUI 集成 ============================
@@ -98,9 +112,10 @@ def main():
 
     app = QApplication.instance() or QApplication([])
 
-    import main_gui
     from PySide6.QtCore import QEvent, QModelIndex, QPoint, Qt
     from PySide6.QtGui import QKeyEvent
+
+    import main_gui
 
     win = main_gui.MainWindow()
     app.processEvents()
@@ -111,7 +126,10 @@ def main():
 
     # ── [2] 快照链 ──
     win._set_batch_snapshot("HEADER line\n" + F1 + "\n", "t.log")
-    check("set_batch_snapshot 建立快照", win._batch_snapshot_text.startswith("HEADER line\n"))
+    check(
+        "set_batch_snapshot 建立快照",
+        win._batch_snapshot_text.startswith("HEADER line\n"),
+    )
     check("快照名记录", win._batch_snapshot_name == "t.log")
     win._set_batch_snapshot("crlf\r\nline\r\n", None)
     check("CRLF 归一为 LF", "\r" not in win._batch_snapshot_text)
@@ -129,7 +147,7 @@ def main():
     app.processEvents()
 
     def mk_monitor_line(frame_spaced, seq):
-        ts = "2026-09-10 10:00:0{}".format(seq % 10)
+        ts = f"2026-09-10 10:00:0{seq % 10}"
         head = " ".join(f"{i:02X}" for i in range(15))
         return f"{ts} {seq} -> 接收机 Has Get {head} {frame_spaced}"
 
@@ -145,7 +163,7 @@ def main():
     win.batch_input.setPlainText(log)
     win._set_batch_snapshot(log, "monitor.log")
     win.parse_batch()
-    app.processEvents()
+    wait_batch(win)
     n = len(win.batch_results)
     check("批量解析产出帧", n >= 3, f"results={n}")
     hexes = [r["_input"].replace(" ", "").upper() for r in win.batch_results]
@@ -175,7 +193,11 @@ def main():
     # 重发消歧：第二个 F1 帧命中第 3 行（0-based=2）
     win._locate_frame_in_snapshot(f1_idxs[1])
     hit_line2 = first_sel_line(v)
-    check("重发帧消歧到后一次命中(0-based=2)", hit_line2 == 2, f"{hit_line2} vs {hit_line}")
+    check(
+        "重发帧消歧到后一次命中(0-based=2)",
+        hit_line2 == 2,
+        f"{hit_line2} vs {hit_line}",
+    )
 
     # 查看器复用单实例
     win._locate_frame_in_snapshot(f2_idxs[0])
@@ -208,7 +230,10 @@ def main():
 
     # clear_batch：快照与查看器销毁
     win.clear_batch()
-    check("clear_batch 清快照", win._batch_snapshot_text == "" and win._snapshot_hex_cache is None)
+    check(
+        "clear_batch 清快照",
+        win._batch_snapshot_text == "" and win._snapshot_hex_cache is None,
+    )
     check("clear_batch 关查看器", win._src_viewer is None)
     check("clear_batch 后 batch_results 空", win.batch_results == [])
 
@@ -233,13 +258,16 @@ def main():
     )
     win._set_batch_snapshot(win.batch_input.toPlainText(), "m.log")
     win.parse_batch()
-    app.processEvents()
+    wait_batch(win)
     check("解析后有摘要行", table.rowCount() >= 2, f"rows={table.rowCount()}")
     if table.rowCount() >= 2:
         rect = table.visualItemRect(table.item(1, 0))
         menu2 = win._build_batch_summary_menu(table, rect.center())
         check("有数据行右键定位项启用", menu2.actions()[0].isEnabled())
-        check("右键落选区外先选中该行", table.selectionModel().isRowSelected(1, QModelIndex()))
+        check(
+            "右键落选区外先选中该行",
+            table.selectionModel().isRowSelected(1, QModelIndex()),
+        )
 
     # 无快照时点定位 → 弹信息提示且不建查看器（monkeypatch 捕获）
     win._batch_snapshot_text = ""
@@ -257,7 +285,7 @@ def main():
     win._batch_snapshot_text = ""
     win.batch_input.setPlainText(mk_monitor_line(f1_spaced, 9))
     win.parse_batch()
-    app.processEvents()
+    wait_batch(win)
     check("parse_batch 兜底建立快照", win._batch_snapshot_text.startswith("2026-09-10"))
     check("兜底快照名", win._batch_snapshot_name == "输入框内容")
 
@@ -270,7 +298,7 @@ def main():
     )
     win._set_batch_snapshot(win.batch_input.toPlainText(), "m.log")
     win.parse_batch()
-    app.processEvents()
+    wait_batch(win)
     hexes2 = [r["_input"].replace(" ", "").upper() for r in win.batch_results]
     table.selectRow(0)
     app.processEvents()

@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/09-15-gui-batch-parse-perf/design.md", "reason": "技术设计：线程边界（剥离/快照留主线程）、BatchFrameResult 契约、详情按需与 LRU、过滤契约、取舍与回滚点"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "worker（不碰 Qt）→ UI 槽 → 详情/导出 三层的字段与状态契约必须一致（去 _table_data 后靠 _has_detail/_frame_bytes 还原）"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复用既有线程范式（serial_worker + thread_registry.track）与 _get_summary_from_table_data/_get_frame_type_name，不要另造线程封装或摘要实现"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "新增进度条/取消按钮与解析状态机需遵守「UI 组件独立、纯逻辑层无 Qt」约定；worker 逻辑应可脱离 GUI 测试"}
+{"file": "AGENTS.md", "reason": "§8 陷阱 20/20b（QThread 必须 thread_registry.track；退出必须显式 quit）、§7 测试目录与 _path_setup 约定、§6 Tab 能力表"}
