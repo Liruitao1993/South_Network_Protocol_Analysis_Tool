@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/09-17-dlt645-report-status-word/prd.md", "reason": "验收标准 A1~A7 与 Out of Scope 是检查的判定基准"}
+{"file": ".trellis/tasks/09-17-dlt645-report-status-word/design.md", "reason": "D3 分派与 D6 不变式（valid 语义/元组结构/无新依赖）是回归红线"}
+{"file": ".trellis/tasks/09-17-dlt645-report-status-word/implement.md", "reason": "步骤 0 探针结论、步骤 7 变异反证矩阵需逐条核对是否真的执行且变红"}
+{"file": ".trellis/tasks/09-17-dlt645-report-status-word/research-bits.md", "reason": "核对位表逐位是否正确（F1/F2/F3）与字节序（F4），以及是否违反 F6 硬规则"}

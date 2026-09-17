@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "本任务核心正是「位表只存一份、桌面/Web/虚拟表共用」，并避免形成第四份清单"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "dlt645_data_codec 是被桌面 Qt 层与 Reflex Web 层共用的纯逻辑模块，不得 import main_gui/Qt"}
+{"file": ".trellis/tasks/09-17-dlt645-report-status-word/design.md", "reason": "本任务技术设计：D2 常量与函数接口 / D3 分派与前置探针 / D4 双源依据 / D5 文案 / D7 风险回退"}
+{"file": ".trellis/tasks/09-17-dlt645-report-status-word/prd.md", "reason": "验收标准 A1~A7 与位号依据表（R3）是实现的唯一口径来源"}
+{"file": ".trellis/tasks/09-17-dlt645-report-status-word/research-bits.md", "reason": "位表定向摘录：F1 状态字1~7 原文与现状偏差 / F2 96位表 / F3 64位表与不变量 / F4 三示例字节序自证与现场帧 / F5 MD 瑕疵 / F6 仓库硬规则"}
