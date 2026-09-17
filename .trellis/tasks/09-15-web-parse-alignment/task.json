@@ -25,7 +25,8 @@
     "09-15-web-single-frame-alignment",
     "09-15-web-parse-perf",
     "09-15-web-spectrum-plot",
-    "09-15-web-theme-system"
+    "09-15-web-theme-system",
+    "09-17-web-gui-parity-sync"
   ],
   "parent": null,
   "relatedFiles": [],

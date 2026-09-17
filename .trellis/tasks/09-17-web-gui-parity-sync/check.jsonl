@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "校验 Web 侧改动的质量门（含测试与回归要求）"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "校验点：645 转表是否真的只剩一份实现，是否存在新的复制"}
+{"file": ".trellis/tasks/09-17-web-gui-parity-sync/design.md", "reason": "校验点：D3 逐行不变证明、D5.2 路径注入、D6 变异反证是否落实"}

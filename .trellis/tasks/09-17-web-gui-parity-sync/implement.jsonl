@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "前端层总览；本任务涉及 Reflex Web 组件与 State 改动"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Web 查询页新增增删控件须遵循组件规范"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Web State 新增 add_custom_di/delete_custom_di 事件与缓存刷新"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "本任务核心正是消除两份复制实现（645 转表）、抽取共享纯逻辑（frame_summary）"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "桌面 Qt 层与 Web 层共用纯逻辑模块的分层边界（Web 不得 import main_gui）"}
+{"file": ".trellis/tasks/09-17-web-gui-parity-sync/design.md", "reason": "本任务技术设计：D2 去重 / D3 偏移公式 / D4 摘要共享 / D5 CRUD 与路径注入"}
