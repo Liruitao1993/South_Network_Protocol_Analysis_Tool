@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "形态探测判据必须单一来源（_probe_pb_form 一处），禁止在 _parse_pb_block(:867) 与 _parse_pb_and_mac_header(:3026) 各写一份 —— 这正是 AGENTS §8 陷阱 44/47 记录的「两份清单漂移」缺陷模式"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "PB 形态探测横跨 FC→PB(PBH)→MAC头→MSDU→应用层五层，判据 C1~C6 需跨层自洽而非单层位域硬判；FC 可变区域解释差异属非目标，不得据此裁决"}

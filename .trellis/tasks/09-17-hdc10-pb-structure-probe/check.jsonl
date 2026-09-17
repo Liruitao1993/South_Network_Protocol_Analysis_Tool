@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复核两处入口是否真的复用同一 _probe_pb_form，而非各自复制判据"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "复核判据是否跨层自洽、是否存在「只满足弱判据就回退」的误判窗口；并确认未把 FC 可变区域解释差异混入裁决"}
