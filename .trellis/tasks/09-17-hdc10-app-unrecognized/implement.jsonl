@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "单一来源/复用原则：本次 P0 的根因正是 MSG_ID_NAMES 与分派链两份手写清单漂移，D4 改用查表消除；D1 值域常量集中定义同依此原则"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "跨层约定：MAC 头 msdu_type（第4-2部分 表10/表13）与应用层端口判据的分层边界——上层不得反向推测下层已显式声明的信息"}
+{"file": "AGENTS.md", "reason": "本项目权威规范：§5.9 协议11 参考文档与解析重点；§7 测试约定（test/ 目录 + import _path_setup # noqa: E402,F401 + 登记 release_check.py:CORE_TESTS）；§8 陷阱 23（不得空白返回）/41（跨帧可变状态）/44（应用层摘要关键字段）/45/46；§9 开发原则"}
+{"file": ".trellis/tasks/09-17-hdc10-app-unrecognized/design.md", "reason": "技术设计 D1~D6 的判据与权衡，以及 R6「已知业务输出不变」等不变式，实现必须与之一致"}
+{"file": ".trellis/tasks/09-17-hdc10-app-unrecognized/implement.md", "reason": "执行计划：步骤 0 基线对拍口径、步骤 7 四条变异反证要求、步骤 8 回归命令清单"}

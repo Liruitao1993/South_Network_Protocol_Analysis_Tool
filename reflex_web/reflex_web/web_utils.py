@@ -809,6 +809,7 @@ _GW_APP_META_FIELDS = (
     "规约类型",
     "发送类型",
     "MSDU类型",
+    "⚠ 安全保护",
 )
 _GW_APP_SUMMARY_KEY_FIELDS = 2
 

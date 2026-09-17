@@ -132,6 +132,14 @@ SINGLEHOP_MSG_TYPES = {
     129: "IPV4报文",
 }
 
+# 应用层报文的 MSDU 类型值域（单一来源）：表10 标准MAC头=48(0x30)，
+# 表13 单跳帧头=128(0x80)。值是用 MAC 头类型字段判「是否应用层」的唯一依据，
+# 首字节启发式只作无 MAC 头上下文(msdu_type=None)时的回退。
+APP_MSDU_TYPES = frozenset({48, 128})
+
+# IP 报文的 MSDU 类型值域：表10 标准MAC头=49(0x31)，表13 单跳帧头=129(0x81)
+IPV4_MSDU_TYPES = frozenset({49, 129})
+
 # 报文端口号
 APP_PORTS = {
     0x11: "普通业务(抄表/校时/事件/注册等)",
@@ -182,6 +190,14 @@ MSG_ID_NAMES = {
     0x0A3: "精准校时",
     0x0A4: "配电信息上报",
 }
+
+# 规范表2 列出、但第4-3部分**未给出字段格式定义**的业务ID。
+# 依据（已全文核实 HDC 第1/4-1/4-2/4-3 部分）：`鉴权安全`(0x00A0)、`配电信息上报`(0x00A4)
+# 仅出现在「表2 报文ID」与「应用层报文优先级表」，规范无其字段格式章节
+# → 只能报业务名 + 原始数据，不得臆造字段。
+# 注：本表是**规范文档事实**的显式建模，不是分派链的第二份清单——哪个「端口+业务ID」
+# 组合有解析由 _parse_app_payload 的 if/elif 链权威决定，本表只影响 fallback 的措辞。
+MSG_ID_NO_FORMAT_DEFINED = frozenset({0x0A0, 0x0A4})
 
 
 # ── CRC 工具 ──────────────────────────────────────────────────────
@@ -1932,7 +1948,8 @@ class HDC10Parser:
                             msdu_type: Optional[int] = None) -> List[Tuple]:
         """解析MSDU载荷（按类型分发）
 
-        msdu_type: MAC头中的 MSDU类型字段(表10)。None 时按首字节启发式检测。
+        msdu_type: MAC头中的 MSDU类型字段（表10 标准头 / 表13 单跳头）。
+                   APP_MSDU_TYPES / IPV4_MSDU_TYPES 据此判据；None 时才按首字节启发式。
         """
         table = []
         if not data:
@@ -1956,9 +1973,28 @@ class HDC10Parser:
                 ))
             return table
 
-        if first in (0x11, 0x12, 0x1A):
-            app_table = self._parse_application_layer(data, base_offset)
-            table.extend(app_table)
+        if msdu_type in APP_MSDU_TYPES:
+            # MAC 头已声明为应用层报文（表10=48 / 表13=128）→ 直接按应用层解析。
+            # 判据只取 MAC 头字段，**不再**看首字节：旧实现用首字节启发式，
+            # 曾导致「声明 48 却按未定义处理」与「声明 47 却按应用层解析」双向误判。
+            table.extend(self._parse_application_layer(data, base_offset))
+            return table
+
+        if msdu_type in IPV4_MSDU_TYPES:
+            # 名称取自类型表（表10=49「IP报文」/ 表13=129「IPV4报文」），不另写字面量
+            type_label = MSDU_TYPES.get(msdu_type) or SINGLEHOP_MSG_TYPES.get(msdu_type, "IP报文")
+            table.append((
+                f"  {type_label}",
+                ' '.join(f'{b:02X}' for b in data[:16]) + ("..." if len(data) > 16 else ""),
+                f"{len(data)}字节",
+                f"类型{msdu_type}: {type_label}(表10/表13), 本解析器暂不展开IP载荷, 显示原始数据",
+                base_offset, base_offset + min(len(data), 16) - 1,
+            ))
+            return table
+
+        if msdu_type is None and first in APP_PORTS:
+            # 回退判据（仅无 MAC 头上下文时）：首字节命中应用层端口表
+            table.extend(self._parse_application_layer(data, base_offset))
             return table
 
         # 未知/厂商扩展类型: 原始hex + 可读ASCII片段提示
@@ -2025,6 +2061,17 @@ class HDC10Parser:
             SECURITY_MODES.get(sec_mode, f"保留({sec_mode})"),
             base_offset + 1, base_offset + 2,
         ))
+        if sec_mode:
+            # 报文ID 高4位非0 = 数据域受信道安全机制保护（第4-3部分 §5.2.3）。
+            # 不能因此跳过业务解析（陷阱23：点解析就必须看到内容），但必须醒目提示：
+            # 以下按明文逐字段解出的数值可能是「看起来正常」的错误值。
+            table.append((
+                "  ⚠ 安全保护",
+                f"0x{sec_mode:X}",
+                SECURITY_MODES.get(sec_mode, f"保留({sec_mode})"),
+                "数据域受信道安全机制保护, 以下按明文解析的字段可能无效",
+                base_offset + 1, base_offset + 2,
+            ))
         table.append((
             "  业务报文ID",
             f"0x{biz_id:03X}",
@@ -2088,15 +2135,47 @@ class HDC10Parser:
         elif msg_id == 0x041 and port == 0x11:
             table.extend(self._parse_meter_reader_passthrough(data, offset))
         else:
-            # 未知类型，显示原始hex
+            # 未实现字段级解析的报文：**先查报文ID名称表**（单一来源 MSG_ID_NAMES）。
+            # 名字表与分派链曾是两份手写清单，0x0A0/0x0A4 有名字却无分支 → 静默显示
+            # 「未识别的业务数据」。查表后规范已命名的业务自动受益，也不再二次遗漏。
+            name = MSG_ID_NAMES.get(msg_id)
             show = data[:32]
-            table.append((
-                "  原始数据",
-                ' '.join(f'{b:02X}' for b in show) + ("..." if len(data) > 32 else ""),
-                f"{len(data)}字节",
-                f"未识别的业务数据(0x{msg_id:03X})",
-                offset, offset + min(len(data), 32) - 1,
-            ))
+            if name:
+                table.append((
+                    f"  {name}",
+                    "",
+                    f"{len(data)}字节",
+                    f"业务ID 0x{msg_id:03X}：{name}",
+                    offset, offset + len(data) - 1,
+                ))
+                if msg_id in MSG_ID_NO_FORMAT_DEFINED:
+                    # 规范确实未定义格式（如 0x00A0/0x00A4）：只能报名字 + 原始数据
+                    table.append((
+                        "    ⚠ 格式未定义",
+                        ' '.join(f'{b:02X}' for b in show) + ("..." if len(data) > 32 else ""),
+                        f"{len(data)}字节",
+                        "本规范（第4-3部分）未给出该报文的字段格式，以下为原始数据",
+                        offset, offset + min(len(data), 32) - 1,
+                    ))
+                else:
+                    # 规范**有**格式定义，只是本次未命中已实现分支（多为端口不匹配）。
+                    # 旧文案在此会声称「规范未给出字段格式」→ 事实错误（R1 要求依据必须成立）。
+                    table.append((
+                        "    ⚠ 未按业务格式解析",
+                        ' '.join(f'{b:02X}' for b in show) + ("..." if len(data) > 32 else ""),
+                        f"{len(data)}字节",
+                        f"本解析器未对「端口 0x{port:02X} + 业务ID 0x{msg_id:03X}」组合实现字段解析"
+                        "（该业务的字段格式见规范第4-3部分对应章节），以下为原始数据",
+                        offset, offset + min(len(data), 32) - 1,
+                    ))
+            else:
+                table.append((
+                    "  原始数据",
+                    ' '.join(f'{b:02X}' for b in show) + ("..." if len(data) > 32 else ""),
+                    f"{len(data)}字节",
+                    f"未识别的业务数据(0x{msg_id:03X})：未在本规范报文ID表中定义",
+                    offset, offset + min(len(data), 32) - 1,
+                ))
 
         return table
 
@@ -2885,16 +2964,41 @@ class HDC10Parser:
     # ─── 便捷模式 ──────────────────────────────────────────────
 
     def _parse_app_only(self, data: bytes) -> List[Tuple]:
-        """app 模式：直接解析应用层"""
-        if len(data) >= 1 and data[0] in (0x11, 0x12, 0x1A):
+        """app 模式：用户已显式声明输入即应用层报文，不再由端口值二次否决。
+
+        判据顺序：
+          ① 长度 < 4：通用头都不完整 → 明确报错 + 原始数据；
+          ② 端口命中端口表，或报文控制字合规（§5.2.4「默认设置为0」）
+             且不是完整 MPDU → 按应用层通用头解析（任意端口都能解，见 R2）；
+          ③ 完整 MPDU（FCCS 校验通过）→ 交回完整帧解析（误粘整帧的既有兜底）；
+          ④ 其余 → 仍按应用层解释，并注明为推测。
+        """
+        if len(data) < 4:
+            return [(
+                "❌ 应用层数据",
+                ' '.join(f'{b:02X}' for b in data),
+                f"{len(data)}字节",
+                "长度不足4字节（端口1B+报文ID2B+控制字1B），非完整应用层报文",
+                0, max(len(data) - 1, 0),
+            )]
+        # ② 的「完整 MPDU 排除」是必需的：FC 的 byte3 是网络标识(NID)高字节，
+        # 取 0 的概率约 1/256；没有该排除时，NID 高字节为 0 的完整 MPDU
+        # 会被当成应用层错位解析（A6：完整 MPDU 必须仍走 FC 路径）。
+        has_fc = self._detect_fc(data)
+        if data[0] in APP_PORTS or (data[3] == 0 and not has_fc):
             return self._parse_application_layer(data, 0)
-        # 尝试剥离FC
-        if self._detect_fc(data) and len(data) > 16:
+        if has_fc and len(data) > 16:
             return self.parse_to_table(data, parse_level="auto")
-        return [("应用层数据",
-                 ' '.join(f'{b:02X}' for b in data[:16]) + ("..." if len(data) > 16 else ""),
-                 f"{len(data)}字节",
-                 "未识别格式的应用层数据", 0, min(len(data), 16) - 1)]
+        table = self._parse_application_layer(data, 0)
+        table.append((
+            "  ⚠ 推测解析",
+            "",
+            "",
+            "端口未在端口表中且报文控制字非0，按应用层通用头推测解析，字段可能无效",
+            None, None,
+        ))
+        return table
+
     def _parse_mac_only(self, data: bytes, frame_type: int) -> List[Tuple]:
         """mac_only 模式：直接解析MAC帧（支持 PBH 前缀自动剥离）"""
         hdr_start = 0

@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "核查是否引入第二份判据/重复清单（R5 单一来源），例如类型值域或端口白名单被再次硬编码"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "核查跨层判据是否以 MAC 头类型字段声明为准，而非由应用层端口反推"}
+{"file": "AGENTS.md", "reason": "对照 §7 测试约定（_path_setup/# noqa: E402,F401/CORE_TESTS 登记）与 §8 陷阱 23/41/44/45/46 逐条核验，并按 §9 开发原则自检"}
+{"file": ".trellis/tasks/09-17-hdc10-app-unrecognized/prd.md", "reason": "验收标准 A1~A12 为检查口径；Scope 段落用于判定是否越界（内嵌解析/MME 7 类/IPv4 载荷/except 吞异常均属范围外）"}
+{"file": ".trellis/tasks/09-17-hdc10-app-unrecognized/design.md", "reason": "核查实现是否偏离 D1~D6，尤其是 R6「已知业务字段值/行序/偏移不变」与 R8「不引入跨帧实例状态」"}
+{"file": ".trellis/tasks/09-17-hdc10-app-unrecognized/implement.md", "reason": "核查步骤 0 基线对拍、步骤 7 四条变异反证是否真的执行并观察到变红（不是推断），以及步骤 8 全量回归是否跑完"}

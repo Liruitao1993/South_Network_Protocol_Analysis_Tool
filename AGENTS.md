@@ -34,7 +34,7 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 
 ## 1. 项目概览
 
-多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.23.19`）。
+多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.23.20`）。
 
 **支持的协议（共 12 种，对应 GUI 协议下拉框 `current_protocol` 索引）：**
 
@@ -109,7 +109,7 @@ python main_gui.py --clipboard
 - Lua 脚本引擎依赖 `lupa`，打包时需作为 hidden import 或确保运行环境已安装
 - 当前主程序 spec 未显式声明 `scapy`；如需把 TCP 监控打包进 exe，需补充 `scapy` 依赖并确保目标机器安装 npcap
 - `docs/Lua脚本使用说明.md` 是 Lua 功能的用户文档
-- Inno Setup 安装脚本 `南网解析工具.iss` / `2222.iss` 的 `MyAppVersion` 用 `python release_check.py --sync-iss` 与 `APP_VERSION` 对齐（当前 1.23.19），发版前务必再跑一次 `python release_check.py`
+- Inno Setup 安装脚本 `南网解析工具.iss` / `2222.iss` 的 `MyAppVersion` 用 `python release_check.py --sync-iss` 与 `APP_VERSION` 对齐（当前 1.23.20），发版前务必再跑一次 `python release_check.py`
 
 ### Reflex Web 离线源码部署（UV）
 
@@ -736,6 +736,7 @@ python test/test_pp_cli.py             # 预处理命令链拆分（半角基准
 python test/test_gw_new_gen.py      # 国网新一代双模协议
 python test/test_gdw_fujian.py      # 国网福建增补规约 + EB 数据标识（1.14.0 起）
 python test/test_hdc10.py           # HDC 1.0 双模互联互通协议（时隙分配条目/信标 BPCS/PBCS）
+python test/test_hdc10_app_dispatch.py # 协议11 应用层分派收口（94 项：MAC 头类型字段判据 / 端口白名单收口 / 未定义业务命名与依据 A13 表驱动 / 安全模式提示 / 真实帧 60 帧分派一致性 / fuzz，1.23.20 起）
 python test/test_gw_batch_parse.py  # 国网新一代批量解析
 python test/test_gw_ext_cmd.py      # 国网新一代扩展命令载荷
 python test/test_gw_parse_levels.py # 国网新一代解析级别
@@ -849,13 +850,21 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
     - 对拍范围**只限应用层表**（物理层/MSDU/MME 段两端文案差异属共享核心任务），回归套件 `test/test_gw_app_summary_detail.py`（42 项，含**真实夹具 auto/fc_pb/app 三级别**不得混入 FC/MAC 字段的断言、真实批量解析 20 帧可区分性、Web 协议10 非应用层表不退化、变异反证）。
 
 45. **HDC 1.0（协议11）抄表报文解析曾有未定义名（1.23.19 修复）；同文件 2 处静态告警为误报**：`hdc10_parser._parse_meter_reading`（服务报文ID `0x001`/`0x002`/`0x003` 三类抄表报文）渲染「协议版本号」行时引用了**从未赋值**的局部名 `proto_ver`（同文件 `_parse_confirm`/`_parse_timesync` 等 6 个函数都写有 `proto_ver = b0 & 0x3F`，唯独它漏写）⇒ **协议11 + 解析级别「应用层报文(app)」+ 抄表类报文ID + 端口 `0x11`** 四条件齐备时抛 `NameError`，GUI 弹「解析失败：name 'proto_ver' is not defined」。**默认「自动识别」级别走 MAC 帧路径、不经过该函数，故自协议11 引入以来长期潜伏**——改本协议时留意「同一份数据在不同解析级别下走完全不同的代码路径」。同类排查手段：`ruff check --select F821`（全仓已 0 命中）。
-    - 另注：pyright/ty 对 `hdc10_parser.py` 报的 `bcsha_phases` possibly unbound（L1516）与 `msdu_len` 类型收窄（L1655）经逐行核实**均为不可达路径误报**——前者使用点所在的 `if ln > 20` 蕴含赋值处的 `if ln >= 7`；后者 `extra_bytes` 非空只可能来自 `if msdu_len is not None` 分支（`elif` 分支保持 `b''`）。同理 `release_check.py` 的 `sys.stdout.reconfigure` 告警是 `typing.TextIO` 协议不含该方法的标注局限。**这些不属于开放缺陷，勿按告警改造**。
+    - 另注：pyright/ty 对 `hdc10_parser.py` 的 `bcsha_phases`（`for i in range(bcsha_phases)`，位于 `_parse_beacon_management_info` 一类的信标可变区解析）与 `msdu_len`（`base_offset + msdu_abs + msdu_len + 4`，位于 `_parse_mac_frame` 的帧尾多余数据行）报 possibly-unbound / 类型收窄，**均为不可达路径误报**：前者使用点在 `if ln > 20` 内、赋值在 `if ln >= 7` 内（数值蕴含，检查器不做）；后者 `extra_bytes` 初始化为 `b''`、只在 `if msdu_len is not None` 分支被赋值 ⇒ `if extra_bytes:` 块内 `msdu_len` 必非 None（跨变量关联，检查器推断不出）。同类的还有 `main_gui.py` 的 88 条（PySide6 枚举经类访问 `QTableWidget.NoEditTriggers` / `__init__` 动态属性 `update_stats` / `QLayout.takeAt` 覆盖签名）、`reflex_web/reflex_web/web_utils.py` 的 `from reflex_web import web_utils` unknown-import-symbol（`test/_path_setup.py` 把 `reflex_web/` 插入 `sys.path`，包名解析到内层包；外层目录无 `__init__.py` 故静态不可解析——`test_gw_app_summary_detail.py:56` 等既有测试同款）、以及 `release_check.py` 的 `sys.stdout.reconfigure`（`typing.TextIO` 协议不含该方法）。**这些不属于开放缺陷，勿按告警改造**。⚠ **行号会随改动漂移（实测：1.23.20 的 +16 行便使 L1516→L1532、L1655→L1671），请按符号名/代码文本检索，不要按行号判断是否新引入**；复核手段：`git show HEAD:<file> | sed -n '<HEAD行号>p'` 与被标记行逐字节对比 + `git diff` 的 hunk 范围是否覆盖该行（2026-09-17 复核：该两行与 HEAD 逐字节相同且不在任何 hunk 内）。
 
 46. **pi-lens 的自动格式化与自动修复在本项目已关闭（`ruff.toml` + `.pi-lens.json`，2026-09-17）**：pi-lens 在**项目无 ruff 配置**时会回落它自带的 `config/ruff/core.toml`（`line-length=88` + `select=E,W,F,I,B,UP,SIM,C4,PIE,S`），配合 `ruff format` 对既有代码做大规模重写——实测 `hdc10_parser.py` 单文件产生 **4201 行**格式 diff、`web_utils.py` **343 行**（单引号统一为双引号、`List[X]`→`list[X]`、长行炸开成一行一参），**5 行的真实修复被淹没在 2932 行格式噪声中、无法评审**。
     - **分工**：`ruff.toml`（`select=["F"]` + `quote-style="preserve"`）决定「报什么」——只留 pyflakes 真实缺陷（F821 未定义名，1.23.19 修的 `proto_ver` 即此类；另有 F841/F541），不选任何风格/现代化规则，从根上消除改写来源；`.pi-lens.json` 的 `format.enabled=false` + `autofix.enabled=false` 决定「是否后台改写」——两者都关，lens 只**报告**诊断、不动文件。
     - **变异反证（同轮实测，双向）**：同一份「单引号 + `List[int]` + 超长行(>88)」探针，`format.enabled=true` 时 lens 立刻 `Auto-fixed 2 issue(s)` 并改写；改回 `false` 后 md5 逐字节不变、无任何改写提示。ruff 侧另证：从仓库根运行 `ruff check --statistics <file>`（**不带 `--config`**）只报 F 类 → 项目 `ruff.toml` 被自动发现、不再回落 lens 的 `core.toml`。
     - **临时恢复格式化**：把 `.pi-lens.json` 的 `format.enabled` 改回 `true`（或删除该文件 = 回落 lens 默认）。**改真实代码时不要开**：长行重排是 `ruff format` 的固有行为，`quote-style="preserve"` 只能挡住引号统一，挡不住重排。
     - 工具提示：ruff 是 Windows 程序，`--config` 传 WSL 路径（`/mnt/c/...`）会直接 `invalid value ... for '--config'` 退出 2（**表现是「所有测量结果全 0」的假绿**）——对比配置时必须传 `C:/...` 形式；`ruff --diff` 不写文件，可安全用于测量。
+
+47. **协议11 应用层的「是否应用层」由 MAC 头类型字段决定，不由端口字节决定；值域、判据、文案都是单一来源**（1.23.20 起，改 `hdc10_parser.py` 应用层任何分支前必读）：
+    - **分派顺序**（`_parse_msdu_payload`）：`msdu_type == 0` → MME（两套表的 0 都是管理类；单跳表的 0 是「发现列表消息」，经 MMTYPE `0x0008` 在 MME 树内解析）→ `in APP_MSDU_TYPES`（标准头 `48` / 单跳头 `128`，表10/表13）→ 应用层 → `in IPV4_MSDU_TYPES`（`49`/`129`）→ IPv4 提示（不展开载荷）→ `msdu_type is None` 才回退首字节启发式（`first in APP_PORTS`，`0x00` → MME）→ 其余才走「未定义(厂商扩展)」。**不要为提高“兼容性”把端口白名单写回 app 分支**：真实帧实测过双向误判——声明 `48`（应用层）的帧被当「厂商扩展」不解析，声明 `47`（表外）的帧反被当应用层错位解析。
+    - **`app` 级别入口白名单**（`_parse_app_only`）：现为 `data[0] in APP_PORTS or (data[3] == 0 and not has_fc)`，最后兜底仍按应用层解释并标 `⚠ 推测解析`（陷阱 23：宁可解释也不空白）。**`and not has_fc` 不可删**：FC 的 byte3 是**网络标识(NID)高字节**、取 0 概率约 1/256，字面按「控制字为 0 即应用层」会错位解析合法完整 MPDU（`test/test_hdc10_app_dispatch.py` 的 A6d 与变异 7.5 钉住此护）。
+    - **fallback 文案两分（依据必须成立）**：`MSG_ID_NO_FORMAT_DEFINED`（= `{0x0A0, 0x0A4}`——规范第4-3部分只有报文ID表、无字段格式章节，已全文核实第1/4-1/4-2/4-3部分）→ `⚠ 格式未定义`；其余命中 `MSG_ID_NAMES` 但**有**定义的 → `⚠ 未按业务格式解析`（附当前端口，说明未命中已实现分支）。**两者不可混用**：给有定义的业务印「规范未给出字段格式」是**事实错误**（1.23.20 初版曾如此，影响 44 种端口×业务ID 组合，被独立检查抳出）。该表是**规范文档事实**的建模，不是分派链的第二份清单——哪个组合有解析由 `_parse_app_payload` 的 `if/elif` 链权威决定。
+    - **安全模式提示**：`sec_mode != 0`（报文ID 高4位=信道安全机制，如 `0x2004` 完整性保护的校时、`0x3032` 全面保护的传输文件数据）时插「⚠ 安全保护」行（说明数据域受保护、按明文解析的字段可能无效；仍保留解析，不在安全报文上直接空白）。该行已进桌面 `main_gui._GW_APP_META_FIELDS` 与 Web `web_utils` 同名字段的**黑名单**（两端集合必须相等），防它挤占批量摘要的业务名/关键字段位（陷阱 44）——改摘要逻辑时勿删。
+    - **排查夹具陷阱**：`test/hdc10_real_frames.pkl` 定 60 帧，其 **43 帧是 TMI 填充帧（随机数据）**——它们的「未定义(厂商扩展)」`0x347`、`未解析的管理消息内容(0x1002/0xC0C3…)` **不是缺陷**。语义断言只能对 `key[1] != '-'` 的真实业务帧做（填充帧只断言「不抛异常」），否则会得到大量假阳性。
+    - **同批已识别、尚未修的缺口（另行立项）**：抄表 DATA 域内嵌 645/698.45 未展开（现场抄表报文的核心内容就在 DATA 里）；`hdc10_mme_parser` 15 类 MMTYPE 只实现 8 类（缺代理变更 `0x0003/0x0004/0x0005`、过零NTB `0x000B/0x000C`、网络诊断 `0x004F`、无线信道冲突 `0x0080`；真实帧已实测命中 `0x000B`）；`_parse_msdu_payload` 的 MME 分支 `except Exception` 静默吞异常（不记录异常类型/位置——同类 `NameError` 在此分支会永久潜伏）。
 
 ---
 
@@ -883,6 +892,17 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 ## 10. 变更日志
 
 > 详细版本变更记录请查看 `main_gui.py:CHANGELOG`（按版本倒序），或运行 `git log --oneline` 查看提交历史。本文档仅保留最近两个版本的摘要。
+
+### 1.23.20 — 2026-09-17
+
+- **协议11（HDC 1.0）应用层报文收口**（承接 1.23.19 的同类缺口排查）：
+  - `0x00A0 鉴权安全`（专属端口 `0x1A`）与 `0x00A4 配电信息上报` 原先落到「未识别的业务数据(0x0A0)」→ 现由 fallback 查 `MSG_ID_NAMES` 统一命名（**不新增专用分支**，防「名字表与分派链两份手写清单漂移」即 P0 根因复发）；这两个业务规范无字段格式章节，故只报名字 + 原始数据并注明依据（新增 `MSG_ID_NO_FORMAT_DEFINED`）
+  - 修正错误依据：有定义、仅「端口与已实现分支不匹配」的业务（44 种端口×业务ID 组合）原先也被说成「规范未给出字段格式」→ 现分 `⚠ 未按业务格式解析` / `⚠ 格式未定义` 两种措辞（独立检查抳出）
+  - 端口白名单不再挡在通用头之前：`_parse_app_only` / `_parse_msdu_payload` 原先硬编码 `(0x11,0x12,0x1A)`，非白名单端口连端口号/报文ID/安全模式/控制字都不解析 → 现按「像不像通用头」判定（未知端口显示 `保留(0xNN)`，并保留误粘完整 MPDU 走 FC 的兼容）
+  - 「是否应用层」改以 **MAC 头类型字段**为准（标准头 `48` / 单跳头 `128`，新增 `APP_MSDU_TYPES`/`IPV4_MSDU_TYPES` 单一来源），首字节启发式仅在无头上下文回退——修复双向误判（真实帧：声明 `48` 被当「厂商扩展」、声明 `47` 反被当应用层）
+  - `sec_mode != 0` 新增 `⚠ 安全保护` 提示行（不再对受保护的数据域默默输出「看似正常的错误字段」），并进两端 `_GW_APP_META_FIELDS` 黑名单
+- 新增 `test/test_hdc10_app_dispatch.py`（94 项，登记 `CORE_TESTS`）；**基线对拍** 60 帧仅 3 帧预期变化、其余 57 帧逐字节一致（sha256 指纹）；**变异反证 5 条**全部观察到变红（8/4/11/6/1 红）后还原
+- 范围外（另行立项）：抄表 DATA 内嵌 645/698.45、MME 7 类 MMTYPE、IPv4 载荷深度解析、MME 分支 `except Exception`
 
 ### 1.23.19 — 2026-09-17
 
