@@ -573,3 +573,45 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Status
 
 [OK] **Completed**
+
+
+## Session 23: 协议6 主动上报状态字/模式字位表入库 + 电表运行状态字1~7 位号纠错（v1.23.23）
+
+**Date**: 2026-09-17
+**Task**: 协议6 主动上报状态字/模式字位表入库 + 电表运行状态字1~7 位号纠错（v1.23.23）
+**Branch**: `main`
+
+### Summary
+
+依据国网第4号补遗给协议6 入库 96 位主动上报状态字与 64 位主动上报模式字位表，并修正 dlt645_data_codec.STATUS_WORD_BITS（电表运行状态字 1~7）系统性位号错误
+
+### Main Changes
+
+- dlt645_data_codec.py 新增 REPORT_STATUS_BITS(96 位)/REPORT_MODE_BITS(64 位)/SUPPLY_MODE_NAMES/_format_bits/decode_report_status_word/decode_report_mode_word；_norm_bit_entry 支持 (名称,位宽,枚举) 两位域写法
+- 修正 STATUS_WORD_BITS：原 8 个字无一正确（状态字4 0x0002 原报「A相潮流方向异常」，附录C 实为 Bit1=欠压）；供电方式由两个单 bit 改为 Bit2~Bit1 两位域；补全附录C 声明的保留位占位
+- 保留位显式 None 占位 + 置位时点名「保留位（补遗未定义事件）: Bit76」（用户现场帧命中补遗未定义位），未置位不进列表防噪声；模式字=使能、状态字=已发生
+- 提示文案纠错：未收录位域不再只写「见DL/T645-2007附录C」（对主动上报表是错误出处），改为并列两个出处
+- test/test_dlt645_status_word_bits.py（130 项，登记 CORE_TESTS，含 R2 不变量 状态字Bit(32+n)≡模式字Bit(n) 与桌面↔Web 逐行对拍）；test_dlt645_lme.py 12b/12c 原固化错误位号且 12c 假绿，已修正
+- 版本 1.23.23：APP_VERSION / README（badge·版本句·更新记录）/ 2222.iss 与 南网解析工具.iss / CHANGELOG（逐条列出状态字 1~3/7 输出变化）/ AGENTS.md（§5.4 依据、§8 陷阱 50、§10 摘要）
+- 入库《第4号补遗》PDF + 转换 MD 至 协议文档/6.645协议/；位表以 pdfplumber 按单元格重取为准（MD 的 markitdown 转换有拆行/丢格/页码混入）
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0f10205` | (see git log) |
+| `497a64b` | (see git log) |
+
+### Testing
+
+- [OK] python release_check.py → PASS=68 FAIL=0 WARN=0（68 = 原 67 + 新增 1 项）
+- [OK] 变异反证 3 条均实测变红后还原：M1 状态字4 位号改回旧错位 9 红 / M2 去掉保留位标注 2 红 / M3 96 位当 64 位解 3 红
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 09-17-web-gui-parity-sync（Web↔GUI 版本×Web 审计与已确认缺口修复）可开始
+- 组帧侧位域写入（dlt645_frame_schema 的 BS* 分支）仍属本次范围外
