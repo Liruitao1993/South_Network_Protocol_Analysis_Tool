@@ -110,7 +110,7 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.23"
+APP_VERSION = "1.23.24"
 BUILD_DATE = "2026-09-17"  # 编译日期，每次打包前更新
 
 # 窗口状态持久化（config.json 顶层 "window" 段）的表格清单：
@@ -131,6 +131,17 @@ _WINDOW_STATE_TABLES = (
 )
 
 CHANGELOG = [
+    (
+        "1.23.24",
+        "2026-09-17",
+        [
+            "**协议11（HDC 1.0）修复「无物理块头」帧整体错位**（用户报障：同一帧协议10 能解析、协议11 只有 17 行且 MAC/MSDU 树全错）：`_parse_pb_block` 原先无条件剥离 1 字节物理块头(PBH)，而该帧 PB 体第 1 字节即 MAC 帧头起始 —— 依据 第4-2部分 表37（物理块头：bit7=帧结束标志，合法 PBH 恒为 1）与 表10（标准 MAC 帧头：版本 0 时 byte1/byte6 必为 0x00）判定其不含 PBH；**帧内 ICV 与 `crc32(MSDU)` 完全相等**（1/2^32 概率）为决定性证据",
+            "新增 `HDC10Parser._probe_pb_form(data)` 逐字节打分探测 PB 形态（存在合规 MAC 头 → 无 PBH；合法 PBH + 其后合规 MAC 头 → 有 PBH；无任何合规信号 → 回落旧行为），`_parse_pb_block` 与 `_parse_pb_and_mac_header` 均改走该探测；现场帧 auto 级别 **17 行 → 57 行**，MAC 头 / ICV / 端口号 / 报文ID / 抄表头 / DATA 全部可读，与协议10 结果一致",
+            "**同时修复既有缺陷**：`_parse_pb_and_mac_header` 把原帧**绝对**偏移当作 data 内**相对**索引（旧代码传 `base_offset + 1`）⇒ 解析级别「fc_mac」下 MAC 头整体错位（原始源TEI 读成 2、MSDU类型 读成 0、MSDU长度 读成 1280）",
+            "补齐抄表报文头的**设备超时时间**（字节6 ×100ms，§5.3.1.8）与**选项字**（字节7：方向位；终端主动并发抄表下为「报文间间隔」×10ms，表8、表9；上行按表7 输出 16bit 应答状态）两行 —— 协议10 早已输出、协议11 缺失，属跨协议一致性",
+            "新增 `test/test_hdc10_pb_structure_probe.py`（39 项，含**变异反证**：强制判定「有 PBH」后 MSDU 类型 ≠ 48、行数变少）；基线对拍：真实夹具 `test/hdc10_real_frames.pkl` 60 帧 × 7 个解析级别逐帧零差异（pb_only 逐帧指纹与强制旧行为完全相同），边界帧长 0/1/8/15/16/17 均不抛异常",
+        ],
+    ),
     (
         "1.23.23",
         "2026-09-17",

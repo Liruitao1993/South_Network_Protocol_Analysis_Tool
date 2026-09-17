@@ -1,13 +1,13 @@
 # 南网协议解析工具
 
-[![Version](https://img.shields.io/badge/version-1.23.23-blue)]()
+[![Version](https://img.shields.io/badge/version-1.23.24-blue)]()
 [![Python](https://img.shields.io/badge/Python-3.8%2B-brightgreen)]()
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)]()
 [![License](https://img.shields.io/badge/License-MIT-green)]()
 
 一个面向电力通信现场调试的多协议解析工具，基于 Python / PySide6 开发，支持 12 种电力通信协议，覆盖单帧解析、批量解析、协议校验、帧生成、串口通信、虚拟表、通信时序图、测试方案、Lua 脚本、实时监控与 TCP 抓包等工作流。
 
-当前版本为 `1.23.23`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
+当前版本为 `1.23.24`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
 
 ## 功能总览
 
@@ -455,6 +455,13 @@ python test/test_web_landing.py            # Web 产品首页（内容不变式/
 ## 更新记录
 
 > 完整历史见 `main_gui.py:CHANGELOG`。以下仅摘录最近版本要点。
+
+### 1.23.24 — 2026-09-17
+
+- **协议11（HDC 1.0）修复「无物理块头」帧整体错位**（用户报障：同一帧协议10 能解析、协议11 只剩 17 行且 MAC/MSDU 树全错）：`_parse_pb_block` 原先无条件剥离 1 字节物理块头(PBH)，而该帧 PB 体第 1 字节即 MAC 帧头起始。新增 `HDC10Parser._probe_pb_form()` 逐字节打分探测 PB 形态（依据：第4-2部分 表37 物理块头的 bit7=帧结束标志恒为 1、表10 标准 MAC 帧头在版本 0 时 byte1/byte6 必为 0x00、帧内 ICV == `crc32(MSDU)`），现场帧 auto 级别 **17 行 → 57 行**，MAC 头/ICV/端口号/报文ID/抄表头/DATA 全部可读，与协议10 结果一致
+- **同时修复既有缺陷**：`_parse_pb_and_mac_header` 把绝对偏移当作 data 内相对索引 ⇒ 解析级别「fc_mac」下 MAC 头整体错位（原始源TEI 读成 2、MSDU类型 读成 0）
+- 补齐抄表报文头的**设备超时时间**（§5.3.1.8）与**选项字**（表8/表9，并发抄表下为「报文间间隔」）两行 —— 协议10 早已输出、协议11 缺失
+- 新增 `test/test_hdc10_pb_structure_probe.py`（39 项，含变异反证）；真实夹具 60 帧 × 7 解析级别逐帧零差异
 
 ### 1.23.23 — 2026-09-17
 

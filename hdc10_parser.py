@@ -147,6 +147,12 @@ APP_PORTS = {
     0x1A: "鉴权安全",
 }
 
+# 无 PBH 物理块的探测阈值（见 HDC10Parser._probe_pb_form）：
+# 必要条件「MSDU 长度合理」+「MSDU 类型已知」各 1 分；
+# 强证据「应用层端口/报文ID 命中」或「ICV 自校验通过」各 2 分。
+# 达阈值才判该 PB 省略了 PBH，否则维持原判（防末尾 PB 被误判）。
+_PB_PROBE_MIN_SCORE = 4
+
 # 安全模式（报文ID高4位）
 SECURITY_MODES = {
     0: "明文传输",
@@ -985,16 +991,101 @@ class HDC10Parser:
                     mac_table = self._parse_mac_frame(pb_body, base_offset + 1)
                     table.extend(mac_table)
         else:
-            # 不是SOF帧起始（中间PB或末尾PB），直接显示hex
-            table.append((
-                "物理块数据(部分)",
-                ' '.join(f'{b:02X}' for b in data[:20]) + ("..." if len(data) > 20 else ""),
-                f"{len(data)}字节",
-                "非帧起始PB，原始数据",
-                base_offset, base_offset + min(len(data), 20) - 1,
-            ))
+            # 不是SOF帧起始（中间PB或末尾PB）
+            # 先探测该 PB 是否**省略了 PBH**（PB体直接以 MAC 帧头起始）：
+            # 规范（HDC 1.0 表37 / HDC 2.0 表21）要求每 PB 必含 PBH，但现场存在
+            # 无 PBH 的 PB；硬按 PBH 解析会整体错位 1 字节，只剩「非帧起始PB，
+            # 原始数据」——与协议10 同帧结果不一致。判据见 _probe_pb_form。
+            pbh_len, probe_score = self._probe_pb_form(data)
+            if pbh_len == 0:
+                table.append((
+                    "物理块(PB) - 未检测到合法物理块头",
+                    '',
+                    f"{len(data)}字节",
+                    f"data[0]=0x{data[0]:02X} 不满足 PBH 判据(帧起始/帧结束位均为0、"
+                    f"PBCS 不匹配)；按「PB体直接起始于 MAC 帧头」解析(探测得分 {probe_score})",
+                    base_offset, base_offset,
+                ))
+                table.extend(self._parse_mac_frame(data, base_offset))
+                tail3 = int.from_bytes(data[-3:], 'little')
+                has_pbcs = (len(data) > 3 and _crc24(data[:-3]) == tail3)
+                table.append((
+                    "  PBCS",
+                    ' '.join(f'{b:02X}' for b in data[-3:]),
+                    f"0x{tail3:06X}",
+                    "✓ 校验正确" if has_pbcs else
+                    "无 PBCS（尾3字节非合法 CRC-24，可能为日志填充）",
+                    base_offset + len(data) - 3, base_offset + len(data) - 1,
+                ))
+            else:
+                table.append((
+                    "物理块数据(部分)",
+                    ' '.join(f'{b:02X}' for b in data[:20]) + ("..." if len(data) > 20 else ""),
+                    f"{len(data)}字节",
+                    "非帧起始PB，原始数据",
+                    base_offset, base_offset + min(len(data), 20) - 1,
+                ))
 
         return table
+
+    def _probe_pb_form(self, data: bytes) -> Tuple[int, int]:
+        """探测物理块形态，返回 (pbh_len, score)。
+
+        pbh_len：0 = 检测到「无 PBH」（PB体直接以 MAC 帧头起始）；1 = 按有 PBH 处理。
+
+        背景：规范（HDC 1.0 表37 / HDC 2.0 表21）规定 PB = PBH(1B) + PB体 + PBCS(3B)，
+        每块必含 PBH；但现场存在**无 PBH** 的 PB。硬按 PBH 解析会让 MAC 头整体错位
+        1 字节（MSDU 类型/长度荒谬、端口与报文ID 全错），最终只剩「非帧起始PB，
+        原始数据」，且与协议10 同帧结果不一致。
+
+        判据（必要条件 + 强证据，不足则判「有 PBH」）：
+          必要条件
+            C2 MSDU 长度合理：0 < msdu_len <= 剩余长度 - 4(ICV)
+            C3 MSDU 类型在已知集合（APP_MSDU_TYPES / IPV4_MSDU_TYPES / 0=管理类）
+          强证据（各 2 分，至少一条）
+            C5 应用层端口命中 APP_PORTS，或报文ID 命中 MSG_ID_NAMES
+            C6 ICV 自校验：尾部 ICV == crc32(MSDU)，或 ICV 全 0（明文填充）
+
+        判据中的常量一律取自模块既有单一来源，不另立清单。
+        """
+        if len(data) < 16:
+            return 1, 0
+
+        # MAC 版本（标准头=0 / 单跳头=1）；其余值说明 data[0] 不是 MAC 头首字节
+        ver = data[0] & 0x0F
+        if ver not in (0, 1):
+            return 1, 0
+
+        # 头长与 MSDU 类型/长度均与 _parse_mac_frame 同口径
+        mac_hdr_len, _ = self._parse_mac_header(data, 0)
+        msdu_start = mac_hdr_len
+        if mac_hdr_len < 4 or msdu_start >= len(data):
+            return 1, 0
+        if ver == 0:
+            msdu_type = data[7]
+            msdu_len = data[8] | ((data[9] & 0x07) << 8)
+        else:
+            msdu_type = data[1]
+            msdu_len = (data[2] << 3) | (data[3] & 0x07)
+
+        score = 0
+        if 0 < msdu_len <= len(data) - msdu_start - 4:
+            score += 1                                    # C2
+            if (msdu_type in APP_MSDU_TYPES or msdu_type in IPV4_MSDU_TYPES
+                    or msdu_type == 0):
+                score += 1                                # C3
+                msdu_end = msdu_start + msdu_len
+                if msdu_type in APP_MSDU_TYPES and msdu_len >= 3:
+                    port = data[msdu_start]
+                    msg_id = int.from_bytes(data[msdu_start + 1:msdu_start + 3], 'little')
+                    if port in APP_PORTS or msg_id in MSG_ID_NAMES:
+                        score += 2                        # C5
+                if msdu_end + 4 <= len(data):
+                    icv = int.from_bytes(data[msdu_end:msdu_end + 4], 'little')
+                    if icv == 0 or icv == _crc32(data[msdu_start:msdu_end]):
+                        score += 2                        # C6
+
+        return (0 if score >= _PB_PROBE_MIN_SCORE else 1), score
 
     def _scan_all_pb(self, data: bytes) -> List[Tuple[int, int]]:
         """扫描所有PB边界，返回 [(start, end), ...]"""
@@ -2290,6 +2381,50 @@ class HDC10Parser:
             offset + 4, offset + 5,
         ))
 
+        # 字节6~7：下行 = 设备超时时间 + 选项字（第4-3部分 表3）；
+        # 上行 = 选项字 16bit（同部分 表10「抄表上行报文格式说明」）
+        # 方向位 = 选项字(byte7) bit0（0=下行 CCO→STA, 1=上行 STA→CCO，表9）；
+        # 终端主动并发抄表方式下字节7 为「报文间间隔」而非方向位（表8），
+        # 且 CCO 下发的并发抄表报文恒为下行（表3 为请求报文头），故不参与上行判定。
+        opt_byte = data[7]
+        is_uplink = (msg_id != 0x003) and bool(opt_byte & 0x01)
+        if is_uplink:
+            opt16 = data[6] | (data[7] << 8)
+            table.append((
+                "    选项字(应答状态)",
+                f"0x{opt16:04X}",
+                f"0x{opt16:04X}",
+                f"上行应答报文头(第4-3部分 表10)：选项字 16bit = 报文应答状态 0x{opt16:04X}",
+                offset + 6, offset + 7,
+            ))
+        else:
+            # 设备超时时间：byte6, 8bit, 单位 100ms（文档 §5.3.1.8）
+            timeout_raw = data[6]
+            table.append((
+                "    设备超时时间",
+                f"0x{timeout_raw:02X}",
+                f"{timeout_raw * 100}ms",
+                f"STA 与设备(电能表/采集器)通信超时: {timeout_raw} × 100ms "
+                f"= {timeout_raw * 100}ms（依据 §5.3.1.8）",
+                offset + 6, offset + 6,
+            ))
+            # 选项字：byte7, 8bit（文档 §5.3.1.9 / 表8 / 表9）
+            if msg_id == 0x003:
+                opt_desc = (f"报文间间隔: {opt_byte} × 10ms = {opt_byte * 10}ms"
+                            "（终端主动并发抄表方式, 表8）")
+            else:
+                opt_desc = ("方向: 上行(STA→CCO)" if (opt_byte & 0x01)
+                            else "方向: 下行(CCO→STA)")
+                if opt_byte & 0xFE:
+                    opt_desc += f"; bit7~bit1 保留(非0: 0x{opt_byte & 0xFE:02X})"
+            table.append((
+                "    选项字",
+                f"0x{opt_byte:02X}",
+                f"0x{opt_byte:02X}",
+                opt_desc,
+                offset + 7, offset + 7,
+            ))
+
         # DATA 域
         if hdr_bytes < len(data):
             payload = data[hdr_bytes:hdr_bytes + data_len] if hdr_bytes + data_len <= len(data) else data[hdr_bytes:]
@@ -3029,6 +3164,20 @@ class HDC10Parser:
         # 先取第一个PB
         if len(data) < 2:
             return table
+        # 先探测该 PB 是否省略了 PBH（与 _parse_pb_block 同一判据，防两处漂移）
+        pbh_len, probe_score = self._probe_pb_form(data)
+        if pbh_len == 0:
+            table.append((
+                "PB头",
+                f"0x{data[0]:02X}",
+                "无",
+                "未检测到合法物理块头(PBH)，PB体直接起始于 MAC 帧头"
+                f"（探测得分 {probe_score}）",
+                base_offset, base_offset,
+            ))
+            hdr_len, mac_table = self._parse_mac_header(data, 0)
+            table.extend(mac_table)
+            return table
         pbh = data[0]
         table.append((
             "PB头",
@@ -3040,6 +3189,8 @@ class HDC10Parser:
         # MAC帧头
         if len(data) > 1:
             mac_data = data[1:]
-            hdr_len, mac_table = self._parse_mac_header(mac_data, base_offset + 1)
+            # 注意：_parse_mac_header 的第二参数是 data 内的**相对**索引，
+            # 不是原帧绝对偏移（旧代码误传 base_offset+1，使 MAC 头整体错位解析）
+            hdr_len, mac_table = self._parse_mac_header(mac_data, 0)
             table.extend(mac_table)
         return table

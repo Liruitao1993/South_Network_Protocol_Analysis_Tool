@@ -68,6 +68,7 @@ CORE_TESTS = [
     "test/test_hdc10_batch_strip_level.py",
     "test/test_hdc10_meter_reading.py",
     "test/test_hdc10_app_dispatch.py",
+    "test/test_hdc10_pb_structure_probe.py",
     "test/test_dlt645_frame_gen.py",
     "test/test_dlt645_tolerant_parse.py",
     "test/test_dlt645_status_word_bits.py",

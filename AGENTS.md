@@ -746,6 +746,7 @@ python test/test_gw_new_gen.py      # 国网新一代双模协议
 python test/test_gdw_fujian.py      # 国网福建增补规约 + EB 数据标识（1.14.0 起）
 python test/test_hdc10.py           # HDC 1.0 双模互联互通协议（时隙分配条目/信标 BPCS/PBCS）
 python test/test_hdc10_app_dispatch.py # 协议11 应用层分派收口（94 项：MAC 头类型字段判据 / 端口白名单收口 / 未定义业务命名与依据 A13 表驱动 / 安全模式提示 / 真实帧 60 帧分派一致性 / fuzz，1.23.20 起）
+python test/test_hdc10_pb_structure_probe.py # 协议11 无物理块头(PBH)帧形态探测（39 项：现场帧 auto 17→57 行 golden / ICV 自证 / fc_mac 偏移修复 / 探测判据纯函数 / 变异反证 / 真实夹具 60 帧×7 级别零差异，1.23.24 起）
 python test/test_gw_batch_parse.py  # 国网新一代批量解析
 python test/test_gw_ext_cmd.py      # 国网新一代扩展命令载荷
 python test/test_gw_parse_levels.py # 国网新一代解析级别
@@ -952,6 +953,23 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
   - **单一来源**：扩展 DI 只在新增 `dlt645_pv_ext.py` 定义一份，解析器/查询页/Web 共用 `merge_pv_di_map`；生成物 `dlt645_di.json` 未改
   - **顺带修复组帧侧错配**（本次改动引入的副作用）：多值掩码被当单值套模板（约 44 个 DI 形状明显不符）→ 加最小守卫 + 同步 `_encode_di_value`，标准表 1099 条零误伤
 - 新增 `test/test_dlt645_pv_ext.py`（156 项，登记 `CORE_TESTS`）；**变异反证 6 条**均实测变红后还原；范围外：该扩展协议的组帧下发、645 虚拟表从站、附录 G 厂商逆变器协议、附录 I.3.3.2 的 698.45 透传
+
+51. **协议11（HDC 1.0）的物理块(PB)不保证带物理块头；PB 形态必须探测，不可无条件剥离**（1.23.24 起，改 `hdc10_parser._parse_pb_block` / `_parse_pb_and_mac_header` 前必读）：
+    - **现场缺陷**：用户报「同一帧协议10 能解析、协议11 只剩 17 行且 MAC/MSDU 树全错」（解析级别选「应用层报文(app)」时又能看到业务）。根因：`_parse_pb_block` 处理 SOF 帧时**无条件**剥 1 字节 PBH（`mac_hdr_start = offset + 1`），而该帧 PB 体第 1 字节即 MAC 帧头 → 整体错位 1 字节，MSDU 长度被读成 1792（0x700）。
+    - **判据（第4-2部分 表37 / 表10）**：表37「物理块头的格式」的 **bit7 = 帧结束标志（合法 PBH 恒为 1）**、bit6 = 帧起始标志、bit0~5 = 序列号（**该表无“块大小码”**）；表10 标准 MAC 帧头在**版本 0 时要求 byte1 与 byte6 均为 0x00**。两者合起来即能区分「有无 PBH」。
+    - **ICV 自证是决定性证据**：按「无 PBH」解析时 `帧内 ICV == crc32(MSDU)` 完全相等（1/2^32 概率，排除巧合），按「有 PBH」则 MSDU 长度荒谬。以后遇到同类「疑似错位」争议，优先用 ICV/CRC 自证而非目测 —— 单帧页切「应用层报文(app)」能看到业务，正是「错位只发生在 auto 的 PB 层」的旁证。
+    - **实现是单一来源**：`HDC10Parser._probe_pb_form(data) -> (pbh_len, score)` 逐字节打分（阈值模块常量 `_PB_PROBE_MIN_SCORE = 4`）；**无任何合规信号时回落旧行为（有 PBH）**，即探测只在拿到正向证据时才改变行为。`_parse_pb_block`（SOF 且未直接给出块大小时）与 `_parse_pb_and_mac_header` 都走它——**不要在调用方再写第二份打分**。
+    - **`_parse_mac_header(data, offset)` 的第二参数是 data 内「相对」索引、不是原帧绝对偏移**：`_parse_pb_and_mac_header` 旧代码传 `base_offset + 1` ⇒ 解析级别「fc_mac」下 MAC 头整体错位（原始源TEI 读成 2、MSDU类型 读成 0、MSDU长度 读成 1280）。正确写法是**先切片、再传 0**。
+    - **探测只作用于「FC + 未知形态 PB」的输入**：`pb_only`（裸 PB 输入）拿到的字节已是 PB 体，不要再剥离/探测；真实夹具 60 帧的 `pb_only` 逐帧指纹已钉住“探测对裸 PB 零影响”。
+    - **跨协议字段覆盖差异要 grep 另一侧**：协议10 早已输出的「设备超时时间」（字节6 ×100ms，§5.3.1.8）与「选项字」（字节7；终端主动并发抄表下为「报文间间隔」×10ms，表8；上行按表7 输出 16bit 应答状态）协议11 原先缺失——改任一协议的应用层字段时对照另一侧同业务。
+    - 回归：`test/test_hdc10_pb_structure_probe.py`（39 项，含变异反证「强制判定有 PBH」与真实夹具 60 帧×7 解析级别零差异）。
+
+### 1.23.24 — 2026-09-17
+
+- **协议11（HDC 1.0）修复「无物理块头」帧整体错位**（用户报障：同一帧协议10 能解析、协议11 只剩 17 行）：`_parse_pb_block` 原先无条件剥离 1 字节 PBH，而该帧 PB 体第 1 字节即 MAC 帧头起始。新增 `HDC10Parser._probe_pb_form()` 逐字节打分探测 PB 形态（第4-2部分 表37 物理块头 bit7=帧结束标志恒为 1；表10 标准 MAC 帧头在版本 0 时 byte1/byte6 必为 0；**帧内 ICV == crc32(MSDU)** 为决定性证据），现场帧 auto 级别 **17 行 → 57 行**，MAC头/ICV/端口号/报文ID/抄表头/DATA 全部可读，与协议10 结果一致
+- **同时修复既有缺陷**：`_parse_pb_and_mac_header` 把原帧绝对偏移当作 data 内相对索引（旧传 `base_offset + 1`）⇒ 解析级别「fc_mac」下 MAC 头整体错位（原始源TEI 读成 2、MSDU类型 读成 0、MSDU长度 读成 1280）
+- 补齐抄表报文头的**设备超时时间**（§5.3.1.8）与**选项字**（表8/表9）两行 —— 协议10 早有、协议11 缺失
+- 新增 `test/test_hdc10_pb_structure_probe.py`（39 项，含变异反证）；真实夹具 60 帧×7 解析级别逐帧零差异（详见 §8 陷阱 51）
 
 ### 1.23.20 — 2026-09-17
 
