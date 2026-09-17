@@ -6,6 +6,7 @@ from dlt645_data_codec import (
     FUNC_NAMES, decode_value, decode_err,
     split_write_request, split_change_password, split_clear_command,
 )
+from dlt645_pv_ext import merge_pv_di_map, is_pv_di, parse_pv_di
 
 # LME自定义DI集合（手册《LME产品相关信息生产运维接口手册_V2.4》中走645框架的接口）
 _LME_DI_CODES = (DI_STA_VERSION_SINGLE, DI_DUAL_ENTRY)
@@ -15,20 +16,24 @@ class DLT645Parser:
 
     @staticmethod
     def _load_di_map():
-        """从 JSON 文件加载完整的 DI 映射表"""
+        """从 JSON 文件加载完整的 DI 映射表
+
+        并入光伏协议转换单元 DL/T645-2007 扩展协议 DI（dlt645_pv_ext.PV_DI_MAP，
+        单一来源；dlt645_di.json 是生成物，不写入扩展 DI）。
+        """
         json_path = os.path.join(os.path.dirname(__file__), 'dlt645_di.json')
 
         try:
             with open(json_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                return data.get('di_map', {})
+                return merge_pv_di_map(data.get('di_map', {}))
         except Exception as e:
             print(f"加载 DLT645 DI 映射表失败: {e}")
             # 返回基本 DI 映射作为后备
-            return {
+            return merge_pv_di_map({
                 "00010000": {"name": "当前正向有功总电能", "unit": "kWh", "data_type": "XXXXXX.XX", "length": 4},
                 "00020000": {"name": "当前反向有功总电能", "unit": "kWh", "data_type": "XXXXXX.XX", "length": 4},
-            }
+            })
 
     @staticmethod
     def check_frame(data: bytes) -> bool:
@@ -159,6 +164,16 @@ class DLT645Parser:
             except Exception as e:
                 lme_rows = [('  └ ⚠ LME解析异常', str(e), '已回退显示原始数据')]
 
+        # 光伏协议转换单元 DL/T645-2007 扩展协议（附件1 §D.1 三张表）：按 DI 分派深度解析
+        pv_rows = None
+        if is_pv_di(result['di_code']):
+            try:
+                pv_rows, pv_name = parse_pv_di(result['di_code'], ctrl, result['data'])
+                if pv_name:
+                    result['di_desc'] = pv_name
+            except Exception as e:
+                pv_rows = [('  └ ⚠ 光伏扩展协议解析异常', str(e), '已回退显示原始数据')]
+
         result['fields'] = [
             ('帧起始符 1', '68H', '起始符'),
             ('从站地址', result['address'], '表地址，BCD编码，低位在前'),
@@ -211,9 +226,31 @@ class DLT645Parser:
         elif len(result['data']) >=4:
             result['fields'].append(('数据标识 DI', result['di_code'], result['di_desc']))
             body = result['data'][4:]
-            if lme_rows is not None:
+            if func_code == 0x0F:
+                # 无线转发（透传）帧：数据域 = 数据标识(4B) + 透传数据(N)，L = 04H + N
+                # （附件1 附录 I.3.3.1；主站请求 0FH / 从站应答 8FH 均走本分支）
+                result['fields'].append((
+                    '  └ 透传数据标识 DI', result['di_code'], result['di_desc'],
+                    '无线转发(透传)帧：数据标识(D0~D3) + 透传数据(N0~Nm)，L = 04H + N（附录 I.3.3.1）'))
+                result['fields'].append((
+                    '  └ 透传数据', body.hex().upper(),
+                    f'{len(body)} 字节' if body else '无（透传数据长度为 0）',
+                    '无线通信模组经微功率无线信道转发的 DL/T645 报文数据'))
+                if pv_rows is not None:
+                    # 透传内容即扩展协议的 DI 数据块：二次展开
+                    result['fields'].append((
+                        '  └ ※ 透传内容按扩展协议展开', '', result['di_desc'],
+                        '该 DI 命中光伏协议转换单元扩展协议表，展开其数据块'))
+                    result['fields'].extend(pv_rows)
+            elif lme_rows is not None:
                 # LME自定义接口：逐字段深度解析
                 result['fields'].extend(lme_rows)
+                if body:
+                    result['fields'].append(('数据内容(原始)', body.hex().upper(),
+                                             '减33H后原始数据（备查）'))
+            elif pv_rows is not None:
+                # 光伏协议转换单元扩展协议：逐字段深度解析（契约同 LME 行列表）
+                result['fields'].extend(pv_rows)
                 if body:
                     result['fields'].append(('数据内容(原始)', body.hex().upper(),
                                              '减33H后原始数据（备查）'))

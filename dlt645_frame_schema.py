@@ -20,7 +20,7 @@ cmd_key 约定：`(direction, func_code)`
 更改通信速率 17H L=01H、写通信地址 15H L=06H、写地址应答 95H L=00H。
 """
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from dlt645_data_codec import (
     bcd_pack,
@@ -59,7 +59,7 @@ FALLBACK_TYPE = F_HEX
 def fld(name: str, ftype: str, default: str = "", hint: str = "",
         length: Optional[int] = None) -> Dict:
     """构造一个字段定义（与既有三套 schema 的字段字典同构）。"""
-    d = {"name": name, "type": ftype, "default": default, "hint": hint}
+    d: Dict[str, Any] = {"name": name, "type": ftype, "default": default, "hint": hint}
     if length is not None:
         d["length"] = length
     return d
@@ -247,7 +247,12 @@ def _norm_key(cmd_key) -> tuple:
     direction, func = cmd_key
     if direction not in (REQ, RSP, ERR):
         raise ValueError(f"未知方向 {direction!r}（应为 req/rsp/err）")
-    return (direction, int(func) & 0x1F)
+    try:
+        func_int = int(func) & 0x1F
+    except (TypeError, ValueError) as e:
+        # 保持原异常类型（ValueError），仅补充可读信息
+        raise ValueError(f"未知功能码 {func!r}（应为形如 '11' 的十六进制数字串）") from e
+    return (direction, func_int)
 
 
 def get_command(cmd_key) -> Dict:
@@ -297,9 +302,28 @@ def get_di_info(di_code: str) -> Dict:
         info = None
     if not info:
         return {"name": "", "unit": "", "data_type": "", "length": 0}
+    try:
+        _nlen = int(info.get("length") or 0)
+    except (TypeError, ValueError):
+        _nlen = 0          # 表内 length 异常时安全降级（生成物正常为数字）
     return {"name": info.get("name", ""), "unit": info.get("unit", ""),
             "data_type": info.get("data_type", ""),
-            "length": int(info.get("length") or 0)}
+            "length": _nlen}
+
+
+def _is_multivalue_dt(dt: str) -> bool:
+    """多值数据块掩码判定（扩展协议用 `|` 分隔同一 DI 下的多个值）。
+
+    例：`XXX.X|XXX.X|XXX.X`（光伏逆变器电压块 3 值）、
+    `YYMMDDhhmmss|YYMMDDhhmmss|XX...XX|XX...XX`（开关机控制事件块）。
+    这类 DI 的**单值**模板（数值/时间/日期/通信地址）一律不适用 —— 组帧按裸字节填写。
+
+    零误伤依据（实测）：标准 DI 表 `dlt645_di.json` 1099 条中 **无任何** `|` 掩码；
+    `|` 只出现在 `dlt645_pv_ext.py` 的扩展协议条目（682 键中 467 键）。
+    组帧支持该扩展协议属范围外（见 AGENTS.md §5.4），此前模板会错配成
+    时间/日期/通信地址字段，此处只做兜底、不实现结构化组帧。
+    """
+    return "|" in dt
 
 
 def build_di_fields(di_code: str) -> List[Dict]:
@@ -333,6 +357,12 @@ def build_di_fields(di_code: str) -> List[Dict]:
     if di_code == "04FFAAF9":
         return []   # 手册 4.2 查询请求无数据单元
 
+    if _is_multivalue_dt(dt):
+        # 扩展协议的多值数据块：不套用任何单值模板（否则会被当成时间/日期/数值）
+        return [fld("数据内容", FALLBACK_TYPE, "",
+                    f"{label}：多值数据块（{dt}），{nlen} 字节，按裸字节填写"
+                    "（组帧支持该扩展协议属范围外）")]
+
     if dt == "XX.XXXX,MDHM":
         return [
             fld("需量值", F_DEMAND, "", f"{label}：XX.XXXX（kW）"),
@@ -352,13 +382,20 @@ def build_di_fields(di_code: str) -> List[Dict]:
 
     up = dt.upper()
     if up.startswith("BS"):
-        want = nlen or (int(up[2:]) // 8 if up[2:].isdigit() else None)
+        _bits = None
+        try:
+            _bits = int(up[2:]) // 8      # 非数字/空串时保持 None（与原先 isdigit 判据等价）
+        except ValueError:
+            _bits = None
+        want = nlen or _bits
         return [fld("位串内容", F_HEX, "", f"{label}：{dt}，{want} 字节 hex", want)]
     if "YYYYMMDD" in up:
         return [fld("日期", F_DI_VALUE, "", f"{label}：YYYY-MM-DD")]
     if "hhmmss" in dt.lower():
         return [fld("时间", F_DI_VALUE, "", f"{label}：hh:mm:ss")]
-    if set(up) == {"N"}:
+    if set(up) == {"N"} and len(up) >= 12:
+        # 仅标准「通信地址」（掩码 NNNNNNNNNNNN，12 位）适用；
+        # 扩展协议存在短全 N 掩码（如运行状态 `NN`，1 字节），套用会得到错误字段名
         return [fld("通信地址", F_ADDR, "", f"{label}：12 位地址")]
     if nlen:
         return [fld("数据内容", FALLBACK_TYPE, "",
@@ -391,9 +428,12 @@ def _encode_di_value(di_code: str, fv: Dict, value_key: str = "数据值") -> by
     if dt == "XX.XXXX,MDHM":
         return encode_demand_with_time(_fv(fv, "需量值", "0"),
                                        _fv(fv, "发生时间", ""), label)
-    if set(dt.upper()) == {"N"} or "YYYYMMDD" in dt.upper() or "hhmmss" in dt.lower():
-        key = ("通信地址" if set(dt.upper()) == {"N"}
-               else "日期" if "YYYYMMDD" in dt.upper() else "时间")
+    up_dt = dt.upper()
+    _is_addr = set(up_dt) == {"N"} and len(dt) >= 12
+    if not _is_multivalue_dt(dt) and (
+            _is_addr or "YYYYMMDD" in up_dt or "hhmmss" in dt.lower()):
+        key = ("通信地址" if _is_addr
+               else "日期" if "YYYYMMDD" in up_dt else "时间")
         return encode_value(_fv(fv, key), dt, info["unit"], label,
                             nbytes=info["length"] or None)
     total, _dec, nbytes = mask_shape(dt)

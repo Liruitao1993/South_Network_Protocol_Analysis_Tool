@@ -1,5 +1,9 @@
 """
 DLT645-2007 数据标识(DI)查询模块
+
+数据源：`dlt645_di.json`（生成物，勿手改） + 光伏协议转换单元扩展协议 DI
+（`dlt645_pv_ext.PV_DI_MAP`，经 `merge_pv_di_map` 合并 —— 与解析器同一函数，
+单一来源：桌面查询页与 Reflex Web 查询页均读本模块）。
 """
 
 import json
@@ -7,6 +11,7 @@ import os
 from typing import List, Tuple, Optional
 
 from app_paths import data_path
+from dlt645_pv_ext import merge_pv_di_map
 
 
 class DLT645DILookup:
@@ -19,7 +24,7 @@ class DLT645DILookup:
         self._load_di_map()
 
     def _load_di_map(self):
-        """从JSON文件加载DI映射表"""
+        """从JSON文件加载DI映射表（并入光伏扩展协议 DI，单一来源）"""
         json_path = os.path.join(os.path.dirname(__file__), 'dlt645_di.json')
 
         # 加载标准DI定义
@@ -31,6 +36,11 @@ class DLT645DILookup:
                     standard_dis = data.get('di_map', {})
             except Exception as e:
                 print(f"加载DLT645 DI文件失败: {e}")
+        else:
+            print("DLT645 DI 映射表不存在，仅加载光伏扩展协议 DI")
+
+        # 并入光伏协议转换单元 DL/T645-2007 扩展协议 DI（dlt645_pv_ext.PV_DI_MAP）
+        standard_dis = merge_pv_di_map(standard_dis)
 
         # 加载自定义DI
         custom_dis = self._load_custom_di()

@@ -1,0 +1,7 @@
+{"file": "协议文档/6.645协议/附件1：协议转换单元【低压分布式光伏协议转换单元】-技术规范书0625.md", "reason": "本次实现的唯一规范来源：§D.1 三张数据标识表（变量 02E6/参数 04E6/事件 03E6）与附录 I.3.3.1 的扩展控制码 0FH/8FH 透传帧；数据字节切分必须按『数据长度』列与行内文字描述核对"}
+{"file": ".trellis/tasks/09-17-dlt645-pv-ext/design.md", "reason": "技术设计 D1~D7：新模块契约（镜像 parse_lme_dlt645）、DI 表单一来源与合并点、分派点、0F/8F 处理、解码规则（长度列权威/功率符号位/单相 FF/逆变器字节序/调控结果枚举/DI0 双语义）、两端同步与测试策略"}
+{"file": ".trellis/tasks/09-17-dlt645-pv-ext/implement.md", "reason": "执行计划步骤 0~10：步骤 0 文档逐行核对产出 DI 清单（硬门）、步骤 2 解码工具、步骤 6 测试（表驱动全覆盖）、步骤 7 四条变异反证（硬门）、步骤 9 回归命令清单"}
+{"file": ".trellis/tasks/09-17-dlt645-pv-ext/prd.md", "reason": "需求与验收 A1~A13；Scope 段落界定越界（组帧、虚拟表、厂商逆变器协议、698.45 透传均属范围外）"}
+{"file": "AGENTS.md", "reason": "项目权威规范：§5.4 协议6 解析器/组帧/虚拟表/参考文档映射；§4.5 明确 dlt645_di.json 是生成物禁止手改；§7 测试约定（test/ + import _path_setup # noqa: E402,F401 + 登记 release_check.py:CORE_TESTS）；§8 陷阱 23（不得空白返回）/31（Web 与桌面漂移）/41（跨帧状态）/44（摘要字段）/45/46；§9 开发原则"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "单一来源原则：扩展 DI 表只定义一处，解析器/查询页/Web 三处共用 merge_pv_di_map，避免复制清单"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "分层边界：解析（dlt645_parser）与数据编解码（dlt645_data_codec）职责划分，避免把块解码塞进单值解码器"}

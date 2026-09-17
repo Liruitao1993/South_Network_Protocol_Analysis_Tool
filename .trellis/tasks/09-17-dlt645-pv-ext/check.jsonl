@@ -1,0 +1,6 @@
+{"file": "协议文档/6.645协议/附件1：协议转换单元【低压分布式光伏协议转换单元】-技术规范书0625.md", "reason": "核对实现是否忠实文档：数据长度列的字节切分、功率符号位规则（文档示例 0111=+7 / 1111=-7）、单相 B/C 相为 FF、事件块逆变器 12→1 字节序、调控结果枚举、0FH/8FH 透传帧格式（L=04H+数据长度）"}
+{"file": ".trellis/tasks/09-17-dlt645-pv-ext/prd.md", "reason": "验收标准 A1~A13 为检查口径；Scope 段落判定越界（组帧 dlt645_frame_schema、虚拟表 dlt645_sim、厂商逆变器协议、698.45 透传、硬件章节均属范围外）"}
+{"file": ".trellis/tasks/09-17-dlt645-pv-ext/design.md", "reason": "核查实现是否偏离 D1~D7，尤其是 R5 单一来源（merge_pv_di_map 三处共用）、R7 兜底不回归、R8 纯函数无跨帧状态"}
+{"file": ".trellis/tasks/09-17-dlt645-pv-ext/implement.md", "reason": "核查步骤 0 的 DI 清单是否覆盖三张表全部行、步骤 7 四条变异反证是否实际执行并观察到变红（非推断）、步骤 9 全量回归是否跑完"}
+{"file": "AGENTS.md", "reason": "对照 §4.5（dlt645_di.json 是生成物，禁手改）、§7 测试约定（_path_setup/# noqa: E402,F401/CORE_TESTS 登记）、§8 陷阱 23/31/41/44 逐条核验"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "核查是否引入重复清单（例如把扩展 DI 名再抄一份到查询页或 Web）"}
