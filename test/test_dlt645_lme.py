@@ -341,14 +341,21 @@ def test_dlt645_lme():
     check("异常应答 无误判DI", r12.get("di_code", "") == "")
 
     # ========== 12b. 电表运行状态字按附录C位定义展开 ==========
-    # 状态字4（DI=04000504，线序 04 05 00 04）A相故障：bit7断相+bit3过压=0x88
+    # 状态字4（DI=04000504，线序 04 05 00 04）A相故障：
+    # 附录C 位定义 Bit7 断相 / Bit3 失流 → 0x88 = 断相 + 失流
+    # （1.23.23 修正前本表位号错位：Bit3 被误标为「过压」）
     r12b = DLT645Parser.parse(build_frame(bytes.fromhex("04050004 88000000".replace(" ", ""))))
     sv = field_map(r12b).get("数据值", ("",))[0]
-    check("状态字4 断相/过压置位", "断相" in sv and "过压" in sv, sv[:200])
-    # 状态字1（DI=04000501，线序 01 05 00 04）：bit6有功方向=0x40
-    r12c = DLT645Parser.parse(build_frame(bytes.fromhex("01050004 40000000".replace(" ", ""))))
+    check("状态字4 断相/失流置位",
+          "置位: " in sv and "A相断相" in sv and "A相失流" in sv
+          and "A相过压" not in sv, sv[:200])
+    # 状态字1（DI=04000501，线序 01 05 00 04）：
+    # 附录C 位定义 Bit4 有功功率方向（Bit5 才是无功方向）→ 0x10
+    r12c = DLT645Parser.parse(build_frame(bytes.fromhex("01050004 10000000".replace(" ", ""))))
     svc = field_map(r12c).get("数据值", ("",))[0]
-    check("状态字1 有功方向置位", "有功功率方向" in svc and "置位" in svc, svc[:200])
+    set_part = svc.split("未置位")[0]          # 只看「置位」段，避免被未置位列表假绿
+    check("状态字1 有功方向置位",
+          "有功功率方向" in set_part and "置位: 无" not in set_part, svc[:200])
 
     # ========== 13. 写数据/改密码/清零命令请求拆分 ==========
     # 写数据14H：DI(00010000) + 密码权限04/密码123456 + 操作者00000001 + 数据BCD
