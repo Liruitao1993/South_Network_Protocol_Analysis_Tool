@@ -2116,6 +2116,11 @@ class HDC10Parser:
 
         # 报文头长度: byte0[6:7](高2b)+byte1[0:3](低4b)=6bit, 单位4字节字(类IPv4 IHL)
         hdr_len = (((b0 >> 6) & 0x03) << 4) | (b1 & 0x0F)
+        # 协议版本号: byte0[0:5] = 6bit（文档第4-3部分 §5.3.1.2：本版本取值固定为 1）。
+        # 原实现漏了本行赋值，却在下方三处引用 proto_ver → app 级别解析抄表报文
+        # （0x001/0x002/0x003）时抛 NameError（现场弹「解析失败」）。
+        # 写法与同文件 _parse_confirm / _parse_timesync 等 6 处保持一致。
+        proto_ver = b0 & 0x3F
         hdr_bytes = hdr_len * 4
 
         table.append((

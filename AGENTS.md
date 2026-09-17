@@ -34,7 +34,7 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 
 ## 1. 项目概览
 
-多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.23.18`）。
+多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.23.19`）。
 
 **支持的协议（共 12 种，对应 GUI 协议下拉框 `current_protocol` 索引）：**
 
@@ -109,7 +109,7 @@ python main_gui.py --clipboard
 - Lua 脚本引擎依赖 `lupa`，打包时需作为 hidden import 或确保运行环境已安装
 - 当前主程序 spec 未显式声明 `scapy`；如需把 TCP 监控打包进 exe，需补充 `scapy` 依赖并确保目标机器安装 npcap
 - `docs/Lua脚本使用说明.md` 是 Lua 功能的用户文档
-- Inno Setup 安装脚本 `南网解析工具.iss` / `2222.iss` 的 `MyAppVersion` 用 `python release_check.py --sync-iss` 与 `APP_VERSION` 对齐（当前 1.23.18），发版前务必再跑一次 `python release_check.py`
+- Inno Setup 安装脚本 `南网解析工具.iss` / `2222.iss` 的 `MyAppVersion` 用 `python release_check.py --sync-iss` 与 `APP_VERSION` 对齐（当前 1.23.19），发版前务必再跑一次 `python release_check.py`
 
 ### Reflex Web 离线源码部署（UV）
 
@@ -845,6 +845,9 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
     - Web `get_frame_summary` 对协议10 **按表类型分流**：应用层报文走 `get_hdc10_summary`（与协议11 同一实现），物理层/网络层帧**保持原路径**（协议9 摘要函数——它对 TEI/发送类型等段覆盖更全，整包切换会让 105/118 张真实表摘要丢信息）；物理层段全量对齐属 `09-15-web-shared-parse-core`。业务名已含于 `报文:{报文ID}` 段时**不重复追加**（协议10 的 `报文:开始升级`）；
     - 对拍范围**只限应用层表**（物理层/MSDU/MME 段两端文案差异属共享核心任务），回归套件 `test/test_gw_app_summary_detail.py`（42 项，含**真实夹具 auto/fc_pb/app 三级别**不得混入 FC/MAC 字段的断言、真实批量解析 20 帧可区分性、Web 协议10 非应用层表不退化、变异反证）。
 
+45. **HDC 1.0（协议11）抄表报文解析曾有未定义名（1.23.19 修复）；同文件 2 处静态告警为误报**：`hdc10_parser._parse_meter_reading`（服务报文ID `0x001`/`0x002`/`0x003` 三类抄表报文）渲染「协议版本号」行时引用了**从未赋值**的局部名 `proto_ver`（同文件 `_parse_confirm`/`_parse_timesync` 等 6 个函数都写有 `proto_ver = b0 & 0x3F`，唯独它漏写）⇒ **协议11 + 解析级别「应用层报文(app)」+ 抄表类报文ID + 端口 `0x11`** 四条件齐备时抛 `NameError`，GUI 弹「解析失败：name 'proto_ver' is not defined」。**默认「自动识别」级别走 MAC 帧路径、不经过该函数，故自协议11 引入以来长期潜伏**——改本协议时留意「同一份数据在不同解析级别下走完全不同的代码路径」。同类排查手段：`ruff check --select F821`（全仓已 0 命中）。
+    - 另注：pyright/ty 对 `hdc10_parser.py` 报的 `bcsha_phases` possibly unbound（L1516）与 `msdu_len` 类型收窄（L1655）经逐行核实**均为不可达路径误报**——前者使用点所在的 `if ln > 20` 蕴含赋值处的 `if ln >= 7`；后者 `extra_bytes` 非空只可能来自 `if msdu_len is not None` 分支（`elif` 分支保持 `b''`）。同理 `release_check.py` 的 `sys.stdout.reconfigure` 告警是 `typing.TextIO` 协议不含该方法的标注局限。**这些不属于开放缺陷，勿按告警改造**。
+
 ---
 
 ## 9. 开发原则
@@ -871,6 +874,12 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 ## 10. 变更日志
 
 > 详细版本变更记录请查看 `main_gui.py:CHANGELOG`（按版本倒序），或运行 `git log --oneline` 查看提交历史。本文档仅保留最近两个版本的摘要。
+
+### 1.23.19 — 2026-09-17
+
+- **修复 HDC 1.0（协议11）抄表报文解析崩溃**：`hdc10_parser._parse_meter_reading`（服务报文ID `0x001`/`0x002`/`0x003`）渲染「协议版本号」行时引用了**从未赋值**的 `proto_ver`（同文件另 6 个 `_parse_*` 都有 `proto_ver = b0 & 0x3F`）⇒ 协议11 + 解析级别「应用层报文(app)」+ 抄表报文 + 端口 `0x11` 时抛 `NameError`、弹「解析失败」。默认「自动识别」级别走 MAC 帧路径不经过该函数，故自协议11 引入以来长期潜伏
+- 修复：补 `proto_ver = b0 & 0x3F`（依据 第4-3部分 表3 字节0 bit0-5 = 协议版本号、§5.3.1.2「本版本取值固定为 1」；现场帧 b0=0x01 实测一致），其余字段公式一字未动。现场 88 字节并发抄表帧修复后：报文ID `0x0003` / 协议版本 `1` / 报文头 `2×4B=8B` / 规约类型 `3`=DL/T698.45 / 转发数据长度 `75` / 报文序号 `17543` / DATA 自偏移 12 起内嵌 698.45 报文
+- 新增 `test/test_hdc10_meter_reading.py`（13 项：现场帧 golden / 三类抄表报文 / `auto` 级别 7 行基线回归 / DATA 偏移与帧尾自洽 / 短帧与 8 字节边界 / **F821 静态守卫**），登记 `release_check.py:CORE_TESTS`；变异反证（删赋值→复现 `NameError`）。范围外：DATA 域内嵌 698.45/645 深度解析、其他报文 ID 的动态排查
 
 ### 1.23.18 — 2026-09-16
 

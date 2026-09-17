@@ -110,8 +110,8 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.18"
-BUILD_DATE = "2026-09-16"  # 编译日期，每次打包前更新
+APP_VERSION = "1.23.19"
+BUILD_DATE = "2026-09-17"  # 编译日期，每次打包前更新
 
 # 窗口状态持久化（config.json 顶层 "window" 段）的表格清单：
 # 只收「用户拖动列宽才有意义」的主表；弹窗/克隆表不做持久化（见任务 PRD 的
@@ -131,6 +131,19 @@ _WINDOW_STATE_TABLES = (
 )
 
 CHANGELOG = [
+    (
+        "1.23.19",
+        "2026-09-17",
+        [
+            "**修复 HDC 1.0（协议11）抄表报文解析崩溃**（用户报障：一条并发抄表报文选「应用层报文」级别解析时弹 `解析失败：name 'proto_ver' is not defined`）",
+            "根因：`hdc10_parser._parse_meter_reading`（服务报文ID 0x001/0x002/0x003 三类抄表报文）在渲染「协议版本号」行时引用了**从未赋值**的局部名 `proto_ver`——同文件 `_parse_confirm`/`_parse_timesync` 等 6 个函数都写有 `proto_ver = b0 & 0x3F`，唯独本函数漏写；`ruff check --select F821` 全仓仅此一处",
+            "**触发条件四条同时满足**（故自协议11 引入以来长期潜伏）：协议索引 11 + 解析级别「应用层报文(app)」+ 报文ID ∈ {0x001 终端主动抄表, 0x002 路由主动抄表, **0x003 终端主动并发抄表**} + 端口 0x11。默认「自动识别」级别先把数据当 MAC 帧解析、不经过该函数，所以一直没暴露",
+            "修复：补 `proto_ver = b0 & 0x3F`（依据 HDC 1.0 第4-3部分 表3「下行抄表报文」字节0 bit0-5 = 协议版本号、§5.3.1.2「本版本取值固定为 1」；现场帧 b0=0x01 实测一致），该函数其余字段公式一字未动",
+            "现场帧（88 字节，并发抄表）修复后逐字段验证：端口 0x11 / 报文ID 0x0003 / 协议版本号 1 / 报文头长度 2×4B=8B / 配置字 0 / 转发数据规约类型 3=DL/T698.45 / 转发数据长度 75 字节 / 报文序号 17543 / DATA 自偏移 12 起（内嵌 698.45 报文 `68 49 00 43 …`，帧尾 0x16 不计入 DATA）",
+            "测试：新增 `test/test_hdc10_meter_reading.py`（13 项：现场帧 golden 逐字段 / 0x001·0x002·0x003 三类报文 / `auto` 级别 7 行基线回归（路径不同、零变化）/ DATA 偏移与帧尾自洽 / 短帧「过短」分支与 8 字节长度下限边界 / 全表行结构完整 / **F821 静态守卫**防同类复发），登记 `release_check.py:CORE_TESTS`；**变异反证**：删掉 `proto_ver` 赋值（内存变异，不动原文件）→ 精确复现 `NameError`",
+            "注：lens/pyright 对同一批文件另报 4 处既有告警（`bcsha_phases` possibly unbound、`msdu_len` 类型收窄、`sys.stdout.reconfigure` 不在 `TextIO` 协议），经逐行核实均为**不可达路径/类型标注局限的误报**，按「最小修复」范围未改动",
+        ],
+    ),
     (
         "1.23.18",
         "2026-09-16",
@@ -1159,7 +1172,9 @@ def _gw_app_biz_summary(table_data) -> tuple:
         if not _raw_name(table_data[j]).startswith(" "):  # 下一个顶层行 = 段结束
             window_end = j
             break
-    window = table_data[window_start : window_end if window_end >= 0 else len(table_data)]
+    window = table_data[
+        window_start : window_end if window_end >= 0 else len(table_data)
+    ]
 
     # ── 业务名 ──
     biz_name = ""
