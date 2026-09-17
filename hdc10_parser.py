@@ -1423,6 +1423,11 @@ class HDC10Parser:
             if ln >= 3:
                 result.append(("      保留", f"0x{content[2]:02X}", "1字节",
                                "保留字段(byte2)", bo + 2, bo + 3, True))
+            # bcsha_phases 初始化：使用点位于 `if ln > 20:` 的「绑定CSMA时隙信息」循环，
+            # 而赋值点在 `if ln >= 7:`（ln > 20 蕴含 ln >= 7）⇒ 运行时必然已赋值，此处
+            # 初始化**不改变任何行为**，仅消除静态分析对跨条件数值蕴含的误报
+            # （AGENTS.md §8 陷阱 45）。
+            bcsha_phases = 0
             if ln >= 4:
                 proxy_beacon = content[3]
                 result.append(("      代理信标时隙总数", f"0x{proxy_beacon:02X}", str(proxy_beacon),
@@ -1659,7 +1664,11 @@ class HDC10Parser:
                 ))
 
                 # 帧尾多余字节（填充/日志噪声）
-                if extra_bytes:
+                # `msdu_len is not None` 显式判断：extra_bytes 仅在其为 None 之外的
+                # 分支被赋值（见上文 `if msdu_len is not None and …`）⇒ 运行时必然成立，
+                # 显式写出不改变任何行为，仅消除静态分析对跨变量关联的误报
+                # （AGENTS.md §8 陷阱 45）。
+                if extra_bytes and msdu_len is not None:
                     preview = ' '.join(f'{b:02X}' for b in extra_bytes[:16])
                     if len(extra_bytes) > 16:
                         preview += ' ...'
