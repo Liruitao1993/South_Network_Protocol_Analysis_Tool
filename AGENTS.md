@@ -416,6 +416,9 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
 │                                   #   frozen(单文件exe) → exe 所在目录；dev → 项目根
 │                                   #   纯 stdlib 无 Qt；函数内惰性读 sys.frozen/_MEIPASS/executable
 │
+├── ruff.toml / .pi-lens.json     # 工具链配置（2026-09-17）：ruff 只启用 pyflakes（F）规则；
+│                                 #   pi-lens 关闭自动格式化/自动修复（只报诊断、不改写文件）——见 §8 陷阱 46
+│
 └── 数据文件（运行时读写，需随打包/版本管理；一律经 app_paths.data_path 定位，frozen 下落 exe 目录）
     ├── custom_di.json              # 南网自定义DI（GUI 增删；打包内置，exe 目录缺失时从 _MEIPASS 复制种子）
     ├── gdw_custom_afn.json         # 国网自定义AFN+Fn（GUI 增删；打包内置，exe 目录缺失时从 _MEIPASS 复制种子）
@@ -847,6 +850,12 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 
 45. **HDC 1.0（协议11）抄表报文解析曾有未定义名（1.23.19 修复）；同文件 2 处静态告警为误报**：`hdc10_parser._parse_meter_reading`（服务报文ID `0x001`/`0x002`/`0x003` 三类抄表报文）渲染「协议版本号」行时引用了**从未赋值**的局部名 `proto_ver`（同文件 `_parse_confirm`/`_parse_timesync` 等 6 个函数都写有 `proto_ver = b0 & 0x3F`，唯独它漏写）⇒ **协议11 + 解析级别「应用层报文(app)」+ 抄表类报文ID + 端口 `0x11`** 四条件齐备时抛 `NameError`，GUI 弹「解析失败：name 'proto_ver' is not defined」。**默认「自动识别」级别走 MAC 帧路径、不经过该函数，故自协议11 引入以来长期潜伏**——改本协议时留意「同一份数据在不同解析级别下走完全不同的代码路径」。同类排查手段：`ruff check --select F821`（全仓已 0 命中）。
     - 另注：pyright/ty 对 `hdc10_parser.py` 报的 `bcsha_phases` possibly unbound（L1516）与 `msdu_len` 类型收窄（L1655）经逐行核实**均为不可达路径误报**——前者使用点所在的 `if ln > 20` 蕴含赋值处的 `if ln >= 7`；后者 `extra_bytes` 非空只可能来自 `if msdu_len is not None` 分支（`elif` 分支保持 `b''`）。同理 `release_check.py` 的 `sys.stdout.reconfigure` 告警是 `typing.TextIO` 协议不含该方法的标注局限。**这些不属于开放缺陷，勿按告警改造**。
+
+46. **pi-lens 的自动格式化与自动修复在本项目已关闭（`ruff.toml` + `.pi-lens.json`，2026-09-17）**：pi-lens 在**项目无 ruff 配置**时会回落它自带的 `config/ruff/core.toml`（`line-length=88` + `select=E,W,F,I,B,UP,SIM,C4,PIE,S`），配合 `ruff format` 对既有代码做大规模重写——实测 `hdc10_parser.py` 单文件产生 **4201 行**格式 diff、`web_utils.py` **343 行**（单引号统一为双引号、`List[X]`→`list[X]`、长行炸开成一行一参），**5 行的真实修复被淹没在 2932 行格式噪声中、无法评审**。
+    - **分工**：`ruff.toml`（`select=["F"]` + `quote-style="preserve"`）决定「报什么」——只留 pyflakes 真实缺陷（F821 未定义名，1.23.19 修的 `proto_ver` 即此类；另有 F841/F541），不选任何风格/现代化规则，从根上消除改写来源；`.pi-lens.json` 的 `format.enabled=false` + `autofix.enabled=false` 决定「是否后台改写」——两者都关，lens 只**报告**诊断、不动文件。
+    - **变异反证（同轮实测，双向）**：同一份「单引号 + `List[int]` + 超长行(>88)」探针，`format.enabled=true` 时 lens 立刻 `Auto-fixed 2 issue(s)` 并改写；改回 `false` 后 md5 逐字节不变、无任何改写提示。ruff 侧另证：从仓库根运行 `ruff check --statistics <file>`（**不带 `--config`**）只报 F 类 → 项目 `ruff.toml` 被自动发现、不再回落 lens 的 `core.toml`。
+    - **临时恢复格式化**：把 `.pi-lens.json` 的 `format.enabled` 改回 `true`（或删除该文件 = 回落 lens 默认）。**改真实代码时不要开**：长行重排是 `ruff format` 的固有行为，`quote-style="preserve"` 只能挡住引号统一，挡不住重排。
+    - 工具提示：ruff 是 Windows 程序，`--config` 传 WSL 路径（`/mnt/c/...`）会直接 `invalid value ... for '--config'` 退出 2（**表现是「所有测量结果全 0」的假绿**）——对比配置时必须传 `C:/...` 形式；`ruff --diff` 不写文件，可安全用于测量。
 
 ---
 

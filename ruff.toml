@@ -1,0 +1,20 @@
+# 固定本项目的 ruff 行为。
+#
+# 背景：pi-lens / IDE 的 ruff 自动修复在**项目没有 ruff 配置**时会回落到 pi-lens 自带的
+# core.toml（line-length=88 + select=E,W,F,I,B,UP,SIM,C4,PIE,S），对既有代码做大规模
+# 现代化重写：单引号统一为双引号、List[X] → list[X]、长行强制炸开成一行一参。实测单个
+# 文件可产生 4000+ 行与功能无关的 diff（hdc10_parser.py 4201 行、web_utils.py 343 行），
+# 使真实改动无法评审。本文件存在后，ruff 只读本项目配置，不再回落那份 core.toml。
+#
+# 规则选择：只留 pyflakes（F）——未定义名（F821，1.23.19 修的 proto_ver 即此类）、
+# 未使用变量（F841）、f-string 缺占位符（F541）等真实缺陷；不做风格/现代化规则
+# （E/W/I/UP/SIM/C4/B/S 全部不选），从根上避免再一次大规模改写。
+
+line-length = 88
+
+[format]
+# 项目内单/双引号混用是历史现状，禁止自动统一（否则会整篇翻新）
+quote-style = "preserve"
+
+[lint]
+select = ["F"]
