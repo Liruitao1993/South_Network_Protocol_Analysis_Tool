@@ -69,6 +69,7 @@ CORE_TESTS = [
     "test/test_hdc10_meter_reading.py",
     "test/test_hdc10_app_dispatch.py",
     "test/test_dlt645_frame_gen.py",
+    "test/test_dlt645_tolerant_parse.py",
     "test/test_dlt645_lme.py",
     "test/test_dlt645_pv_ext.py",
     "test/test_dlt645_sim.py",

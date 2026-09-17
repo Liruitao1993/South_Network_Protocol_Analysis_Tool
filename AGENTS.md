@@ -34,7 +34,7 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 
 ## 1. 项目概览
 
-多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.23.21`）。
+多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.23.22`）。
 
 **支持的协议（共 12 种，对应 GUI 协议下拉框 `current_protocol` 索引）：**
 
@@ -109,7 +109,7 @@ python main_gui.py --clipboard
 - Lua 脚本引擎依赖 `lupa`，打包时需作为 hidden import 或确保运行环境已安装
 - 当前主程序 spec 未显式声明 `scapy`；如需把 TCP 监控打包进 exe，需补充 `scapy` 依赖并确保目标机器安装 npcap
 - `docs/Lua脚本使用说明.md` 是 Lua 功能的用户文档
-- Inno Setup 安装脚本 `南网解析工具.iss` / `2222.iss` 的 `MyAppVersion` 用 `python release_check.py --sync-iss` 与 `APP_VERSION` 对齐（当前 1.23.21），发版前务必再跑一次 `python release_check.py`
+- Inno Setup 安装脚本 `南网解析工具.iss` / `2222.iss` 的 `MyAppVersion` 用 `python release_check.py --sync-iss` 与 `APP_VERSION` 对齐（当前 1.23.22），发版前务必再跑一次 `python release_check.py`
 
 ### Reflex Web 离线源码部署（UV）
 
@@ -722,6 +722,7 @@ python test/test_dlt645_lme.py       # LME 自定义接口解析（4.2 单模STA
 python test/test_dlt645_frame_gen.py # DLT645 组帧（掩码推导 / 组帧→解析闭环 / LME 查询模板）
 python test/test_dlt645_frame_gen_gui.py # 645 组帧标签页 offscreen 冒烟
 python test/test_dlt645_pv_ext.py    # 协议6 光伏协议转换单元 645 扩展协议（156 项：682 DI 表驱动全覆盖 / 功率符号位含边界 / 单相 FF / DI0 双语义 / 事件块逆变器字节序 / 0F·8F 透传含二次展开 / 歧义行存疑 / 组帧守卫 / 桌面·Web 两端一致，1.23.21 起）
+python test/test_dlt645_tolerant_parse.py # 协议6 容错解析（135 项：CS 错/长度不符/结构错仍完整解析 + 提示正确 CS 值与计算规则 / 长度<12 降级 / valid 语义不变 / GUI 偏移落在 CS 字节 / 合法帧逐行不变，1.23.22 起）
 python test/test_meter_sim.py       # 698.45 虚拟表从站模拟器（62 项：自组帧自解析闭环/NormalList/Record/安全MAC/通配多表/名单/递增/漏点/粘包分片，1.16.0 起）
 python test/test_quick_parse_panel.py # uTools 风格快捷解析小窗（29 项：空态/真实帧/自动识别/错误态/徽章/显隐/手动切协议/MainWindow 集成，1.17.0 起）
 python test/test_app_exit.py         # 关闭/托盘退出进程不残留 + 线程回收（offscreen：X→托盘退出事件循环结束/直接关闭/虚拟表线程登记，1.17.2 起）
@@ -877,6 +878,15 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
     - **组帧侧守卫（本次改动引入的副作用，已修）**：扩展 DI 进入组帧下拉后，`dlt645_frame_schema.build_di_fields` 把多值掩码当单值套模板（运行状态 `NN`→「通信地址」、时段调节块→「日期」、事件块→「时间」）。现守卫：`_is_multivalue_dt(dt)`（含 `|`）一律走裸字节模板 + `set(dt.upper()) == {"N"}` 需 `len >= 12`；`_encode_di_value` **同步加守卫**（模板与编码必须一致，否则出现「显示裸 hex 但编码走时间/地址」。判据零误伤的前提是**标准表 1099 条无 `|` 掩码、无短全 N 掩码**（测试已钉住这两个前提，表变化会让断言失败提醒复核）。**组帧支持该扩展协议仍属范围外**。
     - **本文件既有静态告警（勿按告警改造）**：`dlt645_frame_schema.py` 的 `fld()` 内 `d["length"] = length`（类型标注）、`_norm_key` 的 `int(func)`（无 try/except）、`int(info.get("length") or 0)`、`BS*` 分支的 `int(up[2:])` —— 经核实**均为改动前既有**（HEAD 第 64/250/302/355 行同文本），后两条分别由 `or 0` 与 `.isdigit()` 保证安全 → 同陷阱 45 处置。
 
+49. **协议6 解析的容错契约：结构/校验/长度不符一律继续解析，并把「正确值」告诉用户**（1.23.22 起，改 `dlt645_parser` 前必读）：
+    - **判据必须分开**：`check_structure(data)`（长度≥12 / 双 `68H` / 结束 `16H`）与 `calc_checksum(data)`（`sum(data[0:-2]) & 0xFF`）是两类不同性质的判据；`check_frame()` 保留为二者合取（语义不变）。**不要再把校验判据混进提前 return** —— 1.23.22 前正是如此，导致 CS 写错时整张表为空、只弹「无效的DLT645帧格式」。
+    - **`parse()` 只在 `len(data) < 12` 时降级**（帧长不足说明 + 原始 hex）；长度够就一律继续完整解析（陷阱 23）。
+    - **`valid` 语义不可动**：`结构OK and 校验OK and not 长度不符`。`dlt645_sim/engine.py` 与 `dlt645_meter_sim_widget.py` 读 `parsed.get("valid", True)`，改语义会连带改虚拟表行为。
+    - **新增提示行的行名必须含「校验和」**：`protocol_registry.DLT645GuiParser` 的偏移映射按字段名子串匹配（`elif "校验和" in field: byte_start = total_len - 2`），改名会让高亮落到字节 0。
+    - **合法帧输出逐行不变**是硬约束（`test_dlt645_tolerant_parse.py` 的 A4 会抓住）；`校验和` / `帧结束符` 行的增强**只在该项不符时**生效。
+    - **虚拟表对 `valid=False` 帧「尽力响应」是作者有意行为**（`dlt645_sim/engine.py:114` 分支注释「尽力：仍尝试取 control / data」+ `pass`，不是 bug）。因此 1.23.22 后「坏 CS 主站帧」从回异常应答变为回正常应答——这是本次修复的**已知副作用，已确认接受**；虚拟表日志现会打出「⚠ 帧校验未通过: 校验和错误，期望 0xXX，实际 0xYY」。若要改成严格拒收，属独立小任务（改 `engine.py` 那一行 + 补测试）。
+    - 同类未修（另行立项）：国网(7)/698.45(8)/新一代系 是否存在「校验不符即拒解析」需逐协议核实（南网协议0 **已是正确行为**：`protocol_parser.py` 的 `解析状态=失败` + `错误信息=校验和错误，期望 0xXX，实际 0xYY`）。
+
 ---
 
 ## 9. 开发原则
@@ -903,6 +913,14 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 ## 10. 变更日志
 
 > 详细版本变更记录请查看 `main_gui.py:CHANGELOG`（按版本倒序），或运行 `git log --oneline` 查看提交历史。本文档仅保留最近两个版本的摘要。
+
+### 1.23.22 — 2026-09-17
+
+- **协议6（DLT645-2007）校验和错误时不再拒解析**（用户报障：645 帧 CS 不对时工具完全不解析、只弹「无效的DLT645帧格式」）：判据拆为 `check_structure()` / `calc_checksum()`（`check_frame()` 保留且语义不变）；长度≥12 一律继续完整解析 + 插入「⚠ 校验和错误」（帧内值 + **正确值** + 计算规则）与「❌ 帧结构错误」（指明字节）；新增 `checksum_expected`/`structure_valid`/`structure_error` 字段
+- `valid` 语义**不变**（虚拟表等消费方不受影响）、合法帧输出**逐行不变**（实测 13 行一致）；长度<12 给出帧长说明+原始 hex 降级
+- 新增 `test/test_dlt645_tolerant_parse.py`（135 项，登记 `CORE_TESTS`）；变异反证 3 条全部实测变红；回归全绿，`release_check` PASS=67 FAIL=0 WARN=0
+- 已知副作用（**已接受**）：虚拟表从站对坏 CS 主站帧由「异常应答」变「正常应答」（`dlt645_sim/engine.py:114` 属作者有意「尽力」而非 bug，旧行为只是解析器返回空导致的偶然）
+- 附带：消除 `hdc10_parser.py` 2 处静态分析误报（零行为变更，该文件 lens 转 clean）
 
 ### 1.23.21 — 2026-09-17
 

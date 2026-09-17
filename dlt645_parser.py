@@ -1,5 +1,6 @@
 import json
 import os
+from typing import Tuple
 
 from lme_info_entry_parser import parse_lme_dlt645, DI_STA_VERSION_SINGLE, DI_DUAL_ENTRY
 from dlt645_data_codec import (
@@ -36,13 +37,41 @@ class DLT645Parser:
             })
 
     @staticmethod
-    def check_frame(data: bytes) -> bool:
+    def check_structure(data: bytes) -> Tuple[bool, str]:
+        """结构判据（**不含** CS）：帧长 / 双 68H 起始符 / 16H 结束符
+
+        返回 (是否通过, 中文原因)；通过时原因为空串。
+
+        与「校验判据」分离的理由见 AGENTS.md §8 陷阱 23：校验和不符时帧内内容
+        仍可完整解析，只应提示正确值，**不得**返回空白结果（用户报障场景）。
+        同仓先例：protocol_parser.py 的南网解析器（照常解析 + 记录校验值/计算值/结果）。
+        """
         if len(data) < 12:
-            return False
-        if data[0] != 0x68 or data[7] != 0x68 or data[-1] != 0x16:
-            return False
-        cs = sum(data[0:-2]) & 0xFF
-        return cs == data[-2]
+            return False, f"帧长度不足 12 字节（实际 {len(data)} 字节）"
+        if data[0] != 0x68 or data[7] != 0x68:
+            bad = []
+            if data[0] != 0x68:
+                bad.append(f"第 1 字节应 68H（实际 {data[0]:02X}H）")
+            if data[7] != 0x68:
+                bad.append(f"第 8 字节应 68H（实际 {data[7]:02X}H）")
+            return False, "帧起始符错误：" + "、".join(bad)
+        if data[-1] != 0x16:
+            return False, f"帧结束符错误：末字节应 16H（实际 {data[-1]:02X}H）"
+        return True, ""
+
+    @staticmethod
+    def calc_checksum(data: bytes) -> int:
+        """正确的校验和 CS = 起始符 68H 到数据域最后 1 字节的算术和 & 0xFF
+
+        （DL/T645-2007 §6.2；单一来源：check_frame 与 parse 均调本方法，勿另写一份）
+        """
+        return sum(data[0:-2]) & 0xFF
+
+    @staticmethod
+    def check_frame(data: bytes) -> bool:
+        """结构 + 校验全部通过（既有公开入口，语义不变）"""
+        ok, _ = DLT645Parser.check_structure(data)
+        return bool(ok) and DLT645Parser.calc_checksum(data) == data[-2]
 
     @staticmethod
     def parse(data: bytes) -> dict:
@@ -59,17 +88,37 @@ class DLT645Parser:
             'di_desc': '',
             'checksum': 0,
             'checksum_valid': False,
+            # 容错解析新增字段（1.23.22）：正确校验值 / 结构判据结果
+            'checksum_expected': 0,
+            'structure_valid': False,
+            'structure_error': '',
             'fields': []
         }
 
         # 加载 DI 映射表
         DI_MAP = DLT645Parser._load_di_map()
 
-        if not DLT645Parser.check_frame(data):
-            result['error'] = '无效的DLT645帧格式'
+        # ── 结构与校验判据拆分（AGENTS.md §8 陷阱 23）
+        #    旧实现把「结构判据」（长度/双 68H/结束 16H）与「校验判据」（CS）混在
+        #    check_frame 返回值里并提前 return ⇒ CS 写错时整张表为空，用户看不到任何内容。
+        #    现在：长度 ≥12 一律继续完整解析，结构与校验结果分别记录 + 插入醒目提示行。
+        #    参照同仓先例 protocol_parser.py（南网）：照常解析，只把失败标注出来。
+        struct_ok, struct_err = DLT645Parser.check_structure(data)
+        result['structure_valid'] = struct_ok
+        result['structure_error'] = struct_err
+
+        if len(data) < 12:
+            # 连最短帧都不够，字段位置无法可靠定位：给出帧长说明 + 原始 hex（可接受的降级）
+            result['error'] = (f"{struct_err}，无法定位完整字段"
+                               "（DL/T645-2007 最短帧：68H + 地址(6B) + 68H + 控制码"
+                               " + 数据长度 + CS + 16H = 12 字节）")
+            result['fields'] = [
+                ('❌ 帧长度不足', f"{len(data)} 字节",
+                 'DL/T645-2007 最短帧：68H + 地址(6B) + 68H + 控制码 + 数据长度 + CS + 16H = 12 字节'),
+                ('原始数据', data.hex().upper(), f"{len(data)} 字节"),
+            ]
             return result
 
-        result['valid'] = True
         result['address'] = data[1:7][::-1].hex().upper()
         result['control'] = data[8]
         result['data_length'] = data[9]
@@ -78,7 +127,6 @@ class DLT645Parser:
         actual_data_len = len(data) - 12
         result['data_length_mismatch'] = actual_data_len != result['data_length']
         if result['data_length_mismatch']:
-            result['valid'] = False
             result['error'] = (f"数据域长度不匹配：声明 {result['data_length']} 字节，"
                                f"实际 {actual_data_len} 字节（帧总长 {len(data)}，期望 {expected_total_len}）")
         # 数据域解码：每个字节减 0x33，使用 & 0xFF 确保结果在有效字节范围内
@@ -91,7 +139,8 @@ class DLT645Parser:
             # 声明比实际短：按声明长度解析（多余字节不处理）
             result['data'] = bytes([(b - 0x33) & 0xFF for b in data[10:10+result['data_length']]])
         result['checksum'] = data[-2]
-        result['checksum_valid'] = (sum(data[0:-2]) & 0xFF) == data[-2]
+        result['checksum_expected'] = DLT645Parser.calc_checksum(data)
+        result['checksum_valid'] = result['checksum'] == result['checksum_expected']
 
         # 读通信地址应答(FUNC=0x13,从站)与写通信地址请求(FUNC=0x15,主站)
         # 数据域为6字节表地址（无数据标识DI）
@@ -187,7 +236,23 @@ class DLT645Parser:
             result['fields'].append((
                 '⚠ 数据长度错误',
                 f"声明{result['data_length']}B / 实际{actual_data_len_display}B",
-                '数据域长度声明值与实际帧内容不匹配，解析结果可能不准确'
+                f"数据域长度声明值与实际帧内容不匹配（数据长度域应声明 {actual_data_len_display} 字节），"
+                '解析结果可能不准确'
+            ))
+
+        # 结构与校验的醒目提示行（插在数据长度行之后、业务字段之前）
+        if not struct_ok:
+            result['fields'].append((
+                '❌ 帧结构错误', '', struct_err,
+                '按帧内假定位置继续解析；结构不符时字段归属可能不准，请核对原始报文'
+            ))
+        if not result['checksum_valid']:
+            result['fields'].append((
+                '⚠ 校验和错误', f"帧内 {result['checksum']:02X}H",
+                f"应为 {result['checksum_expected']:02X}H",
+                'CS = 起始符 68H 到数据域最后 1 字节的算术和 & 0xFF'
+                f" = {result['checksum_expected']:02X}H；帧内值不符，"
+                '以下字段仍按帧内实际内容解析'
             ))
 
         if err_in_data:
@@ -285,10 +350,25 @@ class DLT645Parser:
         else:
             result['fields'].append(('数据域', result['data'].hex().upper(), '解码后数据（减33H）'))
 
+        # 校验和/结束符行：不符时同时给出「帧内值 + 应有的正确值」（合法帧文案与改动前一致）
+        cs_desc = ('CS校验' if result['checksum_valid']
+                   else f"应为 {result['checksum_expected']:02X}H（帧内值错误）")
+        end_ok = data[-1] == 0x16
         result['fields'].extend([
-            ('校验和', f"{result['checksum']:02X}H", 'CS校验'),
-            ('帧结束符', '16H', '结束符')
+            ('校验和', f"{result['checksum']:02X}H", cs_desc),
+            ('帧结束符', f"{data[-1]:02X}H", '结束符' if end_ok else '结束符错误（应为 16H）')
         ])
+
+        # ── valid 语义保持不变（R5）：结构 OK + 校验 OK + 长度相符 才为 True
+        #    既有消费方（dlt645_sim/engine.py、dlt645_meter_sim_widget.py 等）按
+        #    parsed['valid'] 判定帧是否可信，不得为了「容错解析」把 valid 放松。
+        result['valid'] = bool(struct_ok and result['checksum_valid']
+                               and not result['data_length_mismatch'])
+        if not struct_ok:
+            result['error'] = struct_err
+        elif not result['checksum_valid']:
+            result['error'] = (f"校验和错误，期望 0x{result['checksum_expected']:02X}，"
+                               f"实际 0x{result['checksum']:02X}")
 
         return result
 

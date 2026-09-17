@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/09-17-dlt645-tolerant-parse/prd.md", "reason": "验收 A1~A11 为检查口径；Scope 判定越界（其他协议 / validator / 组帧 / 虚拟表从站均属范围外）"}
+{"file": ".trellis/tasks/09-17-dlt645-tolerant-parse/design.md", "reason": "核查实现是否偏离 D1~D5，重点三条不变式：valid 语义不变（虚拟表拒收坏帧依赖它）、合法帧行为逐行不变、提示行名含「校验和」（GUI 偏移映射依赖）"}
+{"file": ".trellis/tasks/09-17-dlt645-tolerant-parse/implement.md", "reason": "核查步骤 0 基线与旧断言检索是否真做、步骤 5 三条变异反证是否实际观察到变红（非推断）、步骤 4 全量回归是否跑完"}
+{"file": "AGENTS.md", "reason": "对照 §8 陷阱 23（不得空白返回，须尽力解析 + ⚠ 行）逐条核验；§7 测试约定（_path_setup/# noqa: E402,F401/CORE_TESTS 登记）；§4.2 结果 dict 字段约定"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "核查是否新造第二套校验计算（应复用 calc_checksum）或重复既有 data_length_mismatch 模式"}

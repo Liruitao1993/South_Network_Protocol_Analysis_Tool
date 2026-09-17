@@ -110,7 +110,7 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.21"
+APP_VERSION = "1.23.22"
 BUILD_DATE = "2026-09-17"  # 编译日期，每次打包前更新
 
 # 窗口状态持久化（config.json 顶层 "window" 段）的表格清单：
@@ -131,6 +131,21 @@ _WINDOW_STATE_TABLES = (
 )
 
 CHANGELOG = [
+    (
+        "1.23.22",
+        "2026-09-17",
+        [
+            "**协议6（DLT645-2007）校验和错误时不再拒解析**（用户报障：提供的 645 帧 CS 不对时工具完全不解析、只弹「无效的DLT645帧格式」，看不到任何内容）",
+            "根因：`dlt645_parser.check_frame()` 把「结构判据」（长度≥12 / 双 68H / 结束 16H）与「校验判据」（CS）混在一个返回值里，`parse()` 用它**提前 return** ⇒ 任何一项不符都得到空表（违反 AGENTS.md §8 陷阱 23「不得直接返回空白结果」）",
+            "修复：判据拆为 `check_structure()` / `calc_checksum()`（`check_frame()` 保留、语义不变）；长度 ≥12 时无论结构与校验是否通过一律**继续完整解析**，并插入醒目提示行 —— **`⚠ 校验和错误`：帧内值 + 正确值 + 计算规则**（`CS = 起始符 68H 到数据域最后 1 字节的算术和 & 0xFF`）、`❌ 帧结构错误`（指明哪个字节不符）",
+            "新增结果字段 `checksum_expected` / `structure_valid` / `structure_error`；`error` 文案与南网（`protocol_parser`）同口径「校验和错误，期望 0xXX，实际 0xYY」",
+            "`valid` 语义**保持不变**（结构 OK + 校验 OK + 长度相符才为 True），虚拟表等既有消费方不受影响；合法帧输出**逐行不变**（实测 13 行一致）",
+            "长度 <12 时给出「帧长不足」说明 + 原始 hex（可接受的降级，不崩溃不空白）",
+            "新增 `test/test_dlt645_tolerant_parse.py`（135 项，登记 CORE_TESTS）；**变异反证 3 条**全部实测变红（恢复提前 return 7 红 / 去掉 checksum_expected 24 红 / valid 恒 True 14 红）",
+            "**行为变化（有意接受）**：虚拟表从站对坏 CS 主站帧由「异常应答」变为「正常应答」—— `dlt645_sim/engine.py:114` 的 `if not parsed.get('valid')` 分支带注释「尽力：仍尝试取 control/data」属作者有意宽容，旧版回异常应答只是解析器返回空导致的偶然；现虚拟表日志会显示「⚠ 帧校验未通过: 校验和错误，期望 0xXX，实际 0xYY」，信息量更大（详见 AGENTS.md）",
+            "附带：消除 `hdc10_parser.py` 两处静态分析误报（`bcsha_phases` 前置初始化、`extra_bytes` 判断补 `msdu_len is not None`），零行为变更（hdc10 全套 + `gw_new_gen` 逐行一致），该文件 lens 转 clean",
+        ],
+    ),
     (
         "1.23.21",
         "2026-09-17",

@@ -3,7 +3,7 @@
 ; 仅供非商业使用
 
 #define MyAppName "南网解析工具"
-#define MyAppVersion "1.23.21"
+#define MyAppVersion "1.23.22"
 #define MyAppPublisher "力合微电子"
 #define MyAppURL "https://www.leaguerme.com/"
 #define MyAppExeName "南网协议解析工具.exe"

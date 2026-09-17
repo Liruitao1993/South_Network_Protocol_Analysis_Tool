@@ -1,0 +1,5 @@
+{"file": "AGENTS.md", "reason": "§8 陷阱 23 是本任务的**核心依据**（字段声明与实际不一致时解析器不得返回空白结果，须尽力解析 + valid=False + 表格插入醒目 ⚠ 行）；§4.2 解析结果 dict 字段约定；§7 测试约定（test/ + import _path_setup # noqa: E402,F401 + 登记 release_check.py:CORE_TESTS）；§9 开发原则"}
+{"file": ".trellis/tasks/09-17-dlt645-tolerant-parse/prd.md", "reason": "需求 R1~R8 与验收 A1~A11；Scope 段落界定越界（其他协议、validator、组帧、虚拟表均属范围外）"}
+{"file": ".trellis/tasks/09-17-dlt645-tolerant-parse/design.md", "reason": "技术设计 D1~D5：判据拆分与向后兼容、parse() 分级降级、valid 语义必须不变（虚拟表依赖）、提示行命名必须含「校验和」（GUI 偏移映射）、风险缓解"}
+{"file": ".trellis/tasks/09-17-dlt645-tolerant-parse/implement.md", "reason": "执行计划步骤 0~6：步骤 0 基线与旧断言检索（硬门）、步骤 3 测试覆盖 A1~A9、步骤 5 三条变异反证（硬门）"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "单一来源/复用：本任务应复用既有 data_length_mismatch 模式与 calc_checksum，不新造第二套校验计算"}
