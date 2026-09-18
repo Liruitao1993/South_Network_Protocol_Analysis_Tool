@@ -50,6 +50,7 @@ reflex_web/wheels/
 .kilocode/
 .pi/
 .codex/
+.commandcode/
 .playwright-mcp/
 _hdc_pages/
 _ocr_tmp/
@@ -102,3 +103,19 @@ testfile.txt
 /dlt645_addr_history.json
 # Git worktree 本地隔离区（不入库）
 .worktrees/
+
+# ── 构建产物兜底（防止 dist/build 类产物再次入库导致仓库膨胀）──────────
+# 背景：dist/ 与 build/ 下的 exe/pkg、Output/mysetup.exe、dist.rar、
+# dist/*/_internal.zip 等曾在早期版本被提交，使 .git 历史不可逆增长约 1.2GB
+# （15 个 >50MB 的 blob 全部是构建产物）。故在既有 dist/ / build/ / Output/
+# 规则之外，再把常见变体目录与中间产物一并忽略。
+# 注意：dist1/ dist2/ dist_old/ 等变体目录此前仅靠 *.exe 兜底，
+# 一旦构建产出 .pyd/.dll/_internal/ 就会被误跟踪。
+dist*/
+build*/
+Output*/
+_internal/
+*.pkg
+*.rar
+dist*.zip
+build*.zip
