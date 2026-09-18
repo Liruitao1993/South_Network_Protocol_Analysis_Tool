@@ -1,14 +1,24 @@
 # -*- coding: utf-8 -*-
-"""单帧解析结果「字段树」视图（Wireshark 风格）。
+"""单帧解析结果「Wireshark 风格字段树」。
 
-纯逻辑 build_tree_from_table_data：把扁平 table_data（缩进表示层级）
-转成嵌套树；GUI 用 QTreeWidget 展示，点击节点传出字节范围供高亮。
+与表格视图的差异（研发工具视角）：
+- **两列**：字段 | 值（不再复用表格四列网格）
+- **协议结构树**：按解析行缩进还原层级；有子级的节点是可展开结构节点
+  （类似 Wireshark 的 bitfield / header / struct），叶子才是字段+值
+- **值列**：优先「解析值」，必要时附原始 hex；说明进 tooltip
+- **位段标注**：从字段名提取 bit/D 位范围，以 Wireshark 习惯展示
+  （如 `传输方向位 [D15]`）
+- 点击节点 → 高亮输入框对应报文字节
+
+数据源仍是 GUI 既有的 table_data 六元组（字段/原始/解析/说明/起/止），
+不改各协议 parser。
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
-from typing import Any, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 
 def _leading(name: str) -> int:
@@ -16,8 +26,12 @@ def _leading(name: str) -> int:
 
 
 def _level_map(names) -> dict:
-    depths = sorted({_leading(n) for n in names if _leading(n) > 0})
+    depths = sorted({_leading(n) for n in names if _field_leading_exists(n)})
     return {d: i + 1 for i, d in enumerate(depths)}
+
+
+def _field_leading_exists(name: str) -> bool:
+    return _leading(name) > 0
 
 
 @dataclass
@@ -34,16 +48,80 @@ class FieldNode:
     def byte_range(self) -> Tuple[Optional[int], Optional[int]]:
         return self.byte_start, self.byte_end
 
+    @property
+    def is_structure(self) -> bool:
+        """有子级 = 结构节点（可展开），对应 Wireshark 的 header/bitfield/struct。"""
+        return bool(self.children)
+
+    @property
+    def display_name(self) -> str:
+        return format_field_label(self.name)
+
+    @property
+    def display_value(self) -> str:
+        return format_field_value(self.parsed, self.raw)
+
+
+_BIT_PATTERNS = (
+    re.compile(r"[（(]\s*(bit\s*\d+\s*[-~～]\s*\d+|bit\s*\d+|D\d+\s*[-~～]\s*D?\d+|D\d+)\s*[)）]", re.I),
+    re.compile(r"\b(bit\s*\d+\s*[-~～]\s*\d+|bit\s*\d+|D\d+\s*[-~～]\s*D?\d+|D\d+)\b", re.I),
+)
+
+_STRUCTURE_HINT = re.compile(r"位域|bitfield|控制域|帧头|报文头|可变区域|管理信息|MAC|FC|PB|结构|区域", re.I)
+
+
+def extract_bit_range(name: str) -> Optional[str]:
+    for pat in _BIT_PATTERNS:
+        m = pat.search(name or "")
+        if m:
+            return re.sub(r"\s+", "", m.group(1))
+    return None
+
+
+def format_field_label(name: str) -> str:
+    """Wireshark 风格字段标签：名称 + [位段]（若已识别）。"""
+    n = (name or "").lstrip(" ")
+    if not n:
+        return ""
+    br = extract_bit_range(n)
+    if not br:
+        return n
+    # 去掉原括号位段，避免重复
+    stripped = n
+    for pat in _BIT_PATTERNS:
+        stripped = pat.sub("", stripped).strip()
+    stripped = stripped.strip("()（） 　")
+    br_up = br.replace(" ", "").replace("～", "-").replace("~", "-")
+    return f"{stripped} [{br_up}]" if stripped else f"[{br_up}]"
+
+
+def format_field_value(parsed: str, raw: str) -> str:
+    """叶子节点值列：解析值优先，原始 hex 不同则并列。"""
+    p = (parsed or "").strip()
+    r = (raw or "").strip()
+    if p and r and p != r and _looks_useful_raw(r, p):
+        return f"{p}  ({r})"
+    return p or r
+
+
+def _looks_useful_raw(raw: str, parsed: str) -> bool:
+    """原始值是否值得单独展示（hex / 与解析值不同的编码）。"""
+    if not raw:
+        return False
+    if raw in ("-", "—"):
+        return False
+    # 纯 hex 块
+    compact = re.sub(r"[^0-9A-Fa-f]", "", raw)
+    return len(compact) >= 2 and bool(compact)
+
 
 def build_tree_from_table_data(table_data: list) -> List[FieldNode]:
-    """table_data 行： (字段, 原始值, 解析值, 说明[, start[, end]])。
-
-    字段名前导空格深度 → 父子关系；同级依次挂到最近的更浅节点下。
-    """
+    """table_data 行 → Wireshark 风格嵌套树（缩进 = 层级）。"""
     if not table_data:
         return []
     names = [str(it[0]) if it and it[0] is not None else "" for it in table_data]
-    lmap = _level_map(names)
+    depths = sorted({_leading(n) for n in names if _leading(n) > 0})
+    lmap = {d: i + 1 for i, d in enumerate(depths)}
 
     roots: List[FieldNode] = []
     stack: List[Tuple[int, FieldNode]] = []
@@ -76,7 +154,6 @@ def build_tree_from_table_data(table_data: list) -> List[FieldNode]:
 
 
 def flatten_tree(nodes: List[FieldNode], depth: int = 0) -> List[Tuple[int, FieldNode]]:
-    """前序展开，便于测试/复制。"""
     out: List[Tuple[int, FieldNode]] = []
     for n in nodes:
         out.append((depth, n))
@@ -84,74 +161,88 @@ def flatten_tree(nodes: List[FieldNode], depth: int = 0) -> List[Tuple[int, Fiel
     return out
 
 
+def is_structure_like(node: FieldNode) -> bool:
+    if node.is_structure:
+        return True
+    return bool(_STRUCTURE_HINT.search(node.name or ""))
+
+
 def build_ui_tree(QTreeWidget_cls, QTreeWidgetItem_cls, QHeaderView_cls, QColor=None):
-    """工厂：返回已配置好的 QTreeWidget（样式与 result_table_widget 对齐）。"""
+    """Wireshark 风格两列字段树（延迟注入 Qt 类便于测试）。"""
 
     class ParseResultTree(QTreeWidget_cls):
-        headers = ["字段", "原始值", "解析值", "说明"]
-        # 与 ZoomableTableWidget / 主题 QSS 保持一致的列宽
-        col_widths = (130, 100, 100)
+        headers = ["字段", "值"]
+        col_widths = (320, 420)
 
         def __init__(self, parent=None):
             super().__init__(parent)
             self.setObjectName("result_tree_widget")
-            self.setColumnCount(4)
+            self.setColumnCount(2)
             self.setHeaderLabels(self.headers)
             self.setEditTriggers(QTreeWidget_cls.NoEditTriggers)
             self.setSelectionBehavior(QTreeWidget_cls.SelectRows)
-            self.setAlternatingRowColors(True)
+            # 结构树不使用表格交替色，保持 Wireshark 清爽感（配色仍由主题 QSS 提供）
+            self.setAlternatingRowColors(False)
             self.setUniformRowHeights(True)
             self.setRootIsDecorated(True)
-            self.setIndentation(18)
+            self.setIndentation(16)
             self.setAnimated(False)
-            self.header().setSectionResizeMode(
-                0, QHeaderView_cls.ResizeMode.Interactive
-            )
-            self.header().setStretchLastSection(True)
+            self.header().setSectionResizeMode(0, QHeaderView_cls.ResizeMode.Stretch)
+            self.header().setSectionResizeMode(1, QHeaderView_cls.ResizeMode.Stretch)
             self.header().setDefaultSectionSize(20)
             for i, w in enumerate(self.col_widths):
-                self.setColumnWidth(i, w)
-            self._node_map = {}  # QTreeWidgetItem id -> FieldNode
-            self._level_color = QColor("#555555") if QColor else None
+                self.header().resizeSection(i, w)
+            self._node_map = {}
+            self._structure_color = QColor("#1a5276") if QColor else None
+            self._leaf_color = None
             self.itemClicked.connect(self._on_item_clicked)
-            self.byte_range_clicked = None  # callable(start, end)
+            self.byte_range_clicked = None
             self.apply_table_style(None)
 
         def apply_table_style(self, table_font=None):
-            """与解析结果表格同字号/行高；配色交给全局主题 QSS（与 QTableWidget 同规则）。"""
+            """字号/行高与结果表一致；树自身两列结构，不套用表格交替色。"""
             if table_font is not None:
                 self.setFont(table_font)
-            # 刻意不用实例级浅色 QSS 覆盖全局主题，否则深色/玻璃主题会被写死
             self.setStyleSheet("")
             fm = self.fontMetrics()
-            h = max(10, fm.height() + 4)
-            self.header().setDefaultSectionSize(h)
+            self.header().setDefaultSectionSize(max(10, fm.height() + 4))
 
         def populate(self, table_data: list):
             self.clear()
             self._node_map.clear()
             roots = build_tree_from_table_data(table_data)
             for node in roots:
-                self._add_node(None, node, depth=0)
-            # 与表格一致：默认全部展开可见（缩进表示层级，不是隐藏内容）
+                self._add_node(None, node)
             self.expandAll()
 
-        def _add_node(self, parent_item, node: FieldNode, depth: int = 0):
+        def _add_node(self, parent_item, node: FieldNode):
+            structure = is_structure_like(node)
+            # 结构节点：值列显示汇总（解析值或原始），叶子才强调值
+            if structure:
+                val = node.display_value
+            else:
+                val = node.display_value
             item = QTreeWidgetItem_cls(
                 parent_item if parent_item is not None else self.invisibleRootItem(),
-                [node.name, node.raw, node.parsed, node.comment],
+                [node.display_name, val],
             )
+            tip_parts = []
+            if node.comment:
+                tip_parts.append(node.comment)
+            if node.parsed and node.raw and node.parsed != node.raw:
+                tip_parts.append(f"解析: {node.parsed}")
+                tip_parts.append(f"原始: {node.raw}")
             if node.byte_start is not None and node.byte_end is not None:
-                item.setToolTip(
-                    0,
-                    f"字节 {node.byte_start}-{node.byte_end}｜{node.comment or node.name}",
-                )
-            # 与表格一致：子级字段名灰色，父级用默认前景色
-            if self._level_color is not None and depth > 0:
-                item.setForeground(0, self._level_color)
+                tip_parts.append(f"字节 {node.byte_start}-{node.byte_end}")
+            if tip_parts:
+                item.setToolTip(0, "｜".join(tip_parts))
+                item.setToolTip(1, "｜".join(tip_parts))
+            # 结构节点字段名用主题深色强调（Wireshark 里 header 更醒目）
+            if structure and self._structure_color is not None:
+                item.setForeground(0, self._structure_color)
             self._node_map[id(item)] = node
             for child in node.children:
-                self._add_node(item, child, depth + 1)
+                self._add_node(item, child)
             return item
 
         def _on_item_clicked(self, item, _col):
@@ -181,4 +272,8 @@ __all__ = [
     "build_tree_from_table_data",
     "flatten_tree",
     "build_ui_tree",
+    "format_field_label",
+    "format_field_value",
+    "extract_bit_range",
+    "is_structure_like",
 ]

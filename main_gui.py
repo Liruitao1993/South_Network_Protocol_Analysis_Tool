@@ -111,7 +111,7 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.26"
+APP_VERSION = "1.23.27"
 BUILD_DATE = "2026-09-18"  # 编译日期，每次打包前更新
 
 # 窗口状态持久化（config.json 顶层 "window" 段）的表格清单：
@@ -132,6 +132,13 @@ _WINDOW_STATE_TABLES = (
 )
 
 CHANGELOG = [
+    (
+        "1.23.27",
+        "2026-09-18",
+        [
+            "字段树重做成 Wireshark 风格：两列「字段|值」而非表格四列；结构节点（有子级/位域/帧头等）可展开，叶子显示 解析值(+原始hex)；位段提取为 [D15]/[bit0-11]；说明进 tooltip；默认展开、点击仍高亮字节",
+        ],
+    ),
     (
         "1.23.26",
         "2026-09-18",
