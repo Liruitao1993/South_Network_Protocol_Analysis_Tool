@@ -111,8 +111,8 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.25"
-BUILD_DATE = "2026-09-17"  # 编译日期，每次打包前更新
+APP_VERSION = "1.23.26"
+BUILD_DATE = "2026-09-18"  # 编译日期，每次打包前更新
 
 # 窗口状态持久化（config.json 顶层 "window" 段）的表格清单：
 # 只收「用户拖动列宽才有意义」的主表；弹窗/克隆表不做持久化（见任务 PRD 的
@@ -132,6 +132,13 @@ _WINDOW_STATE_TABLES = (
 )
 
 CHANGELOG = [
+    (
+        "1.23.26",
+        "2026-09-18",
+        [
+            "字段树与表格视觉对齐：主题 QSS 中 QTreeWidget 与 QTableWidget 同配色/交替行/选中色/内边距；树默认 expandAll、列宽 130/100/100 与表一致、子级字段名灰色 #555、去掉与表不一致的父节点蓝字；主题切换时同步树字号行高",
+        ],
+    ),
     (
         "1.23.25",
         "2026-09-17",
@@ -2379,6 +2386,7 @@ class MainWindow(QMainWindow):
         )
         self.result_tree_widget = ParseResultTree(self.result_table_widget.parent() or self)
         self.result_tree_widget.setFont(table_font)
+        self.result_tree_widget.apply_table_style(table_font)
         self.result_tree_widget.byte_range_clicked = self._highlight_byte_range
         self._last_table_data: list = []
 
@@ -11490,6 +11498,13 @@ class MainWindow(QMainWindow):
         if getattr(self, "spectrum_tab", None) is not None:
             try:
                 self.spectrum_tab.restyle_for_theme(self._is_dark_theme())
+            except RuntimeError:
+                pass
+        # 字段树与解析结果表同字号（主题 QSS 已含 QTreeWidget）
+        if getattr(self, "result_tree_widget", None) is not None:
+            try:
+                f = self.result_table_widget.font()
+                self.result_tree_widget.apply_table_style(f)
             except RuntimeError:
                 pass
 

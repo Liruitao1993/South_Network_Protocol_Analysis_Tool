@@ -209,26 +209,28 @@ LIGHT_QSS = """
         color: #000000;
     }
 
-    /* ========== 表格 ========== */
-    QTableWidget {
+    /* ========== 表格 / 字段树（样式保持一致） ========== */
+    QTableWidget, QTreeWidget {
         border: 1px solid #cccccc;
         border-radius: 4px;
         background-color: #ffffff;
         gridline-color: #e0e0e0;
         color: #000000;
         font-size: 9pt;
+        alternate-background-color: #e8e8e8;
+        outline: 0;
     }
-    QTableWidget::item:!alternate {
+    QTableWidget::item:!alternate, QTreeWidget::item:!alternate {
         background-color: #ffffff;
         color: #000000;
         padding: 2px 4px;
     }
-    QTableWidget::item:alternate {
+    QTableWidget::item:alternate, QTreeWidget::item:alternate {
         background-color: #e8e8e8;
         color: #000000;
         padding: 2px 4px;
     }
-    QTableWidget::item:selected {
+    QTableWidget::item:selected, QTreeWidget::item:selected {
         background-color: #2196F3;
         color: white;
     }
@@ -552,26 +554,28 @@ DARK_QSS = """
         color: #e0e0e0;
     }
 
-    /* ========== 表格 ========== */
-    QTableWidget {
+    /* ========== 表格 / 字段树 ========== */
+    QTableWidget, QTreeWidget {
         border: 1px solid #555555;
         border-radius: 4px;
         background-color: #2b2b2b;
         gridline-color: #444444;
         color: #e0e0e0;
         font-size: 9pt;
+        alternate-background-color: #333333;
+        outline: 0;
     }
-    QTableWidget::item:!alternate {
+    QTableWidget::item:!alternate, QTreeWidget::item:!alternate {
         background-color: #2b2b2b;
         color: #e0e0e0;
         padding: 2px 4px;
     }
-    QTableWidget::item:alternate {
+    QTableWidget::item:alternate, QTreeWidget::item:alternate {
         background-color: #333333;
         color: #e0e0e0;
         padding: 2px 4px;
     }
-    QTableWidget::item:selected {
+    QTableWidget::item:selected, QTreeWidget::item:selected {
         background-color: #42a5f5;
         color: white;
     }
@@ -932,26 +936,28 @@ GLASS_QSS = """
         border: 1px solid rgba(59, 130, 246, 200);
     }
 
-    /* ========== 表格 ========== */
-    QTableWidget {
+    /* ========== 表格 / 字段树 ========== */
+    QTableWidget, QTreeWidget {
         border: 1px solid rgba(180, 200, 235, 180);
         border-radius: 6px;
         background-color: rgba(255, 255, 255, 170);
         gridline-color: rgba(200, 214, 235, 160);
         color: #1f2937;
         font-size: 9pt;
+        alternate-background-color: rgba(219, 234, 254, 215);
+        outline: 0;
     }
-    QTableWidget::item:!alternate {
+    QTableWidget::item:!alternate, QTreeWidget::item:!alternate {
         background-color: rgba(255, 255, 255, 200);
         color: #1f2937;
         padding: 2px 4px;
     }
-    QTableWidget::item:alternate {
+    QTableWidget::item:alternate, QTreeWidget::item:alternate {
         background-color: rgba(219, 234, 254, 215);
         color: #1f2937;
         padding: 2px 4px;
     }
-    QTableWidget::item:selected {
+    QTableWidget::item:selected, QTreeWidget::item:selected {
         background-color: rgba(59, 130, 246, 200);
         color: white;
     }
@@ -1376,26 +1382,28 @@ MICA_QSS = """
         border-bottom: 2px solid #005fb8;
     }
 
-    /* ========== 表格 ========== */
-    QTableWidget {
+    /* ========== 表格 / 字段树 ========== */
+    QTableWidget, QTreeWidget {
         border: 1px solid #e0e0e0;
         border-radius: 4px;
         background-color: #fcfcfc;
         gridline-color: #ececec;
         color: #1a1a1a;
         font-size: 9pt;
+        alternate-background-color: #f0f6fc;
+        outline: 0;
     }
-    QTableWidget::item:!alternate {
+    QTableWidget::item:!alternate, QTreeWidget::item:!alternate {
         background-color: #ffffff;
         color: #1a1a1a;
         padding: 2px 4px;
     }
-    QTableWidget::item:alternate {
+    QTableWidget::item:alternate, QTreeWidget::item:alternate {
         background-color: #f0f6fc;
         color: #1a1a1a;
         padding: 2px 4px;
     }
-    QTableWidget::item:selected {
+    QTableWidget::item:selected, QTreeWidget::item:selected {
         background-color: #005fb8;
         color: white;
     }
@@ -1594,7 +1602,7 @@ VISTA_INPUT_QSS = """
         selection-color: #ffffff;
     }
     /* ===== 表格 / 列表 ===== */
-    QTableWidget, QTableView, QTreeView, QListWidget {
+    QTableWidget, QTableView, QTreeView, QTreeWidget, QListWidget {
         background-color: #ffffff;
         color: #000000;
         alternate-background-color: #f2f2f2;
@@ -1602,8 +1610,8 @@ VISTA_INPUT_QSS = """
         selection-background-color: #3399ff;
         selection-color: #ffffff;
     }
-    QTableWidget::item, QTableView::item {
-        padding: 2px;
+    QTableWidget::item, QTableView::item, QTreeWidget::item {
+        padding: 2px 4px;
     }
     QHeaderView::section {
         background-color: #f0f0f0;

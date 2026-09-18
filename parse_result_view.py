@@ -85,52 +85,73 @@ def flatten_tree(nodes: List[FieldNode], depth: int = 0) -> List[Tuple[int, Fiel
 
 
 def build_ui_tree(QTreeWidget_cls, QTreeWidgetItem_cls, QHeaderView_cls, QColor=None):
-    """工厂：返回已配置好的 QTreeWidget（延迟 import Qt 类，避免模块级重依赖）。"""
+    """工厂：返回已配置好的 QTreeWidget（样式与 result_table_widget 对齐）。"""
 
     class ParseResultTree(QTreeWidget_cls):
         headers = ["字段", "原始值", "解析值", "说明"]
+        # 与 ZoomableTableWidget / 主题 QSS 保持一致的列宽
+        col_widths = (130, 100, 100)
 
         def __init__(self, parent=None):
             super().__init__(parent)
+            self.setObjectName("result_tree_widget")
             self.setColumnCount(4)
             self.setHeaderLabels(self.headers)
             self.setEditTriggers(QTreeWidget_cls.NoEditTriggers)
             self.setSelectionBehavior(QTreeWidget_cls.SelectRows)
             self.setAlternatingRowColors(True)
             self.setUniformRowHeights(True)
+            self.setRootIsDecorated(True)
+            self.setIndentation(18)
+            self.setAnimated(False)
             self.header().setSectionResizeMode(
                 0, QHeaderView_cls.ResizeMode.Interactive
             )
             self.header().setStretchLastSection(True)
-            self.setColumnWidth(0, 180)
-            self.setColumnWidth(1, 100)
-            self.setColumnWidth(2, 100)
+            self.header().setDefaultSectionSize(20)
+            for i, w in enumerate(self.col_widths):
+                self.setColumnWidth(i, w)
             self._node_map = {}  # QTreeWidgetItem id -> FieldNode
+            self._level_color = QColor("#555555") if QColor else None
             self.itemClicked.connect(self._on_item_clicked)
             self.byte_range_clicked = None  # callable(start, end)
+            self.apply_table_style(None)
+
+        def apply_table_style(self, table_font=None):
+            """与解析结果表格同字号/行高；配色交给全局主题 QSS（与 QTableWidget 同规则）。"""
+            if table_font is not None:
+                self.setFont(table_font)
+            # 刻意不用实例级浅色 QSS 覆盖全局主题，否则深色/玻璃主题会被写死
+            self.setStyleSheet("")
+            fm = self.fontMetrics()
+            h = max(10, fm.height() + 4)
+            self.header().setDefaultSectionSize(h)
 
         def populate(self, table_data: list):
             self.clear()
             self._node_map.clear()
             roots = build_tree_from_table_data(table_data)
             for node in roots:
-                self._add_node(None, node)
-            self.expandToDepth(1)
+                self._add_node(None, node, depth=0)
+            # 与表格一致：默认全部展开可见（缩进表示层级，不是隐藏内容）
+            self.expandAll()
 
-        def _add_node(self, parent_item, node: FieldNode):
+        def _add_node(self, parent_item, node: FieldNode, depth: int = 0):
             item = QTreeWidgetItem_cls(
                 parent_item if parent_item is not None else self.invisibleRootItem(),
                 [node.name, node.raw, node.parsed, node.comment],
             )
             if node.byte_start is not None and node.byte_end is not None:
                 item.setToolTip(
-                    0, f"字节 {node.byte_start}-{node.byte_end}｜{node.comment or node.name}"
+                    0,
+                    f"字节 {node.byte_start}-{node.byte_end}｜{node.comment or node.name}",
                 )
-            if QColor is not None and node.children:
-                item.setForeground(0, QColor("#1a5f7a"))
+            # 与表格一致：子级字段名灰色，父级用默认前景色
+            if self._level_color is not None and depth > 0:
+                item.setForeground(0, self._level_color)
             self._node_map[id(item)] = node
             for child in node.children:
-                self._add_node(item, child)
+                self._add_node(item, child, depth + 1)
             return item
 
         def _on_item_clicked(self, item, _col):
