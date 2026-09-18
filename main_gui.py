@@ -56,6 +56,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSpinBox,
     QSplitter,
+    QStackedWidget,
     QStyle,
     QTableWidget,
     QTableWidgetItem,
@@ -110,7 +111,7 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.24"
+APP_VERSION = "1.23.25"
 BUILD_DATE = "2026-09-17"  # 编译日期，每次打包前更新
 
 # 窗口状态持久化（config.json 顶层 "window" 段）的表格清单：
@@ -131,6 +132,13 @@ _WINDOW_STATE_TABLES = (
 )
 
 CHANGELOG = [
+    (
+        "1.23.25",
+        "2026-09-17",
+        [
+            "单帧解析结果新增「视图: 表格 / 字段树」切换（Wireshark 风格）：字段树按缩进还原父子层级，点击树节点高亮输入框对应报文字节；parse_result_view.py（纯逻辑 + QTreeWidget）；test/test_parse_result_tree.py",
+        ],
+    ),
     (
         "1.23.24",
         "2026-09-17",
@@ -2359,8 +2367,38 @@ class MainWindow(QMainWindow):
         # 存储每行对应的字节范围
         self._byte_ranges: list = []
 
+        # 字段树（Wireshark 风格）+ 视图切换
+        from PySide6.QtGui import QColor as _QColor
+        from PySide6.QtWidgets import QTreeWidget as _QTreeWidget
+        from PySide6.QtWidgets import QTreeWidgetItem as _QTreeWidgetItem
+
+        from parse_result_view import build_ui_tree
+
+        ParseResultTree = build_ui_tree(
+            _QTreeWidget, _QTreeWidgetItem, QHeaderView, _QColor
+        )
+        self.result_tree_widget = ParseResultTree(self.result_table_widget.parent() or self)
+        self.result_tree_widget.setFont(table_font)
+        self.result_tree_widget.byte_range_clicked = self._highlight_byte_range
+        self._last_table_data: list = []
+
+        self.result_stack = QStackedWidget()
+        self.result_stack.addWidget(self.result_table_widget)  # 0 表格
+        self.result_stack.addWidget(self.result_tree_widget)  # 1 树
+        self.result_view_combo = QComboBox()
+        self.result_view_combo.addItem("表格", "table")
+        self.result_view_combo.addItem("字段树", "tree")
+        self.result_view_combo.setToolTip(
+            "解析结果展示方式：表格（默认）或 Wireshark 风格字段树。\n"
+            "选中树节点可高亮输入框中对应报文字节。"
+        )
+        self.result_view_combo.setMinimumWidth(90)
+        self.result_view_combo.currentIndexChanged.connect(self._on_result_view_changed)
+
         # 导出图片按钮行
         export_row = QHBoxLayout()
+        export_row.addWidget(QLabel("视图:"))
+        export_row.addWidget(self.result_view_combo)
         export_row.addStretch()
         self.export_result_btn = QPushButton("导出图片")
         self.export_result_btn.setToolTip("将解析结果表格导出为完整的PNG图片")
@@ -2371,7 +2409,7 @@ class MainWindow(QMainWindow):
         export_row.addWidget(self.export_result_btn)
         result_layout.addLayout(export_row)
 
-        result_layout.addWidget(self.result_table_widget)
+        result_layout.addWidget(self.result_stack)
 
         # === 校验结果区域 ===
         self.verify_group = QGroupBox("校验结果")
@@ -5985,6 +6023,9 @@ class MainWindow(QMainWindow):
         self.result_table_widget.setRowCount(0)
         self.current_result = None
         self._byte_ranges = []
+        self._last_table_data = []
+        if hasattr(self, "result_tree_widget"):
+            self.result_tree_widget.clear()
         # 清空校验结果
         if hasattr(self, "verify_label"):
             self.verify_label.setText("点击「校验报文」按钮进行协议一致性校验")
@@ -10598,6 +10639,7 @@ class MainWindow(QMainWindow):
         """从解析器生成的表格数据填充表格（6元组：含字节范围）"""
         self.result_table_widget.setRowCount(0)
         self._byte_ranges = []
+        self._last_table_data = list(table_data) if table_data else []
 
         level_map = _field_level_map(
             [str(item[0]) for item in table_data if item[0] is not None]
@@ -10625,6 +10667,56 @@ class MainWindow(QMainWindow):
             )
             self.result_table_widget.setItem(row, 3, QTableWidgetItem(str(comment)))
             self._byte_ranges.append((byte_start, byte_end))
+
+        # 同步字段树（切换视图时也可即时重建）
+        if hasattr(self, "result_tree_widget"):
+            self.result_tree_widget.populate(self._last_table_data)
+
+    def _on_result_view_changed(self, _index: int = 0):
+        """解析结果：表格 / 字段树 切换"""
+        if not hasattr(self, "result_stack"):
+            return
+        data = self.result_view_combo.currentData()
+        if data == "tree":
+            if hasattr(self, "result_tree_widget") and self._last_table_data:
+                self.result_tree_widget.populate(self._last_table_data)
+            self.result_stack.setCurrentIndex(1)
+        else:
+            self.result_stack.setCurrentIndex(0)
+
+    def _highlight_byte_range(self, byte_start, byte_end):
+        """按字节范围高亮输入框（字段树点击 / 与表格共用）"""
+        # 复用 _highlight_bytes 的范围逻辑：临时写入并调用
+        self._apply_byte_highlight(byte_start, byte_end)
+
+    def _apply_byte_highlight(self, byte_start, byte_end):
+        if byte_start is None or byte_end is None:
+            return
+        doc = self.single_input.document()
+        cursor = QTextCursor(doc)
+        cursor.select(QTextCursor.SelectionType.Document)
+        default_fmt = QTextCharFormat()
+        default_fmt.setFontFamily("Consolas, Monaco, monospace")
+        default_fmt.setForeground(QColor("#000000"))
+        default_fmt.setBackground(QColor("#FFFFFF"))
+        cursor.setCharFormat(default_fmt)
+
+        char_start = byte_start * 3
+        char_end = byte_end * 3 + 2
+        text_len = len(self.single_input.toPlainText())
+        if char_end > text_len:
+            char_end = text_len
+        if char_start > char_end:
+            return
+        highlight_cursor = QTextCursor(doc)
+        highlight_cursor.setPosition(char_start)
+        highlight_cursor.setPosition(char_end, QTextCursor.MoveMode.KeepAnchor)
+        hl_fmt = QTextCharFormat()
+        hl_fmt.setFontFamily("Consolas, Monaco, monospace")
+        hl_fmt.setForeground(QColor("#000000"))
+        hl_fmt.setBackground(QColor(255, 235, 59, 160))
+        highlight_cursor.setCharFormat(hl_fmt)
+        self.single_input.setTextCursor(highlight_cursor)
 
     def _highlight_bytes(self, row: int, col: int, prev_row: int, prev_col: int):
         """选中表格行时，高亮输入框中对应的报文字节"""
