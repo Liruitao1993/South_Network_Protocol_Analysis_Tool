@@ -111,7 +111,7 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.27"
+APP_VERSION = "1.23.28"
 BUILD_DATE = "2026-09-18"  # 编译日期，每次打包前更新
 
 # 窗口状态持久化（config.json 顶层 "window" 段）的表格清单：
@@ -132,6 +132,13 @@ _WINDOW_STATE_TABLES = (
 )
 
 CHANGELOG = [
+    (
+        "1.23.28",
+        "2026-09-18",
+        [
+            "字段树增加「说明」列（字段 | 值 | 说明），中文含义直接可见；列宽 260/280，说明列伸展",
+        ],
+    ),
     (
         "1.23.27",
         "2026-09-18",

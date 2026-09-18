@@ -2,7 +2,7 @@
 """单帧解析结果「Wireshark 风格字段树」。
 
 与表格视图的差异（研发工具视角）：
-- **两列**：字段 | 值（不再复用表格四列网格）
+- **三列**：字段 | 值 | 说明（说明列给出中文含义，结构树仍可展开）
 - **协议结构树**：按解析行缩进还原层级；有子级的节点是可展开结构节点
   （类似 Wireshark 的 bitfield / header / struct），叶子才是字段+值
 - **值列**：优先「解析值」，必要时附原始 hex；说明进 tooltip
@@ -171,13 +171,14 @@ def build_ui_tree(QTreeWidget_cls, QTreeWidgetItem_cls, QHeaderView_cls, QColor=
     """Wireshark 风格两列字段树（延迟注入 Qt 类便于测试）。"""
 
     class ParseResultTree(QTreeWidget_cls):
-        headers = ["字段", "值"]
-        col_widths = (320, 420)
+        # 字段 + 值 + 说明：结构树保留层级，说明列给出中文含义
+        headers = ["字段", "值", "说明"]
+        col_widths = (260, 280, 280)
 
         def __init__(self, parent=None):
             super().__init__(parent)
             self.setObjectName("result_tree_widget")
-            self.setColumnCount(2)
+            self.setColumnCount(3)
             self.setHeaderLabels(self.headers)
             self.setEditTriggers(QTreeWidget_cls.NoEditTriggers)
             self.setSelectionBehavior(QTreeWidget_cls.SelectRows)
@@ -187,8 +188,9 @@ def build_ui_tree(QTreeWidget_cls, QTreeWidgetItem_cls, QHeaderView_cls, QColor=
             self.setRootIsDecorated(True)
             self.setIndentation(16)
             self.setAnimated(False)
-            self.header().setSectionResizeMode(0, QHeaderView_cls.ResizeMode.Stretch)
-            self.header().setSectionResizeMode(1, QHeaderView_cls.ResizeMode.Stretch)
+            self.header().setSectionResizeMode(0, QHeaderView_cls.ResizeMode.Interactive)
+            self.header().setSectionResizeMode(1, QHeaderView_cls.ResizeMode.Interactive)
+            self.header().setSectionResizeMode(2, QHeaderView_cls.ResizeMode.Stretch)
             self.header().setDefaultSectionSize(20)
             for i, w in enumerate(self.col_widths):
                 self.header().resizeSection(i, w)
@@ -217,14 +219,11 @@ def build_ui_tree(QTreeWidget_cls, QTreeWidgetItem_cls, QHeaderView_cls, QColor=
 
         def _add_node(self, parent_item, node: FieldNode):
             structure = is_structure_like(node)
-            # 结构节点：值列显示汇总（解析值或原始），叶子才强调值
-            if structure:
-                val = node.display_value
-            else:
-                val = node.display_value
+            val = node.display_value
+            comment = (node.comment or "").strip()
             item = QTreeWidgetItem_cls(
                 parent_item if parent_item is not None else self.invisibleRootItem(),
-                [node.display_name, val],
+                [node.display_name, val, comment],
             )
             tip_parts = []
             if node.comment:
@@ -235,8 +234,8 @@ def build_ui_tree(QTreeWidget_cls, QTreeWidgetItem_cls, QHeaderView_cls, QColor=
             if node.byte_start is not None and node.byte_end is not None:
                 tip_parts.append(f"字节 {node.byte_start}-{node.byte_end}")
             if tip_parts:
-                item.setToolTip(0, "｜".join(tip_parts))
-                item.setToolTip(1, "｜".join(tip_parts))
+                for col in range(3):
+                    item.setToolTip(col, "｜".join(tip_parts))
             # 结构节点字段名用主题深色强调（Wireshark 里 header 更醒目）
             if structure and self._structure_color is not None:
                 item.setForeground(0, self._structure_color)

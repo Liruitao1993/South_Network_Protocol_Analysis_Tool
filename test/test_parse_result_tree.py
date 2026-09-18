@@ -39,7 +39,7 @@ def test_bit_and_value_helpers():
     assert format_field_value("", "A0 B0") == "A0 B0"
 
 
-def test_gui_tree_two_columns():
+def test_gui_tree_three_columns():
     from PySide6.QtWidgets import QApplication, QTreeWidget, QTreeWidgetItem
     from PySide6.QtGui import QColor
     from PySide6.QtWidgets import QHeaderView
@@ -47,21 +47,24 @@ def test_gui_tree_two_columns():
     app = QApplication.instance() or QApplication([])
     ParseResultTree = build_ui_tree(QTreeWidget, QTreeWidgetItem, QHeaderView, QColor)
     tree = ParseResultTree()
-    assert tree.columnCount() == 2
+    assert tree.columnCount() == 3
+    assert tree.headerItem().text(2) == "说明"
     tree.populate(
         [
-            ("FC", "00 00", "帧控制", "", 0, 1),
-            ("  版本号(bit0-1)", "0", "2", "", 0, 0),
-            ("MSDU", "11", "0x11", "", 2, 2),
+            ("FC", "00 00", "帧控制", "帧控制域", 0, 1),
+            ("  版本号(bit0-1)", "0", "2", "协议版本 2", 0, 0),
+            ("MSDU", "11", "0x11", "载荷", 2, 2),
         ]
     )
     assert tree.topLevelItemCount() == 2
     top = tree.topLevelItem(0)
     assert top.childCount() == 1
-    assert "bit0-1" in top.child(0).text(0).lower() or "bit0-1" in top.child(0).text(0)
+    child = top.child(0)
+    assert "bit0-1" in child.text(0).lower() or "bit0-1" in child.text(0)
+    assert child.text(2) == "协议版本 2"
     hits = []
     tree.byte_range_clicked = lambda a, b: hits.append((a, b))
-    tree._on_item_clicked(top.child(0), 0)
+    tree._on_item_clicked(child, 0)
     assert hits == [(0, 0)]
     print("parse_result_view tests OK")
 
@@ -69,5 +72,5 @@ def test_gui_tree_two_columns():
 if __name__ == "__main__":
     test_nested_and_value_format()
     test_bit_and_value_helpers()
-    test_gui_tree_two_columns()
+    test_gui_tree_three_columns()
     print("all OK")
