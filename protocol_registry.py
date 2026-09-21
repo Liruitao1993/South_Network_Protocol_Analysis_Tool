@@ -43,6 +43,11 @@ class ProtocolSpec:
     has_sequence_diagram: bool = False
     # 解析级别族：None | csg | gw | hdc10（GUI 控件共用/复用）
     parse_level_family: Optional[str] = None
+    # ED..EE 监控包装：单帧「ED监控协议」勾选 + 包装头格式下拉 + 字节剔除
+    # （协议9 原生能力；1.23.31 起 10/11 同步，现场日志常带 ED 封装）
+    has_ed_monitor: bool = False
+    # 单帧输入 hex 按 4 字节一组端序翻转后再解析
+    has_reverse_4byte: bool = False
     # 批量提取策略
     extract_strategy: str = "line"  # ft12_68 | dlt698_45 | generic | hdlc | line | wrapper | csg_line | gw_line_min4
     # 校验器类路径（延迟 import）
@@ -199,6 +204,8 @@ _PROTOS: Tuple[ProtocolSpec, ...] = (
         monitor_wrapper="plc2",
         has_sequence_diagram=True,
         parse_level_family="csg",
+        has_ed_monitor=True,
+        has_reverse_4byte=True,
         extract_strategy="csg_line",
         validator_class="validator.csg_new_gen_validator:CSGNewGenValidator",
         parser_wrapper="csg",
@@ -216,6 +223,8 @@ _PROTOS: Tuple[ProtocolSpec, ...] = (
         monitor_wrapper="hplc",
         has_sequence_diagram=True,
         parse_level_family="gw",
+        has_ed_monitor=True,
+        has_reverse_4byte=True,
         extract_strategy="gw_line_min4",
         validator_class="validator.gw_new_gen_validator:GWNewGenValidator",
         parser_wrapper="gw",
@@ -231,6 +240,8 @@ _PROTOS: Tuple[ProtocolSpec, ...] = (
         lookup_tab_title="报文ID查询",
         has_sequence_diagram=True,
         parse_level_family="hdc10",
+        has_ed_monitor=True,
+        has_reverse_4byte=True,
         extract_strategy="line",
         validator_class="validator.hdc10_validator:HDC10Validator",
         parser_wrapper="hdc10",
@@ -360,7 +371,14 @@ class DLT645GuiParser:
         result = self.parser.parse(data)
         table = []
         data_len = result.get("data_length", 0)
-        total_len = 10 + data_len + 2
+        # 字节偏移一律以**实际帧长**为准：1.23.22 起「声明长度与实际不符」的帧也会走到
+        # 这里（不再拒解析），用声明长度推出来的偏移会越界（见 AGENTS §8 陷阱 49）。
+        # 合法帧满足 frame_len == 10 + data_len + 2，此时以下三式与旧公式完全相同
+        # ⇒ 合法帧输出逐行不变（硬约束）。
+        frame_len = len(data)
+        data_end = max(0, min(10 + data_len - 1, frame_len - 3))
+        cs_pos = max(0, frame_len - 2)
+        end_pos = max(0, frame_len - 1)
 
         for item in result["fields"]:
             if len(item) == 4:
@@ -391,13 +409,13 @@ class DLT645GuiParser:
                     f"{di_code} ({di_desc})" if di_code and di_desc else di_code
                 )
             elif "数据内容" in field:
-                byte_start, byte_end = 14, 10 + data_len - 1
+                byte_start, byte_end = 14, data_end
             elif "数据域" in field:
-                byte_start, byte_end = 10, 10 + data_len - 1
+                byte_start, byte_end = 10, data_end
             elif "校验和" in field:
-                byte_start, byte_end = total_len - 2, total_len - 2
+                byte_start, byte_end = cs_pos, cs_pos
             elif "帧结束符" in field:
-                byte_start, byte_end = total_len - 1, total_len - 1
+                byte_start, byte_end = end_pos, end_pos
 
             table.append((field, raw, parsed_value, desc, byte_start, byte_end))
 

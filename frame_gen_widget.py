@@ -4199,6 +4199,10 @@ class FrameGenWidget(QWidget):
             elif self.protocol_mode == "dlt698":
                 table_data = self.dlt698_parser.parse_to_table(frame)
                 key_fields = ("控制域", "APDU类型", "DIR+PRM")
+            elif self.protocol_mode == "dlt645":
+                # 协议6 原先落进 else 分支被 gdw_parser 解析 → 收到回包也只显示解析失败
+                table_data = self._dlt645_to_table(frame)
+                key_fields = ("控制码", "数据标识 DI", "从站地址")
             else:
                 table_data = self.gdw_parser.parse_to_table(frame)
                 key_fields = ("应用功能码(AFN)", "数据单元标识(DT)", "传输方向")
@@ -4231,6 +4235,26 @@ class FrameGenWidget(QWidget):
             self.response_table.setItem(row, 1, QTableWidgetItem(str(raw_value)))
             self.response_table.setItem(row, 2, QTableWidgetItem(str(parsed_value)))
             self.response_table.setItem(row, 3, QTableWidgetItem(str(comment)))
+
+    @staticmethod
+    def _dlt645_to_table(frame: bytes) -> list:
+        """DL/T645 解析结果 → 统一 6 元组表格行
+
+        ``DLT645Parser.parse`` 返回 dict，``fields`` 内为 3 元组
+        ``(字段, 原始值, 说明)``；LME 自定义接口子字段为 4 元组
+        ``(字段, 原始值, 解析值, 说明)``。口径与 ``main_gui`` 深度解析一致
+        （见 main_gui.py 的 ``parsed_data.append((field, raw, lme_parsed, desc, 0, 0))``）。
+        """
+        result = DLT645Parser.parse(frame)
+        rows = []
+        for item in result.get("fields", []):
+            if len(item) == 4:
+                field, raw, parsed, desc = item
+            else:
+                field, raw, desc = item
+                parsed = ""
+            rows.append((field, raw, parsed, desc, 0, 0))
+        return rows
 
     # ------------------------------------------------------------------
     # 协议模式切换

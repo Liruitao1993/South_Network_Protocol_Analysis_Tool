@@ -31,6 +31,14 @@ class GDWAFNLookup:
         """根据关键词搜索 AFN+Fn 组合"""
         return self.parser.search_afn_fn(keyword)
 
+    def refresh(self) -> None:
+        """重建缓存数据（自定义 AFN+Fn 增删后必须调用，否则查询页仍是旧表）。
+
+        `_data` 在构造时一次性构建，而自定义条目是运行时改的（同一进程内
+        `parser_registry.get_parser("gdw")` 单例已被就地修改），不重建就读不到。
+        """
+        self._build_data_list()
+
     @property
     def data(self) -> List[Tuple]:
         """获取所有 AFN+Fn 数据"""

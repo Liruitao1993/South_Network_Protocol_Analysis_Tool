@@ -145,7 +145,7 @@ class GWNewGenParser:
                 - "auto": 自动识别，完整解析 (FC + MAC + 应用层)
                 - "fc_pb": 解析FC + 完整物理块PB (PBH 1B + MAC帧头 + MSDU)
                 - "fc_only": 仅解析帧控制(FC)字段
-                - "mac_only": 仅解析MAC帧（默认按SOF帧解析）
+                - "mac_only": 仅解析MAC帧（输入即MAC帧，不含PBH，从字节0解析）
                 - "pb_only": 仅解析物理块(PB)，需指定frame_type
                 - "fc_mac": 解析FC + PB头(PBH 1B) + MAC帧头（不含应用层）
                 - "app": 仅解析应用层报文
@@ -214,17 +214,25 @@ class GWNewGenParser:
                     direction = data[7] & 0x01
             return self._parse_application_layer(data, 0, direction)
 
-        # ── 仅MAC帧模式：输入包含PB头+MAC帧头（输入即PB/MAC数据, 不剥离FC）──
+        # ── 仅MAC帧模式：输入即 MAC 帧（不含 PBH），从字节 0 直接解析 ──
+        # 契约（AGENTS §8 陷阱19 / 协议9 同口径）：不自动剥 PBH。
+        # 需要 PBH+MAC 请用 pb_only；需要 FC+PB 请用 auto/fc_pb。
         if parse_level == "mac_only":
             result = []
-            # 添加帧类型说明（默认SOF帧）
-            result.append(("解析模式", "", "仅MAC帧", "默认按SOF帧结构解析", None, None, False))
-            # 输入即PBH+MAC数据, 直接从offset 0解析
-            pb_result = self._parse_pb_by_frame_type(data, 0, 1, std_version)  # 1=SOF帧
-            if pb_result:
-                result.extend(pb_result)
+            result.append((
+                "解析模式", "", "仅MAC帧",
+                "输入即MAC帧（不含物理块头PBH），从字节0直接解析",
+                None, None, False,
+            ))
+            mac_result = self._parse_mac_and_msdu(data, 0, std_version)
+            if mac_result:
+                result.extend(mac_result)
             else:
-                result.append(("❌ 解析失败", "", "", "MAC帧头解析失败，数据可能不完整", None, None, False))
+                result.append((
+                    "❌ 解析失败", "", "",
+                    "MAC帧头解析失败，数据可能不完整",
+                    None, None, False,
+                ))
             return result
 
         # ── 仅PB模式：输入即为物理块数据（PBH+MAC+MSDU, 不剥离FC）──
@@ -828,6 +836,114 @@ class GWNewGenParser:
         if version == 1:
             return self._parse_mac_singlehop_header(data, offset, std_version)
         return self._parse_mac_std_header(data, offset, std_version)
+
+    def _parse_mac_and_msdu(self, data: bytes, mac_offset: int,
+                            std_version: int = 1) -> List[Tuple]:
+        """从 mac_offset 起解析 MAC 帧头 + MSDU + ICV（不假设 PBH）。
+
+        mac_only 调用时 mac_offset=0（输入即 MAC 帧）。
+        SOF PB 路径若需要带 PBH 的完整解析，请走 _parse_pb_by_frame_type。
+        """
+        result: List[Tuple] = []
+        if mac_offset < 0 or mac_offset >= len(data):
+            return result
+        mac_result = self._parse_mac_header(data, mac_offset, std_version)
+        if not mac_result:
+            return result
+        result.extend(mac_result)
+
+        mac_len = self._get_mac_header_length(data, mac_offset)
+        if mac_len <= 0:
+            return result
+
+        version = data[mac_offset] & 0x0F
+        if version == 1:
+            msdu_type = data[mac_offset + 1]
+            is_app = (msdu_type == 128)
+            msdu_len = data[mac_offset + 2] | ((data[mac_offset + 3] & 0x07) << 8)
+        else:
+            msdu_type = data[mac_offset + 7]
+            is_app = (msdu_type == 48)
+            msdu_len = data[mac_offset + 8] | ((data[mac_offset + 9] & 0x07) << 8)
+
+        msdu_start = mac_offset + mac_len
+        if msdu_len > 0 and msdu_start < len(data):
+            msdu_end = min(msdu_start + msdu_len, len(data))
+            if is_app:
+                _dir = 0
+                if msdu_start + 8 <= msdu_end and data[msdu_start] in (0x11, 0x12, 0x13):
+                    _mid = data[msdu_start + 1] | (data[msdu_start + 2] << 8)
+                    if _mid in (0x0001, 0x0002, 0x0003):
+                        _dir = data[msdu_start + 7] & 0x01
+                result.extend(
+                    self._parse_application_layer(data[:msdu_end], msdu_start, _dir))
+            elif version == 1:
+                mme_result = parse_singlehop_msdu(
+                    data[:msdu_end], msdu_start, msdu_type)
+                if mme_result:
+                    result.extend(mme_result)
+                else:
+                    msdu_data = data[msdu_start:msdu_end]
+                    result.append((
+                        "  MSDU数据",
+                        " ".join(f"{x:02X}" for x in msdu_data),
+                        f"{len(msdu_data)}字节",
+                        f"单跳消息类型{msdu_type}",
+                        msdu_start, msdu_end, True,
+                    ))
+            elif msdu_type == 0:
+                mme_result = parse_management_message(data[:msdu_end], msdu_start)
+                if mme_result:
+                    result.extend(mme_result)
+                else:
+                    msdu_data = data[msdu_start:msdu_end]
+                    result.append((
+                        "  MSDU数据",
+                        " ".join(f"{x:02X}" for x in msdu_data),
+                        f"{len(msdu_data)}字节",
+                        "网络管理消息",
+                        msdu_start, msdu_end, True,
+                    ))
+            else:
+                msdu_data = data[msdu_start:msdu_end]
+                type_name = "IP报文" if msdu_type == 49 else f"MSDU类型{msdu_type}"
+                result.append((
+                    "  MSDU数据",
+                    " ".join(f"{x:02X}" for x in msdu_data),
+                    f"{len(msdu_data)}字节",
+                    type_name,
+                    msdu_start, msdu_end, True,
+                ))
+            icv_start = msdu_start + msdu_len
+            if icv_start + 4 <= len(data):
+                icv = data[icv_start:icv_start + 4]
+                icv_val = int.from_bytes(icv, 'little')
+                calc = zlib.crc32(data[msdu_start:icv_start]) & 0xFFFFFFFF
+                verify = "校验通过" if calc == icv_val else f"校验失败(计算值0x{calc:08X})"
+                result.append((
+                    "  完整性校验(ICV)",
+                    " ".join(f"{x:02X}" for x in icv),
+                    f"0x{icv_val:08X} {verify}",
+                    "MSDU的CRC-32(不含MAC帧头/MAC地址)",
+                    icv_start, icv_start + 4, True,
+                ))
+                tail_start = icv_start + 4
+                if tail_start < len(data):
+                    tail = data[tail_start:]
+                    result.append((
+                        "  填充/PBCS",
+                        " ".join(f"{x:02X}" for x in tail),
+                        f"{len(tail)}字节",
+                        "物理块填充及PBCS(CRC-24)",
+                        tail_start, len(data), True,
+                    ))
+        elif msdu_start < len(data):
+            remain = data[msdu_start:]
+            result.append((
+                "  剩余数据", remain.hex().upper(), f"{len(remain)}字节",
+                "ICV/填充/PBCS", msdu_start, len(data), True,
+            ))
+        return result
 
     def _parse_mac_std_header(self, data: bytes, offset: int, std_version: int = 1) -> List[Tuple]:
         """解析标准MAC帧头（4-2部分 表2: 16字节固定域）

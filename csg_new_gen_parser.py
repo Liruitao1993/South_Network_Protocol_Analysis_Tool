@@ -574,16 +574,22 @@ class CSGNewGenParser:
     def _parse_ed_wrapper(self, frame_bytes: bytes, parse_level: str = "auto",
                           pb_frame_type: str = "sof",
                           channel: str = "auto",
-                          wrapper: Optional[str] = None) -> Optional[list]:
-        """解析完整 ED..EE 监控包装（PLC2.0 / 广西台体），并继续解析其中业务数据。
+                          wrapper: Optional[str] = None,
+                          protocol_index: Optional[int] = None) -> Optional[list]:
+        """解析完整 ED..EE 监控包装（PLC2.0 / 广西台体布局），并继续解析其中业务数据。
 
         wrapper=None → 自动识别（detect_ed_wrapper）；"plc2"/"gx" → 按指定布局。
+        protocol_index → 字段解释语言（9=广西台体/PLC2.0；10/11=国网HDC，gx 同构）。
         """
+        from batch_core import ed_wrapper_display
+
         n = len(frame_bytes)
         if n < 8 or frame_bytes[0] != 0xED:
             return None
         if wrapper not in ("plc2", "gx"):
             wrapper = detect_ed_wrapper(frame_bytes)
+        ed_lab = ed_wrapper_display(protocol_index if protocol_index is not None else 9,
+                                    wrapper)
 
         def fail(reason: str) -> list:
             return [("❌ 解析失败", "", "", f"ED 监控帧错误：{reason}", 0, n - 1)]
@@ -619,11 +625,11 @@ class CSGNewGenParser:
         }.get(ctrl2, f"保留(0x{ctrl2:02X})")
 
         is_gx = wrapper == "gx"
-        hdr_title = "── 广西台体监控包装头 ──" if is_gx else "── PLC2.0 监控包装头 ──"
+        hdr_title = ed_lab["title"]
         rows = [
-            (hdr_title, "", "", "ED..EE 监控设备附加信息（不属于业务帧）", None, None),
+            (hdr_title, "", "", ed_lab["header_desc"], None, None),
             ("起始符(ED)", f"0x{frame_bytes[0]:02X}", "ED",
-             "广西台体发射机包装起始标识" if is_gx else "PLC2.0 收发机包装起始标识",
+             ed_lab["start_comment"],
              0, 0),
             ("帧长", self._hex_space(frame_bytes[1:3]), f"{frame_len} 字节",
              "控制域1+控制域2+EF+数据域+CS(小端)", 1, 2),
@@ -681,7 +687,7 @@ class CSGNewGenParser:
             ("校验(CS)", f"0x{cs:02X}", cs_txt,
              "ED..数据域末所有字节求和取低8bit", cs_offset, cs_offset),
             ("结束符(EE)", f"0x{frame_bytes[total - 1]:02X}", "EE",
-             "广西台体包装结束标识" if is_gx else "PLC2.0 包装结束标识",
+             ed_lab["end_comment"],
              total - 1, total - 1),
             ("── 业务帧 ──", "", "",
              "以下为 ED 数据域解析结果", business_offset, cs_offset - 1),

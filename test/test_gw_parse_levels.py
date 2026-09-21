@@ -13,37 +13,53 @@ from gw_new_gen_parser import GWNewGenParser
 
 
 def test_mac_only():
-    """测试仅MAC帧解析模式（PB头1字节 + 标准MAC帧头16字节+MAC地址12字节）"""
+    """测试仅MAC帧解析模式：输入即 MAC 帧（不含 PBH），从字节 0 解析。
 
-    print("Test: mac_only - 仅MAC帧解析")
+    契约（AGENTS §8 陷阱19 / 协议9 同口径）：mac_only 不得自动剥离物理块头。
+    pb_only 仍按「PBH+MAC」解析，见 test_pb_only_sof。
+    """
+
+    print("Test: mac_only - 仅MAC帧解析（输入即MAC帧，不含PBH）")
     parser = GWNewGenParser()
 
-    # 实际帧：PBH=0xC0 + 标准MAC帧头(版本=0, 源TEI=1, 目的TEI=0xFFF, 本地广播)
-    mac_data = bytes.fromhex("C01000FF2F0114000024001108003F0000009098016 3FFFFFFFFFFFF08".replace(" ", ""))
+    # 标准MAC帧头(版本=0, 源TEI=0, 目的TEI=1, MSDU类型0=网络管理消息) + MAC地址12B
+    # 现场关联请求帧（协议10/11 共用样本，见 test_hdc10_mac_only_contract）
+    mac_data = bytes.fromhex(
+        "00000100019673005C80FF0800960000"
+        "200000000124010101010101"
+        "000000002000000001240100000000000000000001030001"
+        "329FBACA69DE640900000000A860CAF104A18A64E8F2"
+        "0000040099F4484C3039000000000000000065F9"
+        "0000000000000000000000000000000000000000000000000000"
+        "688150C4"
+        "0000000000000000BA711E"
+    )
 
     result = parser.parse_to_table(mac_data, parse_level='mac_only')
 
     print(f"  解析结果行数: {len(result)}")
 
-    # 查找关键行
     mode_row = [r for r in result if '解析模式' in r[0]]
-    pbh_row = [r for r in result if '物理块头' in r[0]]
+    pbh_row = [r for r in result if '物理块头' in r[0] or 'PBH' in r[0]]
     src_tei_row = [r for r in result if '原始源TEI' in r[0]]
     dst_tei_row = [r for r in result if '原始目的TEI' in r[0]]
     msdu_type_row = [r for r in result if 'MSDU类型' in r[0]]
+    mmtyp_row = [r for r in result if 'MMTYPE' in r[0]]
 
     if mode_row:
         print(f"  解析模式: {mode_row[0][2]}")
         assert 'MAC帧' in mode_row[0][2], "应为MAC帧模式"
 
-    # PB头必须为1字节（4-2部分 表21）
-    assert pbh_row, "应解析出物理块头"
-    assert pbh_row[0][5] - pbh_row[0][4] == 1, "PB头应为1字节"
+    # 契约：mac_only 不得出现物理块头
+    assert not pbh_row, f"mac_only 不应解析物理块头，实际: {pbh_row}"
+    assert mode_row and '不含' in str(mode_row[0][3]), "说明应交代不含PBH"
 
-    assert src_tei_row and src_tei_row[0][2] == '1', "源TEI应为1(CCO)"
-    assert dst_tei_row and dst_tei_row[0][2] == '4095', "目的TEI应为4095(广播)"
+    assert src_tei_row and src_tei_row[0][2] == '0', "源TEI应为0"
+    assert dst_tei_row and dst_tei_row[0][2] == '1', "目的TEI应为1"
     assert msdu_type_row and msdu_type_row[0][2] == '0', "MSDU类型应为0(网络管理消息)"
+    assert mmtyp_row and mmtyp_row[0][2] == '0x0000', "MMTYPE应为0x0000(关联请求)"
     print(f"  源TEI: {src_tei_row[0][2]}  目的TEI: {dst_tei_row[0][2]}")
+    print(f"  MMTYPE: {mmtyp_row[0][2] if mmtyp_row else 'N/A'}")
 
     print("  [✅] mac_only解析成功\n")
 

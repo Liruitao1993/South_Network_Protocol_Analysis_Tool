@@ -121,15 +121,21 @@ FC_FRAME = bytes.fromhex(
 
 PICKLE = ROOT / "test" / "hdc10_real_frames.pkl"
 
-# 真实夹具中输出发生变化的帧（改动前基线 vs 改动后逐帧对拍得出，仅此 3 帧）：
+# 真实夹具中输出发生变化的帧（改动前基线 vs 改动后逐帧对拍得出，仅此 7 帧）：
 #   9  msdu_type=47（表外）→ 不再按首字节启发式进应用层解析（P1-4 误判修复）
 #   48 msdu_type=128 → 由「类型128: 未定义」变为应用层解析（D2）
 #   50 msdu_type=48  → 由「类型48: 未定义」变为应用层解析（D2）
 #      且 sec_mode=1 → 新增「⚠ 安全保护」提示行（D5）
-DIFF_FRAMES = (9, 48, 50)
-# 其余 57 帧的行序列指纹（改动前基线 == 改动后，R6「已知业务输出不变」）
+#   2  msdu MMTYPE=0x0001 关联确认 → 由猜测口径改为表70逐字段深解析（1.23.31）
+#   10 msdu MMTYPE=0x0002 关联汇总指示 → 表76/78 深解析（1.23.31）
+#   41 msdu MMTYPE=0x0009 通信成功率 → 表100/101 逐子站点深解析（1.23.31）
+#   3  报文ID 0x006 通信测试，字节1 高4位=6 → 按 A-HS-11-03 表2 解出
+#      「测试模式/配置操作=6(频段切换操作) + 频段值(目标频段)=1」，并补出
+#      表32 原有的「协议版本号/报文头长度」；原先误读为「转发数据长度=1字节」
+DIFF_FRAMES = (2, 3, 9, 10, 41, 48, 50)
+# 其余帧的行序列指纹（随 MME 深解析重算，R6「已知业务输出不变」）
 UNCHANGED_FRAMES_SHA256 = (
-    "e20b9e23cd5ef839c44df9eede7db9c836ab3e0181393d7fbb26f95f3ed99631"
+    "be20c31f1e317fa485f43bc000abf86aaf9a97ce546575ce2a6f7fdc7275aff5"
 )
 
 # A7 golden：改动前 0x2004 校时帧的完整行序列（步骤 0 基线，逐行内嵌）
@@ -534,8 +540,8 @@ def main():
     check("A8 真实业务帧（%d 帧）MMTYPE 解析未回归" % len(real_biz),
           {"0x0008", "0x000B", "0x0001"} <= found_mmtype, str(sorted(found_mmtype)))
 
-    # R6：除 DIFF_FRAMES 三帧外，其余 57 帧输出与改动前基线逐字节一致
-    check("A8 其余 57 帧输出指纹与改动前基线一致（R6）",
+    # R6：除 DIFF_FRAMES 登记帧外，其余 53 帧输出与改动前基线逐字节一致
+    check("A8 其余 53 帧输出指纹与改动前基线一致（R6）",
           fingerprint_unchanged_frames(frames) == UNCHANGED_FRAMES_SHA256,
           fingerprint_unchanged_frames(frames))
 

@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import app_paths
@@ -103,14 +104,19 @@ def validate_key_text(
 # ── JSON 读写 ────────────────────────────────────────────────────────
 
 
-def load_custom_di() -> List[dict]:
+def load_custom_di(path: Optional[Path] = None) -> List[dict]:
     """读取 `custom_di.json` 返回条目列表。
 
     文件缺失时先经 `app_paths.ensure_data_file` 尝试从内置种子复制；内容非法
     （非列表 / JSON 解析失败）返回空列表，绝不抛异常打断解析器构造。
+
+    ``path`` 显式传入时直接用该路径（不查 `app_paths`）：Reflex Web 版的数据根
+    与桌面不同（见 `reflex_web.app_data`），需要各自读写各自的 `custom_di.json`。
+    默认 ``None`` 时行为与历史完全一致。
     """
-    app_paths.ensure_data_file(CUSTOM_DI_FILE)
-    path = app_paths.data_path(CUSTOM_DI_FILE)
+    if path is None:
+        app_paths.ensure_data_file(CUSTOM_DI_FILE)
+        path = app_paths.data_path(CUSTOM_DI_FILE)
     try:
         if not path.exists():
             return []
@@ -124,9 +130,14 @@ def load_custom_di() -> List[dict]:
     return [item for item in data if isinstance(item, dict)]
 
 
-def save_custom_di(entries: Sequence[dict]) -> None:
-    """整体写回 `custom_di.json`（UTF-8、保留中文、缩进 2）。"""
-    path = app_paths.data_path(CUSTOM_DI_FILE)
+def save_custom_di(entries: Sequence[dict], path: Optional[Path] = None) -> None:
+    """整体写回 `custom_di.json`（UTF-8、保留中文、缩进 2）。
+
+    ``path`` 语义同 `load_custom_di`：显式传入则写该路径，默认写
+    `app_paths.data_path(CUSTOM_DI_FILE)`（桌面行为不变）。
+    """
+    if path is None:
+        path = app_paths.data_path(CUSTOM_DI_FILE)
     with open(path, "w", encoding="utf-8") as fp:
         json.dump(list(entries), fp, ensure_ascii=False, indent=2)
 
@@ -134,9 +145,11 @@ def save_custom_di(entries: Sequence[dict]) -> None:
 # ── 列表增删（纯函数，不碰磁盘）──────────────────────────────────────
 
 
-def custom_key_set(entries: Optional[Sequence[dict]] = None) -> Set[DIKey]:
-    """自定义 DI 键集合；``entries`` 为 None 时从磁盘读取。"""
-    source = load_custom_di() if entries is None else entries
+def custom_key_set(
+    entries: Optional[Sequence[dict]] = None, path: Optional[Path] = None
+) -> Set[DIKey]:
+    """自定义 DI 键集合；``entries`` 为 None 时从磁盘读取（``path`` 透传）。"""
+    source = load_custom_di(path) if entries is None else entries
     keys: Set[DIKey] = set()
     for entry in source:
         key = key_of(entry)

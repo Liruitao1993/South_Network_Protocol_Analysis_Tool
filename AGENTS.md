@@ -34,7 +34,7 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 
 ## 1. 项目概览
 
-多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.23.22`）。
+多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.23.42`）。
 
 **支持的协议（共 12 种，对应 GUI 协议下拉框 `current_protocol` 索引）：**
 
@@ -109,7 +109,7 @@ python main_gui.py --clipboard
 - Lua 脚本引擎依赖 `lupa`，打包时需作为 hidden import 或确保运行环境已安装
 - 当前主程序 spec 未显式声明 `scapy`；如需把 TCP 监控打包进 exe，需补充 `scapy` 依赖并确保目标机器安装 npcap
 - `docs/Lua脚本使用说明.md` 是 Lua 功能的用户文档
-- Inno Setup 安装脚本 `南网解析工具.iss` / `2222.iss` 的 `MyAppVersion` 用 `python release_check.py --sync-iss` 与 `APP_VERSION` 对齐（当前 1.23.22），发版前务必再跑一次 `python release_check.py`
+- Inno Setup 安装脚本 `南网解析工具.iss` / `2222.iss` 的 `MyAppVersion` 用 `python release_check.py --sync-iss` 与 `APP_VERSION` 对齐（当前 1.23.42），发版前务必再跑一次 `python release_check.py`
 
 ### Reflex Web 离线源码部署（UV）
 
@@ -747,6 +747,13 @@ python test/test_gdw_fujian.py      # 国网福建增补规约 + EB 数据标识
 python test/test_hdc10.py           # HDC 1.0 双模互联互通协议（时隙分配条目/信标 BPCS/PBCS）
 python test/test_hdc10_app_dispatch.py # 协议11 应用层分派收口（94 项：MAC 头类型字段判据 / 端口白名单收口 / 未定义业务命名与依据 A13 表驱动 / 安全模式提示 / 真实帧 60 帧分派一致性 / fuzz，1.23.20 起）
 python test/test_hdc10_pb_structure_probe.py # 协议11 无物理块头(PBH)帧形态探测（39 项：现场帧 auto 17→57 行 golden / ICV 自证 / fc_mac 偏移修复 / 探测判据纯函数 / 变异反证 / 真实夹具 60 帧×7 级别零差异，1.23.24 起）
+python test/test_hdc10_mac_only_contract.py # 协议10/11 仅MAC帧契约：输入即MAC帧禁止剥PBH（35 项：现场帧 golden / GUI 包装 / bit7前缀变异反证 / pb_only 仍解析 PBH，1.23.29 起）
+python test/test_gw_pb_mme_summary.py # 协议10/11 批量摘要网络层 MMTYPE（13 项：pb_only/auto/两协议字段名/Web 同口径，1.23.30 起）
+python test/test_ed_ui_for_gw_hdc10.py # 协议9/10/11 共用 ED 勾选+4字节反转+剔除（25 项：注册表能力/可见性/解包/反转/报错，1.23.35 起）
+python test/test_ed_wrapper_labels.py # ED 包装头文案按协议分语义（19 项：协议9=广西/PLC2.0，10/11=国网HDC，1.23.36 起）
+python test/test_tcp_monitor_ed_hdc.py # TCP 监控 HDC 1.0 + ED 封装（15 项：FlowBuffer 整帧/协议11 国网HDC 文案/业务解析，1.23.37 起）
+python test/test_beacon_ed_hdc10.py # 协议11 ED 信标帧现场样本（20 项：帧长域异常解包/中央信标/摘要，1.23.38 起）
+python test/test_gw_parse_levels.py # 国网新一代解析级别（mac_only 按「输入即MAC帧」契约，pb_only 仍解析 PBH）
 python test/test_gw_batch_parse.py  # 国网新一代批量解析
 python test/test_gw_ext_cmd.py      # 国网新一代扩展命令载荷
 python test/test_gw_parse_levels.py # 国网新一代解析级别
@@ -802,6 +809,7 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 17. **监控器包装格式**：`monitor_widget.py` 区分 `96..16`（国网新一代/HPLC）与 `ED..EE`（南网新一代/PLC2）；协议 9 / 10 切换时 wrapper 会自动切换，不要用错格式。
 18. **TCP 监控可选依赖**：`monitor/tcp_monitor.py` 使用 scapy QThread + signal 回主线程，Windows 需 npcap；scapy 缺失时不能调用 `get_if_list`，UI 已做降级，但新增抓包逻辑要保持 try/except。
 19. **输入即 PB 契约**：`mac_only` / `pb_only` / `app` 等仅输入解析模式不再剥离 FC，输入内容按界面提示的层级直接解析；不要再次假设输入包含完整 MPDU 而剥离 16 字节。
+    **mac_only 契约（1.23.29 起，协议9/10/11 统一）**：`mac_only` 的输入**就是 MAC 帧**，解析器从**字节 0** 直接解析，**禁止**探测/剥离物理块头(PBH)。协议10 曾误走 `_parse_pb_by_frame_type`（输入按 PBH+MAC），协议11 曾在 `data[0]&0x80` 时自动剥 1 字节——两者均已改为从 0 解析；需要带 PBH 的输入请用 `pb_only` / `auto`。回归：`test/test_hdc10_mac_only_contract.py`、`test/test_gw_parse_levels.py`。
 20. **系统集成仅限 Windows**：`system_integration/registry_menu.py` 与 `global_hotkey.py` 依赖 Windows API 与 HKCU 注册表；热键注册失败时应打印提示而不是阻塞启动。`main()` 先做单实例判断，修改启动流程时不要破坏该顺序。
 20b. **退出必须显式 `QApplication.quit()`**（2026-08-28 修复）：Qt 仅在「最后一个可见顶层窗口关闭」时发 `lastWindowClosed` 并结束 `app.exec()`。点 X 最小化到托盘后窗口已 `hide()`，托盘「退出」/自动更新重启（`_schedule_quit`）再调 `self.close()` 时**没有可见窗口关闭**，即使 `closeEvent` 里 `event.accept()`、所有线程都已回收，事件循环仍不退出、进程残留。正确做法：`closeEvent` 真正退出路径（最小化到托盘的 `event.ignore()` 分支之后）在 `event.accept()` 后追加 `QTimer.singleShot(0, QApplication.quit)`（延迟到当前事件处理结束后，不能在 closeEvent 中途直接 quit）。新增 QThread 一律 `thread_registry.track(self, 名称)`，`_shutdown_threads` 的兜底回收依赖该注册表；回归测试 `test/test_app_exit.py`（offscreen）。
 21. **剪贴板检测与 Notepad++ 集成**：`clipboard_monitor.py` 监听 `QClipboard.dataChanged`，受 `config.json` 的 `system.clipboard_monitor` 控制；`npp_integration.py` 会修改 `%APPDATA%/Notepad++` 下的 XML 并保留 `.parser_backup`。改动时保持严格 hex 校验、去抖与提示框单实例复用，避免自身复制触发弹窗。
@@ -816,12 +824,13 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
     - **计算范围 = MSDU 载荷本身**（不含 MAC 头、不含 ICV 自身），文档原文"不包括MAC帧头"
     - **MSDU 起点 = PBH + MAC头总长**：MAC地址标志=1 时头长 28B（16B 固定域 + 源/目的MAC各6B），标志=0 时 16B——必须用 `_parse_mac_std_header` 返回的 header_len 定位，禁止硬编码 16
     - MSDU 长度 = 声明值（MAC头 byte8），与 `帧尾-4 - MSDU起点` 应一致；不一致说明对齐错误
-    - **PBH 剥离判据**：MAC标准头 b0 bit7 恒为0（源TEI≤0x7FF），b0 bit7=1 必为 PBH——auto/mac_only 自动剥离；PBH 低4位=0 与 MAC版本0 冲突，**不能用 ver 位区分**
+    - **PBH 剥离判据**：MAC标准头 b0 bit7 恒为0（源TEI≤0x7FF），b0 bit7=1 必为 PBH——**仅 auto/fc_pb 等「FC+未知形态PB」路径**可用探测；**mac_only 不得剥离**（陷阱19）。PBH 低4位=0 与 MAC版本0 冲突，**不能用 ver 位区分**
     - MME 头为 **4字节**（表58：MMTYPE 2B + 保留 2B），不是3字节；MME 解析器 offset 参数是切片内相对索引，切片后传 0
     - 实机明文模式 ICV 可能填全0（此时校验必然"失败"），应显示"明文填充"而非报错
 29. **HDC 1.0(索引11) 真实报文回归测试**：`test/test_hdc10_real.py` 使用 TMI 遍历测试日志提取的 119 个真实 PB 帧（`test/hdc10_real_frames.pkl`）。修改 `hdc10_parser.py`/`hdc10_mme_parser.py` 后必须运行该测试——组帧只能覆盖想象结构，真实日志才能暴露实机与文档差异。原始数据源：`国网新一代协议/HDC-国网双模协议/TMI模式遍历测试_频段1__All.log`（4500+ 条 `Origin sof pb:'<hex>'` 行）。
 30. **ED..EE 监控包装格式判别是解析器层单源**（1.23.12 起）：PLC2.0（9B 公共头）与广西台体（gx，8B 公共头）的判别与两套字段偏移都在 `csg_new_gen_parser.detect_ed_wrapper` / `_parse_ed_wrapper`，桌面 `main_gui._detect_ed_wrapper` 仅委托（手动下拉值作 `fallback`）。改 ED 相关逻辑时不要再在调用方写第二份打分或偏移表；摘要侧判定按「字段名含 `监控包装头`」而不是 `PLC2.0`（否则 gx 帧摘要掉到兜底分支）。`parse_to_table(..., ed_wrapper=...)` 可显式覆盖自动识别。
-31. **Web 与桌面解析链路的复刻风险**（1.23.12 记录，待 `09-15-web-shared-parse-core` 收口）：`reflex_web/reflex_web/web_utils.py` + `lookup_utils.py` 与 `main_gui.py` 存在多份同义实现（前缀剥离/帧提取/摘要/DLT645 转表/字段层级/查询数据源），历史上已发生漂移（协议10 摘要用协议9 函数、Web 独有 `get_hdc10_summary` 键名不匹配恒不命中、协议10 查询页抄协议9 表、南网 AFN 列算成 `di3 & 0x0F`）。改这些逻辑时必须**同时改两侧**并在 `test/test_web_parse_fixes.py` 补对拍断言，直至共享核心任务落地。
+31. **Web 与桌面解析链路的复刻风险**（1.23.12 记录，待 `09-15-web-shared-parse-core` 收口）：`reflex_web/reflex_web/web_utils.py` + `lookup_utils.py` 与 `main_gui.py` 仍存在多份同义实现（前缀剥离/帧提取/摘要主体/字段层级/查询数据源），历史上已发生漂移（协议10 摘要用协议9 函数、Web 独有 `get_hdc10_summary` 键名不匹配恒不命中、协议10 查询页抄协议9 表、南网 AFN 列算成 `di3 & 0x0F`）。改这些逻辑时必须**同时改两侧**并在 `test/test_web_parse_fixes.py` 补对拍断言，直至共享核心任务落地。
+    - **已收口（1.23.42 起，勿再复制）**：① **645 转表**——唯一实现在 `protocol_registry.DLT645GuiParser`，Web 走 `reflex_web._safe_parse_to_table` 的 import（守卫 `test/test_dlt645_table_offsets.py`）；② **测试模式摘要片段**——唯一实现在 `batch_core.extract_test_mode_content`（桌面一行转发、Web 直接 import，对拍 `test/test_web_gui_parity.py`）。审计清单见 `docs/Web与GUI同步审计.md`（1.23.0~1.23.22 逐条判定 + 7 项待补缺失）。
     - 已知**有意保留**的差异（勿当 bug 修）：① Web 校验与 Web 解析同预处理（含剔除），桌面 `verify_single` 不做头/尾剔除；② 协议10 查询页 Web 对 4 列（含「说明」）匹配关键词、桌面只匹配 类别/代码/名称（Web 为超集）；③ 南网 DI 页 Web 逐单元格匹配、桌面另含 DI 拼接串搜索。
 32. **ED 包装解析入口的 `wrapper` 默认值**（1.23.12 起）：`main_gui._parse_ed_monitor_header` / `_extract_business_from_ed_frame` 与 `csg_new_gen_parser._parse_ed_wrapper` 的 `wrapper` 默认均为「None = 按当前下拉/逐帧自动识别」，**不要再写成硬编码 `"plc2"`**——快捷解析小窗曾因漏传 wrapper + 硬编码默认值，把广西台体帧按 9B 头错位解析 1 字节（复核实测业务偏移 15 而非 14）。
 33. **预处理命令链的拆分必须走 `pp_cli.split_commands()`**（1.23.13 起）：中文输入法全角状态打出的空格（U+3000）与引号（＂“”‘’）不是 ASCII 字符，`shlex.split` 既不视作分隔符也不视作引号 → 整串被当成一个命令名（`未知命令: find　＂CSG＂`）。桌面 `_run_cli_preprocessor` 与 Web `parse_batch`/`run_preprocess` 三处**不要再直接 `shlex.split`**；该函数只在「首个 token 不是已知命令」时才做全角→半角归一化，以免改写参数里刻意保留的全角字符。命令名含非 ASCII 时 `parse_and_run` 会附码位，便于定位零宽/全角字符。
@@ -904,6 +913,32 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
     - **改位表后必须检查既有测试是否固化了错误期望**：`test/test_dlt645_lme.py` 的 12b/12c 就曾固化旧错位（且 12c 用子串断言 `"有功功率方向" in svc`，会命中**未置位列表**而假绿）→ 断言应切分 `svc.split("未置位")[0]` 只查置位段，或用 `check(..., 精确相等)`。
     - **补遗 MD 的位表有转换瑕疵**（markitdown：`费率参数表编程`/`电流严重不平衡` 被拆到两行、跨页的 `Bit87–80`/`Bit55–48` 值行丢格、页码「15」混入表格）→ **位表必须以 pdfplumber 按单元格重取为准**（`page.extract_tables()`），MD 仅作文字对照；跨页表必须把「位段头行」与「跨页后的值行」配对才能拿全。
 
+51. **协议10/11「仅MAC帧」不得自动剥离物理块头（1.23.29 起）**：`mac_only` 输入即 MAC 帧，从字节 0 解析。协议10 曾把输入当 PBH+MAC 走 `_parse_pb_by_frame_type`，协议11 曾在 `data[0]&0x80` 时剥 1 字节——两者都会让 MAC 头错位并冒出「物理块头(PBH)」行。需要 PBH 用 `pb_only`/`auto`。协议11 MME 内容行偏移为**绝对帧偏移**（`_parse_msdu_payload` 在切片解析后统一 `+ base_offset`）；改 MME 字段时不要改回相对 MSDU 切片。回归：`test/test_hdc10_mac_only_contract.py`。
+
+52. **协议10/11 摘要里的 MMTYPE 字段名不同构（1.23.30 起）**：协议10=`管理消息类型(MMTYPE)`（`gw_new_gen_mme_parser`），协议11=`消息类型(MMTYPE)`（`hdc10_mme_parser`）。桌面 `_get_gw_new_gen_summary` 与 Web `get_hdc10_summary` 必须**两种都认**（或子串含 `MMTYPE`）；`仅PB` 批量时网络层帧靠这段摘要区分关联请求/发现列表等，漏字段名会让整批摘要变成 `0→1 | msduSeq:x | 单播`。回归：`test/test_gw_pb_mme_summary.py`。
+
+53. **协议10/11 的 ED..EE 监控包装帧必须在「行提取」阶段解包，且公共头有 plc2(9B)/gx(8B) 两种（1.23.32 起，改批量/监控前缀剥离前必读）**：现场日志把 ED 包装帧原样贴进来（真实形态每帧 168B，帧尾 `CS+EE`=`FF EE`，帧间无换行、**一行可能拼多帧**）。协议9 的 `csg_line` 策略一直有解包，但协议10(`gw_line_min4`)/11(`line`) **完全没有** → 首字节 `0xED` 被当成应用层端口号，解析成「应用层报文 端口 0xED / 业务 0x0A4」。规则：
+    - 解包三件套在 `batch_core`：`ed_wrapper_prefix_len`（按帧长 + `detect_ed_wrapper` 判别 plc2=15B / gx=14B）、`split_ed_frames`（按帧长切分一行内拼接的多帧，尾部残帧丢弃）、`unwrap_ed_line`（返回 `None` 表示「不是 ED 行」→ 调用方按原逻辑处理）。桌面 `main_gui._extract_line_frames` 与 Web `web_utils.extract_frames_for_protocol`（协议10/11 分支）都走它。
+    - **不要再写 `startswith("EDA5")` + 固定剥 15 字节**：帧长字节随报文变化（`EDA4`/`ED1D`… 都合法），gx 帧只有 8B 公共头，多剥 1 字节会让整帧错位。旧硬编码仍保留在协议9 的 `strip_csg_new_gen_frame_prefix`（既有测试锚定其输出），新代码不要照抄。
+    - **不要在 strip 阶段剥 ED 帧**：`_strip_*_prefix` 只做日志前缀清洗，ED 帧应原样留给提取函数——strip 剥出来的业务数据会带上 `CS+EE` 尾巴，反而解析失败（实测 20B 业务帧带 2B 尾巴即失败）。ED 帧太短（无业务域，如测试装置控制帧）时**不得丢弃**，否则触发「预处理后未保留有效报文内容」弹窗（offscreen 测试会直接卡住）。
+    - **三条路径都必须覆盖**（1.23.33 补齐单帧两条）：批量（`_extract_line_frames`）、单帧 `parse_single`、快捷弹窗 `_parse_and_show_dialog._preprocess`。前两条单帧路径曾把 ED 解包硬门控在协议9（`current_protocol == 9 and ed_monitor_chk.isChecked()`；快捷弹窗只认 `idx in (9, 10)`），而「ED监控协议」复选框仅 9/10 可见 → **协议11 单帧贴 ED 帧仍被当应用层解析**。协议10/11 现为自动识别，判据用 `_ed_business_is_fc`（解包后业务帧 `DT = business[0] & 0x07` 必须 ∈0~3；`0xED` 低 3 位=5 恒非法，真 FC 恒满足）防误剥离；协议9 勾选态「不完整帧必须报错、禁止回退」契约不变（AGENTS 陷阱 22）。
+    - **单帧工具栏能力来自注册表（1.23.35 起）**：`ProtocolSpec.has_ed_monitor` / `has_reverse_4byte`（协议9/10/11=True）控制「ED监控协议 / ED包装格式 / 4字节反转 / 字节剔除」可见性与 `parse_single` 是否应用；**不要再写 `current_protocol == 9` 硬门控**。勾选 ED 时三协议统一「解包失败必须报错」；未勾选时 10/11 仍自动识别。回归：`test/test_ed_ui_for_gw_hdc10.py`。
+    - **展示文案按协议分语义（1.23.36 起）**：`batch_core.ed_wrapper_display(protocol_index, wrapper)` 是标题/注释/摘要/下拉文案的**单一来源**。协议9→`PLC2.0`/`广西台体`；协议10/11→`国网HDC`（gx 8B 与 HDC 同构，**禁止**再写广西台体；plc2 布局标题带「(PLC2.0布局)」后缀）。摘要判定用标题含 `监控包装头` + `ed_wrapper_summary_name`。回归：`test/test_ed_wrapper_labels.py`。
+    - **TCP 监控（1.23.37 起）**：协议下拉含「HDC 1.0」；`FlowBuffer` **保留完整 ED 帧**（禁止写死剥 9 字节）；解析走 `batch_core.unwrap_ed_for_parse(frame, protocol_index)` + 对应 parser。`resolve_ed_wrapper(..., protocol_index=10/11)` auto 时**优先 gx/8B**（HDC 同构），不得回落 plc2 造成业务错位 1 字节。回归：`test/test_tcp_monitor_ed_hdc.py`。
+    - **ED 帧长域与 EE 不一致（1.23.38 起）**：现场日志可能出现「帧长域偏小、EE 在缓冲区末尾」的信标/数据帧。`_ed_frame_parts` 与 `extract_business_from_ed_frame` 在 `EF..EE` 自洽时按**末尾 EE 重算**；`extract` 未传 wrapper 时 `resolve` 必须带 `protocol_index`。HDC10 `auto` 在 FCCS 失败且 DT=0 时仍可按信标解析（⚠ 推测信标帧）。回归：`test/test_beacon_ed_hdc10.py`。
+    - 回归：`test/test_hdc10_ed_wrapper.py`（30 项，含现场 7 帧、一行多帧、plc2/gx 判别、协议6 不受影响护栏、批量/单帧/快捷弹窗三条路径端到端）。
+
+54. **协议11（HDC 1.0）跨字节位域一律按「LSB-first 位流」读，不得按「首字节=高位」组装（1.23.34 起，改 `hdc10_parser` 任何 FC/载荷字段前必读）**：规范各表（表19/23/27/30/34 等）的「字节号 / 比特位」列把跨字节字段写成「字节N 比特0-7」+「字节N+1 比特0-3」这类形式，含义是**位号小的一端是低位**。两条独立实证（同一现场帧）：① `广播标志位 = 比特1` → `(b11>>1)&1 = 1`，且该帧目的TEI 确为广播地址 `4095`；② `分集拷贝基本模式 = 比特4-7` → `4`，而该帧物理块恰好 `136` 字节（模式4 = 136B）。
+    - 统一入口：`hdc10_parser._bits_lsb(data, byte_off, bit_off, nbits)`（参数即规范表的「起始字节 / 起始比特 / 位宽」，公式可直接对照表格核验）。**新增跨字节字段一律用它**。
+    - 已修的 13 处（原为 `(bX << 4) | (bY & 0x0F)` 这类「首字节=高位」写法）：6 个 FC 可变区域函数（`_parse_fc_vf_sof_plc` / `_parse_fc_vf_beacon_plc` / `_parse_fc_vf_beacon_hrf` / `_parse_fc_vf_sack_plc` / `_parse_fc_vf_sof_hrf` / `_parse_fc_vf_sack_hrf`）的 **源TEI / 目的TEI / 帧长 / 符号数**。现场帧 FC 源TEI 曾解成 `32`（应为 `2`）、目的TEI 解成 `256`（应为 `1`）。
+    - **MAC 头是正确参照**：`((b0>>4)&0x0F) | (b1<<4)`（原始源TEI）、`b2 | ((b3&0x0F)<<8)`（原始目的TEI）——都等价于 `_bits_lsb`。排查同类位序问题的最快手段是**语义不变量**：单跳帧的 FC 源TEI/目的TEI 必须等于 MAC 头的「原始源TEI」/「原始目的TEI」。
+    - 回归：`test/test_hdc10_fc_bits.py`（22 项，含上述不变量、`_bits_lsb` 单元、以及「6 个函数无旧位序写法」的静态守卫）。
+55. **Web 查询页的自定义条目（协议0 DI / 协议7 AFN+Fn）落盘位置 = 该端解析器实际读取的那一份，且改完必须刷新查询缓存**（1.23.42 起，改 `reflex_web.lookup_utils` / `reflex_web.reflex_web` 查询页前必读）：
+    - **落盘位置**：DI 走 `custom_di_store`（`app_paths.data_path("custom_di.json")`），AFN 走 `GDW10376Parser`（`app_paths.data_path("gdw_custom_afn.json")`）。**不要**按 Web 的 `app_data.data_root()`（那是反馈库/发布产物的数据根）另存一份——写了那里，`ProtocolFrameParser` 与 `GDW10376Parser` 读不到，用户会看到「保存成功但查询不到」。`custom_di_store.load_custom_di/save_custom_di/custom_key_set` 现支持可选 `path`（默认 None = 历史行为，桌面调用点不传）；`GDW10376Parser(custom_config_path=...)` 同理。
+    - **测试沙箱**：`custom_di_store` 以属性形式调 `app_paths.data_path` → patch `app_paths.data_path` 即可；`gdw10376_parser` 是 `from app_paths import data_path`（直接绑名）→ 必须 patch `gdw10376_parser.data_path`，并清 `parser_registry._INSTANCES["gdw"]` 与 `gdw_afn_lookup._LOOKUP_INSTANCE`（否则复用旧路径/旧数据）。
+    - **查询缓存**：`GDWAFNLookup._data` 在构造时一次性构建，自定义 AFN+Fn 增删后必须 `gdw_afn_lookup.refresh()`（`lookup_utils.refresh_gdw_afn_lookup()` 已封装），否则查询页仍是旧表。
+    - **判据同源**：某条目「是否自定义（可删）」= 是否存在于 `custom_di.json` / 解析器 `_custom_fn_map[afn][fn]`（内置 DI 只活在 `DI_COMBINATION_MAP`、标准 Fn 只活在 `FN_MAP`），查询表「自定义」列（★）与删除逻辑必须用同一判据；批量删除时内置/标准条目**忽略并计数**，不要静默丢弃。回归：`test/test_web_gui_parity.py`（R4/R4b 段）。
+
 ## 9. 开发原则
 
 1. **协议定义优先**：遇到不确定的协议字段、字节序、校验范围，**先查 §5 对应文档**，不要凭记忆或猜测。
@@ -928,6 +963,48 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 ## 10. 变更日志
 
 > 详细版本变更记录请查看 `main_gui.py:CHANGELOG`（按版本倒序），或运行 `git log --oneline` 查看提交历史。本文档仅保留最近两个版本的摘要。
+
+### 1.23.42 — 2026-09-21
+
+- **Web↔GUI 修复同步（任务 09-17-web-gui-parity-sync）**：新增审计清单 `docs/Web与GUI同步审计.md`（1.23.0~1.23.22 共 167 条逐条判定：继承 88 / 缺失 21 / 同错 0 / N/A 58，均附 `文件:行号` 依据）
+- **645 转表收口**：Web 删除逐字复制体、改 import `protocol_registry.DLT645GuiParser`；偏移改按**实际帧长**算 → 修「声明长度不符」帧的校验和/结束符偏移越界（合法帧输出不变）；`test/test_dlt645_table_offsets.py`（40 项）
+- **测试模式摘要片段收口**：单源 `batch_core.extract_test_mode_content`（桌面一行转发 + Web import）；Web 协议10/11 测试类报文摘要补齐该片段（`_append_test_mode_segment` 带去重守卫）；`test/test_web_gui_parity.py`（83 项，含两端对拍）
+- **Web 查询页自定义条目 CRUD**：协议0 自定义 DI 增/覆盖/删除（勾选列 + 「删除选中」批量按钮，内置忽略并计数）；协议7 自定义 AFN+Fn 增删（复用 `GDW10376Parser` API + `gdw_afn_lookup.refresh()`）；查询表新增「自定义」★ 列；`custom_di_store` 读写支持可选 `path` 注入
+- 详见 §8 陷阱 31（已收口清单）、陷阱 55（Web 查询页自定义条目约定）
+
+### 1.23.41 — 2026-09-21
+
+- **GUI 顶部栏协议/串口可折叠**：`▼/▶ 协议选择`、`▼/▶ 串口配置` 两个开关（类似 LLM 预处理面板）；折叠腾出内容区高度
+- 协议折叠时窗口标题中间显示协议**短名**（`protocol_registry.short_name`）；串口折叠时状态栏显示 `端口 · 波特率 · 校验 · 连接状态`
+- 折叠态持久化 `config.json` 顶层 `top_bar` 段（勿写入 `ui`）；测试 `test/test_top_bar_collapse.py`
+
+### 1.23.38 — 2026-09-20
+
+- **协议11 TCP/ED 可解析信标帧**：帧长域与末尾 EE 不一致时按末尾 EE 重算整包；业务解出中央信标（NID/时隙分配等）；摘要兼容「定界符类型(DT)」并带信标类型。详见 §8 陷阱 53
+
+### 1.23.37 — 2026-09-20
+
+- **TCP 监控支持 HDC 1.0 与 ED 封装解析**：协议下拉新增「HDC 1.0」；选中国网HDC 时 ED..EE 按国网HDC 文案解析包装头 + HDC10Parser 解析业务；FlowBuffer 保留完整 ED 帧；`resolve_ed_wrapper` 在协议10/11 auto 时优先 8 字节 gx 布局。详见 §8 陷阱 53
+
+### 1.23.36 — 2026-09-20
+
+- **ED 包装头文案按协议分语义**：协议10/11 解析 ED 帧时字段标题/注释显示「国网HDC监控包装头」，不再显示「广西台体」（两者 8 字节公共头同构，解释语言随协议切换）；协议9 保持 PLC2.0/广西台体。单一来源 `batch_core.ed_wrapper_display`。详见 §8 陷阱 53
+
+### 1.23.35 — 2026-09-20
+
+- **协议10/11 单帧开放协议9 的 ED 勾选与 4字节反转**（用户：协议11 解析带 ED 封装报文时需要这些操作）：注册表 `has_ed_monitor`/`has_reverse_4byte`（9/10/11）；工具栏可见 ED 监控/包装格式/4字节反转/字节剔除；勾选 ED 失败报错，未勾选 10/11 仍自动识别；解析弹窗 ED 开关扩到协议11。详见 §8 陷阱 53
+
+### 1.23.30 — 2026-09-18
+
+- **协议10/11 批量摘要：网络层 MME 帧体现 MMTYPE**（用户报障：协议11 解析级别=仅PB 批量时，详情已是关联请求，摘要只有 `0→1 | msduSeq:x | 单播`）。根因：桌面只匹配协议10 字段名 `管理消息类型(MMTYPE)`，协议11 为 `消息类型(MMTYPE)`。现两端兼容两种字段名，输出 `MMTYPE:0x0000(关联请求)`；Web `get_hdc10_summary` 由 `MME:` 改为同口径并补 TEI/msduSeq/发送类型。详见 §8 陷阱 52
+
+### 1.23.29 — 2026-09-18
+
+- **协议10/11「仅MAC帧」不再自动解析物理块头**（用户报障：GUI 协议11 选「仅MAC帧」粘贴现场帧后仍像在解析 PBH）：契约与协议9 对齐——`mac_only` 输入即 MAC 帧，从字节 0 解析。协议10 `gw_new_gen_parser` 原先走 `_parse_pb_by_frame_type`（把首字节当 PBH）导致 MAC 头错位；协议11 `hdc10_parser._parse_mac_only` 去掉 `data[0]&0x80` 自动剥 1 字节。需要 PBH 请用 `pb_only`/`auto`
+- 协议11 MME 字段偏移改为**绝对帧偏移**（原先相对 MSDU 切片，点击字节高亮错位）；`hdc10_mme_parser` 内容段补 `content_offset`
+- GUI 解析级别下拉切换后自动重解析（与通道切换同口径）
+- 现场帧关键字段（协议10/11 一致）：版本0 / 源TEI0 / 目的TEI1 / MSDU类型0 / MSDU长度92 / MMTYPE=0x0000 关联请求 / ICV 0xC4508168 校验通过
+- 新增 `test/test_hdc10_mac_only_contract.py`（35 项）登记 `CORE_TESTS`；`test_gw_parse_levels` 按新契约改写；详见 §8 陷阱 19/51
 
 ### 1.23.23 — 2026-09-17
 

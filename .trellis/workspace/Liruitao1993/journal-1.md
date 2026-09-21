@@ -615,3 +615,33 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 
 - 09-17-web-gui-parity-sync（Web↔GUI 版本×Web 审计与已确认缺口修复）可开始
 - 组帧侧位域写入（dlt645_frame_schema 的 BS* 分支）仍属本次范围外
+
+
+## Session 24: Web↔GUI 修复同步（审计清单 + 645 转表单源 + 测试模式摘要单源 + 查询页自定义 DI/AFN CRUD，1.23.42）
+
+**Date**: 2026-09-21
+**Task**: 09-17-web-gui-parity-sync（父任务 09-15-web-parse-alignment）
+**Branch**: `main`
+
+### Summary
+
+接续该任务：R2（645 转表偏移 + 单一来源）此前已落地但未收口，本次补齐 R1 审计清单、R3（测试模式摘要两端同源）、R4（Web 查询页自定义条目 CRUD），并跑完全量门槛与变异反证。
+
+### Main Changes
+
+- **R1 审计**：`docs/Web与GUI同步审计.md`（167 条逐条判定：继承 88 / 缺失 21 / 同错 0 / N/A 58 + 1 条派生同错），全部附 `文件:行号`；含未覆盖区间 1.23.23~1.23.40 与 1.22.x 待办。G1 门新发现 6 项 Web 缺失 → 拆子任务 `09-21-web-missing-capabilities`（已建 PRD）
+- **R3 单源**：原计划新建 `frame_summary.py`，实测发现另一任务线的共享核心 `batch_core.py` 已含逐字搬移的 `extract_test_mode_content` + `TEST_MODE_SENTINELS` → 改为直接复用（删除临时新建的 `frame_summary.py`）；桌面一行转发、Web `from batch_core import ...`；Web `get_csg_new_gen_summary` 经新增 `_append_test_mode_segment`（去重守卫）与 `get_hdc10_summary` 各补片段（协议10 的检测扩展命令帧会路由到 csg 摘要，两处都要接）
+- **R4/R4b CRUD**：`custom_di_store` 读写加可选 `path`；Web 协议0 自定义 DI 增/覆盖/删 + 勾选列与批量「删除选中」（内置忽略并计数）；**G2 门用户决定**国网 AFN+Fn CRUD 也纳入 → `lookup_utils.add_gdw_custom_fn` / `remove_gdw_custom_fns` 薄封装 `GDW10376Parser` 既有 API（不新增第二份 JSON 读写），`gdw_afn_lookup.refresh()` 解决查询缓存不刷新；查询表新增「自定义」★ 列
+- **测试**：`test/test_web_gui_parity.py`（83 项：R3 两端片段对拍 + R4/R4b 增删与沙箱），与 `test/test_dlt645_table_offsets.py` 一并登记 `release_check.CORE_TESTS`；**变异反证 3+1 条**全部实测变红后还原
+- **收尾**：CHANGELOG 1.23.42、`APP_VERSION` 1.23.42 + `--sync-iss`、AGENTS.md §1/§2 版本陈述 + §8 陷阱 31 已收口清单 + 新增陷阱 55（Web 查询页自定义条目约定）+ §10 摘要
+
+### Testing
+
+- [OK] `python release_check.py` → **PASS=86 / FAIL=1 / WARN=1**；唯一 FAIL = `test/test_hdc10_batch_strip_level.py`（「帧类型含 [11]」），属另一条工作线的批量重构（`_type_name` 走 `batch_parse_worker`/`batch_core`），本任务未触及
+- [OK] 变异反证：偏移公式回退 8 红 / 去 Web 片段 6 红（协议11 路径再 2 红）/ 645 复制体回潮 4 红
+- [OK] 沙箱：全程未污染真实 `custom_di.json` / `gdw_custom_afn.json`（测试后 `git status` 干净）
+
+### Notes
+
+- 工作区内另一会话同期在做「顶部栏折叠 1.23.41」等改动（`main_gui.py` 在我收尾前几分钟仍被写入），本次按用户要求把全部未提交改动一并提交；仅排除明显临时调试产物（`test/_tmp_*`、`test/out*.txt`）
+- 收尾前曾出现一次 `test_nanwang_custom_di` / `test_menu_wiring` 报 `MainWindow` 缺 `_top_bar_toggle_style` 的偶发失败——实为另一会话正在写 `main_gui.py` 的中间态；随后连跑两次均全过（92/92、13/13），非本任务回归

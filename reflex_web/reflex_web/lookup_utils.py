@@ -7,7 +7,7 @@
 import sys
 import re
 from pathlib import Path
-from typing import List, Dict, Any, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 if str(ROOT) not in sys.path:
@@ -22,7 +22,7 @@ if str(ROOT) not in sys.path:
 QUERY_CONFIG = {
     0: {  # 南网
         "title": "DI 查询",
-        "columns": ["DI3", "DI2", "DI1", "DI0", "AFN", "中文含义"],
+        "columns": ["DI3", "DI2", "DI1", "DI0", "AFN", "中文含义", "自定义"],
     },
     1: {  # PLC RF
         "title": "命令字查询",
@@ -50,7 +50,7 @@ QUERY_CONFIG = {
     },
     7: {  # 国网
         "title": "AFN+Fn 查询",
-        "columns": ["AFN", "AFN名称", "Fn", "功能说明"],
+        "columns": ["AFN", "AFN名称", "Fn", "功能说明", "自定义"],
     },
     8: {  # 698.45
         "title": "OI 查询",
@@ -86,18 +86,29 @@ def _search_south_di(keyword: str = "") -> List[List[str]]:
     AFN 列 = DI1（键序 (DI3, DI2, DI1, DI0)，见 protocol_parser.py:519-541 的分组注释
     「# AFN=02H 管理任务」）；此前误用 DI3 低 4 位，导致所有 E8 前缀 DI 都显示 08H。
     桌面同口径：main_gui.py:2234-2235（afn_val = di1 + AFN_MAP 名称）。
+
+    第 7 列「自定义」：★ = 条目来自 `custom_di.json`（可在查询页删除/覆盖），
+    空 = 内置条目（不可删除）。与桌面查询页的蓝色★标记同义
+    （main_gui 表格 di_data 第 8 位标志），Web 侧靠这一列决定「删除」按钮是否可用。
     """
     try:
         from protocol_parser import ProtocolFrameParser
+        from custom_di_store import custom_key_set
+
         parser = ProtocolFrameParser()
         afn_map = getattr(parser, "AFN_MAP", {})
+        # 自定义键集合：ProtocolFrameParser 构造时已把 custom_di.json 合并进
+        # DI_COMBINATION_MAP，这里取同一份文件的键集合做标记，保证「能看到的
+        # 自定义条目 = 能删除的自定义条目」。
+        custom_keys = custom_key_set()
         results = []
         keyword_upper = keyword.upper().strip()
         for (di3, di2, di1, di0), desc in parser.DI_COMBINATION_MAP.items():
             afn = di1
             afn_name = afn_map.get(afn, f"未知({afn:02X})")
             row = [f"{di3:02X}", f"{di2:02X}", f"{di1:02X}", f"{di0:02X}",
-                   f"{afn:02X}H {afn_name}", desc]
+                   f"{afn:02X}H {afn_name}", desc,
+                   "★" if (di3, di2, di1, di0) in custom_keys else ""]
 
             if not keyword_upper:
                 results.append(row)
@@ -113,7 +124,7 @@ def _search_south_di(keyword: str = "") -> List[List[str]]:
                 results.append(row)
         return results
     except Exception as e:
-        return [[f"加载失败: {e}", "", "", "", "", ""]]
+        return [[f"加载失败: {e}", "", "", "", "", "", ""]]
 
 
 def _search_plc_cmd(keyword: str = "") -> List[List[str]]:
@@ -203,25 +214,34 @@ def _search_dlt645_di(keyword: str = "") -> List[List[str]]:
 
 
 def _search_gdw_afn(keyword: str = "") -> List[List[str]]:
-    """国网 AFN+Fn 查询"""
+    """国网 AFN+Fn 查询
+
+    第 5 列「自定义」：★ = AFN+Fn 由用户自定义（可删除），空 = 标准定义。
+    判据与桌面 `main_gui._delete_custom_gdw_fn` 一致：只有落在解析器
+    `_custom_fn_map[afn][fn]` 里的组合才是自定义（标准 FN_MAP 条目不可删）。
+    """
     try:
         from gdw_afn_lookup import get_gdw_afn_lookup
+
         lookup = get_gdw_afn_lookup()
         if keyword.strip():
             data = lookup.search(keyword)
         else:
             data = lookup.data
+        custom_pairs = gdw_custom_fn_pairs()
         results = []
         for item in data:
             afn = item[0]
             afn_name = item[1]
             fn = item[2]
             fn_name = item[3] if len(item) > 3 else ""
-            results.append([f"{afn:02X}H", afn_name, f"F{fn:02d}", fn_name])
+            results.append([
+                f"{afn:02X}H", afn_name, f"F{fn:02d}", fn_name,
+                "★" if (afn, fn) in custom_pairs else "",
+            ])
         return results
     except Exception as e:
-        return [[f"加载失败: {e}", "", "", ""]]
-
+        return [[f"加载失败: {e}", "", "", "", ""]]
 
 def _search_gdw_eb(keyword: str = "") -> List[List[str]]:
     """国网本地通信模块扩展协议 EB 数据标识查询（附件1 V3.31）
@@ -476,3 +496,115 @@ def _row_to_dict(row: List[str], columns: List[str]) -> Dict[str, str]:
     for i, col in enumerate(columns):
         item[col] = str(row[i]) if i < len(row) else ""
     return item
+
+
+# ═══════════════════════════════════════════════════════════════
+# 查询页「自定义条目」增删（协议0 DI / 协议7 AFN+Fn）
+#
+# 单一来源：DI 走 `custom_di_store`；AFN+Fn 走 `GDW10376Parser` 的自定义 API
+# （与桌面 main_gui._add_custom_gdw_fn / _delete_custom_gdw_fn 同一实现），
+# 落盘文件分别是 custom_di.json 与 gdw_custom_afn.json（app_paths 数据目录）。
+# 这里只放**无 reflex 依赖**的逻辑，State 事件只做薄封装，便于测试。
+# ═══════════════════════════════════════════════════════════════
+
+
+def gdw_custom_fn_pairs() -> set:
+    """国网自定义 AFN+Fn 组合集合 {(afn, fn)}（★ 标记与「是否可删」判据）"""
+    from parser_registry import get_parser
+
+    parser = get_parser("gdw")
+    return {(afn, fn) for afn, _name, fn, _fn_name in parser.get_custom_entries()}
+
+
+def refresh_gdw_afn_lookup() -> None:
+    """重建 AFN+Fn 查询缓存（增删自定义组合后必须调用，否则页面仍是旧表）"""
+    from gdw_afn_lookup import get_gdw_afn_lookup
+
+    get_gdw_afn_lookup().refresh()
+
+
+def add_gdw_custom_fn(
+    afn_text: str, fn_text: str, name: str, afn_name: str = ""
+) -> Tuple[bool, str]:
+    """添加自定义 AFN+Fn（校验与提示文案对齐桌面 `_add_custom_gdw_fn`）。
+
+    Returns:
+        (ok, message)：失败时 message 为可直接展示的中文提示。
+    """
+    raw_afn = (afn_text or "").strip().replace("H", "").replace("h", "").replace("0x", "")
+    try:
+        afn = int(raw_afn, 16)
+    except ValueError:
+        return False, "AFN 必须为十六进制（00-FF）！"
+    if not 0 <= afn <= 0xFF:
+        return False, "AFN 必须为十六进制（00-FF）！"
+
+    raw_fn = (fn_text or "").strip().lstrip("Ff")
+    try:
+        fn = int(raw_fn)
+    except ValueError:
+        return False, "Fn 必须为十进制整数（1-248）！"
+    if not 1 <= fn <= 248:
+        return False, "Fn 必须为十进制整数（1-248）！"
+
+    name = (name or "").strip()
+    if not name:
+        return False, "功能名称不能为空"
+
+    from parser_registry import get_parser
+
+    parser = get_parser("gdw")
+    if afn in parser.FN_MAP and fn in parser.FN_MAP.get(afn, {}):
+        return False, f"AFN={afn:02X}H Fn=F{fn} 已在标准定义中存在"
+
+    if (afn_name or "").strip():
+        parser.add_custom_afn(afn, afn_name.strip())
+    parser.add_custom_fn(afn, fn, name)
+    refresh_gdw_afn_lookup()
+    return True, f"已添加自定义组合: AFN={afn:02X}H Fn=F{fn}"
+
+
+def remove_gdw_custom_fns(pairs) -> Tuple[int, int]:
+    """批量删除自定义 AFN+Fn 组合；标准定义条目忽略（不可删）。
+
+    Returns:
+        (removed, ignored_builtin)
+    """
+    from parser_registry import get_parser
+
+    parser = get_parser("gdw")
+    custom = gdw_custom_fn_pairs()
+    removed = ignored = 0
+    for afn, fn in pairs:
+        if (afn, fn) in custom:
+            parser.remove_custom_fn(afn, fn)
+            removed += 1
+        else:
+            ignored += 1
+    if removed:
+        refresh_gdw_afn_lookup()
+    return removed, ignored
+
+
+def parse_gdw_row_key(key: str) -> Optional[Tuple[int, int]]:
+    """查询页行选择键 ``"03HF01"`` → ``(3, 1)``；非法返回 None"""
+    raw = (key or "").strip().upper()
+    if "H" not in raw:
+        return None
+    afn_part, fn_part = raw.split("H", 1)
+    try:
+        return int(afn_part, 16), int(fn_part.lstrip("F"))
+    except ValueError:
+        return None
+
+
+def parse_di_row_key(key: str) -> Optional[Tuple[int, int, int, int]]:
+    """查询页行选择键 ``"E8 00 08 03"`` → ``(232, 0, 8, 3)``；非法返回 None"""
+    parts = [p for p in (key or "").replace(",", " ").split() if p]
+    if len(parts) != 4:
+        return None
+    try:
+        values = tuple(int(p, 16) for p in parts)
+    except ValueError:
+        return None
+    return values if all(0 <= v <= 0xFF for v in values) else None

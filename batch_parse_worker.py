@@ -243,9 +243,8 @@ def parse_one_frame(
                     )
                 )
                 table_data = meta_rows
-                ed_wrap_name = (
-                    "广西台体监控包装帧" if wrapper == "gx" else "PLC2.0监控包装帧"
-                )
+                from batch_core import ed_wrapper_display
+                ed_wrap_name = ed_wrapper_display(protocol_index, wrapper)["summary_name"]
                 summary = f"[ED:{ed_data_type[3:]}] {ed_wrap_name}"
                 status = "成功"
             else:

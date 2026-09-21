@@ -212,12 +212,31 @@ def main():
         check(f"协议10 摘要不含 {meta}", meta not in got10, repr(got10))
 
     # ── [6] 回归：网络层/空表/失败帧 ────────────────────────
-    section("[6] 回归（网络层帧不被注入业务字段）")
+    section("[6] 回归（网络层帧不被注入业务字段；有 MMTYPE 时摘要须带出）")
     fc = bytes.fromhex("09" + "00" * 15)
     rows_fc = gw_new_gen_parser.GWNewGenParser().parse_to_table(fc, parse_level="fc_only")
     got_fc = host._get_gw_new_gen_summary(rows_fc)
     check("协议10 fc_only 摘要与改动前逐字符一致", got_fc == FC_ONLY_BASELINE, repr(got_fc))
     check("网络层摘要未被注入业务字段", "升级" not in got_fc, repr(got_fc))
+    # 网络层 MME 帧（1.23.29 起）：字段名协议11 为「消息类型(MMTYPE)」也须命中
+    mme_rows = hdc10_parser.HDC10Parser().parse_to_table(
+        bytes.fromhex(
+            "C0"
+            "00000100019673005C80FF0800960000"
+            "200000000124010101010101"
+            "000000002000000001240100000000000000000001030001"
+            "329FBACA69DE640900000000A860CAF104A18A64E8F2"
+            "0000040099F4484C3039000000000000000065F9"
+            "0000000000000000000000000000000000000000000000000000"
+            "688150C40000000000000000BA711E"
+        ),
+        parse_level="pb_only",
+        frame_type=1,
+    )
+    got_mme = host._get_gw_new_gen_summary(mme_rows)
+    check("协议11 pb_only 网络层帧摘要含 MMTYPE", "MMTYPE:" in got_mme and "关联请求" in got_mme,
+          repr(got_mme))
+    check("网络层 MME 摘要未被注入应用层业务字段", "端口:" not in got_mme, repr(got_mme))
     check("空表仍返回 '-'", host._get_gw_new_gen_summary([]) == "-")
     check(
         "失败帧仍返回失败原因",

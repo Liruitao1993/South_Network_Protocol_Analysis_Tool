@@ -140,15 +140,49 @@ class SerialWorker(QThread):
         self._ser = None
         self.connection_changed.emit(False)
 
+    @staticmethod
+    def _fmt_frame(frame: bytes) -> str:
+        """帧字节 → 空格分隔大写十六进制"""
+        hex_str = frame.hex().upper()
+        return " ".join(hex_str[i:i + 2] for i in range(0, len(hex_str), 2))
+
     def _process_buffer(self):
-        """从缓冲区提取完整 FT1.2 帧（支持长度域容错）"""
+        """从缓冲区提取完整帧，支持两种 68H 起始格式：
+
+        - **DL/T645-2007/1997**（协议6）：``68H + 地址(6B) + 68H + C(1B) + L(1B)
+          + 数据(L B) + CS(1B) + 16H``，总长 = ``12 + L``（与 ``dlt645_parser``
+          同一公式）；现场帧常带 4 字节 ``FEH`` 唤醒前导，由 ``find`` 自然跳过。
+        - **FT1.2**（IEC 62056-21 / 南网等）：``68H + 长度(2B 小端) + … + 16H``。
+
+        判别依据：首个 68H 之后**偏移 +7** 处是否也是 68H（地址占 6 字节，
+        第 2 个起始符落在 index 7；与 ``dlt645_parser`` 的 ``data[7] != 0x68`` 同口径）。
+        **必须先判 DL/T645**：FT1.2 把 68H 后 2 字节当长度域，而 DL/T645 那里是
+        地址低字节——`68 01 00 …` 会被算成长度 1（<8）而整帧丢弃，表现为
+        「串口只有发送没有接收」（用户报障，协议6）。
+        """
         buf = self._buffer
         i = 0
-        while i < len(buf) - 7:
-            # 寻找 68 起始
+        while i < len(buf):
             pos = buf.find(b'\x68', i)
             if pos == -1:
                 break
+            # ── DL/T645：双 68H 起始符（地址 6 字节 → 第 2 个 68H 在 +7）──
+            if pos + 7 < len(buf) and buf[pos + 7] == 0x68:
+                if pos + 10 > len(buf):
+                    break                       # 帧头未收齐，等下一批
+                total = 12 + buf[pos + 9]       # 68+地址6+68+C+L+数据L+CS+16
+                if pos + total > len(buf):
+                    break                       # 帧体未收齐
+                if buf[pos + total - 1] == 0x16:
+                    frame = bytes(buf[pos:pos + total])
+                    self.frame_received.emit(frame)
+                    self.log_message.emit(f"[接收] {self._fmt_frame(frame)}")
+                    del buf[:pos + total]
+                    i = 0
+                    continue
+                i = pos + 1
+                continue
+            # ── FT1.2 ──
             if pos + 6 > len(buf):
                 break
             # 解析长度域（小端）
@@ -161,25 +195,18 @@ class SerialWorker(QThread):
                 break
             # 验证结束符
             if buf[end_pos - 1] == 0x16:
-                # 标准 FT1.2 帧
                 frame = bytes(buf[pos:end_pos])
                 self.frame_received.emit(frame)
-                hex_str = frame.hex().upper()
-                formatted = " ".join(hex_str[j:j+2] for j in range(0, len(hex_str), 2))
-                self.log_message.emit(f"[接收] {formatted}")
-                # 删除已处理数据
+                self.log_message.emit(f"[接收] {self._fmt_frame(frame)}")
                 del buf[:end_pos]
                 i = 0
                 continue
             # 长度域对应的结束符不是 0x16，尝试查找下一个 0x16 作为备选边界
             alt_end = buf.find(b'\x16', pos + 3)
             if alt_end != -1 and 7 <= alt_end - pos <= 2048:
-                # 找到一个可能的帧边界（从 0x68 到 0x16）
                 frame = bytes(buf[pos:alt_end + 1])
                 self.frame_received.emit(frame)
-                hex_str = frame.hex().upper()
-                formatted = " ".join(hex_str[j:j+2] for j in range(0, len(hex_str), 2))
-                self.log_message.emit(f"[接收(容错)] {formatted}")
+                self.log_message.emit(f"[接收(容错)] {self._fmt_frame(frame)}")
                 del buf[:alt_end + 1]
                 i = 0
                 continue

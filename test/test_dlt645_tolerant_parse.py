@@ -18,13 +18,15 @@
   A8        valid 语义不变（虚拟表依赖）；`dlt645_sim` 既有套件另跑
   A9        GUI 链路（DLT645GuiParser）非空 + 「校验和」行映射到 CS 字节 total_len-2
   +  单一来源/不变式守卫：check_frame 语义不变、check_structure 不含 CS、
-     calc_checksum 唯一实现、R7 行名含「校验和」、结果行元组形状、Web 侧接线
+     calc_checksum 唯一实现、R7 行名含「校验和」、结果行元组形状、
+     Web 侧已改为调用同一实现（不得再有转表复制体）
 
 直接运行: python test/test_dlt645_tolerant_parse.py
 """
 
 import _path_setup  # noqa: E402,F401
 
+import re
 import sys
 from pathlib import Path
 
@@ -342,14 +344,17 @@ def test_gui_wrapper():
     check("A9 结构错帧同样返回非空表", len(table2) > 0 and any("帧结构错误" in r[0] for r in table2),
           str([r[0] for r in table2])[:120])
 
-    # Web 侧接线守卫（同一份 fields 的行名映射，改行名会失效 → 由源码守卫钉住）
+    # Web 侧接线守卫：645 转表已收口为**单一来源**（protocol_registry.DLT645GuiParser），
+    # reflex_web 不得再出现转表复制体（AGENTS §8 陷阱 31/49）。
+    # 用行首锚定的赋值语句匹配，避免误伤注释/文档里的同名字面量。
     web_src = (Path(__file__).resolve().parent.parent
                / "reflex_web" / "reflex_web" / "reflex_web.py").read_text(encoding="utf-8")
-    check("A9 Web 侧仍按「校验和」子串映射到 total_len-2",
-          'elif "校验和" in field:' in web_src
-          and "byte_start, byte_end = total_len - 2, total_len - 2" in web_src)
-    check("A9 Web 侧仍消费同一份 fields",
-          'dlt645_result.get("fields", [])' in web_src)
+    copy_stmt = re.compile(r"^\s*total_len\s*=\s*10\s*\+\s*data_len\s*\+\s*2\s*$", re.M)
+    check("A9 Web 侧不再含 645 转表复制体（声明长度赋值语句已消失）",
+          not copy_stmt.search(web_src))
+    check("A9 Web 侧改为调用桌面同一实现 DLT645GuiParser",
+          "from protocol_registry import DLT645GuiParser" in web_src
+          and "DLT645GuiParser(parser).parse_to_table(frame_bytes)" in web_src)
 
 
 # ═══════════════════════════════════════════════════════════════

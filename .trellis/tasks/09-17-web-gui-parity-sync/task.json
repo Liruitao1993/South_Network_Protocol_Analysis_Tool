@@ -3,7 +3,7 @@
   "name": "web-gui-parity-sync",
   "title": "Web↔GUI 修复同步：版本×Web 审计 + 已确认缺口修复",
   "description": "落实「GUI 修的问题 Web 若同样存在必须一起修」：① 出「版本×Web对应物」审计清单（1.23.0~1.23.22 逐版，含批量/监控/组帧/时序图/导出链路的 Web 对应实现）；② 修已确认缺口：645 转表两份复制去重 + 声明长度不符时偏移越界、Web 缺「测试模式」批量摘要、Web 查询页缺自定义 DI/AFN CRUD。两端同源 + 对拍断言。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

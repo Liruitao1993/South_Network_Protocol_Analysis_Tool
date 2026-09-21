@@ -69,6 +69,7 @@ from PySide6.QtWidgets import (
 import app_icons
 import batch_source_view
 import custom_di_store
+import batch_core
 import proc_stats
 import protocol_registry as protocol_registry
 import thread_registry
@@ -111,8 +112,8 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.28"
-BUILD_DATE = "2026-09-18"  # 编译日期，每次打包前更新
+APP_VERSION = "1.23.42"
+BUILD_DATE = "2026-09-21"  # 编译日期，每次打包前更新
 
 # 窗口状态持久化（config.json 顶层 "window" 段）的表格清单：
 # 只收「用户拖动列宽才有意义」的主表；弹窗/克隆表不做持久化（见任务 PRD 的
@@ -132,6 +133,169 @@ _WINDOW_STATE_TABLES = (
 )
 
 CHANGELOG = [
+    (
+        "1.23.42",
+        "2026-09-21",
+        [
+            "Web↔GUI 修复同步（任务 09-17-web-gui-parity-sync）：出「版本×Web 对应物」审计清单 docs/Web与GUI同步审计.md（1.23.0~1.23.22 共 167 条逐条判定：继承 88 / 缺失 21 / 同错 0 / N/A 58，含依据与文件:行号）",
+            "645 转表收口为单一来源：`reflex_web._safe_parse_to_table` 删除逐字复制体，改 import `protocol_registry.DLT645GuiParser`；偏移公式改为按**实际帧长**（`frame_len`/`cs_pos`/`end_pos`）计算，修「声明长度与实际不符」帧的校验和/结束符偏移越界（合法帧输出逐行不变）；新增 test/test_dlt645_table_offsets.py（40 项，含单一来源守卫）",
+            "测试模式摘要片段收口为单一来源：桌面 `_extract_test_mode_content` 改为一行转发 `batch_core.extract_test_mode_content`（`_TEST_MODE_SENTINELS` 同源），Web `web_utils` 接入同一函数并在 `get_csg_new_gen_summary`（`_append_test_mode_segment`，含去重守卫）与 `get_hdc10_summary` 补上该片段——修 Web 协议10/11 测试类报文摘要缺「测试模式」",
+            "Web 查询页补齐自定义条目 CRUD：协议0 新增/覆盖/删除自定义 DI（`State.add_custom_di` / `delete_custom_di` / `delete_selected_custom`，查询表勾选列 + 「删除选中」批量按钮，内置 DI 忽略并计数）；协议7 新增自定义 AFN+Fn（`lookup_utils.add_gdw_custom_fn` / `remove_gdw_custom_fns`，复用 `GDW10376Parser` 既有 API，表单 + 批量删除）；查询表新增「自定义」★ 列；`custom_di_store` 读写支持可选 path 注入（默认行为不变）",
+            "`gdw_afn_lookup` 新增 `refresh()`：自定义 AFN+Fn 增删后重建查询缓存（否则页面仍是旧表）",
+            "测试：新增 test/test_web_gui_parity.py（83 项：R3 两端摘要片段对拍 + R4/R4b 增删与沙箱，均已登记 release_check.CORE_TESTS）；变异反证 3 条实测变红后还原（偏移公式回退 / 删 Web 片段 / 645 复制体回潮）",
+        ],
+    ),
+    (
+        "1.23.41",
+        "2026-09-21",
+        [
+            "GUI 顶部栏「协议选择 / 串口配置」支持折叠（类似 LLM 预处理面板），折叠后腾出更多内容显示面积",
+            "协议选择折叠时：当前协议短名插入窗口标题中间（`协议解析工具 vX (日期) · 协议短名 · 作者`），切换协议实时更新；短名取 protocol_registry.short_name，避免下拉全名过长",
+            "串口配置折叠时：状态栏右侧显示紧凑串口信息（端口 · 波特率 · 校验 · 连接状态），展开/连接/改参数时同步刷新",
+            "折叠状态持久化到 config.json 顶层 `top_bar` 段（proto_collapsed / serial_collapsed），重启恢复；不写入 ui 段",
+            "测试：新增 test/test_top_bar_collapse.py（offscreen：折叠显隐/标题中间协议/状态栏串口/配置往返/协议切换标题）",
+        ],
+    ),
+    (
+        "1.23.40",
+        "2026-09-21",
+        [
+            "协议6（DL/T645-2007）串口接收修复（用户报障：协议6 打开串口发送测试，只有发送没有接收）",
+            "根因一：SerialWorker._process_buffer 只按 FT1.2 切帧（68H + 长度2B 小端 + … + 16H），而 DL/T645 是 68H + 地址(6B) + 68H + C + L + 数据(L) + CS + 16H —— 它把**地址低字节当长度域**，`68 01 00 …` 算出长度 1（<8）→ 整帧丢弃，frame_received 永不触发",
+            "根因二：协议组帧页只连了 frame_received、未连 raw_data_received，故切帧失败时接收数据**完全静默**，日志里只剩 [发送]",
+            "修：切帧按「首个 68H 之后偏移 +7 是否也是 68H」判别 DL/T645 双起始符（与 dlt645_parser 的 data[7] != 0x68 同口径），总长 = 12 + 数据长度；FT1.2 分支保持原样（含长度域对不上时靠 16H 兜底的容错路径）；支持 FEH 唤醒前导、粘包、半帧分次到达",
+            "修：frame_gen_widget._on_serial_frame_received 补 dlt645 分支（原先落进 else 被 gdw_parser 解析，收到回包也只显示解析失败），新增 _dlt645_to_table 与 main_gui 深度解析同口径（fields 的 3/4 元组 → 6 元组表格行）",
+            "测试：新增 test/test_serial_worker_framing.py（28 项）登记 CORE_TESTS——含用户截图那帧 68 01 00 00 00 00 00 68 11 04 33 33 34 33 B3 16",
+        ],
+    ),
+    (
+        "1.23.39",
+        "2026-09-20",
+        [
+            "协议11 应用层扩展（用户提供 HPLC技术应用手册 与 2024年2批HDC模块即装即采增补协议要求(山东)，均已转 MD 归档）",
+            "通信测试命令(0x006)：按 A-HS-11-03 表2 解析「检测扩展命令」——字节1 高4位为测试模式/配置操作（6 频段切换 / 7 ToneMask / 8 无线信道切换 / 12 MCS / 13 安全测试 / 3·4·5·9·10·11 模式持续时间），12bit 配置值按模式解释；普通通信测试（测试模式=0）仍按表32 原义",
+            "事件上报(0x0008)：新增数据域字段级解析（原先只打印原始 hex）——位图方式（事件类型 1/2，起始TEI + 节点位图置位展开）/ 地址方式（3/4，电表个数 + N×(地址6B+带电状态1B)）/ 设备信息（51，即装即采附件3：设备地址·协议类型·描述符 + M 台下挂设备清单）",
+            "修 报文头长度 位拼接：事件上报与通信测试原按「低位在字节0」拼装（事件帧显示 192 字节头），改为与本文件其余报文一致的 byte0[6:7]高2位 + byte1[0:3]低4位、单位4字节字（实测真实抄表帧 01 02 → 2×4B=8B 印证）",
+            "TCP 监控协议11 自动解析：ED 包装布局改用 CRC-24 自证（原「HDC MAC 版本号」启发式对 DT∈{2,3} 的 SACK/网间协调帧会误判 plc2，业务帧整体错位 1 字节后被降级成「应用层报文」垃圾解析；穷举 NID 最低字节实测误判 32/256）",
+            "TCP 监控自动识别排序：拿到帧控制证据时把 HDC 1.0 提到南网新一代之前（原先信标/SOF/SACK/网间协调四类帧全部被误判为南网新一代）；摘要兼容协议11「定界符类型(DT)」字段名",
+            "测试：新增 test_tcp_monitor_proto11_frames.py(55) / test_hdc10_comm_test_ext.py(43) / test_hdc10_event_data.py(41) 并登记 CORE_TESTS；test_tcp_monitor_ed_hdc 与 test_tcp_monitor_proto11_frames 改用 os._exit 交出退出码，避免 Qt offscreen 收尾崩溃被 release_check 误判",
+        ],
+    ),
+    (
+        "1.23.38",
+        "2026-09-20",
+        [
+            "协议11 TCP/ED 解析信标帧（用户提供现场帧：ED A4…FF EE，292 字节，帧长域=164 与末尾 EE 不一致）",
+            "batch_core：帧长域与 EE 不一致且缓冲区以 EF..EE 结尾时，按末尾 EE 重算整包（`_ed_frame_parts` / `extract_business_from_ed_frame`）；extract 未指定 wrapper 时 resolve 带 protocol_index（10/11 优先 gx）",
+            "HDC10 auto：FCCS 失败时若 DT=0 且 HDC1.0 版本位，按 FC+信标载荷继续解析（「⚠ 推测信标帧」）",
+            "摘要：兼容协议11「定界符类型(DT)」字段名，并补「中央信标/发现信标」等信标类型",
+            "该帧现解出：国网HDC包装头 + DT=0 信标 + FCCS✓ + 中央信标 + 时隙分配条目；摘要 `国网HDC监控包装帧 | NID:3 | 信标帧 | 中央信标 | 1→?`",
+            "测试：新增 `test/test_beacon_ed_hdc10.py`（20 项）登记 CORE_TESTS",
+        ],
+    ),
+    (
+        "1.23.37",
+        "2026-09-20",
+        [
+            "TCP 监控支持协议11 HDC 1.0：协议下拉新增「HDC 1.0」；选中后 ED..EE 封装按国网HDC 文案解析包装头字段，并对业务帧用 HDC10Parser 解析",
+            "FlowBuffer 改为保留完整 ED 帧（原先写死剥 9 字节 PLC2 公共头，HDC/gx 8B 布局会错位）；解包与字段行走 batch_core.unwrap_ed_for_parse / build_ed_header_rows（与桌面同源）",
+            "主窗口 TCP 监控 tab 注入 hdc10 解析器；自动识别顺序：南网 → 国网新一代 → HDC 1.0",
+            "测试：新增 `test/test_tcp_monitor_ed_hdc.py`",
+        ],
+    ),
+    (
+        "1.23.36",
+        "2026-09-20",
+        [
+            "ED 包装头字段文案按协议分语义（用户：广西 ED 与国网 HDC 封装定义相同，但协议10/11 解析结果不得显示「广西台体监控包装头」）",
+            "单一来源 `batch_core.ed_wrapper_display(protocol_index, wrapper)`：协议9→PLC2.0/广西台体；协议10/11→国网HDC（gx 8B 布局同构，plc2 布局标题标注「(PLC2.0布局)」）",
+            "接线：`_parse_ed_monitor_header`、`csg_new_gen_parser._parse_ed_wrapper`、桌面/批量/Web 摘要、ED 包装格式下拉文案（协议切换时刷新）",
+            "测试：新增 `test/test_ed_wrapper_labels.py`（19 项）；ed_gx_wrapper / hdc10_ed_wrapper / ed_ui 回归全绿",
+        ],
+    ),
+    (
+        "1.23.35",
+        "2026-09-20",
+        [
+            "协议10/11 单帧解析开放协议9 的 ED 工作流控件（用户：GUI 协议11 解析带 ED 封装报文时，需要 ED 勾选、4字节反转等操作）",
+            "注册表 ProtocolSpec 新增 `has_ed_monitor` / `has_reverse_4byte`（协议9/10/11 为 True）；主窗口可见性与 parse_single 能力开关改为查表，不再写 `current_protocol==9` 硬门控",
+            "协议10/11 工具栏可见：「ED监控协议」「ED包装格式」「4字节反转」「字节剔除头/尾」",
+            "行为：勾选 ED → 与协议9 相同，解包失败明确报错；未勾选时 10/11 仍自动识别（业务帧 DT∈0~3 才剥离）；勾选 4字节反转/字节剔除对 9/10/11 生效",
+            "解析弹窗「剥离ED监控头」同样适用于协议11，勾选后不完整 ED 帧报错",
+            "测试：新增 `test/test_ed_ui_for_gw_hdc10.py`（25 项）；ed_fallback / ed_gx_wrapper / registry 回归全绿",
+        ],
+    ),
+    (
+        "1.23.34",
+        "2026-09-20",
+        [
+            "修复协议11（HDC 1.0）FC 可变区域跨字节位域位序错误（用户报障：FC 源TEI 应为 002 却解析成 032，而 MAC 头 TEI 正确）",
+            "根因：FC 可变区域的跨字节位域按「首字节=高位」组装（如 src_tei=(b4<<4)|(b5&0x0F)），而规范各表（表19/23/27/30/34）的「字节号/比特位」列是 LSB-first 位流——位号小的一端是低位；MAC 头一直按 LSB-first 解析（((b0>>4)&0x0F)|(b1<<4)）故正确，FC 错",
+            "判定依据（两条独立实证）：① 广播标志位=比特1 → (b11>>1)&1=1，该帧目的TEI 确为广播地址 4095；② 分集拷贝基本模式=比特4-7 → 4，该帧物理块恰好 136 字节（模式4=136B）",
+            "修复：新增 hdc10_parser._bits_lsb(data, byte_off, bit_off, nbits)（公式与规范比特位列一一对应，可防再犯）；6 个 FC 可变区域解析函数的 源TEI/目的TEI/帧长/符号数 全部改用它（共 13 处）；目的TEI 此前同样错（现场帧 256 应为 1）",
+            "验证：现场 7 帧的 FC 源TEI/目的TEI 现与 MAC 头「原始源TEI」/「原始目的TEI」逐帧完全一致（帧0: 2/4095；帧1-6: 0/1）；新增 test/test_hdc10_fc_bits.py（22 项，含该语义不变量与「无旧位序写法」静态守卫）",
+        ],
+    ),
+
+    (
+        "1.23.33",
+        "2026-09-20",
+        [
+            "修复协议11（HDC 1.0）单帧解析/快捷弹窗仍把 ED..EE 监控包装帧当应用层解析（用户报障：单帧框贴 ED 帧仍输出「应用层报文」）",
+            "根因：ED 解包在单帧路径被硬门控在协议9——parse_single 的 ed_mode 要求 current_protocol==9 且勾选「ED监控协议」（复选框仅 9/10 可见），快捷弹窗 _preprocess 更是只认 idx in (9,10) → 协议11 下 ED 帧原样送解析器",
+            "修复：两条单帧路径的 ED 识别扩到协议 9/10/11；协议10/11 无该复选框 → 自动识别，并新增 _ed_business_is_fc 防误剥离判据（解包后业务帧 DT=business[0]&0x07 必须 ∈0~3；0xED 低 3 位=5 恒非法，真 FC 恒满足），避免把首字节恰为 0xED 的物理块/MAC 帧误剥；协议9 勾选态「不完整帧必须报错」契约不变",
+            "回归：test/test_hdc10_ed_wrapper.py 扩到 30 项（新增单帧解析与快捷弹窗端到端断言）",
+        ],
+    ),
+
+    (
+        "1.23.32",
+        "2026-09-20",
+        [
+            "修复协议11（HDC 1.0）无法解析 ED..EE 监控包装帧（用户报障：现场日志帧贴入后被解析成「应用层报文」端口0xED/业务0x0A4）",
+            "根因①：协议11 extract_strategy=\"line\" 的默认分支「每行一帧」完全不做 ED 解包（ED 解包只存在于协议9 的 csg_line 策略）→ 首字节 0xED 落到应用层解析",
+            "根因②：既有解包路径硬编码 startswith(\"EDA5\") + 固定剥 15 字节；现场帧是 EDA4 且数据域公共头为 gx(8B) 而非 plc2(9B)，应剥 14 字节 → 双重不命中，即便泛化前缀也会多剥 1 字节致整帧错位",
+            "修复：batch_core 新增通用 ED 解包三件套 ed_wrapper_prefix_len（按帧长+detect_ed_wrapper 判别 plc2/gx）/ split_ed_frames（按帧长切分一行内拼接的多帧，残帧丢弃）/ unwrap_ed_line；协议10/11 行提取改为 ED-aware（桌面 main_gui._extract_line_frames、Web web_utils 同源）；strip_gw_new_gen_prefix 的 app 扫描跳过 ED 行（避免被帧内偶然的 0x11/0x12/0x1A 截断）",
+            "验证：现场 7 帧（每帧 168B）现解出 7 条 152B 业务帧（FC16+PB136），FCCS/PBCS/ICV 全部校验正确，MMTYPE 0x0008 发现列表完整展开；新增 test/test_hdc10_ed_wrapper.py（26 项，含桌面批量端到端与协议6 不受影响护栏）",
+        ],
+    ),
+
+    (
+        "1.23.31",
+        "2026-09-19",
+        [
+            "协议11（HDC 1.0）网络管理消息 MME 全 20 个类型字段级深解析补齐（依据第4-2部分表59/60~137）：关联确认、关联汇总指示、代理变更请求/确认/位图确认、离线指示、通信成功率、网络冲突、过零NTB采集指示/告知、网络诊断、路由请求/回复/错误/应答、链路确认请求/回应、无线信道冲突，以及单跳帧无线发现列表 TLV（站点属性/路由/邻居信道非位图与位图）",
+            "修复 0x000A 网络冲突上报分派调用不存在的 _parse_network_conflict 抛 NameError（被上层兜底成「管理消息解析失败」）；补全名称表缺失的 0x0050~0x0055（原显示「保留」）；0x0001 关联确认由猜测口径改为按表70逐字段解析；0x0006 离线指示由错误的 TEI 口径改为原因/总数/延迟/MAC 列表",
+            "所有变长列表/位图/12比特紧凑差值流均做截断容错（声明长度超实际给 ⚠ 不崩）；Web 端复用同一解析器同步受益",
+            "新增 test/test_hdc10_mme_full.py（81 项，全类型 golden 断言 + 截断容错 + 0x000A 回归）；真实帧 hdc10_real_frames.pkl 60 帧全量解析 0 崩溃",
+        ],
+    ),
+
+    (
+        "1.23.30",
+        "2026-09-18",
+        [
+            "协议10/11 批量/监控摘要：网络层（含仅PB级别）MME 帧体现管理消息 MMTYPE（用户报障：协议11 仅PB 批量 68 帧，详情已是「关联请求」，摘要却只有 `0→1 | msduSeq:x | 单播`）",
+            "根因：桌面 `_get_gw_new_gen_summary` 只精确匹配协议10 字段名 `管理消息类型(MMTYPE)`，协议11 为 `消息类型(MMTYPE)`（hdc10_mme_parser）→ 永不命中；且步骤7 故意跳过「网络管理」类 MSDU 类型",
+            "桌面摘要现兼容两种字段名 + 区头 comment（`MMTYPE: 0x0000 (关联请求)`），输出 `MMTYPE:0x0000(关联请求)`；有 MMTYPE 时不重复「网络管理消息」",
+            "Web `get_hdc10_summary` 同步：`MME:` 前缀改为与桌面一致的 `MMTYPE:`，并补 TEI/`msduSeq`/发送类型",
+            "测试：新增 `test/test_gw_pb_mme_summary.py`（13 项）登记 CORE_TESTS；`test_gw_app_summary_detail` 网络层回归段扩 MMTYPE 断言",
+        ],
+    ),
+    (
+        "1.23.29",
+        "2026-09-18",
+        [
+            "修复协议10/11「仅MAC帧(mac_only)」仍自动解析物理块头（用户报障：GUI 协议11 粘贴现场帧后要求“解析正确，而不是又自动的解析物理块头部”）",
+            "契约与协议9对齐（AGENTS §8 陷阱19）：mac_only 输入即 MAC 帧，从字节0解析，不探测/剥离 PBH；需要 PBH 用 pb_only/auto",
+            "协议10 `gw_new_gen_parser`：mac_only 原走 `_parse_pb_by_frame_type` 把首字节当 PBH → MAC 头整体错位（源TEI/目的TEI/MSDU类型全错），改为 `_parse_mac_and_msdu(data, 0)`",
+            "协议11 `hdc10_parser._parse_mac_only`：去掉 data[0]&0x80 自动剥 1 字节逻辑",
+            "协议11 MME 行偏移改为绝对帧偏移（原先相对 MSDU 切片，点击字节高亮错位）；`hdc10_mme_parser` 内容段偏移补 content_offset",
+            "GUI 解析级别下拉切换后自动重解析（与通道切换同口径）",
+            "现场帧关键字段（协议10/11 一致）：版本0 / 源TEI0 / 目的TEI1 / MSDU类型0 / MSDU长度92 / MMTYPE=0x0000 关联请求 / ICV 0xC4508168 校验通过",
+            "测试：新增 `test/test_hdc10_mac_only_contract.py`（35 项，含 GUI 包装路径与 bit7 前缀变异反证），`test_gw_parse_levels` 按新契约改写；登记 `release_check.py:CORE_TESTS`",
+        ],
+    ),
     (
         "1.23.28",
         "2026-09-18",
@@ -1785,6 +1949,18 @@ class MainWindow(QMainWindow):
         self._thread_count_timer.start()
         self._refresh_thread_count()
 
+        # 状态栏：串口配置折叠时的紧凑回显（端口 · 波特率 · 校验 · 连接状态）
+        self._serial_statusbar_lbl = QLabel("")
+        self._serial_statusbar_lbl.setStyleSheet("color: #607D8B; padding: 0 8px;")
+        self._serial_statusbar_lbl.setToolTip(
+            "串口配置面板折叠时，在此显示端口 / 波特率 / 校验位 / 连接状态"
+        )
+        self.statusBar().addPermanentWidget(self._serial_statusbar_lbl)
+        self._serial_statusbar_lbl.hide()
+        # setup_ui 已按折叠态改过标题；此处状态栏标签就绪后再刷一次串口回显
+        self._update_window_title()
+        self._update_serial_statusbar()
+
     @property
     def parser(self):
         return get_parser("south")
@@ -1830,9 +2006,26 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(8)
 
-        # ========== 顶部栏：协议选择 + 串口配置 ==========
+        # ========== 顶部栏：协议选择 + 串口配置（均可折叠，见 _toggle_*） ==========
         top_bar = QHBoxLayout()
         top_bar.setSpacing(6)
+
+        # ---- 协议选择（可折叠外壳） ----
+        # 折叠后协议名进入窗口标题中间（_update_window_title），腾出顶部高度
+        proto_outer = QWidget()
+        proto_outer_layout = QVBoxLayout(proto_outer)
+        proto_outer_layout.setContentsMargins(0, 0, 0, 0)
+        proto_outer_layout.setSpacing(2)
+
+        self.proto_toggle_btn = QPushButton("▼ 协议选择")
+        self.proto_toggle_btn.setCheckable(True)
+        self.proto_toggle_btn.setChecked(True)
+        self.proto_toggle_btn.setStyleSheet(self._top_bar_toggle_style())
+        self.proto_toggle_btn.setToolTip(
+            "折叠协议选择区以腾出显示空间；折叠后当前协议会显示在窗口标题中间"
+        )
+        self.proto_toggle_btn.clicked.connect(self._toggle_proto_group)
+        proto_outer_layout.addWidget(self.proto_toggle_btn)
 
         # ---- 协议选择分组 ----
         proto_group = QGroupBox("协议选择")
@@ -2007,10 +2200,29 @@ class MainWindow(QMainWindow):
         self.gw_channel_combo.setVisible(False)
         proto_layout.addWidget(self.gw_channel_combo)
 
-        top_bar.addWidget(proto_group, 1)
+        proto_outer_layout.addWidget(proto_group)
+        top_bar.addWidget(proto_outer, 1)
+
+        # ---- 串口配置（可折叠外壳） ----
+        # 折叠后串口参数与连接状态进入状态栏（_update_serial_statusbar）
+        serial_outer = QWidget()
+        serial_outer_layout = QVBoxLayout(serial_outer)
+        serial_outer_layout.setContentsMargins(0, 0, 0, 0)
+        serial_outer_layout.setSpacing(2)
+
+        self.serial_toggle_btn = QPushButton("▼ 串口配置")
+        self.serial_toggle_btn.setCheckable(True)
+        self.serial_toggle_btn.setChecked(True)
+        self.serial_toggle_btn.setStyleSheet(self._top_bar_toggle_style())
+        self.serial_toggle_btn.setToolTip(
+            "折叠串口配置区以腾出显示空间；折叠后端口/波特率/校验/连接状态会显示在状态栏"
+        )
+        self.serial_toggle_btn.clicked.connect(self._toggle_serial_group)
+        serial_outer_layout.addWidget(self.serial_toggle_btn)
 
         # ---- 串口配置分组 ----
         serial_group = QGroupBox("串口配置")
+        self.serial_group = serial_group
         serial_layout = QHBoxLayout(serial_group)
         serial_layout.setContentsMargins(8, 4, 8, 4)
         serial_layout.setSpacing(6)
@@ -2076,7 +2288,15 @@ class MainWindow(QMainWindow):
         serial_layout.addWidget(self.serial_status_label)
 
         serial_layout.addStretch()
-        top_bar.addWidget(serial_group)
+        serial_outer_layout.addWidget(serial_group)
+        top_bar.addWidget(serial_outer)
+
+        # 串口参数变化时刷新状态栏紧凑回显（折叠态下用户改下拉也要同步）
+        self.serial_port_combo.currentTextChanged.connect(self._update_serial_statusbar)
+        self.serial_baud_combo.currentTextChanged.connect(self._update_serial_statusbar)
+        self.serial_parity_combo.currentTextChanged.connect(
+            self._update_serial_statusbar
+        )
 
         main_layout.addLayout(top_bar)
 
@@ -2224,6 +2444,9 @@ class MainWindow(QMainWindow):
         self._window_shown_once = False
         # 套用上次退出时保存的窗口几何 / 分栏 / 列宽（缺失/损坏/屏外均回落默认）
         self._apply_window_state()
+        # 顶部栏折叠状态（协议→标题 / 串口→状态栏；状态栏标签可能尚未创建，先只改控件与标题）
+        self._apply_top_bar_collapse_state()
+        self._update_window_title()
         self._ui_ready = True  # UI 构造完成，此后协议切换才写盘
 
         # 分隔条拖动/尺寸变化后，子控件旧位置可能残留像素（Windows DWM 合成
@@ -2319,7 +2542,9 @@ class MainWindow(QMainWindow):
         # ED 监控协议勾选项（仅南网新一代协议显示）
         self.ed_monitor_chk = QCheckBox("ED监控协议")
         self.ed_monitor_chk.setToolTip(
-            "勾选后解析 ED..EE 监控包装头（PLC2.0 收发机报文格式），\n前置显示 RSSI/NTB/信道等信息，再解析业务帧"
+            "勾选后解析 ED..EE 监控包装头（PLC2.0 / 广西台体），\n"
+            "前置显示 RSSI/NTB/信道等信息，再解析业务帧。\n"
+            "适用于协议9 / 10 / 11"
         )
         self.ed_monitor_chk.setVisible(False)
         btn_layout.addWidget(self.ed_monitor_chk)
@@ -2333,7 +2558,7 @@ class MainWindow(QMainWindow):
             "ED..EE 监控包装头格式：\n"
             "自动识别：逐帧按业务帧 FC 特征 + 物理块长度自洽性打分判别\n"
             "PLC2.0 台体：数据域公共头 9 字节，业务帧自第 15 字节起\n"
-            "广西台体：数据域公共头 8 字节（无 Payload CRC 字节），业务帧自第 14 字节起"
+            "广西台体/国网HDC：数据域公共头 8 字节（布局相同，文案随协议切换）"
         )
         self.ed_wrapper_combo.setVisible(False)
         btn_layout.addWidget(self.ed_wrapper_combo)
@@ -2341,7 +2566,9 @@ class MainWindow(QMainWindow):
         # 4字节反转勾选项（仅南网新一代协议显示）
         self.csg_reverse_4byte_chk = QCheckBox("4字节反转")
         self.csg_reverse_4byte_chk.setToolTip(
-            "勾选后对输入 hex 按 4 字节一组做端序翻转（大端↔小端），\n例如 C9D50438 → 3804D5C9），再进行解析"
+            "勾选后对输入 hex 按 4 字节一组做端序翻转（大端↔小端），\n"
+            "例如 C9D50438 → 3804D5C9，再进行解析。\n"
+            "适用于协议9 / 10 / 11"
         )
         self.csg_reverse_4byte_chk.setVisible(False)
         btn_layout.addWidget(self.csg_reverse_4byte_chk)
@@ -3494,6 +3721,8 @@ class MainWindow(QMainWindow):
             self.csg_new_gen_parser,
             gw_summary_fn=self._get_gw_new_gen_summary,
             csg_summary_fn=self._get_csg_new_gen_summary,
+            hdc10_parser=self.hdc10_parser,
+            hdc10_summary_fn=self._get_gw_new_gen_summary,
         )
         self._replace_lazy_tab(
             self._tcp_monitor_placeholder, self._tcp_monitor_tab_index, tab
@@ -3549,6 +3778,122 @@ class MainWindow(QMainWindow):
             lay.invalidate()
         group.updateGeometry()
         group.adjustSize()
+
+    # ==================== 顶部栏折叠（协议 / 串口） ====================
+
+    def _top_bar_toggle_style(self) -> str:
+        """顶部栏折叠开关样式（明暗主题各一套，选中=展开态）"""
+        if self._is_dark_theme():
+            return (
+                "QPushButton { text-align: left; padding: 3px 8px; font-weight: bold;"
+                " color: #ddd; background: transparent; border: 1px solid #555;"
+                " border-radius: 4px; }"
+                "QPushButton:hover { background: rgba(255,255,255,20); }"
+                "QPushButton:checked { background: #2a4a6a; }"
+            )
+        return (
+            "QPushButton { text-align: left; padding: 3px 8px; font-weight: bold;"
+            " color: #333; background: #f5f7fa; border: 1px solid #d0d7de;"
+            " border-radius: 4px; }"
+            "QPushButton:hover { background: #e8f0fe; }"
+            "QPushButton:checked { background: #e8f4fd; }"
+        )
+
+    def _apply_top_bar_collapse_state(self):
+        """按 _saved_*_collapsed 套用顶部栏折叠态（构造末尾 / 读配置后调用）。"""
+        proto_collapsed = bool(getattr(self, "_saved_proto_collapsed", False))
+        serial_collapsed = bool(getattr(self, "_saved_serial_collapsed", False))
+        if hasattr(self, "proto_toggle_btn"):
+            self.proto_toggle_btn.setChecked(not proto_collapsed)
+            self.proto_toggle_btn.setText(
+                "▼ 协议选择" if not proto_collapsed else "▶ 协议选择"
+            )
+        if hasattr(self, "proto_group"):
+            self.proto_group.setVisible(not proto_collapsed)
+        if hasattr(self, "serial_toggle_btn"):
+            self.serial_toggle_btn.setChecked(not serial_collapsed)
+            self.serial_toggle_btn.setText(
+                "▼ 串口配置" if not serial_collapsed else "▶ 串口配置"
+            )
+        if hasattr(self, "serial_group"):
+            self.serial_group.setVisible(not serial_collapsed)
+
+    def _toggle_proto_group(self):
+        """折叠/展开协议选择区；折叠时当前协议写入窗口标题中间。"""
+        expanded = self.proto_toggle_btn.isChecked()
+        self.proto_group.setVisible(expanded)
+        self.proto_toggle_btn.setText("▼ 协议选择" if expanded else "▶ 协议选择")
+        self._update_window_title()
+        if getattr(self, "_ui_ready", False):
+            self._save_app_config()
+
+    def _toggle_serial_group(self):
+        """折叠/展开串口配置区；折叠时串口信息写入状态栏。"""
+        expanded = self.serial_toggle_btn.isChecked()
+        self.serial_group.setVisible(expanded)
+        self.serial_toggle_btn.setText("▼ 串口配置" if expanded else "▶ 串口配置")
+        self._update_serial_statusbar()
+        if getattr(self, "_ui_ready", False):
+            self._save_app_config()
+
+    def _update_window_title(self):
+        """刷新主窗口标题。
+
+        协议选择展开：`协议解析工具 v{ver} ({date}) - 作者: liruitao`
+        协议选择折叠：协议短名插在标题中间
+                       `协议解析工具 v{ver} ({date}) · {协议短名} · 作者: liruitao`
+        短名取 protocol_registry（如「南网协议」），避免下拉全名过长撑爆标题栏。
+        """
+        base = f"协议解析工具 v{APP_VERSION} ({BUILD_DATE})"
+        author = "作者: liruitao"
+        collapsed = False
+        proto_name = ""
+        try:
+            collapsed = not self.proto_toggle_btn.isChecked()
+            idx = self.protocol_combo.currentIndex()
+            try:
+                proto_name = protocol_registry.get_protocol(idx).short_name
+            except Exception:
+                proto_name = self.protocol_combo.currentText()
+        except Exception:
+            collapsed = False
+        if collapsed and proto_name:
+            self.setWindowTitle(f"{base} · {proto_name} · {author}")
+        else:
+            self.setWindowTitle(f"{base} - {author}")
+
+    def _update_serial_statusbar(self):
+        """串口配置折叠时，在状态栏显示端口/波特率/校验/连接状态；展开时隐藏。"""
+        lbl = getattr(self, "_serial_statusbar_lbl", None)
+        if lbl is None:
+            return
+        try:
+            collapsed = not self.serial_toggle_btn.isChecked()
+        except Exception:
+            collapsed = False
+        if not collapsed:
+            try:
+                lbl.hide()
+            except RuntimeError:
+                pass
+            return
+        try:
+            port = self.serial_port_combo.currentText() or "未选择"
+            baud = self.serial_baud_combo.currentText() or "-"
+            parity = self.serial_parity_combo.currentText() or "-"
+            status = (
+                self.serial_status_label.text()
+                if hasattr(self, "serial_status_label")
+                else "未连接"
+            )
+            color = getattr(self, "_serial_status_color", "#607D8B")
+            if self._is_dark_theme() and color == "#999":
+                color = "#bbb"
+            lbl.setText(f"串口: {port} · {baud} · {parity} · {status}")
+            lbl.setStyleSheet(f"color: {color}; padding: 0 8px;")
+            lbl.show()
+        except RuntimeError:
+            pass
 
     def _fit_combo_to_current(self, combo, pad_extra=12, min_w=90):
         """让 QComboBox 宽度贴合当前选中项文字，而非撑到列表中最宽项。
@@ -3641,26 +3986,30 @@ class MainWindow(QMainWindow):
                 if hasattr(self, "topology_tab"):
                     self.topology_tab.clear_nodes()
 
-        # 新一代载波协议解析级别选择和字节剔除：仅协议索引9时可见
+        # 新一代载波协议解析级别：仅协议索引9时可见
         show_csg_level = spec.parse_level_family == "csg"
         self.csg_parse_level_label.setVisible(show_csg_level)
         self.csg_parse_level_combo.setVisible(show_csg_level)
-        self.csg_strip_head_label.setVisible(show_csg_level)
-        self.csg_strip_head_spin.setVisible(show_csg_level)
-        self.csg_strip_tail_label.setVisible(show_csg_level)
-        self.csg_strip_tail_spin.setVisible(show_csg_level)
         self.csg_pb_frame_type_label.setVisible(
             show_csg_level and self._csg_parse_level in ("pb_only", "mac_only")
         )
         self.csg_pb_frame_type_combo.setVisible(
             show_csg_level and self._csg_parse_level in ("pb_only", "mac_only")
         )
-        # ED 监控协议勾选项：仅协议索引9（南网新一代）时可见
-        self.ed_monitor_chk.setVisible(show_csg_level)
+        # ED 监控 / 4字节反转 / 字节剔除：能力来自注册表（协议9/10/11）
+        # 现场日志常带 ED..EE 封装与 4 字节端序，协议10/11 与协议9 同一套操作
+        show_ed_ui = getattr(spec, "has_ed_monitor", False)
+        show_rev = getattr(spec, "has_reverse_4byte", False)
+        self.ed_monitor_chk.setVisible(show_ed_ui)
         if hasattr(self, "ed_wrapper_combo"):
-            self.ed_wrapper_combo.setVisible(show_csg_level)
-        # 4字节反转勾选项：仅协议索引9（南网新一代）时可见
-        self.csg_reverse_4byte_chk.setVisible(show_csg_level)
+            self.ed_wrapper_combo.setVisible(show_ed_ui)
+            # 包装格式下拉文案按协议语境：9=广西台体/PLC2.0；10/11=国网HDC/PLC2.0布局
+            self._sync_ed_wrapper_combo_labels(index)
+        self.csg_reverse_4byte_chk.setVisible(show_rev)
+        self.csg_strip_head_label.setVisible(show_ed_ui)
+        self.csg_strip_head_spin.setVisible(show_ed_ui)
+        self.csg_strip_tail_label.setVisible(show_ed_ui)
+        self.csg_strip_tail_spin.setVisible(show_ed_ui)
         # 通道下拉框：仅协议索引9（南网新一代）时可见
         self.csg_channel_label.setVisible(show_csg_level)
         self.csg_channel_combo.setVisible(show_csg_level)
@@ -3700,6 +4049,8 @@ class MainWindow(QMainWindow):
         self._fit_combo_to_current(self.csg_pb_frame_type_combo, min_w=90)
         self._fit_combo_to_current(self.gw_pb_frame_type_combo, min_w=90)
         self._reflow_proto_group()
+        # 协议折叠时窗口标题中间的协议名跟随切换
+        self._update_window_title()
 
         # 通信时序图标签页：注册表 has_sequence_diagram；按钮同步启停
         if hasattr(self, "_seq_diagram_tab_index"):
@@ -3731,6 +4082,29 @@ class MainWindow(QMainWindow):
         # 持久化协议选择（UI 全部就绪后才写盘，避免构造期触发保存）
         if getattr(self, "_ui_ready", False):
             self._save_app_config()
+
+    def _sync_ed_wrapper_combo_labels(self, protocol_index: int):
+        """按协议语境刷新 ED 包装格式下拉文案（数据值 auto/plc2/gx 不变）。"""
+        if not hasattr(self, "ed_wrapper_combo"):
+            return
+        from batch_core import ed_wrapper_display
+        combo = self.ed_wrapper_combo
+        combo.blockSignals(True)
+        current = combo.currentData()
+        labels = {
+            "auto": "自动识别(推荐)",
+            "plc2": ed_wrapper_display(protocol_index, "plc2")["combo_label"],
+            "gx": ed_wrapper_display(protocol_index, "gx")["combo_label"],
+        }
+        for i in range(combo.count()):
+            val = combo.itemData(i)
+            if val in labels:
+                combo.setItemText(i, labels[val])
+        idx = combo.findData(current)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+        combo.blockSignals(False)
+        self._fit_combo_to_current(combo, min_w=90)
 
     def _get_monitor_summary(self, table_data: list) -> str:
         """监控器摘要生成：按当前协议分派到对应摘要函数"""
@@ -3780,6 +4154,9 @@ class MainWindow(QMainWindow):
             show_frame_type and self.current_protocol in (10, 11)
         )
         self._reflow_proto_group()
+        # 级别切换后自动重解析（与通道切换同口径），避免界面显示新级别但仍是旧结果
+        if self.single_input.toPlainText().strip():
+            self.parse_single()
 
     def _on_csg_channel_changed(self, index: int):
         """南网新一代通道切换回调"""
@@ -5422,8 +5799,20 @@ class MainWindow(QMainWindow):
         """
         return resolve_ed_wrapper(frame_bytes, self._ed_wrapper_mode())
 
-    def _parse_ed_monitor_header(self, frame_bytes: bytes, wrapper: str = None):
-        """解析 ED..EE 监控包装头（PLC2.0 / 广西台体两种公共头格式）
+    @staticmethod
+    def _ed_business_is_fc(business: bytes) -> bool:
+        """ED 解包后的业务帧是否像合法 FC：定界符类型 DT = ``business[0] & 0x07`` ∈ 0~3。
+
+        用于协议10/11「无 ED监控协议 复选框」时的**自动识别防误剥离**：首字节恰为
+        0xED 的物理块/MAC 帧不应被当成监控包装帧。真 FC 的 DT 恒取 0~3（0xED 的
+        低 3 位=5 非法），故本判据不会误拒合法业务帧。
+        """
+        return bool(business) and (business[0] & 0x07) <= 3
+
+    def _parse_ed_monitor_header(
+        self, frame_bytes: bytes, wrapper: str = None, protocol_index: int = None
+    ):
+        """解析 ED..EE 监控包装头（PLC2.0 / 广西台体两种公共头布局）
 
         包结构: ED(1)+帧长(2,LE)+控制域1(1)+控制域2(1)+EF(1)+数据域(变长)+CS(1)+EE(1)
         数据报文(ctrl1=0x00) ctrl2=0x01/0x02/0x03 的数据域公共头(9字节):
@@ -5432,6 +5821,9 @@ class MainWindow(QMainWindow):
         Args:
             wrapper: "plc2"/"gx"；None 或非法值 → 取当前下拉（auto 时逐帧打分识别）
                 —— 默认不再是硬编码 plc2，避免漏传的调用点把 gx 帧按 9B 头错位解析
+            protocol_index: 决定字段**解释语言**。协议9→PLC2.0/广西台体；
+                协议10/11→国网HDC（gx 布局与 HDC 同构，不得再写广西台体）。
+                None → 用 self.current_protocol
 
         Returns:
             (meta_rows, business_bytes, business_offset) 成功时返回前置行列表、业务字节、
@@ -5440,6 +5832,10 @@ class MainWindow(QMainWindow):
         """
         if wrapper not in ("plc2", "gx"):
             wrapper = self._ed_wrapper_for_frame(frame_bytes)
+        if protocol_index is None:
+            protocol_index = getattr(self, "current_protocol", 9)
+        from batch_core import ed_wrapper_display
+        ed_lab = ed_wrapper_display(protocol_index, wrapper)
         n = len(frame_bytes)
         if n < 8 or frame_bytes[0] != 0xED:
             return None, None, None
@@ -5474,12 +5870,10 @@ class MainWindow(QMainWindow):
 
         rows = [
             (
-                "── 广西台体监控包装头 ──"
-                if wrapper == "gx"
-                else "── PLC2.0 监控包装头 ──",
+                ed_lab["title"],
                 "",
                 "",
-                "ED..EE 监控设备附加信息（不属于业务帧）",
+                ed_lab["header_desc"],
                 None,
                 None,
             ),
@@ -5487,7 +5881,7 @@ class MainWindow(QMainWindow):
                 "起始符(ED)",
                 f"0x{frame_bytes[0]:02X}",
                 "ED",
-                "PLC2.0 收发机包装起始标识",
+                ed_lab["start_comment"],
                 0,
                 0,
             ),
@@ -5616,7 +6010,7 @@ class MainWindow(QMainWindow):
                 "结束符(EE)",
                 f"0x{frame_bytes[ee_offset]:02X}",
                 "EE",
-                "PLC2.0 包装结束标识",
+                ed_lab["end_comment"],
                 ee_offset,
                 ee_offset,
             ),
@@ -5650,9 +6044,14 @@ class MainWindow(QMainWindow):
         clean_input = self._clean_hex_input(input_text)
         clean_input = clean_input.strip()
 
-        # 4字节反转（仅南网新一代 + 勾选时）
+        # 能力开关来自注册表：协议9/10/11 共用 ED 勾选、4字节反转、字节剔除
+        proto_spec = protocol_registry.get_protocol(self.current_protocol)
+        has_ed_cap = getattr(proto_spec, "has_ed_monitor", False)
+        has_rev_cap = getattr(proto_spec, "has_reverse_4byte", False)
+
+        # 4字节反转（注册表 has_reverse_4byte + 勾选时）
         if (
-            self.current_protocol == 9
+            has_rev_cap
             and hasattr(self, "csg_reverse_4byte_chk")
             and self.csg_reverse_4byte_chk.isChecked()
             and clean_input
@@ -5680,8 +6079,8 @@ class MainWindow(QMainWindow):
             hex_display = " ".join(f"{b:02X}" for b in frame_bytes)
             self.single_input.setPlainText(hex_display)
 
-            # 通感一体化协议：字节剔除（在解析前执行，支持缓存避免重复剔除）
-            if self.current_protocol == 9:
+            # 字节剔除（协议9/10/11，解析前执行，支持缓存避免重复剔除）
+            if has_ed_cap:
                 strip_head = self.csg_strip_head_spin.value()
                 strip_tail = self.csg_strip_tail_spin.value()
                 current_hex = clean_input.lower()
@@ -5707,40 +6106,60 @@ class MainWindow(QMainWindow):
                         f"{b:02x}" for b in frame_bytes
                     )
 
-            # ED 监控协议头解析（仅南网新一代协议 + 勾选项启用时）
+            # ED 监控协议头解析
+            # 协议9：由「ED监控协议」勾选项显式启用
+            # 协议10/11：勾选后同协议9；未勾选时仍自动识别（首字节 0xED 不可能是
+            #   合法 HDC FC——定界符类型 DT 取 0~3，0xED 低 3 位=5）
             full_frame_bytes = (
                 frame_bytes  # 保存完整帧（用于高亮定位和 current_result）
             )
             ed_meta_rows = None
             ed_business_offset = 0
+            ed_checked = has_ed_cap and self.ed_monitor_chk.isChecked()
             ed_mode = (
-                self.current_protocol == 9
-                and self.ed_monitor_chk.isChecked()
+                has_ed_cap
                 and len(frame_bytes) >= 1
                 and frame_bytes[0] == 0xED
+                and (
+                    ed_checked
+                    or self.current_protocol in (10, 11)
+                )
             )
             if ed_mode:
                 ed_rows, business, ed_business_offset = self._parse_ed_monitor_header(
                     frame_bytes, wrapper=self._ed_wrapper_for_frame(frame_bytes)
                 )
                 if ed_rows is None or business is None:
-                    declared = (
-                        (frame_bytes[1] | (frame_bytes[2] << 8)) + 4
-                        if len(frame_bytes) >= 3
-                        else 0
-                    )
-                    msg = (
-                        "ED 监控帧解析失败：报文不完整或格式错误。\n"
-                        "已勾选「ED监控协议」，首字节 ED 不能作为业务帧起始符解析。\n"
-                        "请检查报文是否被截断（帧长字段声明整包应为 %d 字节，实际 %d 字节），"
-                        "或缺少 EF 数据域起始符 / EE 结束符。"
-                        % (declared, len(frame_bytes))
-                    )
-                    QMessageBox.critical(self, "ED 监控帧错误", msg)
-                    return
-                ed_meta_rows = ed_rows
-                frame_bytes = business  # 后续解析使用业务载荷
-                # 不替换 hex_display，保持输入框显示完整帧
+                    if ed_checked:
+                        declared = (
+                            (frame_bytes[1] | (frame_bytes[2] << 8)) + 4
+                            if len(frame_bytes) >= 3
+                            else 0
+                        )
+                        msg = (
+                            "ED 监控帧解析失败：报文不完整或格式错误。\n"
+                            "已勾选「ED监控协议」，首字节 ED 不能作为业务帧起始符解析。\n"
+                            "请检查报文是否被截断（帧长字段声明整包应为 %d 字节，实际 %d 字节），"
+                            "或缺少 EF 数据域起始符 / EE 结束符。"
+                            % (declared, len(frame_bytes))
+                        )
+                        QMessageBox.critical(self, "ED 监控帧错误", msg)
+                        return
+                    # 10/11 未勾选时的自动识别：结构不符 → 不剥离
+                    # （可能是首字节恰为 0xED 的物理块/MAC 帧，交由解析器按原样处理）
+                    ed_rows = None
+                elif (
+                    self.current_protocol in (10, 11)
+                    and not ed_checked
+                    and not self._ed_business_is_fc(business)
+                ):
+                    # 自动识别再要求业务帧确为合法 FC，防误剥离；
+                    # 用户已勾选 ED 时按其意图解包，不再用 FC 判据否决
+                    ed_rows = None
+                if ed_rows is not None:
+                    ed_meta_rows = ed_rows
+                    frame_bytes = business  # 后续解析使用业务载荷
+                    # 不替换 hex_display，保持输入框显示完整帧
 
             # 使用当前选中的解析器
             current_parser = self._get_current_parser()
@@ -7209,12 +7628,13 @@ class MainWindow(QMainWindow):
         proto_row.addStretch()
         layout.addLayout(proto_row)
 
-        # ED 监控头剥离开关（仅 9/10 可见，默认勾选）
+        # ED 监控头剥离开关（协议9/10/11 可见，默认勾选）
         ed_chk = QCheckBox("剥离ED监控头")
         ed_chk.setChecked(True)
         ed_chk.setVisible(False)
         ed_chk.setToolTip(
-            "勾选后自动识别并剥离 ED..EF..EE 监控包装头，前置显示监控信息再解析业务帧"
+            "勾选后自动识别并剥离 ED..EF..EE 监控包装头，前置显示监控信息再解析业务帧。\n"
+            "适用于协议9 / 10 / 11；勾选后不完整 ED 帧会明确报错"
         )
         layout.addWidget(ed_chk)
 
@@ -7249,7 +7669,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(error_label)
 
         def _is_new_gen(idx):
-            return idx in (9, 10)
+            # 协议9/10/11：解析级别 + ED 监控头勾选（与主窗口注册表能力一致）
+            return idx in (9, 10, 11)
 
         def _update_extras_visibility(idx):
             """按协议索引显示/隐藏解析级别、帧类型、ED监控头控件"""
@@ -7261,7 +7682,7 @@ class MainWindow(QMainWindow):
                 frame_type_label.setVisible(False)
                 frame_type_combo.setVisible(False)
                 return
-            # 填解析级别选项（9/10 不同）
+            # 填解析级别选项（9 用 CSG 族；10/11 用 GW 族）
             level_combo.blockSignals(True)
             level_combo.clear()
             levels = CSG_LEVELS if idx == 9 else GW_LEVELS
@@ -7296,13 +7717,18 @@ class MainWindow(QMainWindow):
             frame_type_combo.setVisible(show and is_pb)
 
         def _preprocess(idx, raw):
-            """协议预处理：ED 监控头剥离 + 前置行。返回 (bytes, extra_rows, err)"""
-            if (
-                idx not in (9, 10)
-                or not ed_chk.isChecked()
-                or not raw
-                or raw[0] != 0xED
-            ):
+            """协议预处理：ED 监控头剥离 + 前置行。返回 (bytes, extra_rows, err)
+
+            协议9：由「ED监控协议/剥离ED监控头」勾选项启用（勾选后不完整帧必须报错）；
+            协议10/11：勾选后同协议9（严格报错）；未勾选时自动识别，且要求解包后
+            业务帧确为合法 FC（DT ∈ 0~3），否则按原样解析。
+            """
+            if not raw or raw[0] != 0xED:
+                return raw, None, None
+            if idx not in (9, 10, 11):
+                return raw, None, None
+            ed_on = ed_chk.isChecked()
+            if idx == 9 and not ed_on:
                 return raw, None, None
             declared = (raw[1] | (raw[2] << 8)) + 4 if len(raw) >= 3 else 0
             err = (
@@ -7316,9 +7742,11 @@ class MainWindow(QMainWindow):
                     raw, wrapper=self._ed_wrapper_for_frame(raw)
                 )
             except Exception:
-                return None, None, err
+                return (None, None, err) if (idx == 9 or ed_on) else (raw, None, None)
             if rows is None or business is None:
-                return None, None, err
+                return (None, None, err) if (idx == 9 or ed_on) else (raw, None, None)
+            if idx in (10, 11) and not ed_on and not self._ed_business_is_fc(business):
+                return raw, None, None
             return business, rows, None
 
         def do_parse(idx=None):
@@ -8303,120 +8731,15 @@ class MainWindow(QMainWindow):
                     continue
                 summary_parts.append(f"{parsed_val}")
             return " | ".join(summary_parts) if summary_parts else "-"
-
-    # 测试模式/子模式的解析行名（协议9 表61 与协议10 检测扩展命令共用）
-    _TEST_MODE_SENTINELS = ("测试模式/配置操作", "安全测试模式", "新一代测试模式")
+    # 测试模式/子模式的解析行名（协议9 表61 与协议10 检测扩展命令共用）——
+    # 单一来源在批量共享核心 batch_core（桌面/Web 共用，见 _extract_test_mode_content）
+    _TEST_MODE_SENTINELS = batch_core.TEST_MODE_SENTINELS
 
     @staticmethod
     def _extract_test_mode_content(table_data: list) -> str:
-        """测试帧/检测扩展命令 → 摘要片段（非测试类报文返回空串）。
-
-        现场关注的「测试模式」来自解析器的两类字段：
-          - 协议9 1.0测试（表61）/ 协议10 检测扩展命令 → `测试模式/配置操作`
-          - 协议10 子模式 → `安全测试模式`(模式13) / `新一代测试模式`(模式15)
-        测试帧若没有上述字段（如协议9 测试ID=0x00/0x01/0x02 类），回退到
-        `测试ID`/`扩展ID`/测试数据区频段，避免这类帧的摘要一片空白。
-
-        输出示例：
-          "测试模式:PLC物理层透传测试模式(3)"
-          "测试模式:安全测试模式(13) | 安全测试模式:SHA256签名"
-          "测试ID:频段切换命令 | 通信频段:0x02"
-          "测试帧上行（确认/否认，无数据单元）"
-        """
-        if not table_data:
-            return ""
-
-        import re
-
-        fs = {}
-        for item in table_data:
-            key = str(item[0]).strip()
-            if key:
-                fs.setdefault(key, item)
-
-        def _numeric(text: str) -> bool:
-            text = text.strip()
-            return bool(re.fullmatch(r"0[xX][0-9A-Fa-f]+|-?\d+(?:\.\d+)?", text))
-
-        # 名称所在槽位两个协议相反，按「非数值者即名称」探测（不做描述文本黑名单）：
-        #   协议9 表61：raw=0x03  parsed=3(数值)  comment=PLC物理层透传测试模式（高4位）
-        #   协议10 检测扩展命令：raw=3  parsed=HPLC物理层透传测试模式  comment=检测扩展命令:…
-        #   → parsed 非数值时名称在 parsed；否则名称在 comment；再退回 raw。
-        def _name_of(item) -> str:
-            for cand in (item[2], item[3], item[1]):
-                text = str(cand).strip() if cand not in (None, "") else ""
-                text = text.replace("（高4位）", "").strip()
-                text = re.sub(r"^[^:：]*检测扩展命令[:：]?\s*", "", text)
-                if not text or _numeric(text):
-                    continue
-                if "仅测试模式" in text:
-                    continue  # 协议9 表61 恒定输出的占位子模式行
-                return text
-            return ""
-
-        def _value_of(item) -> str:
-            for cand in (item[2], item[1]):
-                text = str(cand).strip() if cand not in (None, "") else ""
-                if _numeric(text):
-                    return text
-            return ""
-
-        def _is_test_frame_rows() -> bool:
-            """本 helper 只服务测试类报文：协议9 以业务标识 0xF0 自证。"""
-            svc = fs.get("业务标识")
-            if svc is None:
-                return False
-            return (
-                str(svc[2]).strip() == "240"
-                or "F0" in str(svc[1]).upper()
-                or "测试帧" in str(svc[3])
-            )
-
-        parts = []
-
-        mode_item = fs.get("测试模式/配置操作")
-        if mode_item is not None:
-            name = _name_of(mode_item)
-            value = _value_of(mode_item)
-            # 名称自带括号（`保留(14)`、`…测试模式(暂未使用)`）时不再重复追加模式号
-            has_paren_suffix = bool(re.search(r"[（(][^（()）]*[)）]\s*$", name))
-            if value and not has_paren_suffix:
-                parts.append(f"测试模式:{name}({value})")
-            elif name:
-                parts.append(f"测试模式:{name}")
-
-        for sub_name in ("安全测试模式", "新一代测试模式"):
-            sub_item = fs.get(sub_name)
-            if sub_item is None:
-                continue
-            sub_text = _name_of(sub_item)
-            if sub_text:
-                parts.append(f"{sub_name}:{sub_text}")
-
-        if mode_item is None:
-            # 没有「测试模式/配置操作」的测试帧（协议9 测试ID 0/1/2 或 2.0测试扩展ID）：
-            # 回退到测试ID/扩展ID，避免这类帧摘要一片空白
-            test_id = fs.get("测试ID")
-            ext_id = fs.get("扩展ID")
-            if test_id is not None:
-                text = _name_of(test_id)
-                if text:
-                    parts.append(f"测试ID:{text}")
-            if ext_id is not None:
-                text = _name_of(ext_id)
-                if text:
-                    parts.append(f"扩展ID:{text}")
-
-        data_item = fs.get("测试数据区")
-        if data_item is not None:
-            comment = str(data_item[3]) if data_item[3] not in (None, "") else ""
-            if "通信频段" in comment:
-                band = comment.split(":", 1)[1].strip() if ":" in comment else comment
-                parts.append(f"通信频段:{band}")
-
-        if not parts and "上行负载" in fs and _is_test_frame_rows():
-            return "测试帧上行（确认/否认，无数据单元）"
-        return " | ".join(parts)
+        """转发到 batch_core.extract_test_mode_content（桌面/Web 共用单源）。"""
+        return batch_core.extract_test_mode_content(table_data)
+        return frame_summary.extract_test_mode_content(table_data)
 
     def _get_csg_new_gen_summary(self, table_data: list) -> str:
         """新一代载波协议(索引9)批量解析摘要生成
@@ -8439,17 +8762,15 @@ class MainWindow(QMainWindow):
         # ── 字段索引：快速定位关键字段 ──
         fields = {item[0]: item for item in table_data}
 
-        # ── ED 监控包装帧（PLC2.0 / 广西台体两种公共头格式）──
+        # ── ED 监控包装帧（标题含「监控包装头」；文案按协议/布局由 batch_core 单源给出）──
+        from batch_core import ed_wrapper_summary_name
+
         ed_hdr = next(
-            (
-                k
-                for k in ("── PLC2.0 监控包装头 ──", "── 广西台体监控包装头 ──")
-                if k in fields
-            ),
+            (k for k in fields if "监控包装头" in str(k)),
             None,
         )
         if ed_hdr:
-            parts = ["广西台体监控包装帧" if "广西" in ed_hdr else "PLC2.0监控包装帧"]
+            parts = [ed_wrapper_summary_name(ed_hdr)]
             ctrl1 = fields.get("控制域1")
             ctrl2 = fields.get("控制域2")
             if ctrl1:
@@ -8796,8 +9117,9 @@ class MainWindow(QMainWindow):
         if nid:
             parts.append(f"NID:{nid}")
 
-        # 2. 帧类型（定界符类型），comment 形如 "DT=1: SOF帧"
-        delim = cmt("定界符类型")
+        # 2. 帧类型（定界符类型）。协议10 comment 形如 "DT=1: SOF帧"；
+        #    协议11 字段名为「定界符类型(DT)」，comment 即「信标帧/SOF帧」等。
+        delim = cmt("定界符类型") or cmt("定界符类型(DT)")
         frame_type_name = ""
         if delim:
             frame_type_name = delim.split(":", 1)[1].strip() if ":" in delim else delim
@@ -8807,10 +9129,36 @@ class MainWindow(QMainWindow):
             else:
                 parts.append(frame_type_name)
 
+        # 信标帧：补「中央信标/发现信标/代理信标」等类型（协议11 现场扫读用）
+        beacon_type = cmt("信标类型") or val("信标类型")
+        if beacon_type and "保留" not in str(beacon_type):
+            if frame_type_name and "信标" in frame_type_name:
+                if beacon_type not in frame_type_name:
+                    parts.append(str(beacon_type))
+            elif not frame_type_name:
+                parts.append(f"信标:{beacon_type}")
+
         # 3. 管理消息类型(MMTYPE)：如 关联确认(MMeAssocCnf)/发现列表
-        mmtype = cmt("管理消息类型(MMTYPE)")
+        #    字段名两协议不同构：协议10=`管理消息类型(MMTYPE)`，协议11=`消息类型(MMTYPE)`
+        #    （hdc10_mme_parser）。pb_only 批量时网络层帧只有 MAC+MME，
+        #    摘要若不带 MMTYPE 则整批「0→1 | msduSeq:x | 单播」无法扫读。
+        mmtype = cmt("管理消息类型(MMTYPE)") or cmt("消息类型(MMTYPE)")
+        mmtype_code = val("管理消息类型(MMTYPE)") or val("消息类型(MMTYPE)")
+        if not mmtype:
+            # 区头 comment 形如 "MMTYPE: 0x0000 (关联请求)"
+            for item in table_data:
+                key = str(item[0]).strip()
+                if "网络管理消息" in key and len(item) >= 4 and item[3]:
+                    c = str(item[3]).strip()
+                    if "MMTYPE" in c:
+                        mmtype = c
+                        break
         if mmtype:
-            parts.append(f"MMTYPE:{mmtype}")
+            text = mmtype[7:].strip() if mmtype.startswith("MMTYPE:") else mmtype
+            if mmtype_code and mmtype_code not in text:
+                parts.append(f"MMTYPE:{mmtype_code}({text})")
+            else:
+                parts.append(f"MMTYPE:{text}")
 
         # 4. 源→目的TEI：优先 FC 级，其次 MAC 级原始源/目的
         src = val("源TEI") or val("原始源TEI")
@@ -8829,9 +9177,15 @@ class MainWindow(QMainWindow):
             parts.append(send_type)
 
         # 7. MSDU类型（非保留且未在别处体现）
+        #    「网络管理消息」优先由 MMTYPE 段体现；无 MMTYPE 时仍要展示，
+        #    否则 pb_only 网络层帧摘要只剩 TEI/序号。
         msdu_type = cmt("MSDU类型")
-        if msdu_type and "保留" not in msdu_type and "网络管理" not in msdu_type:
-            parts.append(msdu_type)
+        has_mmtype = any(p.startswith("MMTYPE:") for p in parts)
+        if msdu_type and "保留" not in msdu_type:
+            if "网络管理" in msdu_type and has_mmtype:
+                pass
+            else:
+                parts.append(msdu_type)
 
         # 8. 应用层：报文端口 + 报文ID(含方向) + 报文序号 + 规约类型 + 数据长度
         port = val("报文端口号")
@@ -8908,15 +9262,36 @@ class MainWindow(QMainWindow):
             return self._extract_csg_new_gen_frames(text)
         if strategy == "gw_line_min4":
             # 前缀已在 parse_batch 中通过 _strip_gw_new_gen_prefix 剥离
-            return [
-                (f.strip(), "", i)
-                for i, f in enumerate(text.splitlines())
-                if f.strip() and len(f.strip()) >= 4
-            ]
+            return self._extract_line_frames(text, protocol_index, min_len=4)
         # line / 默认：每行一帧
-        return [
-            (f.strip(), "", i) for i, f in enumerate(text.splitlines()) if f.strip()
-        ]
+        return self._extract_line_frames(text, protocol_index, min_len=1)
+
+    def _extract_line_frames(
+        self, text: str, protocol_index: int, min_len: int = 1
+    ) -> list:
+        """按行提取帧（每行一帧）；双模协议（10/11）的 ED..EE 包装行先解包。
+
+        监控日志把 ED 包装帧（可能一行拼多帧）原样贴进来时，必须剥离
+        ``ED(6B) + 数据域公共头``（plc2 9B / gx 8B）才是 FC+PB 业务帧；否则首字节
+        0xED 会被当成应用层端口号解析（用户报障：协议11 下 ED 帧被解析成
+        「应用层报文」）。解包实现与批量共享核心 ``batch_core`` 同源
+        （协议9 走 csg_line 策略，其提取函数已含同等逻辑）。
+        """
+        from batch_core import unwrap_ed_line
+
+        frames = []
+        for i, raw_line in enumerate(text.splitlines()):
+            line = raw_line.strip()
+            if not line or len(line) < min_len:
+                continue
+            if protocol_index in (10, 11):
+                unwrapped = unwrap_ed_line(line, protocol_index)
+                if unwrapped is not None:
+                    for frame_hex, ed_type in unwrapped:
+                        frames.append((frame_hex, ed_type, i))
+                    continue
+            frames.append((line, "", i))
+        return frames
 
     def _extract_wrapper_frames(self, text: str) -> list:
         """
@@ -10332,6 +10707,24 @@ class MainWindow(QMainWindow):
                     return str(item[3] or item[2] or "国网新一代")
             return "国网新一代"
 
+        elif proto == 11:  # HDC 1.0
+            # 与协议10 字段名不同构：FC 定界符行叫「定界符类型(DT)」→ 两种都认，
+            # 否则类型列恒为注册表名首段「HDC」而看不到
+            # 信标帧/SOF帧/选择确认帧(SACK)/网间协调帧（口径与 batch_core 同名函数一致）。
+            for item in table_data:
+                field = str(item[0])
+                if field.startswith(("定界符类型", "MSDU类型")):
+                    val = str(item[3] or item[2] or "")
+                    if val:
+                        return val
+            for item in table_data:
+                field = str(item[0]).strip()
+                if field in ("MSDU类型", "报文ID", "业务报文ID"):
+                    val = str(item[3] or item[2] or "")
+                    if val:
+                        return val
+            return "HDC 1.0"
+
         elif proto == 6:  # DLT645
             for item in table_data:
                 if "控制码" in str(item[0]) and not str(item[0]).startswith(" "):
@@ -10985,6 +11378,14 @@ class MainWindow(QMainWindow):
             self._saved_protocol = 0
         # 同步到 combo（combo 在 create_single_parse_tab 中创建，稍后初始化时设置）
 
+        # 顶部栏折叠状态（独立顶层 "top_bar" 段；**不要**写入 "ui"——该段由
+        # ThemeManager.to_config 整体重建）。缺省 = 展开。
+        top_bar_cfg = self._app_config.get("top_bar", {})
+        if not isinstance(top_bar_cfg, dict):
+            top_bar_cfg = {}
+        self._saved_proto_collapsed = bool(top_bar_cfg.get("proto_collapsed", False))
+        self._saved_serial_collapsed = bool(top_bar_cfg.get("serial_collapsed", False))
+
         # 窗口几何 / 分栏 / 列宽（顶层 "window" 段，由 closeEvent 真实退出路径写出）。
         # 只解析成数据，不碰 widget（此时 UI 还未建）；套用在 __init__ 末尾
         # 与 _update_protocol_lookup_tab 里。结构不合法则置空 → 回落默认布局。
@@ -11324,6 +11725,21 @@ class MainWindow(QMainWindow):
         parse_cfg["protocol"] = getattr(self, "current_protocol", 0)
         config["parse"] = parse_cfg
 
+        # 顶部栏折叠状态（独立顶层 "top_bar" 段；勿写入 ui 段）。
+        # 用 toggle 的 checked 判定，不依赖 isVisible()——父窗口未 show 时后者恒 False。
+        try:
+            proto_collapsed = not self.proto_toggle_btn.isChecked()
+            serial_collapsed = not self.serial_toggle_btn.isChecked()
+        except Exception:
+            proto_collapsed = getattr(self, "_saved_proto_collapsed", False)
+            serial_collapsed = getattr(self, "_saved_serial_collapsed", False)
+        top_bar_state = config.get("top_bar", {})
+        if not isinstance(top_bar_state, dict):
+            top_bar_state = {}
+        top_bar_state["proto_collapsed"] = proto_collapsed
+        top_bar_state["serial_collapsed"] = serial_collapsed
+        config["top_bar"] = top_bar_state
+
         # 窗口几何/分栏/列宽（顶层 "window" 段）。只有 closeEvent 的真实退出路径
         # 会把 _window_state 填成最新值（_collect_window_state）；其余保存点沿用
         # 载入值，避免切协议/改串口配置时把中途布局当退出布局写盘。空则删键。
@@ -11489,6 +11905,18 @@ class MainWindow(QMainWindow):
                 self.serial_refresh_btn.setStyleSheet(self._serial_refresh_style())
             except RuntimeError:
                 pass
+        for _btn_name in ("proto_toggle_btn", "serial_toggle_btn"):
+            _btn = getattr(self, _btn_name, None)
+            if _btn is not None:
+                try:
+                    _btn.setStyleSheet(self._top_bar_toggle_style())
+                except RuntimeError:
+                    pass
+        if hasattr(self, "_serial_statusbar_lbl"):
+            try:
+                self._update_serial_statusbar()
+            except RuntimeError:
+                pass
         if hasattr(self, "batch_frame_count_label"):
             try:
                 self.batch_frame_count_label.setStyleSheet(self._batch_count_style())
@@ -11588,6 +12016,7 @@ class MainWindow(QMainWindow):
             idx = self.serial_port_combo.findText(current)
             if idx >= 0:
                 self.serial_port_combo.setCurrentIndex(idx)
+        self._update_serial_statusbar()
 
     def _on_serial_open_clicked(self):
         """打开/关闭串口按钮点击"""
@@ -11600,6 +12029,7 @@ class MainWindow(QMainWindow):
             self.serial_parity_combo.setEnabled(True)
             self.serial_status_label.setText("未连接")
             self.serial_status_label.setStyleSheet(self._serial_status_style("#999"))
+            self._update_serial_statusbar()
             self._save_serial_config()
         else:
             port = self.serial_port_combo.currentText()
@@ -11621,6 +12051,7 @@ class MainWindow(QMainWindow):
                 self.serial_status_label.setStyleSheet(
                     "color: #4CAF50; font-size: 12px;"
                 )
+                self._update_serial_statusbar()
                 self._save_serial_config()
 
     def _on_serial_connection_changed(self, connected: bool):
@@ -11634,11 +12065,13 @@ class MainWindow(QMainWindow):
             self.serial_parity_combo.setEnabled(True)
             self.serial_status_label.setText("未连接")
             self.serial_status_label.setStyleSheet(self._serial_status_style("#999"))
+            self._update_serial_statusbar()
 
     def _on_serial_error(self, msg: str):
         """串口错误回调"""
         self.serial_status_label.setText(f"错误: {msg}")
         self.serial_status_label.setStyleSheet(self._serial_status_style("#f44336"))
+        self._update_serial_statusbar()
 
 
 def main():

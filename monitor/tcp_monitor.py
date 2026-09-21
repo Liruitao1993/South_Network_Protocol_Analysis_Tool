@@ -3,7 +3,15 @@
 TCP 流量监控器 Widget
 
 基于 scapy 的 TCP 流量捕获 + 流重组 + 应用层协议解析。
-支持国网新一代 / 南网新一代协议自动识别与解析。
+
+支持国网新一代（协议10）/ 南网新一代（协议9）/ HDC 1.0（协议11）解析。
+在协议下拉框显式选择「HDC 1.0」时，可解析 ED..EE 监控封装头、网络层
+（FC/PB）与应用层（MAC/MSDU/MME）字段，并按定界符类型区分信标帧 / SOF 帧 /
+选择确认帧(SACK) / 网间协调帧。
+
+「自动识别」的范围与上述**不同**：它只在拿到 CRC-24 自证的帧控制证据时把
+HDC 1.0 候选提前，因此覆盖信标帧 / SOF 帧 / SACK / 网间协调帧四类；
+MAC/应用层帧需显式选择协议（原因见 ``hdc_fc_evidence`` 的 docstring）。
 """
 
 import time
@@ -47,16 +55,111 @@ def _load_scapy():
     return True
 
 
+# ── 国网 HDC 帧归属证据（协议11/10 自动识别用，纯函数）──────────
+#
+# 背景（实测）：TCP 监控「自动识别」原先按 南网→国网新一代→HDC 1.0 顺序试解析，
+# 而南网新一代解析器对 HDC 帧只返回 1 行退化结果（「未识别的MSDU类型」）却算
+# 「成功」→ 先行接管。TMI 真实日志 748 个 ED 帧（DT=0/1/2/3 四类齐全）与
+# 合成 MAC 帧全部被误判为南网新一代。
+
+def _strip_wrapper_common_header(frame: bytes, wrapper: str) -> bytes:
+    """剥掉 ED 包装头(6B) + 数据域公共头（gx=8B / plc2=9B），返回业务帧字节。"""
+    hdr = 8 if wrapper == "gx" else 9
+    frame_len = frame[1] | (frame[2] << 8)
+    return frame[6:6 + frame_len - 4][hdr:]
+
+
+def _ed_frame_business_candidates(frame: bytes):
+    """ED..EE 帧 → 两种公共头读法下的 ``(wrapper, 业务字节)``；帧不合法则空。
+
+    公共头有 gx(8B)/plc2(9B) 两种，布局判别可能出错，故两种读法都要给出，
+    由调用方用**自证判据**挑选（见 :func:`hdc_fc_evidence`）。
+    """
+    if not frame or frame[0] != 0xED or len(frame) < 16 or frame[5] != 0xEF:
+        return
+    frame_len = frame[1] | (frame[2] << 8)
+    if frame_len < 4 or frame_len + 4 != len(frame) or frame[-1] != 0xEE:
+        return
+    for wrapper in ("gx", "plc2"):
+        yield wrapper, _strip_wrapper_common_header(frame, wrapper)
+
+
+def hdc_fc_evidence(frame: bytes) -> bool:
+    """ED 包装帧是否为国网 HDC 1.0 的 **MPDU 帧控制**（信标/SOF/SACK/网间协调）。
+
+    判据为 ``hdc10_parser.looks_like_hdc_fc``：定界符 0~3 + 网络类型=0 +
+    标准版本号=0 + FCCS(CRC-24) 校验通过。这是**互斥证据**：
+
+      - 南网新一代 FC 的「网络类型」域（bit3~7）含接入指示位，恒 ≥1 → 被排除；
+      - 协议10 的 HDC 2.0 标准版本号 ≠0 → 被排除；
+      - 误判概率 1/2^24。
+
+    为什么只用这一条判据（而不用「像 HDC MAC 帧」这类结构启发式）：ED 包装布局
+    判别本身可能出错，错位 1 字节的垃圾业务帧**恰好能通过** HDC MAC 的结构检查
+    （版本=0、MSDU 长度自洽）——实测南网新一代帧因此被误重排到 HDC 1.0，且真实
+    HDC 帧的第二字节 0x3A 也会反过来撞上「南网 MPDU」特征。只有 CRC 自证的读法
+    才同时排除这两种误判。
+
+    gx 与 plc2 两种读法都试，任一自证即命中。
+    """
+    try:
+        from hdc10_parser import looks_like_hdc_fc
+    except Exception:
+        return False
+    for _wrapper, business in _ed_frame_business_candidates(frame):
+        try:
+            if looks_like_hdc_fc(business):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def evidenced_ed_wrapper(frame: bytes, protocol_index=None) -> str:
+    """ED 包装布局判别：协议10/11 用**权威 FCCS 证据**，其余沿用原打分实现。
+
+    为什么不能只用 ``batch_core.resolve_ed_wrapper``：它的协议10/11 打分基于
+    「HDC MAC 版本号」启发式（首字节低 4 位 ∈{0,1} 加 2 分），对 DT∈{2,3}
+    （SACK / 网间协调）的 16 字节 FC 帧，一旦 NID 最低字节低 4 位 ∈{0,1}，
+    错位一字节的 plc2 结果反而得分更高（穷举 NID 最低字节实测误判 32/256），
+    业务帧整体错位 1 字节后 DT 判据失效，被降级成「应用层报文」垃圾解析。
+
+    这里改用 ``looks_like_hdc_fc``（CRC-24，互斥证据）试剥 gx/plc2，命中即返回
+    （gx 优先，协议10/11 的公共头与 gx 同构为 8 字节）；都不命中再退回原实现。
+    """
+    from batch_core import resolve_ed_wrapper
+
+    def _fallback():
+        return resolve_ed_wrapper(frame, "auto", protocol_index=protocol_index)
+
+    if protocol_index not in (10, 11):
+        return _fallback()
+    try:
+        from hdc10_parser import looks_like_hdc_fc
+    except Exception:
+        return _fallback()
+    for wrapper, business in _ed_frame_business_candidates(frame):
+        try:
+            if looks_like_hdc_fc(business):
+                return wrapper
+        except Exception:
+            continue
+    return _fallback()
+
+
 # ── 流重组器 ──────────────────────────────────────────────
 
 class FlowBuffer:
     """
     单方向 TCP 字节流缓冲区，负责切出完整应用帧。
 
-    切帧格式：监控器协议封装（南网新一代 PLC2 监控协议）
+    切帧格式：监控器协议封装（ED..EE，PLC2.0 / 国网HDC 等）
       ED + 帧长(2B小端) + 控制域1(1B) + 控制域2(1B) + EF + 数据域 + CS + EE
     帧长 = 数据域长度 + 4
-    数据报文(ctrl1=0x00)的数据域前 9 字节是公共头，其后为业务帧。
+
+    **保留完整 ED 帧**（不在此处剥公共头）：解析阶段按所选协议
+    （南网 PLC2 / 国网新一代 / HDC 1.0）用 batch_core 解包并生成包装头字段。
+    公共头布局：PLC2.0=9B / 国网HDC·广西=8B，由 resolve_ed_wrapper 判别。
     """
 
     SOF = 0xED
@@ -66,7 +169,7 @@ class FlowBuffer:
 
     def __init__(self):
         self._buf = bytearray()
-        self._frames: List[Tuple[float, bytes]] = []  # (时间戳, 业务帧数据)
+        self._frames: List[Tuple[float, bytes]] = []  # (时间戳, 完整帧字节)
 
     def append(self, data: bytes, timestamp: float):
         """追加数据并尝试切帧"""
@@ -74,7 +177,7 @@ class FlowBuffer:
         self._deframe(timestamp)
 
     def _deframe(self, timestamp: float):
-        """从缓冲区切出监控封装帧，提取业务帧数据"""
+        """从缓冲区切出完整 ED 监控封装帧（业务解析在 _parse_and_summarize）"""
         i = 0
         n = len(self._buf)
         while i < n:
@@ -96,32 +199,8 @@ class FlowBuffer:
             if self._buf[i + 5] != self.EF or self._buf[i + total - 1] != self.EE:
                 i += 1
                 continue
-            ctrl1 = self._buf[i + 3]
-            ctrl2 = self._buf[i + 4]
-            data_start = i + 6
-            data_len = frame_len - 4
-            cs_pos = data_start + data_len
-
-            # 校验和（ED 到数据域末尾的累加 & 0xFF）
-            calc_cs = sum(self._buf[i:cs_pos]) & 0xFF
-            stored_cs = self._buf[cs_pos]
-            cs_ok = (calc_cs == stored_cs)
-
-            # 提取业务帧
-            business = b''
-            if ctrl1 == 0x00 and ctrl2 in (0x01, 0x02, 0x03) and data_len >= 9:
-                # 数据报文：剥 9 字节公共头（信道1 + 时间戳4 + PB数1 + 标志1 + PB长2）
-                business = bytes(self._buf[data_start + 9:data_start + data_len])
-            elif ctrl1 == 0x00 and ctrl2 == 0x00:
-                # 控制报文：无业务帧
-                pass
-            else:
-                # 其他类型：取整个数据域尝试解析
-                business = bytes(self._buf[data_start:data_start + data_len])
-
-            if business:
-                self._frames.append((timestamp, business))
-
+            # 保留完整 ED 帧（含包装头），供协议相关解析/文案使用
+            self._frames.append((timestamp, bytes(self._buf[i:i + total])))
             i += total
             continue
 
@@ -365,6 +444,7 @@ class TCPMonitorWidget(QWidget):
         super().__init__(parent)
         self._gw_parser = None
         self._csg_parser = None
+        self._hdc10_parser = None
         self._sniffer: Optional[PacketSniffer] = None
         self._reassembler = TCPFlowReassembler()
         self._current_flow_id: Optional[int] = None
@@ -373,6 +453,7 @@ class TCPMonitorWidget(QWidget):
         self._auto_scroll = True  # 应用层帧列表自动滚动
         self._gw_summary_fn = None
         self._csg_summary_fn = None
+        self._hdc10_summary_fn = None
         # CSV 实时记录
         self._csv_file = None
         self._csv_writer = None
@@ -391,12 +472,22 @@ class TCPMonitorWidget(QWidget):
         self._ui_timer.timeout.connect(self._flush_ui_updates)
         self._pending_flow_updates = False
 
-    def set_parsers(self, gw_parser, csg_parser, gw_summary_fn=None, csg_summary_fn=None):
-        """注入协议解析器和摘要生成函数"""
+    def set_parsers(
+        self,
+        gw_parser,
+        csg_parser,
+        gw_summary_fn=None,
+        csg_summary_fn=None,
+        hdc10_parser=None,
+        hdc10_summary_fn=None,
+    ):
+        """注入协议解析器和摘要生成函数（国网新一代 / 南网新一代 / HDC 1.0）"""
         self._gw_parser = gw_parser
         self._csg_parser = csg_parser
+        self._hdc10_parser = hdc10_parser
         self._gw_summary_fn = gw_summary_fn
         self._csg_summary_fn = csg_summary_fn
+        self._hdc10_summary_fn = hdc10_summary_fn or gw_summary_fn
 
     # ── UI 构建 ────────────────────────────────────────
 
@@ -460,7 +551,15 @@ class TCPMonitorWidget(QWidget):
         toolbar.addSpacing(12)
         toolbar.addWidget(QLabel("协议："))
         self.proto_combo = QComboBox()
-        self.proto_combo.addItems(["自动识别", "国网新一代", "南网新一代"])
+        self.proto_combo.addItems(
+            ["自动识别", "国网新一代", "南网新一代", "HDC 1.0"]
+        )
+        self.proto_combo.setToolTip(
+            "解析所选协议族；ED..EE 监控封装按协议语义解析：\n"
+            "  国网新一代 / HDC 1.0 → 国网HDC 封包头字段\n"
+            "  南网新一代 → PLC2.0 / 广西台体\n"
+            "  自动识别 → 依次尝试南网 / 国网新一代 / HDC 1.0"
+        )
         toolbar.addWidget(self.proto_combo)
 
         toolbar.addStretch()
@@ -981,66 +1080,177 @@ class TCPMonitorWidget(QWidget):
         # 用缓存的解析结果填充表格
         self._fill_parse_table(parsed)
 
+    def _unwrap_ed_for_parse(
+        self, frame: bytes, protocol_index=None
+    ) -> Tuple[list, bytes]:
+        """ED..EE 帧 → (ed_rows, business)，包装布局判别用**权威 FCCS 证据**。
+
+        与 ``batch_core.unwrap_ed_for_parse`` 同构，仅把布局判别换成
+        :func:`evidenced_ed_wrapper`：后者对协议11 的 DT∈{2,3}（SACK/网间协调）
+        帧不会被 batch_core 的「HDC MAC 版本号」启发式误判成 plc2（穷举 NID
+        最低字节实测误判 32/256），从而避免业务帧整体错位 1 字节、DT 判据失效
+        后被降级成「应用层报文」垃圾解析。
+        """
+        from batch_core import build_ed_header_rows, extract_business_from_ed_frame
+
+        if not frame or frame[0] != 0xED:
+            return [], frame
+        wrapper = evidenced_ed_wrapper(frame, protocol_index)
+        ed_rows = build_ed_header_rows(frame, protocol_index, wrapper)
+        business_hex, _dtype = extract_business_from_ed_frame(
+            frame.hex(),
+            wrapper=wrapper,
+            protocol_index=protocol_index if protocol_index is not None else 9,
+        )
+        if business_hex:
+            return ed_rows, bytes.fromhex(business_hex)
+        if ed_rows:
+            return ed_rows, b""
+        return [], frame
+
     def _parse_and_summarize(self, frame: bytes) -> Tuple[str, str, list]:
-        """解析帧并生成摘要，返回 (协议名, 摘要, 解析结果列表)"""
-        proto_mode = self.proto_combo.currentIndex()  # 0=自动 1=国网 2=南网
-        parser = None
-        proto_name = "未知"
-        summary_fn = None
+        """解析帧并生成摘要，返回 (协议名, 摘要, 解析结果列表)。
 
+        proto_combo: 0=自动 1=国网新一代 2=南网新一代 3=HDC 1.0
+        ED..EE 监控封装：先按协议语义生成包装头字段，再解析业务帧。
+        """
+        from batch_core import (
+            ed_wrapper_display,
+            ed_wrapper_summary_name,
+        )
+
+        proto_mode = self.proto_combo.currentIndex()
+        # (parser, proto_name, summary_fn, protocol_index_for_ed)
+        candidates = []
         if proto_mode == 1 and self._gw_parser:
-            parser = self._gw_parser
-            proto_name = "国网新一代"
-            summary_fn = self._gw_summary_fn
+            candidates = [(self._gw_parser, "国网新一代", self._gw_summary_fn, 10)]
         elif proto_mode == 2 and self._csg_parser:
-            parser = self._csg_parser
-            proto_name = "南网新一代"
-            summary_fn = self._csg_summary_fn
+            candidates = [(self._csg_parser, "南网新一代", self._csg_summary_fn, 9)]
+        elif proto_mode == 3 and self._hdc10_parser:
+            candidates = [(self._hdc10_parser, "HDC 1.0", self._hdc10_summary_fn, 11)]
         else:
-            # 自动识别：先试南网（因为 TCP 监控大概率是南网 PLC2），不行试国网
-            if self._csg_parser and self._try_parse(self._csg_parser, frame):
-                parser = self._csg_parser
-                proto_name = "南网新一代"
-                summary_fn = self._csg_summary_fn
-            elif self._gw_parser and self._try_parse(self._gw_parser, frame):
-                parser = self._gw_parser
-                proto_name = "国网新一代"
-                summary_fn = self._gw_summary_fn
+            # 自动识别：南网 → 国网新一代 → HDC 1.0
+            if self._csg_parser:
+                candidates.append(
+                    (self._csg_parser, "南网新一代", self._csg_summary_fn, 9)
+                )
+            if self._gw_parser:
+                candidates.append(
+                    (self._gw_parser, "国网新一代", self._gw_summary_fn, 10)
+                )
+            if self._hdc10_parser:
+                candidates.append(
+                    (self._hdc10_parser, "HDC 1.0", self._hdc10_summary_fn, 11)
+                )
 
-        if not parser:
-            return (proto_name, "无法识别协议", [])
 
-        try:
-            rows = parser.parse_to_table(frame)
-        except Exception as e:
-            return (proto_name, f"解析错误: {e}", [])
+        # 自动识别：先用**互斥证据**判定输入是否国网 HDC 1.0 的 MPDU 帧控制
+        # （信标/SOF/SACK/网间协调），是则把国网候选提到南网新一代之前。
+        #
+        # 实测（TMI 真实日志 748 个 ED 帧，DT=0/1/2/3 四类齐全）：南网新一代
+        # 解析器对这些帧只返回 1 行退化结果（「未识别的MSDU类型」）却算「成功」
+        # → 先行接管，四类帧全部被误判为南网新一代。国网新一代解析器亦不可
+        # 先行——它把 HDC 1.0 的 MAC 帧误读成「信标帧 FC」（假阳性）。
+        #
+        # 判据只用 hdc_fc_evidence（CRC-24 自证）；不采用「像 HDC MAC 帧」这类
+        # 结构启发式，因为 ED 布局错位 1 字节的垃圾业务帧能骗过它（实测会把
+        # 南网新一代帧误重排到 HDC 1.0）。MAC/应用层帧在自动识别下不重排，
+        # 需在协议下拉框显式选择「HDC 1.0」。
+        if proto_mode == 0 and len(candidates) > 1 and hdc_fc_evidence(frame):
+            _rank = {"HDC 1.0": 0, "国网新一代": 1, "南网新一代": 2}
+            candidates.sort(key=lambda c: _rank.get(c[1], 9))
+        if not candidates:
+            return ("未知", "无法识别协议", [])
 
-        # 生成摘要
-        if summary_fn:
+        def _try_one(parser, proto_name, summary_fn, ed_proto):
+            ed_rows, business = self._unwrap_ed_for_parse(frame, ed_proto)
+            parse_target = business if business else (frame if not ed_rows else b"")
+            biz_rows = []
+            if parse_target and parser is not None:
+                try:
+                    biz_rows = parser.parse_to_table(parse_target) or []
+                except Exception as e:
+                    if ed_rows:
+                        return (
+                            proto_name,
+                            f"{ed_wrapper_summary_name(ed_rows[0][0])} | 业务解析错误: {e}",
+                            ed_rows,
+                        )
+                    raise
+            if not ed_rows and not biz_rows:
+                return None
+            rows = list(ed_rows) + list(biz_rows)
+            if ed_rows and not biz_rows:
+                wrap_name = ed_wrapper_summary_name(ed_rows[0][0])
+                ctrl1 = next((r[2] for r in ed_rows if r[0] == "控制域1"), "")
+                ctrl2 = next((r[2] for r in ed_rows if r[0] == "控制域2"), "")
+                dlen = next((r[2] for r in ed_rows if r[0] == "数据域长度"), "")
+                summary = " | ".join(
+                    p for p in (wrap_name, str(ctrl1), str(ctrl2),
+                                f"数据:{dlen}" if dlen else "") if p
+                )
+                return (proto_name, summary, rows)
+            # 有业务：包装名前缀 + 业务摘要
+            biz_summary = ""
+            if summary_fn:
+                try:
+                    biz_summary = summary_fn(biz_rows)
+                except Exception:
+                    biz_summary = self._fallback_summary(biz_rows)
+            else:
+                biz_summary = self._fallback_summary(biz_rows)
+            if ed_rows:
+                wrap_name = ed_wrapper_summary_name(ed_rows[0][0])
+                # 业务摘要若已含包装名则不重复
+                if wrap_name not in (biz_summary or ""):
+                    biz_summary = f"{wrap_name} | {biz_summary}"
+            return (proto_name, biz_summary or "-", rows)
+
+        last_err = "无法识别协议"
+        for parser, proto_name, summary_fn, ed_proto in candidates:
             try:
-                summary = summary_fn(rows)
-            except Exception:
-                summary = self._fallback_summary(rows)
-        else:
-            summary = self._fallback_summary(rows)
-
-        return (proto_name, summary, rows)
+                result = _try_one(parser, proto_name, summary_fn, ed_proto)
+            except Exception as e:
+                last_err = f"解析错误: {e}"
+                result = None
+            if result is not None:
+                return result
+        if frame and frame[:1] == b"\xed":
+            # ED 帧但业务未能用任一解析器展开：仍按当前模式给包装头
+            mode_map = {1: 10, 2: 9, 3: 11, 0: 11}
+            ed_proto = mode_map.get(proto_mode, 11)
+            ed_rows, _biz = self._unwrap_ed_for_parse(frame, ed_proto)
+            if ed_rows:
+                wrap_name = ed_wrapper_summary_name(ed_rows[0][0])
+                return ("ED封装", wrap_name, ed_rows)
+        return ("未知", last_err, [])
 
     def _fallback_summary(self, table_data: list) -> str:
         """无 summary_fn 时的简易摘要"""
         if not table_data:
             return "-"
-        # 找几个关键字段
-        fields = {item[0]: item for item in table_data}
+        # 找几个关键字段（兼容协议10/11 两种 MMTYPE 字段名）
+        fields = {str(item[0]).strip(): item for item in table_data}
         parts = []
-        if "定界符类型" in fields:
-            parts.append(fields["定界符类型"][3])
+        # 帧类型：协议10 字段名「定界符类型」（comment 形如 "DT=1: SOF帧"），
+        # 协议11 为「定界符类型(DT)」（comment 即「信标帧/SOF帧/选择确认帧(SACK)/
+        # 网间协调帧」，无冒号）——两种都认，否则协议11 四类帧摘要只剩 "-"。
+        delim = fields.get("定界符类型") or fields.get("定界符类型(DT)")
+        if delim is not None:
+            dtext = str(delim[3] or delim[2])[:24]
+            parts.append(
+                dtext.split(":", 1)[1].strip() if ":" in dtext else dtext
+            )
         if "MSDU类型" in fields:
-            parts.append(fields["MSDU类型"][3])
-        if "管理消息类型(MMTYPE)" in fields:
-            parts.append(fields["管理消息类型(MMTYPE)"][3][:20])
+            parts.append(str(fields["MSDU类型"][3])[:24])
+        for mm_name in ("管理消息类型(MMTYPE)", "消息类型(MMTYPE)"):
+            if mm_name in fields:
+                cmt = str(fields[mm_name][3] or fields[mm_name][2])[:24]
+                if cmt:
+                    parts.append(f"MMTYPE:{cmt}")
+                break
         if "业务标识" in fields:
-            parts.append(fields["业务标识"][2][:20])
+            parts.append(str(fields["业务标识"][2])[:20])
         return " | ".join(parts) if parts else "-"
 
     def _fill_parse_table(self, table_data: list):
@@ -1168,26 +1378,13 @@ class TCPMonitorWidget(QWidget):
                     frame = bytes.fromhex(hex_str.replace(" ", "")) if hex_str else b''
                     direction = 0 if dir_str == "→" else 1
 
-                    # 解析帧（为了填充缓存和摘要）
-                    parsed = []
-                    if frame and (self._gw_parser or self._csg_parser):
-                        try:
-                            if self._csg_parser:
-                                rows = self._csg_parser.parse_to_table(frame)
-                                if rows and not rows[0][0].startswith("❌"):
-                                    parsed = rows
-                                    proto_name = "南网新一代"
-                                    if self._csg_summary_fn:
-                                        summary = self._csg_summary_fn(rows)
-                            if not parsed and self._gw_parser:
-                                rows = self._gw_parser.parse_to_table(frame)
-                                if rows and not rows[0][0].startswith("❌"):
-                                    parsed = rows
-                                    proto_name = "国网新一代"
-                                    if self._gw_summary_fn:
-                                        summary = self._gw_summary_fn(rows)
-                        except Exception:
-                            pass
+                    # 解析帧（为了填充缓存和摘要）——复用 _parse_and_summarize（含 ED）
+                    proto_name2, summary2, parsed = self._parse_and_summarize(frame)
+                    if proto_name2 not in ("未知",) or not proto_name:
+                        if proto_name2 not in ("未知",):
+                            proto_name = proto_name2
+                    if summary2 and summary2 not in ("-", "无法识别协议"):
+                        summary = summary2
 
                     # 加入流
                     if flow_id not in flows_map:

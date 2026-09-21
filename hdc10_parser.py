@@ -169,6 +169,68 @@ PROTOCOL_TYPES = {
     3: "DL/T698.45",
 }
 
+# ── 通信测试命令(0x006)「检测扩展命令」：测试模式/配置操作 ───────────────
+#
+# 依据：A-HS-11-03《国网双模通信测试用例提案》1.2 节 表2（转换稿见
+# ``协议文档/11.HDC协议/A-HS-11-03 国网双模通信测试用例提案_20210414.md``）。
+# 规范表32 的通信测试下行报文里，字节1 高4位是「保留」、字节2 高4位+字节3 是
+# 「转发数据长度(12bit)」；测试场景下这两处被扩展为「测试模式/配置操作」与
+# 「模式持续时间/配置值」。测试模式=0 即未扩展（普通通信测试，走表32 原义）。
+#
+# 注：协议10（gw_new_gen_cmd_payloads._EXT_TEST_MODES）与协议9
+# （csg_new_gen_cmd_payloads._LEGACY_TEST_MODE_MAP）各有一份同内容表，
+# 改本表时三处需同步。
+EXT_TEST_MODES = {
+    1: "转发应用层报文至应用层串口信道测试模式(暂未使用)",
+    2: "转发应用层报文至载波信道测试模式(暂未使用)",
+    3: "HPLC物理层透传测试模式",
+    4: "HPLC物理层回传测试模式",
+    5: "MAC层透传测试模式",
+    6: "频段切换操作",
+    7: "ToneMask配置操作",
+    8: "无线信道切换操作",
+    9: "RF物理层回传测试模式",
+    10: "RF物理层透传测试模式",
+    11: "RF/PLC物理层回传测试模式",
+    12: "PLC到RF物理层回传测试模式",
+    13: "安全测试模式",
+    15: "新一代扩展测试模式",
+}
+
+# 安全测试模式（字节4 低4位，仅测试模式=13 生效；表2 第9条：≠13 时应为0）
+EXT_SEC_MODES = {
+    1: "SHA256算法测试", 2: "SM3算法测试",
+    3: "ECC签名测试", 4: "ECC验签测试",
+    5: "SM2签名测试", 6: "SM2验签测试",
+    7: "AES-CBC加密测试", 8: "AES-CBC解密测试",
+    9: "AES-GCM加密测试", 10: "AES-GCM解密测试",
+    11: "SM4-CBC加密测试", 12: "SM4-CBC解密测试",
+}
+
+# 频段切换操作（测试模式=6）的目标频段取值（表2 第6条原文）
+EXT_BAND_RANGES = {
+    0: "通信频段0（1.953~11.96MHz）",
+    1: "通信频段1（2.441~5.615MHz）",
+    2: "通信频段2（0.781~2.930MHz）",
+    3: "通信频段3（1.758~2.930MHz）",
+}
+
+# 模式持续时间上限（表2 注意事项第10条：超过则限定到最大时长）
+EXT_MAX_DURATION_MIN = 60
+
+# ── 事件上报(0x008) 数据域：STA上报事件类型 ────────────────────────────
+#
+# 1/2 位图方式（停电/上电）与 3/4 地址方式（停电/上电）出自 HDC 第4-3部分
+# 表30 / 表31；51 出自 A-HS-11-03 附件3《Q/GDW 11612.43 协议扩增》
+# （2024年第二批HDC模块即装即采增补协议要求，山东）。
+EVENT_TYPES = {
+    1: ("停电事件（位图方式）", "bitmap"),
+    2: ("上电事件（位图方式）", "bitmap"),
+    3: ("停电事件（地址方式）", "addr"),
+    4: ("上电事件（地址方式）", "addr"),
+    51: ("设备信息（上报下挂设备）", "device"),
+}
+
 # 报文ID名称映射（业务ID低12位）
 MSG_ID_NAMES = {
     0x001: "终端主动抄表",
@@ -236,6 +298,111 @@ def _crc32(data: bytes) -> int:
     return zlib.crc32(data) & 0xFFFFFFFF
 
 
+def _ascii_text(buf: bytes) -> str:
+    """ASCII 字段解码（非 ASCII 字节按原样以 hex 展示，不抛异常）"""
+    try:
+        text = buf.decode("ascii")
+    except UnicodeDecodeError:
+        return " ".join(f"{b:02X}" for b in buf)
+    return text if text.isprintable() else " ".join(f"{b:02X}" for b in buf)
+
+
+def _bits_lsb(data: bytes, byte_off: int, bit_off: int, nbits: int) -> int:
+    """按规范各表的「字节号 / 比特位」列读跨字节位域（**位号小的一端是低位**）。
+
+    规范把跨字节字段写成「字节N 比特0-7」+「字节N+1 比特0-3」这类形式，含义是
+    **LSB-first 位流**：位号小的比特是该字段的低位。同字节内的单比特标志已由
+    实测实证同一口径——SOF 帧 `0x42` 的「广播标志位=比特1」→ ``(0x42>>1)&1 = 1``
+    且该帧目的TEI 确为广播地址 4095；「分集拷贝基本模式=比特4-7」→ ``4`` 且该帧
+    物理块恰为 136 字节（模式4 = 136B）。
+
+    **不能**按「首字节=高位」组装：现场帧 ``02 F0 FF`` 的源TEI 曾被解成 32，
+    而正确值是 2（与该帧 MAC 头「原始源TEI」一致）。
+
+    Args:
+        data: 帧字节；byte_off: 字段起始字节；bit_off: 起始字节内的起始比特号；
+        nbits: 字段位宽。
+    """
+    value = 0
+    for i in range(nbits):
+        pos = byte_off * 8 + bit_off + i
+        if pos >> 3 >= len(data):
+            break
+        if data[pos >> 3] & (1 << (pos & 7)):
+            value |= 1 << i
+    return value
+
+
+# ── 帧类型/协议归属的**证据判定**（自动识别用，纯函数）────────────────
+
+# detect_hdc_frame_kind 复用解析器做 MAC 头长度判定（无状态，仅调用纯解析方法）
+_KIND_PROBE_PARSER = None
+
+
+def looks_like_hdc_fc(data: bytes) -> bool:
+    """输入是否 HDC 1.0 的 MPDU 帧控制(FC)：定界符0~3 + 网络类型0 + 标准版本号0 + FCCS 校验通过。
+
+    这是**互斥证据**，不只是「像」：
+      - 南网新一代(CSG) 的 FC 低4位为 0x8~0xB（bit3=接入指示=1），其
+        ``(b0 >> 3) & 0x1F`` 恒 ≥ 1 → 被「网络类型=0」排除；
+      - 协议10 的 HDC 2.0 帧标准版本号非 0 → 被「标准版本号=0」排除；
+      - FCCS 是 CRC-24 校验（对前 13 字节），误判概率 1/2^24。
+    实测 TMI 真实日志 1305 个 ED 包装帧的业务帧全部命中本判据（dt=0/1/2/3 四类齐全）。
+    """
+    if len(data) < 16:
+        return False
+    if (data[0] & 0x07) > 3:            # 定界符类型 = 信标/SOF/SACK/网间协调
+        return False
+    if ((data[0] >> 3) & 0x1F) != 0:    # 网络类型 = 用电信息采集系统（表15）
+        return False
+    if ((data[12] >> 4) & 0x0F) != 0:   # 标准版本号 = 0（HDC 1.0 本标准）
+        return False
+    return _crc24(data[:13]) == int.from_bytes(data[13:16], "little")
+
+
+def detect_hdc_frame_kind(data: bytes) -> str:
+    """判定输入属于哪一类 HDC 帧（自动识别用），返回：
+
+      ``"fc"``  —— MPDU（FC 校验通过）：信标帧 / SOF 帧 / 选择确认帧(SACK) / 网间协调帧
+      ``"mac"`` —— MAC 帧（标准 16/28B 或单跳 4B 头，MSDU 长度自洽、MSDU 类型已知）
+      ``"app"`` —— 应用层报文（首字节命中应用层端口号表）
+      ``""``    —— 无 HDC 证据
+
+    用于「自动识别协议」时给候选解析器排序：拿到 ``fc``/``mac``/``app`` 证据说明
+    输入确定是国网双模帧，应先按 HDC/国网新一代解析，而不是被南网新一代的宽松
+    启发式先行接管（实测 TCP 监控下四类 HDC 帧全部被误判为南网新一代）。
+    """
+    if len(data) < 4:
+        return ""
+    if looks_like_hdc_fc(data):
+        return "fc"
+    if data[0] in APP_PORTS:
+        return "app"
+    ver = data[0] & 0x0F
+    if ver not in (0, 1):
+        return ""
+    global _KIND_PROBE_PARSER
+    if _KIND_PROBE_PARSER is None:
+        _KIND_PROBE_PARSER = HDC10Parser()
+    hdr_len, _rows = _KIND_PROBE_PARSER._parse_mac_header(data, 0)
+    if ver == 1:
+        if hdr_len != 4 or len(data) < 8:
+            return ""
+        msdu_type = data[1]
+        msdu_len = (data[2] << 3) | (data[3] & 0x07)
+    else:
+        if hdr_len not in (16, 28) or len(data) < hdr_len + 4:
+            return ""
+        msdu_type = data[7]
+        msdu_len = data[8] | ((data[9] & 0x07) << 8)
+    # MSDU 长度必须与剩余字节自洽（MAC头 + MSDU + ICV(4B)）
+    if not 0 < msdu_len <= len(data) - hdr_len - 4:
+        return ""
+    if msdu_type in APP_MSDU_TYPES or msdu_type in IPV4_MSDU_TYPES or msdu_type == 0:
+        return "mac"
+    return ""
+
+
 # ── 主解析器类 ────────────────────────────────────────────────────
 
 class HDC10Parser:
@@ -262,6 +429,9 @@ class HDC10Parser:
         self._channel = "plc"  # "plc" 或 "hrf"
         self._aggregated = False
         self._std_version = 0  # 0=HDC 1.0, 1=HDC 2.0
+        # ED..EE 监控封装头声明的 PB 大小/个数（parse_to_table kwargs 注入）
+        self._pb_size_hint = None
+        self._pb_count_hint = None
 
     # ─── 主入口 ────────────────────────────────────────────────
 
@@ -274,13 +444,22 @@ class HDC10Parser:
           auto    - 自动识别，完整解析
           fc_pb   - 解析 FC + 完整物理块 PB
           fc_only - 仅解析帧控制 FC
-          mac_only- 仅解析 MAC 帧（输入即PB体中的MAC帧）
+          mac_only- 仅解析 MAC 帧（输入即 MAC 帧，不含 PBH，从字节0解析）
           pb_only - 仅解析物理块 PB，需 frame_type
           fc_mac  - 解析 FC + PBH + MAC 帧头
           app     - 仅解析应用层报文
+
+        kwargs:
+          channel: "plc"（默认）/ "hrf" —— 决定 FC 可变区域按载波表还是无线表解析
+          frame_type: pb_only 的帧类型（0=信标 1=SOF 2=SACK 3=网间协调）
+          pb_size / pb_count: **ED..EE 监控封装头声明的物理块大小与个数**（可选）。
+            多 PB 聚合帧据此做确定性切分（切分前逐块校验 PBH 序列号与起止标志，
+            校验不过则回落启发式扫描），见 ``_split_pb_by_hint``。
         """
         self._channel = kwargs.get('channel', 'plc')
         frame_type = kwargs.get('frame_type', 1)  # 默认SOF
+        self._pb_size_hint = kwargs.get('pb_size')
+        self._pb_count_hint = kwargs.get('pb_count')
         table = []
         flen = len(frame_bytes)
 
@@ -308,6 +487,24 @@ class HDC10Parser:
             # 无 FC，尝试按 MAC 帧解析
             if self._detect_mac_header(frame_bytes):
                 return self._parse_mac_only(frame_bytes, frame_type)
+            # 信标启发式：DT=0 且 HDC1.0 版本位，FCCS 失败时仍按 FC+信标载荷解析
+            # （ED 监控解包后的业务帧可能因帧长/填充导致 FCCS 对不上，但 DT=0 是信标）
+            if (
+                flen >= 20
+                and (frame_bytes[0] & 0x07) == 0
+                and ((frame_bytes[12] >> 4) & 0x0F) == 0
+            ):
+                table = self._parse_fc(frame_bytes, 0)
+                table.append((
+                    "⚠ 推测信标帧",
+                    "",
+                    "DT=0",
+                    "FCCS 未通过或未检出完整 MPDU，按信标帧(FC+信标载荷)解析",
+                    None, None,
+                ))
+                if flen > 16:
+                    table.extend(self._parse_pb_block(frame_bytes[16:], 16, 0))
+                return table
             # 尝试按应用层解析
             return self._parse_app_only(frame_bytes)
 
@@ -324,7 +521,22 @@ class HDC10Parser:
         # 获取定界符类型
         dt = frame_bytes[0] & 0x07
 
-        if dt == 2:  # SACK帧无载荷
+        if dt == 2:  # SACK帧无载荷（选择确认帧只有 FC）
+            return table
+
+        if dt == 3:
+            # 网间协调帧：表26 只定义 FC 可变区域，无物理块载荷。
+            # 真实抓包常在 FC 后带填充/冗余字节 → 只提示，**禁止**按 SOF 的 PB 解析
+            # （否则 PBH/序列号等字段全是错位臆造）。
+            extra = frame_bytes[16:]
+            if extra:
+                table.append((
+                    "  尾部数据",
+                    ' '.join(f'{b:02X}' for b in extra),
+                    f"{len(extra)}字节",
+                    "网间协调帧不含物理块载荷（超出 FC 16字节的部分按填充/冗余展示）",
+                    16, len(frame_bytes) - 1,
+                ))
             return table
 
         # 解析物理块 + MAC
@@ -455,8 +667,8 @@ class HDC10Parser:
                 table = self._parse_fc_vf_sof_plc(data, offset)
             elif dt == 2:  # SACK帧
                 table = self._parse_fc_vf_sack_plc(data, offset)
-            elif dt == 3:  # 网间协调帧
-                table = [("  可变区域(网间协调)", "", "", "待实现", base, offset + 12)]
+            elif dt == 3:  # 网间协调帧（表26）
+                table = self._parse_fc_vf_net(data, offset, "plc")
         else:  # hrf
             if dt == 0:
                 table = self._parse_fc_vf_beacon_hrf(data, offset)
@@ -465,7 +677,71 @@ class HDC10Parser:
             elif dt == 2:
                 table = self._parse_fc_vf_sack_hrf(data, offset)
             elif dt == 3:
-                table = [("  可变区域(无线网间协调)", "", "", "待实现", base, offset + 12)]
+                # 规范 5.1.2.8「无线可变区域」（表27~36）未定义网间协调帧，
+                # 只有 5.1.2.7（载波）给出表26 → 按表26 解释并显式标注依据
+                table = self._parse_fc_vf_net(data, offset, "hrf")
+
+        return table
+
+    def _parse_fc_vf_net(self, data: bytes, offset: int, channel: str) -> List[Tuple]:
+        """网间协调帧可变区域（表26，规范 5.1.2.7「载波可变区域」）
+
+        表26 字段（跨字节位域按 LSB-first 读，见 ``_bits_lsb``）：
+          持续时间(字节4-5, 16bit, 单位1ms) / 带宽开始偏移(字节6-7, 16bit, 单位1ms) /
+          接收到的邻居网络号(字节8-10, 24bit) / 本网络无线信道编号(字节11, 8bit) /
+          保留(字节12 比特0-3) —— 保留位不单列行（与表17/19/23 的既有风格一致）。
+
+        ``channel="hrf"`` 时规范无对应表，仍按表26 解释并附「依据」行说明，
+        不臆造无线专有字段（试验证：真实帧的本网络无线信道编号与同网络信标一致）。
+        """
+        table = []
+        base = offset
+
+        duration = _bits_lsb(data, offset + 4, 0, 16)
+        table.append((
+            "  持续时间",
+            f"0x{duration:04X}",
+            f"{duration}ms",
+            "本网络需要申请占用的时隙长度（单位1ms）",
+            base + 4, base + 5,
+        ))
+
+        bw_start = _bits_lsb(data, offset + 6, 0, 16)
+        table.append((
+            "  带宽开始偏移",
+            f"0x{bw_start:04X}",
+            f"{bw_start}ms",
+            "下个带宽时隙开始时刻的时间偏移（单位1ms）；该时隙已开始时取0",
+            base + 6, base + 7,
+        ))
+
+        neighbor_nid = _bits_lsb(data, offset + 8, 0, 24)
+        table.append((
+            "  接收到的邻居网络号",
+            ' '.join(f'{b:02X}' for b in data[offset + 8:offset + 11]),
+            str(neighbor_nid),
+            "能够接收到邻居网络的网络号(NID)；每次只携带一个，多次发送后拼出邻居网络集",
+            base + 8, base + 10,
+        ))
+
+        ch_no = data[offset + 11]
+        table.append((
+            "  本网络无线信道编号",
+            f"0x{ch_no:02X}",
+            str(ch_no),
+            "告知邻居网络本网络使用的无线信道编号",
+            base + 11, base + 11,
+        ))
+
+        if channel != "plc":
+            table.append((
+                "  依据",
+                "",
+                "表26(载波)",
+                "规范第4-2部分 5.1.2.8「无线可变区域」(表27~36) 未定义网间协调帧，"
+                "此处按 5.1.2.7 表26 解释",
+                base + 4, base + 11,
+            ))
 
         return table
 
@@ -483,8 +759,8 @@ class HDC10Parser:
         b11 = data[offset + 11]
         b12 = data[offset + 12]
 
-        # 源TEI: byte4(高8bit) + byte5[0:3](低4bit) = 12bit
-        src_tei = (b4 << 4) | (b5 & 0x0F)
+        # 源TEI: 字节4 比特0-7(低8位) + 字节5 比特0-3(高4位) = 12bit（表19，LSB-first 位流）
+        src_tei = _bits_lsb(data, offset + 4, 0, 12)
         table.append((
             "  源TEI",
             f"0x{src_tei:03X}",
@@ -493,8 +769,8 @@ class HDC10Parser:
             base + 4, base + 5,
         ))
 
-        # 目的TEI: byte5[4:7](高4bit) + byte6(低8bit) = 12bit
-        dst_tei = ((b5 >> 4) << 8) | b6
+        # 目的TEI: 字节5 比特4-7(低4位) + 字节6 比特0-7(高8位) = 12bit（表19）
+        dst_tei = _bits_lsb(data, offset + 5, 4, 12)
         table.append((
             "  目的TEI",
             f"0x{dst_tei:03X}",
@@ -512,8 +788,8 @@ class HDC10Parser:
             base + 7, base + 7,
         ))
 
-        # 帧长: byte8(高8bit) + byte9[0:3](低4bit) = 12bit, 单位10us
-        frame_len = (b8 << 4) | (b9 & 0x0F)
+        # 帧长: 字节8 比特0-7(低8位) + 字节9 比特0-3(高4位) = 12bit, 单位10us（表19）
+        frame_len = _bits_lsb(data, offset + 8, 0, 12)
         table.append((
             "  帧长(FL)",
             f"0x{frame_len:03X}",
@@ -532,8 +808,8 @@ class HDC10Parser:
             base + 9, base + 9,
         ))
 
-        # 符号数: byte10(高8bit) + byte11[0](最低bit) = 9bit
-        sym_count = (b10 << 1) | (b11 & 0x01)
+        # 符号数: 字节10 比特0-7(低8位) + 字节11 比特0(高1位) = 9bit（表19）
+        sym_count = _bits_lsb(data, offset + 10, 0, 9)
         table.append((
             "  符号数",
             f"0x{sym_count:03X}",
@@ -613,8 +889,8 @@ class HDC10Parser:
             base + 4, base + 7,
         ))
 
-        # 源TEI: byte8(高8bit) + byte9[0:3](低4bit)
-        src_tei = (b8 << 4) | (b9 & 0x0F)
+        # 源TEI: 字节8 比特0-7(低8位) + 字节9 比特0-3(高4位) = 12bit（表27）
+        src_tei = _bits_lsb(data, offset + 8, 0, 12)
         table.append((
             "  源TEI",
             f"0x{src_tei:03X}",
@@ -633,8 +909,8 @@ class HDC10Parser:
             base + 9, base + 9,
         ))
 
-        # 符号数: byte10(高8bit) + byte11[0] = 9bit
-        sym_count = (b10 << 1) | (b11 & 0x01)
+        # 符号数: 字节10 比特0-7(低8位) + 字节11 比特0(高1位) = 9bit（表27）
+        sym_count = _bits_lsb(data, offset + 10, 0, 9)
         table.append((
             "  符号数",
             f"0x{sym_count:03X}",
@@ -673,8 +949,8 @@ class HDC10Parser:
             base + 4, base + 7,
         ))
 
-        # 源TEI: byte8(高8bit) + byte9[0:3](低4bit) = 12bit
-        src_tei = (b8 << 4) | (b9 & 0x0F)
+        # 源TEI: 字节8 比特0-7(低8位) + 字节9 比特0-3(高4位) = 12bit（无线信标表）
+        src_tei = _bits_lsb(data, offset + 8, 0, 12)
         table.append((
             "  源TEI",
             f"0x{src_tei:03X}",
@@ -739,8 +1015,8 @@ class HDC10Parser:
             base + 4, base + 4,
         ))
 
-        # 源TEI: byte5(高8bit) + byte6[0:3](低4bit)
-        src_tei = (b5 << 4) | (b6 & 0x0F)
+        # 源TEI: 字节5 比特0-7(低8位) + 字节6 比特0-3(高4位) = 12bit（表23）
+        src_tei = _bits_lsb(data, offset + 5, 0, 12)
         table.append((
             "  源TEI",
             f"0x{src_tei:03X}",
@@ -749,8 +1025,8 @@ class HDC10Parser:
             base + 5, base + 6,
         ))
 
-        # 目的TEI: byte6[4:7](高4bit) + byte7(低8bit)
-        dst_tei = ((b6 >> 4) << 8) | b7
+        # 目的TEI: 字节6 比特4-7(低4位) + 字节7 比特0-7(高8位) = 12bit（表23）
+        dst_tei = _bits_lsb(data, offset + 6, 4, 12)
         table.append((
             "  目的TEI",
             f"0x{dst_tei:03X}",
@@ -801,19 +1077,19 @@ class HDC10Parser:
         b9 = data[offset + 9]
         b11 = data[offset + 11]
 
-        # 源TEI
-        src_tei = (b4 << 4) | (b5 & 0x0F)
+        # 源TEI: 字节4 比特0-7(低8位) + 字节5 比特0-3(高4位) = 12bit（表30）
+        src_tei = _bits_lsb(data, offset + 4, 0, 12)
         table.append(("  源TEI", f"0x{src_tei:03X}", str(src_tei), "源站点TEI", base + 4, base + 5))
 
-        # 目的TEI
-        dst_tei = ((b5 >> 4) << 8) | b6
+        # 目的TEI: 字节5 比特4-7(低4位) + 字节6 比特0-7(高8位) = 12bit（表30）
+        dst_tei = _bits_lsb(data, offset + 5, 4, 12)
         table.append(("  目的TEI", f"0x{dst_tei:03X}", str(dst_tei), "目的站点TEI", base + 5, base + 6))
 
         # 链路标识符
         table.append(("  链路标识符(LID)", f"0x{b7:02X}", str(b7), "优先级/业务分类", base + 7, base + 7))
 
-        # 帧长(单位100us)
-        frame_len = (b8 << 4) | (b9 & 0x0F)
+        # 帧长: 字节8 比特0-7(低8位) + 字节9 比特0-3(高4位) = 12bit, 单位100us（表30）
+        frame_len = _bits_lsb(data, offset + 8, 0, 12)
         table.append(("  帧长(FL)", f"0x{frame_len:03X}", f"{frame_len * 100}us",
                       f"信道占用时长: {frame_len} × 100us = {frame_len * 100}us",
                       base + 8, base + 9))
@@ -856,9 +1132,9 @@ class HDC10Parser:
                       SACK_RESULTS.get(rx_result, f"保留({rx_result})"),
                       base + 4, base + 4))
 
-        # 源TEI / 目的TEI
-        src_tei = (b5 << 4) | (b6 & 0x0F)
-        dst_tei = ((b6 >> 4) << 8) | b7
+        # 源TEI(表34: 字节5 比特0-7 + 字节6 比特0-3) / 目的TEI(字节6 比特4-7 + 字节7 比特0-7)
+        src_tei = _bits_lsb(data, offset + 5, 0, 12)
+        dst_tei = _bits_lsb(data, offset + 6, 4, 12)
         table.append(("  源TEI", f"0x{src_tei:03X}", str(src_tei), "发送SACK的站点TEI", base + 5, base + 6))
         table.append(("  目的TEI", f"0x{dst_tei:03X}", str(dst_tei), "SACK目的站点TEI", base + 6, base + 7))
 
@@ -937,9 +1213,9 @@ class HDC10Parser:
                     ))
         elif sof and not eof:
             # 多PB聚合的首块 - 需要重组
-            # 简化处理：递归解析所有PB，拼接PB体后解析MAC
-            # 先扫描所有PB边界
-            pb_list = self._scan_all_pb(data)
+            # 优先用 ED 监控封装头声明的 PB 大小/个数做确定性切分（逐块校验 PBH），
+            # 声明缺失或校验不过时回落启发式扫描
+            pb_list = self._split_pb_by_hint(data) or self._scan_all_pb(data)
             if len(pb_list) > 1:
                 table.append((
                     f"── 物理块聚合(共{len(pb_list)}个PB) ──",
@@ -1086,6 +1362,40 @@ class HDC10Parser:
                         score += 2                        # C6
 
         return (0 if score >= _PB_PROBE_MIN_SCORE else 1), score
+
+    def _split_pb_by_hint(self, data: bytes) -> Optional[List[Tuple[int, int]]]:
+        """按 ED 监控封装头声明的 PB 大小/个数**确定性**切分 PB 区域。
+
+        声明值来自包装头的「单个物理块长度 / 物理块个数」（TCP 监控、批量解析路径注入）。
+        只在以下条件全部成立时才采信（否则返回 ``None`` 让调用方回落启发式扫描）：
+
+          1. ``pb_size`` ∈ 16..520（规范物理块规格），``pb_count`` ≥ 2（单块无需切分）；
+          2. 区域长度恰好 = ``pb_count × pb_size``（真实日志里个数偶尔填 0 → 不采信）；
+          3. 每块的 PBH（表37）序列号 = 块序号，且帧起始标志只置在首块、帧结束标志
+             只置在末块（这是「切分正确」的自证，错位即判失败）。
+
+        依据：5.1.2.3「物理块头为 1 字节…序列号初始值为 0」+ 表37 帧起始/结束标志。
+        """
+        pb_size = self._pb_size_hint
+        pb_count = self._pb_count_hint
+        try:
+            pb_size = int(pb_size) if pb_size is not None else 0
+            pb_count = int(pb_count) if pb_count is not None else 0
+        except (TypeError, ValueError):
+            return None
+        if not (16 <= pb_size <= 520) or pb_count < 2:
+            return None
+        if len(data) != pb_size * pb_count:
+            return None
+        for i in range(pb_count):
+            pbh = data[i * pb_size]
+            if (pbh & 0x3F) != i:                     # 序列号必须等于块序号
+                return None
+            if ((pbh >> 6) & 0x01) != (1 if i == 0 else 0):        # 帧起始标志仅首块
+                return None
+            if ((pbh >> 7) & 0x01) != (1 if i == pb_count - 1 else 0):  # 帧结束标志仅末块
+                return None
+        return [(i * pb_size, (i + 1) * pb_size) for i in range(pb_count)]
 
     def _scan_all_pb(self, data: bytes) -> List[Tuple[int, int]]:
         """扫描所有PB边界，返回 [(start, end), ...]"""
@@ -2060,9 +2370,17 @@ class HDC10Parser:
             # 网络管理消息(MME)
             try:
                 from hdc10_mme_parser import parse_management_message
-                # MME 解析器约定 offset 为切片内相对索引, 数据已按 msdu_abs 切好
+                # data 已按 MSDU 切片 → offset 传 0（值索引相对切片）；
+                # 行偏移再整体加上 base_offset，与原帧字节高亮对齐。
                 mme_table = parse_management_message(data, 0)
-                table.extend(mme_table)
+                shifted = []
+                for row in mme_table:
+                    cells = list(row)
+                    if len(cells) >= 6 and cells[4] is not None and cells[5] is not None:
+                        cells[4] = cells[4] + base_offset
+                        cells[5] = cells[5] + base_offset
+                    shifted.append(tuple(cells))
+                table.extend(shifted)
             except Exception:
                 table.append((
                     "  网络管理消息",
@@ -2544,38 +2862,335 @@ class HDC10Parser:
                       "BCD码(6字节)",
                       offset + 6, offset + 11))
 
-        if len(data) > hdr_bytes:
-            payload = data[hdr_bytes:]
-            table.append(("    事件数据",
-                          ' '.join(f'{b:02X}' for b in payload[:16]) + ("..." if len(payload) > 16 else ""),
-                          f"{len(payload)}字节", "事件数据内容",
-                          offset + hdr_bytes, offset + hdr_bytes + len(payload) - 1))
-
+        # 数据（DATA）域：字节12 起（表30/表31/附件3 的字节号以报文头为基准）
+        data_off = hdr_bytes if 12 <= hdr_bytes <= len(data) else 12
+        if len(data) > data_off:
+            table.extend(self._parse_event_data(data, data_off, offset))
         return table
 
+    def _parse_event_data(self, data: bytes, pos: int, offset: int) -> List[Tuple]:
+        """事件上报数据（DATA）域：位图方式 / 地址方式 / 设备信息
+
+        依据 HDC 第4-3部分 §5.6.1.10：
+          表30 位图方式 —— 事件类型 1=停电(位图) / 2=上电(位图)：
+            字节12 事件类型 + 字节13-14 发生事件站点起始TEI(16bit) + 可变长节点位图
+          表31 地址方式 —— 事件类型 3=停电(地址) / 4=上电(地址)：
+            字节12 事件类型 + 字节13-14 发生事件电表个数(16bit)
+            + N × (电表地址 6B + 带电状态 1B)
+        依据 A-HS-11-03 附件3《Q/GDW 11612.43 协议扩增》（即装即采）：
+          事件类型 51 = 设备信息：设备地址/协议类型/描述符 + M 台下挂设备清单
+        """
+        table = []
+        ev_type = data[pos]
+        name, kind = EVENT_TYPES.get(ev_type, (f"保留({ev_type})", ""))
+        table.append(("    事件类型", f"0x{ev_type:02X}", name,
+                      "STA上报事件类型（表30/表31/即装即采附件3）",
+                      offset + pos, offset + pos))
+        if not kind:
+            rem = data[pos + 1:]
+            if rem:
+                table.append(("    事件数据",
+                              ' '.join(f'{b:02X}' for b in rem[:16])
+                              + ("..." if len(rem) > 16 else ""),
+                              f"{len(rem)}字节", "未定义事件类型的原始数据",
+                              offset + pos + 1, offset + pos + len(rem)))
+            return table
+        if kind == "bitmap":
+            table.extend(self._parse_event_bitmap(data, pos + 1, offset))
+        elif kind == "addr":
+            table.extend(self._parse_event_addr(data, pos + 1, offset))
+        elif kind == "device":
+            table.extend(self._parse_event_device(data, pos + 1, offset))
+        return table
+
+    def _parse_event_bitmap(self, data: bytes, pos: int, offset: int) -> List[Tuple]:
+        """位图方式数据域（表30）：起始TEI(16bit) + 可变长节点位图"""
+        if len(data) < pos + 2:
+            return [("    事件数据", "", "", "位图方式数据不足（需起始TEI 2字节）",
+                     offset + pos, offset + len(data) - 1)]
+        start_tei = int.from_bytes(data[pos:pos + 2], 'little')
+        table = [("    发生事件站点起始TEI", f"0x{start_tei:04X}", str(start_tei),
+                  "第1个bit代表该TEI，后续依次类推", offset + pos, offset + pos + 1)]
+        bitmap = data[pos + 2:]
+        if bitmap:
+            set_bits = [start_tei + i * 8 + b
+                        for i, byte in enumerate(bitmap)
+                        for b in range(8) if byte & (1 << b)]
+            table.append(("    发生事件的节点位图",
+                          ' '.join(f'{b:02X}' for b in bitmap[:16])
+                          + ("..." if len(bitmap) > 16 else ""),
+                          f"{len(bitmap)}字节 / {len(set_bits)}个节点",
+                          "置位TEI: " + (', '.join(str(t) for t in set_bits[:12])
+                                        + ("..." if len(set_bits) > 12 else "")),
+                          offset + pos + 2, offset + pos + 1 + len(bitmap)))
+        return table
+    def _parse_event_addr(self, data: bytes, pos: int, offset: int) -> List[Tuple]:
+        """地址方式数据域（表31）：电表个数(16bit) + N × (地址6B + 带电状态1B)"""
+        if len(data) < pos + 2:
+            return [("    事件数据", "", "", "地址方式数据不足（需电表个数 2字节）",
+                     offset + pos, offset + len(data) - 1)]
+        count = int.from_bytes(data[pos:pos + 2], 'little')
+        table = [("    发生事件的电表个数", f"0x{count:04X}", str(count),
+                  f"发生事件电表个数: {count}", offset + pos, offset + pos + 1)]
+        p = pos + 2
+        for i in range(count):
+            if p + 7 > len(data):
+                table.append((f"    电表{i + 1}", "", "",
+                              "数据不足（需地址6B+状态1B）",
+                              offset + p, offset + len(data) - 1))
+                break
+            addr = data[p:p + 6]
+            state = data[p + 6]
+            table.append((f"    电表{i + 1}地址",
+                          ' '.join(f'{b:02X}' for b in addr),
+                          ''.join(f'{b:02X}' for b in reversed(addr)),
+                          "BCD码(6字节)", offset + p, offset + p + 5))
+            table.append((f"    电表{i + 1}带电状态", f"0x{state:02X}", str(state),
+                          "0-停电 1-未停电", offset + p + 6, offset + p + 6))
+            p += 7
+        return table
+
+    def _parse_event_device(self, data: bytes, pos: int, offset: int) -> List[Tuple]:
+        """设备信息数据域（即装即采附件3 事件类型=51）
+
+        设备地址(BCD 6B) + 设备通信协议类型(1B) + 设备描述符长度N(1B)
+        + 设备描述符(ASCII N B) + 下挂设备数量M(1B)
+        + M × (通信地址长度N1(1B) + 通信地址(BCD N1 B)
+               + 设备描述符长度N2(1B) + 设备描述符(ASCII N2 B) + 通信协议类型(1B))
+        """
+        table = []
+        if len(data) < pos + 9:
+            table.append(("    设备信息", "", "",
+                          "数据不足（需设备地址6B+协议1B+描述符长度1B+数量1B）",
+                          offset + pos, offset + len(data) - 1))
+            return table
+        dev_addr = data[pos:pos + 6]
+        proto_type = data[pos + 6]
+        desc_len = data[pos + 7]
+        table.append(("    设备地址", ' '.join(f'{b:02X}' for b in dev_addr),
+                      ''.join(f'{b:02X}' for b in reversed(dev_addr)),
+                      "BCD码(6字节)：STA模块通信地址", offset + pos, offset + pos + 5))
+        table.append(("    设备通信协议类型", f"0x{proto_type:02X}", str(proto_type),
+                      PROTOCOL_TYPES.get(proto_type, f"保留({proto_type})"),
+                      offset + pos + 6, offset + pos + 6))
+        table.append(("    设备描述符长度", f"0x{desc_len:02X}", f"{desc_len}字节",
+                      f"设备描述符长度 N={desc_len}", offset + pos + 7, offset + pos + 7))
+        p = pos + 8
+        if p + desc_len > len(data):
+            table.append(("    设备描述符", "", "", "数据不足（描述符长度超出报文）",
+                          offset + p, offset + len(data) - 1))
+            return table
+        table.append(("    设备描述符", _ascii_text(data[p:p + desc_len]),
+                      f"{desc_len}字节", "ASCII 设备描述符",
+                      offset + p, offset + p + desc_len - 1))
+        p += desc_len
+        if p >= len(data):
+            return table
+        dev_count = data[p]
+        table.append(("    下挂设备数量M", f"0x{dev_count:02X}", str(dev_count),
+                      f"下挂设备数量: {dev_count}（不应超过32）", offset + p, offset + p))
+        p += 1
+        for i in range(dev_count):
+            if p + 2 > len(data):
+                table.append((f"    下挂设备{i + 1}", "", "", "数据不足",
+                              offset + p, offset + len(data) - 1))
+                break
+            a_len = data[p]
+            table.append((f"    下挂设备{i + 1}通信地址长度", f"0x{a_len:02X}",
+                          f"{a_len}字节", f"N1={a_len}", offset + p, offset + p))
+            p += 1
+            if p + a_len + 1 > len(data):
+                table.append((f"    下挂设备{i + 1}", "", "",
+                              "数据不足（通信地址超出报文）",
+                              offset + p, offset + len(data) - 1))
+                break
+            addr = data[p:p + a_len]
+            table.append((f"    下挂设备{i + 1}通信地址",
+                          ' '.join(f'{b:02X}' for b in addr),
+                          ''.join(f'{b:02X}' for b in reversed(addr)),
+                          f"BCD码({a_len}字节)", offset + p, offset + p + a_len - 1))
+            p += a_len
+            d_len = data[p]
+            table.append((f"    下挂设备{i + 1}设备描述符长度", f"0x{d_len:02X}",
+                          f"{d_len}字节", f"N2={d_len}", offset + p, offset + p))
+            p += 1
+            if p + d_len + 1 > len(data):
+                table.append((f"    下挂设备{i + 1}", "", "",
+                              "数据不足（描述符超出报文）",
+                              offset + p, offset + len(data) - 1))
+                break
+            table.append((f"    下挂设备{i + 1}设备描述符",
+                          _ascii_text(data[p:p + d_len]),
+                          f"{d_len}字节", "ASCII 设备描述符",
+                          offset + p, offset + p + d_len - 1))
+            p += d_len
+            pt = data[p]
+            table.append((f"    下挂设备{i + 1}通信协议类型", f"0x{pt:02X}", str(pt),
+                          PROTOCOL_TYPES.get(pt, f"保留({pt})"), offset + p, offset + p))
+            p += 1
+        if p < len(data):
+            rem = data[p:]
+            table.append(("    剩余数据",
+                          ' '.join(f'{b:02X}' for b in rem[:16])
+                          + ("..." if len(rem) > 16 else ""),
+                          f"{len(rem)}字节", "下挂设备清单之后的剩余字节",
+                          offset + p, offset + len(data) - 1))
+        return table
     def _parse_comm_test(self, data: bytes, offset: int) -> List[Tuple]:
-        """通信测试命令（0x006）"""
+        """通信测试命令（0x006）：表32 普通通信测试 + 检测扩展命令（A-HS-11-03 表2）
+
+        域布局（字节号 / 比特位）：
+          字节0 bit0-5        协议版本号（本版本固定为1）
+          字节0 bit6-7（高2位）+ 字节1 bit0-3（低4位）  报文头长度（6bit，单位4字节字）
+          字节1 bit4-7        保留 / 测试模式·配置操作
+          字节2 bit0-3        转发数据的规约类型
+          字节2 bit4-7 + 字节3 bit0-7   12bit 转发数据长度 / 模式持续时间 / 配置值
+          字节4 bit0-3        安全测试模式（仅测试模式=13 生效）
+          字节4 bit4-7、字节5  保留（模式12 时为 PHR_MCS / PSDU_MCS / PbSIZE）
+
+        字节1 高4位 = 0 → 普通通信测试（按表32 原义：转发数据长度 = 12bit）；
+        ≠ 0 → 检测扩展命令，该 12bit 按测试模式分别解释为
+        频段值(6) / ToneMask值(7) / 无线信道号(8) / MCS值(12) / 模式持续时间(其余)。
+
+        扩展命令的链路层约定（表2 注意事项第7条）：nid=0、源TEI=0、目的TEI=0xFFF。
+        """
         table = []
         if len(data) < 4:
             return table
 
+        b0 = data[0]
+        b1 = data[1]
+        ver = b0 & 0x3F
+        # 报文头长度: byte0[6:7](高2b)+byte1[0:3](低4b)=6bit, 单位4字节字(类IPv4 IHL)
+        # 与本文件其余报文一致（原先此处拼成了「低位在字节0」，与规范相反：
+        # 实测 01 61 30 00 应为 1→4字节，原写法得 4→16字节）
+        hdr_len = (((b0 >> 6) & 0x03) << 4) | (b1 & 0x0F)
+        test_mode = (b1 >> 4) & 0x0F
         b2 = data[2]
         b3 = data[3]
         proto_type = b2 & 0x0F
-        data_len = ((b2 >> 4) & 0x0F) | (b3 << 4)
+        config_val = ((b2 >> 4) & 0x0F) | (b3 << 4)
 
-        table.append(("  通信测试报文", "", "", "通信测试命令", offset, offset + len(data) - 1))
-        table.append(("    转发数据规约类型", f"0x{proto_type:01X}", str(proto_type),
-                      PROTOCOL_TYPES.get(proto_type, f"保留({proto_type})"), offset + 2, offset + 2))
-        table.append(("    转发数据长度", f"0x{data_len:03X}", f"{data_len}字节",
-                      f"测试数据长度: {data_len}字节", offset + 2, offset + 3))
+        table.append(("  通信测试报文", "", "", "通信测试命令",
+                      offset, offset + len(data) - 1))
+        table.append(("    协议版本号", f"0x{ver:02X}", str(ver),
+                      "本版本固定为1", offset, offset))
+        table.append(("    报文头长度", str(hdr_len),
+                      f"{hdr_len}×4B={hdr_len * 4}B",
+                      "报文头(除数据域外)的长度", offset, offset + 1))
 
+        if test_mode == 0:
+            table.extend(self._parse_comm_test_plain(data, offset, proto_type, config_val))
+        else:
+            table.extend(self._parse_comm_test_ext(
+                data, offset, test_mode, proto_type, b2, b3, config_val))
+        return table
+
+    def _parse_comm_test_plain(self, data: bytes, offset: int,
+                               proto_type: int, data_len: int) -> List[Tuple]:
+        """普通通信测试（测试模式=0，表32 原义）
+
+        槽位约定与协议9/10 同构 ``(字段, 原始值, 解析值, 说明, 起, 止)``；
+        纯元数据行的解析值**留空**——摘要按「解析值非空」过滤，留空即不留噪声。
+        """
+        table = [
+            ("    保留", "0", "", "保留(=0 为普通通信测试)", offset + 1, offset + 1),
+            ("    转发数据规约类型", f"0x{proto_type:01X}", str(proto_type),
+             PROTOCOL_TYPES.get(proto_type, f"保留({proto_type})"),
+             offset + 2, offset + 2),
+            ("    转发数据长度", f"0x{data_len:03X}", f"{data_len}字节",
+             f"实际数据(DATA)域长度: {data_len}字节", offset + 2, offset + 3),
+        ]
         if len(data) > 4:
             payload = data[4:4 + data_len] if 4 + data_len <= len(data) else data[4:]
             table.append(("    测试数据",
-                          ' '.join(f'{b:02X}' for b in payload[:16]) + ("..." if len(payload) > 16 else ""),
+                          ' '.join(f'{b:02X}' for b in payload[:16])
+                          + ("..." if len(payload) > 16 else ""),
                           f"{len(payload)}字节", "通信测试数据",
                           offset + 4, offset + 4 + len(payload) - 1))
+        return table
+
+    def _parse_comm_test_ext(self, data: bytes, offset: int, test_mode: int,
+                             proto_type: int, b2: int, b3: int,
+                             config_val: int) -> List[Tuple]:
+        """检测扩展命令（测试模式≠0，A-HS-11-03 表2）
+
+        槽位约定与协议10 ``_parse_comm_test_ext`` 一致：**名称放解析值槽**。
+        ``main_gui._extract_test_mode_content`` 按「非数值者即名称」探测
+        （协议9 名称在说明槽、协议10 在解析值槽，两种都要能读），故解析值槽
+        放名称、原始值槽放数值，摘要才不会退化成「测试模式:6 (频段切换操作)」。
+        """
+        mode_name = EXT_TEST_MODES.get(test_mode, f"保留({test_mode})")
+        table = [
+            ("    测试模式/配置操作", str(test_mode), mode_name,
+             "检测扩展命令: 测试模式/配置操作(A-HS-11-03 表2)",
+             offset + 1, offset + 1),
+            ("    转发数据规约类型", f"0x{proto_type:01X}", str(proto_type),
+             PROTOCOL_TYPES.get(proto_type, f"保留({proto_type})"),
+             offset + 2, offset + 2),
+        ]
+
+        # 12bit 配置值：按测试模式取用（表2 该行字段名
+        # 「转发数据长度/测试模式持续时间/频段值/ToneMask值/无线信道号/MCS值」）
+        if test_mode == 6:
+            table.append(("    频段值(目标频段)", str(config_val),
+                          EXT_BAND_RANGES.get(config_val, f"保留({config_val})"),
+                          "频段切换操作的目标频段（表2 第6条）",
+                          offset + 2, offset + 3))
+        elif test_mode == 7:
+            table.append(("    ToneMask值(目标ToneMask)", str(config_val),
+                          f"目标ToneMask: {config_val}",
+                          "ToneMask配置操作的目标值（表2 第7条）",
+                          offset + 2, offset + 3))
+        elif test_mode == 8:
+            table.append(("    无线信道号", str(config_val),
+                          f"目标无线信道号: {config_val}",
+                          "无线信道切换操作的目标信道（表2 第8条）",
+                          offset + 2, offset + 3))
+        elif test_mode == 12:
+            table.append(("    MCS值", str(config_val), f"MCS值: {config_val}",
+                          "PLC到RF物理层回传测试模式的MCS（表2）",
+                          offset + 2, offset + 3))
+        elif test_mode in (1, 2):
+            table.append(("    模式持续时间/配置值", str(config_val), "填0即可",
+                          "该模式转发完成首帧后即退出（表2 第1/2条）",
+                          offset + 2, offset + 3))
+        else:
+            parsed = f"{config_val}分钟"
+            if config_val > EXT_MAX_DURATION_MIN:
+                parsed += f"(超限,限定{EXT_MAX_DURATION_MIN}分钟)"
+            table.append(("    模式持续时间/配置值", str(config_val), parsed,
+                          f"测试模式持续时间(单位:分钟,最大{EXT_MAX_DURATION_MIN})",
+                          offset + 2, offset + 3))
+
+        # 字节4：安全测试模式(bit0-3) + 保留/PHR_MCS(bit4-7)
+        b4 = data[4] if len(data) > 4 else 0
+        sec_mode = b4 & 0x0F
+        hi4 = (b4 >> 4) & 0x0F
+        if test_mode == 13:
+            table.append(("    安全测试模式", str(sec_mode),
+                          EXT_SEC_MODES.get(sec_mode, f"保留({sec_mode})"),
+                          "标识不同的安全测试模式（表2 第13条）",
+                          offset + 4, offset + 4))
+        elif test_mode == 12:
+            table.append(("    PHR_MCS", str(hi4), f"MCS {hi4}",
+                          "仅模式12生效", offset + 4, offset + 4))
+        else:
+            # 字段名带「字段」后缀：非 13 时该域是保留位，不应被摘要的
+            # 「安全测试模式」哨兵当成子模式渲染（与协议10 同名同义）。
+            table.append(("    安全测试模式字段", str(sec_mode), "应为0",
+                          "测试模式≠13时该字段应为0（表2 注意事项第9条）",
+                          offset + 4, offset + 4))
+
+        # 字节5：模式12 时为 PSDU_MCS(bit0-3) + PbSIZE(bit4-7)
+        if len(data) > 5 and test_mode == 12:
+            b5 = data[5]
+            psdu = b5 & 0x0F
+            pbsize = (b5 >> 4) & 0x0F
+            table.append(("    PSDU_MCS", str(psdu), f"MCS {psdu}",
+                          "仅模式12生效", offset + 5, offset + 5))
+            table.append(("    PbSIZE", str(pbsize), f"PbSIZE {pbsize}",
+                          "仅模式12生效", offset + 5, offset + 5))
         return table
 
     def _parse_registration(self, data: bytes, offset: int, msg_id: int) -> List[Tuple]:
@@ -3144,13 +3759,12 @@ class HDC10Parser:
         return table
 
     def _parse_mac_only(self, data: bytes, frame_type: int) -> List[Tuple]:
-        """mac_only 模式：直接解析MAC帧（支持 PBH 前缀自动剥离）"""
-        hdr_start = 0
-        if data and (data[0] & 0x80):
-            # b0 bit7=1: MAC标准头 b0 bit7 恒为0(源TEI≤0x7FF), 故该字节必为 PBH
-            hdr_start = 1
-            data = data[hdr_start:]
-        return self._parse_mac_frame(data, hdr_start)
+        """mac_only 模式：输入即 MAC 帧，从字节 0 直接解析。
+
+        契约（AGENTS §8 陷阱19 / 协议9 同口径）：mac_only 不探测、不剥离 PBH。
+        需要带 PBH 的输入请改用 pb_only / auto。
+        """
+        return self._parse_mac_frame(data, 0)
 
     def _parse_pb_only(self, data: bytes, frame_type: int) -> List[Tuple]:
         """pb_only 模式：解析物理块"""
@@ -3159,7 +3773,8 @@ class HDC10Parser:
     def _parse_pb_and_mac_header(self, data: bytes, base_offset: int, dt: int) -> List[Tuple]:
         """fc_mac 模式：解析 PBH + MAC帧头"""
         table = []
-        if not data or dt == 2:
+        if not data or dt in (2, 3):
+            # SACK / 网间协调帧无物理块载荷（网间协调见表26）
             return table
         # 先取第一个PB
         if len(data) < 2:

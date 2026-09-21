@@ -26,7 +26,8 @@
     "09-15-web-parse-perf",
     "09-15-web-spectrum-plot",
     "09-15-web-theme-system",
-    "09-17-web-gui-parity-sync"
+    "09-17-web-gui-parity-sync",
+    "09-21-web-missing-capabilities"
   ],
   "parent": null,
   "relatedFiles": [],

@@ -119,3 +119,25 @@ python release_check.py
 | G1 | 步骤 2 末 | 审计清单 v1 —— 是否发现需纳入范围的新缺口 |
 | G2 | 步骤 5 末 | CRUD 交互等价性取舍（单条 vs 多选）与国网 AFN 是否降级 |
 | G3 | 步骤 6 末 | 全量测试 + 变异反证结果 |
+
+---
+
+## 执行结果（2026-09-21 收口，版本 1.23.42）
+
+**步骤 1 前置核实**：以代码实测代替 grep 记录——①645 转表 API 与 Web 调用点（`reflex_web._safe_parse_to_table`）；②桌面测试模式摘要两个调用点（`main_gui:8863` 协议9 首个分支 / `:9137` 协议10-11 第 9 步）；③Web `get_csg_new_gen_summary` / `get_hdc10_summary` 片段顺序；④`custom_di_store` 调用链；⑤Web 查询页 `lookup_tab()` 结构。**结论：`batch_core.py`（另一任务线的共享核心）已含 `extract_test_mode_content` + `TEST_MODE_SENTINELS` 的逐字搬移版**，因此 R3 不新建 `frame_summary.py`（原计划），改为直接复用 `batch_core` 单源——已删除临时新建的 `frame_summary.py`。
+
+**步骤 2（R1 审计清单）**：`docs/Web与GUI同步审计.md` 完成。1.23.0~1.23.22 共 **167 条**逐条判定（继承 88 / 缺失 21 / 同错 0 / N/A 58，另 1 条 1.23.22 派生缺陷判同错），全部附 `文件:行号` 依据；含未覆盖区间 1.23.23~1.23.40（仅列标题）与 1.22.x 待办。
+
+**G1 门**：除三项已知缺口外新发现 6 项 Web 缺失（时序图 / 批量日志快照跳转 / 脚本预处理 / pcap / 批量取消 / 协议6 预设）→ 用户决定**拆为后续子任务** `.trellis/tasks/09-21-web-missing-capabilities`（已建 PRD）。
+
+**步骤 3（R2）**：`protocol_registry.DLT645GuiParser.parse_to_table` 偏移改按实际帧长（`frame_len`/`data_end`/`cs_pos`/`end_pos`）；Web 删除复制体改 import 单源；新增 `test/test_dlt645_table_offsets.py`（40 项，含单一来源守卫）；已登记 `CORE_TESTS`。合法帧输出逐行不变（回归 `test_dlt645_tolerant_parse.py` 135 项、`test_dlt645_pv_ext.py` 156 项全过）。
+
+**步骤 4（R3）**：桌面 `_extract_test_mode_content` 改为一行转发 `batch_core.extract_test_mode_content`（`_TEST_MODE_SENTINELS` 同源）；Web `web_utils` 接入同一函数，`get_csg_new_gen_summary` 经新增 `_append_test_mode_segment`（带去重守卫，协议9 测试帧不重复追加）与 `get_hdc10_summary` 各补片段；新增 `test/test_web_gui_parity.py` R3 段（两端片段对拍 + 非测试帧不污染 + 单一来源守卫）。
+
+**步骤 5（R4）**：`custom_di_store` 读写加可选 `path`；Web 协议0 自定义 DI 增/覆盖/删（含勾选列 + 批量「删除选中」，内置忽略并计数）；**G2 门用户决定：国网 AFN+Fn CRUD 纳入本次、删除需多选批量** → 追加 R4b：协议7 自定义 AFN+Fn 增删（`lookup_utils.add_gdw_custom_fn` / `remove_gdw_custom_fns` 薄封装 `GDW10376Parser` 既有 API）+ `gdw_afn_lookup.refresh()` 解决查询缓存不刷新；查询表新增「自定义」★ 列。G2 另一项：删除粒度由「逐行单删」升级为「勾选 + 批量删除」。
+
+**步骤 6**：变异反证 3 条全部实测变红后还原 —— ①偏移公式回退（`test_dlt645_table_offsets` 8 项红）②去掉 Web 摘要片段（`test_web_gui_parity` 6 项红；协议11 路径单独变异再红 2 项）③645 复制体回潮（`test_dlt645_table_offsets` 4 项红）。全量 `release_check.py`：**PASS=86 / FAIL=1 / WARN=1**，唯一 FAIL 为 `test/test_hdc10_batch_strip_level.py`（「帧类型含 [11]」），属**另一条工作线的批量重构**（`_type_name` 由 `batch_parse_worker`/`batch_core` 生成），本任务未触及该链路。
+
+**步骤 7**：CHANGELOG 新增 1.23.42；`APP_VERSION` 1.23.42 + `release_check.py --sync-iss`；AGENTS.md §1/§2 版本陈述、§8 陷阱 31（已收口清单）、新增陷阱 55、§10 摘要均已同步。
+
+**已知遗留**：① 审计发现的 6 项 Web 缺失 → 后续任务；② 工作区内还有另一会话（顶部栏折叠 1.23.41）与 ED/TCP 监控等未提交改动，本次按用户要求一并提交；③ `test/test_hdc10_batch_strip_level.py` 的 FAIL 归另一条工作线。

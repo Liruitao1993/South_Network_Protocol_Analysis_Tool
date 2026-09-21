@@ -268,8 +268,21 @@ class State(rx.State):
     # ── 查询 ─────────────────────────────────────────────────
     lookup_query: str = ""
     lookup_results: list[dict[str, Any]] = []
-    lookup_columns: list[str] = ["DI3", "DI2", "DI1", "DI0", "AFN", "中文含义"]
+    lookup_columns: list[str] = ["DI3", "DI2", "DI1", "DI0", "AFN", "中文含义", "自定义"]
     lookup_title: str = "DI 查询"
+    # 自定义 DI 新增/覆盖表单（协议0 查询页；对齐桌面「添加自定义DI」对话框字段）
+    lookup_di3: str = ""
+    lookup_di2: str = ""
+    lookup_di1: str = ""
+    lookup_di0: str = ""
+    lookup_desc: str = ""
+    # 自定义 AFN+Fn 新增表单（协议7 查询页；对齐桌面「添加自定义AFN+Fn」对话框字段）
+    lookup_afn: str = ""
+    lookup_fn: str = ""
+    lookup_fn_name: str = ""
+    lookup_afn_name: str = ""
+    # 结果表勾选的行键（协议0 = "E8 00 08 03"，协议7 = "03HF01"）——多选批量删除用
+    lookup_selected: list[str] = []
 
     # ── 客户端下载 ────────────────────────────────────────────
     download_exe_available: bool = False  # downloads/ 目录是否有 exe
@@ -509,51 +522,16 @@ class State(rx.State):
             return ProtocolFrameParser()
 
     def _safe_parse_to_table(self, parser, frame_bytes, **kwargs):
-        """解析帧为表格行；对没有 parse_to_table 的 parser（DLT645）用 parse() + 桌面版同款转换。"""
+        """解析帧为表格行；对没有 parse_to_table 的 parser（DLT645）走桌面同一实现。
+
+        645 转表的唯一实现在 ``protocol_registry.DLT645GuiParser``（纯 Python 无 Qt，
+        Web 已 import 该模块取校验器），此处原先手抄了一份逐字相同的复制体，
+        导致「声明长度与实际不符」帧的字节偏移两端同错（AGENTS §8 陷阱 49/50）。
+        """
         if not hasattr(parser, "parse_to_table"):
-            # DLT645Parser 只有 parse() 返回 dict，fields 普通行为 (字段名, 原始值, 说明)
-            # 三元组，LME自定义接口子字段为 (字段名, 原始hex, 解析值, 说明) 四元组；
-            # 用桌面版（main_gui.DLT645GuiParser）同款逻辑补字节范围，转成表格行。
-            dlt645_result = parser.parse(frame_bytes)
-            result = []
-            data_len = dlt645_result.get("data_length", 0)
-            total_len = 10 + data_len + 2
-            for item in dlt645_result.get("fields", []):
-                # LME自定义接口子字段为4元组(字段,原始hex,解析值,说明)，其余为3元组
-                if len(item) == 4:
-                    field, raw, lme_parsed, desc = item
-                else:
-                    field, raw, desc = item
-                    lme_parsed = ""
-                byte_start, byte_end, parsed_value = 0, 0, lme_parsed
-                if "帧起始符 1" in field:
-                    byte_start, byte_end = 0, 0
-                elif "从站地址" in field:
-                    byte_start, byte_end = 1, 6
-                elif "帧起始符 2" in field:
-                    byte_start, byte_end = 7, 7
-                elif "控制码" in field:
-                    byte_start, byte_end = 8, 8
-                    parsed_value = dlt645_result.get("control_parsed", "")
-                elif "数据长度" in field:
-                    byte_start, byte_end = 9, 9
-                elif "数据标识 DI" in field:
-                    byte_start, byte_end = 10, 13
-                    di_code = dlt645_result.get("di_code", "")
-                    di_desc = dlt645_result.get("di_desc", "")
-                    parsed_value = (
-                        f"{di_code} ({di_desc})" if di_code and di_desc else di_code
-                    )
-                elif "数据内容" in field:
-                    byte_start, byte_end = 14, 10 + data_len - 1
-                elif "数据域" in field:
-                    byte_start, byte_end = 10, 10 + data_len - 1
-                elif "校验和" in field:
-                    byte_start, byte_end = total_len - 2, total_len - 2
-                elif "帧结束符" in field:
-                    byte_start, byte_end = total_len - 1, total_len - 1
-                result.append((field, raw, parsed_value, desc, byte_start, byte_end))
-            return result
+            from protocol_registry import DLT645GuiParser
+
+            return DLT645GuiParser(parser).parse_to_table(frame_bytes)
         return parser.parse_to_table(frame_bytes, **kwargs)
 
     def _get_validator(self):
@@ -3118,8 +3096,6 @@ class State(rx.State):
         self.diff_right = ""
         self.diff_byte_rows = []
         self.diff_field_rows = []
-        self.diff_explanations = []
-        self.diff_stats = {}
 
     # ── 查询 ─────────────────────────────────────────────────
     def set_lookup_query(self, value: str):
@@ -3130,7 +3106,7 @@ class State(rx.State):
         self.is_loading = True
         self.message = ""
         self.lookup_results = []
-
+        self.lookup_selected = []  # 结果刷新即清空勾选（避免误删上一批的行）
         try:
             from .lookup_utils import _is_eb_query, get_lookup_data, get_query_config
 
@@ -3174,6 +3150,228 @@ class State(rx.State):
             self.lookup_title = "查询"
             self.lookup_columns = []
 
+    # ── 自定义 DI 增删（协议0 查询页；与桌面 lookup_pages 同规则）──────
+    #
+    # 落盘位置与桌面一致走 `custom_di_store` 默认路径（`app_paths.data_path`）：
+    # **必须**是 Web 端 `ProtocolFrameParser` 构造时读的那一份 `custom_di.json`
+    # （见 protocol_parser 合并 DI_COMBINATION_MAP），否则会出现「保存成功但查询
+    # 看不到」。Web 的 `app_data` 数据根只管反馈库/发布产物，不含 DI 表。
+
+    def set_lookup_di_field(self, field: str, value: str):
+        """设置自定义 DI 输入框（field ∈ di3/di2/di1/di0/desc）"""
+        if field == "di3":
+            self.lookup_di3 = value
+        elif field == "di2":
+            self.lookup_di2 = value
+        elif field == "di1":
+            self.lookup_di1 = value
+        elif field == "di0":
+            self.lookup_di0 = value
+        else:
+            self.lookup_desc = value
+
+    def _clear_lookup_di_form(self):
+        self.lookup_di3 = ""
+        self.lookup_di2 = ""
+        self.lookup_di1 = ""
+        self.lookup_di0 = ""
+        self.lookup_desc = ""
+
+    async def add_custom_di(self):
+        """校验并写入一条自定义 DI（新增或覆盖已有键）。
+
+        与桌面 `lookup_pages.apply_custom_di_add` 同规则：四个 DI 字节必须是
+        十六进制（00-FF）、中文含义不能为空；键已存在则覆盖其含义（桌面弹确认框，
+        Web 无对话框，按按钮文案「添加/覆盖」直接覆盖，并在提示里说明）。
+        """
+        from custom_di_store import (
+            find_entry,
+            format_key,
+            load_custom_di,
+            save_custom_di,
+            upsert_entry,
+            validate_key_text,
+        )
+
+        key, err = validate_key_text(
+            self.lookup_di3, self.lookup_di2, self.lookup_di1, self.lookup_di0
+        )
+        if key is None:
+            self.message = err
+            self.message_type = "error"
+            return
+
+        desc = (self.lookup_desc or "").strip()
+        if not desc:
+            self.message = "请填写中文含义！"
+            self.message_type = "error"
+            return
+
+        try:
+            entries = load_custom_di()
+            entries, replaced = upsert_entry(entries, key, desc)
+            save_custom_di(entries)
+        except OSError as exc:
+            self.message = f"保存自定义DI失败: {exc}"
+            self.message_type = "error"
+            return
+
+        await self.do_lookup()
+        self.message = (
+            f"已{'覆盖' if replaced else '添加'}自定义DI: {format_key(key)} → {desc}"
+        )
+        self.message_type = "success"
+        self._clear_lookup_di_form()
+
+    async def delete_custom_di(self, di3: str, di2: str, di1: str, di0: str):
+        """删除一条自定义 DI；内置 DI 拒绝删除。
+
+        与桌面 `lookup_pages.delete_selected_custom_di_interactive` 同判据：
+        只有存在于 `custom_di.json` 的键才是自定义（内置 DI 只活在
+        `DI_COMBINATION_MAP`，不在文件里）。
+        """
+        from custom_di_store import (
+            custom_key_set,
+            format_key,
+            load_custom_di,
+            make_key,
+            parse_hex_byte,
+            remove_keys,
+            save_custom_di,
+        )
+
+        values = [parse_hex_byte(t) for t in (di3, di2, di1, di0)]
+        if any(v is None for v in values):
+            self.message = "该行 DI 无法识别，未执行删除"
+            self.message_type = "error"
+            return
+        key = make_key(*values)
+        if key not in custom_key_set():
+            self.message = (
+                f"{format_key(key)} 是内置DI（带★标记的才是自定义DI），不可删除！"
+            )
+            self.message_type = "error"
+            return
+
+        try:
+            entries, removed = remove_keys(load_custom_di(), [key])
+            if removed:
+                save_custom_di(entries)
+        except OSError as exc:
+            self.message = f"删除自定义DI失败: {exc}"
+            self.message_type = "error"
+            return
+
+        await self.do_lookup()
+        self.message = (
+            f"已删除 {removed} 条自定义DI（{format_key(key)}）"
+            if removed
+            else f"{format_key(key)} 不存在，未删除"
+        )
+        self.message_type = "success" if removed else "error"
+
+    def set_lookup_afn_field(self, field: str, value: str):
+        """设置自定义 AFN+Fn 输入框（field ∈ afn/fn/name/afn_name）"""
+        if field == "afn":
+            self.lookup_afn = value
+        elif field == "fn":
+            self.lookup_fn = value
+        elif field == "name":
+            self.lookup_fn_name = value
+        else:
+            self.lookup_afn_name = value
+
+    async def add_custom_afn(self):
+        """校验并添加一条自定义 AFN+Fn（与桌面 `_add_custom_gdw_fn` 同规则）。
+
+        规则：AFN 十六进制 00-FF、Fn 十进制 1-248、功能名称必填；与标准定义
+        重名的组合拒绝添加；AFN 类别名称可选（填了才写进自定义 AFN 名）。
+        """
+        from reflex_web.lookup_utils import add_gdw_custom_fn
+
+        ok, msg = add_gdw_custom_fn(
+            self.lookup_afn, self.lookup_fn, self.lookup_fn_name, self.lookup_afn_name
+        )
+        if not ok:
+            self.message = msg
+            self.message_type = "error"
+            return
+
+        await self.do_lookup()
+        self.message = msg
+        self.message_type = "success"
+        self.lookup_afn = ""
+        self.lookup_fn = ""
+        self.lookup_fn_name = ""
+        self.lookup_afn_name = ""
+
+    def toggle_lookup_selection(self, key: str, checked: bool):
+        """勾选/取消勾选结果表的一行（key 见 lookup_selected 注释）"""
+        current = list(self.lookup_selected)
+        if checked:
+            if key not in current:
+                current.append(key)
+        elif key in current:
+            current.remove(key)
+        self.lookup_selected = current
+
+    async def delete_selected_custom(self):
+        """批量删除勾选的自定义条目（协议0 → DI；协议7 → AFN+Fn）。
+
+        与桌面多选删除同语义：勾选里的内置/标准条目**忽略**并在提示里说明条数，
+        不做「全内置就拒绝」的额外分支（消息里已含 ignored 计数）。
+        """
+        from reflex_web import lookup_utils
+
+        keys = list(self.lookup_selected)
+        if not keys:
+            self.message = "请先勾选要删除的自定义条目！"
+            self.message_type = "error"
+            return
+
+        if self.current_protocol == 0:
+            import custom_di_store
+
+            parsed = [lookup_utils.parse_di_row_key(k) for k in keys]
+            parsed = [p for p in parsed if p is not None]
+            custom = custom_di_store.custom_key_set()
+            targets = [p for p in parsed if p in custom]
+            ignored = len(keys) - len(targets)
+            try:
+                entries, removed = custom_di_store.remove_keys(
+                    custom_di_store.load_custom_di(), targets
+                )
+                if removed:
+                    custom_di_store.save_custom_di(entries)
+            except OSError as exc:
+                self.message = f"删除自定义DI失败: {exc}"
+                self.message_type = "error"
+                return
+            await self.do_lookup()
+            self.message = f"已删除 {removed} 条自定义DI" + (
+                f"（另有 {ignored} 条内置DI已忽略）" if ignored else ""
+            )
+            self.message_type = "success" if removed else "error"
+            return
+
+        if self.current_protocol == 7:
+            parsed = [lookup_utils.parse_gdw_row_key(k) for k in keys]
+            parsed = [p for p in parsed if p is not None]
+            try:
+                removed, ignored = lookup_utils.remove_gdw_custom_fns(parsed)
+            except OSError as exc:
+                self.message = f"删除自定义AFN失败: {exc}"
+                self.message_type = "error"
+                return
+            await self.do_lookup()
+            self.message = f"已删除 {removed} 条自定义AFN+Fn组合" + (
+                f"（另有 {ignored} 条标准定义已忽略）" if ignored else ""
+            )
+            self.message_type = "success" if removed else "error"
+            return
+
+        self.message = "当前协议的查询页不支持删除自定义条目"
+        self.message_type = "error"
     # ── Tab 切换 ─────────────────────────────────────────────
     def set_tab(self, tab: str):
         """切换标签页"""
@@ -10638,6 +10836,24 @@ def release_tab() -> rx.Component:
 # ═══════════════════════════════════════════════════════════════
 
 
+def _lookup_row_key(row):
+    """结果表行键（勾选与批量删除共用）：协议7 → ``"03HF01"``；协议0 → ``"E8 00 08 03"``。
+
+    键格式与 `lookup_utils.parse_gdw_row_key` / `parse_di_row_key` 一一对应。
+    """
+    return rx.cond(
+        State.current_protocol == 7,
+        row["AFN"].to(str) + row["Fn"].to(str),
+        row["DI3"].to(str)
+        + " "
+        + row["DI2"].to(str)
+        + " "
+        + row["DI1"].to(str)
+        + " "
+        + row["DI0"].to(str),
+    )
+
+
 def lookup_tab() -> rx.Component:
     """查询（根据当前协议自动切换查询类型）"""
     return rx.vstack(
@@ -10651,6 +10867,18 @@ def lookup_tab() -> rx.Component:
                         f"{State.lookup_results.length()} 条",
                         color_scheme="blue",
                         variant="soft",
+                    ),
+                    # 批量删除勾选的自定义条目（协议0 → DI；协议7 → AFN+Fn）
+                    rx.cond(
+                        (State.current_protocol == 0) | (State.current_protocol == 7),
+                        rx.button(
+                            rx.icon("trash-2", size=14),
+                            "删除选中",
+                            on_click=State.delete_selected_custom,
+                            color_scheme="red",
+                            variant="soft",
+                            size="1",
+                        ),
                     ),
                     spacing="2",
                 ),
@@ -10682,6 +10910,145 @@ def lookup_tab() -> rx.Component:
             ),
             width="100%",
         ),
+        # 自定义 DI 增删（协议0 南网 DI 查询；对齐桌面查询页的「添加/删除自定义DI」按钮）
+        rx.cond(
+            State.current_protocol == 0,
+            rx.card(
+                rx.vstack(
+                    rx.hstack(
+                        rx.icon("plus", size=18, color="var(--accent)"),
+                        rx.heading("自定义 DI", size="3", font_weight="semibold"),
+                        rx.text(
+                            "（★ 为自定义条目，可删除；同键再次添加即覆盖其含义）",
+                            size="1",
+                            color="gray",
+                        ),
+                        spacing="2",
+                        wrap="wrap",
+                    ),
+                    rx.hstack(
+                        rx.input(
+                            placeholder="DI3",
+                            value=State.lookup_di3,
+                            on_change=lambda v: State.set_lookup_di_field("di3", v),
+                            width="90px",
+                            size="2",
+                        ),
+                        rx.input(
+                            placeholder="DI2",
+                            value=State.lookup_di2,
+                            on_change=lambda v: State.set_lookup_di_field("di2", v),
+                            width="90px",
+                            size="2",
+                        ),
+                        rx.input(
+                            placeholder="DI1",
+                            value=State.lookup_di1,
+                            on_change=lambda v: State.set_lookup_di_field("di1", v),
+                            width="90px",
+                            size="2",
+                        ),
+                        rx.input(
+                            placeholder="DI0",
+                            value=State.lookup_di0,
+                            on_change=lambda v: State.set_lookup_di_field("di0", v),
+                            width="90px",
+                            size="2",
+                        ),
+                        rx.input(
+                            placeholder="中文含义（如：查询采集任务号）",
+                            value=State.lookup_desc,
+                            on_change=lambda v: State.set_lookup_di_field("desc", v),
+                            width="320px",
+                            size="2",
+                        ),
+                        rx.button(
+                            rx.icon("plus", size=16),
+                            "添加/覆盖",
+                            on_click=State.add_custom_di,
+                            color_scheme="blue",
+                            size="2",
+                        ),
+                        spacing="2",
+                        wrap="wrap",
+                    ),
+                    rx.text(
+                        "DI 为十六进制（00-FF）；内置 DI 不可删除。保存后立即重新查询。",
+                        size="1",
+                        color="gray",
+                    ),
+                    spacing="3",
+                    width="100%",
+                ),
+                width="100%",
+            ),
+        ),
+        # 自定义 AFN+Fn 增删（协议7 国网查询页；对齐桌面「添加/删除自定义AFN+Fn」按钮）
+        rx.cond(
+            State.current_protocol == 7,
+            rx.card(
+                rx.vstack(
+                    rx.hstack(
+                        rx.icon("plus", size=18, color="var(--accent)"),
+                        rx.heading("自定义 AFN+Fn", size="3", font_weight="semibold"),
+                        rx.text(
+                            "（★ 为自定义组合，可勾选后删除；标准定义不可删）",
+                            size="1",
+                            color="gray",
+                        ),
+                        spacing="2",
+                        wrap="wrap",
+                    ),
+                    rx.hstack(
+                        rx.input(
+                            placeholder="AFN (十六进制，如 03)",
+                            value=State.lookup_afn,
+                            on_change=lambda v: State.set_lookup_afn_field("afn", v),
+                            width="200px",
+                            size="2",
+                        ),
+                        rx.input(
+                            placeholder="Fn (1-248)",
+                            value=State.lookup_fn,
+                            on_change=lambda v: State.set_lookup_afn_field("fn", v),
+                            width="120px",
+                            size="2",
+                        ),
+                        rx.input(
+                            placeholder="功能名称（必填）",
+                            value=State.lookup_fn_name,
+                            on_change=lambda v: State.set_lookup_afn_field("name", v),
+                            width="260px",
+                            size="2",
+                        ),
+                        rx.input(
+                            placeholder="AFN类别名称（可选）",
+                            value=State.lookup_afn_name,
+                            on_change=lambda v: State.set_lookup_afn_field("afn_name", v),
+                            width="220px",
+                            size="2",
+                        ),
+                        rx.button(
+                            rx.icon("plus", size=16),
+                            "添加",
+                            on_click=State.add_custom_afn,
+                            color_scheme="blue",
+                            size="2",
+                        ),
+                        spacing="2",
+                        wrap="wrap",
+                    ),
+                    rx.text(
+                        "AFN 十六进制 00-FF、Fn 十进制 1-248；与标准定义重名的组合会被拒绝。保存后立即重新查询。",
+                        size="1",
+                        color="gray",
+                    ),
+                    spacing="3",
+                    width="100%",
+                ),
+                width="100%",
+            ),
+        ),
         # 查询结果 - 动态列表格
         rx.card(
             rx.vstack(
@@ -10691,23 +11058,72 @@ def lookup_tab() -> rx.Component:
                         rx.table.root(
                             rx.table.header(
                                 rx.table.row(
+                                    # 「选择」列：协议0/7 的查询页支持勾选后批量删除自定义条目
+                                    rx.cond(
+                                        (State.current_protocol == 0)
+                                        | (State.current_protocol == 7),
+                                        rx.table.column_header_cell("选择"),
+                                    ),
                                     rx.foreach(
                                         State.lookup_columns,
                                         lambda col: rx.table.column_header_cell(col),
-                                    )
+                                    ),
+                                    # 「操作」列仅协议0（南网 DI）显示：与桌面查询页
+                                    # 的「删除选中自定义DI」按钮同语义，只是粒度到行。
+                                    rx.cond(
+                                        State.current_protocol == 0,
+                                        rx.table.column_header_cell("操作"),
+                                    ),
                                 )
                             ),
                             rx.table.body(
                                 rx.foreach(
                                     State.lookup_results,
                                     lambda row: rx.table.row(
+                                        rx.cond(
+                                            (State.current_protocol == 0)
+                                            | (State.current_protocol == 7),
+                                            rx.table.cell(
+                                                rx.checkbox(
+                                                    checked=State.lookup_selected.contains(
+                                                        _lookup_row_key(row)
+                                                    ),
+                                                    on_change=lambda v: State.toggle_lookup_selection(
+                                                        _lookup_row_key(row),
+                                                        v,
+                                                    ),
+                                                    size="1",
+                                                ),
+                                                font_size="12px",
+                                            ),
+                                        ),
                                         rx.foreach(
                                             State.lookup_columns,
                                             lambda col: rx.table.cell(
                                                 rx.code(row[col], variant="soft"),
                                                 font_size="12px",
                                             ),
-                                        )
+                                        ),
+                                        rx.cond(
+                                            State.current_protocol == 0,
+                                            rx.table.cell(
+                                                rx.cond(
+                                                    row["自定义"] == "★",
+                                                    rx.button(
+                                                        "删除",
+                                                        on_click=lambda: State.delete_custom_di(
+                                                            row["DI3"], row["DI2"],
+                                                            row["DI1"], row["DI0"],
+                                                        ),
+                                                        size="1",
+                                                        color_scheme="red",
+                                                        variant="soft",
+                                                    ),
+                                                    rx.text("—", size="1", color="var(--muted)"),
+                                                ),
+                                                font_size="12px",
+                                            ),
+                                        ),
                                     ),
                                 )
                             ),

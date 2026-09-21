@@ -17,6 +17,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
+# 桌面/Web 共用批量核心：测试类报文摘要片段（协议9 表61 / 协议10 检测扩展命令）
+# 必须放在 sys.path 注入之后（batch_core 在仓库根目录）
+from batch_core import TEST_MODE_SENTINELS, extract_test_mode_content  # noqa: E402
+
+
 # ═══════════════════════════════════════════════════════════════
 # HEX 输入清洗
 # ═══════════════════════════════════════════════════════════════
@@ -402,6 +407,12 @@ def strip_gw_new_gen_prefix(
             continue
 
         if parse_level == 'app':
+            # ED..EE 监控包装行不参与 app 端口扫描：包装头/业务数据里偶然出现的
+            # 0x11/0x12/0x1A 字节会把整帧截断（解包由 extract_frames_for_protocol 负责）。
+            import batch_core
+            if batch_core.ed_wrapper_prefix_len(hex_clean):
+                out_lines.append(hex_clean)
+                continue
             app_prefixes = gw_app_port_prefixes(protocol_index)
             found = False
             i = 0
@@ -615,7 +626,21 @@ def extract_frames_for_protocol(text: str, protocol_index: int) -> list[str]:
     elif protocol_index == 9:  # 新一代载波协议(通感一体化)：按行提取，过滤无效短帧
         return extract_csg_new_gen_frames(text)
     elif protocol_index == 10 or protocol_index == 11:  # 国网新一代双模：按行提取，每行一帧
-        return [f.strip() for f in text.splitlines() if f.strip() and len(f.strip()) >= 4]
+        # ED..EE 监控包装帧先解包（可能一行拼多帧）——与桌面 batch_core 同源，
+        # 否则首字节 0xED 会被当成应用层端口号解析（用户报障：协议11 ED 帧解析成
+        # 「应用层报文」）。
+        import batch_core
+        frames = []
+        for line in text.splitlines():
+            f = line.strip()
+            if not f or len(f) < 4:
+                continue
+            unwrapped = batch_core.unwrap_ed_line(f, protocol_index)
+            if unwrapped is not None:
+                frames.extend(frame_hex for frame_hex, _ed in unwrapped)
+                continue
+            frames.append(f)
+        return frames
     else:
         return [f.strip() for f in text.splitlines() if f.strip()]
 
@@ -632,8 +657,35 @@ def _find_field(table_data: list, field_keyword: str) -> tuple | None:
     return None
 
 
+def _append_test_mode_segment(table_data: list, summary: str) -> str:
+    """测试类报文摘要片段收口（与桌面 main_gui._get_gw_new_gen_summary 第 9 步同口径）。
+
+    桌面协议10/11 的摘要入口一律经过该步；Web 侧协议10 的检测扩展命令帧（没有
+    「报文端口号」/「报文ID」行）会路由到本文件的新一代载波摘要函数，因此这里
+    也必须补上同一片段，否则同一帧两端摘要不一致（见任务 09-17-web-gui-parity-sync R3）。
+
+    去重守卫：协议9 测试帧的核心内容分支已经带出该片段，此时不再重复追加。
+    片段本身来自桌面/Web 共用单源 batch_core.extract_test_mode_content。
+    """
+    if not any(
+        row and str(row[0]).strip() in TEST_MODE_SENTINELS for row in table_data
+    ):
+        return summary
+    text = extract_test_mode_content(table_data)
+    if not text or text in summary:
+        return summary
+    if not summary or summary == "空":
+        return text
+    return f"{summary} | {text}"
+
+
 def get_csg_new_gen_summary(table_data: list) -> str:
-    """新一代载波协议摘要提取"""
+    """新一代载波协议摘要提取（含测试类报文片段收口）"""
+    return _append_test_mode_segment(table_data, _csg_summary_core(table_data))
+
+
+def _csg_summary_core(table_data: list) -> str:
+    """新一代载波协议摘要主体（不含测试模式片段收口，见 get_csg_new_gen_summary）"""
     if not table_data:
         return "空"
 
@@ -642,11 +694,17 @@ def get_csg_new_gen_summary(table_data: list) -> str:
     if "❌" in first_field or "失败" in first_field:
         return str(table_data[0][3]) if len(table_data[0]) >= 4 else "解析失败"
 
-    # ED 包装 / 测试装置控制协议（PLC2.0 与广西台体两种公共头格式）
+    # ED 包装 / 测试装置控制协议（标题含「监控包装头」；文案按标题推断）
     if "监控包装头" in first_field:
         ctrl1 = _find_field(table_data, "控制域1")
         ctrl2 = _find_field(table_data, "控制域2")
-        parts = ["广西台体监控包装" if "广西" in first_field else "ED监控包装"]
+        from batch_core import ed_wrapper_display
+        if "HDC" in first_field or "国网" in first_field:
+            parts = [ed_wrapper_display(11, "gx")["summary_web"]]
+        elif "广西" in first_field:
+            parts = ["广西台体监控包装"]
+        else:
+            parts = ["ED监控包装"]
         if ctrl1:
             parts.append(str(ctrl1[2]))
         if ctrl2:
@@ -730,6 +788,22 @@ def get_csg_new_gen_summary(table_data: list) -> str:
 def extract_csg_core_content(table_data: list) -> str:
     """提取新一代载波核心内容"""
     # 帧类型
+    # ── 测试帧（业务标识 0xF0）：优先体现测试模式/测试ID ──
+    # 与桌面 main_gui._extract_csg_core_content 的**首个分支**逐字同口径：
+    # 必须放在否认/确认/命令帧分支之前，否则测试帧（帧类型域是「命令帧」）
+    # 的测试模式信息会被通用命令帧分支淹没。测试模式片段来自桌面/Web 共用的
+    # frame_summary.extract_test_mode_content（单源）。
+    for _row in table_data:
+        if not _row or str(_row[0]).strip() != "业务标识":
+            continue
+        _svc_raw = str(_row[1]) if len(_row) >= 2 and _row[1] is not None else ""
+        _svc_val = str(_row[2]).strip() if len(_row) >= 3 and _row[2] is not None else ""
+        _svc_cmt = str(_row[3]) if len(_row) >= 4 and _row[3] is not None else ""
+        if _svc_val == "240" or "F0" in _svc_raw.upper() or "测试帧" in _svc_cmt:
+            _mode_text = extract_test_mode_content(table_data)
+            if _mode_text:
+                return _mode_text
+        break
     frame_type_row = _find_field(table_data, "帧类型")
     if not frame_type_row:
         return ""
@@ -957,11 +1031,33 @@ def get_hdc10_summary(table_data: list) -> str:
         msdu = str(msdu_row[3]) if len(msdu_row) >= 4 and msdu_row[3] else str(msdu_row[2])
         parts.append(msdu)
 
-    # 网络管理消息（MME）
+    # 网络管理消息（MME）——字段名两协议不同构：
+    # 协议10=`管理消息类型(MMTYPE)`，协议11=`消息类型(MMTYPE)`；子串匹配两者均可命中。
+    # pb_only 批量时网络层帧必须带出 MMTYPE，否则摘要无法区分关联请求/发现列表等。
     mmtype_row = _find_field(table_data, "MMTYPE")
     if mmtype_row:
-        name = str(mmtype_row[3]) if len(mmtype_row) >= 4 and mmtype_row[3] else str(mmtype_row[2])
-        parts.append(f"MME:{name}")
+        code = str(mmtype_row[2]).strip() if len(mmtype_row) >= 3 and mmtype_row[2] else ""
+        name = str(mmtype_row[3]).strip() if len(mmtype_row) >= 4 and mmtype_row[3] else code
+        if name.startswith("MMTYPE:"):
+            name = name[7:].strip()
+        if code and name and code not in name:
+            parts.append(f"MMTYPE:{code}({name})")
+        elif name:
+            parts.append(f"MMTYPE:{name}")
+
+    # 网络层 MAC 字段：与桌面 `_get_gw_new_gen_summary` 同口径，便于 pb_only 批量扫读
+    src = _field_value(table_data, "原始源TEI") or _field_value(table_data, "源TEI")
+    dst = _field_value(table_data, "原始目的TEI") or _field_value(table_data, "目的TEI")
+    if src or dst:
+        tei_txt = f"{src or '?'}→{dst or '?'}"
+        if tei_txt not in " | ".join(parts):
+            parts.append(tei_txt)
+    seq = _field_value(table_data, "MSDU序列号")
+    if seq:
+        parts.append(f"msduSeq:{seq}")
+    send_cmt = _field_comment(table_data, "发送类型")
+    if send_cmt and "保留" not in send_cmt and send_cmt not in " | ".join(parts):
+        parts.append(send_cmt)
 
     # 应用层报文：端口号 + 报文ID(含方向) + 业务名 + 关键业务字段 + 序号/规约/数据长度
     # （与桌面 `main_gui._get_gw_new_gen_summary` 逐段同口径；对拍见
@@ -994,6 +1090,17 @@ def get_hdc10_summary(table_data: list) -> str:
     data_len = _field_value(table_data, "转发数据长度")
     if data_len:
         parts.append(f"数据:{data_len}")
+
+    # 测试类报文（通信测试/检测扩展命令）：体现测试模式/配置操作
+    # 与桌面 main_gui._get_gw_new_gen_summary 第 9 步同口径：仅在三个哨兵行
+    # 之一存在时才调用（协议10 无 0xF0 概念，避免 helper 对同名字段误提取），
+    # 片段来自桌面/Web 共用的 frame_summary.extract_test_mode_content（单源）。
+    if any(
+        str(row[0]).strip() in TEST_MODE_SENTINELS for row in table_data if row
+    ):
+        test_mode_text = extract_test_mode_content(table_data)
+        if test_mode_text:
+            parts.append(test_mode_text)
 
     # 兜底：取前几个非冗余字段
     if not parts:

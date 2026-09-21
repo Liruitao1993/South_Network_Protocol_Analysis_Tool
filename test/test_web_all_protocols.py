@@ -1,104 +1,33 @@
 # -*- coding: utf-8 -*-
 """Web 版全协议解析路径回归测试。
 
-验证 reflex_web 的解析分发（_get_parser + _safe_parse_to_table）对全部 12 种协议
-的真实帧都不会因「调用了不正确的函数」而崩溃——这是 Web 部署最常见的低级错误
-（例如 DLT645Parser 只有 parse() 没有 parse_to_table、协议 3/4/5 应走 APDU/Wrapper
-方法而非完整 HDLC 解析）。
+验证 reflex_web 的解析分发对全部 12 种协议的真实帧都不会因「调用了不正确的
+函数」而崩溃——这是 Web 部署最常见的低级错误（例如 DLT645Parser 只有 parse()
+没有 parse_to_table、协议 3/4/5 应走 APDU/Wrapper 方法而非完整 HDLC 解析）。
 
-与 reflex_web/reflex_web/reflex_web.py 中 State._get_parser 与
-State._safe_parse_to_table 保持逻辑一致。
+**本测试不再手抄产品逻辑**：解析器构造与 645 转表一律调用产品实现
+（`protocol_registry` + `parser_registry`），手抄体会与产品代码静默漂移
+（曾被用于固化的 `total_len = 10 + data_len + 2` 越界缺陷即出自此处）。
 """
 import _path_setup  # noqa: E402
 
-# ── 复制 Web 版 _get_parser 逻辑（保持同步）──────────────────
+
 def get_parser(p):
-    """复制 reflex_web.py::State._get_parser"""
-    if p == 0:
-        from protocol_parser import ProtocolFrameParser
-        return ProtocolFrameParser()
-    if p == 1:
-        from plc_rf_parser import PLCRFProtocolParser
-        return PLCRFProtocolParser()
-    if p in (2, 3, 4, 5):
-        from hdlc_parser import HDLCParser
-        if p == 2:
-            return HDLCParser()
-        if p in (3, 5):
-            class APDUParserWeb:
-                def __init__(self, h):
-                    self.h = h
-                def parse_to_table(self, data, **kw):
-                    return self.h.parse_apdu_to_table(data)
-            return APDUParserWeb(HDLCParser())
-        class WrapperParserWeb:
-            def __init__(self, h):
-                self.h = h
-            def parse_to_table(self, data, **kw):
-                return self.h.parse_wrapper_to_table(data)
-        return WrapperParserWeb(HDLCParser())
-    if p == 6:
-        from dlt645_parser import DLT645Parser
-        return DLT645Parser()
-    if p == 7:
-        from gdw10376_parser import GDW10376Parser
-        return GDW10376Parser()
-    if p == 8:
-        from dl_t698_45_parser import DLT69845Parser
-        return DLT69845Parser()
-    if p == 9:
-        from csg_new_gen_parser import CSGNewGenParser
-        return CSGNewGenParser()
-    if p == 10:
-        from gw_new_gen_parser import GWNewGenParser
-        return GWNewGenParser()
-    if p == 11:
-        from hdc10_parser import HDC10Parser
-        return HDC10Parser()
-    from protocol_parser import ProtocolFrameParser
-    return ProtocolFrameParser()
+    """解析器构造：与桌面 `_get_current_parser` / Web `State._get_parser` 同一注册表路径。"""
+    import parser_registry
+    import protocol_registry
+
+    spec = protocol_registry.get_protocol(p)
+    base = parser_registry.get_parser(spec.parser_key)
+    return protocol_registry.build_gui_parser(p, base, parse_level="auto", channel="plc")
 
 
-# ── 复制 Web 版 _safe_parse_to_table 逻辑（保持同步）──────────
 def safe_parse_to_table(parser, frame_bytes, **kwargs):
+    """与 State._safe_parse_to_table 同口径：645 无 parse_to_table → 注册表同款转换。"""
     if not hasattr(parser, "parse_to_table"):
-        r = parser.parse(frame_bytes)
-        result = []
-        data_len = r.get("data_length", 0)
-        total_len = 10 + data_len + 2
-        for item in r.get("fields", []):
-            # LME自定义接口子字段为4元组(字段,原始hex,解析值,说明)，其余为3元组
-            if len(item) == 4:
-                field, raw, lme_parsed, desc = item
-            else:
-                field, raw, desc = item
-                lme_parsed = ""
-            bs, be, pv = 0, 0, lme_parsed
-            if "帧起始符 1" in field:
-                bs, be = 0, 0
-            elif "从站地址" in field:
-                bs, be = 1, 6
-            elif "帧起始符 2" in field:
-                bs, be = 7, 7
-            elif "控制码" in field:
-                bs, be = 8, 8
-                pv = r.get("control_parsed", "")
-            elif "数据长度" in field:
-                bs, be = 9, 9
-            elif "数据标识 DI" in field:
-                bs, be = 10, 13
-                dc, dd = r.get("di_code", ""), r.get("di_desc", "")
-                pv = f"{dc} ({dd})" if dc and dd else dc
-            elif "数据内容" in field:
-                bs, be = 14, 10 + data_len - 1
-            elif "数据域" in field:
-                bs, be = 10, 10 + data_len - 1
-            elif "校验和" in field:
-                bs, be = total_len - 2, total_len - 2
-            elif "帧结束符" in field:
-                bs, be = total_len - 1, total_len - 1
-            result.append((field, raw, pv, desc, bs, be))
-        return result
+        from protocol_registry import DLT645GuiParser
+
+        return DLT645GuiParser(parser).parse_to_table(frame_bytes)
     return parser.parse_to_table(frame_bytes, **kwargs)
 
 
@@ -127,12 +56,7 @@ for p in sorted(FRAMES):
     try:
         parser = get_parser(p)
         fb = bytes.fromhex(FRAMES[p].replace(" ", ""))
-        if p == 9:
-            rows = safe_parse_to_table(parser, fb, parse_level="auto")
-        elif p in (10, 11):
-            rows = safe_parse_to_table(parser, fb, parse_level="auto", channel="plc")
-        else:
-            rows = safe_parse_to_table(parser, fb)
+        rows = safe_parse_to_table(parser, fb)
         assert rows, f"{name}: 解析结果为空"
         print(f"  [OK] {name} (协议{p}): {len(rows)} 行")
         passed += 1
