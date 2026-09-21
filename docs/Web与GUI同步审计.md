@@ -260,6 +260,16 @@ B. **Web 工具页协议清单未走注册表**
 C. **协议10 物理层/网络层帧摘要两端仍走不同实现**（已登记，不重复计为新增）
    - Web：`web_utils.get_frame_summary:1141` → `get_csg_new_gen_summary`（Web 自有 CSG 摘要）；桌面：`_get_gw_new_gen_summary`。1.23.18-05 与 `web_utils.py:1126-1130` 注释均明示该差异归 `09-15-web-shared-parse-core`。
 
+D. **Web 单帧页无 ED..EE 解包（协议10/11）——已实测复现，登记为待补能力**（补审发现的额外缺失，与 §2.1 六项一并归 `09-21-web-missing-capabilities`）
+   - 桌面单帧路径会解 ED 包装：`main_gui.parse_single:6004` → `resolve_ed_wrapper(frame_bytes, mode)`（`main_gui.py:8241`，1.23.32/1.23.33 修的就是这条）；Web `State.parse_frame`（`reflex_web.py:606-620`）只有 `_clean_hex` / `_apply_strip` / `_parse_kwargs`，`reflex_web/` 内 `ed_wrapper|unwrap_ed|ED监控` 仅出现在**批量**前缀剥离（`web_utils.py:413/638/701`），单帧无解包。
+   - **实测证据（2026-09-21）**：协议11 + 现场真实帧 `EDA4…FFEE`（`test/test_hdc10_ed_wrapper.py` 的 `FRAME0`，gx 8B 公共头，168B）贴进 Web 单帧页 → 解析出 9 行、首行是 `── 应用层报文 ──`，`报文端口号 raw=0xED 保留(0xED)`、`报文ID 0xA4 00`、`业务ID 0x0A4 配电信息上报`——与桌面 1.23.32 修掉的那个症状完全一致（「被当成应用层报文 端口 0xED / 业务 0x0A4」），且**不含**「监控包装头」行。
+   - 协议9 不受影响：`csg_new_gen_parser` 在解析器内部处理首字节 `0xED`。
+   - 修法方向：Web 单帧路径复用 `batch_core.unwrap_ed_for_parse` / `ed_wrapper_prefix_len`（桌面单帧同源），或在 `web_utils.parse_kwargs_for` 之外补一个「单帧预处理」步骤。
+
+E. **协议9 批量 csg 剥离的 `EDA5` 硬编码 + 固定剥 15 字节：尝试复现「gx 多剥 1 字节」未成立**（保持观察，不计为缺陷）
+   - 代码事实：`batch_core.strip_csg_new_gen_frame_prefix:276-281`（桌面批量）与 `web_utils.py:301-303`（Web 批量）各有一份 `startswith("EDA5")` → `hex_clean[30:]`；桌面 CHANGELOG（`main_gui.py:257`）自述「即便泛化前缀也会多剥 1 字节致整帧错位」。
+   - **实测（2026-09-21）**：真实 `EDA5` 样本 `ed_wrapper_prefix_len == 15`，与硬编码剥 15 一致；把真实 gx 帧的 `EDA4` 前缀改写成 `EDA5` 后，`ed_wrapper_prefix_len` 仍返回 **15**（非 14），硬编码同样剥 15 → **未复现 1 字节偏差**。故不作缺陷登记；若要彻底排除，需一条现场 `EDA5 + gx` 真实帧做帧级对拍。
+
 ---
 
 ## 三、未覆盖区间（1.23.23 ~ 1.23.40，仅列版本/日期/条目标题，不做判定）
