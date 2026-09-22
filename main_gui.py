@@ -23,10 +23,12 @@ from PySide6.QtCore import (
     Qt,
     QThread,
     QTimer,
+    QUrl,
     Signal,
 )
 from PySide6.QtGui import (
     QColor,
+    QDesktopServices,
     QFont,
     QGuiApplication,
     QIcon,
@@ -62,6 +64,7 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QTabWidget,
     QTextEdit,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -112,8 +115,12 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.42"
-BUILD_DATE = "2026-09-21"  # 编译日期，每次打包前更新
+APP_VERSION = "1.23.55"
+BUILD_DATE = "2026-09-22"  # 编译日期，每次打包前更新
+
+# 作者 GitHub 仓库地址 —— 「关于」对话框 Star 按钮的**唯一来源**。
+# 改地址只改这一处（按钮文案/提示/跳转都读它，不要在别处再写死一份）。
+AUTHOR_GITHUB_URL = "https://github.com/Liruitao1993/South_Network_Protocol_Analysis_Tool"
 
 # 窗口状态持久化（config.json 顶层 "window" 段）的表格清单：
 # 只收「用户拖动列宽才有意义」的主表；弹窗/克隆表不做持久化（见任务 PRD 的
@@ -134,6 +141,136 @@ _WINDOW_STATE_TABLES = (
 
 CHANGELOG = [
     (
+        "1.23.55",
+        "2026-09-22",
+        [
+            "串口工具：**命令列表「名称」列用状态图标表示本轮结果**（实测诉求）：○ 灰 待测 / ↻ 蓝 发送中（已发出、等待响应匹配）/ ✓ 绿 通过（发送成功；启用匹配时表示已匹配上）/ ✗ 红 失败（响应超时未匹配）/ ⚠ 橙 错误（写串口失败）。图标取 lucide（`circle` / `loader` / `check-circle` / `x-circle` / `alert-triangle`）并用 `CompositionMode_SourceIn` **按状态上色**（`app_icons` 只出单色，故对渲染好的 pixmap 整体染色并保留 alpha），名称文字同色系、tooltip 写明状态；表格下方加**图例**（悬停有详细说明）。状态迁移：每轮发送开始全部回到「待测」→ 发出后「通过」或「发送中」→ 匹配成功「通过」/ 超时「失败」；`_on_send_failed` 把仍在等待的记为「错误」；停止/收尾时剩余待匹配记为「失败」",
+            "串口工具：状态存命令的**运行时键 `_status`**（不进 `normalize_command`、不落盘、不导出 —— `export_commands` 统一剔除下划线开头的键，避免下次打开显示上一次的旧状态）；状态变化只**重画那一行的名称单元格**（`_refresh_cmd_row`），不整表重建，因此不打断选中与滚动位置；命令上下移/删除时状态随命令字典自然跟随",
+            "测试：test_serial_tool_widget.py 扩至 448 项（新增第 [32] 段 30 项：五态图标非空且**逐态校验渲染出的像素颜色**（容差 3，实测上色正确）、未知状态回落「待测」、图标缓存、五态形状两两不同、表格名称列的图标/配色/tooltip/文字、状态机读回、六条迁移路径（发出→发送中、无需匹配→通过、匹配成功→通过、超时→失败、发送失败→错误、每轮重置）、`_status` 不落盘不导出、图例文案）",
+        ],
+    ),
+    (
+        "1.23.54",
+        "2026-09-22",
+        [
+            "串口工具：**日志新增「自动保存到文件」**（实测诉求）。勾选「自动保存日志」即把日志**实时写入文件**，取消勾选即停止并写入统计尾；文件是**日志窗口内容的完整镜像**（同样受「显示发送 / 显示接收 / 显示解析」控制，不存在第二套过滤规则），但**不截断** —— 窗口只保留最近 10000 行，文件一直追加，适合现场跑完再离线复盘。每行带**毫秒时间戳**前缀（可关）、**写一行 flush 一次**（断电/崩溃也尽量保住已写内容）；文件头记录标题/开始时间/串口上下文，文件尾记录停止时间与收发、匹配统计。目录可选（默认数据目录下的 `Output/`，与监控器 CSV 一级）、可一键在资源管理器打开；另有「保存当前日志…」把窗口现有内容另存一份",
+            "串口工具：写入点挂在 `_log()`（日志窗口的**唯一出口**）上 → 面板显示什么、文件里就是什么，避免出现「窗口有、文件没有」这类漂移。文件名精确到秒且**同名不覆盖**（同一秒内停止再开始 → `_1`/`_2` 递增，宁可多一个文件也不丢数据）；`LogFileWriter` 纯逻辑无 Qt（`_write` 同时捕 `OSError` 与 `ValueError` —— 句柄被外部关掉时 Python 抛的是 `ValueError` 而非 `OSError`），任何写失败都**不抛给调用方**：GUI 依据返回值明确提示原因（含 `error` 文本）并自动关闭自动保存，绝不静默丢日志",
+            "串口工具：`cleanup()` 现会先把**残留日志队列**刷进日志窗口/文件，再写统计尾并关闭文件（旧版队列里的最后几帧与解析行会在退出时直接丢失）。勾选状态作为偏好持久化（`log_auto_save` / `log_dir` / `log_timestamp` 三个新参数，旧配置缺键 → 默认关闭，行为与旧版完全一致，故 `CONFIG_VERSION` 不动）",
+            "测试：test_serial_tool_widget.py 扩至 418 项（新增第 [31] 段 59 项：时间戳/文件名/默认目录/同名递增/手写文件等纯函数、`LogFileWriter` 的文件头无前缀 + 逐物理行加前缀 + 写一行即落盘 + 同名不覆盖 + 打开失败/写失败不抛、Widget 级「勾选即建文件（且在沙箱内）」、「面板新增的每一行都在文件里」的镜像断言、「显示发送」关闭时文件同步不写、时间戳开关立即生效、统计尾真实计数、写失败自动关闭并提示且不递归、目录不可用时勾选回弹 + 弹窗、偏好持久化与重启自动开始保存、手动保存与 cleanup 残留队列不丢)",
+        ],
+    ),
+    (
+        "1.23.53",
+        "2026-09-22",
+        [
+            "串口工具：**新增匹配方式「HEX 通配（XX=任意字节）」**（实测诉求）。用正则匹配二进制帧要写 `\\xNN` 转义、还要绕开「忽略大小写把 `\\x68` 也当 `0x48`」「`.` 不匹配 `0x0A`」两个坑，现场太别扭 —— 现在可以直接写 **HEX + `XX`**：`68 D0 XX XX XX XX`。**沿用「测试方案」的既有约定**（`test_plan_widget._match_frame`：HEX 模式逐字符走、遇 `XX` 跳过一个字节），`XX` 可嵌在连续串里（`68D0XXXX16` 也认），`??` 是等价别名，分隔符复用 HEX 容错那一套。语义为**包含式**（在累积接收数据里任意位置查找，跨交付块），另支持可选锚点：开头写 `^`、结尾写 `$`（`^68D0XX` / `XX16$` / `^…$` 全长）。命中日志给出**命中偏移**；失败诊断区分「模式比数据长」与「未匹配到」",
+            "串口工具：匹配方式下拉从 6 项扩到 7 项；对话框按所选方式**动态切换占位符与说明**（HEX 通配给出 `XX`/`^`/`$` 写法；正则给出 `\\xNN` 与两个坑的提醒，并建议二进制帧改用 HEX 通配）；新增 `parse_hex_wildcard()` / `hex_wildcard_match()` / `match_offset()` 三个纯函数（`match_offset` 统一匹配入口并返回偏移，`contains` 也能报出位置）；`normalize_command` 对 `hex_wildcard` 只校验通配模式合法性（非法才降级，不会像旧正则那样被静默降级）",
+            "测试：test_serial_tool_widget.py 扩至 356 项（新增第 [30] 段 HEX 通配 34 项：模式解析 / 连续串内嵌 XX / `??` 别名 / 反例、包含式与 `^`/`$` 锚点、`XX` 真的跳过而非通配位必须逐字节相等、`match_offset` 偏移、normalize 与展示、通配专用诊断、以及**用实测国网帧四块交付的端到端命中**）",
+        ],
+    ),
+    (
+        "1.23.52",
+        "2026-09-22",
+        [
+            "串口工具：**命令列表新增「选择」勾选列 + 全选 / 全不选 / 反选，发送只发勾选的命令（按表内顺序）**（实测诉求「多条命令时可以选择需要发送的，而不是默认全部执行」）。勾选状态存命令的 `enabled` 字段（随配置落盘读回；**旧配置无该键 → 全选**，与旧版本「只能全部发送」等价）；`SerialSendWorker` 新增 `index_map`，把「筛选后的下标」映射回 `commands` 的原下标 —— 名称 / 协议 / 匹配规则都按原下标取，否则会张冠李戴；一条都没勾时明确提示而不启动；发送日志标明「N/M 条命令（已勾选）」。实测用 `QTest` **真鼠标点击**验证了勾选框在 `NoEditTriggers` 下仍能切换（只断言 flags 不够）",
+            "串口工具：**修复「明明是对的却提示不是有效的 HEX」**（实测报障）。根因：`hex_str_to_bytes` 按「空格 / 半角逗号」切分后把每个片段当**一个字节**，于是**连续无分隔的 hex**（如 `6812004116`）会被整串转成一个越界整数 → 判为非法。现在容错：连续串按字节切、半角/全角逗号/顿号/分号/斜杠/竖线/连字符/全角空格都当分隔符、容忍 `0x` 前缀；仍拒绝「连续串字符数为奇数」与「含非 hex 字符」。另外新增 `hex_input_error()`，把「不是有效 HEX」换成**可读原因**（`含非 HEX 字符 'G'（第 6 个字符）` / `片段 '681200411' 的字符数为奇数（9 个）`），对话框与「开始发送」校验都带上原因 —— 与匹配诊断同一思路，现场能自查",
+            "串口工具：**修复「正则表达式」匹配方式完全不工作**。旧实现把「预期响应」一律按 HEX 校验，正则文本必然非法 → 被 `normalize_command` 静默降级成「不匹配」、待匹配项根本不会入队，现场只会看到「超时未匹配」。现在：正则方式下「预期响应」按**正则文本**处理（`normalize_command` 只校验正则语法是否合法、空正则也降级；`_on_sent` 用 `encode('latin-1')` 而非 `hex_str_to_bytes`），日志里预期按 `正则 <文本>` 展示（**不用 repr**，避免 `68\\s*D0` 显示成 `'68\\\\s*D0'`），且不参与「预期 = 发送值」误填提示",
+            "测试：test_serial_tool_widget.py 扩至 322 项（新增第 [1] 段 HEX 容错 10 项、第 [1b] 段失败原因 5 项、第 [28] 段勾选与「只发勾选项」（含真鼠标点击、index_map 不错位、落盘读回、编辑不改勾选）、第 [29] 段正则匹配方式端到端 13 项）",
+        ],
+    ),
+    (
+        "1.23.51",
+        "2026-09-22",
+        [
+            "串口工具：**命令列表双击直接进入编辑窗口**（等价于选中该行后点「编辑」），并给表格加了「双击某一行可直接编辑该命令」的提示。实现上单独加了 `_on_cmd_double_clicked(row, col)` 而**不给 `_edit_command` 加位置参数** —— 按钮的 `clicked` 会带一个 bool 参数，加位置参数会被那个 `False` 当成行号（`False` → 第 0 行），属于必须避开的坑；处理函数先 `selectRow(row)` 让视觉选中与编辑目标一致，越界行号（空表/程序化调用）直接忽略",
+            "测试：test_serial_tool_widget.py 扩至 265 项（新增第 [27] 段：双击任意列都能打开对应行的编辑框、走**真实 `cellDoubleClicked` 信号**验证连线、双击后选中行一致、越界行号安全忽略、取消编辑不改动命令）",
+        ],
+    ),
+    (
+        "1.23.50",
+        "2026-09-22",
+        [
+            "串口工具：**修复响应匹配漏配**（实测报障「设置了匹配规则仍超时未匹配」）。根因：匹配原来按**串口单次交付的块**比对，而驱动会把一帧拆成多次交付（实测 208 字节的国网帧被拆成 77+92+36+3 四块）—— 于是「预期响应 = 整帧」永远不可能匹配上（也不受接收模式影响：匹配吃的是原始交付块，不是切好的帧）。改为按**累积接收缓冲**比对（`MATCH_BUFFER_MAX = 8192` 防无界），跨交付块也能命中；累积缓冲在**每次发送**时清空（一问一答的窗口重新开始）、队列清空时也清空，避免用上一次响应的字节误判本次；**「队首连续匹配」语义不变**（同一批数据仍可连续命中多项）",
+            "串口工具：**匹配判决全部输出可比对的日志**（实测诉求「需要把匹配规则也输出日志，才能分析为何判决失败」）。发送时输出 `[匹配] #n 等待响应：包含(contains)，预期 = …`；命中输出 `[匹配✓] #n 匹配成功（方式，预期 = …）`；超时输出 5 行诊断 —— `[匹配✗] … 超时未匹配` + `匹配方式 = 完全相等(equals)` + `预期响应 = …` + `期间收到 = …（共 N 字节）` + `诊断 = <为什么没匹配上>`。新增纯函数 `match_failure_reason()`：按 6 种匹配方式分别说明差在哪（预期串未出现 / 长度不一致 / 首个不同字节偏移 / 结尾不符 / 正则未匹配 / 期间未收到任何数据），并能识别最常见的误填 —— **预期响应与发送数据完全相同**时直接点名。新增 `hex_preview()`（超长 HEX 预览带总长）、`first_diff_offset()`、`match_type_label()`；匹配日志走 RX/TX 队列，享受 burst 保护（高速时不会刷屏）",
+            "测试：test_serial_proto_frame.py 扩至 122 项（新增第 [10] 段匹配诊断纯函数：6 种方式的失败原因 + 误填识别 + HEX 预览截断 + 首个不同字节偏移）；test_serial_tool_widget.py 扩至 257 项（新增第 [26] 段：**用实测的 77+92+36+3 四块交付复现跨块匹配**、失败诊断 5 行内容、误填点名、以及「两次发送之间不得拿上一次响应的字节误判」）",
+        ],
+    ),
+    (
+        "1.23.49",
+        "2026-09-22",
+        [
+            "修复（实测报障）：**改了默认值却对老用户不生效** —— 1.23.48 已把「解析行数上限」默认改为不限制，但日志里仍显示「已省略 83 行」。根因：参数一旦被保存过就会把**当时的默认值**写进 `serial_tool_config.json`（实测该文件是 `version: 1` + `parse_max_lines: 30`），而 `merge_params` 只在「键不存在」时才用新默认值。改为引入**配置版本迁移**：`CONFIG_VERSION` 升到 2，`load_config` 按 `version` 调 `migrate_params` —— v1 配置里 `parse_max_lines == 30`（= v1 的默认值，不是用户特意选的）迁移为新默认 `0`（不限制），用户显式设过的**其他**值一律保留；回写后版本升为 2，不会来回抖动。**通用教训**：以后改任何参数的默认值，都要同时考虑「旧配置里已存了旧默认值」并加迁移，否则改动等于没做",
+            "测试：test_serial_proto_frame.py 扩至 102 项（新增第 [9] 段配置迁移：旧默认 30 → 0、用户特意设的 5 / 0 保留、v2 里的 30 保留、迁移不改原对象、`load_config` 走迁移、回写升版本 2、再读回不抖动），并把「反例自检」段顺延为 [10]",
+        ],
+    ),
+    (
+        "1.23.48",
+        "2026-09-22",
+        [
+            "串口工具：**发送（TX）也按命令协议解析**，与接收对称 —— 之前只解析 RX，发送的命令在日志里只有一行 hex。`_tx_log_queue` 与 `_rx_log_queue` 统一为 `(kind, text)` 元素，`_queue_parse(frame, protocol, channel)` 按 `channel` 入对应队列；`_flush_log_queues` 用同一套规则处理两个队列（各自前缀 `[TX]`/`[RX]`、raw 用各自配色 tx/rx、解析行 sys、失败行 fail），**burst 只对各自队列的 raw 计数**",
+            "串口工具：**解析行数默认不再截断**（`parse_max_lines` 默认 `0` = 不限制，可选 0~2000，0 显示为「不限制」）。起因：现场实测国网「查询从节点ID信息」一条应答帧就有 **113 行**解析（22 行帧级字段 + 1 行从节点总数量 + **15 个节点 × 6 行**），旧的默认上限 30 让现场只能看到前 30 行；实测已核对「113」是**解析行数**、与「从节点总数量 = 113」纯属数字巧合（解析器确实只输出 15 个节点 = 本次应答数量）",
+            "测试：test_serial_proto_frame.py 扩至 88 项（`max_lines = 0 / 负数` 不限制、上限 2000、默认值语义）；test_serial_tool_widget.py 扩至 136 项（新增第 [24] 段：TX 按命令协议解析 / TX 原始行与字段行格式 / 关闭「显示解析」时 TX provider 零调用 / 命令协议为「不解析」时不解析 / TX 解析异常只进 TX 失败行 / 两个队列按各自前缀与配色刷出；第 [23] 段补「默认不限制 → 完整 113 行」与「节点地址行 = 15」两条实测断言）",
+        ],
+    ),
+    (
+        "1.23.47",
+        "2026-09-22",
+        [
+            "串口工具：**命令表新增「协议」字段**（任务 09-22-serial-proto-parse）—— 命令表第 5 列显示协议短名（「不解析」= 不参与），添加/编辑命令时用下拉选择（`不解析` + 12 个协议，带 `[i]` 前缀）；字段随 `serial_tool_config.json` 落盘与读回，**旧配置无该键时回落「不解析」**，非法值（bool / 越界 / 非数字字符串）一律回落，导出裸列表时统一补齐该键（源工具忽略未知键，双向兼容不破）",
+            "串口工具：**接收按「最近一次发送命令的协议」断帧**（串口是问答式，RX 就是这条 TX 的响应）。新增纯函数 `frame_length_for(strategy, buf)`：南网/国网 `68H + L(2B 小端)`（整帧 = L）、DLT645-2007 `68H + A(6) + 68H + 控制码 + L(1B@9)`（整帧 = L + 12）、698.45 `68H + L(2B 小端) + 68H`（整帧 = L + 3）、HDLC/DLMS-APDU(国网) `7EH…7EH` 定界（7D 转义，共享标志位不产空帧）、DLMS Wrapper `版本 0001 + … + 长度(2B 大端@6)`（整帧 = 8 + L）；**每种都要求自证**（末字节 16H / 第二起始符位置 / 版本 + 长度合理），任一不满足即返回 0 交回既有「启发式 + 时间聚合」路径 —— **错切帧比不切更糟**；无自证依据的协议（PLC RF / DLMS-APDU 裸 / 新一代 / 国网新一代 / HDC 1.0）行为与改动前完全一致",
+            "串口工具：**按该协议解析并在日志直接输出文字**。解析能力由 `main_gui` 注入回调（`tab.set_parse_provider(self._serial_parse_provider)`，与 `set_serial_worker` 同一约定，widget 不 import main_gui），与单帧页/批量共用同一套分派（`_get_current_parser` + `build_gui_parser`），保证「串口工具看到的解析」与「复制到单帧页解析」逐字段一致。每个完整帧输出 `[解析·<协议短名>] <摘要>` + 缩进字段行（`字段名 = 解析值  说明`，解析值空则回落原始值）；行数上限可配（默认 30，超限提示「共 N 行，已省略 M 行」）；解析异常 / 返回空表时只输出 `[解析·…] 失败：<原因>`（fail 配色），**不伪造**半成品字段",
+            "串口工具：新增「显示解析」开关（默认开，关闭时零解析开销 —— 实测 provider 零调用）与「解析行数上限」参数（1~500，随参数落盘）；RX 日志队列元素升级为 `(kind, text)`（raw/parse/fail 三色），**burst 策略只对原始行计数**：一批超 20 帧时只输出「摘要 + 首帧 + 末帧」，同批解析明细整批丢弃（防刷屏拖慢界面）",
+            "串口工具：`export_commands` 统一补齐并归一化 `protocol` 键（程序内直接构造的命令可能缺它），保证落盘/导出格式一致；`_on_sent` 锁存该命令的协议供接收侧使用（同批命令协议不同时以最后发出的为准）",
+            "测试：新增 test_serial_proto_frame.py（84 项：三种 68 结构 / 645 / 698.45 / HDLC / Wrapper 的策略分帧 + 越界与自证失败反例 + HDLC 共享标志位 + 文字格式化与截断 + 协议字段归一化与参数钳制 + 反例自检），登记 release_check.py:CORE_TESTS；test_serial_tool_widget.py 扩至 119 项（协议锁存与按协议断帧、假 provider 的解析格式/截断/异常/空表/开关、burst 不展开、协议字段对话框与落盘读回与导入导出、**真实解析器端到端冒烟**：国网 208 字节帧 / 645 / 698.45）",
+        ],
+    ),
+    (
+        "1.23.46",
+        "2026-09-22",
+        [
+            "新增**「串口工具」标签页**（集成自 `E:\\python\\USB负载测试工具`，任务 09-22-serial-tool-integration）：命令表（名称 / 发送数据 HEX / 匹配方式 / 预期响应）增删改与上下移 + 保存·加载配置（JSON，与源工具**裸列表双向兼容**）+ 加载报文文件（txt 每行 hex，兼容 `前缀:` 形式，比源工具多一次「最后一个冒号」兜底）",
+            "串口工具：**精确间隔**循环发送（间隔 1~10000ms、次数 0=无限；间隔 >5ms 先 sleep 再尾段忙等保精度）+ 发送完成后等一个响应超时收尾并打印成功率；接收两模式（原始数据按批聚合 / 按帧尾分割，帧尾可配默认 `FE 16`）",
+            "串口工具：6 种响应匹配（包含 / 完全相等 / 开头 / 结尾 / 正则 / 不匹配）与源工具同名同义；接收数据从待匹配**队首连续**比对（一批数据可连续命中多项），超时 / 停止 / 收尾把剩余待匹配计为失败；成功率 = 成功 / 已发送待匹配数（仅计入「启用匹配且匹配方式非 none」的发送）",
+            "串口工具：彩色日志（TX 红 / RX 绿 / 匹配 ✓✗ / 系统蓝）+ 1 万行上限 + 自动滚动 / 显示发送 / 显示接收开关；**高速发送日志按 100ms 批量刷出**，队列超过 20 条只输出「摘要 + 首帧 + 末帧」（实测 200 帧仅十余行日志，不刷屏）",
+            "串口工具：命令与参数自动落盘到 `serial_tool_config.json`（临时文件 + `os.replace` 原子写，损坏回落默认值），该文件已加入 .gitignore；串口层**复用主窗口共享的 `serial_worker`**（与组帧页/监控器页同一约定，端口/波特率只在顶部「串口配置」设置），并为其新增静默写入 `write_raw()`（不逐帧发日志信号 + 写锁，供高速发送使用）；本页只读跟随连接状态、不再自带端口/波特率/连接控件（一个 COM 口只能打开一次，各页各持句柄会互相抢口）",
+            "修复（实测报障，两轮）：**「原始数据」模式下一帧被打成多行**。① 串口驱动会把同一帧拆成多次 `read` 交付（低波特率甚至逐字节），原实现按每次交付输出一行 → 一帧多行、RX 帧数虚增；② 首轮改为 10ms **静默聚合**后仍报障：实测 208 字节的国网帧被拆成 77+92+36+3 共 4 行，说明**交付块间隔本身就大于 10ms**，纯时间聚合不可能可靠合并。最终改为**帧结构优先、时间聚合兜底**：按长度域收全再输出 —— 南网/国网 `68H + 长度域 L(2B 小端) + … + CS + 16H`（`L` 就是整帧字节数，实测 `68 D0 00 …` → 208 与 4 行合计 208 完全吻合）、698.45 `68H + L(2B 小端) + 68H + … + FCS + 16H`（整帧 = L + 3，见协议文档 6.2.2）、DLT645-2007 `68H + 地址(6B) + 68H + 控制码 + 数据长度 L(1B) + … + 16H`（整帧 = L + 12）；三者按**第二个起始符 68H 的位置**（第 4 / 第 8 字节）互斥判别，且末字节必须是 16H 才算自证 —— 帧体内出现 16H 不会被误切，两帧连在一次交付里也能切成两行，判别不出的（不足 8 字节等）一律退回时间聚合，**错切帧比不切更糟**。非上述结构与无结构裸数据仍走时间聚合，并保留 10ms 静默窗口、200ms 最长持有（防持续流无界增长）、已声明长度帧 300ms 容忍静默 + 5s 绝对上限；切换接收模式与 `cleanup()` 时立即刷出，不丢数据",
+            "修复（测试暴露的既有缺陷）：构造期 `_load_persisted()` 触发控件 `toggled` → `_schedule_save()`，而 `_save_timer` 彼时尚未创建 → 信号槽内抛 `AttributeError`（Qt 静默吞掉，**配置保存随之失效**）。已把 `_save_timer` 提到 `_build_ui()`/`_load_persisted()` 之前创建，并加构造顺序回归断言",
+            "修复（实现期由测试发现）：上一轮发送遗留的收尾定时器 / 迟到信号会掐断新一轮发送（实测 200 帧只发出 140）—— 改用「发送器身份 + 发送代次」双重守卫",
+            "测试：新增 test_serial_tool_widget.py（纯逻辑 + 假串口驱动的发送/匹配/分帧/节流/持久化 + 主窗口懒加载集成）、test_serial_worker_write_raw.py，均登记 release_check.py:CORE_TESTS；既有 test_serial_worker_framing.py（28 项）全绿",
+        ],
+    ),
+    (
+        "1.23.45",
+        "2026-09-22",
+        [
+            "TCP 监控：非 ED..EE 封装的**原始 TCP 载荷**不再被静默丢弃。`FlowBuffer` 新增切帧策略 `auto/ed/raw`（默认 auto）：某方向出现过 ED 帧则行为与改动前一致；判定为非 ED 方向时按 **TCP segment 逐包**产出「原始数据帧」（实测：27B 原始载荷原先切出 0 帧、`pending_bytes` 归零即字节全丢，现在 1 段 1 帧且长度相符）。含 0xED 的普通载荷不会被误判为 ED 帧（完整定界校验 + 等待上限 2 段），跨包 ED 帧仍正常切出，raw 方向遇完整 ED 帧可升级回 ED（应对抓包从 ED 连接中途开始）",
+            "TCP 监控：协议识别扩展为「显式选择优先 + 自动识别（只认可自证形态）」。自动识别覆盖 DLMS Wrapper（版本 00 01 + 长度自洽）、DLMS-APDU 裸报文（首字节 ∈ `HDLCParser.APDU_TYPES`）、DLT645-2007（68+6+68 结构 + 校验器 0 fail）、698.45（HCS/FCS 双通过 CRC 自证）。**已声明边界**：南网/国网 同为 0x68 起头且链路层结构相近，校准实测两者校验器互判 0 fail（无法区分），故**不参与自动识别**，需显式选择 —— 错解析比不解析更糟；显式选择下解析器返回退化结果（行数 <2 或摘要为 '-'）也如实回落为原始数据，不拿退化结果冒充解析成功",
+            "TCP 监控：识别不出的载荷按「原始数据」正常显示（协议列 = 原始数据、摘要含长度、解析行含 TCP 载荷/首字节/原始数据 三行），首字节命中 698.45 或 DLMS APDU 标签表时给出「疑似 … APDU: 名称」；路由不再只看首字节（原始载荷恰以 0xED 开头时不再被塞进 ED 路径得到「无法识别协议」+ 空表）",
+            "TCP 监控 UI：新增 Wireshark 风格字节视图 `hex_dump_view.HexDumpView`（偏移 + 16 进制 + ASCII + 按字节范围高亮，高亮色与主窗口一致，保留旧属性名 `segment_hex`）；「解析结果」新增 表/字段树 切换（复用 `parse_result_view`，与主窗口同构，树选中同样高亮字节）；帧表新增「源 → 目的」列、未识别帧灰色弱化；新增「仅未识别」勾选与协议过滤（只影响显示、缓存保持全量）；协议下拉扩展为全协议并按 itemData 携带协议索引；切换协议下拉会**重解析已抓帧**（>200 帧分批让出事件循环，帧数量/顺序/字节不变）",
+            "测试：新增 test_hex_dump_view.py（27 项）、test_tcp_monitor_raw_payload.py（27 项）、test_tcp_monitor_proto_detect.py（36 项）、test_tcp_monitor_ui_views.py（46 项），均登记 release_check.py:CORE_TESTS；既有 ED 相关 TCP 测试（test_tcp_monitor_ed_hdc 15 项 / test_tcp_monitor_proto11_frames 55 项 / hdc10_tcp_ed_frames）全绿",
+        ],
+    ),
+    (
+        "1.23.44",
+        "2026-09-21",
+        [
+            "修复：启动后「协议选择」下拉框显示为空白、点一下才出现文字。根因是顶部协议组的自定义 `FlowLayout.sizeHint()` 返回了 `minimumSize()`（各子项最小尺寸的逐分量最大值 ≈ 最宽单项 276px），父布局据此只给这么宽 → 布局被迫换行成两行 → 分组框高 75px 而顶栏容器只有 49px → 第二行的协议下拉框被裁成一条缝（实测 geometry (5,44)、visibleRegion 仅 266x5）",
+            "修复：`FlowLayout.sizeHint()` 改为**单行自然尺寸**（各子项 sizeHint 之和 + 间距 + 边距），语义对齐 QHBoxLayout；`minimumSize()` 保持不变，窗口真窄时仍照旧换行（换行能力未被削弱）",
+            "修复：`_reflow_proto_group()` 增加「重排外层顶栏」步骤。原实现只 invalidate/updateGeometry/adjustSize 内层布局，分组框拿不到最终宽度、内层 FlowLayout 也不会被重新调用，子项就停在旧的换行位置；实测只重排外层后，下拉框同步从 (5,44)/266x5 恢复到 (76,20)/266x26，不再依赖点击等交互触发",
+            "测试：新增 test/test_flow_layout_proto_group.py（11 项，offscreen：sizeHint 语义 / 窄窗仍换行 / 启动 reflow 后下拉框完整落在顶栏容器内 / 反例自检还原旧实现必须变红），登记 release_check.py:CORE_TESTS",
+        ],
+    ),
+    (
+        "1.23.43",
+        "2026-09-21",
+        [
+            "「关于」对话框新增「去 GitHub 给作者点 Star」按钮（star 图标）与提示行「如果这个工具帮到了你，欢迎在 GitHub 上给作者点个 ⭐ Star」；点击用系统默认浏览器打开作者仓库",
+            "作者仓库地址 `AUTHOR_GITHUB_URL` 为单一来源（按钮提示/跳转/测试都读它，改地址只改一处）；调起浏览器失败时弹窗给出可手动复制的地址，不静默无反应",
+            "「关于」对话框拆出 `_build_about_dialog()`（构造与 `exec()` 分离）便于测试直接检查控件与接线，菜单接线不变（仍由 test_menu_wiring.py 守卫）",
+            "测试：新增 test/test_about_github_star.py（offscreen：按钮存在/图标非空/文案/与「检查更新」「确定」同排/URL 单一来源/点击跳转/失败兜底/`_show_about_dialog` 仍 exec）",
+        ],
+    ),
+    (
         "1.23.42",
         "2026-09-21",
         [
@@ -143,17 +280,17 @@ CHANGELOG = [
             "Web 查询页补齐自定义条目 CRUD：协议0 新增/覆盖/删除自定义 DI（`State.add_custom_di` / `delete_custom_di` / `delete_selected_custom`，查询表勾选列 + 「删除选中」批量按钮，内置 DI 忽略并计数）；协议7 新增自定义 AFN+Fn（`lookup_utils.add_gdw_custom_fn` / `remove_gdw_custom_fns`，复用 `GDW10376Parser` 既有 API，表单 + 批量删除）；查询表新增「自定义」★ 列；`custom_di_store` 读写支持可选 path 注入（默认行为不变）",
             "`gdw_afn_lookup` 新增 `refresh()`：自定义 AFN+Fn 增删后重建查询缓存（否则页面仍是旧表）",
             "测试：新增 test/test_web_gui_parity.py（83 项：R3 两端摘要片段对拍 + R4/R4b 增删与沙箱，均已登记 release_check.CORE_TESTS）；变异反证 3 条实测变红后还原（偏移公式回退 / 删 Web 片段 / 645 复制体回潮）",
+            "顶栏折叠时标题栏协议短名**近似居中**：Windows 原生标题整段左对齐，按窗口宽度用空格把短名顶到中部，resize 时重算填充（用户反馈：字面插在字符串中间仍靠左）",
         ],
     ),
     (
         "1.23.41",
         "2026-09-21",
         [
-            "GUI 顶部栏「协议选择 / 串口配置」支持折叠（类似 LLM 预处理面板），折叠后腾出更多内容显示面积",
-            "协议选择折叠时：当前协议短名插入窗口标题中间（`协议解析工具 vX (日期) · 协议短名 · 作者`），切换协议实时更新；短名取 protocol_registry.short_name，避免下拉全名过长",
-            "串口配置折叠时：状态栏右侧显示紧凑串口信息（端口 · 波特率 · 校验 · 连接状态），展开/连接/改参数时同步刷新",
-            "折叠状态持久化到 config.json 顶层 `top_bar` 段（proto_collapsed / serial_collapsed），重启恢复；不写入 ui 段",
-            "测试：新增 test/test_top_bar_collapse.py（offscreen：折叠显隐/标题中间协议/状态栏串口/配置往返/协议切换标题）",
+            "GUI 顶部栏「协议选择 + 串口配置」支持整体显示/隐藏：菜单栏右上角小图标按钮（panel-top-open/close）一键切换，两组控件同时消失/恢复，不再各占一条折叠按钮栏",
+            "顶栏折叠时：标题左侧保持「版本+日期 - 作者」不变，**仅协议短名**按窗口宽度空格近似居中（Windows 原生标题整段左对齐，resize 重算）；状态栏显示 `串口: 端口 · 波特率 · 校验 · 连接状态`",
+            "折叠态持久化到 config.json 顶层 `top_bar.collapsed`（兼容初版 proto_collapsed/serial_collapsed，任一为真即整栏折叠）；不写入 ui 段",
+            "测试：改写 test/test_top_bar_collapse.py（单开关一起显隐/标题短名/状态栏串口/配置往返）",
         ],
     ),
     (
@@ -1723,7 +1860,29 @@ class FlowLayout(QLayout):
         self._do_layout(rect, test_only=False)
 
     def sizeHint(self):
-        return self.minimumSize()
+        """单行自然尺寸（语义对齐 QHBoxLayout.sizeHint：各子项 sizeHint 之和）。
+
+        不能直接返回 minimumSize()：它是「各子项最小尺寸的逐分量最大值」（≈最宽单项），
+        父布局会照这个宽度只给这么宽 → 本布局被迫换行 → 高度翻倍并超出父容器高度，
+        第二行（协议下拉框）被裁成一条缝，启动时看起来是空白，点一下才刷新。
+        返回单行总宽后，父布局首轮即给足宽度，正常情况不会换行；窗口真窄时父布局仍可
+        压到 minimumSize()，_do_layout 照旧换行（换行能力不受影响）。
+        """
+        total_w = 0
+        max_h = 0
+        visible = 0
+        for item in self._items:
+            wid = item.widget()
+            if wid is not None and not wid.isVisible():
+                continue
+            hint = item.sizeHint()
+            total_w += hint.width()
+            max_h = max(max_h, hint.height())
+            visible += 1
+        if visible > 1:
+            total_w += self.spacing() * (visible - 1)
+        m = self.contentsMargins()
+        return QSize(total_w + m.left() + m.right(), max_h + m.top() + m.bottom())
 
     def minimumSize(self):
         size = QSize()
@@ -1900,6 +2059,9 @@ class MainWindow(QMainWindow):
 
         self.setup_ui()
         self._setup_menu_bar()
+        # 菜单栏图标按钮在 _setup_menu_bar 创建；套用顶栏折叠态须在其后
+        self._apply_top_bar_collapse_state()
+        self._update_window_title()
 
         # 发现新版本不再弹窗打扰：状态栏右下角常驻绿色⬆提示，点击可选择下载更新
         self._pending_update = None
@@ -1957,8 +2119,7 @@ class MainWindow(QMainWindow):
         )
         self.statusBar().addPermanentWidget(self._serial_statusbar_lbl)
         self._serial_statusbar_lbl.hide()
-        # setup_ui 已按折叠态改过标题；此处状态栏标签就绪后再刷一次串口回显
-        self._update_window_title()
+        # 顶栏折叠态/标题在菜单栏图标就绪后套用（见 __init__ 中 _setup_menu_bar 之后）
         self._update_serial_statusbar()
 
     @property
@@ -2006,26 +2167,12 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(8)
 
-        # ========== 顶部栏：协议选择 + 串口配置（均可折叠，见 _toggle_*） ==========
-        top_bar = QHBoxLayout()
+        # ========== 顶部栏：协议选择 + 串口配置（整体可隐藏，开关在菜单栏右上角） ==========
+        # 折叠时整行一起消失（协议→窗口标题中间，串口→状态栏），不再占任何高度
+        self.top_bar_widget = QWidget()
+        top_bar = QHBoxLayout(self.top_bar_widget)
+        top_bar.setContentsMargins(0, 0, 0, 0)
         top_bar.setSpacing(6)
-
-        # ---- 协议选择（可折叠外壳） ----
-        # 折叠后协议名进入窗口标题中间（_update_window_title），腾出顶部高度
-        proto_outer = QWidget()
-        proto_outer_layout = QVBoxLayout(proto_outer)
-        proto_outer_layout.setContentsMargins(0, 0, 0, 0)
-        proto_outer_layout.setSpacing(2)
-
-        self.proto_toggle_btn = QPushButton("▼ 协议选择")
-        self.proto_toggle_btn.setCheckable(True)
-        self.proto_toggle_btn.setChecked(True)
-        self.proto_toggle_btn.setStyleSheet(self._top_bar_toggle_style())
-        self.proto_toggle_btn.setToolTip(
-            "折叠协议选择区以腾出显示空间；折叠后当前协议会显示在窗口标题中间"
-        )
-        self.proto_toggle_btn.clicked.connect(self._toggle_proto_group)
-        proto_outer_layout.addWidget(self.proto_toggle_btn)
 
         # ---- 协议选择分组 ----
         proto_group = QGroupBox("协议选择")
@@ -2200,25 +2347,7 @@ class MainWindow(QMainWindow):
         self.gw_channel_combo.setVisible(False)
         proto_layout.addWidget(self.gw_channel_combo)
 
-        proto_outer_layout.addWidget(proto_group)
-        top_bar.addWidget(proto_outer, 1)
-
-        # ---- 串口配置（可折叠外壳） ----
-        # 折叠后串口参数与连接状态进入状态栏（_update_serial_statusbar）
-        serial_outer = QWidget()
-        serial_outer_layout = QVBoxLayout(serial_outer)
-        serial_outer_layout.setContentsMargins(0, 0, 0, 0)
-        serial_outer_layout.setSpacing(2)
-
-        self.serial_toggle_btn = QPushButton("▼ 串口配置")
-        self.serial_toggle_btn.setCheckable(True)
-        self.serial_toggle_btn.setChecked(True)
-        self.serial_toggle_btn.setStyleSheet(self._top_bar_toggle_style())
-        self.serial_toggle_btn.setToolTip(
-            "折叠串口配置区以腾出显示空间；折叠后端口/波特率/校验/连接状态会显示在状态栏"
-        )
-        self.serial_toggle_btn.clicked.connect(self._toggle_serial_group)
-        serial_outer_layout.addWidget(self.serial_toggle_btn)
+        top_bar.addWidget(proto_group, 1)
 
         # ---- 串口配置分组 ----
         serial_group = QGroupBox("串口配置")
@@ -2288,17 +2417,16 @@ class MainWindow(QMainWindow):
         serial_layout.addWidget(self.serial_status_label)
 
         serial_layout.addStretch()
-        serial_outer_layout.addWidget(serial_group)
-        top_bar.addWidget(serial_outer)
+        top_bar.addWidget(serial_group)
 
-        # 串口参数变化时刷新状态栏紧凑回显（折叠态下用户改下拉也要同步）
+        # 串口参数变化时刷新状态栏紧凑回显（顶栏折叠时用户改不到，但连接状态仍可能变）
         self.serial_port_combo.currentTextChanged.connect(self._update_serial_statusbar)
         self.serial_baud_combo.currentTextChanged.connect(self._update_serial_statusbar)
         self.serial_parity_combo.currentTextChanged.connect(
             self._update_serial_statusbar
         )
 
-        main_layout.addLayout(top_bar)
+        main_layout.addWidget(self.top_bar_widget)
 
         # ========== 串口工作线程 ==========
         self.serial_worker = SerialWorker()
@@ -2414,6 +2542,12 @@ class MainWindow(QMainWindow):
             self._tcp_monitor_placeholder, app_icons.load_icon("radar"), "TCP监控"
         )
 
+        # 串口工具页面（始终可见；集成自 USB 负载测试工具）
+        self._serial_tool_placeholder = QWidget()
+        self._serial_tool_tab_index = self.tab_widget.addTab(
+            self._serial_tool_placeholder, app_icons.load_icon("cable"), "串口工具"
+        )
+
         # 实时监控器页面（南网新一代(9)/国网新一代(10) 专用，默认隐藏）
         self.monitor_tab = RealtimeMonitorWidget()
         self.monitor_tab.set_serial_worker(self.serial_worker)
@@ -2444,9 +2578,7 @@ class MainWindow(QMainWindow):
         self._window_shown_once = False
         # 套用上次退出时保存的窗口几何 / 分栏 / 列宽（缺失/损坏/屏外均回落默认）
         self._apply_window_state()
-        # 顶部栏折叠状态（协议→标题 / 串口→状态栏；状态栏标签可能尚未创建，先只改控件与标题）
-        self._apply_top_bar_collapse_state()
-        self._update_window_title()
+        # 顶栏折叠态在 _setup_menu_bar 之后套用（开关在菜单栏角标）
         self._ui_ready = True  # UI 构造完成，此后协议切换才写盘
 
         # 分隔条拖动/尺寸变化后，子控件旧位置可能残留像素（Windows DWM 合成
@@ -3658,6 +3790,8 @@ class MainWindow(QMainWindow):
             self._ensure_topology_tab()
         elif index == getattr(self, "_tcp_monitor_tab_index", -1):
             self._ensure_tcp_monitor_tab()
+        elif index == getattr(self, "_serial_tool_tab_index", -1):
+            self._ensure_serial_tool_tab()
         elif index == getattr(self, "_seq_diagram_tab_index", -1):
             self._ensure_seq_diagram_tab()
 
@@ -3730,6 +3864,38 @@ class MainWindow(QMainWindow):
         apply_chinese_context_menus(tab)
         return tab
 
+    def _ensure_serial_tool_tab(self):
+        """懒加载创建串口工具页（集成自 USB 负载测试工具，与协议无关、始终可见）。"""
+        if hasattr(self, "serial_tool_tab"):
+            return self.serial_tool_tab
+        from serial_tool_widget import SerialToolWidget
+
+        tab = SerialToolWidget()
+        self.serial_tool_tab = tab
+        # 复用主窗口共享的串口线程（与组帧页/监控器页同一约定）：
+        # 端口/波特率只在顶部「串口配置」里设置，本页只订阅信号
+        tab.set_serial_worker(self.serial_worker)
+        # 解析能力同样走注入（本页不 import main_gui，避免循环依赖）：
+        # 按命令协议解析 RX 帧并在日志输出文字
+        tab.set_parse_provider(self._serial_parse_provider)
+        self._replace_lazy_tab(
+            self._serial_tool_placeholder, self._serial_tool_tab_index, tab
+        )
+        apply_chinese_context_menus(tab)
+        return tab
+
+    def _serial_parse_provider(self, frame_bytes: bytes, protocol_index: int):
+        """串口工具的解析回调：``(摘要, 解析表)``。
+
+        与单帧页/批量共用同一套分派（`_get_current_parser` + `build_gui_parser`），
+        保证「串口工具里看到的解析」与「复制到单帧页解析」逐字段一致。
+        在 GUI 线程调用（串口接收信号投递到 GUI 线程），与响应匹配同一口径。
+        """
+        parser = self._get_current_parser(protocol_index)
+        table_data = parser.parse_to_table(frame_bytes)
+        summary = self._get_summary_from_table_data(table_data, protocol_index)
+        return summary, table_data
+
     def _ensure_seq_diagram_tab(self):
         """懒加载创建通信时序图标签页（协议9批量解析可视化）"""
         if hasattr(self, "seq_diagram_tab"):
@@ -3778,78 +3944,86 @@ class MainWindow(QMainWindow):
             lay.invalidate()
         group.updateGeometry()
         group.adjustSize()
+        # 关键：必须让**外层顶栏**这一层也重排一次。只动内层（invalidate / updateGeometry /
+        # adjustSize）时，协议分组框拿不到最终宽度，内层 FlowLayout 也不会被重新调用，子项就
+        # 停在旧的换行位置 —— 协议下拉框留在第二行、被顶栏裁成一条缝（实测 visibleRegion
+        # 仅 266x5）→ 启动后显示为空白，点一下才刷新。重排外层后分组框立刻拿到最终宽度，
+        # 内层随之重排，下拉框回到第一行（实测同步恢复到 (76,20) / 266x26，无需交互）。
+        bar = getattr(self, "top_bar_widget", None)
+        if bar is not None:
+            bar_lay = bar.layout()
+            if bar_lay is not None:
+                bar_lay.invalidate()
+                bar_lay.activate()
 
-    # ==================== 顶部栏折叠（协议 / 串口） ====================
+    # ==================== 顶部栏显隐（协议+串口一起，菜单栏图标开关） ====================
 
-    def _top_bar_toggle_style(self) -> str:
-        """顶部栏折叠开关样式（明暗主题各一套，选中=展开态）"""
-        if self._is_dark_theme():
-            return (
-                "QPushButton { text-align: left; padding: 3px 8px; font-weight: bold;"
-                " color: #ddd; background: transparent; border: 1px solid #555;"
-                " border-radius: 4px; }"
-                "QPushButton:hover { background: rgba(255,255,255,20); }"
-                "QPushButton:checked { background: #2a4a6a; }"
-            )
-        return (
-            "QPushButton { text-align: left; padding: 3px 8px; font-weight: bold;"
-            " color: #333; background: #f5f7fa; border: 1px solid #d0d7de;"
-            " border-radius: 4px; }"
-            "QPushButton:hover { background: #e8f0fe; }"
-            "QPushButton:checked { background: #e8f4fd; }"
+    def _create_topbar_toggle_btn(self) -> QToolButton:
+        """菜单栏右上角的小图标按钮：一键显示/隐藏整条「协议选择+串口配置」栏。"""
+        btn = QToolButton()
+        btn.setObjectName("topbar_toggle_btn")
+        btn.setCheckable(True)
+        btn.setChecked(True)  # 默认展开
+        btn.setAutoRaise(True)
+        btn.setFixedSize(28, 28)
+        btn.setIconSize(QSize(16, 16))
+        btn.clicked.connect(self._toggle_top_bar)
+        self._sync_topbar_toggle_btn(btn)
+        return btn
+
+    def _sync_topbar_toggle_btn(self, btn=None):
+        """按当前折叠态刷新图标与提示（展开=顶栏可见）。"""
+        btn = btn if btn is not None else getattr(self, "topbar_toggle_btn", None)
+        if btn is None:
+            return
+        shown = btn.isChecked()
+        # panel-top-open：顶栏展开；panel-top-close：顶栏已收起
+        btn.setIcon(
+            app_icons.load_icon("panel-top-open" if shown else "panel-top-close")
+        )
+        btn.setToolTip(
+            "隐藏协议选择与串口配置栏（折叠后协议在窗口标题、串口在状态栏）"
+            if shown
+            else "显示协议选择与串口配置栏"
         )
 
     def _apply_top_bar_collapse_state(self):
-        """按 _saved_*_collapsed 套用顶部栏折叠态（构造末尾 / 读配置后调用）。"""
-        proto_collapsed = bool(getattr(self, "_saved_proto_collapsed", False))
-        serial_collapsed = bool(getattr(self, "_saved_serial_collapsed", False))
-        if hasattr(self, "proto_toggle_btn"):
-            self.proto_toggle_btn.setChecked(not proto_collapsed)
-            self.proto_toggle_btn.setText(
-                "▼ 协议选择" if not proto_collapsed else "▶ 协议选择"
-            )
-        if hasattr(self, "proto_group"):
-            self.proto_group.setVisible(not proto_collapsed)
-        if hasattr(self, "serial_toggle_btn"):
-            self.serial_toggle_btn.setChecked(not serial_collapsed)
-            self.serial_toggle_btn.setText(
-                "▼ 串口配置" if not serial_collapsed else "▶ 串口配置"
-            )
-        if hasattr(self, "serial_group"):
-            self.serial_group.setVisible(not serial_collapsed)
+        """按 _saved_topbar_collapsed 套用顶栏显隐（构造末尾调用）。"""
+        collapsed = bool(getattr(self, "_saved_topbar_collapsed", False))
+        if hasattr(self, "topbar_toggle_btn"):
+            self.topbar_toggle_btn.setChecked(not collapsed)
+            self._sync_topbar_toggle_btn()
+        if hasattr(self, "top_bar_widget"):
+            self.top_bar_widget.setVisible(not collapsed)
 
-    def _toggle_proto_group(self):
-        """折叠/展开协议选择区；折叠时当前协议写入窗口标题中间。"""
-        expanded = self.proto_toggle_btn.isChecked()
-        self.proto_group.setVisible(expanded)
-        self.proto_toggle_btn.setText("▼ 协议选择" if expanded else "▶ 协议选择")
+    def _toggle_top_bar(self):
+        """菜单栏图标点击：协议选择 + 串口配置整行一起显示/隐藏。"""
+        shown = self.topbar_toggle_btn.isChecked()
+        self.top_bar_widget.setVisible(shown)
+        self._sync_topbar_toggle_btn()
         self._update_window_title()
-        if getattr(self, "_ui_ready", False):
-            self._save_app_config()
-
-    def _toggle_serial_group(self):
-        """折叠/展开串口配置区；折叠时串口信息写入状态栏。"""
-        expanded = self.serial_toggle_btn.isChecked()
-        self.serial_group.setVisible(expanded)
-        self.serial_toggle_btn.setText("▼ 串口配置" if expanded else "▶ 串口配置")
         self._update_serial_statusbar()
         if getattr(self, "_ui_ready", False):
             self._save_app_config()
 
+    @staticmethod
+    def _title_chrome_reserve() -> int:
+        """标题栏图标 + 最小化/最大化/关闭按钮的大致像素占用（Win10/11）。"""
+        return 150
+
     def _update_window_title(self):
         """刷新主窗口标题。
 
-        协议选择展开：`协议解析工具 v{ver} ({date}) - 作者: liruitao`
-        协议选择折叠：协议短名插在标题中间
-                       `协议解析工具 v{ver} ({date}) · {协议短名} · 作者: liruitao`
-        短名取 protocol_registry（如「南网协议」），避免下拉全名过长撑爆标题栏。
+        顶栏展开：`协议解析工具 v{ver} ({date}) - 作者: liruitao`（OS 左对齐）
+        顶栏折叠：**版本+作者仍在左侧同一段**，仅协议短名近似居中——
+        Windows 原生标题整段左对齐，用空格把短名顶到中部（缩放时 resizeEvent 重算）。
+            `协议解析工具 v… (日期) - 作者: liruitao` + 填充空格 + `协议短名`
         """
-        base = f"协议解析工具 v{APP_VERSION} ({BUILD_DATE})"
-        author = "作者: liruitao"
+        left = f"协议解析工具 v{APP_VERSION} ({BUILD_DATE}) - 作者: liruitao"
         collapsed = False
         proto_name = ""
         try:
-            collapsed = not self.proto_toggle_btn.isChecked()
+            collapsed = not self.topbar_toggle_btn.isChecked()
             idx = self.protocol_combo.currentIndex()
             try:
                 proto_name = protocol_registry.get_protocol(idx).short_name
@@ -3857,18 +4031,47 @@ class MainWindow(QMainWindow):
                 proto_name = self.protocol_combo.currentText()
         except Exception:
             collapsed = False
-        if collapsed and proto_name:
-            self.setWindowTitle(f"{base} · {proto_name} · {author}")
-        else:
-            self.setWindowTitle(f"{base} - {author}")
+        if not (collapsed and proto_name):
+            self.setWindowTitle(left)
+            return
+
+        # 左段与协议之间至少一个间隔符；协议名再按窗口宽度居中
+        sep = "  "
+        pad = ""
+        try:
+            fm = self.fontMetrics()
+            left_w = fm.horizontalAdvance(left + sep)
+            proto_w = fm.horizontalAdvance(proto_name)
+            usable = max(240, int(self.width()) - self._title_chrome_reserve())
+            # 目标：left_w + pad_w + proto_w/2 ≈ usable/2
+            pad_px = usable / 2.0 - proto_w / 2.0 - left_w
+            space_w = max(1, fm.horizontalAdvance(" "))
+            n = int(max(0.0, pad_px) / space_w)
+            n = min(n, 120)  # 上限防异常窗口宽度；允许 0（左段已很长时紧挨其后）
+            pad = " " * n
+        except Exception:
+            pass
+        self.setWindowTitle(f"{left}{sep}{pad}{proto_name}")
+
+    def resizeEvent(self, event):
+        """窗口尺寸变化时：顶栏折叠态下重算标题中协议名的居中填充。"""
+        super().resizeEvent(event)
+        try:
+            if (
+                hasattr(self, "topbar_toggle_btn")
+                and not self.topbar_toggle_btn.isChecked()
+            ):
+                self._update_window_title()
+        except Exception:
+            pass
 
     def _update_serial_statusbar(self):
-        """串口配置折叠时，在状态栏显示端口/波特率/校验/连接状态；展开时隐藏。"""
+        """顶栏折叠时，在状态栏显示端口/波特率/校验/连接状态；展开时隐藏。"""
         lbl = getattr(self, "_serial_statusbar_lbl", None)
         if lbl is None:
             return
         try:
-            collapsed = not self.serial_toggle_btn.isChecked()
+            collapsed = not self.topbar_toggle_btn.isChecked()
         except Exception:
             collapsed = False
         if not collapsed:
@@ -6558,6 +6761,10 @@ class MainWindow(QMainWindow):
         """创建菜单栏"""
         menubar = self.menuBar()
 
+        # 右上角小图标：一键显示/隐藏「协议选择+串口配置」整栏（折叠后协议进标题、串口进状态栏）
+        self.topbar_toggle_btn = self._create_topbar_toggle_btn()
+        menubar.setCornerWidget(self.topbar_toggle_btn, Qt.Corner.TopRightCorner)
+
         # 配置菜单
         config_menu = menubar.addMenu("配置(&C)")
         config_action = config_menu.addAction("配置文件路径(&P)...")
@@ -7047,6 +7254,10 @@ class MainWindow(QMainWindow):
 
     def _show_about_dialog(self):
         """显示"关于"对话框"""
+        self._build_about_dialog().exec()
+
+    def _build_about_dialog(self):
+        """构造"关于"对话框并返回（不 exec，便于测试直接检查控件与接线）"""
         dialog = QDialog(self)
         dialog.setWindowTitle("关于")
         dialog.setMinimumSize(520, 480)
@@ -7079,6 +7290,16 @@ class MainWindow(QMainWindow):
         author_label.setStyleSheet("color: #888;")
         layout.addWidget(author_label)
 
+        # 提示用户去 GitHub 给作者点 Star（文案与跳转地址同源 AUTHOR_GITHUB_URL）
+        star_tip_label = QLabel(
+            "如果这个工具帮到了你，欢迎在 GitHub 上给作者点个 ⭐ Star"
+        )
+        star_tip_label.setFont(self._ui_font(0))
+        star_tip_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        star_tip_label.setStyleSheet("color: #888;")
+        star_tip_label.setWordWrap(True)
+        layout.addWidget(star_tip_label)
+
         changelog_label = QLabel("版本更新记录")
         changelog_label.setFont(self._ui_font(0, bold=True))
         layout.addWidget(changelog_label)
@@ -7105,6 +7326,13 @@ class MainWindow(QMainWindow):
 
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
+        star_btn = QPushButton("去 GitHub 给作者点 Star")
+        star_btn.setObjectName("about_star_btn")
+        star_btn.setIcon(app_icons.load_icon("star"))
+        star_btn.setToolTip(f"在浏览器中打开作者仓库：{AUTHOR_GITHUB_URL}")
+        star_btn.setMinimumWidth(170)
+        star_btn.clicked.connect(self._open_author_github)
+        btn_layout.addWidget(star_btn)
         check_update_btn = QPushButton("检查更新")
         check_update_btn.setFixedWidth(110)
         check_update_btn.clicked.connect(
@@ -7118,7 +7346,26 @@ class MainWindow(QMainWindow):
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
 
-        dialog.exec()
+        return dialog
+
+    def _open_author_github(self):
+        """用系统默认浏览器打开作者 GitHub 仓库（「关于」对话框的 Star 按钮）。
+
+        打开失败时把地址显示出来供用户手动复制，而不是静默无反应
+        （同 AGENTS §8 陷阱 23 的容错原则：宁可给出信息也不要什么都不发生）。
+        """
+        url = (AUTHOR_GITHUB_URL or "").strip()
+        if not url:
+            QMessageBox.information(
+                self, "给作者点 Star", "未配置 GitHub 地址（AUTHOR_GITHUB_URL 为空）。"
+            )
+            return
+        if not QDesktopServices.openUrl(QUrl(url)):
+            QMessageBox.information(
+                self,
+                "给作者点 Star",
+                f"未能调起浏览器，请手动访问：\n{url}",
+            )
 
     # ==================== 系统集成（托盘 / 热键 / 单实例 / 命令行） ====================
 
@@ -7398,6 +7645,14 @@ class MainWindow(QMainWindow):
         if tcp is not None:
             try:
                 tcp.cleanup()
+            except Exception:
+                pass
+
+        # 6b) 串口工具：发送线程 + 串口句柄 + 落盘
+        serial_tool = getattr(self, "serial_tool_tab", None)
+        if serial_tool is not None:
+            try:
+                serial_tool.cleanup()
             except Exception:
                 pass
 
@@ -11380,11 +11635,17 @@ class MainWindow(QMainWindow):
 
         # 顶部栏折叠状态（独立顶层 "top_bar" 段；**不要**写入 "ui"——该段由
         # ThemeManager.to_config 整体重建）。缺省 = 展开。
+        # 兼容 1.23.41 初版的 proto_collapsed/serial_collapsed（任一为真即视为整栏折叠）。
         top_bar_cfg = self._app_config.get("top_bar", {})
         if not isinstance(top_bar_cfg, dict):
             top_bar_cfg = {}
-        self._saved_proto_collapsed = bool(top_bar_cfg.get("proto_collapsed", False))
-        self._saved_serial_collapsed = bool(top_bar_cfg.get("serial_collapsed", False))
+        if "collapsed" in top_bar_cfg:
+            self._saved_topbar_collapsed = bool(top_bar_cfg.get("collapsed", False))
+        else:
+            self._saved_topbar_collapsed = bool(
+                top_bar_cfg.get("proto_collapsed", False)
+                or top_bar_cfg.get("serial_collapsed", False)
+            )
 
         # 窗口几何 / 分栏 / 列宽（顶层 "window" 段，由 closeEvent 真实退出路径写出）。
         # 只解析成数据，不碰 widget（此时 UI 还未建）；套用在 __init__ 末尾
@@ -11726,19 +11987,16 @@ class MainWindow(QMainWindow):
         config["parse"] = parse_cfg
 
         # 顶部栏折叠状态（独立顶层 "top_bar" 段；勿写入 ui 段）。
-        # 用 toggle 的 checked 判定，不依赖 isVisible()——父窗口未 show 时后者恒 False。
+        # 用菜单栏 toggle 的 checked 判定，不依赖 isVisible()——父窗口未 show 时后者恒 False。
         try:
-            proto_collapsed = not self.proto_toggle_btn.isChecked()
-            serial_collapsed = not self.serial_toggle_btn.isChecked()
+            topbar_collapsed = not self.topbar_toggle_btn.isChecked()
         except Exception:
-            proto_collapsed = getattr(self, "_saved_proto_collapsed", False)
-            serial_collapsed = getattr(self, "_saved_serial_collapsed", False)
+            topbar_collapsed = getattr(self, "_saved_topbar_collapsed", False)
         top_bar_state = config.get("top_bar", {})
         if not isinstance(top_bar_state, dict):
             top_bar_state = {}
-        top_bar_state["proto_collapsed"] = proto_collapsed
-        top_bar_state["serial_collapsed"] = serial_collapsed
-        config["top_bar"] = top_bar_state
+        # 只保留单一 collapsed 键（清掉 1.23.41 初版的分键，避免双源漂移）
+        config["top_bar"] = {"collapsed": topbar_collapsed}
 
         # 窗口几何/分栏/列宽（顶层 "window" 段）。只有 closeEvent 的真实退出路径
         # 会把 _window_state 填成最新值（_collect_window_state）；其余保存点沿用
@@ -11905,13 +12163,11 @@ class MainWindow(QMainWindow):
                 self.serial_refresh_btn.setStyleSheet(self._serial_refresh_style())
             except RuntimeError:
                 pass
-        for _btn_name in ("proto_toggle_btn", "serial_toggle_btn"):
-            _btn = getattr(self, _btn_name, None)
-            if _btn is not None:
-                try:
-                    _btn.setStyleSheet(self._top_bar_toggle_style())
-                except RuntimeError:
-                    pass
+        if hasattr(self, "topbar_toggle_btn"):
+            try:
+                self._sync_topbar_toggle_btn()
+            except RuntimeError:
+                pass
         if hasattr(self, "_serial_statusbar_lbl"):
             try:
                 self._update_serial_statusbar()

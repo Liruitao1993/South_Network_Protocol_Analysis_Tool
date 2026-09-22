@@ -340,6 +340,8 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
 │   │   └── lme_query.py            #   LME 自定义下发组帧 4.2/4.6/4.7（模块版本查询，1.23.7 起；复用 DLT645FrameGenerator + DLT645Parser）
 │   ├── monitor_widget.py            # 实时监控器 (RealtimeMonitorWidget) - 串口原始字节流自动组帧/CSV记录
 │   ├── monitor/tcp_monitor.py       # TCP流量监控 (TCPMonitorWidget) - scapy抓包/流重组/自动解析
+│   ├── serial_worker.py             # 串口后台线程 (SerialWorker) - 打开/读取/FT1.2+645 分帧/发送（write_raw 静默写，供高速发送）
+│   ├── serial_tool_widget.py        # 串口工具 (SerialToolWidget) - 命令表循环发送 + 响应匹配 + 统计 + 按协议断帧解析 + 日志自动保存到文件（集成自 USB 负载测试工具）
 │   ├── system_integration/          # 系统集成包（Windows）
 │   │   ├── sys_tray.py              #   系统托盘（关闭最小化/显示隐藏/自启/退出）
 │   │   ├── global_hotkey.py         #   全局热键（默认 Ctrl+Alt+X，唤出快捷解析小窗）
@@ -939,6 +941,56 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
     - **查询缓存**：`GDWAFNLookup._data` 在构造时一次性构建，自定义 AFN+Fn 增删后必须 `gdw_afn_lookup.refresh()`（`lookup_utils.refresh_gdw_afn_lookup()` 已封装），否则查询页仍是旧表。
     - **判据同源**：某条目「是否自定义（可删）」= 是否存在于 `custom_di.json` / 解析器 `_custom_fn_map[afn][fn]`（内置 DI 只活在 `DI_COMBINATION_MAP`、标准 Fn 只活在 `FN_MAP`），查询表「自定义」列（★）与删除逻辑必须用同一判据；批量删除时内置/标准条目**忽略并计数**，不要静默丢弃。回归：`test/test_web_gui_parity.py`（R4/R4b 段）。
 
+56. **顶部「协议选择」组的 FlowLayout：`sizeHint()` 必须是单行总宽，且 reflow 必须重排外层顶栏**（1.23.44 起，改 `FlowLayout` / `_reflow_proto_group` / 顶栏容器前必读）：
+    - **`sizeHint()` 不能用 `minimumSize()`**：后者是「各子项最小尺寸的逐分量最大值」（≈最宽单项，实测 276px），父布局（`QGroupBox` → 顶栏 `QHBoxLayout`）会照此只给这么宽 → FlowLayout 被迫换行成两行 → 分组框高 75px 而顶栏容器只有 49px → 第二行的**协议下拉框被裁成一条缝**（实测 geometry (5,44)、`visibleRegion()` 仅 266x5）→ 启动后该控件显示为空白，点一下（触发重排）才出现文字。现 `sizeHint()` 返回单行总宽（各子项 `sizeHint()` 之和 + 间距 + 边距），`minimumSize()` 保持「最宽单项」语义不变 —— 窗口真窄时仍照旧换行。
+    - **`_reflow_proto_group()` 必须重排外层顶栏**：只 `invalidate()` / `updateGeometry()` / `adjustSize()` 内层时，协议分组框拿不到最终宽度，内层 FlowLayout 也不会被重新调用，子项就停在旧的换行位置（**单独调 `QLayout.activate()` 是空操作**，实测无效）。补上 `top_bar_widget.layout().invalidate() + activate()` 后，分组框立刻拿到最终宽度、内层随之重排，实测同步从 (5,44)/266x5 恢复到 (76,20)/266x26，不再依赖点击等交互触发。
+    - **排查手段**：`QWidget.visibleRegion()`（真正被绘制的区域）比 `geometry()` / `grab()` 更能暴露「控件在但没画出来」；`grab()` 会强制重绘，看不出这类问题。回归：`test/test_flow_layout_proto_group.py`（含反例自检）。
+
+57. **TCP 监控的「原始载荷」路径：切帧策略、识别边界、帧表列序三处约定**（1.23.45 起，改 `monitor/tcp_monitor.py` 的切帧/解析/帧表前必读）：
+    - **切帧**：`FlowBuffer(mode)` 三档 —— `ed` 只切 ED..EE（旧行为）、`raw` 一段一帧、`auto`（默认）先 ED、判定非 ED 后按 **TCP segment 逐包**产出原始帧。判定只认完整定界校验（`ED` + 帧长∈[4,4096] + `buf[5]==EF` + 末字节 `EE`）；「未收全的 ED 候选」最多等 `MAX_WAIT_SEGMENTS`(=2) 段（原始流里偶然出现的 `ED xx xx` 会伪装成候选，不设上限会让该方向长时间不出行）。raw 方向仍检测**完整 ED 帧并升级回 ED**（抓包从 ED 连接中途开始时不丢既有能力），升级时 ED 帧之前的字节仍按原始载荷产出 —— 同一字节只上报一次。回归：`test/test_tcp_monitor_raw_payload.py`。
+    - **识别边界**：自动识别**只认可自证形态**（DLMS Wrapper `00 01`+长度自洽 / DLMS-APDU 首字节 ∈ `HDLCParser.APDU_TYPES` / 645 结构 `68+6+68`+校验器 0 fail / 698.45 HCS/FCS 双通过）。**南网 / 国网 不参与自动识别**：两者同为 `0x68` 起头、链路层结构相近，校准实测校验器互判 0 fail（无法区分），错解析比不解析更糟 → 需显式选择。注意 `APDU_TYPES` 是 `HDLCParser` 的**类属性**（不是模块级常量）；路由判据不能只看首字节 `0xED`（原始载荷恰以 0xED 开头会被塞进 ED 路径，得到「无法识别协议」+ 空表）。回归：`test/test_tcp_monitor_proto_detect.py`。
+    - **帧表列序**：`时间/方向/源 → 目的/长度/协议/摘要`（6 列）。第 0 列 UserRole 存 `_frame_cache` 下标 —— 过滤开启后行号与缓存下标不再一一对应，`_on_frame_selected` 必须经 `_row_cache_index(row)` 取下标。改列序要同步 `_fill_frame_row` / `_rebuild_frame_table`；CSV 用列名读写（`_write_csv_record` / `_load_csv_recording`），不受列序影响。回归：`test/test_tcp_monitor_ui_views.py`。
+
+58. **串口工具（`serial_tool_widget.py`）的四条契约**（1.23.46 起，改串口工具/`serial_worker` 前必读）：
+    - **发送必须走 `SerialWorker.write_raw`**（静默写，不发日志信号），不要用 `send_frame`：负载测试按毫秒级连发，逐帧 `log_message.emit` 会让 GUI 事件队列被日志淹没。`write_raw` 与 `send_frame` 共用 `_write_lock`，可被发送线程与 GUI 线程并发调用。回归：`test/test_serial_worker_write_raw.py`。
+    - **发送器身份 + 发送代次双重守卫**：`_start_send` 把发送器实例绑进信号 lambda，`_on_sent/_on_send_done/_on_send_failed` 先判 `sender is not self._sender` 则忽略；收尾定时器用 `_send_generation` 代次校验。**去掉任一守卫都会复现「上一轮遗留的收尾定时器/迟到信号掐断新一轮发送」**（实测 200 帧只发出 140）。
+    - **匹配队列语义**：只有「启用响应匹配 且 该命令 `match_type != none`」的发送才 `_tx_total += 1` 并入队；接收数据从**队首连续**比对（一批数据可连续命中同值的多个待匹配项，这是源工具语义、不是 bug）；超时 / 停止 / 收尾把剩余待匹配计入失败。成功率 = 成功 / `_tx_total`。
+    - **匹配必须按「累积接收缓冲」比对，不能按单次交付的块**（1.23.50 修，实测报障「设了匹配规则仍超时未匹配」）：串口驱动会把一帧拆成多次交付（实测 208 字节国网帧 = 77+92+36+3 四块），按单次交付比对时「预期 = 整帧」**永远匹配不上**（且与接收模式无关 —— 匹配吃的是原始交付块，不是切好的帧）。实现：`_match_buffer`（上限 `MATCH_BUFFER_MAX = 8192`）累积接收字节后比对；**每次发送清空**（一问一答窗口重新开始）、队列清空时清空，避免用上一次响应的字节误判本次。**「队首连续匹配」语义不变**。回归：`test/test_serial_tool_widget.py` 第 [26] 段（用实测四块交付复现）。
+    - **匹配判决必须输出可比对的日志**（1.23.50）：只打「超时未匹配」现场无从分析。发送时打 `[匹配] #n 等待响应：<方式>，预期 = …`；命中打 `[匹配✓] …（<方式>，预期 = …）`；超时打 5 行（标题 + 匹配方式 + 预期响应 + 期间收到 + `match_failure_reason()` 的诊断）。`match_failure_reason()` 按 6 种方式分别说明差在哪，并识别最常见误填「**预期响应与发送数据完全相同**」。匹配日志走 RX/TX 队列（享受 burst 保护）。回归：`test_serial_proto_frame.py` 第 [10] 段 + `test_serial_tool_widget.py` 第 [26] 段。
+    - **给按钮槽函数加位置参数是个坑**（1.23.51）：`QPushButton.clicked` 会带一个 bool（`checked`）实参，`btn.clicked.connect(self._edit_command)` 下若把签名写成 `_edit_command(self, row=None)`，那个 `False` 会被当成行号 → **永远编辑第 0 行**。要传参就单独写一个信号专用处理函数（如 `_on_cmd_double_clicked(row, col)`）再转调，别改按钮槽的签名。回归：`test_serial_tool_widget.py` 第 [27] 段。
+    - **落盘与句柄**：命令与参数存 `app_paths.data_path("serial_tool_config.json")`（原子写 + 损坏回落默认值；导入/导出用**裸列表**以兼容源工具 `commands.json`）；用 `app_paths.data_path` **属性访问**（不是 `from app_paths import data_path`），否则测试的 `_config_sandbox` 无法重定向。串口**复用主窗口共享的 `self.serial_worker`**（`main_gui._ensure_serial_tool_tab` 里 `tab.set_serial_worker(self.serial_worker)`，与组帧页/监控器页同一约定）：本页**不做端口/波特率/连接控件**，只订阅 `connection_changed`（驱动按钮可用性）与 `raw_data_received`；`cleanup()` **不得关闭串口**（端口生命周期归顶部「串口配置」与主窗口收尾）。**一个 COM 口只能被打开一次**，各页各持 `SerialWorker` 会互相抢口（顶栏连上后本页再连必失败），波特率也会出现两处配置。回归：`test/test_serial_tool_widget.py`。
+    - **命令勾选与「只发勾选项」**（1.23.52）：勾选存命令的 `enabled`（`coerce_enabled`：旧配置缺键 → `True` 全选）；表格第 0 列是勾选框（`ItemIsEnabled | ItemIsUserCheckable` + `setCheckState`，项目既有范式见 `archive_widget.py`），**`NoEditTriggers` 不阻碍勾选**（勾选走 delegate 的 `editorEvent`，不经 `edit()`）；重建表格期间必须用 `_rebuilding_cmd_table` 抑制 `itemChanged` 回写。**筛选发送必须传 `index_map`**：`messages` 是勾选子集而 `sent` 的 `msg_index` 要回指 `commands` 原下标，否则名称/协议/匹配规则全部错位。回归：`test/test_serial_tool_widget.py` 第 [28] 段（含 `QTest` 真鼠标点击）。
+    - **`hex_str_to_bytes` 必须容忍「连续无分隔」的 hex**（1.23.52 修）：原实现按空格/半角逗号切分后把每个片段当**一个字节**（`int(p, 16)` + `bytes([...])`），于是 `6812004116` 整串被转成越界整数 → 判为非法，现场报「明明是对的却提示不是有效的 HEX」。现：连续串按字节切（`bytes.fromhex`，奇数位拒绝）、半角/全角逗号、顿号、半角/全角分号、斜杠、竖线、连字符、全角空格都作分隔符、容忍 `0x` 前缀；仍拒绝奇数位与非 hex。**报错必须给原因**：`hex_input_error()` 返回「含非 HEX 字符 'G'（第 6 个字符）」这类可读原因，别只说「格式不对」。
+    - **「正则表达式」匹配方式下「预期响应」是正则文本、不是 HEX**（1.23.52 修）：旧实现一律按 HEX 校验 → 正则必然非法 → 被 `normalize_command` 静默降级成 `none`、待匹配项**根本不会入队**，现场只看到「超时未匹配」，极难排查。现：`normalize_command` 对 regex 只校验正则语法（空正则也降级）；`_on_sent` 用 `match_hex.encode("latin-1")` 而非 `hex_str_to_bytes`；日志按 `expected_display()` 展示（正则是文本且**不用 repr**，否则 `68\s*D0` 会显示成 `'68\\s*D0'`）。回归：`test/test_serial_tool_widget.py` 第 [29] 段。
+    - **正则匹配二进制帧有两个坑**（实测确认，故新增 HEX 通配）：① 模式是在**字节按 latin-1 解码后的字符流**上匹配，字节必须写 `\xNN`，直接写 hex 数字匹配不上（`68` ≠ 字节 `0x68`）；② `re.IGNORECASE` 会把「解码成字母」的字节大小写互配 —— 实测 `\x68` 也匹配 `0x48`、`\x69`↔`0x49`、`\xD0`↔`0xF0`、`\x41`↔`0x61`（**国网帧起始符 0x68 会误配 `'H'`**）；③ `.` **不匹配 `0x0A`**，要写 `[\s\S]` 或 `(?s).`。
+    - **「HEX 通配」匹配方式**（1.23.53）：约定**必须与「测试方案」一致** —— `test_plan_widget._match_frame` 是逐字符走、遇 `XX` 跳过一个字节，故 `XX` 可内嵌连续串（`68D0XXXX16`），`??` 为等价别名；语义为**包含式**（在累积接收数据里任意位置找）+ 可选 `^`/`$` 锚点；命中报偏移。改这里要与 `test_plan_widget._match_frame` 的约定保持同源，别自创 `*`/`?` 之类记号。回归：`test/test_serial_tool_widget.py` 第 [30] 段。
+    - **匹配统一入口是 `match_offset()`**（返回偏移或 None）：`check_match()` 只回答「是否命中」，日志要报位置就得用 `match_offset()`；新增匹配方式时**两处都要接**（`check_match` 供纯判断、`match_offset` 供带位置判断）。
+    - **命令状态图标**（1.23.55）：状态存命令的**运行时键 `_status`**（`CMD_STATUS_KEY`）—— 不进 `normalize_command`、**不落盘不导出**（`export_commands` 剔除所有 `_` 开头的键，否则下次打开会显示上一轮的旧状态）；状态变化只调 `_refresh_cmd_row(i)` **重画那一行的名称单元格**，别整表重建（会丢选中/滚动位置）。图标颜色靠 `CompositionMode_SourceIn` 给 `app_icons.load_icon()` 渲染出的 pixmap 整体染色（`app_icons` 只出单色）。迁移点：每轮 `_start_send` 先 `_clear_cmd_statuses()`、`_on_sent` 先记「通过」再在真正入待匹配队列时改「发送中」、`_on_send_failed` 用 `_mark_running_as("error")`。回归：`test/test_serial_tool_widget.py` 第 [32] 段（**逐态校验渲染出的像素颜色**，别只断言 icon 非空）。
+    - **「原始数据」接收模式必须做「帧结构优先、时间聚合兜底」**（实测报障两轮，改这里前必读）：① 串口驱动会把**同一帧**拆成多次 `read` 交付（低波特率甚至逐字节），按每次交付输出一行会让一帧打成多行、RX 帧数虚增；② **只做时间聚合不够**——实测 208 字节的国网帧被拆成 77+92+36+3 共 4 行，即**交付块间隔本身就大于静默窗口**（10ms），窗口调多大都不稳。正确做法是按长度域收全再输出：`_declared_frame_len()` 按**第二个起始符 68H 的位置**互斥判别三种结构 —— 第 4 字节（698.45：`68H + L(2B 小端) + 68H + … + FCS + 16H`，整帧 = L + 3，见协议文档 6.2.2）、第 8 字节（DLT645-2007：`68H + 地址(6B) + 68H + 控制码 + 数据长度 L(1B) + … + 16H`，整帧 = L + 12）、都不是（南网/国网：`68H + L(2B 小端) + … + CS + 16H`，**L 就是整帧字节数**，见 `protocol_parser.py:72` / `gdw10376_parser.py:333`）；**判别顺序必须先查第 4 字节**（698.45 的第 4 字节恒为 68H），不足 8 字节或长度域越界一律返回 0 退回时间聚合 —— **错切帧比不切更糟**。`_emit_structured_frames()` 只在**末字节确为 16H** 时才算自证（帧体内含 16H 不会被误切，两帧连在一次交付里会切成两行）。无结构裸数据仍走时间聚合：`RAW_FLUSH_DELAY_MS = 10` 静默窗口 + `RAW_MAX_HOLD_MS = 200` 最长持有（防持续流 `_raw_buffer` 无界增长且永不显示）；已声明长度但未收全时改用 `FRAME_IDLE_MS = 300` 容忍静默 + `FRAME_HOLD_MAX_MS = 5000` 绝对上限。切换接收模式与 `cleanup()` 时立即刷出（含未收全残帧），不丢数据。**取舍**：非 68 结构的裸数据两段间隔小于窗口会被合并成一行 —— 需要逐帧精确切分时用「按帧尾分割」模式。回归：`test/test_serial_tool_widget.py` 第 [17] 段。
+    - **`_save_timer` 必须先于 `_build_ui()/_load_persisted()` 创建**：载入持久化参数会触发控件 `toggled` → `_schedule_save()`，若定时器还没建好，信号槽内会抛 `AttributeError` 被 Qt **静默吞掉**（表现为配置保存失效，极难排查）。回归：`test/test_serial_tool_widget.py` 第 [18] 段。
+    - **线程归属（已知取舍）**：接收数据经 `raw_data_received` 信号投递到 **GUI 线程**后再做匹配与分帧（源工具是在接收线程里直接匹配）。与既有组帧页同一口径、只保留一套串口层；常规表计流量无影响；解析也走同一口径（`set_parse_provider` 注入的回调在 GUI 线程执行）。若将来遇到极高接收速率（数千帧/秒）导致界面滞后，再把匹配与解析一起下沉到 worker 线程。
+
+59. **串口工具「按命令协议断帧 + 解析」（1.23.47 起，任务 09-22-serial-proto-parse）**：
+    - **协议来源 = 最近一次发送命令的协议**（串口问答式，RX 就是这条 TX 的响应）：`_on_sent` 里 `_last_tx_protocol = coerce_protocol(commands[msg_index]["protocol"])` 锁存；同批命令协议不同时以**最后发出的**为准。为 `None`（不解析）时接收行为与 1.23.46 完全一致。
+    - **分帧策略表 `STRATEGY_BY_PROTOCOL`**：`0/7 → ft12_68`（`68H + L(2B 小端)`，**L 就是整帧字节数**）、`6 → dlt645`（`L(1B@9) + 12`）、`8 → dlt698_45`（`L(2B 小端) & 0x3FFF + 3`，见协议文档 6.2.2）、`2/3 → hdlc_7e`（`7EH…7EH` 定界，帧内 `7D 5E/7D 5D` 转义，**输出含首尾 7EH**，与 `main_gui._extract_hdlc_frames` / `HDLCParser.parse` 同口径）、`4 → dlms_wrapper`（`版本 0001 + … + 长度(2B 大端@6)`，整帧 = `8 + L`）。**未列出的 1/5/9/10/11 没有自证依据，不得硬加策略**。
+    - **一律要求自证，不满足就返回 0 交回既有路径**：68 家族看**末字节必须 16H**（`END_CHAR_STRATEGIES`，长度域只给长度、末字节才是自证；DLMS Wrapper / HDLC 各有自证，**不要**给它们套 16H 检查）；`ft12_68` 还要显式排除 `buf[3] == 0x68`（698.45）与 `buf[7] == 0x68`（645）两种签名。**错切帧比不切更糟** —— 指定了协议时**只**按该协议切，不再叠加启发式（避免"你告诉了我协议却按另一种结构切"）。
+    - **解析能力走注入，widget 不 import `main_gui`**：`main_gui._ensure_serial_tool_tab` 调 `tab.set_parse_provider(self._serial_parse_provider)`（与 `set_serial_worker` 同一约定），回调返回 `(摘要, 解析表)` 且与单帧页/批量**共用同一套分派**（`_get_current_parser` + `build_gui_parser` + `_get_summary_from_table_data`），保证「串口工具看到的解析」与「复制到单帧页解析」逐字段一致。
+    - **发送与接收都解析**（1.23.48 起）：`_queue_parse(frame, protocol, channel)` 的 `channel ∈ {rx, tx}` 决定入哪个队列；TX 用**该条命令自己的协议**、RX 用锁存的「最近发送命令的协议」。`_tx_log_queue` 与 `_rx_log_queue` 元素**都是** `(kind, text)`。
+    - **失败不伪造**：回调抛异常 / 返回空表 → 只输出 `[解析·<短名>] 失败：<原因>`（fail 配色），不出半成品字段；原始 `[TX]`/`[RX]` 行始终完整。
+    - **RX/TX 日志队列元素是 `(kind, text)`**（`kind ∈ raw/parse/fail`，决定配色；raw 用各自队列的 tx/rx 配色）；**burst 只对各自队列的 `raw` 计数**：一批超 `LOG_FLUSH_BURST` 时只输出「摘要 + 首帧 + 末帧」，同批解析明细整批丢弃（防刷屏）。改 `_flush_log_queues` 或队列元素结构必须同步 `test/test_serial_tool_widget.py` 的 `raw_texts/parse_texts/fail_texts/tx_raw_texts/tx_parse_texts` 辅助函数。
+    - **`parse_max_lines` 默认 `0` = 不限制**（可选 0~2000，spin box 0 显示为「不限制」）：现场实测国网「查询从节点ID信息」**一条应答帧就有 113 行**解析（22 行帧级字段 + 1 行从节点总数量 + **15 个节点 × 6 行**），默认截断会让现场看不到完整结果。`format_parse_rows` 里 `max_lines <= 0` 即不截断。**注意「113 行」与报文里的「从节点总数量 = 113」纯属数字巧合** —— 解析器只输出「本次应答数量」个节点（实测 15 个），不是 113 个。
+    - **改参数默认值必须配配置迁移**（1.23.49 踩坑，通用教训）：参数一旦被保存过就会把**当时的默认值**写进 `serial_tool_config.json`，而 `merge_params` 只在「键不存在」时才用新默认值 —— 于是「改了默认值」对老用户**完全不生效**（实测：1.23.48 已把 `parse_max_lines` 默认改为 0，用户日志里仍显示「已省略 83 行」，因为 1.23.47 那次运行把 30 存进了配置）。做法：升 `CONFIG_VERSION` + 在 `load_config` 里按 `version` 调 `migrate_params`（旧默认值 → 新默认值，用户特意设过的其他值保留；回写后版本升级，不会来回抖动）。**以后改任何参数默认值都要照此办理**。回归：`test/test_serial_proto_frame.py` 第 [9] 段。
+    - **`export_commands` 统一补齐并归一化 `protocol` 键**（程序内直接构造的命令可能缺它）；旧配置/旧导出文件缺该键 → `coerce_protocol` 回落 `None`（不解析）。回归：`test/test_serial_proto_frame.py`（84 项）+ `test/test_serial_tool_widget.py` 第 [19]~[23] 段。
+
+60. **串口工具「日志自动保存到文件」的六条契约**（1.23.54 起，改 `serial_tool_widget.py` 日志相关代码前必读）：
+    - **写入点是 `_log()`，且只能是它**：`_log` 是日志窗口的**唯一出口**（`_flush_log_queues` 也走它），文件写在 `_log` 里调 `_save_log_line` ⇒ **面板显示什么、文件里就是什么**。不要另开「按 `[TX]`/`[RX]` 前缀抓行」之类的第二套过滤 —— 那正是「显示发送/显示接收」关掉后两边不一致的来源。回归：`test/test_serial_tool_widget.py` 第 [31] 段（「面板新增的每一行都在文件里」「显示发送关闭 → 文件同步不写」两条）。
+    - **文件不截断、窗口截断**：日志窗口 `setMaximumBlockCount(10000)`，文件一直追加 —— 现场跑完还能回到最早的帧。不要顺手给文件也加上限。
+    - **`LogFileWriter` 是纯逻辑无 Qt**（可直接单测）：写一行 `flush()` 一次（崩溃/断电尽量保住）；`text` 含换行时**按物理行逐行**加前缀；`header` / `write_raw()` 是**原文行**（文件头上下文、文件尾统计，不带时间戳前缀）。**`_write` 必须同时捕 `OSError` 与 `ValueError`** —— 句柄被外部关掉时 Python 抛 `ValueError: I/O operation on closed file`，只捕 `OSError` 会把异常抛进 GUI 线程（实测踩到）。
+    - **默认目录由「本页配置文件的目录」派生**：`log_dir()` = 用户选择 → 否则 `default_log_dir(os.path.dirname(self._config_path))`（= 数据目录下的 `Output/`，已被 `.gitignore` 排除）。**不要直接调 `app_paths.app_data_dir()`**：那样测试沙箱（`_config_sandbox` 只重定向 `data_path`）挡不住，跑一次测试就会往开发机真实数据目录里拉一堆日志文件。
+    - **失败必须外显且不递归**：打开失败 → 弹窗 + 勾选回弹（`blockSignals` 包住 `setChecked(False)`，否则会重入）；写失败 → 先把 `_log_writer` 摘成 `None` 再 `_log("…已停止自动保存：<原因>")`，这样提示行不会再往坏文件里写（否则无限递归）。**断网/磁盘满/目录被删都要按此处理**，不许静默丢日志（陷阱 23 的同一精神）。
+    - **`cleanup()` 的顺序与副作用**：`_stop_send()` → `_flush_raw_display_now()` → **`_flush_log_queues()`** → `_stop_log_recording()`（写统计尾 + 关闭）→ 落盘配置。**第 3 步是本版新增的行为**：旧版残留队列（最后几帧原始行、解析行）在退出时直接丢；现在会先刷进窗口与文件（`test/test_serial_tool_widget.py` 第 [17] 段「cleanup 时把聚合缓冲刷出」的断言已相应改为**看窗口内容**，因为队列随即被清空）。勾选状态**不改**（当偏好持久化，下次启动仍自动保存）。
+    - 参数：`log_auto_save` / `log_dir` / `log_timestamp` 三个**新键**（旧配置缺键 → 默认关闭，行为与旧版完全一致 ⇒ **不需要** `CONFIG_VERSION` 迁移，见陷阱 58 最后一条：只有「改默认值」才需要迁移）。
+
 ## 9. 开发原则
 
 1. **协议定义优先**：遇到不确定的协议字段、字节序、校验范围，**先查 §5 对应文档**，不要凭记忆或猜测。
@@ -962,7 +1014,97 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 
 ## 10. 变更日志
 
-> 详细版本变更记录请查看 `main_gui.py:CHANGELOG`（按版本倒序），或运行 `git log --oneline` 查看提交历史。本文档仅保留最近两个版本的摘要。
+> 详细版本变更记录请查看 `main_gui.py:CHANGELOG`（按版本倒序），或运行 `git log --oneline` 查看提交历史。本文档保留近期版本的摘要。
+
+### 1.23.55 — 2026-09-22
+
+- **串口工具命令列表「名称」列用状态图标表示本轮结果**：○ 待测 / ↻ 发送中 / ✓ 通过 / ✗ 失败 / ⚠ 错误；图标取 lucide 并用 `CompositionMode_SourceIn` **按状态上色**（`app_icons.load_icon` 只出单色）；名称文字同色系 + tooltip + 表格下方图例
+- 状态存运行时键 `_status`：不进 `normalize_command`、不落盘（`export_commands` 剔除 `_` 开头的键）；状态变化只重画那一行（`_refresh_cmd_row`），不整表重建
+- 测试：`test_serial_tool_widget.py` 448 项（第 [32] 段 30 项，含逐态校验渲染像素颜色）
+
+### 1.23.54 — 2026-09-22
+
+- **串口工具日志支持自动保存到文件**（实测诉求）：勾选「自动保存日志」即把日志**实时写入文件**，取消勾选即停止并写入统计尾。文件是**日志窗口内容的完整镜像**（同样受「显示发送 / 显示接收 / 显示解析」控制），但**不截断**（窗口只保留最近 10000 行）。每行带**毫秒时间戳**前缀（可关）、**写一行 flush 一次**；文件头写标题/开始时间/串口上下文，文件尾写停止时间与收发、匹配统计；目录可选（默认数据目录下的 `Output/`）、可一键打开；另有「保存当前日志…」手动另存
+- 写入点挂在 `_log()`（日志窗口**唯一出口**）上 → 不存在第二套过滤规则；`LogFileWriter` 纯逻辑无 Qt，文件名同名**不覆盖**（`_1`/`_2` 递增）；打开/写失败一律**外显 + 自动关闭且不递归**（不静默丢日志）
+- `cleanup()` 现在会先把**残留日志队列**刷进窗口/文件再收尾（旧版最后几帧会在退出时丢）；第 [17] 段相关断言改为看窗口内容
+- 新增三个参数（旧配置缺键 → 默认关闭，行为与旧版一致，故不动 `CONFIG_VERSION`）；测试 `test_serial_tool_widget.py` 418 项（第 [31] 段 59 项）；约定沉淀为 §8 陷阱 60
+
+### 1.23.53 — 2026-09-22
+
+- **串口工具新增匹配方式「HEX 通配（XX=任意字节）」**：正则匹配二进制帧要写 `\xNN`、还得绕开「忽略大小写把 `\x68` 也当 `0x48`」「`.` 不匹配 `0x0A`」两个坑，故新增直写 HEX + `XX` 的方式。**沿用「测试方案」既有约定**（`test_plan_widget._match_frame`：逐字符走、遇 `XX` 跳一字节），`XX` 可内嵌连续串（`68D0XXXX16`），`??` 为别名；语义为**包含式** + 可选 `^`/`$` 锚点（可表达开头/结尾/全长）；命中报偏移
+- 匹配方式下拉 6 → 7 项；对话框按方式动态切换占位符与说明（正则的说明里点明两个坑并建议二进制帧改用 HEX 通配）
+- 新增纯函数 `parse_hex_wildcard()` / `hex_wildcard_match()` / `match_offset()`（统一匹配入口并返回偏移）
+- 测试：`test_serial_tool_widget.py` 356 项（第 [30] 段 34 项）
+
+### 1.23.52 — 2026-09-22
+
+- **串口工具命令表新增「选择」勾选列 + 全选/全不选/反选，发送只发勾选项**（按表内顺序）：勾选存命令 `enabled`（旧配置无该键 → 全选）；`SerialSendWorker.index_map` 把筛选后下标映射回 `commands` 原下标（名称/协议/匹配规则按原下标取，否则张冠李戴）；一条未勾 → 提示不启动。用 `QTest` 真鼠标点击验证 `NoEditTriggers` 下勾选框仍可切换
+- **修复「明明是对的却提示不是有效的 HEX」**：`hex_str_to_bytes` 原按空格/半角逗号切分后把片段当**一个字节** → 连续无分隔的 hex（`6812004116`）整串越界被判非法。现容错连续串按字节切、全角/顿号/分号/斜杠/竖线/连字符/全角空格作分隔符、容忍 `0x`；仍拒奇数位与非 hex。新增 `hex_input_error()` 给出可读原因（含字符与位置）
+- **修复「正则表达式」匹配方式完全不工作**：旧实现把预期一律按 HEX 校验 → 正则被静默降级成「不匹配」、待匹配项不入队（现场只看到「超时未匹配」）。现正则按文本处理（只校验语法、空正则降级、`encode('latin-1')`），日志按 `正则 <文本>` 展示且不用 repr
+- 测试：`test_serial_tool_widget.py` 322 项
+
+### 1.23.51 — 2026-09-22
+
+- **串口工具命令列表双击直接进编辑窗口**（+ 表格提示文案）。单独加 `_on_cmd_double_clicked(row, col)`，**不给 `_edit_command` 加位置参数** —— 按钮 `clicked` 带的 bool 会被当成行号（`False` → 第 0 行）
+- 测试：`test_serial_tool_widget.py` 265 项（含走真实 `cellDoubleClicked` 信号验证连线）
+
+### 1.23.50 — 2026-09-22
+
+- **修复响应匹配漏配**（实测报障）：匹配原来按**串口单次交付的块**比对，而驱动把一帧拆成多次交付（实测 208 字节国网帧 = 77+92+36+3），「预期 = 整帧」永远匹配不上（与接收模式无关：匹配吃原始交付块，不是切好的帧）→ 改为按**累积接收缓冲**比对（`MATCH_BUFFER_MAX` 上限），每次发送/队列清空时清空缓冲；「队首连续匹配」语义不变
+- **匹配判决全部输出可比对日志**（实测诉求）：发送时打规则行、命中打方式+预期、超时打 5 行诊断（方式 / 预期响应 / 期间收到 / `match_failure_reason()` 结论）；新增 `match_failure_reason()` / `hex_preview()` / `first_diff_offset()` / `match_type_label()` 四个纯函数，并能点名最常见误填「预期 = 发送值」
+- 测试：`test_serial_proto_frame.py` 122 项、`test_serial_tool_widget.py` 257 项（含用实测四块交付复现跨块匹配）
+
+### 1.23.49 — 2026-09-22
+
+- **修复「改了默认值却对老用户不生效」**（实测报障）：参数一旦被保存过就把**当时的默认值**写进 `serial_tool_config.json`（实测 `version:1` + `parse_max_lines:30`），而 `merge_params` 只在「键不存在」时才用新默认值 → 1.23.48 的「默认不限制」等于没生效。引入**配置版本迁移**：`CONFIG_VERSION` → 2，`load_config` 按 `version` 调 `migrate_params`（v1 里 `parse_max_lines == 30` = 旧默认 → 迁移为 0；用户特意设的其他值保留；回写升版本 2，不抖动）
+- **通用教训**：改任何参数默认值时，必须同时处理「旧配置里已存了旧默认值」，否则对老用户无效 —— 见 §8 陷阱 59
+- 测试：`test_serial_proto_frame.py` 102 项（新增配置迁移段）
+
+### 1.23.48 — 2026-09-22
+
+- **串口工具：发送（TX）也按命令协议解析**，与接收对称（之前只解析 RX，发送只有一行 hex）：`_tx_log_queue`/`_rx_log_queue` 统一为 `(kind, text)`，`_queue_parse(..., channel)` 按方向入队；flush 用同一套规则（前缀 `[TX]`/`[RX]`、raw 各自 tx/rx 配色、解析 sys、失败 fail），**burst 只对各自队列的 raw 计数**
+- **解析行数默认不再截断**：`parse_max_lines` 默认 `0` = 不限制（0~2000，spin box 0 显示「不限制」）。起因：国网「查询从节点ID信息」一条应答帧实测 **113 行**（22 行帧级字段 + 1 行从节点总数量 + 15 节点 × 6 行），默认上限 30 让现场看不到完整结果；**「113 行」与报文里的「从节点总数量=113」是巧合**，解析器只输出「本次应答数量」个节点
+- 测试：`test_serial_proto_frame.py` 88 项、`test_serial_tool_widget.py` 136 项（新增第 [24] 段 TX 解析对称性）
+
+### 1.23.47 — 2026-09-22
+
+- **串口工具：命令表新增「协议」字段**（任务 `09-22-serial-proto-parse`）：第 5 列显示协议短名，添加/编辑命令时下拉选择（`不解析` + 12 协议）；随配置落盘读回，旧配置无该键回落「不解析」，导出裸列表统一补齐该键
+- **接收按「最近一次发送命令的协议」断帧**：新增 `frame_length_for(strategy, buf)` —— 南网/国网 `68H+L(2B 小端)`、645 `L+12`、698.45 `L+3`、HDLC `7EH…7EH` 定界、DLMS Wrapper `8+L`；**每种都要求自证**，不满足即交回既有「启发式 + 时间聚合」路径（**错切帧比不切更糟**）；无自证依据的 1/5/9/10/11 行为不变
+- **按该协议解析并在日志输出文字**：解析能力由 `main_gui` 注入回调（`set_parse_provider`，widget 不 import main_gui），与单帧页共用同一套分派 → `[解析·<短名>] 摘要` + 缩进字段行；行数上限可配（默认 30）；解析异常/空表只输出失败行，**不伪造**
+- 新增「显示解析」开关（关闭零解析开销）与「解析行数上限」参数；RX 日志队列升级为 `(kind, text)`，**burst 只对原始行计数**，同批解析明细整批丢弃
+- 新增 `test/test_serial_proto_frame.py`（84 项）；`test/test_serial_tool_widget.py` 扩至 119 项（含**真实解析器端到端冒烟**）；约定沉淀为 §8 陷阱 59
+
+### 1.23.46 — 2026-09-22
+
+- **新增「串口工具」标签页**（任务 `09-22-serial-tool-integration`，集成自 `E:\python\USB负载测试工具`）：命令表（名称/发送 HEX/匹配方式/预期响应）+ 增删改上下移 + 保存·加载配置（JSON 与源工具裸列表双向兼容）+ 加载报文 txt；**精确间隔**循环发送（0=无限）+ 完成后等一个响应超时收尾出成功率；接收两模式（原始数据 / 按帧尾分割）；6 种响应匹配 + **队首连续匹配** + 超时统计；彩色日志 + 高速时按 100ms 批量刷出
+- **串口层复用而非重写**：`SerialWorker` 新增静默写入 `write_raw()`（不发日志信号 + 写锁）；串口工具**复用主窗口共享的 `serial_worker`**（端口/波特率只在顶部「串口配置」设置，本页只读跟随连接状态，避免两个句柄争抢同一个 COM 口）
+- **命令与参数自动落盘** `serial_tool_config.json`（原子写、损坏回落默认值，已入 .gitignore）
+- 实现期由测试发现并修复：**上一轮发送遗留的收尾定时器/迟到信号会掐断新一轮发送**（200 帧只发 140）→ 「发送器身份 + 发送代次」双重守卫；另修复 `_save_timer` 晚于 `_load_persisted()` 创建导致配置保存静默失效
+- 新增 `test/test_serial_tool_widget.py`、`test/test_serial_worker_write_raw.py`（登记 `CORE_TESTS`）；既有 `test_serial_worker_framing.py`（28 项）全绿；约定沉淀为 §8 陷阱 58
+
+### 1.23.45 — 2026-09-22
+
+- **TCP 监控补齐「原始载荷」路径**（任务 `09-21-tcp-monitor-raw-apdu`）：`FlowBuffer` 新增 `auto/ed/raw` 切帧策略，非 ED..EE 封装的 TCP 载荷按 **TCP segment 逐包**成帧（实测原先 27B 原始载荷切出 0 帧、字节被静默丢弃）
+- **协议识别**：显式选择优先 + 自动识别只认可自证形态（DLMS Wrapper / DLMS-APDU / DLT645-2007 / 698.45）；**南网/国网 不参与自动识别**（校准实测两者校验器互判 0 fail，无法区分），需显式选择 —— 边界已声明并钉在测试里
+- **未识别载荷按「原始数据」正常显示** + APDU 标签提示；显式选择下解析器返回退化结果也如实回落，不冒充解析成功
+- **UI**：新增 Wireshark 风格字节视图 `hex_dump_view.py`（偏移/hex/ASCII/按字节高亮）、解析结果 表↔字段树 切换（复用 `parse_result_view`）、帧表「源 → 目的」列与未识别帧弱化、仅未识别 + 协议过滤、切换协议重解析已抓帧（>200 帧分批）
+- 新增 4 个测试（27 + 27 + 36 + 46 项）并登记 `release_check.py:CORE_TESTS`；既有 ED 相关 TCP 测试（15 / 55 项）全绿；约定与排查手段沉淀为 §8 陷阱 57
+
+### 1.23.44 — 2026-09-21
+
+- **修复启动后「协议选择」下拉框显示为空白（点一下才出现文字）**：根因是顶部协议组自定义 `FlowLayout.sizeHint()` 返回 `minimumSize()`（≈最宽单项 276px），父布局据此只给该宽度 → 布局被迫换行两行 → 分组框 75px 而顶栏容器 49px → 第二行的协议下拉框被裁成一条缝（实测 geometry (5,44)、`visibleRegion()` 仅 266x5）
+- **`FlowLayout.sizeHint()` 改为单行自然尺寸**（各子项 `sizeHint()` 之和 + 间距 + 边距），语义对齐 `QHBoxLayout`；`minimumSize()` 不变，窄窗仍照旧换行
+- **`_reflow_proto_group()` 补「重排外层顶栏」**：原实现只动内层布局，分组框拿不到最终宽度、内层 FlowLayout 不会被重新调用（单独 `activate()` 是空操作）；补上后下拉框同步从 (5,44)/266x5 恢复到 (76,20)/266x26，无需交互触发
+- 新增 `test/test_flow_layout_proto_group.py`（11 项，offscreen，登记 `release_check.CORE_TESTS`）；**反例自检**还原修复前两处实现后判据实测变红
+- 排查手段沉淀为 §8 陷阱 56（`visibleRegion()` vs `grab()` 的判别价值）
+
+### 1.23.43 — 2026-09-21
+
+- **「关于」对话框新增 GitHub Star 入口**：底部按钮行加「去 GitHub 给作者点 Star」（`icons/lucide/star.svg`）+ 提示行「如果这个工具帮到了你，欢迎在 GitHub 上给作者点个 ⭐ Star」，点击用系统默认浏览器打开作者仓库
+- **地址单一来源 `main_gui.AUTHOR_GITHUB_URL`**：按钮 tooltip / 跳转 / 测试都读它，改地址只改一处（`test/test_about_github_star.py` 有「main_gui.py 内 URL 字面量只有一处」守卫）；`QDesktopServices.openUrl` 返回 False（未装浏览器）或地址为空时**弹窗给出可手动复制的地址**，不静默无反应（同 §8 陷阱 23）
+- 「关于」对话框拆出 `_build_about_dialog()`（构造与 `exec()` 分离，便于测试直接检查控件与接线）；菜单接线不变（仍由 `test_menu_wiring.py` 守卫）
+- 新增 `test/test_about_github_star.py`（22 项，offscreen，登记 `release_check.CORE_TESTS`）；**变异反证 2 条**（删 `clicked.connect` / 加第二份 URL 字面量）均实测变红后还原
+- 遗留（本次未改）：该对话框内「版本 2.0」与更新记录仍是早期**写死的占位文案**，未读 `APP_VERSION` / `CHANGELOG`
 
 ### 1.23.42 — 2026-09-21
 
@@ -972,11 +1114,15 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 - **Web 查询页自定义条目 CRUD**：协议0 自定义 DI 增/覆盖/删除（勾选列 + 「删除选中」批量按钮，内置忽略并计数）；协议7 自定义 AFN+Fn 增删（复用 `GDW10376Parser` API + `gdw_afn_lookup.refresh()`）；查询表新增「自定义」★ 列；`custom_di_store` 读写支持可选 `path` 注入
 - 详见 §8 陷阱 31（已收口清单）、陷阱 55（Web 查询页自定义条目约定）
 
+### 1.23.42 — 2026-09-21
+
+- Web↔GUI 同步修复等（见 `main_gui.py:CHANGELOG`）；本构建同时包含 1.23.41 的顶部栏整体显隐
+
 ### 1.23.41 — 2026-09-21
 
-- **GUI 顶部栏协议/串口可折叠**：`▼/▶ 协议选择`、`▼/▶ 串口配置` 两个开关（类似 LLM 预处理面板）；折叠腾出内容区高度
-- 协议折叠时窗口标题中间显示协议**短名**（`protocol_registry.short_name`）；串口折叠时状态栏显示 `端口 · 波特率 · 校验 · 连接状态`
-- 折叠态持久化 `config.json` 顶层 `top_bar` 段（勿写入 `ui`）；测试 `test/test_top_bar_collapse.py`
+- **GUI 顶部栏协议+串口整体显隐**：菜单栏右上角**一个小图标**（`panel-top-open`/`panel-top-close`）一键切换；协议选择与串口配置**同时**显示/隐藏，折叠后整行高度归零（开关不在顶栏内）
+- 顶栏折叠时窗口标题：左侧保持「版本+日期 - 作者」，**仅协议短名**空格近似居中；状态栏显示 `串口: 端口 · 波特率 · 校验 · 连接状态`
+- 折叠态持久化 `config.json` 顶层 `top_bar.collapsed`（兼容初版分键）；测试 `test/test_top_bar_collapse.py`
 
 ### 1.23.38 — 2026-09-20
 
