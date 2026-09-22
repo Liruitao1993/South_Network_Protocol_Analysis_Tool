@@ -1,0 +1,3 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "新增 GUI 标签页与组件（SerialToolWidget/SerialCommandDialog）须遵循的 PySide6 组件规范（按钮/表格/图标/主题一致性）"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "核心是复用 serial_worker.SerialWorker / gui_utils / app_icons，不写第二套串口实现"}
