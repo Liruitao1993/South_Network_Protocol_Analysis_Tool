@@ -101,6 +101,10 @@ testfile.txt
 /repomix-output.md
 /test/_probe_qp_cards.py
 /dlt645_addr_history.json
+# 串口工具运行时命令/参数（自动落盘，随使用变化，不入库）
+/serial_tool_config.json
+# 串口工具「导出命令」的默认文件名（用户手动导出物，不入库）
+/commands.json
 # Git worktree 本地隔离区（不入库）
 .worktrees/
 
