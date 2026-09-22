@@ -10,6 +10,7 @@
 
 from typing import Optional
 import time
+from threading import Lock
 import serial
 import serial.tools.list_ports
 
@@ -39,6 +40,8 @@ class SerialWorker(QThread):
         self._stopbits: float = 1.0
         self._running: bool = False
         self._buffer: bytearray = bytearray()
+        # 写锁：GUI 线程（send_frame）与发送线程（write_raw）可能并发写同一串口
+        self._write_lock = Lock()
 
     def configure(self, port: str, baudrate: int = 9600,
                   bytesize: int = 8, parity: str = "N", stopbits: float = 1.0):
@@ -90,15 +93,35 @@ class SerialWorker(QThread):
         return self._ser is not None and self._ser.is_open
 
     def send_frame(self, frame_bytes: bytes) -> bool:
-        """发送一帧字节数据"""
+        """发送一帧字节数据（发送后发 [发送] 日志）"""
         if not self._ser or not self._ser.is_open:
             self.error_occurred.emit("串口未打开")
             return False
         try:
-            self._ser.write(frame_bytes)
+            with self._write_lock:
+                self._ser.write(frame_bytes)
             hex_str = frame_bytes.hex().upper()
             formatted = " ".join(hex_str[i:i+2] for i in range(0, len(hex_str), 2))
             self.log_message.emit(f"[发送] {formatted}")
+            return True
+        except serial.SerialException as e:
+            self.error_occurred.emit(f"发送失败: {e}")
+            return False
+
+    def write_raw(self, data: bytes) -> bool:
+        """**静默**发送字节：只写串口，不发任何信号（含日志）。
+
+        为什么需要：负载测试会按毫秒级间隔连发大量帧，若逐帧 ``log_message.emit``
+        会让 GUI 事件队列被日志淹没（调用方应在合适时机批量汇总显示）。
+        与 :meth:`send_frame` 共用 ``_write_lock``，允许发送线程与 GUI 线程并发调用。
+        未打开串口或写异常时发 ``error_occurred`` 并返回 False。
+        """
+        if not self._ser or not self._ser.is_open:
+            self.error_occurred.emit("串口未打开")
+            return False
+        try:
+            with self._write_lock:
+                self._ser.write(data)
             return True
         except serial.SerialException as e:
             self.error_occurred.emit(f"发送失败: {e}")
