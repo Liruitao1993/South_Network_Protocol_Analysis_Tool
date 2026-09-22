@@ -2362,6 +2362,79 @@ def main():
               for k in ("待测", "发送中", "通过", "失败", "错误")))
     w18.cleanup()
 
+    section("[33] 命令状态可手动清理")
+    w19 = stw.SerialToolWidget()
+    w19.set_parse_provider(None)
+    w19.chk_show_parse.setChecked(False)
+    w19.commands = [
+        {"name": "甲", "data_hex": "01", "match_type": "contains",
+         "match_hex": "AA", "protocol": 7, "enabled": True, "_status": "pass"},
+        {"name": "乙", "data_hex": "02", "match_type": "none",
+         "match_hex": "", "protocol": None, "enabled": False, "_status": "fail"},
+        {"name": "丙", "data_hex": "03", "match_type": "none",
+         "match_hex": "", "protocol": None, "enabled": True, "_status": "running"},
+    ]
+    w19._rebuild_cmd_table()
+    check("清除状态按钮存在且带图标",
+          w19.btn_clear_status.text() == "清除状态"
+          and not w19.btn_clear_status.icon().isNull(),
+          w19.btn_clear_status.text())
+    check("清除前三种状态都在",
+          [w19._cmd_status(i) for i in range(3)] == ["pass", "fail", "running"],
+          str([w19._cmd_status(i) for i in range(3)]))
+    check("清除前图标配色各异（通过/失败/发送中）",
+          _near(_icon_colors(w19.cmd_table.item(0, 1).icon()), "#008000")
+          and _near(_icon_colors(w19.cmd_table.item(1, 1).icon()), "#C00000")
+          and _near(_icon_colors(w19.cmd_table.item(2, 1).icon()), "#1565C0"))
+    w19.btn_clear_status.click()               # 走真实按钮信号
+    QApplication.processEvents()
+    check("点击后全部回到「待测」",
+          [w19._cmd_status(i) for i in range(3)] == ["", "", ""],
+          str([w19._cmd_status(i) for i in range(3)]))
+    check("图标全部变成「待测」灰",
+          all(_near(_icon_colors(w19.cmd_table.item(i, 1).icon()), "#9E9E9E")
+              for i in range(3)),
+          str([sorted(_icon_colors(w19.cmd_table.item(i, 1).icon()))[:1]
+               for i in range(3)]))
+    check("tooltip 同步为「待测」",
+          all("待测" in w19.cmd_table.item(i, 1).toolTip() for i in range(3)),
+          str([w19.cmd_table.item(i, 1).toolTip() for i in range(3)]))
+    check("命令内容不被清除影响",
+          [c["name"] for c in w19.commands] == ["甲", "乙", "丙"]
+          and w19.commands[0]["data_hex"] == "01"
+          and w19.commands[0]["match_hex"] == "AA"
+          and w19.commands[0]["protocol"] == 7,
+          str(w19.commands[0]))
+    check("勾选状态不被清除影响",
+          [c["enabled"] for c in w19.commands] == [True, False, True],
+          str([c["enabled"] for c in w19.commands]))
+    check("名称文字仍在", w19.cmd_table.item(1, 1).text() == "乙")
+    check("清除后 _status 键被移除（运行态不残留）",
+          all(stw.CMD_STATUS_KEY not in c for c in w19.commands))
+    check("清除后导出里没有 _status",
+          all("_status" not in c for c in stw.export_commands(w19.commands)))
+    check("重复清除幂等（不抛、仍全待测）",
+          w19._clear_cmd_statuses() is None
+          and [w19._cmd_status(i) for i in range(3)] == ["", "", ""])
+    # 发送中禁止清除（与「清除统计」同一口径）
+    w19._set_cmd_status(0, "pass")
+    w19._running = True
+    w19.btn_clear_status.click()
+    QApplication.processEvents()
+    check("发送中点清除 → 不生效（状态保持）", w19._cmd_status(0) == "pass",
+          w19._cmd_status(0))
+    w19._running = False
+    w19.btn_clear_status.click()
+    QApplication.processEvents()
+    check("停止后可清除", w19._cmd_status(0) == "", w19._cmd_status(0))
+    # 空命令表也安全
+    w19.commands = []
+    w19._rebuild_cmd_table()
+    w19.btn_clear_status.click()
+    QApplication.processEvents()
+    check("空命令表点清除不抛异常", w19.cmd_table.rowCount() == 0)
+    w19.cleanup()
+
     print()
     print("=" * 64)
     if FAIL:

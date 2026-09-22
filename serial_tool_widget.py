@@ -1575,6 +1575,15 @@ class SerialToolWidget(QWidget):
             "  ⚠ 橙 = 错误（写串口失败 / 发送出错）"
         )
         sel_row.addWidget(legend)
+        self.btn_clear_status = QPushButton("清除状态")
+        set_btn(self.btn_clear_status, "secondary")
+        set_btn_icon(self.btn_clear_status, "clear")
+        self.btn_clear_status.setToolTip(
+            "把所有命令的状态图标重置为「待测」\n"
+            "（只清运行态图标，不影响命令内容与勾选；每轮发送开始时也会自动重置）"
+        )
+        self.btn_clear_status.clicked.connect(self._clear_cmd_status_clicked)
+        sel_row.addWidget(self.btn_clear_status)
         cmd_layout.addLayout(sel_row)
 
         cmd_btns = QHBoxLayout()
@@ -2301,6 +2310,17 @@ class SerialToolWidget(QWidget):
         for i, cmd in enumerate(self.commands):
             cmd.pop(CMD_STATUS_KEY, None)
             self._refresh_cmd_row(i)
+
+    def _clear_cmd_status_clicked(self):
+        """「清除状态」按钮：手动把状态图标重置为「待测」。
+
+        发送中禁止（与「清除统计」同一口径）—— 那时状态还在被实时改写，
+        清了也会立刻被下一批信号填回来，徒增困惑。
+        """
+        if self._running:
+            QMessageBox.information(self, "串口工具", "发送中不能清除状态")
+            return
+        self._clear_cmd_statuses()
 
     def _mark_running_as(self, status: str):
         """把仍在「发送中」的命令改成指定状态（发送失败 / 停止时用）。"""

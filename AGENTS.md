@@ -965,7 +965,7 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
     - **正则匹配二进制帧有两个坑**（实测确认，故新增 HEX 通配）：① 模式是在**字节按 latin-1 解码后的字符流**上匹配，字节必须写 `\xNN`，直接写 hex 数字匹配不上（`68` ≠ 字节 `0x68`）；② `re.IGNORECASE` 会把「解码成字母」的字节大小写互配 —— 实测 `\x68` 也匹配 `0x48`、`\x69`↔`0x49`、`\xD0`↔`0xF0`、`\x41`↔`0x61`（**国网帧起始符 0x68 会误配 `'H'`**）；③ `.` **不匹配 `0x0A`**，要写 `[\s\S]` 或 `(?s).`。
     - **「HEX 通配」匹配方式**（1.23.53）：约定**必须与「测试方案」一致** —— `test_plan_widget._match_frame` 是逐字符走、遇 `XX` 跳过一个字节，故 `XX` 可内嵌连续串（`68D0XXXX16`），`??` 为等价别名；语义为**包含式**（在累积接收数据里任意位置找）+ 可选 `^`/`$` 锚点；命中报偏移。改这里要与 `test_plan_widget._match_frame` 的约定保持同源，别自创 `*`/`?` 之类记号。回归：`test/test_serial_tool_widget.py` 第 [30] 段。
     - **匹配统一入口是 `match_offset()`**（返回偏移或 None）：`check_match()` 只回答「是否命中」，日志要报位置就得用 `match_offset()`；新增匹配方式时**两处都要接**（`check_match` 供纯判断、`match_offset` 供带位置判断）。
-    - **命令状态图标**（1.23.55）：状态存命令的**运行时键 `_status`**（`CMD_STATUS_KEY`）—— 不进 `normalize_command`、**不落盘不导出**（`export_commands` 剔除所有 `_` 开头的键，否则下次打开会显示上一轮的旧状态）；状态变化只调 `_refresh_cmd_row(i)` **重画那一行的名称单元格**，别整表重建（会丢选中/滚动位置）。图标颜色靠 `CompositionMode_SourceIn` 给 `app_icons.load_icon()` 渲染出的 pixmap 整体染色（`app_icons` 只出单色）。迁移点：每轮 `_start_send` 先 `_clear_cmd_statuses()`、`_on_sent` 先记「通过」再在真正入待匹配队列时改「发送中」、`_on_send_failed` 用 `_mark_running_as("error")`。回归：`test/test_serial_tool_widget.py` 第 [32] 段（**逐态校验渲染出的像素颜色**，别只断言 icon 非空）。
+    - **命令状态图标**（1.23.55）：状态存命令的**运行时键 `_status`**（`CMD_STATUS_KEY`）—— 不进 `normalize_command`、**不落盘不导出**（`export_commands` 剔除所有 `_` 开头的键，否则下次打开会显示上一轮的旧状态）；状态变化只调 `_refresh_cmd_row(i)` **重画那一行的名称单元格**，别整表重建（会丢选中/滚动位置）。图标颜色靠 `CompositionMode_SourceIn` 给 `app_icons.load_icon()` 渲染出的 pixmap 整体染色（`app_icons` 只出单色）。迁移点：每轮 `_start_send` 先 `_clear_cmd_statuses()`、`_on_sent` 先记「通过」再在真正入待匹配队列时改「发送中」、`_on_send_failed` 用 `_mark_running_as("error")`。回归：`test/test_serial_tool_widget.py` 第 [32] 段（**逐态校验渲染出的像素颜色**，别只断言 icon 非空）。1.23.56 起「清除状态」按钮走 `_clear_cmd_status_clicked()`（发送中禁止，与「清除统计」同口径）；第 [33] 段。
     - **「原始数据」接收模式必须做「帧结构优先、时间聚合兜底」**（实测报障两轮，改这里前必读）：① 串口驱动会把**同一帧**拆成多次 `read` 交付（低波特率甚至逐字节），按每次交付输出一行会让一帧打成多行、RX 帧数虚增；② **只做时间聚合不够**——实测 208 字节的国网帧被拆成 77+92+36+3 共 4 行，即**交付块间隔本身就大于静默窗口**（10ms），窗口调多大都不稳。正确做法是按长度域收全再输出：`_declared_frame_len()` 按**第二个起始符 68H 的位置**互斥判别三种结构 —— 第 4 字节（698.45：`68H + L(2B 小端) + 68H + … + FCS + 16H`，整帧 = L + 3，见协议文档 6.2.2）、第 8 字节（DLT645-2007：`68H + 地址(6B) + 68H + 控制码 + 数据长度 L(1B) + … + 16H`，整帧 = L + 12）、都不是（南网/国网：`68H + L(2B 小端) + … + CS + 16H`，**L 就是整帧字节数**，见 `protocol_parser.py:72` / `gdw10376_parser.py:333`）；**判别顺序必须先查第 4 字节**（698.45 的第 4 字节恒为 68H），不足 8 字节或长度域越界一律返回 0 退回时间聚合 —— **错切帧比不切更糟**。`_emit_structured_frames()` 只在**末字节确为 16H** 时才算自证（帧体内含 16H 不会被误切，两帧连在一次交付里会切成两行）。无结构裸数据仍走时间聚合：`RAW_FLUSH_DELAY_MS = 10` 静默窗口 + `RAW_MAX_HOLD_MS = 200` 最长持有（防持续流 `_raw_buffer` 无界增长且永不显示）；已声明长度但未收全时改用 `FRAME_IDLE_MS = 300` 容忍静默 + `FRAME_HOLD_MAX_MS = 5000` 绝对上限。切换接收模式与 `cleanup()` 时立即刷出（含未收全残帧），不丢数据。**取舍**：非 68 结构的裸数据两段间隔小于窗口会被合并成一行 —— 需要逐帧精确切分时用「按帧尾分割」模式。回归：`test/test_serial_tool_widget.py` 第 [17] 段。
     - **`_save_timer` 必须先于 `_build_ui()/_load_persisted()` 创建**：载入持久化参数会触发控件 `toggled` → `_schedule_save()`，若定时器还没建好，信号槽内会抛 `AttributeError` 被 Qt **静默吞掉**（表现为配置保存失效，极难排查）。回归：`test/test_serial_tool_widget.py` 第 [18] 段。
     - **线程归属（已知取舍）**：接收数据经 `raw_data_received` 信号投递到 **GUI 线程**后再做匹配与分帧（源工具是在接收线程里直接匹配）。与既有组帧页同一口径、只保留一套串口层；常规表计流量无影响；解析也走同一口径（`set_parse_provider` 注入的回调在 GUI 线程执行）。若将来遇到极高接收速率（数千帧/秒）导致界面滞后，再把匹配与解析一起下沉到 worker 线程。
@@ -1015,6 +1015,11 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 ## 10. 变更日志
 
 > 详细版本变更记录请查看 `main_gui.py:CHANGELOG`（按版本倒序），或运行 `git log --oneline` 查看提交历史。本文档保留近期版本的摘要。
+
+### 1.23.56 — 2026-09-22
+
+- **串口工具命令状态可手动清理**：勾选操作行新增「清除状态」按钮 → `_clear_cmd_status_clicked()`（只清运行态图标，不动命令内容/勾选；发送中禁止，与「清除统计」同一口径）
+- 测试：`test_serial_tool_widget.py` 463 项（第 [33] 段 15 项）
 
 ### 1.23.55 — 2026-09-22
 

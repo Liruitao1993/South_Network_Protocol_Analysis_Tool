@@ -267,6 +267,7 @@ CMD_STATUS_KEY = "_status"      # 命令字典里的运行时键（不落盘、�
 - **只重画一行**：`_refresh_cmd_row(i)` 改图标/颜色/文字，**不**整表重建（避免丢选中与滚动位置）。
 - **迁移点**：`_start_send` → `_clear_cmd_statuses()`；`_on_sent` → 先 `"pass"`，真正入待匹配队列时改 `"running"`；`_on_rx_match_data` 命中 → `"pass"`；`_check_match_timeout` → `"fail"`；`_on_send_failed` → `_mark_running_as("error")`；`_stop_send`/`_finalize_send` → 剩余待匹配记 `"fail"`。
 - **不落盘**：`export_commands` 剔除所有 `_` 开头的键（`save_config` 走它）。
+- **手动清理**（1.23.56）：勾选操作行「清除状态」按钮 → `_clear_cmd_status_clicked()` → `_clear_cmd_statuses()`；`_running` 时弹提示并返回（与「清除统计」同口径）。按钮放图例右侧，图标键 `clear`。
 
 ## 12. 风险与取舍
 

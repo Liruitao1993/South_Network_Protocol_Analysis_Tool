@@ -115,7 +115,7 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.55"
+APP_VERSION = "1.23.56"
 BUILD_DATE = "2026-09-22"  # 编译日期，每次打包前更新
 
 # 作者 GitHub 仓库地址 —— 「关于」对话框 Star 按钮的**唯一来源**。
@@ -140,6 +140,14 @@ _WINDOW_STATE_TABLES = (
 )
 
 CHANGELOG = [
+    (
+        "1.23.56",
+        "2026-09-22",
+        [
+            "串口工具：**命令状态可手动清理**（实测诉求）—— 勾选操作行新增「清除状态」按钮，一键把所有命令的名称列状态图标重置为「待测」。原先状态只在**每轮发送开始时**自动重置，跑过一轮后想清干净只能再发一次。只清运行态图标，**不动命令内容与勾选**；发送中禁止清除（与「清除统计」同一口径 —— 那时状态还在被实时改写，清了也会立刻被填回来，徒增困惑）；按钮带 tooltip 说明，空命令表下点击安全无副作用",
+            "测试：test_serial_tool_widget.py 扩至 463 项（新增第 [33] 段 15 项：按钮存在且带图标、**走真实按钮信号**点击后三态全部回「待测」且图标逐态校验变灰、tooltip 同步、命令内容/勾选/名称不被影响、`_status` 键被移除且导出里不残留、重复清除幂等、发送中点击不生效、停止后可清、空表不抛异常）",
+        ],
+    ),
     (
         "1.23.55",
         "2026-09-22",
