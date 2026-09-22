@@ -24,12 +24,14 @@ from typing import Dict, List, Tuple, Optional
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QComboBox,
-    QLineEdit, QSplitter, QMessageBox, QGroupBox, QMenu, QTextEdit,
-    QTabWidget, QCheckBox
+    QLineEdit, QSplitter, QMessageBox, QGroupBox, QMenu,
+    QTabWidget, QCheckBox, QTreeWidget, QTreeWidgetItem
 )
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
-from PySide6.QtGui import QFont, QKeySequence, QShortcut, QGuiApplication
+from PySide6.QtGui import QFont, QKeySequence, QShortcut, QGuiApplication, QColor
 from gui_utils import ZoomableTableWidget, set_btn, set_btn_icon
+from hex_dump_view import HexDumpView
+import parse_result_view
 from app_paths import app_data_dir
 import thread_registry
 
@@ -160,53 +162,185 @@ class FlowBuffer:
     **保留完整 ED 帧**（不在此处剥公共头）：解析阶段按所选协议
     （南网 PLC2 / 国网新一代 / HDC 1.0）用 batch_core 解包并生成包装头字段。
     公共头布局：PLC2.0=9B / 国网HDC·广西=8B，由 resolve_ed_wrapper 判别。
+
+    切帧策略 ``mode``（1.23.45 起）：
+
+      - ``"ed"``：只切 ED..EE（改动前的旧行为）；
+      - ``"raw"``：完全不切，**一个 append（= 一个 TCP segment）= 一个原始载荷帧**；
+      - ``"auto"``（默认）：先按 ED..EE 切。某方向只要出现过 ED 帧就固定走 ED 路径
+        （行为与 ``"ed"`` 等价，不产生原始帧）；若判定该方向不是 ED 封装，则回退为
+        ``"raw"`` 行为，把该方向的载荷按 segment 逐包产出，**不再丢弃字节**。
+
+    为什么需要 raw 回退：非 ED 封装的 TCP 载荷（DLMS / 698.45 / 645 等直接跑在 TCP 上）
+    原先被逐字节跳过、`pending_bytes` 归零 —— 界面上既没有帧可点，也就无从解析显示。
+
+    判定规则（避免把普通字节误判成 ED 帧）：
+      只有既有**完整定界校验**全部通过（``buf[i]==0xED`` + 帧长 ∈ [4, 4096] +
+      ``buf[i+5]==0xEF`` + ``buf[i+total-1]==0xEE``）才算 ED 命中；缓冲区里存在
+      「未收全的 ED 候选」时先等收全（跨包 ED 帧），但最多等 ``MAX_WAIT_SEGMENTS``
+      个 segment，超限即判定 raw（原始流里偶然出现的 ``ED xx xx`` 会伪装成候选，
+      不设上限会让该方向长时间不出行）。raw 方向仍会在每段里检测**完整 ED 帧**，
+      命中即升级回 ED 模式（应对「抓包从 ED 连接中途开始」的场景），ED 帧之前的
+      字节仍按原始载荷产出，保证同一字节只上报一次。
     """
 
     SOF = 0xED
     EF = 0xEF
     EE = 0xEE
     MAX_FRAME_LEN = 4096
+    # 存在「未收全的 ED 候选」时最多等几个 segment 再判定 raw。
+    # 实测 ED 帧（现场形态 ~168B）远小于一个 MSS(1460)，跨包最多跨 2 段；
+    # 而原始流里偶然出现的 `ED xx xx` 也会被当成候选 —— 若无上限，该方向要攒到
+    # 4KB 才回退，界面会长时间不出行。上限 2 段同时覆盖两种情形。
+    MAX_WAIT_SEGMENTS = 2
 
-    def __init__(self):
+    def __init__(self, mode: str = "auto"):
+        if mode not in ("auto", "ed", "raw"):
+            raise ValueError(f"未知切帧模式: {mode!r}（应为 auto/ed/raw）")
+        self._mode = mode
         self._buf = bytearray()
         self._frames: List[Tuple[float, bytes]] = []  # (时间戳, 完整帧字节)
+        # 方向判定结果：None=未定 / "ed"=ED 封装 / "raw"=原始载荷
+        self._decided: Optional[str] = "raw" if mode == "raw" else None
+        # 每个 append 在缓冲中的起点与时间戳，用于 raw 回退时按 segment 逐包产出
+        self._seg_marks: List[Tuple[int, float]] = []
+        # 已连续等待的 segment 数（ED 候选未收全）
+        self._wait_segments = 0
+
+    @property
+    def mode(self) -> str:
+        return self._mode
+
+    @property
+    def decided(self) -> Optional[str]:
+        """该方向的切帧判定结果（auto 模式下才会从 None 变为 ed/raw）。"""
+        return self._decided
 
     def append(self, data: bytes, timestamp: float):
         """追加数据并尝试切帧"""
+        if not data:
+            # 空载荷（纯 ACK）：不产帧、不建 segment 标记
+            return
+        if self._decided == "raw":
+            self._append_in_raw_mode(data, timestamp)
+            return
+        self._seg_marks.append((len(self._buf), timestamp))
         self._buf.extend(data)
         self._deframe(timestamp)
 
-    def _deframe(self, timestamp: float):
-        """从缓冲区切出完整 ED 监控封装帧（业务解析在 _parse_and_summarize）"""
+    def _append_in_raw_mode(self, data: bytes, timestamp: float):
+        """原始载荷方向：一个 segment 一帧；若本段出现**完整 ED 帧**则升级回 ED 模式。
+
+        为什么允许升级：抓包可能从一条 ED 连接的中途开始（首个载荷段只是某帧的尾巴），
+        若判定 raw 后永不回头，该方向此后所有 ED 帧都不再被切分 —— 相对改动前是功能回退。
+        升级时把 ED 帧之前的字节仍按原始载荷产出，保证同一字节只被上报一次。
+        """
+        if self.SOF in data:
+            hits, _consumed, _waiting = self._scan_ed_bytes(data, timestamp)
+            if hits:
+                first_off = hits[0][0]
+                if first_off > 0:
+                    self._frames.append((timestamp, bytes(data[:first_off])))
+                # 升级为 ED 模式：从 ED 帧起点起交给常规切帧路径处理
+                self._decided = "ed"
+                self._buf = bytearray(data[first_off:])
+                self._seg_marks = [(0, timestamp)]
+                self._deframe(timestamp)
+                return
+        self._frames.append((timestamp, bytes(data)))
+
+    def _scan_ed_bytes(self, buf, timestamp: float):
+        """扫描给定字节序列里的完整 ED..EE 帧。
+
+        返回 ``(hits, consumed, waiting)``：
+          - ``hits``：``[(帧起始偏移, (时间戳, 帧字节)), ...]``；
+          - ``consumed``：可安全丢弃的前缀长度（非 ED 字节 + 已产出帧）；
+          - ``waiting``：存在**未收全**的 ED 候选（需等后续字节）。
+        """
+        hits = []
         i = 0
-        n = len(self._buf)
+        n = len(buf)
+        waiting = False
         while i < n:
-            if self._buf[i] != self.SOF:
+            if buf[i] != self.SOF:
                 i += 1
                 continue
             # 至少 6 字节头：ED + 帧长(2) + ctrl1 + ctrl2 + EF
             if i + 6 > n:
+                waiting = True
                 break
-            frame_len = self._buf[i + 1] | (self._buf[i + 2] << 8)
+            frame_len = buf[i + 1] | (buf[i + 2] << 8)
             if frame_len < 4 or frame_len > self.MAX_FRAME_LEN:
                 i += 1
                 continue
             # 总长度 = ED(1) + 帧长字段(2) + [ctrl1+ctrl2+EF+数据域+CS = frame_len] + EE(1)
             total = frame_len + 4
             if i + total > n:
+                waiting = True
                 break
             # 强定界校验
-            if self._buf[i + 5] != self.EF or self._buf[i + total - 1] != self.EE:
+            if buf[i + 5] != self.EF or buf[i + total - 1] != self.EE:
                 i += 1
                 continue
             # 保留完整 ED 帧（含包装头），供协议相关解析/文案使用
-            self._frames.append((timestamp, bytes(self._buf[i:i + total])))
+            hits.append((i, (timestamp, bytes(buf[i:i + total]))))
             i += total
             continue
+        return hits, i, waiting
 
-        # 保留未处理的尾部
-        if i > 0:
-            del self._buf[:i]
+    def _deframe(self, timestamp: float):
+        """从缓冲区切出完整帧（业务解析在 _parse_and_summarize）"""
+        hits, consumed, waiting = self._scan_ed_bytes(self._buf, timestamp)
+
+        if hits:
+            # ED 命中：丢弃非 ED 前缀（与改动前一致），该方向固定为 ED 封装
+            if consumed:
+                del self._buf[:consumed]
+                self._drop_seg_marks(consumed)
+            self._decided = "ed"
+            self._wait_segments = 0
+            self._seg_marks.clear()
+            self._frames.extend(frame for _off, frame in hits)
+            return
+
+        if self._mode == "ed" or self._decided == "ed":
+            # 旧行为：只丢弃已扫过的非 ED 字节，继续等后续字节（ED 方向不设等待上限）
+            if consumed:
+                del self._buf[:consumed]
+                self._drop_seg_marks(consumed)
+            return
+
+        if waiting and len(self._buf) <= self.MAX_FRAME_LEN + 4:
+            # 可能是跨包的 ED 帧（或长度可疑的候选），先等收全
+            self._wait_segments += 1
+            if self._wait_segments <= self.MAX_WAIT_SEGMENTS:
+                return
+
+        # 判定：该方向不是 ED 封装 → 原始载荷模式，按 segment 补发已缓冲字节
+        self._decided = "raw"
+        self._wait_segments = 0
+        self._emit_raw_frames()
+        self._buf.clear()
+        self._seg_marks.clear()
+
+    def _drop_seg_marks(self, consumed: int):
+        """缓冲区前缀被丢弃后，同步收缩 segment 标记。"""
+        if consumed <= 0:
+            return
+        self._seg_marks = [
+            (off - consumed, ts) for off, ts in self._seg_marks if off >= consumed
+        ]
+
+    def _emit_raw_frames(self):
+        """按 segment 边界把缓冲区内容产出为原始载荷帧（一个 append = 一帧）。"""
+        if not self._buf:
+            self._seg_marks.clear()
+            return
+        marks = sorted(self._seg_marks) or [(0, 0.0)]
+        for idx, (off, ts) in enumerate(marks):
+            end = marks[idx + 1][0] if idx + 1 < len(marks) else len(self._buf)
+            if end > off:
+                self._frames.append((ts, bytes(self._buf[off:end])))
 
     def pop_frames(self) -> List[Tuple[float, bytes]]:
         """取出所有已切分的帧并清空"""
@@ -551,16 +685,45 @@ class TCPMonitorWidget(QWidget):
         toolbar.addSpacing(12)
         toolbar.addWidget(QLabel("协议："))
         self.proto_combo = QComboBox()
-        self.proto_combo.addItems(
-            ["自动识别", "国网新一代", "南网新一代", "HDC 1.0"]
-        )
+        # itemData = 协议索引（None = 自动识别）。用 itemData 而不是位置索引，
+        # 这样扩展协议列表时解析分派逻辑无需再改。
+        # 顺序：自动识别 → 原始载荷常用协议（注册表短名为单一来源）→ ED 三协议
+        #（后三者名称保持既有文案，既有测试用 findText 定位）
+        import protocol_registry as _pr
+
+        self.proto_combo.addItem("自动识别", None)
+        for _pindex in (0, 4, 5, 6, 7, 8):
+            self.proto_combo.addItem(_pr.get_protocol(_pindex).short_name, _pindex)
+        for _label, _pindex in (
+            ("国网新一代", 10),
+            ("南网新一代", 9),
+            ("HDC 1.0", 11),
+        ):
+            self.proto_combo.addItem(_label, _pindex)
         self.proto_combo.setToolTip(
-            "解析所选协议族；ED..EE 监控封装按协议语义解析：\n"
-            "  国网新一代 / HDC 1.0 → 国网HDC 封包头字段\n"
-            "  南网新一代 → PLC2.0 / 广西台体\n"
-            "  自动识别 → 依次尝试南网 / 国网新一代 / HDC 1.0"
+            "原始载荷按所选协议解析（显式选择优先）：\n"
+            "  自动识别 → 只对**可自证**的形态判定（DLMS Wrapper / DLMS-APDU /\n"
+            "            DLT645-2007 / 698.45）；南网 / 国网 需显式选择\n"
+            "  其余项 → 只按该协议解析，不匹配时按「原始数据」显示\n"
+            "ED..EE 监控封装帧不受影响：按封装语义解析（国网新一代 / 南网新一代 / HDC 1.0）"
         )
+        self.proto_combo.currentIndexChanged.connect(self._reparse_current_flow)
         toolbar.addWidget(self.proto_combo)
+
+        # 过滤（R8）：只影响显示，不清缓存
+        self.unrecognized_only_cb = QCheckBox("仅未识别")
+        self.unrecognized_only_cb.setToolTip("只显示未识别出具体协议的帧（协议列为「原始数据」等）")
+        self.unrecognized_only_cb.toggled.connect(self._apply_frame_filter)
+        toolbar.addWidget(self.unrecognized_only_cb)
+
+        self.proto_filter_combo = QComboBox()
+        self.proto_filter_combo.addItem("全部协议", None)
+        self.proto_filter_combo.addItem("原始数据", "原始数据")
+        for _pindex in (0, 4, 5, 6, 7, 8, 9, 10, 11):
+            _spec = _pr.get_protocol(_pindex)
+            self.proto_filter_combo.addItem(_spec.short_name, _spec.short_name)
+        self.proto_filter_combo.currentIndexChanged.connect(self._apply_frame_filter)
+        toolbar.addWidget(self.proto_filter_combo)
 
         toolbar.addStretch()
 
@@ -648,9 +811,11 @@ class TCPMonitorWidget(QWidget):
         frame_layout.addLayout(frame_toolbar)
 
         self.frame_table = ZoomableTableWidget()
-        self.frame_table.setColumnCount(5)
+        self.frame_table.setColumnCount(6)
+        # 列序固定为：时间/方向/源→目的/长度/协议/摘要（R6；改动列序需同步
+        # _refresh_frame_list、_reparse_current_flow、_apply_frame_filter 与 CSV 往返测试）
         self.frame_table.setHorizontalHeaderLabels(
-            ["时间", "方向", "长度", "协议", "摘要"]
+            ["时间", "方向", "源 → 目的", "长度", "协议", "摘要"]
         )
         self.frame_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.frame_table.setSelectionMode(QTableWidget.SingleSelection)
@@ -660,13 +825,15 @@ class TCPMonitorWidget(QWidget):
         fhdr = self.frame_table.horizontalHeader()
         fhdr.setSectionResizeMode(0, QHeaderView.Fixed)
         fhdr.setSectionResizeMode(1, QHeaderView.Fixed)
-        fhdr.setSectionResizeMode(2, QHeaderView.Fixed)
+        fhdr.setSectionResizeMode(2, QHeaderView.Interactive)
         fhdr.setSectionResizeMode(3, QHeaderView.Fixed)
-        fhdr.setSectionResizeMode(4, QHeaderView.Stretch)
+        fhdr.setSectionResizeMode(4, QHeaderView.Fixed)
+        fhdr.setSectionResizeMode(5, QHeaderView.Stretch)
         self.frame_table.setColumnWidth(0, 100)
-        self.frame_table.setColumnWidth(1, 60)
-        self.frame_table.setColumnWidth(2, 60)
-        self.frame_table.setColumnWidth(3, 90)
+        self.frame_table.setColumnWidth(1, 50)
+        self.frame_table.setColumnWidth(2, 240)
+        self.frame_table.setColumnWidth(3, 55)
+        self.frame_table.setColumnWidth(4, 90)
         self.frame_table.setFont(f)
         self.frame_table.verticalHeader().setDefaultSectionSize(20)
         self.frame_table.cellClicked.connect(self._on_frame_selected)
@@ -704,11 +871,9 @@ class TCPMonitorWidget(QWidget):
         self._setup_table_copy_menu(self.segment_table)
         raw_layout.addWidget(self.segment_table, 1)
 
-        self.segment_hex = QTextEdit()
-        self.segment_hex.setReadOnly(True)
-        self.segment_hex.setMaximumHeight(120)
-        self.segment_hex.setFont(QFont("Consolas", 9))
-        self.segment_hex.setPlaceholderText("选中 segment 以查看原始字节…")
+        # 字节视图（偏移 + 16 进制 + ASCII，支持按字段高亮）。保留旧属性名
+        # segment_hex 以免既有引用断裂（R4）
+        self.segment_hex = HexDumpView(max_height=120)
         raw_layout.addWidget(self.segment_hex)
 
         self.detail_tabs.addTab(raw_tab, "原始报文")
@@ -719,12 +884,36 @@ class TCPMonitorWidget(QWidget):
         parse_layout.setContentsMargins(4, 4, 4, 4)
         parse_layout.setSpacing(4)
 
-        self.parse_hex = QTextEdit()
-        self.parse_hex.setReadOnly(True)
-        self.parse_hex.setMaximumHeight(60)
-        self.parse_hex.setFont(QFont("Consolas", 9))
-        self.parse_hex.setPlaceholderText("选中帧以查看详情…")
-        parse_layout.addWidget(self.parse_hex)
+        # 视图切换行：表 / 字段树（与主窗口 result_view_combo 语义一致，R5）
+        parse_toolbar = QHBoxLayout()
+        parse_toolbar.setSpacing(6)
+        parse_toolbar.addWidget(QLabel("视图："))
+        self.parse_view_combo = QComboBox()
+        self.parse_view_combo.addItem("表", "table")
+        self.parse_view_combo.addItem("字段树", "tree")
+        self.parse_view_combo.setToolTip(
+            "解析结果的展示方式：\n"
+            "  表 —— 字段 / 原始值 / 解析值 / 说明 四列\n"
+            "  字段树 —— Wireshark 风格层级字段（与主窗口一致），叶子显示解析值"
+        )
+        self.parse_view_combo.currentIndexChanged.connect(self._on_parse_view_changed)
+        parse_toolbar.addWidget(self.parse_view_combo)
+        parse_toolbar.addStretch()
+        parse_layout.addLayout(parse_toolbar)
+
+        self.frame_byte_view = HexDumpView(max_height=60)
+        parse_layout.addWidget(self.frame_byte_view)
+        # 旧属性名保留（原 parse_hex 为帧字节预览）
+        self.parse_hex = self.frame_byte_view
+
+        self.parse_tree = QTreeWidget()
+        self.parse_tree.setColumnCount(2)
+        self.parse_tree.setHeaderLabels(["字段", "值"])
+        self.parse_tree.setEditTriggers(QTreeWidget.NoEditTriggers)
+        self.parse_tree.setAlternatingRowColors(True)
+        self.parse_tree.setFont(f)
+        self.parse_tree.setVisible(False)
+        parse_layout.addWidget(self.parse_tree, 1)
 
         self.parse_table = ZoomableTableWidget()
         self.parse_table.setColumnCount(4)
@@ -744,6 +933,8 @@ class TCPMonitorWidget(QWidget):
         self.parse_table.setFont(f)
         self.parse_table.verticalHeader().setDefaultSectionSize(18)
         self._setup_table_copy_menu(self.parse_table)
+        self.parse_table.currentCellChanged.connect(self._on_parse_row_selected)
+        self.parse_tree.itemSelectionChanged.connect(self._on_parse_tree_selected)
         parse_layout.addWidget(self.parse_table, 1)
 
         self.detail_tabs.addTab(parse_tab, "解析结果")
@@ -970,14 +1161,10 @@ class TCPMonitorWidget(QWidget):
             info = self._loaded_flows[flow_id]
             for frame_info in info["frames"]:
                 self._frame_cache.append(frame_info)
-                r = self.frame_table.rowCount()
-                self.frame_table.insertRow(r)
-                self.frame_table.setItem(r, 0, QTableWidgetItem(frame_info.get("time_str", "")))
-                dir_text = "→" if frame_info["direction"] == 0 else "←"
-                self.frame_table.setItem(r, 1, QTableWidgetItem(dir_text))
-                self.frame_table.setItem(r, 2, QTableWidgetItem(str(len(frame_info["frame"]))))
-                self.frame_table.setItem(r, 3, QTableWidgetItem(frame_info["protocol"]))
-                self.frame_table.setItem(r, 4, QTableWidgetItem(frame_info["summary"]))
+                self._fill_frame_row(
+                    self.frame_table.rowCount(), frame_info,
+                    len(self._frame_cache) - 1,
+                )
             # 清空 segment（加载模式无原始 TCP 段）
             self.segment_table.setRowCount(0)
         else:
@@ -987,8 +1174,10 @@ class TCPMonitorWidget(QWidget):
 
         # 清空解析结果
         self.parse_table.setRowCount(0)
-        self.parse_hex.clear()
-        self.segment_hex.clear()
+        if hasattr(self, "parse_tree"):
+            self.parse_tree.clear()
+        self.frame_byte_view.set_bytes(b"")
+        self.segment_hex.set_bytes(b"")
 
     def _refresh_frame_list(self, flow_id: int):
         """刷新当前流的帧列表（增量追加，解析并生成详细摘要）"""
@@ -1006,37 +1195,111 @@ class TCPMonitorWidget(QWidget):
         for ts, direction, frame in new_frames:
             # 解析 + 生成摘要
             proto_name, summary, parsed = self._parse_and_summarize(frame)
-            self._frame_cache.append({
+            info = {
                 "ts": ts,
                 "direction": direction,
                 "frame": frame,
                 "protocol": proto_name,
                 "summary": summary,
                 "parsed": parsed,
-            })
-            row = self.frame_table.rowCount()
-            self.frame_table.insertRow(row)
-            self.frame_table.setItem(row, 0, QTableWidgetItem(self._fmt_time(ts)))
-            dir_text = "→" if direction == 0 else "←"
-            self.frame_table.setItem(row, 1, QTableWidgetItem(dir_text))
-            self.frame_table.setItem(row, 2, QTableWidgetItem(str(len(frame))))
-            self.frame_table.setItem(row, 3, QTableWidgetItem(proto_name))
-            self.frame_table.setItem(row, 4, QTableWidgetItem(summary))
+                # 源/目的按方向推导（R6：帧表「源 → 目的」列）
+                "src": src_addr if direction == 0 else dst_addr,
+                "dst": dst_addr if direction == 0 else src_addr,
+            }
+            self._frame_cache.append(info)
+            # 过滤开启时整表重建（保证行与缓存一致）；否则增量追加（性能优先）
+            if self._frame_filter_active():
+                self._apply_frame_filter()
+            elif self._frame_matches_filter(info):
+                self._fill_frame_row(
+                    self.frame_table.rowCount(), info, len(self._frame_cache) - 1
+                )
 
-            # CSV 记录（全量，所有流）
+            # CSV 记录（全量、所有流、不受过滤影响）
             if self._csv_writer is not None:
-                if direction == 0:
-                    s, d = src_addr, dst_addr
-                else:
-                    s, d = dst_addr, src_addr
                 self._write_csv_record(
-                    flow_id, ts, direction, s, d,
+                    flow_id, ts, direction, info["src"], info["dst"],
                     len(frame), proto_name, summary, frame
                 )
 
         # 自动滚动
         if self._auto_scroll and new_frames:
             self.frame_table.scrollToBottom()
+
+    # ── 帧表行填充 / 过滤（R6 / R8）──────────────────────────────
+
+    @staticmethod
+    def _is_recognized_protocol(name) -> bool:
+        """协议列是否识别出具体协议（「原始数据」等视为未识别）。"""
+        return bool(name) and str(name) not in ("原始数据", "未知", "ED封装", "-")
+
+    def _fill_frame_row(self, row: int, info: dict, cache_index: int = -1):
+        """按缓存条目填充一行。
+
+        列序见 `_build_ui`：时间 / 方向 / 源→目的 / 长度 / 协议 / 摘要。
+        第 0 列写入 UserRole = 缓存下标，供过滤后仍能正确定位解析结果。
+        """
+        self.frame_table.insertRow(row)
+        ts_item = QTableWidgetItem(
+            info.get("time_str") or self._fmt_time(info.get("ts", 0.0))
+        )
+        ts_item.setData(Qt.ItemDataRole.UserRole, cache_index)
+        self.frame_table.setItem(row, 0, ts_item)
+        dir_text = "→" if info.get("direction", 0) == 0 else "←"
+        self.frame_table.setItem(row, 1, QTableWidgetItem(dir_text))
+        self.frame_table.setItem(
+            row, 2,
+            QTableWidgetItem(f"{info.get('src', '')} → {info.get('dst', '')}"),
+        )
+        self.frame_table.setItem(
+            row, 3, QTableWidgetItem(str(len(info.get("frame", b""))))
+        )
+        proto_item = QTableWidgetItem(str(info.get("protocol", "")))
+        summary_item = QTableWidgetItem(str(info.get("summary", "")))
+        if not self._is_recognized_protocol(info.get("protocol", "")):
+            # 未识别帧视觉弱化（AC6.2）
+            for item in (proto_item, summary_item):
+                item.setForeground(QColor("#999999"))
+        self.frame_table.setItem(row, 4, proto_item)
+        self.frame_table.setItem(row, 5, summary_item)
+
+    def _row_cache_index(self, row: int) -> int:
+        """帧表行 → `_frame_cache` 下标（过滤后行号与缓存下标不再一一对应）。"""
+        item = self.frame_table.item(row, 0)
+        if item is not None:
+            data = item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(data, int) and not isinstance(data, bool):
+                return data
+        return row
+
+    def _frame_filter_active(self) -> bool:
+        """是否启用了过滤（启用时帧表需按缓存整表重建）。"""
+        if not hasattr(self, "unrecognized_only_cb"):
+            return False
+        return bool(self.unrecognized_only_cb.isChecked()) or (
+            self.proto_filter_combo.currentData() is not None
+        )
+
+    def _frame_matches_filter(self, info: dict) -> bool:
+        if not hasattr(self, "unrecognized_only_cb"):
+            return True
+        if self.unrecognized_only_cb.isChecked() and self._is_recognized_protocol(
+            info.get("protocol", "")
+        ):
+            return False
+        wanted = self.proto_filter_combo.currentData()
+        if wanted is not None and str(info.get("protocol", "")) != str(wanted):
+            return False
+        return True
+
+    def _apply_frame_filter(self):
+        """按当前过滤条件重建帧表（只影响显示，`_frame_cache` 保持全量）。"""
+        if not hasattr(self, "frame_table"):
+            return
+        self._rebuild_frame_table()
+        if self._auto_scroll and self.frame_table.rowCount():
+            self.frame_table.scrollToBottom()
+
 
     def _refresh_segment_list(self, flow_id: int):
         """刷新当前流的原始 TCP segment 列表"""
@@ -1055,30 +1318,90 @@ class TCPMonitorWidget(QWidget):
             self.segment_table.scrollToBottom()
 
     def _on_segment_selected(self, row: int, col: int):
-        """选中原始 TCP segment 时显示 hex"""
+        """选中原始 TCP segment 时显示字节（Wireshark 风格字节视图）"""
         if self._current_flow_id is None:
             return
         flow = self._reassembler.get_flow(self._current_flow_id)
         if not flow or row < 0 or row >= len(flow.segments):
             return
-        ts, direction, payload = flow.segments[row]
-        if payload:
-            hex_str = ' '.join(f'{b:02X}' for b in payload)
-            self.segment_hex.setText(f"{len(payload)} 字节\n{hex_str}")
-        else:
-            self.segment_hex.setText("(空 payload，纯 ACK/SYN 等控制段)")
+        _ts, _direction, payload = flow.segments[row]
+        self.segment_hex.set_bytes(payload or b"")
 
     def _on_frame_selected(self, row: int, col: int):
-        if row < 0 or row >= len(self._frame_cache):
+        if row < 0:
             return
-        info = self._frame_cache[row]
+        cache_index = self._row_cache_index(row)
+        if cache_index < 0 or cache_index >= len(self._frame_cache):
+            return
+        info = self._frame_cache[cache_index]
         frame = info["frame"]
-        parsed = info["parsed"]
-        # 显示 hex
-        hex_str = ' '.join(f'{b:02X}' for b in frame)
-        self.parse_hex.setText(f"帧长度: {len(frame)} 字节\n{hex_str}")
-        # 用缓存的解析结果填充表格
-        self._fill_parse_table(parsed)
+        # 字节视图（R4）：帧字节 + 清掉上一次的高亮
+        self.frame_byte_view.set_bytes(frame)
+        # 用缓存的解析结果填充表格/字段树（R5）
+        self._fill_parse_table(info.get("parsed") or [])
+
+    def _on_parse_view_changed(self, _index: int = 0):
+        """解析结果视图切换：表 / 字段树（R5）"""
+        mode = self.parse_view_combo.currentData()
+        is_tree = mode == "tree"
+        if hasattr(self, "parse_tree"):
+            self.parse_tree.setVisible(is_tree)
+        self.parse_table.setVisible(not is_tree)
+
+    def _on_parse_row_selected(self, row: int, col: int, prev_row: int = -1, prev_col: int = -1):
+        """选中解析行 → 高亮字节视图中对应字节范围（AC4.2）"""
+        item = self.parse_table.item(row, 0)
+        if item is None:
+            return
+        start = item.data(Qt.ItemDataRole.UserRole)
+        end = item.data(Qt.ItemDataRole.UserRole + 1)
+        if isinstance(start, int) and isinstance(end, int):
+            self.frame_byte_view.highlight_range(start, end)
+        else:
+            self.frame_byte_view.clear_highlight()
+
+    def _reparse_current_flow(self, _index: int = 0):
+        """协议下拉变化 → 重解析当前流已抓帧（R7）。
+
+        只重算协议/摘要/解析结果；帧的数量、顺序与字节内容不变（AC7.2）。
+        分批处理（每批 200 帧 + `singleShot(0)` 让出事件循环），避免阻塞 UI（AC7.3）。
+        """
+        if not self._frame_cache:
+            return
+        self._reparse_queue = list(range(len(self._frame_cache)))
+        self._reparse_step()
+
+    def _reparse_step(self, batch: int = 200):
+        """重解析一批；还有剩余则让出事件循环后继续。"""
+        queue = list(getattr(self, "_reparse_queue", []))
+        if not queue:
+            self._refresh_after_reparse()
+            return
+        for idx in queue[:batch]:
+            info = self._frame_cache[idx]
+            proto_name, summary, parsed = self._parse_and_summarize(info["frame"])
+            info["protocol"] = proto_name
+            info["summary"] = summary
+            info["parsed"] = parsed
+        self._reparse_queue = queue[batch:]
+        if self._reparse_queue:
+            QTimer.singleShot(0, self._reparse_step)
+        else:
+            self._refresh_after_reparse()
+
+    def _refresh_after_reparse(self):
+        """重解析结束后刷新显示（帧表 + 当前选中帧的解析视图）。"""
+        self._rebuild_frame_table()
+        row = self.frame_table.currentRow()
+        if row >= 0:
+            self._on_frame_selected(row, 0)
+
+    def _rebuild_frame_table(self):
+        """整表重建（重解析后必须走这里，行→缓存映射随之刷新）。"""
+        self.frame_table.setRowCount(0)
+        for cache_index, info in enumerate(self._frame_cache):
+            if self._frame_matches_filter(info):
+                self._fill_frame_row(self.frame_table.rowCount(), info, cache_index)
 
     def _unwrap_ed_for_parse(
         self, frame: bytes, protocol_index=None
@@ -1111,7 +1434,32 @@ class TCPMonitorWidget(QWidget):
     def _parse_and_summarize(self, frame: bytes) -> Tuple[str, str, list]:
         """解析帧并生成摘要，返回 (协议名, 摘要, 解析结果列表)。
 
-        proto_combo: 0=自动 1=国网新一代 2=南网新一代 3=HDC 1.0
+        - **合法** ``ED..EE`` 监控封装帧 → :meth:`_parse_ed_frame`（判据与改动前逐字一致）；
+        - 其余（原始 TCP 载荷）→ :meth:`_parse_raw_payload`（1.23.45 起）。
+
+        路由判据不能只看首字节：原始载荷恰好以 0xED 开头很常见，若一律进 ED 路径
+        会得到「无法识别协议」+ 空表（等于把数据藏起来），与 R3 相悖。
+        """
+        if self._looks_like_ed_frame(frame):
+            return self._parse_ed_frame(frame)
+        return self._parse_raw_payload(frame)
+
+    @staticmethod
+    def _looks_like_ed_frame(frame: bytes) -> bool:
+        """是否为 FlowBuffer 切出的**合法** ED..EE 封装帧（非「首字节恰好 0xED」）。"""
+        if len(frame) < 10 or frame[0] != FlowBuffer.SOF or frame[5] != FlowBuffer.EF:
+            return False
+        frame_len = frame[1] | (frame[2] << 8)
+        return (
+            4 <= frame_len <= FlowBuffer.MAX_FRAME_LEN
+            and frame_len + 4 == len(frame)
+            and frame[-1] == FlowBuffer.EE
+        )
+
+    def _parse_ed_frame(self, frame: bytes) -> Tuple[str, str, list]:
+        """ED..EE 监控封装帧解析（原 ``_parse_and_summarize`` 主体，判据未改）。
+
+        proto_combo: 显式选择 → 只试该协议族；自动识别 → 三族依次尝试
         ED..EE 监控封装：先按协议语义生成包装头字段，再解析业务帧。
         """
         from batch_core import (
@@ -1119,14 +1467,15 @@ class TCPMonitorWidget(QWidget):
             ed_wrapper_summary_name,
         )
 
-        proto_mode = self.proto_combo.currentIndex()
+        # 显式选择以 itemData 的协议索引为准（10/9/11），None=自动识别
+        selected = self._selected_protocol_index()
         # (parser, proto_name, summary_fn, protocol_index_for_ed)
         candidates = []
-        if proto_mode == 1 and self._gw_parser:
+        if selected == 10 and self._gw_parser:
             candidates = [(self._gw_parser, "国网新一代", self._gw_summary_fn, 10)]
-        elif proto_mode == 2 and self._csg_parser:
+        elif selected == 9 and self._csg_parser:
             candidates = [(self._csg_parser, "南网新一代", self._csg_summary_fn, 9)]
-        elif proto_mode == 3 and self._hdc10_parser:
+        elif selected == 11 and self._hdc10_parser:
             candidates = [(self._hdc10_parser, "HDC 1.0", self._hdc10_summary_fn, 11)]
         else:
             # 自动识别：南网 → 国网新一代 → HDC 1.0
@@ -1156,7 +1505,7 @@ class TCPMonitorWidget(QWidget):
         # 结构启发式，因为 ED 布局错位 1 字节的垃圾业务帧能骗过它（实测会把
         # 南网新一代帧误重排到 HDC 1.0）。MAC/应用层帧在自动识别下不重排，
         # 需在协议下拉框显式选择「HDC 1.0」。
-        if proto_mode == 0 and len(candidates) > 1 and hdc_fc_evidence(frame):
+        if selected is None and len(candidates) > 1 and hdc_fc_evidence(frame):
             _rank = {"HDC 1.0": 0, "国网新一代": 1, "南网新一代": 2}
             candidates.sort(key=lambda c: _rank.get(c[1], 9))
         if not candidates:
@@ -1216,14 +1565,345 @@ class TCPMonitorWidget(QWidget):
             if result is not None:
                 return result
         if frame and frame[:1] == b"\xed":
-            # ED 帧但业务未能用任一解析器展开：仍按当前模式给包装头
-            mode_map = {1: 10, 2: 9, 3: 11, 0: 11}
-            ed_proto = mode_map.get(proto_mode, 11)
+            # ED 帧但业务未能用任一解析器展开：仍按当前显式选择给包装头
+            # （自动识别时沿用 HDC 布局，与改动前 mode_map 的 0→11 一致）
+            ed_proto = selected if selected in (9, 10, 11) else 11
             ed_rows, _biz = self._unwrap_ed_for_parse(frame, ed_proto)
             if ed_rows:
                 wrap_name = ed_wrapper_summary_name(ed_rows[0][0])
                 return ("ED封装", wrap_name, ed_rows)
         return ("未知", last_err, [])
+
+    # ── 原始 TCP 载荷解析（1.23.45 起）─────────────────────────────
+    #
+    # 与 ED 路径的区别：ED 路径只有三个协议族，原始载荷则可能承载任何协议，且
+    # **必须先证明它属于某协议**再解析 —— 各协议解析器对不匹配的字节流会返回
+    # 「退化结果却算成功」（ED 路径的既有教训，见 hdc_fc_evidence docstring），
+    # 只凭「解析器返回非空」必然误判。
+    #
+    # 判据按**校准实测**收敛为三层（样本与交叉验证见 test/test_tcp_monitor_raw_payload.py）：
+    #   1) 字节结构前置检查 `_raw_structural_hint`：不符合帧形直接跳过；
+    #   2) 非退化：解析行数 >= 2；
+    #   3) 自证 `_raw_evidence_ok`：645 用校验器 0 fail；698.45 用 HCS/FCS 双通过
+    #      （CRC 自证，同 HDC 的 CRC-24 思路）；Wrapper/DLMS-APDU 用帧头结构。
+    #
+    # **已声明边界**：南网 / 国网 同为 0x68 起头、链路层结构相近，校准实测两者
+    # 校验器互判 0 fail（无法区分：南网样本对南网/国网校验器都是 0 fail），
+    # 故**不参与自动识别**（错解析比不解析更糟），需在协议下拉显式选择。
+    # 这与既有「HDC MAC/应用层帧不在自动识别覆盖范围」的边界声明同源。
+
+    # 自动识别候选顺序（只放可自证的形态，越靠前越不易误判）
+    _RAW_DETECT_ORDER = (4, 5, 6, 8)
+    # 原始载荷路径的协议显示名（ED 三协议沿用既有文案，其余取注册表短名）
+    _RAW_PROTO_NAMES = {
+        4: "DLMS Wrapper",
+        5: "DLMS-APDU",
+        6: "DLT645-2007",
+        8: "698.45",
+    }
+
+    def _selected_protocol_index(self) -> Optional[int]:
+        """协议下拉里显式选择的协议索引；「自动识别」返回 None。
+
+        以 itemData 为准；缺失时按显示名与注册表名/别名回退匹配，
+        保证旧调用点（含既有测试的 findText + setCurrentIndex 用法）不受影响。
+        """
+        combo = getattr(self, "proto_combo", None)
+        if combo is None:
+            return None
+        data = combo.currentData()
+        if isinstance(data, int) and not isinstance(data, bool):
+            return data
+        text = (combo.currentText() or "").strip()
+        if not text or text == "自动识别":
+            return None
+        try:
+            import protocol_registry as pr
+
+            for spec in pr._PROTOS:
+                if text in (spec.name, spec.short_name) or text in tuple(spec.aliases):
+                    return spec.index
+        except Exception:
+            pass
+        return None
+
+    def _payload_parser_for(self, index: int):
+        """按协议索引取（并缓存）可用于原始载荷的解析器。
+
+        ED 三协议复用 `set_parsers` 注入的实例，保证摘要文案与 ED 路径一致；
+        其余协议走 `protocol_registry.build_gui_parser`（与 GUI 单帧解析同一入口）。
+        """
+        cache = getattr(self, "_payload_parser_cache", None)
+        if cache is None:
+            cache = self._payload_parser_cache = {}
+        if index in cache:
+            return cache[index]
+        parser = None
+        if index == 10 and self._gw_parser is not None:
+            parser = self._gw_parser
+        elif index == 9 and self._csg_parser is not None:
+            parser = self._csg_parser
+        elif index == 11 and self._hdc10_parser is not None:
+            parser = self._hdc10_parser
+        else:
+            try:
+                import protocol_registry as pr
+                from parser_registry import get_parser
+
+                spec = pr.get_protocol(index)
+                parser = pr.build_gui_parser(index, get_parser(spec.parser_key))
+            except Exception:
+                parser = None
+        cache[index] = parser
+        return parser
+
+    def _payload_validator(self, index: int):
+        """按协议索引取（并缓存）校验器实例（取不到返回 None）。"""
+        cache = getattr(self, "_payload_validator_cache", None)
+        if cache is None:
+            cache = self._payload_validator_cache = {}
+        if index in cache:
+            return cache[index]
+        validator = None
+        try:
+            import protocol_registry as pr
+
+            spec = pr.get_protocol(index)
+            if spec.validator_class:
+                mod_name, cls_name = spec.validator_class.split(":")
+                mod = __import__(mod_name, fromlist=[cls_name])
+                validator = getattr(mod, cls_name)()
+        except Exception:
+            validator = None
+        cache[index] = validator
+        return validator
+
+    @staticmethod
+    def _raw_structural_hint(index: int, payload: bytes) -> bool:
+        """字节结构前置检查：明显不符合该协议帧形的候选直接跳过。"""
+        if not payload:
+            return False
+        if index == 4:
+            # DLMS Wrapper：版本 00 01 + Wrapper 长度与总长自洽
+            if len(payload) < 8 or payload[0] != 0x00 or payload[1] != 0x01:
+                return False
+            wlen = int.from_bytes(payload[2:4], "big")
+            return 0 < wlen <= len(payload)
+        if index == 5:
+            # DLMS-APDU 裸报文：首字节必须是已知 APDU 标签
+            # （APDU_TYPES 是 HDLCParser 的类属性，不是模块级常量）
+            try:
+                from hdlc_parser import HDLCParser
+
+                return payload[0] in HDLCParser.APDU_TYPES
+            except Exception:
+                return False
+        if index == 6:
+            # DLT645：68 + 6 字节从站地址 + 68
+            return payload[0] == 0x68 and len(payload) >= 12 and payload[7] == 0x68
+        if index == 8:
+            # 698.45：68 起头、16H 结束（HCS/FCS 由 _raw_evidence_ok 自证）
+            return payload[0] == 0x68 and payload[-1] == 0x16 and len(payload) >= 12
+        return True
+
+    @staticmethod
+    def _rows_have_passing_crc(rows) -> bool:
+        """解析行里是否 HCS 与 FCS 都「通过」（698.45 的 CRC 自证）。"""
+        hcs_ok = fcs_ok = False
+        for r in rows:
+            name = str(r[0])
+            desc = str(r[3] if len(r) > 3 else "")
+            if "通过" not in desc:
+                continue
+            if "HCS" in name:
+                hcs_ok = True
+            elif "FCS" in name:
+                fcs_ok = True
+        return hcs_ok and fcs_ok
+
+    def _raw_evidence_ok(self, index: int, payload: bytes, rows: list) -> bool:
+        """自证判据：不同形态的可靠证据不同（校准实测结论）。"""
+        if index == 6:
+            # 645：校验器 0 fail（帧形已由结构检查保证）
+            validator = self._payload_validator(6)
+            if validator is None:
+                return True
+            try:
+                return validator.verify(payload).fail_count == 0
+            except Exception:
+                return False
+        if index == 8:
+            return self._rows_have_passing_crc(rows)
+        # DLMS Wrapper / DLMS-APDU：帧头结构已足够
+        # （其校验器对自身帧形也报 fail —— 校准记录见 design.md §4）
+        return True
+
+    def _parse_with_protocol(self, index: int, payload: bytes):
+        """用指定协议解析载荷；无解析器或异常返回 None。"""
+        parser = self._payload_parser_for(index)
+        if parser is None:
+            return None
+        try:
+            rows = parser.parse_to_table(payload) or []
+        except Exception:
+            return None
+        return rows or None
+
+    def _raw_proto_name(self, index: int) -> str:
+        name = self._RAW_PROTO_NAMES.get(index)
+        if name:
+            return name
+        try:
+            import protocol_registry as pr
+
+            return pr.get_protocol(index).short_name
+        except Exception:
+            return f"协议{index}"
+
+    def _raw_summary(self, index: int, rows: list) -> str:
+        """命中协议后的摘要：ED 三协议复用既有摘要函数，其余用通用摘要。"""
+        summary_fn = None
+        if index == 10:
+            summary_fn = self._gw_summary_fn
+        elif index == 9:
+            summary_fn = self._csg_summary_fn
+        elif index == 11:
+            summary_fn = self._hdc10_summary_fn
+        if summary_fn:
+            try:
+                text = summary_fn(rows)
+                if text and text != "-":
+                    return text
+            except Exception:
+                pass
+        return self._generic_rows_summary(rows)
+
+    @staticmethod
+    def _generic_rows_summary(rows, limit: int = 3) -> str:
+        """通用摘要：优先取含类型/标识/命令语义的字段，否则取前几行解析值。"""
+        key_words = ("类型", "标识", "APDU", "控制", "命令", "地址", "长度", "校验")
+        picked = []
+        for r in rows:
+            name = str(r[0]).strip()
+            val = str(r[2] if len(r) > 2 else "").strip()
+            if not val or val == "-":
+                continue
+            if any(k in name for k in key_words):
+                picked.append(f"{name[:14]}:{val[:16]}")
+            if len(picked) >= limit:
+                break
+        if not picked:
+            for r in rows:
+                val = str(r[2] if len(r) > 2 else "").strip()
+                if val and val != "-":
+                    picked.append(val[:20])
+                if len(picked) >= limit:
+                    break
+        return " | ".join(picked) if picked else "-"
+
+    @staticmethod
+    def _apdu_tag_hint(first: int):
+        """首字节命中 698.45 / DLMS 的 APDU 标签表时返回 (疑似协议+名称, 说明)。
+
+        标签表复用解析器既有实现（不新增第二份）。
+        """
+        try:
+            from dl_t698_45_apdu_parser import DLT69845APDUParser
+
+            info = DLT69845APDUParser.APDU_TYPE_MAP.get(first)
+            if info:
+                return (f"疑似 698.45 APDU: {info[0]}", str(info[1] or ""))
+        except Exception:
+            pass
+        try:
+            from hdlc_parser import HDLCParser
+
+            name = HDLCParser.APDU_TYPES.get(first)
+            if name:
+                return (f"疑似 DLMS APDU: {name}", "")
+        except Exception:
+            pass
+        return (None, None)
+
+    def _raw_fallback_summary(self, payload: bytes) -> str:
+        """未识别载荷的摘要：长度 + APDU 标签提示（若有）。"""
+        parts = [f"TCP 载荷 {len(payload)} 字节"]
+        if payload:
+            tag, _desc = self._apdu_tag_hint(payload[0])
+            if tag:
+                parts.append(tag)
+        return " | ".join(parts)
+
+    def _raw_fallback_rows(self, payload: bytes) -> list:
+        """未识别载荷的「原始数据」解析行（AC3.1/AC3.2：至少 3 行）。"""
+        n = len(payload)
+        rows = [
+            [
+                "TCP 载荷",
+                f"{n} 字节",
+                f"{n}",
+                "原始数据：未匹配到已知协议（可在协议下拉显式选择）",
+            ]
+        ]
+        if n:
+            first = payload[0]
+            tag, desc = self._apdu_tag_hint(first)
+            rows.append(
+                [
+                    "首字节",
+                    f"0x{first:02X}",
+                    tag or "-",
+                    desc or "APDU 标签表未命中",
+                ]
+            )
+            rows.append(
+                [
+                    "原始数据",
+                    payload[:32].hex(" ").upper(),
+                    "",
+                    f"共 {n} 字节，完整字节见「原始报文」视图",
+                ]
+            )
+        return rows
+
+    def _parse_raw_payload(self, payload: bytes) -> Tuple[str, str, list]:
+        """原始 TCP 载荷解析：先证明协议再解析，都不成立则按 APDU/原始数据显示。"""
+        if not payload:
+            return ("原始数据", "空载荷", self._raw_fallback_rows(b""))
+
+        selected = self._selected_protocol_index()
+        if selected is not None:
+            # 显式选择：只试该协议。但解析器对不匹配字节流会返回「退化行」（各协议
+            # 都偏宽容），故要求「行数 >= 2 且摘要非空非 '-'」才算真命中，否则如实
+            # 回落到原始数据显示 —— 不拿退化结果冒充解析成功。
+            rows = self._parse_with_protocol(selected, payload)
+            if rows and len(rows) >= 2:
+                summary = self._raw_summary(selected, rows)
+                if summary and summary != "-":
+                    return (self._raw_proto_name(selected), summary, rows)
+            name = self._raw_proto_name(selected)
+            return (
+                "原始数据",
+                f"TCP 载荷 {len(payload)} 字节 | {name} 未匹配",
+                self._raw_fallback_rows(payload),
+            )
+
+        # 自动识别：只放可自证的形态
+        for index in self._RAW_DETECT_ORDER:
+            if not self._raw_structural_hint(index, payload):
+                continue
+            rows = self._parse_with_protocol(index, payload)
+            if not rows or len(rows) < 2:
+                continue
+            if not self._raw_evidence_ok(index, payload, rows):
+                continue
+            return (self._raw_proto_name(index), self._raw_summary(index, rows), rows)
+
+        return (
+            "原始数据",
+            self._raw_fallback_summary(payload),
+            self._raw_fallback_rows(payload),
+        )
 
     def _fallback_summary(self, table_data: list) -> str:
         """无 summary_fn 时的简易摘要"""
@@ -1254,9 +1934,16 @@ class TCPMonitorWidget(QWidget):
         return " | ".join(parts) if parts else "-"
 
     def _fill_parse_table(self, table_data: list):
-        """用解析结果填充右侧解析表格"""
+        """用解析结果填充解析表格 + 字段树（R5），并记录字节范围供高亮（R4）。
+
+        table_data 行沿用项目约定：前 4 项固定为 字段/原始值/解析值/说明，
+        第 5、6 项（若有）为字节范围 —— 与主窗口 `_populate_table_from_data` 一致。
+        """
         self.parse_table.setRowCount(0)
         if not table_data:
+            if hasattr(self, "parse_tree"):
+                self.parse_tree.clear()
+            self.frame_byte_view.clear_highlight()
             return
         for i, row_data in enumerate(table_data):
             self.parse_table.insertRow(i)
@@ -1264,10 +1951,64 @@ class TCPMonitorWidget(QWidget):
             raw = str(row_data[1])
             parsed = str(row_data[2])
             desc = str(row_data[3])
-            self.parse_table.setItem(i, 0, QTableWidgetItem(field))
+            start = row_data[4] if len(row_data) > 4 else None
+            end = row_data[5] if len(row_data) > 5 else None
+            field_item = QTableWidgetItem(field)
+            field_item.setData(
+                Qt.ItemDataRole.UserRole, start if isinstance(start, int) else None
+            )
+            field_item.setData(
+                Qt.ItemDataRole.UserRole + 1, end if isinstance(end, int) else None
+            )
+            self.parse_table.setItem(i, 0, field_item)
             self.parse_table.setItem(i, 1, QTableWidgetItem(raw))
             self.parse_table.setItem(i, 2, QTableWidgetItem(parsed))
             self.parse_table.setItem(i, 3, QTableWidgetItem(desc))
+        self._populate_parse_tree(table_data)
+
+    def _populate_parse_tree(self, table_data: list):
+        """填充 Wireshark 风格字段树（复用 parse_result_view，与主窗口同构）。"""
+        if not hasattr(self, "parse_tree"):
+            return
+        self.parse_tree.clear()
+        try:
+            nodes = parse_result_view.build_tree_from_table_data(table_data)
+        except Exception:
+            return
+
+        def _add(node, parent):
+            item = QTreeWidgetItem()
+            item.setText(0, str(node.display_name))
+            item.setText(1, str(node.display_value))
+            if node.comment:
+                item.setToolTip(0, str(node.comment))
+                item.setToolTip(1, str(node.comment))
+            start, end = node.byte_range
+            item.setData(0, Qt.ItemDataRole.UserRole, start)
+            item.setData(0, Qt.ItemDataRole.UserRole + 1, end)
+            if parent is None:
+                self.parse_tree.addTopLevelItem(item)
+            else:
+                parent.addChild(item)
+            for child in node.children:
+                _add(child, item)
+
+        for node in nodes:
+            _add(node, None)
+        self.parse_tree.expandAll()
+
+    def _on_parse_tree_selected(self):
+        """字段树选中 → 高亮对应字节（AC5.3）"""
+        items = self.parse_tree.selectedItems()
+        if not items:
+            return
+        item = items[0]
+        start = item.data(0, Qt.ItemDataRole.UserRole)
+        end = item.data(0, Qt.ItemDataRole.UserRole + 1)
+        if isinstance(start, int) and isinstance(end, int):
+            self.frame_byte_view.highlight_range(start, end)
+        else:
+            self.frame_byte_view.clear_highlight()
 
     def _try_parse(self, parser, frame: bytes) -> bool:
         """尝试解析，成功返回 True"""
@@ -1378,10 +2119,12 @@ class TCPMonitorWidget(QWidget):
                     frame = bytes.fromhex(hex_str.replace(" ", "")) if hex_str else b''
                     direction = 0 if dir_str == "→" else 1
 
-                    # 解析帧（为了填充缓存和摘要）——复用 _parse_and_summarize（含 ED）
+                    # 解析帧（为了填充缓存和摘要）——复用 _parse_and_summarize（含 ED）。
+                    # 「原始数据」与「未知」同等对待：不覆盖旧记录里已存的具体协议名，
+                    # 避免用新版本加载旧 CSV 时把历史协议标签抹成「原始数据」。
                     proto_name2, summary2, parsed = self._parse_and_summarize(frame)
-                    if proto_name2 not in ("未知",) or not proto_name:
-                        if proto_name2 not in ("未知",):
+                    if proto_name2 not in ("未知", "原始数据") or not proto_name:
+                        if proto_name2 not in ("未知", "原始数据"):
                             proto_name = proto_name2
                     if summary2 and summary2 not in ("-", "无法识别协议"):
                         summary = summary2
@@ -1456,8 +2199,10 @@ class TCPMonitorWidget(QWidget):
         self.frame_table.setRowCount(0)
         self.segment_table.setRowCount(0)
         self.parse_table.setRowCount(0)
-        self.parse_hex.clear()
-        self.segment_hex.clear()
+        if hasattr(self, "parse_tree"):
+            self.parse_tree.clear()
+        self.frame_byte_view.set_bytes(b"")
+        self.segment_hex.set_bytes(b"")
         if not (self._sniffer and self._sniffer.isRunning()):
             self.status_label.setText("已清空")
 

@@ -1,0 +1,3 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "新增 GUI 组件 HexDumpView 与 TCP 监控 UI 改动须遵循的 PySide6 组件规范（表格/按钮/字体/列宽一致性）"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "本次核心是复用而非新写：build_gui_parser / validator / parse_result_view / APDU 标签表"}
