@@ -566,7 +566,7 @@ def main():
     page = getattr(mw, "serial_tool_tab", None)
     if page is not None:
         check("页面含命令表/日志/统计控件",
-              page.cmd_table.columnCount() == 6
+              page.cmd_table.columnCount() == 7
               and page.log_text is not None
               and page.lbl_match is not None)
         check("命令表首列为「选择」勾选列",
@@ -575,6 +575,9 @@ def main():
         check("命令表第 6 列为「协议」",
               page.cmd_table.horizontalHeaderItem(5).text() == "协议",
               page.cmd_table.horizontalHeaderItem(5).text())
+        check("命令表第 7 列为「次数」",
+              page.cmd_table.horizontalHeaderItem(6).text() == "次数",
+              page.cmd_table.horizontalHeaderItem(6).text())
         check("含全选 / 全不选 / 反选与已选计数",
               page.lbl_cmd_sel is not None
               and "已选" in page.lbl_cmd_sel.text(),
@@ -947,6 +950,38 @@ def main():
     w._flush_raw_display()
     check("协议 1（无策略）：静默后整体 1 行",
           raw_texts(w) == ["11 22 33"], str(raw_texts(w)))
+    # 场景 7b（1.23.43 实测报障）：首片只有 1 字节 68，块间隔 > 10ms →
+    # 旧逻辑把 68 单独刷出，缓冲从下一片起不再以 68 开头 → 整帧切成 4 行
+    w._reset_stats()
+    w._rx_log_queue.clear()
+    w._raw_buffer.clear()
+    w._last_tx_protocol = 7
+    # 用户现场 F112 响应拆成 1+22+9+21 = 53 字节（长度域 0x0035）
+    f53_chunks = [
+        b"\x68",
+        bytes.fromhex("35 00 83 00 00 10 00 00 00 10 80 0D 02 00 01 00 01 14 38 18 80 00"),
+        bytes.fromhex("80 02 07 EA 9D E6 2E 93 6E"),
+        bytes.fromhex("3C DF C0 A1 00 00 32 41 48 4C 03 FB C1 01 9C 02 01 54 05 78 16"),
+    ]
+    f53 = b"".join(f53_chunks)
+    check("复现帧长度 = 长度域 53", len(f53) == 0x35, str(len(f53)))
+    check("复现帧末字节 16H", f53[-1] == 0x16, hex(f53[-1]))
+    for _i, _c in enumerate(f53_chunks):
+        w._on_raw_data(_c)
+        w._flush_raw_display()
+        # 模拟块间隔 > RAW_FLUSH_DELAY_MS（旧 bug：首片 68 会被 10ms 窗口刷出）
+        w._raw_last_time = time.perf_counter() - (stw.RAW_FLUSH_DELAY_MS + 5) / 1000.0
+        if _i < len(f53_chunks) - 1:
+            w._flush_raw_display()
+            check(f"第 {_i + 1} 片后仍不输出（长度域未收全/未收齐）",
+                  len(w._rx_log_queue) == 0, str(raw_texts(w)))
+    check("首片仅 68 的 4 块交付 → 只输出 1 行整帧",
+          raw_texts(w) == [stw.bytes_to_hex(f53)],
+          f"{len(raw_texts(w))} 行: {raw_texts(w)[:3]}")
+    check("RX 帧数只加 1", w._rx_frames == 1, str(w._rx_frames))
+    w._last_tx_protocol = None
+    w._raw_buffer.clear()
+    w._rx_log_queue.clear()
     # 未指定协议（不解析）→ 行为与 1.23.46 一致
     w._reset_stats()
     w._rx_log_queue.clear()
@@ -1086,8 +1121,9 @@ def main():
     section("[22] 协议字段：对话框默认 / 落盘读回 / 导入导出")
     dlg = stw.SerialCommandDialog()
     check("对话框默认协议 = 不解析", dlg.get_command()["protocol"] is None)
-    check("对话框协议选项 = 1 + 12",
-          dlg.protocol_combo.count() == 13, str(dlg.protocol_combo.count()))
+    check("对话框协议选项 = 1 + 注册表协议数",
+          dlg.protocol_combo.count() == 1 + stw.protocol_count(),
+          str(dlg.protocol_combo.count()))
     dlg.name_edit.setText("查询从节点")
     dlg.data_edit.setText("68 12 00 41 16")
     dlg.protocol_combo.setCurrentIndex(8)          # 第 8 项 = 索引 7（国网）

@@ -171,13 +171,15 @@ def main():
           == ["    名称 = 1"])
 
     section("[5] coerce_protocol：协议字段归一化")
-    check("环境就绪：协议总数 = 12", stw.protocol_count() == 12,
-          str(stw.protocol_count()))
+    _pc = stw.protocol_count()
+    import protocol_registry as _pr
+    check("环境就绪：协议总数与注册表一致",
+          _pc == len(_pr.combo_labels()), f"{_pc} vs {len(_pr.combo_labels())}")
     check("None → None", stw.coerce_protocol(None) is None)
     check("True → None（bool 不是协议）", stw.coerce_protocol(True) is None)
     check("False → None", stw.coerce_protocol(False) is None)
     check("-1 → None", stw.coerce_protocol(-1) is None)
-    check("12（越界）→ None", stw.coerce_protocol(12) is None)
+    check(f"{_pc}（越界）→ None", stw.coerce_protocol(_pc) is None)
     check("99 → None", stw.coerce_protocol(99) is None)
     check("'abc' → None", stw.coerce_protocol("abc") is None)
     check("'' → None", stw.coerce_protocol("") is None)
@@ -226,12 +228,14 @@ def main():
 
     section("[8] 协议元数据辅助")
     opts = stw.protocol_options()
-    check("选项数 = 1 + 12", len(opts) == 13, str(len(opts)))
+    _last = stw.protocol_count() - 1
+    check("选项数 = 1 + 注册表协议数",
+          len(opts) == 1 + stw.protocol_count(), str(len(opts)))
     check("首项为「不解析」/ None", opts[0] == (stw.PROTOCOL_NONE_LABEL, None),
           str(opts[0]))
     check("第二项为 [0] 南网协议", opts[1][1] == 0 and "[0]" in opts[1][0],
           str(opts[1]))
-    check("末项索引为 11", opts[-1][1] == 11, str(opts[-1]))
+    check(f"末项索引为 {_last}", opts[-1][1] == _last, str(opts[-1]))
     check("short_name(0) = 南网协议",
           stw.protocol_short_name(0) == "南网协议", stw.protocol_short_name(0))
     check("short_name(7) = 国网协议",

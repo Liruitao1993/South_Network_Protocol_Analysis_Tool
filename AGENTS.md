@@ -34,9 +34,9 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 
 ## 1. 项目概览
 
-多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.23.42`）。
+多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.23.58`）。
 
-**支持的协议（共 12 种，对应 GUI 协议下拉框 `current_protocol` 索引）：**
+**支持的协议（共 13 种，对应 GUI 协议下拉框 `current_protocol` 索引）：**
 
 | 索引 | 协议名（GUI显示） | 标准号 | 字节序 | 校验算法 |
 | ------ | ------------------ | -------- | -------- | ---------- |
@@ -52,6 +52,7 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 | 9 | 新一代载波协议（通感一体化） | 通感一体化低压电力线宽带载波通信规约（2026校对版） | 小端 | CRC-32（MAC帧） |
 | 10 | 国网新一代双模通信互联互通 | 国网新一代双模通信互联互通技术规范 | 小端 | CRC-32（MAC帧） |
 | 11 | HDC 1.0 双模互联互通 | Q/GDW 12087.42-2020 | 小端（MAC 地址大端） | CRC-24（FC/PB）+ CRC-32（MAC） |
+| 12 | 模组化终端功能模块接口 | Q/GDW 模组化终端功能模块接口协议 | 小端（链路层 L/C/FCS）/**大端（A-XDR 数据）** | CRC-16/PPP FCS（x-25） |
 
 > 协议覆盖差异：**HDC 1.0（索引 11）在 PySide6 主程序与 Reflex Web 版均支持**（2026-09-15 核实）。Web 版无实时监控器/档案/拓扑；组帧与预设标签页在 Web 存在但协议 9/10/11 均不支持（与桌面一致），协议11 另有「无实时监控器/组帧/预设」的说明见 §8 陷阱 27。**「频谱图」标签页两端都有**（与协议无关，常驻）：桌面 `spectrum_widget.py`（QPainter 自绘），Web `reflex_web/reflex_web/spectrum_web.py`（SVG）——两侧共用同一份纯逻辑层。**Web 另有主题系统**（浅色/深色/跟随系统 + 6 个预设 + 5 个强调色，`reflex_web/reflex_web/theme_web.py`，token 化 CSS）；桌面为 7 套 QSS 主题（`theme_settings.py`，含毛玻璃/云母，Web 无对应）。NiceGUI/TUI 版本已于 2026-08-17 移除。
 
@@ -272,6 +273,10 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
 │   └── gw_new_gen_cmd_payloads.py # 国网新一代应用层命令载荷解析
 ├── hdc10_parser.py            # HDC 1.0 双模互联互通 (HDC10Parser) — Q/GDW 12087.42-2020
 │   └── hdc10_mme_parser.py    # HDC 1.0 MME 网络管理消息解析（关联/发现列表/时隙分配等）
+├── modular_iface_parser.py    # 模组化终端功能模块接口 (ModularIfaceParser) — 链路+APDU+DT
+│   └── modular_iface_axdr.py     # A-XDR 编解码单源（表4 类型/8 类 APDU/date_time/Scaler_Unit/fcstab/verify_frame）
+│   └── modular_iface_data.py     # 静态表单源（附录 B/C/D~L/M + 表1/2/3/5/11/13；DT 命名/单位/子接口）
+├── modular_iface_frame_gen.py # 模组化组帧（整帧/ACK/NAK/APDU 模板，纯逻辑）
 └── (解析级别：新一代 auto/fc_pb/fc_efc/fc_only/app/pb_only；国网新一代&HDC 1.0 auto/fc_pb/fc_only/mac_only/pb_only/fc_mac/app；通道：PLC 载波 / HRF 无线)
 │
 ├── 查询/映射模块（lookup）── 单例 get_xxx_lookup() 提供全局实例
@@ -651,6 +656,19 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
   - `双模通信互联互通技术规范 第4-3部分：应用层通信协议.md` — **应用层（业务报文结构）**
   - 注：HDC 1.0 相关表格/字段定义（如时隙分配条目 0xC0 长度字段 2 字节、发现信标省略非中央信标信息）以实测报文 + 上述文档为准
 
+### 5.10 模组化终端功能模块接口（索引 12，**1.23.57 新增 / 1.23.58 重写 A-XDR 层**）
+
+- **解析器**：`modular_iface_parser.py` (ModularIfaceParser) — 链路层 + 8 类 APDU + DT 命名 + 容错 ⚠ 行；`parse` / `parse_to_table` / `get_summary` / `is_frame` / `calc_fcs` / `data_total_len`
+- **A-XDR 层（单源）**：`modular_iface_axdr.py` — 表4 全部类型、8 类 APDU 的 ASN.1 编解码、`date_time`/`date`/`time`/`date_time_s`/`Scaler_Unit`/`bit-string`/数组/结构、附录 A 的 `FCSTAB`+`calc_fcs`、`frame_layout`、`verify_frame`
+- **静态表（单源）**：`modular_iface_data.py` — 附录 B（VID/PID）、附录 C（通用信息类 10 条）、附录 D~L（设备子接口表）、附录 G/J/K/L（模块信息类 11 条）、附录 M（物理单位 77 条），以及表1/2/3/5/11/13；`decode_dt`（大端，返回 dict）唯一 DT 名称来源
+- **组帧**：`modular_iface_frame_gen.py` — 整帧/ACK/NAK/8 类 APDU 编码 + `FRAME_TEMPLATES`（**13 个**模板）；GUI 组帧页已接线（`frame_gen_mode="modular"`），预设页 `preset_mode="modular"` 用 `MODULAR_command.json`（种子 8 条）
+- **校验器**：`validator/modular_iface_validator.py` — FCS = CRC-16/PPP(x-25)，覆盖 `L + C + Data`（附录 A，与 698 同族）；另有控制域/长度域/控制码/APDU 解析检查
+- **批量提取**：`extract_strategy="modular"` → `main_gui._extract_modular_frames`（**L 是数据域长度，整帧 = L + 8**，与南网/国网的「L 即整帧长」不同）
+- **查询页**：`lookup_kind="modular"` → `_create_modular_iface_lookup_content`（控制码 / APDU / DTA / 通用信息类 / 模块信息类 / 物理单位 / 设备子接口 / 厂商标识）
+- **参考文档**：`协议文档/12.模组化功能协议/模组化终端功能模块接口协议.md`（anydoc 自同名 .docx 转换，1136 行）
+- **⚠ 两层字节序不同**：链路层 `68 | L(2B LE) | C(2B LE) | Data | FCS(2B LE) | 16` 是**小端**；APDU 内的 DT/整型/`date_time` 属 **A-XDR → 大端**。两者不可互相套用（1.23.57 的原实现即因此错位）
+- **回归**：`test/test_modular_iface.py`（430 项）+ `test/test_modular_iface_axdr.py`（185 项）；契约与错误排查见 §8 陷阱 61
+
 ---
 
 ## 6. GUI 协议集成点（添加/修改协议必读）
@@ -747,6 +765,8 @@ python test/test_pp_cli.py             # 预处理命令链拆分（半角基准
 python test/test_gw_new_gen.py      # 国网新一代双模协议
 python test/test_gdw_fujian.py      # 国网福建增补规约 + EB 数据标识（1.14.0 起）
 python test/test_hdc10.py           # HDC 1.0 双模互联互通协议（时隙分配条目/信标 BPCS/PBCS）
+python test/test_modular_iface.py   # 模组化终端功能模块接口（组帧→解析闭环/FCS/DT/模板/摘要接线，430 项，1.23.57 起）
+python test/test_modular_iface_axdr.py # 模组化 A-XDR 编解码（表4 逐条/698 附录 H.1.1 独立 oracle/fcstab 对拍/verify_frame，185 项，1.23.58 起）
 python test/test_hdc10_app_dispatch.py # 协议11 应用层分派收口（94 项：MAC 头类型字段判据 / 端口白名单收口 / 未定义业务命名与依据 A13 表驱动 / 安全模式提示 / 真实帧 60 帧分派一致性 / fuzz，1.23.20 起）
 python test/test_hdc10_pb_structure_probe.py # 协议11 无物理块头(PBH)帧形态探测（39 项：现场帧 auto 17→57 行 golden / ICV 自证 / fc_mac 偏移修复 / 探测判据纯函数 / 变异反证 / 真实夹具 60 帧×7 级别零差异，1.23.24 起）
 python test/test_hdc10_mac_only_contract.py # 协议10/11 仅MAC帧契约：输入即MAC帧禁止剥PBH（35 项：现场帧 golden / GUI 包装 / bit7前缀变异反证 / pb_only 仍解析 PBH，1.23.29 起）
@@ -959,14 +979,14 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
     - **匹配判决必须输出可比对的日志**（1.23.50）：只打「超时未匹配」现场无从分析。发送时打 `[匹配] #n 等待响应：<方式>，预期 = …`；命中打 `[匹配✓] …（<方式>，预期 = …）`；超时打 5 行（标题 + 匹配方式 + 预期响应 + 期间收到 + `match_failure_reason()` 的诊断）。`match_failure_reason()` 按 6 种方式分别说明差在哪，并识别最常见误填「**预期响应与发送数据完全相同**」。匹配日志走 RX/TX 队列（享受 burst 保护）。回归：`test_serial_proto_frame.py` 第 [10] 段 + `test_serial_tool_widget.py` 第 [26] 段。
     - **给按钮槽函数加位置参数是个坑**（1.23.51）：`QPushButton.clicked` 会带一个 bool（`checked`）实参，`btn.clicked.connect(self._edit_command)` 下若把签名写成 `_edit_command(self, row=None)`，那个 `False` 会被当成行号 → **永远编辑第 0 行**。要传参就单独写一个信号专用处理函数（如 `_on_cmd_double_clicked(row, col)`）再转调，别改按钮槽的签名。回归：`test_serial_tool_widget.py` 第 [27] 段。
     - **落盘与句柄**：命令与参数存 `app_paths.data_path("serial_tool_config.json")`（原子写 + 损坏回落默认值；导入/导出用**裸列表**以兼容源工具 `commands.json`）；用 `app_paths.data_path` **属性访问**（不是 `from app_paths import data_path`），否则测试的 `_config_sandbox` 无法重定向。串口**复用主窗口共享的 `self.serial_worker`**（`main_gui._ensure_serial_tool_tab` 里 `tab.set_serial_worker(self.serial_worker)`，与组帧页/监控器页同一约定）：本页**不做端口/波特率/连接控件**，只订阅 `connection_changed`（驱动按钮可用性）与 `raw_data_received`；`cleanup()` **不得关闭串口**（端口生命周期归顶部「串口配置」与主窗口收尾）。**一个 COM 口只能被打开一次**，各页各持 `SerialWorker` 会互相抢口（顶栏连上后本页再连必失败），波特率也会出现两处配置。回归：`test/test_serial_tool_widget.py`。
-    - **命令勾选与「只发勾选项」**（1.23.52）：勾选存命令的 `enabled`（`coerce_enabled`：旧配置缺键 → `True` 全选）；表格第 0 列是勾选框（`ItemIsEnabled | ItemIsUserCheckable` + `setCheckState`，项目既有范式见 `archive_widget.py`），**`NoEditTriggers` 不阻碍勾选**（勾选走 delegate 的 `editorEvent`，不经 `edit()`）；重建表格期间必须用 `_rebuilding_cmd_table` 抑制 `itemChanged` 回写。**筛选发送必须传 `index_map`**：`messages` 是勾选子集而 `sent` 的 `msg_index` 要回指 `commands` 原下标，否则名称/协议/匹配规则全部错位。回归：`test/test_serial_tool_widget.py` 第 [28] 段（含 `QTest` 真鼠标点击）。
+    - **命令勾选与「只发勾选项」**（1.23.52）：勾选存命令的 `enabled`（`coerce_enabled`：旧配置缺键 → `True` 全选）；表格第 0 列是勾选框（`ItemIsEnabled | ItemIsUserCheckable` + `setCheckState`，项目既有范式见 `archive_widget.py`），**`NoEditTriggers` 不阻碍勾选**（勾选走 delegate 的 `editorEvent`，不经 `edit()`）；重建表格期间必须用 `_rebuilding_cmd_table` 抑制 `itemChanged` 回写。**筛选发送必须传 `index_map`**：`messages` 是勾选子集而 `sent` 的 `msg_index` 要回指 `commands` 原下标，否则名称/协议/匹配规则全部错位。**命令级「次数」`send_count`**（1.23.57）：表内第 7 列，每轮对该命令展开 N 帧进 `messages`，`index_map` 每次都指回该命令原下标；与底部「循环次数」（全局 loop，已改名避免与「次数」列混淆）相乘。`coerce_send_count` 默认 1、范围 1~9999。回归：`test/test_serial_tool_widget.py` 第 [28] 段（含 `QTest` 真鼠标点击）。
     - **`hex_str_to_bytes` 必须容忍「连续无分隔」的 hex**（1.23.52 修）：原实现按空格/半角逗号切分后把每个片段当**一个字节**（`int(p, 16)` + `bytes([...])`），于是 `6812004116` 整串被转成越界整数 → 判为非法，现场报「明明是对的却提示不是有效的 HEX」。现：连续串按字节切（`bytes.fromhex`，奇数位拒绝）、半角/全角逗号、顿号、半角/全角分号、斜杠、竖线、连字符、全角空格都作分隔符、容忍 `0x` 前缀；仍拒绝奇数位与非 hex。**报错必须给原因**：`hex_input_error()` 返回「含非 HEX 字符 'G'（第 6 个字符）」这类可读原因，别只说「格式不对」。
     - **「正则表达式」匹配方式下「预期响应」是正则文本、不是 HEX**（1.23.52 修）：旧实现一律按 HEX 校验 → 正则必然非法 → 被 `normalize_command` 静默降级成 `none`、待匹配项**根本不会入队**，现场只看到「超时未匹配」，极难排查。现：`normalize_command` 对 regex 只校验正则语法（空正则也降级）；`_on_sent` 用 `match_hex.encode("latin-1")` 而非 `hex_str_to_bytes`；日志按 `expected_display()` 展示（正则是文本且**不用 repr**，否则 `68\s*D0` 会显示成 `'68\\s*D0'`）。回归：`test/test_serial_tool_widget.py` 第 [29] 段。
     - **正则匹配二进制帧有两个坑**（实测确认，故新增 HEX 通配）：① 模式是在**字节按 latin-1 解码后的字符流**上匹配，字节必须写 `\xNN`，直接写 hex 数字匹配不上（`68` ≠ 字节 `0x68`）；② `re.IGNORECASE` 会把「解码成字母」的字节大小写互配 —— 实测 `\x68` 也匹配 `0x48`、`\x69`↔`0x49`、`\xD0`↔`0xF0`、`\x41`↔`0x61`（**国网帧起始符 0x68 会误配 `'H'`**）；③ `.` **不匹配 `0x0A`**，要写 `[\s\S]` 或 `(?s).`。
     - **「HEX 通配」匹配方式**（1.23.53）：约定**必须与「测试方案」一致** —— `test_plan_widget._match_frame` 是逐字符走、遇 `XX` 跳过一个字节，故 `XX` 可内嵌连续串（`68D0XXXX16`），`??` 为等价别名；语义为**包含式**（在累积接收数据里任意位置找）+ 可选 `^`/`$` 锚点；命中报偏移。改这里要与 `test_plan_widget._match_frame` 的约定保持同源，别自创 `*`/`?` 之类记号。回归：`test/test_serial_tool_widget.py` 第 [30] 段。
     - **匹配统一入口是 `match_offset()`**（返回偏移或 None）：`check_match()` 只回答「是否命中」，日志要报位置就得用 `match_offset()`；新增匹配方式时**两处都要接**（`check_match` 供纯判断、`match_offset` 供带位置判断）。
     - **命令状态图标**（1.23.55）：状态存命令的**运行时键 `_status`**（`CMD_STATUS_KEY`）—— 不进 `normalize_command`、**不落盘不导出**（`export_commands` 剔除所有 `_` 开头的键，否则下次打开会显示上一轮的旧状态）；状态变化只调 `_refresh_cmd_row(i)` **重画那一行的名称单元格**，别整表重建（会丢选中/滚动位置）。图标颜色靠 `CompositionMode_SourceIn` 给 `app_icons.load_icon()` 渲染出的 pixmap 整体染色（`app_icons` 只出单色）。迁移点：每轮 `_start_send` 先 `_clear_cmd_statuses()`、`_on_sent` 先记「通过」再在真正入待匹配队列时改「发送中」、`_on_send_failed` 用 `_mark_running_as("error")`。回归：`test/test_serial_tool_widget.py` 第 [32] 段（**逐态校验渲染出的像素颜色**，别只断言 icon 非空）。1.23.56 起「清除状态」按钮走 `_clear_cmd_status_clicked()`（发送中禁止，与「清除统计」同口径）；第 [33] 段。
-    - **「原始数据」接收模式必须做「帧结构优先、时间聚合兜底」**（实测报障两轮，改这里前必读）：① 串口驱动会把**同一帧**拆成多次 `read` 交付（低波特率甚至逐字节），按每次交付输出一行会让一帧打成多行、RX 帧数虚增；② **只做时间聚合不够**——实测 208 字节的国网帧被拆成 77+92+36+3 共 4 行，即**交付块间隔本身就大于静默窗口**（10ms），窗口调多大都不稳。正确做法是按长度域收全再输出：`_declared_frame_len()` 按**第二个起始符 68H 的位置**互斥判别三种结构 —— 第 4 字节（698.45：`68H + L(2B 小端) + 68H + … + FCS + 16H`，整帧 = L + 3，见协议文档 6.2.2）、第 8 字节（DLT645-2007：`68H + 地址(6B) + 68H + 控制码 + 数据长度 L(1B) + … + 16H`，整帧 = L + 12）、都不是（南网/国网：`68H + L(2B 小端) + … + CS + 16H`，**L 就是整帧字节数**，见 `protocol_parser.py:72` / `gdw10376_parser.py:333`）；**判别顺序必须先查第 4 字节**（698.45 的第 4 字节恒为 68H），不足 8 字节或长度域越界一律返回 0 退回时间聚合 —— **错切帧比不切更糟**。`_emit_structured_frames()` 只在**末字节确为 16H** 时才算自证（帧体内含 16H 不会被误切，两帧连在一次交付里会切成两行）。无结构裸数据仍走时间聚合：`RAW_FLUSH_DELAY_MS = 10` 静默窗口 + `RAW_MAX_HOLD_MS = 200` 最长持有（防持续流 `_raw_buffer` 无界增长且永不显示）；已声明长度但未收全时改用 `FRAME_IDLE_MS = 300` 容忍静默 + `FRAME_HOLD_MAX_MS = 5000` 绝对上限。切换接收模式与 `cleanup()` 时立即刷出（含未收全残帧），不丢数据。**取舍**：非 68 结构的裸数据两段间隔小于窗口会被合并成一行 —— 需要逐帧精确切分时用「按帧尾分割」模式。回归：`test/test_serial_tool_widget.py` 第 [17] 段。
+    - **「原始数据」接收模式必须做「帧结构优先、时间聚合兜底」**（实测报障两轮，改这里前必读）：① 串口驱动会把**同一帧**拆成多次 `read` 交付（低波特率甚至逐字节），按每次交付输出一行会让一帧打成多行、RX 帧数虚增；② **只做时间聚合不够**——实测 208 字节的国网帧被拆成 77+92+36+3 共 4 行，即**交付块间隔本身就大于静默窗口**（10ms），窗口调多大都不稳。正确做法是按长度域收全再输出：`_declared_frame_len()` 按**第二个起始符 68H 的位置**互斥判别三种结构 —— 第 4 字节（698.45：`68H + L(2B 小端) + 68H + … + FCS + 16H`，整帧 = L + 3，见协议文档 6.2.2）、第 8 字节（DLT645-2007：`68H + 地址(6B) + 68H + 控制码 + 数据长度 L(1B) + … + 16H`，整帧 = L + 12）、都不是（南网/国网：`68H + L(2B 小端) + … + CS + 16H`，**L 就是整帧字节数**，见 `protocol_parser.py:72` / `gdw10376_parser.py:333`）；**判别顺序必须先查第 4 字节**（698.45 的第 4 字节恒为 68H），不足 8 字节或长度域越界一律返回 0 退回时间聚合 —— **错切帧比不切更糟**。`_emit_structured_frames()` 只在**末字节确为 16H** 时才算自证（帧体内含 16H 不会被误切，两帧连在一次交付里会切成两行）。无结构裸数据仍走时间聚合：`RAW_FLUSH_DELAY_MS = 10` 静默窗口 + `RAW_MAX_HOLD_MS = 200` 最长持有（防持续流 `_raw_buffer` 无界增长且永不显示）；已声明长度但未收全时改用 `FRAME_IDLE_MS = 300` 容忍静默 + `FRAME_HOLD_MAX_MS = 5000` 绝对上限。**头标志 68 已出现但长度域还没收够字节时也算未收全**（1.23.57）——首片仅 1~2 字节时若走 10ms 静默会单独刷出首片，缓冲从下一片起不再以 68 开头、整帧被切碎（实测国网 F112 拆成 4 行）；协议已知时 `ft12_68` 3 字节即可算整帧长。切换接收模式与 `cleanup()` 时立即刷出（含未收全残帧），不丢数据。**取舍**：非 68 结构的裸数据两段间隔小于窗口会被合并成一行 —— 需要逐帧精确切分时用「按帧尾分割」模式。回归：`test/test_serial_tool_widget.py` 第 [17] 段（含首片仅 68 的四块交付复现）。
     - **`_save_timer` 必须先于 `_build_ui()/_load_persisted()` 创建**：载入持久化参数会触发控件 `toggled` → `_schedule_save()`，若定时器还没建好，信号槽内会抛 `AttributeError` 被 Qt **静默吞掉**（表现为配置保存失效，极难排查）。回归：`test/test_serial_tool_widget.py` 第 [18] 段。
     - **线程归属（已知取舍）**：接收数据经 `raw_data_received` 信号投递到 **GUI 线程**后再做匹配与分帧（源工具是在接收线程里直接匹配）。与既有组帧页同一口径、只保留一套串口层；常规表计流量无影响；解析也走同一口径（`set_parse_provider` 注入的回调在 GUI 线程执行）。若将来遇到极高接收速率（数千帧/秒）导致界面滞后，再把匹配与解析一起下沉到 worker 线程。
 
@@ -990,6 +1010,31 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
     - **失败必须外显且不递归**：打开失败 → 弹窗 + 勾选回弹（`blockSignals` 包住 `setChecked(False)`，否则会重入）；写失败 → 先把 `_log_writer` 摘成 `None` 再 `_log("…已停止自动保存：<原因>")`，这样提示行不会再往坏文件里写（否则无限递归）。**断网/磁盘满/目录被删都要按此处理**，不许静默丢日志（陷阱 23 的同一精神）。
     - **`cleanup()` 的顺序与副作用**：`_stop_send()` → `_flush_raw_display_now()` → **`_flush_log_queues()`** → `_stop_log_recording()`（写统计尾 + 关闭）→ 落盘配置。**第 3 步是本版新增的行为**：旧版残留队列（最后几帧原始行、解析行）在退出时直接丢；现在会先刷进窗口与文件（`test/test_serial_tool_widget.py` 第 [17] 段「cleanup 时把聚合缓冲刷出」的断言已相应改为**看窗口内容**，因为队列随即被清空）。勾选状态**不改**（当偏好持久化，下次启动仍自动保存）。
     - 参数：`log_auto_save` / `log_dir` / `log_timestamp` 三个**新键**（旧配置缺键 → 默认关闭，行为与旧版完全一致 ⇒ **不需要** `CONFIG_VERSION` 迁移，见陷阱 58 最后一条：只有「改默认值」才需要迁移）。
+
+61. **协议12（模组化终端功能模块接口）：文档无示例帧，A-XDR 布局靠同族标准实证；三处编码开关是唯一假设来源**（1.23.58 起，改 `modular_iface_axdr.py` / `modular_iface_data.py` 前必读）：
+    - **两层字节序不同，不可互相套用**：链路层 `68 | L(2B) | C(2B) | Data | FCS(2B) | 16` 的 L/C/FCS 是**小端**（§5.1「低字节在前，高字节在后」）；而 APDU 内的 DT / 整型 / `date_time` 属 **A-XDR → 大端**。1.23.57 的原实现把链路层的小端与 BER 长度域一起套到 APDU 上，导致 APDU 内所有多字节字段错位。
+    - **链路的长度域语义与南网/国网不同**：`L = 数据域字节数`，**整帧 = L + 8**（南网/国网是 L 即整帧长）。批量提取 `_extract_modular_frames` 与校验器都依赖这条。
+    - **铁证只有一处，而且是跨标准的**：协议12 文档 `grep 示例` 为空（**通篇没有一条示例帧**），三个开关的取值靠同族标准 DL/T 698.45 附录 H.1.1「登录」的真实编码推导：`05 07 09 19 05 16 20 SA | 01 | 00 | 00 00 | 00 B4 | 07 E0 05 13 04 08 05 00 00 A4` —— `07 E0`=2016、`00 B4`=180、`00 A4`=164 ⇒ **大端**；且 SEQUENCE 内的 `date_time` **连自身标记 0x19 都没有** ⇒ **定长类型在 SEQUENCE 内不带 tag、不带长度域**。自检：2016-05-19 是周四 ⇒ `day_of_week = 04` ✓
+    - **编码假设只能有一份**：`modular_iface_axdr.AXDR_TAG_IN_SEQUENCE` / `AXDR_LEN_FOR_FIXED_IN_CHOICE` / `AXDR_VAR_LENGTH_BYTES` 是**唯一**来源（现取值 `False` / `False` / `1`）；**禁止在某个解析函数里另写一份猜测**（原实现的 `_take_axdr_uint`/`_take_axdr_string` 就是「探测式 + 取不到静默返回 0」，会让真实帧字段无声消失，已删）。
+    - **拿到真实帧的第一动作是跑 `verify_frame(frame)["axdr_tail"]`**：非 0 即当前假设不符，把 3 个开关的 **8 种组合**枚举一遍，能过的那个把**实测依据**（帧来源 + `axdr_tail` 变化）写进注释，而不是往解析函数里加特例。
+    - **静态表单一来源** `modular_iface_data.py`（附录 B/C/D~L/M 与表1/2/3/5/11/13）：禁止在解析器/查询页/Web 各写一份。**已修正的错表**：`DAR` 只能是**表11 的 4 个值**（0 成功 / 1 拒绝读写 / 2 信息类未定义 / 255 其它；旧表 21 项形似其它协议）；DT 位段改 **4+4+8**（表22 按 5+3+8 会把 `0x4000` 解成 DTA1=8H 模拟量，与附录 G / §7.6「4H 遥信脉冲」冲突 ⇒ 取与附录及 §7.3~§7.11 全部自洽的一侧）。
+    - **文档自身的矛盾（记录、不臆造）**：① 表22 的 DTA1 位段 vs 附录 G/J/K/L（见上，需实测帧定论）；② §6.3.9 表12 写「单位见附录 L」，实际在**附录 M**（附录 L 是回路状态巡检模块）；③ 附录 L.2 写「信息类定义见 K.3」应为 **L.3**（K.2 的「见 K.3」才是对的）；④ 附录 M 表31 第 60~64 行**列错位**（已按原文逐字抄录，未自行「修正」）。
+    - **容错显示**（陷阱 23 同一精神）：长度域不符 / FCS 不符 / 截断 / 确认帧带数据域 / 信息帧无 APDU / APDU 未解完，一律**继续解析并输出已能解析的字段** + 醒目 `⚠` 行，**不得返回空表**。
+    - **未确证的 6 条**（需实测帧才能定论；已集中在可切换处，别硬改）：① 三个开关默认值；② `array`/`structure` 长度域是**元素个数**还是字节数（现按元素个数，依据 698 附录 H.3.2）；③ `bit-string` 位序（现按字节内 LSB-first）；④ 表18 通道列表是否每元素再套一层 `structure`（现按 `个数(1B) + N×(接口类型 1B + 功能配置 1B)`；一处可切：`encode_channel_list`/`decode_channel_list`）；⑤ 变长类型长度域是否 BER 长形式（>255 时现抛可读错误，不静默截断）；⑥ DT 5+3+8 vs 4+4+8。
+    - **回归**：`test/test_modular_iface.py`（430 项，含 meta 非死代码 / ⚠ 容错行 / 13 模板闭环 / 批量摘要与类型列接线）+ `test/test_modular_iface_axdr.py`（185 项，含 698 oracle **独立**对拍、附录 A `fcstab` 全表 + crcmod 交叉验证）。
+
+62. **从 cmd.exe 直接启动的 Python 会让 GUI 测试以 0xC0000409 崩溃（假红，2026-09-23 实测）**：
+    - **现象**：`bg_run` 里直接跑 `python release_check.py` → `PASS=65 FAIL=32 WARN=2`，32 项**全部是 GUI/offscreen 测试**，报 `exit=3221226505`（= `0xC0000409` `STATUS_STACK_BUFFER_OVERRUN`，fastfail），且 **`stdout`/`stderr 全空**（release_check 的 `tail` 为空所以只打 `exit=`）—— Python 块缓冲（8KB）还没 flush 就 fastfail，输出全丢；打印量超 8KB 的会只捕获到前半段（`test_modular_iface.py` 就是这样）。同一批测试**单独跑（父进程是 pwsh）则全部 RC=0 全绿**。
+    - **定位矩阵（实测，逐项排除）**：`cmd.exe → python → 测试` = **崩**；`cmd.exe → pwsh → python → 测试` = **不崩（RC=0）**；`pwsh → python → 测试` = 不崩。**与 `chcp` 无关**（`chcp 65001` / `chcp 437` / 不设，三者全崩）；**与 stdin 无关**（`inherit` / `DEVNULL` / `PIPE` 全崩）；**与具体测试文件无关**（问题文件在 pwsh 父进程下逐项通过）。⇒ 唯一变量是**直接父进程是不是 PowerShell**（根因未继续下探，但复现稳定、固定两次跑出完全相同的 32 项）。
+    - **处置（写进习惯）**：凡**从 cmd 侧**发起的批量测试 / 自检 / 发版门禁，**都套一层 pwsh**。`bg_run` 的写法：
+      ```
+      # 先把环境与命令写进一个脚本（避开多层引号）
+      pwsh.exe -NoProfile -NoLogo -NonInteractive -File "%TEMP%\run_rc.ps1"
+      # run_rc.ps1 内容：Set-Location "E:\python\南网解析工具"; $env:PYTHONIOENCODING="utf-8"; python release_check.py; exit $LASTEXITCODE
+      ```
+      `%TEMP%` 的脚本用 `pwshu` + `Set-Content -Encoding UTF8` 生成最简单（不要 `Set-Content` 成 GBK）。
+    - **判别假红的手感**：结果里失败项**输出为空 + 退出码恒为 3221226505** ⇒ 先按本条复核，**不要动代码**（1.23.57/58 的协议12 工作就被这个现象困了一轮）。若只有**少数** GUI 测试崩、其他 GUI 测试过，才可能是代码问题。
+    - 与 §10 1.17.1 记录的「本机已知 MainWindow 关闭期 fastfail」是同一个现象；本条给出了**精确触发条件与避开手法**。
 
 ## 9. 开发原则
 
@@ -1015,6 +1060,30 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 ## 10. 变更日志
 
 > 详细版本变更记录请查看 `main_gui.py:CHANGELOG`（按版本倒序），或运行 `git log --oneline` 查看提交历史。本文档保留近期版本的摘要。
+
+### 1.23.58 — 2026-09-23
+
+- **协议12 A-XDR 编码层重写（正确性修复）**：原实现把「小端 + BER 长度域」套到 A-XDR 上 ⇒ APDU 内所有多字节字段错位。协议12 文档**通篇无示例帧**，故改用同族标准 DL/T 698.45 附录 H.1.1「登录」真实编码实例推导：`07 E0`=2016 年、`00 B4`=180s、`00 A4`=164ms ⇒ **A-XDR 多字节为大端**，且**定长类型在 SEQUENCE 内不带 tag、不带长度域**（date_time 连自身标记 0x19 都没有）。链路层 L/C/FCS 仍为小端，两层不再互相套用
+- 新增 `modular_iface_axdr.py`（A-XDR 编解码**单源**：表4 全部类型、8 类 APDU、日期时间/Scaler_Unit/bit-string/数组/结构、附录 A `fcstab`+`calc_fcs`、`frame_layout`、`verify_frame`）与 `modular_iface_data.py`（静态表**单源**：附录 B/C/D~L/M 与表1/2/3/5/11/13）
+- 编码假设集中 3 个开关（`AXDR_TAG_IN_SEQUENCE=False` / `AXDR_LEN_FOR_FIXED_IN_CHOICE=False` / `AXDR_VAR_LENGTH_BYTES=1`），并新增 `verify_frame(frame)["axdr_tail"]` **作为判据**——拿到真实帧先跑它，非 0 就把 8 种开关组合枚举一遍（实测依据写进注释）
+- 修正既有错表：`DAR_NAMES` 由 21 项（形似其它协议）收口到表11 的 **4 个值**（0 成功 / 1 拒绝读写 / 2 信息类未定义 / 255 其它）；DT 位段由 5+3+8 改为 **4+4+8**（与附录 G/J/K/L 的 4000/7100/8000/9000 及 §7.3~§7.11 自洽；表22 按 5 位会与附录冲突，已记录待真实帧定论）
+- 删除 `_take_axdr_uint` / `_take_axdr_string`（探测式 + 取不到静默返回 0 会让真实帧字段无声消失）→ 严格解码 + 失败时的 ⚠ 行；新增 Scaler_Unit（表12）解码；`parse()` 收尾的 `self._rows(rows, {...} if False else None)` 死代码修复（meta 如实给出 `valid`/`fcs_ok`/`structure_ok`/`axdr_tail`/`errors`）
+- 批量摘要/类型列补协议12 专属分支（此前落兜底）：摘要 =「方向 | 控制码 | 信息类:… | APDU 名」（信息类名走解析器同一个 `dt_name`）；类型列 = APDU 名/控制码名（不改会落 `name.split(" ")[0]` → 显示 `[12]`）
+- 组帧页模板下拉恢复「读取·协议版本」→ **13 个模板**；spec `hiddenimports` 补齐 `modular_iface_axdr` / `modular_iface_data`
+- 测试：`test/test_modular_iface.py` 46 → **430 项**；新增 `test/test_modular_iface_axdr.py` **185 项**（含 698 附录 H.1.1/H.3.2 独立 oracle、附录 A `fcstab` 全表对拍 + crcmod 交叉验证、表4 逐条、越界/截断、`verify_frame`）
+- 顺带修复（新增协议引发的既有测试红/回归）：① 6 项硬编码「12 个协议」变红（`test_window_state` / `test_serial_tool_widget` / `test_serial_proto_frame`）→ 改为与 `protocol_registry.combo_labels()` 同源比对；② 串口工具 `ft12_68` **签名排除恢复**（1.23.57 为修「首片过短」把签名排除整个去掉，连带丢掉「指定南网/国网时不得把 698.45/645 帧按南网口径切」的契约）→ 改为**字节够判时才排除**（`len(buf) >= 8`）
+- 遗留：Web 端（`reflex_web/`）尚未支持协议12 的解析/查询/组帧（仅首页协议表有条目）；协议12 未接入虚拟表与 TCP 监控协议识别
+- 同步文档：README 协议表/下载区、`landing_web.PROTOCOLS`、本文件 §1/§3/§5/§6/§7/§8/§9/§10/§12；详见 §5.10 与 §8 陷阱 61/62
+
+### 1.23.57 — 2026-09-22
+
+- **串口工具 RX 按发送协议断帧修复**（用户报障：国网 F112 响应被拆成 4 条 `[RX]`）：根因是首片只有 1 字节 `68` 时长度域未收齐 → `frame_length_for` 返回 0 → `_frame_incomplete` 误判「非协议帧」→ 走 10ms 静默窗口单独刷出首片，后续缓冲不再以 68 开头 → 整帧碎裂。修：头标志已出现但长度域未收够 → 一律按**未收全**等待；协议已知时 `ft12_68` **3 字节即可算整帧长**。回归：1+22+9+21 四块、块间隔>10ms → 只输出 1 行 53 字节整帧
+- **国网 F112 芯片 ID 解析修复**：24 字节线上为整块小端 → **先原样显示原始 24 字节**，再整体倒序后按表104 解析（类别/厂商/型号/序列号）；现场帧倒序后前 6 字节恰为表104 固定头 `01 02 9C 01 C1 FB`，类别 0x03=HPLC+HRF 双模
+- **串口工具命令表新增「次数」列**：每条命令可单独设置本轮连发 N 次（默认 1，范围 1~9999）；双击行 → 编辑对话框修改；发送时按 N 展开进 `messages`，`index_map` 仍指回原命令下标；与底部「循环次数」（原全局发送次数，已改名避免混淆）相乘
+- **顶栏折叠后启动时协议名仍贴左**：`showEvent` 在窗口显示后（及 150ms 延迟）按**最终标题栏宽度**重算居中填充；`_update_window_title` 用 `frameGeometry` 宽度、控件+应用两套字体度量；padding 算成负时放宽 chrome 预留再算一次
+- **新增协议12 模组化终端功能模块接口**（anydoc 转 MD：`协议文档/12.模组化功能协议/…接口协议.md`）：链路层 `68 + L(数据域长) + C + FCS + 16`、FCS = CRC-16/PPP（`x-25`）；APDU 8 类 CHOICE、DT 信息类标识；`modular_iface_parser` / `modular_iface_frame_gen` / `ModularIfaceValidator`；注册表 index 12、extract=modular、查询页「信息类查询」；组帧 GUI 接线（模板下拉 + DIR/PRM/FID/DT/Data 配置 + 实时解析预览 + 串口回包解析）、预设页独立 `MODULAR_command.json` 种子 8 条、spec 补 datas/hiddenimports
+- 协议12 模块信息 Data 深解：GetResponse/Set/Report 的 Data 不再只显示 hex，按附录C DT=0000 展开 模块设备型号/模块设备ID/软件版本/软件发布日期/硬件版本/硬件发布日期/厂商编码（日期约定 `1A 05 + year LE(2)+month+day+week`，避开 698 AXDR `_decode_date` 长度偏差）
+- 测试：`test/test_modular_iface.py` 54 项；registry / landing 101 项对拍通过
 
 ### 1.23.56 — 2026-09-22
 

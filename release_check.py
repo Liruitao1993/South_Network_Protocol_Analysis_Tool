@@ -96,6 +96,8 @@ CORE_TESTS = [
     "test/test_hdc10_event_data.py",
     "test/test_hdc10_ed_wrapper.py",
     "test/test_hdc10_fc_bits.py",
+    "test/test_modular_iface.py",
+    "test/test_modular_iface_axdr.py",
     "test/test_hex_clean_script.py",
     "test/test_pp_cli.py",
     "test/test_batch_src_line_jump.py",

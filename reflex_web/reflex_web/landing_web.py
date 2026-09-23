@@ -242,6 +242,13 @@ PROTOCOLS = [
         "endian": "小端（MAC 地址大端）",
         "check": "CRC-24（FC/PB）+ CRC-32（MAC）",
     },
+    {
+        "index": "12",
+        "name": "模组化终端功能模块接口",
+        "standard": "Q/GDW 模组化终端功能模块接口协议",
+        "endian": "小端",
+        "check": "CRC-16/PPP FCS（x-25）",
+    },
 ]
 
 # 命令行：参数名与 main_gui.py `_handle_cli_args` 逐个一致

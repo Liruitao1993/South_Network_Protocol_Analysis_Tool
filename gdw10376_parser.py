@@ -1688,10 +1688,24 @@ class GDW10376Parser:
                             dev_map = {1: "抄控器", 2: "集中器本地通信单元", 3: "单相电能表通信单元", 4: "中继器", 5: "II型采集器", 6: "I型采集器", 7: "三相电能表通信单元"}
                             table_data.append((f"  节点{i+1}设备类型", f"0x{dev_type:02X}", dev_map.get(dev_type, f"保留({dev_type})"), "", base_offset + offset + 6, base_offset + offset + 6))
                             chip_id = data_bytes[offset+7:offset+31]
+                            # 线上为整块小端：先原样显示 24 字节，再整体倒序后按表104解析
                             chip_str = ' '.join(f'{b:02X}' for b in chip_id)
-                            # Parse chip ID details
-                            chip_desc = f"类别=0x{chip_id[6]:02X}, 厂商=0x{chip_id[7]:02X}{chip_id[8]:02X}, 型号=0x{chip_id[9]:02X}{chip_id[10]:02X}"
-                            table_data.append((f"  节点{i+1}芯片ID", chip_str, chip_desc, "24字节, 见表104", base_offset + offset + 7, base_offset + offset + 30))
+                            le = chip_id[::-1]
+                            le_str = ' '.join(f'{b:02X}' for b in le)
+                            # 表104（倒序后 1-based）：1-3 固定头，4~6 研究院，7 类别，
+                            # 8~9 厂商，10~11 型号，12~16 序列号，17~24 校验码
+                            chip_desc = (
+                                f"倒序后={le_str} ｜ "
+                                f"类别=0x{le[6]:02X}, "
+                                f"厂商=0x{le[7]:02X}{le[8]:02X}, "
+                                f"型号=0x{le[9]:02X}{le[10]:02X}, "
+                                f"序列号={''.join(f'{b:02X}' for b in le[11:16])}"
+                            )
+                            table_data.append((
+                                f"  节点{i+1}芯片ID", chip_str, chip_desc,
+                                "原始24字节(线上小端整块)；倒序后见表104",
+                                base_offset + offset + 7, base_offset + offset + 30,
+                            ))
                             sw_ver = int.from_bytes(data_bytes[offset+31:offset+33], 'big')
                             table_data.append((f"  节点{i+1}芯片软件版本", f"0x{data_bytes[offset+31]:02X}{data_bytes[offset+32]:02X}", f"{sw_ver}", "BCD编码", base_offset + offset + 31, base_offset + offset + 32))
                             offset += 33

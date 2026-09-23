@@ -115,8 +115,8 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.56"
-BUILD_DATE = "2026-09-22"  # 编译日期，每次打包前更新
+APP_VERSION = "1.23.58"
+BUILD_DATE = "2026-09-23"  # 编译日期，每次打包前更新
 
 # 作者 GitHub 仓库地址 —— 「关于」对话框 Star 按钮的**唯一来源**。
 # 改地址只改这一处（按钮文案/提示/跳转都读它，不要在别处再写死一份）。
@@ -140,6 +140,44 @@ _WINDOW_STATE_TABLES = (
 )
 
 CHANGELOG = [
+    (
+        "1.23.58",
+        "2026-09-23",
+        [
+            "**协议12 A-XDR 编码层重写（正确性修复）**：原实现把「小端 + BER 长度域」套到 A-XDR 上，导致 APDU 内所有多字节字段错位。协议12 文档通篇**没有示例帧**，故改用同族标准 DL/T 698.45 附录 H.1.1「登录」真实编码实例推导——`07 E0`=2016 年、`00 B4`=180s、`00 A4`=164ms 证明 **A-XDR 多字节为大端**；且**定长类型在 SEQUENCE 内不带 tag、不带长度域**（date_time 连自身标记 0x19 都没有）。链路层 L/C/FCS 仍为小端，两层不再互相套用",
+            "新增 `modular_iface_axdr.py`（A-XDR 编解码**单源**：表4 全部类型、8 类 APDU、date_time/date/time/date_time_s/Scaler_Unit/bit-string/数组/结构、附录 A `fcstab` 与 `calc_fcs`、`frame_layout`、`verify_frame`）与 `modular_iface_data.py`（静态表**单源**：附录 B/C/D~L/M 与表1/2/3/5/11/13）",
+            "编码假设集中到一处：`AXDR_TAG_IN_SEQUENCE=False` / `AXDR_LEN_FOR_FIXED_IN_CHOICE=False` / `AXDR_VAR_LENGTH_BYTES=1`，并新增 `verify_frame(frame)[\"axdr_tail\"]` 作为**判据**——拿到真实帧先跑它，非 0 就把 3 个开关的 8 种组合枚举一遍（实测依据写进注释）",
+            "修正既有错表：`DAR_NAMES` 由 21 项（形似其它协议）收口到表11 的 **4 个值**（0 成功 / 1 拒绝读写 / 2 信息类未定义 / 255 其它）；DT 位段由 5+3+8 改为 **4+4+8**（与附录 G/J/K/L 的 4000/7100/8000/9000 及 §7.3~§7.11 自洽；表22 按 5 位会与附录冲突，已记录待真实帧定论）",
+            "删除 `_take_axdr_uint` / `_take_axdr_string`（「探测式 + 取不到静默返回 0」会让真实帧字段无声消失），改为严格解码 + 失败时的 ⚠ 行；新增 Scaler_Unit（表12）解码，单位名取自附录 M",
+            "`parse()` 收尾的 `self._rows(rows, {...} if False else None)` **死代码**修复：meta 现如实给出 `valid`/`fcs_ok`/`structure_ok`/`axdr_tail`/`errors` 等",
+            "批量摘要/类型列补协议12 专属分支（此前落薜底分支）：`_get_summary_from_table_data` 输出「方向 | 控制码 | 信息类:… | APDU 名」（信息类名走解析器同一个 `dt_name`，ACK/NAK 给可读结果）；`_get_frame_type_name` 输出 APDU 名/控制码名（不改就会落薜底 `name.split(\" \")[0]` → 类型列显示 `[12]`）",
+            "测试：`test/test_modular_iface.py` 46 → **430 项**；新增 `test/test_modular_iface_axdr.py` **185 项**（含 698 附录 H.1.1/H.3.2 独立 oracle、附录 A `fcstab` 全表对拍 + crcmod 交叉验证、表4 逐条、越界/截断、`verify_frame`）",
+            "组帧页模板下拉恢复「读取·协议版本」（GUI 预设表引用它）→ **13 个模板**；spec `hiddenimports` 补齐 `modular_iface_axdr` / `modular_iface_data`",
+            "**遗留**：Web 端（`reflex_web/`）尚未支持协议12 的解析/查询/组帧（仅首页协议表有条目）；协议12 未接入虚拟表与 TCP 监控协议识别",
+            "**新增协议12 导致既有测试硬编码「12 个协议」变红**（`test_window_state` / `test_serial_tool_widget` / `test_serial_proto_frame` 共 6 项）：改为与 `protocol_registry.combo_labels()` 同源比对，以后再增协议不必逐个改数字",
+            "**串口工具 `ft12_68` 签名排除恢复**（`test_serial_proto_frame` 2 项变红）：1.23.57 为修「首片过短把整帧切碎」把签名排除**整个去掉了**，连带丢掉了「指定南网/国网时不得把 698.45/645 帧按南网口径切」的契约。现改为**字节够判时才排除**（`len(buf) >= 8` 时排除第 4/第 8 字节为 68H 的 698.45 / 645 结构），两个契约同时成立",
+            "**修复协议11 类型列潜伏红测试**（9e60ba6 / 1.23.17 起）：无 FC 的应用层业务帧曾把**「报文ID」行的说明列**（“安全模式: 明文传输, 业务ID: 0x030”）当成类型名。改为优先复用 `gw_app_biz_summary` 取业务名（如「开始升级」），取不到再退回 MSDU类型/报文ID 的解析值；`main_gui` 与 `batch_core` 两份 `get_frame_type_name` 同步同口径（TCP 监控走后者），测试断言由语义不明的「[11]」改为业务名精确相等",
+            "**EXE 发版编译**：`dist/南网协议解析工具_v1.23.58_20260923154846.exe`（98.0 MB，FileVersion/ProductVersion=1.23.58.0）",
+        ],
+    ),
+    (
+        "1.23.57",
+        "2026-09-22",
+        [
+            "串口工具 RX 按发送协议断帧修复（用户报障：国网 F112 响应被拆成 4 条 `[RX]`，未按协议组帧一帧一行输出）",
+            "根因：首片只有 1 字节 `68` 时长度域未收齐，`frame_length_for` 返回 0，`_frame_incomplete` 误判「非协议帧」→ 走 10ms 静默窗口单独刷出首片；后续缓冲不再以 68 开头 → 整帧碎裂",
+            "修：头标志已出现但长度域/签名特征未收够 → 一律按**未收全**等待（`FRAME_IDLE_MS`/`FRAME_HOLD_MAX_MS`）；协议已知时 `ft12_68` **3 字节即可算整帧长**（不再等满 8 字节做签名排除）",
+            "回归：`test_serial_tool_widget.py` 新增复现用例（1+22+9+21 四块、块间隔>10ms → 只输出 1 行 53 字节整帧），全套 470 项通过",
+            "国网 F112 芯片 ID 解析修复：24 字节线上为整块小端，**先原样显示原始 24 字节**，再整体倒序后按表104 解析（类别/厂商/型号/序列号）；现场帧倒序后前 6 字节恰为表104 固定头 `01 02 9C 01 C1 FB`，类别 0x03=HPLC+HRF 双模",
+            "串口工具命令表新增「次数」列（发送次数）：每条命令可单独设置本轮连发 N 次（默认 1，范围 1~9999）；双击行 → 编辑对话框「发送次数」修改；发送时按 N 展开进 messages，`index_map` 仍指回原命令下标；与底部「循环次数」（原全局发送次数，已改名避免混淆）相乘。旧配置无 `send_count` 键 → 1；导出/归一化统一补齐",
+            "测试：test_serial_tool_widget.py 扩至 471 项（命令表 7 列含「次数」、header 断言、export 带 send_count）",
+            "顶栏折叠后启动时协议名仍贴左（用户截图报障）：`showEvent` 在窗口显示后（及 150ms 延迟）按**最终标题栏宽度**重算居中填充；`_update_window_title` 用 `frameGeometry` 宽度、控件+应用两套字体度量；padding 算成负时放宽 chrome 预留再算一次。构造结束时再刷一次标题",
+            "**新增协议12 模组化终端功能模块接口**（anydoc 转 MD：`协议文档/12.模组化功能协议/…接口协议.md`）：链路层 68+L(数据域长)+C+FCS+16、FCS=CRC-16/PPP(x-25)；APDU 8 类 CHOICE、DT 信息类标识；`modular_iface_parser` / `modular_iface_frame_gen` / `ModularIfaceValidator`；注册表 index12、extract=modular、查询页「信息类查询」；组帧库含模板",
+            "测试：`test/test_modular_iface.py` 46 项；registry / landing 101 项对拍通过",
+            "**协议12 模块信息 Data 深解**（GetResponse/Set/Report 的 Data 不再只显示 hex）：按附录C DT=0000 手走 A-XDR structure，展开 模块设备型号/模块设备ID/软件版本/软件发布日期/硬件版本/硬件发布日期/厂商编码（日期约定 `1A 05 + year LE(2)+month+day+week`，避开 698 AXDR `_decode_date` 长度偏差）；协议版本/电源状态同路径；测试扩至 54 项",
+            "**协议12 组帧 GUI 接线**（此前 `frame_gen_mode=None` 只有纯逻辑库）：注册表 `frame_gen_mode=preset_mode=modular`，组帧页模板下拉（12 模板）+ DIR/PRM/FID/DT/Data 配置 + 实时解析预览 + 串口回包解析；预设页独立 `MODULAR_command.json` 种子 8 条；配置快照含 `modular` 段；spec 补 datas/hiddenimports",
+        ],
+    ),
     (
         "1.23.56",
         "2026-09-22",
@@ -2129,6 +2167,8 @@ class MainWindow(QMainWindow):
         self._serial_statusbar_lbl.hide()
         # 顶栏折叠态/标题在菜单栏图标就绪后套用（见 __init__ 中 _setup_menu_bar 之后）
         self._update_serial_statusbar()
+        # 几何在 setup_ui 内已恢复；按最终宽度再算一次协议名居中（showEvent 还会再刷）
+        self._update_window_title()
 
     @property
     def parser(self):
@@ -4048,14 +4088,34 @@ class MainWindow(QMainWindow):
         pad = ""
         try:
             fm = self.fontMetrics()
-            left_w = fm.horizontalAdvance(left + sep)
-            proto_w = fm.horizontalAdvance(proto_name)
-            usable = max(240, int(self.width()) - self._title_chrome_reserve())
-            # 目标：left_w + pad_w + proto_w/2 ≈ usable/2
-            pad_px = usable / 2.0 - proto_w / 2.0 - left_w
+            # 标题栏系统字体可能比控件字体更宽：两种都量，取偏大值 → pad 偏小更安全
+            # （pad 过大会把协议名顶出中线右侧；用户反馈是偏左 → 先保证能顶开）
+            try:
+                app_fm = QGuiApplication.fontMetrics()
+            except Exception:
+                app_fm = fm
+            left_px = fm.horizontalAdvance(left + sep)
+            proto_px = max(
+                fm.horizontalAdvance(proto_name),
+                app_fm.horizontalAdvance(proto_name),
+            )
+            # 窗口已显示用 frame 宽（含边框更接近标题栏），否则 width()
+            if self.isVisible():
+                bar_w = int(self.frameGeometry().width() or self.width())
+            else:
+                bar_w = int(self.width())
+            # Win10/11 标题栏左侧图标 + 右侧窗口按钮约 140~180px
+            reserve = self._title_chrome_reserve()
+            usable = max(240, bar_w - reserve)
+            # 目标：left_px + pad + proto_px/2 ≈ usable/2
+            pad_px = usable / 2.0 - proto_px / 2.0 - left_px
+            if pad_px < 0 and bar_w > 700:
+                # 左段偏长 / 预留偏保守时：放宽预留，至少把协议名往右顶
+                usable = max(240, bar_w - 80)
+                pad_px = usable / 2.0 - proto_px / 2.0 - left_px
             space_w = max(1, fm.horizontalAdvance(" "))
             n = int(max(0.0, pad_px) / space_w)
-            n = min(n, 120)  # 上限防异常窗口宽度；允许 0（左段已很长时紧挨其后）
+            n = min(n, 200)  # 上限防异常窗口宽度；允许 0（左段极长时紧挨其后）
             pad = " " * n
         except Exception:
             pass
@@ -4754,6 +4814,100 @@ class MainWindow(QMainWindow):
             self.hdc10_table.setItem(row, 3, QTableWidgetItem(note))
         self.hdc10_stats_label.setText(
             f"匹配 {len(results)} / {len(self._hdc10_entries)} 条记录"
+        )
+
+    def _create_modular_iface_lookup_content(self, layout):
+        """模组化终端功能模块接口：信息类标识 / APDU / 控制码 查询页。"""
+        from modular_iface_parser import (
+            APDU_NAMES,
+            CTRL_FUNC_NAMES,
+            DTA1_MODULE_NAMES,
+            DTA2_RW,
+            GENERIC_DT_NAMES,
+        )
+
+        search_layout = QHBoxLayout()
+        search_label = QLabel("搜索：")
+        search_label.setFont(self._ui_font(0))
+        search_layout.addWidget(search_label)
+        self.modular_search = QLineEdit()
+        self.modular_search.setPlaceholderText("输入关键词搜索 APDU/控制码/信息类...")
+        self.modular_search.setFont(self._ui_font(0))
+        self.modular_search.textChanged.connect(self._load_modular_map_data)
+        search_layout.addWidget(self.modular_search)
+        layout.addLayout(search_layout)
+
+        self.modular_stats_label = QLabel()
+        self.modular_stats_label.setFont(self._ui_font(-1))
+        layout.addWidget(self.modular_stats_label)
+
+        self.modular_table = ZoomableTableWidget()
+        self.modular_table.setColumnCount(4)
+        self.modular_table.setHorizontalHeaderLabels(["分类", "代码", "名称", "说明"])
+        self.modular_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.modular_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.modular_table.setAlternatingRowColors(True)
+        self.modular_table.verticalHeader().hide()
+        header = self.modular_table.horizontalHeader()
+        header.setStretchLastSection(True)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        layout.addWidget(self.modular_table)
+
+        self._modular_entries = []
+        for code, name in APDU_NAMES.items():
+            self._modular_entries.append(
+                ("APDU", f"0x{code:02X}", name, "A-XDR CHOICE")
+            )
+        for code, name in CTRL_FUNC_NAMES.items():
+            self._modular_entries.append(
+                ("控制码", f"{code:02X}H", name, "确认/否认/信息")
+            )
+        for dta1, mname in DTA1_MODULE_NAMES.items():
+            self._modular_entries.append(
+                ("DTA1模块", f"{dta1}H", mname, "信息类标识高5位")
+            )
+        for dta2, rw in DTA2_RW.items():
+            self._modular_entries.append(
+                ("DTA2读写", f"{dta2}H", rw, "信息类标识 bit10~8")
+            )
+        # GENERIC_DT_NAMES 键为 (dta2, dtb)，固定 DTA1=0
+        for (dta2, dtb), gname in GENERIC_DT_NAMES.items():
+            dt_val = ((dta2 & 0x07) << 8) | (dtb & 0xFF)
+            self._modular_entries.append(
+                (
+                    "通用信息类",
+                    f"DT=0x{dt_val:04X}",
+                    gname,
+                    f"DTA1=0 DTA2={dta2:X}H DTB={dtb:02X}H",
+                )
+            )
+        self._load_modular_map_data()
+
+    def _load_modular_map_data(self):
+        search = (
+            self.modular_search.text().strip().lower()
+            if hasattr(self, "modular_search")
+            else ""
+        )
+        results = [
+            e
+            for e in self._modular_entries
+            if not search
+            or search in e[0].lower()
+            or search in e[1].lower()
+            or search in e[2].lower()
+            or search in str(e[3]).lower()
+        ]
+        self.modular_table.setRowCount(len(results))
+        for row, (cat, code, name, note) in enumerate(results):
+            self.modular_table.setItem(row, 0, QTableWidgetItem(cat))
+            self.modular_table.setItem(row, 1, QTableWidgetItem(str(code)))
+            self.modular_table.setItem(row, 2, QTableWidgetItem(name))
+            self.modular_table.setItem(row, 3, QTableWidgetItem(note or ""))
+        self.modular_stats_label.setText(
+            f"匹配 {len(results)} / {len(self._modular_entries)} 条记录"
         )
 
     def _load_oad_map_data(self):
@@ -7528,6 +7682,10 @@ class MainWindow(QMainWindow):
         if not getattr(self, "_proto_first_reflowed", False):
             self._proto_first_reflowed = True
             QTimer.singleShot(0, self._reflow_proto_group)
+        # 显示后按最终标题栏宽度重算协议名居中（构造期 width 可能还不是最终值；
+        # Windows 可能在 show 时微调边框/按钮区，resizeEvent 未必触发）
+        QTimer.singleShot(0, self._update_window_title)
+        QTimer.singleShot(150, self._update_window_title)
 
     def closeEvent(self, event):
         """关闭窗口：若启用托盘且非主动退出，最小化到托盘"""
@@ -8972,6 +9130,39 @@ class MainWindow(QMainWindow):
                 summary_parts.append(apdu_type)
             return " | ".join(summary_parts) if summary_parts else "-"
 
+        elif proto == 12:
+            # 模组化终端功能模块接口：方向 + 控制码 + 信息类 + APDU
+            # 行名与 `modular_iface_parser.parse()` 输出保持一致（AGENTS.md 陷阱 44：
+            # 摘要只认表内已有字段，不另立第二份判据）。
+            dir_val = ctrl_val = dt_raw = apdu_val = None
+            for item in table_data:
+                field_name = item[0]
+                parsed_val = str(item[2] or "").strip()
+                comment = str(item[3] or "").strip()
+                if field_name == "  传输方向(DIR)":
+                    dir_val = {"0": "终端→模块", "1": "模块→终端"}.get(parsed_val)
+                elif field_name == "  控制码":
+                    ctrl_val = parsed_val or comment
+                elif field_name == "    信息类标识(DT)":
+                    dt_raw = parsed_val  # 形如 0x0000
+                elif field_name == "    APDU 类型":
+                    apdu_val = parsed_val or comment
+            if dir_val:
+                summary_parts.append(dir_val)
+            if ctrl_val:
+                summary_parts.append(ctrl_val)
+            if dt_raw:
+                # 名称单一来源：与解析器同一个 dt_name（模块信息类也在内）
+                try:
+                    from modular_iface_data import dt_name as _dt_name
+
+                    summary_parts.append(f"信息类:{_dt_name(int(dt_raw, 16))}")
+                except (TypeError, ValueError):
+                    summary_parts.append(f"信息类:{dt_raw}")
+            if apdu_val:
+                summary_parts.append(apdu_val)
+            return " | ".join(summary_parts) if summary_parts else "-"
+
         elif proto == 9:
             # 新一代载波协议：区分网络层报文(MPDU/MAC/MMTYPE)与应用层报文(业务标识)
             return self._get_csg_new_gen_summary(table_data)
@@ -9508,6 +9699,10 @@ class MainWindow(QMainWindow):
             # 南网/国网：68开头，16结束，FT1.2帧格式
             clean = re.sub(r"[^0-9A-Fa-f]", "", text).upper()
             return self._extract_68_frames(clean)
+        if strategy == "modular":
+            # 模组化接口：68 + L(数据域长度) + … + FCS + 16；整帧 = L+8
+            clean = re.sub(r"[^0-9A-Fa-f]", "", text).upper()
+            return self._extract_modular_frames(clean)
         if strategy == "dlt698_45":
             # 698.45：68开头，16结束，但长度域定义不同
             clean = re.sub(r"[^0-9A-Fa-f]", "", text).upper()
@@ -9742,6 +9937,44 @@ class MainWindow(QMainWindow):
             i = pos + frame_hex_len
             continue
 
+        return frames
+
+    def _extract_modular_frames(self, clean: str) -> list:
+        """提取模组化终端功能模块接口帧。
+
+        帧: 68H | L(2B LE, bit0~11=数据域长度) | C(2B) | Data | FCS(2B) | 16H
+        整帧长度 = 数据域长度 + 8。
+        """
+        frames = []
+        i = 0
+        while i < len(clean) - 7:
+            pos = clean.find("68", i)
+            if pos == -1:
+                break
+            if pos + 6 > len(clean):
+                i = pos + 2
+                continue
+            try:
+                low = int(clean[pos + 2 : pos + 4], 16)
+                high = int(clean[pos + 4 : pos + 6], 16)
+                data_len = (low | (high << 8)) & 0x0FFF
+            except ValueError:
+                i = pos + 2
+                continue
+            if data_len > 4095:
+                i = pos + 2
+                continue
+            total_len = data_len + 8
+            frame_hex_len = total_len * 2
+            if pos + frame_hex_len > len(clean):
+                i = pos + 2
+                continue
+            candidate = clean[pos : pos + frame_hex_len]
+            if candidate[-2:] != "16":
+                i = pos + 2
+                continue
+            frames.append(candidate)
+            i = pos + frame_hex_len
         return frames
 
     def _extract_generic_frames(
@@ -10980,13 +11213,33 @@ class MainWindow(QMainWindow):
                     val = str(item[3] or item[2] or "")
                     if val:
                         return val
+            # 无 FC 裸 MAC/应用层帧：优先取业务名（如“开始升级”），复用
+            # batch_core.gw_app_biz_summary 单一规则；取不到再退回 MSDU 类型/
+            # 报文ID（item[2] 解析值优先，并排除“安全模式:…”说明）。曾误用
+            # 「报文ID」行的**说明列**作为类型名（9e60ba6 潜伏红测试根因）
+            biz_name, _ = batch_core.gw_app_biz_summary(table_data)
+            if biz_name:
+                return biz_name
             for item in table_data:
                 field = str(item[0]).strip()
                 if field in ("MSDU类型", "报文ID", "业务报文ID"):
-                    val = str(item[3] or item[2] or "")
-                    if val:
+                    val = str(item[2] or item[3] or "")
+                    if val and not val.startswith("安全模式"):
                         return val
             return "HDC 1.0"
+
+        elif proto == 12:  # 模组化终端功能模块接口
+            # 信息帧取 APDU 名，确认/否认帧取控制码名（不能落到薜底分支：
+            # 注册表展示名以“[12]”开头，split(" ")[0] 会得到“[12]”）
+            ctrl_val = None
+            for item in table_data:
+                field = str(item[0])
+                parsed_val = str(item[2] or "").strip()
+                if field == "    APDU 类型" and parsed_val:
+                    return parsed_val
+                if field == "  控制码" and not ctrl_val:
+                    ctrl_val = parsed_val or str(item[3] or "").strip()
+            return ctrl_val or "模组化接口"
 
         elif proto == 6:  # DLT645
             for item in table_data:

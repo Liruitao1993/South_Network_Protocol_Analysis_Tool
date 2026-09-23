@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "组帧页新增第 5 模式、查询页重做、预设命令模式都必须遵循本项目的 PySide6 组件约定（按钮 set_btn/set_btn_icon、ZoomableTableWidget + 右键复制菜单、app_icons、无自定义 stylesheet、懒加载 tab）"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "核心就是「不写第二份实现」：A-XDR 单源 modular_iface_axdr.py、静态表单源 modular_iface_data.py；并避免 DAR 表这类从其它协议搬表导致的重复"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "链路层(小端)/A-XDR 层(大端)/解析器/组帧器/注册表/GUI 五层契约边界，以及解析→表格→摘要→GUI 高亮的数据流贯通"}
+{"file": "协议文档/12.模组化功能协议/模组化终端功能模块接口协议.md", "reason": "唯一权威协议文档：§5 链路层、§6 应用层(A-XDR)、§7 信息类标识、附录 A(FCS 表)、附录 B~M(信息类/单位/设备子接口)。所有静态表与断言必须从此处逐条抄录"}
+{"file": "面向对象的用电信息数据交换协议(20210910).md", "reason": "同族标准 DL/T 698.45：其附录 H.1.1「登录」含真实 A-XDR 编码示例（date_time 逐字节），是协议12 文档无示例帧时唯一可用的编码 oracle"}

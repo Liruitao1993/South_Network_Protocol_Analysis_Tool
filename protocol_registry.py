@@ -246,6 +246,28 @@ _PROTOS: Tuple[ProtocolSpec, ...] = (
         validator_class="validator.hdc10_validator:HDC10Validator",
         parser_wrapper="hdc10",
     ),
+    ProtocolSpec(
+        index=12,
+        name="[12] 模组化终端功能模块接口",
+        short_name="模组化接口",
+        parser_key="modular",
+        placeholder="请输入模组化接口报文，例如：68 … 16",
+        aliases=(
+            "模组化",
+            "模组化接口",
+            "模组化终端",
+            "modular",
+            "modular_iface",
+            "functional module",
+        ),
+        frame_gen_mode="modular",
+        preset_mode="modular",
+        lookup_kind="modular",
+        lookup_tab_title="信息类查询",
+        extract_strategy="modular",
+        validator_class="validator.modular_iface_validator:ModularIfaceValidator",
+        parser_wrapper="direct",
+    ),
 )
 
 _BY_INDEX = {p.index: p for p in _PROTOS}
@@ -509,6 +531,7 @@ def lookup_builder_method(kind: Optional[str]) -> Optional[str]:
         "csg": "_create_csg_new_gen_lookup_content",
         "gw": "_create_gw_new_gen_lookup_content",
         "hdc10": "_create_hdc10_lookup_content",
+        "modular": "_create_modular_iface_lookup_content",
     }
     if not kind:
         return None

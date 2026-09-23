@@ -38,6 +38,16 @@ from dlt645_frame_schema import (
     list_commands,
 )
 from dlt645_parser import DLT645Parser
+from modular_iface_frame_gen import (
+    CTRL_INFO,
+    build_frame as modular_build_frame,
+    build_get_request as modular_build_get_request,
+    build_set_request as modular_build_set_request,
+    dt_code as modular_dt_code,
+    encode_nak_domain as modular_encode_nak_domain,
+    templates as modular_templates,
+)
+from modular_iface_parser import ModularIfaceParser
 
 
 # =============================================================================
@@ -522,6 +532,85 @@ class FrameGenWidget(QWidget):
         self.dlt645_config_group.setVisible(False)
         left_layout.addWidget(self.dlt645_config_group)
 
+        # ---- 模组化终端功能模块接口（协议12）命令选择 + 帧配置（默认隐藏）----
+        self._current_modular_key = None
+
+        self.modular_combo = QComboBox()
+        self.modular_combo.setMinimumWidth(360)
+        self.modular_combo.setEditable(True)
+        self.modular_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.modular_combo.completer().setCompletionMode(
+            self.modular_combo.completer().CompletionMode.PopupCompletion)
+        self.modular_combo.completer().setFilterMode(Qt.MatchFlag.MatchContains)
+        self.modular_combo.completer().popup().setStyleSheet(
+            "background-color: #ffffff; color: #000000; "
+            "selection-background-color: #2196F3; selection-color: #ffffff;"
+        )
+        self._populate_modular_combo()
+        self.modular_combo.currentIndexChanged.connect(self._on_modular_cmd_changed)
+        self.modular_combo.currentIndexChanged.connect(self._schedule_realtime_update)
+        self.modular_combo.setVisible(False)
+        cmd_layout.addWidget(self.modular_combo)
+
+        self.modular_config_group = QGroupBox("模组化接口 帧配置")
+        dmod_layout = QVBoxLayout(self.modular_config_group)
+        dmod_layout.setContentsMargins(6, 4, 6, 4)
+        dmod_layout.setSpacing(4)
+
+        dmod_ctrl = QHBoxLayout()
+        dmod_ctrl.setSpacing(6)
+        dmod_ctrl.addWidget(QLabel("DIR:"))
+        self.modular_dir = QComboBox()
+        self.modular_dir.addItem("0-终端→模块", 0)
+        self.modular_dir.addItem("1-模块→终端", 1)
+        self.modular_dir.setToolTip("传输方向：0=终端发出，1=功能模块发出")
+        dmod_ctrl.addWidget(self.modular_dir)
+
+        dmod_ctrl.addWidget(QLabel("PRM:"))
+        self.modular_prm = QComboBox()
+        self.modular_prm.addItem("1-发起(请求)", 1)
+        self.modular_prm.addItem("0-响应", 0)
+        self.modular_prm.setToolTip("启动标志：1=终端发起，0=模块发起")
+        dmod_ctrl.addWidget(self.modular_prm)
+
+        dmod_ctrl.addWidget(QLabel("FID:"))
+        self.modular_fid = QLineEdit("0")
+        self.modular_fid.setFixedWidth(40)
+        self.modular_fid.setToolTip("帧序号 0~255，循环递增")
+        dmod_ctrl.addWidget(self.modular_fid)
+        dmod_ctrl.addStretch()
+        dmod_layout.addLayout(dmod_ctrl)
+
+        dmod_dt = QHBoxLayout()
+        dmod_dt.setSpacing(6)
+        dmod_dt.addWidget(QLabel("DT:"))
+        self.modular_dta1 = QLineEdit("0")
+        self.modular_dta1.setFixedWidth(36)
+        self.modular_dta1.setToolTip("DTA1（bit15~11），十进制/0x 前缀 hex")
+        dmod_dt.addWidget(self.modular_dta1)
+        self.modular_dta2 = QLineEdit("0")
+        self.modular_dta2.setFixedWidth(36)
+        self.modular_dta2.setToolTip("DTA2（bit10~8）")
+        dmod_dt.addWidget(self.modular_dta2)
+        self.modular_dtb = QLineEdit("00")
+        self.modular_dtb.setFixedWidth(48)
+        self.modular_dtb.setToolTip("DTB（bit7~0），如 00=模块信息")
+        dmod_dt.addWidget(self.modular_dtb)
+        dmod_dt.addWidget(QLabel("Data(hex):"))
+        self.modular_data = QLineEdit()
+        self.modular_data.setPlaceholderText("A-XDR 数据域，可空")
+        self.modular_data.setToolTip("Set/Report 等带数据的 APDU 的 Data 部分（不含 CHOICE 标签与 DT）")
+        dmod_dt.addWidget(self.modular_data, 1)
+        dmod_layout.addLayout(dmod_dt)
+
+        self.modular_hint = QLabel("")
+        self.modular_hint.setStyleSheet("color: #888;")
+        self.modular_hint.setWordWrap(True)
+        dmod_layout.addWidget(self.modular_hint)
+
+        self.modular_config_group.setVisible(False)
+        left_layout.addWidget(self.modular_config_group)
+
         # ---- 模式切换 ----
         self.mode_group = QGroupBox("字段模式")
         mode_layout = QHBoxLayout(self.mode_group)
@@ -731,6 +820,15 @@ class FrameGenWidget(QWidget):
         # 初始化 SA 输入框长度限制
         self._on_dlt698_addr_len_changed(0)
 
+        # ---- 连接模组化控件的实时更新信号 ----
+        self.modular_dir.currentIndexChanged.connect(self._schedule_realtime_update)
+        self.modular_prm.currentIndexChanged.connect(self._schedule_realtime_update)
+        self.modular_fid.textChanged.connect(self._schedule_realtime_update)
+        self.modular_dta1.textChanged.connect(self._schedule_realtime_update)
+        self.modular_dta2.textChanged.connect(self._schedule_realtime_update)
+        self.modular_dtb.textChanged.connect(self._schedule_realtime_update)
+        self.modular_data.textChanged.connect(self._schedule_realtime_update)
+
         apply_chinese_context_menus(self)
 
     # ------------------------------------------------------------------
@@ -790,6 +888,8 @@ class FrameGenWidget(QWidget):
             self._rebuild_field_form(self._current_di_key)
         elif self.protocol_mode == "dlt698":
             self._rebuild_dlt698_field_form(self._current_dlt698_key)
+        elif self.protocol_mode == "modular":
+            pass  # 字段在配置组，无表单
         else:
             self._rebuild_gdw_field_form(self._current_afn_fn)
 
@@ -1300,7 +1400,8 @@ class FrameGenWidget(QWidget):
         self._field_widgets.clear()
 
         if not di_key:
-            self.mode_group.setVisible(True)
+            # 模组化字段在配置组里，不需要「字段模式」区
+            self.mode_group.setVisible(self.protocol_mode != "modular")
             return
 
         schema = DI_FIELD_SCHEMA.get(di_key)
@@ -1551,6 +1652,153 @@ class FrameGenWidget(QWidget):
             self._custom_mode = False
 
         self._rebuild_dlt698_field_form(key)
+
+    # ------------------------------------------------------------------
+    # 模组化终端功能模块接口（协议12）命令下拉与组帧
+    # ------------------------------------------------------------------
+    def _populate_modular_combo(self):
+        """模板下拉 + 自定义数据域；itemData = template key 或 '_custom_'"""
+        self.modular_combo.clear()
+        self.modular_combo.addItem("-- 请选择命令模板 --", None)
+        for t in modular_templates():
+            self.modular_combo.addItem(f"【模板】 {t['label']}", t["key"])
+        self.modular_combo.addItem("【自定义】 自定义数据域 (DT + Data hex)", "_custom_")
+
+    def _on_modular_cmd_changed(self, *_args):
+        key = self.modular_combo.currentData()
+        self._current_modular_key = key
+        self.cmd_help_btn.setEnabled(key is not None and key != "_custom_")
+        self._rebuild_modular_form(key)
+
+    def _rebuild_modular_form(self, key):
+        """按模板回填 DIR/PRM/DT/Data；自定义则清空可编辑"""
+        if not key:
+            self.modular_hint.setText("")
+            self.mode_group.setVisible(False)
+            self._clear_layout(self._form_layout)
+            self._field_widgets.clear()
+            return
+        self.mode_group.setVisible(False)
+        self._custom_mode = False
+        self._axdr_mode = False
+        self._clear_layout(self._form_layout)
+        self._field_widgets.clear()
+
+        if key == "_custom_":
+            self.modular_hint.setText(
+                "自定义：DIR/PRM/FID + DT(DTA1/DTA2/DTB) + Data hex 自行填写")
+            return
+
+        tpl = next((t for t in modular_templates() if t["key"] == key), None)
+        if not tpl:
+            self.modular_hint.setText("")
+            return
+        idx = self.modular_dir.findData(tpl["dir"])
+        if idx >= 0:
+            self.modular_dir.blockSignals(True)
+            self.modular_dir.setCurrentIndex(idx)
+            self.modular_dir.blockSignals(False)
+        idx = self.modular_prm.findData(tpl["prm"])
+        if idx >= 0:
+            self.modular_prm.blockSignals(True)
+            self.modular_prm.setCurrentIndex(idx)
+            self.modular_prm.blockSignals(False)
+        # 按模板 key 预填常见 DT（仅 Get 类可编辑 DT 生效）
+        if key.startswith("get_") and not key.startswith("get_rsp"):
+            presets = {
+                "get_module_info": ("0", "0", "00"),
+                "get_link_neg": ("0", "0", "01"),
+                "get_proto_ver": ("0", "0", "02"),
+                "get_clock": ("0", "1", "00"),
+            }
+            d1, d2, db = presets.get(key, ("0", "0", "00"))
+            for w, v in ((self.modular_dta1, d1), (self.modular_dta2, d2),
+                         (self.modular_dtb, db)):
+                w.blockSignals(True)
+                w.setText(v)
+                w.blockSignals(False)
+            self.modular_data.clear()
+            self.modular_hint.setText("GetRequest：仅需 DT，Data 为空（可改 DT 字段）")
+        elif key in ("ack", "nak"):
+            self.modular_hint.setText(
+                "确认/否认帧：数据域由模板生成，DT/Data 不参与")
+            if key == "nak":
+                self.modular_data.setText("02 00")
+            else:
+                self.modular_data.clear()
+        elif key in ("link_req", "link_rsp"):
+            self.modular_hint.setText(
+                "链路协商：Data 为 A-XDR 链路信息（模板已生成）")
+            self.modular_data.clear()
+        else:
+            self.modular_hint.setText(tpl["label"])
+            self.modular_data.clear()
+
+    def _parse_modular_int(self, edit: QLineEdit, default: int = 0) -> int:
+        text = (edit.text() or "").strip()
+        if not text:
+            return default
+        # 前导 0 的十进制（如 "01"/"00"）用 base 0 会当非法八进制 → 优先按十进制
+        try:
+            if text.lower().startswith(("0x", "0b", "0o")):
+                return int(text, 0)
+            return int(text, 10)
+        except ValueError:
+            try:
+                return int(text, 0)
+            except ValueError:
+                return default
+
+    def _modular_control(self, key) -> tuple:
+        """返回 (dir, prm, func, fid)；DIR/PRM 以控件为准，func 取模板"""
+        tpl = next((t for t in modular_templates()
+                    if key and t["key"] == key), None)
+        dir_bit = self.modular_dir.currentData()
+        prm = self.modular_prm.currentData()
+        func = tpl["func"] if tpl else CTRL_INFO
+        fid = self._parse_modular_int(self.modular_fid, 0) & 0xFF
+        return int(dir_bit), int(prm), int(func), fid
+
+    def _build_modular_apdu(self, key) -> bytes:
+        """按模板/自定义拼 Data 域（含 APDU CHOICE）"""
+        if key and key != "_custom_":
+            tpl = next((t for t in modular_templates() if t["key"] == key), None)
+            if tpl is None:
+                raise ValueError(f"未知模板: {key}")
+            # GetRequest 允许用界面 DT 覆盖模板默认
+            if key.startswith("get_") and not key.startswith("get_rsp"):
+                d1 = self._parse_modular_int(self.modular_dta1, 0)
+                d2 = self._parse_modular_int(self.modular_dta2, 0)
+                db = self._parse_modular_int(self.modular_dtb, 0)
+                return modular_build_get_request(modular_dt_code(d1, d2, db))
+            if key == "ack":
+                return b""
+            if key == "nak":
+                return modular_encode_nak_domain(
+                    self._parse_modular_int(self.modular_data, 0)
+                    if self.modular_data.text().strip() else 2
+                )
+            return bytes(tpl["build"]())
+
+        # 自定义：DT + Data hex
+        d1 = self._parse_modular_int(self.modular_dta1, 0)
+        d2 = self._parse_modular_int(self.modular_dta2, 0)
+        db = self._parse_modular_int(self.modular_dtb, 0)
+        dt = modular_dt_code(d1, d2, db)
+        data_text = self.modular_data.text().strip().replace(" ", "")
+        if data_text:
+            # 自定义 Data 按 SetRequest 编码：仅接受可编码类型的简单值
+            # hex 字节流 → octet-string（若不支持则原样 Set NULL 失败时回退 Get）
+            try:
+                return modular_build_set_request(
+                    dt, bytes.fromhex(data_text), "octet-string"
+                )
+            except Exception:
+                try:
+                    return modular_build_set_request(dt, int(data_text, 16), "double-long-unsigned")
+                except Exception:
+                    return modular_build_get_request(dt)
+        return modular_build_get_request(dt)
 
     # ------------------------------------------------------------------
     # DLT645-2007（协议6）命令下拉、DI 驱动字段与组帧
@@ -3065,6 +3313,9 @@ class FrameGenWidget(QWidget):
     # ------------------------------------------------------------------
     def _collect_values(self) -> Dict[str, Any]:
         values: Dict[str, Any] = {}
+        if self.protocol_mode == "modular":
+            # 模组化字段不在 _field_widgets，走配置组；快照单独收集
+            return values
         if self.protocol_mode == "south":
             if not self._current_di_key:
                 return values
@@ -3294,10 +3545,46 @@ class FrameGenWidget(QWidget):
                 self._do_realtime_update_dlt698()
             elif self.protocol_mode == "dlt645":
                 self._do_realtime_update_dlt645()
+            elif self.protocol_mode == "modular":
+                self._do_realtime_update_modular()
             else:
                 self._do_realtime_update_gdw()
         except Exception:
             pass
+
+    def _build_modular_frame(self) -> bytes:
+        """由当前配置生成完整 68…16 帧"""
+        if not self._current_modular_key:
+            raise ValueError("请先选择命令模板")
+        apdu = self._build_modular_apdu(self._current_modular_key)
+        dir_bit, prm, func, fid = self._modular_control(self._current_modular_key)
+        return modular_build_frame(
+            apdu, dir_bit=dir_bit, prm=prm, func=func, fid=fid
+        )
+
+    def _do_realtime_update_modular(self):
+        """模组化接口实时组帧与解析"""
+        if not self._current_modular_key:
+            self.preview_table.setRowCount(0)
+            return
+        try:
+            frame = self._build_modular_frame()
+        except Exception:
+            self.preview_table.setRowCount(0)
+            return
+        hex_str = frame.hex().upper()
+        self.result_hex.setText(
+            " ".join(hex_str[i:i + 2] for i in range(0, len(hex_str), 2)))
+        try:
+            rows = ModularIfaceParser().parse_to_table(frame)
+        except Exception:
+            self.preview_table.setRowCount(0)
+            return
+        table_rows = []
+        for item in rows:
+            it = tuple(item)
+            table_rows.append(it + ("",) * max(0, 4 - len(it)))
+        self._populate_preview_table(table_rows)
 
     def _do_realtime_update_dlt645(self):
         """DLT645-2007 实时组帧与解析（200ms 轮询）
@@ -3618,10 +3905,26 @@ class FrameGenWidget(QWidget):
                 self._generate_dlt698_frame()
             elif self.protocol_mode == "dlt645":
                 self._generate_dlt645_frame()
+            elif self.protocol_mode == "modular":
+                self._generate_modular_frame()
             else:
                 self._generate_gdw_frame()
         except Exception as e:
             QMessageBox.critical(self, "错误", f"组帧失败：{str(e)}")
+
+    def _generate_modular_frame(self):
+        """生成模组化终端功能模块接口帧"""
+        if not self._current_modular_key:
+            QMessageBox.warning(self, "警告", "请先选择命令模板")
+            return
+        try:
+            frame = self._build_modular_frame()
+        except Exception as e:
+            QMessageBox.warning(self, "组帧失败", f"生成帧时出错:\n{e}")
+            return
+        hex_str = frame.hex().upper()
+        formatted = " ".join(hex_str[i:i+2] for i in range(0, len(hex_str), 2))
+        self.result_hex.setText(formatted)
 
     def _generate_south_frame(self):
         """生成南网协议帧"""
@@ -3965,6 +4268,18 @@ class FrameGenWidget(QWidget):
             },
         }
 
+        if self.protocol_mode == "modular":
+            snapshot["modular"] = {
+                "template_key": self._current_modular_key,
+                "dir": self.modular_dir.currentData(),
+                "prm": self.modular_prm.currentData(),
+                "fid": self.modular_fid.text(),
+                "dta1": self.modular_dta1.text(),
+                "dta2": self.modular_dta2.text(),
+                "dtb": self.modular_dtb.text(),
+                "data": self.modular_data.text(),
+            }
+
         # 收集字段值
         try:
             snapshot["field_values"] = self._collect_values()
@@ -3997,6 +4312,34 @@ class FrameGenWidget(QWidget):
 
         # 恢复协议模式（由外部先调用 set_protocol_mode，这里只校验）
         mode = config.get("protocol_mode", self.protocol_mode)
+
+        # 恢复模组化配置
+        mod = config.get("modular")
+        if mod and hasattr(self, "modular_combo"):
+            if "dir" in mod:
+                idx = self.modular_dir.findData(mod["dir"])
+                if idx >= 0:
+                    self.modular_dir.setCurrentIndex(idx)
+            if "prm" in mod:
+                idx = self.modular_prm.findData(mod["prm"])
+                if idx >= 0:
+                    self.modular_prm.setCurrentIndex(idx)
+            if "fid" in mod:
+                self.modular_fid.setText(str(mod["fid"]))
+            if "dta1" in mod:
+                self.modular_dta1.setText(str(mod["dta1"]))
+            if "dta2" in mod:
+                self.modular_dta2.setText(str(mod["dta2"]))
+            if "dtb" in mod:
+                self.modular_dtb.setText(str(mod["dtb"]))
+            if "data" in mod:
+                self.modular_data.setText(str(mod["data"]))
+            tpl_key = mod.get("template_key")
+            if tpl_key:
+                for i in range(self.modular_combo.count()):
+                    if self.modular_combo.itemData(i) == tpl_key:
+                        self.modular_combo.setCurrentIndex(i)
+                        break
 
         # 恢复南网配置
         south = config.get("south", {})
@@ -4203,6 +4546,9 @@ class FrameGenWidget(QWidget):
                 # 协议6 原先落进 else 分支被 gdw_parser 解析 → 收到回包也只显示解析失败
                 table_data = self._dlt645_to_table(frame)
                 key_fields = ("控制码", "数据标识 DI", "从站地址")
+            elif self.protocol_mode == "modular":
+                table_data = ModularIfaceParser().parse_to_table(frame)
+                key_fields = ("  控制码", "  帧序号(FID)", "  传输方向(DIR)", "控制域")
             else:
                 table_data = self.gdw_parser.parse_to_table(frame)
                 key_fields = ("应用功能码(AFN)", "数据单元标识(DT)", "传输方向")
@@ -4260,8 +4606,8 @@ class FrameGenWidget(QWidget):
     # 协议模式切换
     # ------------------------------------------------------------------
     def set_protocol_mode(self, mode: str):
-        """切换协议模式: 'south'='南网', 'gdw'='国网', 'dlt698'='698.45', 'dlt645'='DLT645-2007'"""
-        if mode not in ("south", "gdw", "dlt698", "dlt645"):
+        """切换协议模式: 'south'/'gdw'/'dlt698'/'dlt645'/'modular'"""
+        if mode not in ("south", "gdw", "dlt698", "dlt645", "modular"):
             return
         self.protocol_mode = mode
 
@@ -4270,10 +4616,12 @@ class FrameGenWidget(QWidget):
         self.afn_fn_combo.setVisible(False)
         self.dlt698_combo.setVisible(False)
         self.dlt645_combo.setVisible(False)
+        self.modular_combo.setVisible(False)
         self.south_config_group.setVisible(False)
         self.gdw_config_group.setVisible(False)
         self.dlt698_config_group.setVisible(False)
         self.dlt645_config_group.setVisible(False)
+        self.modular_config_group.setVisible(False)
 
         # 切换命令选择区
         if mode == "south":
@@ -4294,6 +4642,14 @@ class FrameGenWidget(QWidget):
             self.mode_custom_rb.setVisible(False)
             self._custom_mode = False
             self._dlt645_addr_touched = False
+        elif mode == "modular":
+            self.cmd_select_group.setTitle("命令模板选择")
+            self.modular_combo.setVisible(True)
+            self.modular_config_group.setVisible(True)
+            self.mode_custom_rb.setVisible(False)
+            self.mode_group.setVisible(False)
+            self._custom_mode = False
+            self._axdr_mode = False
         else:  # gdw
             self.cmd_select_group.setTitle("AFN+Fn 选择")
             self.afn_fn_combo.setVisible(True)
@@ -4312,6 +4668,7 @@ class FrameGenWidget(QWidget):
         self._current_afn_fn = None
         self._current_dlt698_key = None
         self._current_dlt645_key = None
+        self._current_modular_key = None
         self._dlt645_field_widgets.clear()
         self.dlt645_verify_label.setText("")
         self.dlt645_warn_label.setText("")
@@ -4324,6 +4681,11 @@ class FrameGenWidget(QWidget):
         # 又因首个命令就是下拉第 0 项，setCurrentIndex(0) 不会发信号，故需显式刷新。
         if mode == "dlt645":
             self._reset_dlt645_selection()
+        elif mode == "modular":
+            # 同理：显式选中首个模板并回填
+            if self.modular_combo.count() > 1:
+                self.modular_combo.setCurrentIndex(1)
+            self._on_modular_cmd_changed()
 
     # ------------------------------------------------------------------
     # 公共接口
@@ -4367,6 +4729,17 @@ class FrameGenWidget(QWidget):
             self.dlt645_verify_label.setText("")
             self.dlt645_warn_label.setText("")
             self._reset_dlt645_selection()
+        if hasattr(self, "modular_combo"):
+            self._current_modular_key = None
+            self.modular_combo.setCurrentIndex(0)
+            self.modular_hint.setText("")
+            self.modular_dir.setCurrentIndex(0)
+            self.modular_prm.setCurrentIndex(0)
+            self.modular_fid.setText("0")
+            self.modular_dta1.setText("0")
+            self.modular_dta2.setText("0")
+            self.modular_dtb.setText("00")
+            self.modular_data.clear()
         self.result_hex.clear()
         if hasattr(self, 'preview_table'):
             self.preview_table.setRowCount(0)

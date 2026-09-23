@@ -697,10 +697,13 @@ def t_reset_default(win, sandbox, defaults):
 # [9] 协议切换（12 个）
 # ══════════════════════════════════════════════════════════════
 def t_protocol_switch(win, sandbox):
-    section("9. 协议切换：12 个逐个切，不崩、不套错宽度")
+    section("9. 协议切换：逐个切，不崩、不套错宽度")
     app = _app()
     total = win.protocol_combo.count()
-    check("协议下拉共 12 项", total == 12, str(total))
+    # 与注册表同源比对：新增协议时不必再改这里的硬编码数字（协议12 曾因此变红）
+    import protocol_registry
+    _want = len(protocol_registry.combo_labels())
+    check("协议下拉项数与注册表一致", total == _want, f"{total} vs {_want}")
     target = 33
     covered = []
     raised = ""

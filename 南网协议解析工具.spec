@@ -76,6 +76,7 @@ a = Analysis(
         ('custom_di.json', '.'),
         ('dlt645_di.json', '.'),
         ('DLT645_command.json', '.'),  # 协议6 预设命令种子数据
+        ('MODULAR_command.json', '.'),  # 协议12 预设命令种子数据
         ('gdw_custom_afn.json', '.'),
         ('meter_sim_data.json', '.'),  # 虚拟表（698.45 从站模拟器）档案种子数据
         ('icons', 'icons'),
@@ -147,6 +148,11 @@ a = Analysis(
         'dlt645_data_codec',  # DLT645标准数据值解码（dlt645_parser 静态 import，显式声明保险）
         'dlt645_frame_gen',  # DLT645-2007 帧生成（frame_gen_widget 静态 import，显式声明保险）
         'dlt645_frame_schema',  # DLT645 组帧命令 schema（frame_gen_widget 静态 import）
+        'modular_iface_parser',  # 模组化接口解析
+        'modular_iface_frame_gen',  # 模组化接口组帧（frame_gen_widget 静态 import）
+        'modular_iface_axdr',  # 模组化 A-XDR 编解码单源
+        'modular_iface_data',  # 模组化静态表单源（信息类/单位/子接口）
+        'validator.modular_iface_validator',  # make_validator importlib
         'dlt645_sim',  # DLT645 虚拟表包（从站引擎 + LME 下发，dlt645_meter_sim_widget 静态 import）
         'dlt645_sim.engine',
         'dlt645_sim.archive',

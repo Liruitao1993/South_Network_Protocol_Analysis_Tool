@@ -2138,12 +2138,18 @@ def get_frame_type_name(
                 val = str(item[3] or item[2] or "")
                 if val:
                     return val
-        # 无 FC 的裸 MAC/应用层帧：退回 MSDU 类型 / 业务名
+        # 无 FC 的裸 MAC/应用层帧：优先取业务名（协议11 业务数据布局，如
+        # “开始升级”），复用 gw_app_biz_summary 单一规则；取不到再退回
+        # MSDU 类型 / 报文ID。曾误用「报文ID」行的**说明列**（“安全模式:…,
+        # 业务ID:…”)作为类型名（9e60ba6 潜伏红测试根因）
+        biz_name, _ = gw_app_biz_summary(table_data)
+        if biz_name:
+            return biz_name
         for item in table_data:
             field = str(item[0]).strip()
             if field in ("MSDU类型", "报文ID", "业务报文ID"):
-                val = str(item[3] or item[2] or "")
-                if val:
+                val = str(item[2] or item[3] or "")
+                if val and not val.startswith("安全模式"):
                     return val
         return "HDC 1.0"
 

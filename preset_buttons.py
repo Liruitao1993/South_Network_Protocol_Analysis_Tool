@@ -24,11 +24,12 @@ from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu, s
 from app_paths import data_path
 
 
-# 南网、国网、698.45、DLT645 各自独立的预设文件
+# 南网、国网、698.45、DLT645、模组化 各自独立的预设文件
 NW_COMMAND_PATH = data_path("NW_command.json")
 GW_COMMAND_PATH = data_path("GW_command.json")
 DLT698_COMMAND_PATH = data_path("DLT698_command.json")
 DLT645_COMMAND_PATH = data_path("DLT645_command.json")
+MODULAR_COMMAND_PATH = data_path("MODULAR_command.json")
 
 
 def _get_path(protocol: str) -> Path:
@@ -38,6 +39,8 @@ def _get_path(protocol: str) -> Path:
         return DLT698_COMMAND_PATH
     if protocol == "dlt645":
         return DLT645_COMMAND_PATH
+    if protocol == "modular":
+        return MODULAR_COMMAND_PATH
     return GW_COMMAND_PATH
 
 
@@ -112,7 +115,7 @@ class AddPresetDialog(QDialog):
 
         # 协议显示
         proto_names = {"south": "南网协议", "gdw": "国网协议", "dlt698": "698.45 协议",
-                       "dlt645": "DLT645-2007 电表协议"}
+                       "dlt645": "DLT645-2007 电表协议", "modular": "模组化终端功能模块接口"}
         proto_label = QLabel(
             f"协议: {proto_names.get(self._protocol, self._protocol)}"
         )
@@ -215,11 +218,11 @@ class PresetButtonWidget(QWidget):
 
     def set_protocol(self, protocol: str):
         """切换当前显示的协议预设"""
-        if protocol in ("south", "gdw", "dlt698", "dlt645") and protocol != self._protocol:
+        if protocol in ("south", "gdw", "dlt698", "dlt645", "modular") and protocol != self._protocol:
             self._protocol = protocol
             self.load_buttons()
             proto_display = {"south": "南网", "gdw": "国网", "dlt698": "698.45",
-                             "dlt645": "DLT645"}[protocol]
+                             "dlt645": "DLT645", "modular": "模组化"}[protocol]
             self.log_text.append(f"[系统] 已切换至 {proto_display}预设命令")
 
     def setup_ui(self):
@@ -284,6 +287,8 @@ class PresetButtonWidget(QWidget):
             return None  # 698 预设无自定义路径，回退模块默认 DLT698_command.json
         if self._protocol == "dlt645":
             return None  # 645 预设无自定义路径，回退模块默认 DLT645_command.json
+        if self._protocol == "modular":
+            return None  # 模组化预设无自定义路径，回退模块默认 MODULAR_command.json
         return self._gw_path
 
     def set_file_paths(self, nw_path: Optional[Path] = None, gw_path: Optional[Path] = None):
@@ -370,7 +375,8 @@ class PresetButtonWidget(QWidget):
         )
 
         # 日志输出
-        proto_display = {"south": "南网", "gdw": "国网", "dlt698": "698.45"}.get(protocol, protocol)
+        proto_display = {"south": "南网", "gdw": "国网", "dlt698": "698.45",
+                         "dlt645": "DLT645", "modular": "模组化"}.get(protocol, protocol)
         log_line = (
             f"[{self._current_time()}] [{proto_display}] [{group_name}] "
             f"{btn_name}  ->  {frame_hex}"

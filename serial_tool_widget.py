@@ -528,8 +528,21 @@ def coerce_enabled(value) -> bool:
     return True
 
 
+def coerce_send_count(value) -> int:
+    """命令级发送次数：每轮对该命令连发 N 次。默认 1，范围 1~9999。"""
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return 1
+    if n < 1:
+        return 1
+    if n > 9999:
+        return 9999
+    return n
+
+
 def normalize_command(raw: dict, fallback_name: str = "未命名") -> Optional[dict]:
-    """把一条命令归一化为 ``{name, data_hex, match_type, match_hex, protocol, enabled}``。
+    """把一条命令归一化为 ``{name, data_hex, match_type, match_hex, protocol, enabled, send_count}``。
 
     发送数据非法（无法解析成 hex）时返回 None（该条丢弃）。
     """
@@ -571,6 +584,8 @@ def normalize_command(raw: dict, fallback_name: str = "未命名") -> Optional[d
         "protocol": coerce_protocol(raw.get("protocol")),
         # 旧配置无该键 → True（全选），与旧版本「只能全部发送」等价
         "enabled": coerce_enabled(raw.get("enabled")),
+        # 命令级发送次数（旧配置无该键 → 1）
+        "send_count": coerce_send_count(raw.get("send_count", 1)),
     }
 
 
@@ -600,6 +615,7 @@ def export_commands(commands: List[dict]) -> List[dict]:
         item = {k: v for k, v in cmd.items() if not str(k).startswith("_")}
         item["protocol"] = coerce_protocol(item.get("protocol"))
         item["enabled"] = coerce_enabled(item.get("enabled"))
+        item["send_count"] = coerce_send_count(item.get("send_count", 1))
         out.append(item)
     return out
 
@@ -1058,14 +1074,25 @@ def frame_length_for(strategy: str, buf) -> int:
 
     68 家族三者的判别顺序与 :func:`declared_frame_len` 一致（先查第 4 字节、
     再查第 8 字节），因为 ``68 L L 68``（698.45）与 ``68 A6 68``（645）的签名
-    可能同时命中；协议已知时判别更严格（``ft12_68`` 显式排除另两种签名）。
+    可能同时命中。
+
+    协议已知时 ``ft12_68`` **只要长度域收齐（3 字节）** 就按南网/国网口径取长度
+    —— 不再等满 8 字节才开工（策略本身已是选择，等满 8 字节会在首片过短时误走
+    短静默窗口把整帧切碎，1.23.57 现场报障）。但**签名排除在字节够判时仍生效**
+    （``len(buf) >= 8`` 时排除第 4/第 8 字节为 68H 的 698.45 / 645 结构），否则
+    把 698 帧按南网口径切错帧；两者合起来既不会切碎整帧，也不会错认结构。
     """
     if not strategy or not buf:
         return 0
     if strategy == "hdlc_7e":
         return hdlc_frame_len(buf)
     if strategy == "ft12_68":
-        if len(buf) < 8 or buf[0] != 0x68 or buf[3] == 0x68 or buf[7] == 0x68:
+        # 协议已知：长度域在第 1~2 字节即可算整帧长；末字节 16H 由调用方自证。
+        if len(buf) < 3 or buf[0] != 0x68:
+            return 0
+        # 字节够判时仍做签名排除（AGENTS.md §8 陷阱 59）：698.45 的第 4 字节、
+        # 645 的第 8 字节恒为第二个起始符 68H，按南网口径切会把整帧切错。
+        if len(buf) >= 8 and (buf[3] == 0x68 or buf[7] == 0x68):
             return 0
         need = buf[1] | (buf[2] << 8)
     elif strategy == "dlt645":
@@ -1073,7 +1100,7 @@ def frame_length_for(strategy: str, buf) -> int:
             return 0
         need = buf[9] + 12
     elif strategy == "dlt698_45":
-        if len(buf) < 8 or buf[0] != 0x68 or buf[3] != 0x68:
+        if len(buf) < 4 or buf[0] != 0x68 or buf[3] != 0x68:
             return 0
         need = ((buf[1] | (buf[2] << 8)) & 0x3FFF) + 3
     elif strategy == "dlms_wrapper":
@@ -1250,6 +1277,16 @@ class SerialCommandDialog(QDialog):
         )
         form.addRow("协议：", self.protocol_combo)
 
+        self.send_count_spin = QSpinBox()
+        self.send_count_spin.setRange(1, 99999)
+        self.send_count_spin.setValue(1)
+        self.send_count_spin.setFixedWidth(90)
+        self.send_count_spin.setToolTip(
+            "本条命令每轮连续发送的次数（表内「次数」列）。\n"
+            "与底部「循环次数」相乘：例如次数=3、循环=2 → 本命令共发 6 次"
+        )
+        form.addRow("发送次数：", self.send_count_spin)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -1269,6 +1306,9 @@ class SerialCommandDialog(QDialog):
             )
             if proto_idx >= 0:
                 self.protocol_combo.setCurrentIndex(proto_idx)
+            self.send_count_spin.setValue(
+                coerce_send_count(command.get("send_count", 1))
+            )
         self._on_match_type_changed()
 
     def _on_match_type_changed(self):
@@ -1341,6 +1381,7 @@ class SerialCommandDialog(QDialog):
             "match_type": self.match_type_combo.currentData(),
             "match_hex": self.match_edit.text().strip(),
             "protocol": coerce_protocol(self.protocol_combo.currentData()),
+            "send_count": coerce_send_count(self.send_count_spin.value()),
         }
 
 
@@ -1521,9 +1562,9 @@ class SerialToolWidget(QWidget):
         cmd_layout = QVBoxLayout(cmd_group)
         cmd_layout.setContentsMargins(6, 8, 6, 6)
         self.cmd_table = ZoomableTableWidget()
-        self.cmd_table.setColumnCount(6)
+        self.cmd_table.setColumnCount(7)
         self.cmd_table.setHorizontalHeaderLabels(
-            ["选择", "名称", "发送数据 (HEX)", "匹配方式", "预期响应", "协议"]
+            ["选择", "名称", "发送数据 (HEX)", "匹配方式", "预期响应", "协议", "次数"]
         )
         self.cmd_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.cmd_table.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -1537,15 +1578,19 @@ class SerialToolWidget(QWidget):
         chdr.setSectionResizeMode(3, QHeaderView.Fixed)
         chdr.setSectionResizeMode(4, QHeaderView.Stretch)
         chdr.setSectionResizeMode(5, QHeaderView.Fixed)
+        chdr.setSectionResizeMode(6, QHeaderView.Fixed)
         self.cmd_table.setColumnWidth(0, 50)
         self.cmd_table.setColumnWidth(1, 120)
         self.cmd_table.setColumnWidth(3, 90)
-        self.cmd_table.setColumnWidth(5, 130)
+        self.cmd_table.setColumnWidth(5, 110)
+        self.cmd_table.setColumnWidth(6, 52)
         self.cmd_table.verticalHeader().setDefaultSectionSize(20)
         # 勾选状态变化 → 回写命令并落盘（见 _on_cmd_item_changed）
         self.cmd_table.itemChanged.connect(self._on_cmd_item_changed)
         # 双击命令行 → 直接打开该条的编辑窗口（等价于选中后点「编辑」）
-        self.cmd_table.setToolTip("双击某一行可直接编辑该命令；勾选「选择」列决定发送哪些命令")
+        self.cmd_table.setToolTip(
+            "双击某一行可直接编辑该命令（含发送次数）；勾选「选择」列决定发送哪些命令"
+        )
         self.cmd_table.cellDoubleClicked.connect(self._on_cmd_double_clicked)
         cmd_layout.addWidget(self.cmd_table, 1)
 
@@ -1625,12 +1670,16 @@ class SerialToolWidget(QWidget):
         self.interval_spin.setFixedWidth(70)
         send_layout.addWidget(self.interval_spin)
 
-        send_layout.addWidget(QLabel("发送次数："))
+        send_layout.addWidget(QLabel("循环次数："))
         self.loop_spin = QSpinBox()
         self.loop_spin.setRange(0, 999999)
         self.loop_spin.setValue(DEFAULT_PARAMS["loop_count"])
         self.loop_spin.setSpecialValueText("无限")
         self.loop_spin.setFixedWidth(80)
+        self.loop_spin.setToolTip(
+            "整轮命令列表循环发送的次数；0=无限。\n"
+            "与命令表「次数」列（单条连发）相乘：例如表内次数=3、循环=2 → 该命令共发 6 次"
+        )
         send_layout.addWidget(self.loop_spin)
 
         send_layout.addWidget(QLabel("响应超时(ms)："))
@@ -2198,12 +2247,33 @@ class SerialToolWidget(QWidget):
         实测串口驱动的交付块间隔可大于 10ms 静默窗口，靠静默判定会把一帧切成多行；
         只要能算出还差多少字节（或 HDLC 已见到头标志），就按结构等到收全为止
         （受 ``FRAME_IDLE_MS`` / ``FRAME_HOLD_MAX_MS`` 上限约束）。
+
+        **头标志已出现、但长度域还没收够字节时也算未收全**（1.23.43 实测报障）：
+        首片只有 1~2 字节的 ``68`` 时读不出长度；若当「非协议帧」走 10ms 静默窗口，
+        首片会被单独刷出，缓冲从下一片起不再以 68 开头 → 整帧被切成多行
+        （实测国网 F112 响应拆成 4 条 ``[RX]``）。
         """
         buf = self._raw_buffer
         if not buf:
             return False
         if strategy == "hdlc_7e":
             return buf[0] == 0x7E and buf.find(0x7E, 1) < 0
+        if strategy == "dlms_wrapper":
+            if len(buf) < 8:
+                return True
+            need = frame_length_for(strategy, buf)
+            return bool(need) and len(buf) < need
+        # 68 家族：长度域/第二起始符签名还没收够 → 继续等（勿按短静默切开）
+        min_hdr = {
+            "ft12_68": 3,       # 长度域在第 1~2 字节
+            "dlt698_45": 4,     # 长度域在第 1~2，第二起始符在第 3
+            "dlt645": 10,       # 第二起始符在第 7，数据长度在第 9
+        }.get(strategy or "")
+        if strategy and buf[0] == 0x68 and min_hdr and len(buf) < min_hdr:
+            return True
+        if not strategy and buf[0] == 0x68 and len(buf) < 8:
+            # 启发式：还不够区分 698/645/南网国网三种结构
+            return True
         if strategy:
             need = frame_length_for(strategy, buf)
         else:
@@ -2381,6 +2451,14 @@ class SerialToolWidget(QWidget):
                     "该命令的协议：接收响应按它断帧并解析；「不解析」= 只显示原始 HEX"
                 )
                 self.cmd_table.setItem(row, 5, proto_item)
+                n = coerce_send_count(cmd.get("send_count", 1))
+                count_item = QTableWidgetItem(str(n))
+                count_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                count_item.setToolTip(
+                    "发送次数：每轮对该命令连续发送的次数（默认 1）；双击本行可修改。"
+                    "与底部「循环次数」相乘生效"
+                )
+                self.cmd_table.setItem(row, 6, count_item)
         finally:
             self._rebuilding_cmd_table = False
         self._update_cmd_sel_label()
@@ -2653,8 +2731,11 @@ class SerialToolWidget(QWidget):
                     f"{hex_input_error(cmd.get('data_hex', ''))}"
                 )
                 return
-            messages.append(msg)
-            index_map.append(i)
+            # 命令级发送次数：同一命令展开 N 帧，index_map 仍指回原下标
+            n = coerce_send_count(cmd.get("send_count", 1))
+            for _ in range(n):
+                messages.append(msg)
+                index_map.append(i)
         if not messages:
             QMessageBox.information(
                 self, "串口工具",
@@ -2690,9 +2771,19 @@ class SerialToolWidget(QWidget):
         set_btn(self.btn_start, "danger")
         self._sender.start()
         loops = "无限循环" if self.loop_spin.value() == 0 else f"{self.loop_spin.value()} 次"
-        scope = (f"{len(messages)}/{len(self.commands)} 条命令（已勾选）"
-                 if len(messages) != len(self.commands)
-                 else f"{len(messages)} 条命令")
+        checked_cmds = [c for c in self.commands if coerce_enabled(c.get("enabled"))]
+        multi = sum(
+            1 for c in checked_cmds if coerce_send_count(c.get("send_count", 1)) > 1
+        )
+        if multi:
+            scope = (
+                f"{len(checked_cmds)} 条命令 → 展开 {len(messages)} 帧"
+                f"（{multi} 条设置了连发次数）"
+            )
+        elif len(messages) != len(self.commands):
+            scope = f"{len(messages)}/{len(self.commands)} 条命令（已勾选）"
+        else:
+            scope = f"{len(messages)} 条命令"
         self._log(f"[发送] 开始：{scope} × {loops}，间隔 "
                   f"{self.interval_spin.value()}ms", "sys")
 

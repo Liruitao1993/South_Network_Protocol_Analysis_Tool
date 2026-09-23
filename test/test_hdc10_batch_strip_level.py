@@ -266,12 +266,12 @@ def main():
     )
     if win.batch_results:
         first = win.batch_results[0]
-        check("帧类型含 [11]", "[11]" in str(first.get("_type_name")), str(first.get("_type_name")))
+        check("帧类型 = 业务名（开始升级）", first.get("_type_name") == "开始升级", str(first.get("_type_name")))
         check("摘要含 0x0030（开始升级）", "0x0030" in str(first.get("摘要")), str(first.get("摘要")))
         detail = win._get_frame_table_data(0) or []
         check("首帧详情表非空", len(detail) > 0, str(len(detail)))
     else:
-        check("帧类型含 [11]", False, "无结果")
+        check("帧类型 = 业务名（开始升级）", False, "无结果")
         check("摘要含 0x0030（开始升级）", False, "无结果")
         check("首帧详情表非空", False, "无结果")
 

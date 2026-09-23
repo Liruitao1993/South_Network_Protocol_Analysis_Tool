@@ -16,10 +16,11 @@ from protocol_registry import (  # noqa: E402
 )
 
 
-def test_registry_covers_12_protocols():
-    assert len(all_protocols()) == 12
-    assert len(combo_labels()) == 12
-    for i in range(12):
+def test_registry_covers_protocols():
+    n = len(all_protocols())
+    assert n == len(combo_labels())
+    assert n >= 13  # 含索引 12 模组化终端功能模块接口
+    for i in range(n):
         assert get_protocol(i).index == i
 
 
@@ -30,7 +31,7 @@ def test_combo_labels_keep_index_prefix():
 
 
 def test_placeholder_non_empty():
-    for i in range(12):
+    for i in range(len(all_protocols())):
         assert placeholder_for(i).strip()
 
 
@@ -44,10 +45,13 @@ def test_name_to_index_aliases():
 
 
 def test_frame_gen_protocols():
-    assert set(protocols_with_frame_gen()) == {0, 6, 7, 8}
+    assert set(protocols_with_frame_gen()) == {0, 6, 7, 8, 12}
     assert get_protocol(0).frame_gen_mode == "south"
     assert get_protocol(6).frame_gen_mode == "dlt645"
     assert get_protocol(6).preset_mode == "dlt645"
+    # 模组化接口：组帧页 + 预设均已接线
+    assert get_protocol(12).frame_gen_mode == "modular"
+    assert get_protocol(12).preset_mode == "modular"
 
 
 def test_sequence_and_monitor_capabilities():
@@ -65,12 +69,16 @@ def test_virtual_meter_only_698():
     assert get_protocol(6).has_archive is False
 
 
-def test_validator_map_all_12():
+def test_validator_map_covers_all_protocols():
     m = build_validator_map()
-    assert set(m.keys()) == set(range(12))
+    n = len(all_protocols())
+    assert set(m.keys()) == set(range(n))
     # 南网校验器应能对非空 bytes 返回 ValidationResult
     r = m[0].verify(b"\x00")
     assert hasattr(r, "valid")
+    # 模组化接口（索引 12）校验器可用
+    r12 = m[12].verify(b"\x68")
+    assert hasattr(r12, "valid")
 
 
 def test_extract_strategies():
@@ -81,6 +89,7 @@ def test_extract_strategies():
     assert get_protocol(9).extract_strategy == "csg_line"
     assert get_protocol(10).extract_strategy == "gw_line_min4"
     assert get_protocol(3).extract_strategy == "line"
+    assert get_protocol(12).extract_strategy == "modular"
 
 
 class _FakeHdlc:
@@ -110,14 +119,14 @@ def test_lookup_builder_methods():
 
 
 if __name__ == "__main__":
-    test_registry_covers_12_protocols()
+    test_registry_covers_protocols()
     test_combo_labels_keep_index_prefix()
     test_placeholder_non_empty()
     test_name_to_index_aliases()
     test_frame_gen_protocols()
     test_sequence_and_monitor_capabilities()
     test_virtual_meter_only_698()
-    test_validator_map_all_12()
+    test_validator_map_covers_all_protocols()
     test_extract_strategies()
     test_build_gui_parser_wrappers()
     test_lookup_builder_methods()

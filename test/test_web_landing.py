@@ -70,7 +70,14 @@ def unescape(rendered: str) -> str:
 
 def test_content():
     print("\n[1] 内容不变式")
-    check("协议 12 条", len(L.PROTOCOLS) == 12, f"实际 {len(L.PROTOCOLS)}")
+    sys.path.insert(0, str(ROOT))
+    import protocol_registry as pr
+
+    check(
+        "协议条数与注册表一致",
+        len(L.PROTOCOLS) == pr.protocol_count(),
+        f"landing={len(L.PROTOCOLS)} registry={pr.protocol_count()}",
+    )
     idx = [p["index"] for p in L.PROTOCOLS]
     check("协议索引连续且唯一", idx == [str(i) for i in range(len(idx))], str(idx))
     for field in ("name", "standard", "endian", "check"):

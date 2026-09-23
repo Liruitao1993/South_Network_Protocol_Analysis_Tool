@@ -1,0 +1,100 @@
+{
+  "commands": [
+    {
+      "id": "mod00link_r",
+      "button_name": "链路协商请求",
+      "group_name": "常用模板",
+      "description": "链路协商请求 (LinkRequest)",
+      "protocol": "modular",
+      "frame_hex": "68 20 00 42 00 01 12 01 01 0A 08 54 45 52 4D 49 4E 41 4C 0A 05 54 30 30 30 31 12 02 01 00 12 02 01 00 11 01 01 D6 2A 16",
+      "config": {
+        "protocol_mode": "modular",
+        "template_key": "link_req"
+      }
+    },
+    {
+      "id": "mod01get_mo",
+      "button_name": "读取·通用-模块信息",
+      "group_name": "常用模板",
+      "description": "读取·通用-模块信息 (Get 0000)",
+      "protocol": "modular",
+      "frame_hex": "68 03 00 42 01 02 00 00 B7 5A 16",
+      "config": {
+        "protocol_mode": "modular",
+        "template_key": "get_module_info"
+      }
+    },
+    {
+      "id": "mod02get_li",
+      "button_name": "读取·通用-链路协商信息",
+      "group_name": "常用模板",
+      "description": "读取·通用-链路协商信息 (Get 0001)",
+      "protocol": "modular",
+      "frame_hex": "68 03 00 42 02 02 01 00 A2 66 16",
+      "config": {
+        "protocol_mode": "modular",
+        "template_key": "get_link_neg"
+      }
+    },
+    {
+      "id": "mod03get_pr",
+      "button_name": "读取·通用-协议版本",
+      "group_name": "常用模板",
+      "description": "读取·通用-协议版本 (Get 0002)",
+      "protocol": "modular",
+      "frame_hex": "68 03 00 42 03 02 02 00 71 50 16",
+      "config": {
+        "protocol_mode": "modular",
+        "template_key": "get_proto_ver"
+      }
+    },
+    {
+      "id": "mod04get_cl",
+      "button_name": "读取·通用-时钟",
+      "group_name": "常用模板",
+      "description": "读取·通用-时钟 (DTA2=1 DTB=00)",
+      "protocol": "modular",
+      "frame_hex": "68 03 00 42 04 02 00 01 69 25 16",
+      "config": {
+        "protocol_mode": "modular",
+        "template_key": "get_clock"
+      }
+    },
+    {
+      "id": "mod05ack",
+      "button_name": "确认帧",
+      "group_name": "常用模板",
+      "description": "确认帧 (ACK)",
+      "protocol": "modular",
+      "frame_hex": "68 00 00 C0 05 D9 61 16",
+      "config": {
+        "protocol_mode": "modular",
+        "template_key": "ack"
+      }
+    },
+    {
+      "id": "mod06nak",
+      "button_name": "否认帧",
+      "group_name": "常用模板",
+      "description": "否认帧 (NAK 错误码0)",
+      "protocol": "modular",
+      "frame_hex": "68 02 00 C1 06 00 00 62 0E 16",
+      "config": {
+        "protocol_mode": "modular",
+        "template_key": "nak"
+      }
+    },
+    {
+      "id": "mod07link_r",
+      "button_name": "链路协商响应",
+      "group_name": "常用模板",
+      "description": "链路协商响应 (LinkResponse)",
+      "protocol": "modular",
+      "frame_hex": "68 1E 00 82 07 81 12 01 01 0A 06 4D 4F 44 55 4C 45 0A 05 4D 30 30 30 31 12 02 01 00 12 02 01 00 11 01 01 01 C6 16",
+      "config": {
+        "protocol_mode": "modular",
+        "template_key": "link_rsp"
+      }
+    }
+  ]
+}

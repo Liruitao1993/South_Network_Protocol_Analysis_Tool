@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "检查组帧页/查询页/预设页是否与既有 4 模式的控件风格、显隐机制、主题重绘一致，且第 5 模式未污染前 4 模式"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "检查测试是否登记 release_check.py:CORE_TESTS、是否 offscreen 可跑、是否用真实信号点击而非只直调私有方法"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "检查是否出现第二份 A-XDR 实现、第二份 DT/单位/DAR 表、第二份 FCS 实现（跨文件重复是首要审查项）"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查链路层小端与 A-XDR 大端是否被互相套用、解析器 meta 是否被 GUI/摘要正确消费、组帧→解析闭环是否成立"}
+{"file": "协议文档/12.模组化功能协议/模组化终端功能模块接口协议.md", "reason": "逐条对拍静态表（附录 C/G/J/K/L 的 DT、附录 M 单位、附录 D~L 子接口、表11 DAR）与解析/组帧的字段布局，确认没有凭记忆或从其它协议搬表"}
