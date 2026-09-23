@@ -25,8 +25,21 @@ from PySide6.QtWidgets import (
     QTextEdit, QFileDialog, QMessageBox, QHeaderView, QAbstractItemView,
     QLineEdit, QMenu,
 )
-from gui_utils import ZoomableTableWidget, set_btn_icon
+from gui_utils import (
+    ZoomableTableWidget, set_btn_icon, fit_btn_width, fit_btn_width_for_texts,
+)
 from app_paths import app_data_dir
+
+
+# 按钮文案截断长度：`_update_frame_type_btn_text` / `_update_msdu_type_btn_text` 显示
+# 单项名时截断到这个长度，而下方取宽用的候选文案也走同一个 `_short_label` ——
+# **两处必须共用**，否则改了截断长度后取宽失真、按钮又开始裁字。
+_BTN_TEXT_MAX = 6
+
+
+def _short_label(name: str) -> str:
+    """按钮上的单项文案（截断到 `_BTN_TEXT_MAX`，与菜单项全名区分）。"""
+    return name[:_BTN_TEXT_MAX]
 
 
 class RealtimeMonitorWidget(QWidget):
@@ -222,7 +235,6 @@ class RealtimeMonitorWidget(QWidget):
         filter_toolbar.addSpacing(8)
         filter_toolbar.addWidget(QLabel("帧类型:"))
         self.frame_type_btn = QPushButton("全部")
-        self.frame_type_btn.setFixedWidth(100)
         self.frame_type_btn.setToolTip("选择要保留显示的帧类型（多选）")
         self._frame_type_menu = QMenu(self)
         self._frame_type_options = ["信标帧", "SOF帧", "选择确认帧(SACK)", "网间协调帧"]
@@ -235,12 +247,18 @@ class RealtimeMonitorWidget(QWidget):
             self._frame_type_menu.addAction(action)
             self._frame_type_actions.append(action)
         self.frame_type_btn.setMenu(self._frame_type_menu)
+        # 文案会变（全部 / 无 / 单项截断 / N项），故按**候选全集**取下限，不得写死宽度：
+        # 原先 setFixedWidth(100) 时只勾选「选择确认帧(SACK)」会显示成「选择确认帧(」
+        # —— 10 号字就要 103px ⇒ **默认字号**即裁字
+        fit_btn_width_for_texts(
+            self.frame_type_btn,
+            [_short_label(n) for n in self._frame_type_options] + ["全部", "无", f"{len(self._frame_type_options)}项"],
+        )
         filter_toolbar.addWidget(self.frame_type_btn)
 
         filter_toolbar.addSpacing(8)
         filter_toolbar.addWidget(QLabel("MSDU类型:"))
         self.msdu_type_btn = QPushButton("全部")
-        self.msdu_type_btn.setFixedWidth(120)
         self.msdu_type_btn.setToolTip("选择要保留显示的MSDU类型（多选）")
         self._msdu_type_menu = QMenu(self)
         self._msdu_type_options = ["网络管理消息", "应用层报文", "IP报文"]
@@ -253,6 +271,12 @@ class RealtimeMonitorWidget(QWidget):
             self._msdu_type_menu.addAction(action)
             self._msdu_type_actions.append(action)
         self.msdu_type_btn.setMenu(self._msdu_type_menu)
+        # 文案会变（全部 / 无 / 单项截断 / N项），故按**候选全集**取下限，不得写死宽度：
+        # 原先 setFixedWidth(120) 在 12 号字下显示「网络管理消息」需要 128px ⇒ 裁字
+        fit_btn_width_for_texts(
+            self.msdu_type_btn,
+            [_short_label(n) for n in self._msdu_type_options] + ["全部", "无", f"{len(self._msdu_type_options)}项"],
+        )
         filter_toolbar.addWidget(self.msdu_type_btn)
 
         filter_toolbar.addSpacing(8)
@@ -279,11 +303,13 @@ class RealtimeMonitorWidget(QWidget):
         filter_toolbar.addWidget(self.csv_path_label)
 
         self.browse_log_btn = QPushButton("浏览")
-        self.browse_log_btn.setFixedWidth(60)
         self.browse_log_btn.setContentsMargins(8, 0, 8, 0)
         self.browse_log_btn.setToolTip("打开日志目录")
         self.browse_log_btn.clicked.connect(self._open_log_directory)
         filter_toolbar.addWidget(self.browse_log_btn)
+        # 「浏览」文案固定，宽度交给 sizeHint（原先 setFixedWidth(60) 与 QSS 的 min-width
+        # 冲突成 min 68 > max 60，且字号调大即裁字 —— 同 gui_utils.fit_btn_width 的坑）
+        fit_btn_width(self.browse_log_btn)
 
         filter_toolbar.addStretch()
 
@@ -1045,7 +1071,7 @@ class RealtimeMonitorWidget(QWidget):
         elif len(checked) == 0:
             self.frame_type_btn.setText("无")
         elif len(checked) == 1:
-            self.frame_type_btn.setText(checked[0].text()[:6])
+            self.frame_type_btn.setText(_short_label(checked[0].text()))
         else:
             self.frame_type_btn.setText(f"{len(checked)}项")
 
@@ -1057,7 +1083,7 @@ class RealtimeMonitorWidget(QWidget):
         elif len(checked) == 0:
             self.msdu_type_btn.setText("无")
         elif len(checked) == 1:
-            self.msdu_type_btn.setText(checked[0].text()[:6])
+            self.msdu_type_btn.setText(_short_label(checked[0].text()))
         else:
             self.msdu_type_btn.setText(f"{len(checked)}项")
 

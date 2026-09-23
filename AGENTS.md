@@ -110,7 +110,7 @@ python main_gui.py --clipboard
 - Lua 脚本引擎依赖 `lupa`，打包时需作为 hidden import 或确保运行环境已安装
 - 当前主程序 spec 未显式声明 `scapy`；如需把 TCP 监控打包进 exe，需补充 `scapy` 依赖并确保目标机器安装 npcap
 - `docs/Lua脚本使用说明.md` 是 Lua 功能的用户文档
-- Inno Setup 安装脚本 `南网解析工具.iss` / `2222.iss` 的 `MyAppVersion` 用 `python release_check.py --sync-iss` 与 `APP_VERSION` 对齐（当前 1.23.42），发版前务必再跑一次 `python release_check.py`
+- Inno Setup 安装脚本 `南网解析工具.iss` / `2222.iss` 的 `MyAppVersion` 用 `python release_check.py --sync-iss` 与 `APP_VERSION` 对齐（**不要在本文件里写死版本号——它会随每次 bump 过期**；`--sync-iss` 会打印新旧值）。`release_check` 有硬校验：iss 与 `APP_VERSION` 不一致直接 **FAIL**，README 徽章不一致则 **WARN**；发版前务必再跑一次 `python release_check.py`
 
 ### Reflex Web 离线源码部署（UV）
 
@@ -774,6 +774,7 @@ python test/test_gw_pb_mme_summary.py # 协议10/11 批量摘要网络层 MMTYPE
 python test/test_ed_ui_for_gw_hdc10.py # 协议9/10/11 共用 ED 勾选+4字节反转+剔除（25 项：注册表能力/可见性/解包/反转/报错，1.23.35 起）
 python test/test_ed_wrapper_labels.py # ED 包装头文案按协议分语义（19 项：协议9=广西/PLC2.0，10/11=国网HDC，1.23.36 起）
 python test/test_tcp_monitor_ed_hdc.py # TCP 监控 HDC 1.0 + ED 封装（15 项：FlowBuffer 整帧/协议11 国网HDC 文案/业务解析，1.23.37 起）
+python test/test_btn_width_fit.py     # 按钮文字被裁回归（66 项：两个取宽函数纯逻辑（含未设上限 / 不降既有下限断言）/ 真机布局 10·12·14 号字不裁字且等宽 / 反例自检（改回 80px 必红）/ 动态文案按钮走真实勾选动作 / 运行中切字号·切主题 / AST 静态守卫含正负样例自检，1.23.59 起）
 python test/test_beacon_ed_hdc10.py # 协议11 ED 信标帧现场样本（20 项：帧长域异常解包/中央信标/摘要，1.23.38 起）
 python test/test_gw_parse_levels.py # 国网新一代解析级别（mac_only 按「输入即MAC帧」契约，pb_only 仍解析 PBH）
 python test/test_gw_batch_parse.py  # 国网新一代批量解析
@@ -966,10 +967,12 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
     - **`_reflow_proto_group()` 必须重排外层顶栏**：只 `invalidate()` / `updateGeometry()` / `adjustSize()` 内层时，协议分组框拿不到最终宽度，内层 FlowLayout 也不会被重新调用，子项就停在旧的换行位置（**单独调 `QLayout.activate()` 是空操作**，实测无效）。补上 `top_bar_widget.layout().invalidate() + activate()` 后，分组框立刻拿到最终宽度、内层随之重排，实测同步从 (5,44)/266x5 恢复到 (76,20)/266x26，不再依赖点击等交互触发。
     - **排查手段**：`QWidget.visibleRegion()`（真正被绘制的区域）比 `geometry()` / `grab()` 更能暴露「控件在但没画出来」；`grab()` 会强制重绘，看不出这类问题。回归：`test/test_flow_layout_proto_group.py`（含反例自检）。
 
-57. **TCP 监控的「原始载荷」路径：切帧策略、识别边界、帧表列序三处约定**（1.23.45 起，改 `monitor/tcp_monitor.py` 的切帧/解析/帧表前必读）：
+57. **TCP 监控的「原始载荷」路径：切帧策略、识别边界、帧表列序、记录位置四处约定**（1.23.45 起，改 `monitor/tcp_monitor.py` 的切帧/解析/帧表前必读）：
     - **切帧**：`FlowBuffer(mode)` 三档 —— `ed` 只切 ED..EE（旧行为）、`raw` 一段一帧、`auto`（默认）先 ED、判定非 ED 后按 **TCP segment 逐包**产出原始帧。判定只认完整定界校验（`ED` + 帧长∈[4,4096] + `buf[5]==EF` + 末字节 `EE`）；「未收全的 ED 候选」最多等 `MAX_WAIT_SEGMENTS`(=2) 段（原始流里偶然出现的 `ED xx xx` 会伪装成候选，不设上限会让该方向长时间不出行）。raw 方向仍检测**完整 ED 帧并升级回 ED**（抓包从 ED 连接中途开始时不丢既有能力），升级时 ED 帧之前的字节仍按原始载荷产出 —— 同一字节只上报一次。回归：`test/test_tcp_monitor_raw_payload.py`。
     - **识别边界**：自动识别**只认可自证形态**（DLMS Wrapper `00 01`+长度自洽 / DLMS-APDU 首字节 ∈ `HDLCParser.APDU_TYPES` / 645 结构 `68+6+68`+校验器 0 fail / 698.45 HCS/FCS 双通过）。**南网 / 国网 不参与自动识别**：两者同为 `0x68` 起头、链路层结构相近，校准实测校验器互判 0 fail（无法区分），错解析比不解析更糟 → 需显式选择。注意 `APDU_TYPES` 是 `HDLCParser` 的**类属性**（不是模块级常量）；路由判据不能只看首字节 `0xED`（原始载荷恰以 0xED 开头会被塞进 ED 路径，得到「无法识别协议」+ 空表）。回归：`test/test_tcp_monitor_proto_detect.py`。
     - **帧表列序**：`时间/方向/源 → 目的/长度/协议/摘要`（6 列）。第 0 列 UserRole 存 `_frame_cache` 下标 —— 过滤开启后行号与缓存下标不再一一对应，`_on_frame_selected` 必须经 `_row_cache_index(row)` 取下标。改列序要同步 `_fill_frame_row` / `_rebuild_frame_table`；CSV 用列名读写（`_write_csv_record` / `_load_csv_recording`），不受列序影响。回归：`test/test_tcp_monitor_ui_views.py`。
+    - **记录位置（1.23.59 起）**：CSV 落盘目录的唯一来源是 `TCPMonitorWidget.record_dir()` —— 用户配置优先、否则 `<数据目录>/Output`（与串口工具日志目录同一约定，见陷阱 60）。**不要再硬编码 `app_data_dir() / "Output"`**：那样测试沙箱拦不住，跑一趟测试就往开发机真实数据目录拉文件（静态守卫 `无裸 app_data_dir() 调用` 钉住）。目录存 `tcp_monitor_config.json`（`load_record_config` / `save_record_config` 原子写，缺失/损坏/非对象/BOM 一律回落空配置）；路径一律经 `app_paths.data_path` **属性访问**。工具栏「打开位置」用 `open_in_file_manager`（Windows `explorer /select,` **定位并选中当前记录文件**、无文件或文件已删则打开目录；非 Windows 回落 `xdg-open`），目录缺失时先自动创建 —— 否则资源管理器打不开。**`QFileDialog` 必须保持在导入列表中**：「加载记录」按钮与「选择记录目录」都依赖它，曾因漏导入让该按钮一点即抛 `NameError` 长期潜伏（测试从不点它）。新增按钮必须用 `gui_utils._STANDARD_ICON_MAP` 的**合法图标键**：`set_btn_icon` 对未知键**静默跳过**（同「分享此帧」无图标的同类坑）—— 本模块的测试有「图标非空」与「全文件 `set_btn_icon` 键合法性」两道断言。回归：`test/test_tcp_monitor_record_dir.py`（61 项）。
+    - **按钮宽度（1.23.59 起）**：工具栏 4 个按钮（开始记录 / 加载记录 / 打开位置 / 记录目录）**不得写死宽度** —— 写死 80px 会让文字被裁（现场截图里「记录目录」显示成「记录目」）；统一走 `gui_utils.fit_btn_width(...)`，判据与理由见陷阱 63。回归：`test/test_btn_width_fit.py`。
 
 58. **串口工具（`serial_tool_widget.py`）的四条契约**（1.23.46 起，改串口工具/`serial_worker` 前必读）：
     - **发送必须走 `SerialWorker.write_raw`**（静默写，不发日志信号），不要用 `send_frame`：负载测试按毫秒级连发，逐帧 `log_message.emit` 会让 GUI 事件队列被日志淹没。`write_raw` 与 `send_frame` 共用 `_write_lock`，可被发送线程与 GUI 线程并发调用。回归：`test/test_serial_worker_write_raw.py`。
@@ -1036,6 +1039,16 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
     - **判别假红的手感**：结果里失败项**输出为空 + 退出码恒为 3221226505** ⇒ 先按本条复核，**不要动代码**（1.23.57/58 的协议12 工作就被这个现象困了一轮）。若只有**少数** GUI 测试崩、其他 GUI 测试过，才可能是代码问题。
     - 与 §10 1.17.1 记录的「本机已知 MainWindow 关闭期 fastfail」是同一个现象；本条给出了**精确触发条件与避开手法**。
 
+63. **按钮宽度不得写死 —— 本项目字号可配置，写死必裁字（2026-09-23 现场实测）**（改任何工具栏 / 按钮布局前必读）：
+    - **现象**：TCP 监控「应用层帧」工具栏 4 个按钮文字显示不全（现场截图里「记录目录」只显示成「记录目」）。根因是 `setFixedWidth(80)`，而 QSS 主题下这 4 个「16px 图标 + 4 个汉字」的按钮 `sizeHint().width()` 已是 **92px**（带菜单下拉箭头的「记录目录」再 +12px = **104px**）⇒ **默认 10 号字就裁**；本项目字号可配置（`theme_settings`，7 套主题 × 任意字号），12 / 14 号字时需 **104 / 116~128px**。`QPushButton` 不会用省略号缩排，**只会截断** ⇒ 「宽度 < sizeHint」等价于「文字被裁」。
+    - **判据（唯一可靠）**：布局跑完后 `btn.width() >= btn.sizeHint().width()`。`sizeHint` 已含图标 + 文字 + QSS 内边距 + 菜单箭头，就是「不裁字的最小宽度」。**必须在 `show()` 之后量**：headless 下未 show 的 widget 没有 geometry，`width()` 是默认 **640**，量出来永远是「不裁」—— 假绿（本缺陷最初就是这么被测漏的）。
+    - **正确做法**：`gui_utils.fit_btn_width(*btns)` —— 取组内最宽者的 `sizeHint` 设为 `minimumWidth`（**只设下限，不设上限**）。字号变大时 `sizeHint` 继续增长、布局仍会满足它，故**切主题 / 改字号后无需重算**；反之写死 `setFixedWidth` 就必须在每次切主题时重算，迟早漏一处又裁。`test/test_btn_width_fit.py` 用「`maximumWidth` 仍等于 `QWIDGETSIZE_MAX`」钉住「没写死」这一点。
+    - **别只按参考窗口量**：现场截图 1901px 宽，把窗口拖窄到 900px 时这 4 个按钮仍稳定在 104px（压缩压力落在表格 / 分栏器上）⇒ **无需**为窄窗另加横向滚动。
+    - 现状核查（1.23.59，一次性脚本未入库）：主窗口全量扫描 **170 个可见按钮，零裁字**，即该缺陷仅此一处。改按钮 / 工具栏布局后请按上述判据抽查。
+    - **文案会变的按钮要按「候选全集」取下限**（`fit_btn_width_for_texts`）：在线监控器「帧类型 / MSDU类型」写死 100 / 120px，默认 10 号字下只要**单选**「选择确认帧(SACK)」（按钮显示截断后的 `选择确认帧(`）就需 **103px** ⇒ 当场裁字；只按当前文案「全部」（68px）取下限完全不够。该函数临时 `setText` 量完再恢复（`QAbstractButton.setText` 不发信号，无副作用）。**候选文案必须与运行时文案同源** —— 两者共用 `monitor_widget._short_label` / `_BTN_TEXT_MAX`，改截断长度时两处一起动，否则取宽失真、又开始裁字。
+    - **`setFixedWidth` + QSS `min-width` 会退化成「纯上限」**（实测）：在线监控器「浏览」按钮写了 `setFixedWidth(60)`，实际却是 `min 68 > max 60` —— QSS 的 `min-width` 覆盖了 min，只剩 `max=60` 生效 ⇒ 宽度**只减不增**，字号一大必裁。所以**不要用 `setFixedWidth` 给带文字的按钮定宽**；要「至少这么宽」就用 `minimumWidth`。
+    - **大字号 / 最小窗口无需额外改造**（2026-09-23 实测，故**未**引入 FlowLayout 折行）：主窗口在最小尺寸 **1000×700** 下切到 TCP 监控页，10 / 14 / 16 / 24 号字下这 4 个按钮都不裁字（24 号字需 168px、实得 180px；窗口自身的布局最小宽度随之增大，不会把按钮压下去）。抽查脚本记得 `show()` 之后再量。
+
 ## 9. 开发原则
 
 1. **协议定义优先**：遇到不确定的协议字段、字节序、校验范围，**先查 §5 对应文档**，不要凭记忆或猜测。
@@ -1060,6 +1073,17 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 ## 10. 变更日志
 
 > 详细版本变更记录请查看 `main_gui.py:CHANGELOG`（按版本倒序），或运行 `git log --oneline` 查看提交历史。本文档保留近期版本的摘要。
+
+### 1.23.59 — 2026-09-23
+
+- **TCP 监控新增「记录位置」能力**（现场：记录下来的 CSV 找不到、也不知道去哪找）：工具栏新增「打开位置」按钮——一键在资源管理器中**定位并选中当前记录文件**（无记录文件时打开记录目录）；新增「记录目录」菜单（选择记录目录… / 打开记录目录 / 恢复默认目录），目录可自选并**记住**（`tcp_monitor_config.json`，重启仍生效）；状态栏记录名悬停给出完整路径
+- 记录目录解析收敛到**单一来源** `TCPMonitorWidget.record_dir()`（用户配置优先，否则 `<数据目录>/Output`）；`_start_csv_recording` 不再硬编码 `app_data_dir()/Output`（沙箱拦不住 → 跑测试会往开发机真实数据目录拉文件）；纯逻辑层 `default_record_dir` / `load_record_config`（缺失/损坏/非对象/BOM 均回落空配置）/ `save_record_config`（原子写）/ `resolve_record_dir` / `open_in_file_manager`（Windows `explorer /select` 定位文件，非 Windows 回落 `xdg-open`）
+- **顺带修复既有缺陷**：`monitor/tcp_monitor.py` 从未导入 `QFileDialog`，「加载记录」按钮一点即抛 `NameError`（自 TCP 监控 UI 引入以来潜伏 —— 测试从未点过该按钮）；文件对话框起始目录同时改为当前记录目录
+- `gui_utils._STANDARD_ICON_MAP` 新增 `folder` 键（`SP_DirIcon`）—— `set_btn_icon` 对未知键**静默跳过**（同「分享此帧」曾无图标的同类坑），故新按钮必须用合法键并由测试断言图标非空
+- 新增 `test/test_tcp_monitor_record_dir.py`（61 项）并登记 `release_check.py` 门禁；**变异反证 5 条**（退回硬编码目录 / 忽略用户配置 / 去掉 `QFileDialog` 导入 / 不再定位文件 / 图标键改非法）均实测变红；约定沉淀为 §8 陷阱 57
+- **修复「应用层帧」工具栏 4 个按钮文字被裁**（现场：截图中「记录目录」只显示成「记录目」）：根因是写死 `setFixedWidth(80)`，而 QSS 下 `sizeHint` 已需 92px（带菜单箭头的「记录目录」104px）⇒ 默认字号就裁；真正裁字的是**上限**（`setFixedWidth` 的 min 被 QSS `min-width` 覆盖，只剩 max 生效）。改为 `gui_utils.fit_btn_width(...)`（取最宽者 `sizeHint` 作 `minimumWidth`，只设下限不设上限，切主题/改字号后无需重算、且保持等宽）
+- **同一根因第二处（在线监控器筛选栏）**：`monitor_widget.py`「帧类型 / MSDU类型」写死 100 / 120px，默认 10 号字单选「选择确认帧(SACK)」即显示成「选择确认帧(」；因文案会变，新增 `gui_utils.fit_btn_width_for_texts(btn, 候选全集)`（候选与运行时文案共用 `_short_label` 防漂移），「浏览」按钮改走 `fit_btn_width`
+- 新增 `test/test_btn_width_fit.py`（66 项）并登记 `release_check.py` 门禁；**真机取证**：用真实窗口渲染工具栏后 OCR，修复前只读出「记录目」、修复后完整读出「记录目录」；主窗口全量扫描 170 个可见按钮**零裁字**；最小窗口 1000×700 下 10 / 14 / 16 / 24 号字均不裁字（24 号需 168px 实得 180px，故**未**引入折行）；约定沉淀为 §8 陷阱 63
 
 ### 1.23.58 — 2026-09-23
 

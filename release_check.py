@@ -115,6 +115,8 @@ CORE_TESTS = [
     "test/test_tcp_monitor_raw_payload.py",
     "test/test_tcp_monitor_proto_detect.py",
     "test/test_tcp_monitor_ui_views.py",
+    "test/test_tcp_monitor_record_dir.py",
+    "test/test_btn_width_fit.py",
     "test/test_serial_tool_widget.py",
     "test/test_serial_proto_frame.py",
     "test/test_serial_worker_write_raw.py",

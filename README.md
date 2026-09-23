@@ -1,13 +1,13 @@
 # 南网协议解析工具
 
-[![Version](https://img.shields.io/badge/version-1.23.58-blue)]()
+[![Version](https://img.shields.io/badge/version-1.23.59-blue)]()
 [![Python](https://img.shields.io/badge/Python-3.8%2B-brightgreen)]()
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)]()
 [![License](https://img.shields.io/badge/License-MIT-green)]()
 
 一个面向电力通信现场调试的多协议解析工具，基于 Python / PySide6 开发，支持 13 种电力通信协议，覆盖单帧解析、批量解析、协议校验、帧生成、串口通信、虚拟表、通信时序图、测试方案、Lua 脚本、实时监控与 TCP 抓包等工作流。
 
-当前版本为 `1.23.58`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
+当前版本为 `1.23.59`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
 
 ## 功能总览
 
@@ -229,6 +229,8 @@ pyinstaller 南网协议解析工具.spec --noconfirm
 5. 选中帧后自动调用南网新一代或国网新一代解析器，右侧显示解析结果
 
 TCP 监控支持流关注、表格复制、暂停刷新、CSV 实时记录与历史 CSV 加载。首次打开标签页时 scapy 在后台惰性加载，不阻塞主界面。
+
+记录下来的 CSV 不会「找不到」：工具栏「打开位置」一键在资源管理器中**定位并选中当前记录文件**（无记录文件时打开记录目录）；「记录目录」菜单可**自选记录目录并记住**（重启仍生效，默认 `<数据目录>/Output`），也可恢复默认；状态栏的记录名悬停可看到完整路径。
 
 ### 系统集成与命令行
 
@@ -456,6 +458,12 @@ python test/test_web_landing.py            # Web 产品首页（内容不变式/
 ## 更新记录
 
 > 完整历史见 `main_gui.py:CHANGELOG`。以下仅摘录最近版本要点。
+
+### 1.23.59 — 2026-09-23
+
+- **TCP 监控「记录位置」**：工具栏「打开位置」一键在资源管理器中定位并选中当前记录文件；「记录目录」菜单可自选目录并记住（重启生效，默认 `<数据目录>/Output`），也可恢复默认；状态栏记录名悬停看完整路径
+- 记录目录收敛到单一来源 `record_dir()`（原先硬编码 `app_data_dir()/Output`，测试沙箱拦不住）；顺带修复「加载记录」按钮因未导入 `QFileDialog` 而一点即抛 `NameError` 的既有缺陷
+- 测试：新增 `test/test_tcp_monitor_record_dir.py` 61 项（含图标键与路径单一来源静态守卫）
 
 ### 1.23.58 — 2026-09-23
 

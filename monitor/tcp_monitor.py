@@ -16,8 +16,11 @@ MAC/应用层帧需显式选择协议（原因见 ``hdc_fc_evidence`` 的 docstr
 
 import time
 import csv
+import json
 import os
+import subprocess
 from datetime import datetime
+from pathlib import Path
 from collections import defaultdict
 from typing import Dict, List, Tuple, Optional
 
@@ -25,14 +28,14 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QComboBox,
     QLineEdit, QSplitter, QMessageBox, QGroupBox, QMenu,
-    QTabWidget, QCheckBox, QTreeWidget, QTreeWidgetItem
+    QTabWidget, QCheckBox, QTreeWidget, QTreeWidgetItem, QFileDialog
 )
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QFont, QKeySequence, QShortcut, QGuiApplication, QColor
-from gui_utils import ZoomableTableWidget, set_btn, set_btn_icon
+from gui_utils import ZoomableTableWidget, set_btn, set_btn_icon, fit_btn_width
 from hex_dump_view import HexDumpView
 import parse_result_view
-from app_paths import app_data_dir
+import app_paths
 import thread_registry
 
 # scapy 可选依赖 — 用 find_spec 轻量探测是否安装；scapy.all 首次导入耗时数秒，
@@ -55,6 +58,72 @@ def _load_scapy():
     from scapy.all import sniff, IP, TCP, get_if_list, get_if_addr
     _SCAPY_LOADED = True
     return True
+
+
+# ── 记录位置（CSV 落盘目录，纯逻辑无 Qt，可脱离 GUI 单测）────────────
+#
+# 现场诉求：记录下来的 CSV 找不到、也不知道去哪找。故：
+#   ① 目录可配置（``record_dir`` 存 tcp_monitor_config.json，空 = 默认）；
+#   ② 「打开位置」按钮一键在文件管理器中**定位并选中**当前记录文件（无文件时打开目录）。
+# 默认目录与串口工具日志目录同一约定（数据目录下的 ``Output/``）。
+#
+# 配置路径一律经 ``app_paths.data_path`` **属性访问**（不是 ``from ... import``），
+# 否则测试的沙箱 patch 挡不住，会把开发机真实数据目录写脏（同 AGENTS §8 陷阱 60）。
+
+TCP_MONITOR_CONFIG_NAME = "tcp_monitor_config.json"
+DEFAULT_RECORD_DIR_NAME = "Output"
+
+
+def default_record_dir(data_dir=None) -> str:
+    """默认记录目录：``<数据目录>/Output``（``data_dir`` 仅供测试注入）。"""
+    base = Path(app_paths.app_data_dir()) if data_dir is None else Path(data_dir)
+    return str(base / DEFAULT_RECORD_DIR_NAME)
+
+
+def load_record_config(path=None) -> dict:
+    """读取 TCP 监控配置；缺失/损坏/非对象一律回落空配置（绝不抛异常）。"""
+    p = Path(path) if path is not None else Path(app_paths.data_path(TCP_MONITOR_CONFIG_NAME))
+    try:
+        with open(p, "r", encoding="utf-8-sig") as f:  # 容 BOM（编辑器另存常见）
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_record_config(cfg: dict, path=None) -> bool:
+    """原子写 TCP 监控配置（临时文件 + ``os.replace``）；失败返回 False。"""
+    p = Path(path) if path is not None else Path(app_paths.data_path(TCP_MONITOR_CONFIG_NAME))
+    tmp = p.with_name(p.name + ".tmp")
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, p)
+        return True
+    except OSError:
+        return False
+
+
+def resolve_record_dir(configured: Optional[str], default_dir: str) -> str:
+    """记录目录：用户配置优先（非空才算），否则默认目录。"""
+    return (configured or "").strip() or default_dir
+
+
+def open_in_file_manager(path: str, directory: str) -> str:
+    """在系统文件管理器中打开：有 ``path`` 则定位并选中该文件，否则打开目录。
+
+    返回实际打开的目标（供状态栏与测试断言）；失败抛 ``OSError`` 由调用方提示。
+    Windows 用 ``explorer /select,``（定位文件）；其它平台回落 ``xdg-open``。
+    """
+    if path and os.path.exists(path) and hasattr(os, "startfile"):
+        subprocess.Popen(f'explorer /select,"{os.path.normpath(path)}"')
+        return path
+    if hasattr(os, "startfile"):
+        os.startfile(directory)  # Windows
+    else:
+        subprocess.Popen(["xdg-open", directory])
+    return directory
 
 
 # ── 国网 HDC 帧归属证据（协议11/10 自动识别用，纯函数）──────────
@@ -593,6 +662,9 @@ class TCPMonitorWidget(QWidget):
         self._csv_writer = None
         self._csv_path = ""
         self._csv_count = 0
+        # 记录位置配置（目录可配 + 一键打开；读写见模块级 load/save_record_config）
+        self._record_cfg = load_record_config()
+        self._record_dir_cfg = str(self._record_cfg.get("record_dir") or "")
         # 已加载的历史记录流数据 {flow_id: {frames, ...}}
         self._loaded_flows = None
 
@@ -789,19 +861,42 @@ class TCPMonitorWidget(QWidget):
         set_btn(self.csv_record_btn, "success")
         set_btn_icon(self.csv_record_btn, "save")
         self.csv_record_btn.toggled.connect(self._on_csv_record_toggled)
-        self.csv_record_btn.setFixedWidth(80)
         frame_toolbar.addWidget(self.csv_record_btn)
 
         load_btn = QPushButton("加载记录")
         set_btn(load_btn, "secondary")
         set_btn_icon(load_btn, "open_file")
         load_btn.clicked.connect(self._load_csv_recording)
-        load_btn.setFixedWidth(80)
         frame_toolbar.addWidget(load_btn)
+
+        # 记录位置：一键打开（定位文件）+ 目录可配（现场：记录下来的 CSV 找不到）
+        self.open_record_btn = QPushButton("打开位置")
+        set_btn(self.open_record_btn, "secondary")
+        set_btn_icon(self.open_record_btn, "open")
+        self.open_record_btn.clicked.connect(self._open_record_location)
+        frame_toolbar.addWidget(self.open_record_btn)
+
+        self.record_dir_btn = QPushButton("记录目录")
+        set_btn(self.record_dir_btn, "secondary")
+        set_btn_icon(self.record_dir_btn, "folder")
+        dir_menu = QMenu(self.record_dir_btn)
+        dir_menu.addAction("选择记录目录…", self._choose_record_dir)
+        dir_menu.addAction("打开记录目录", self._open_record_location)
+        dir_menu.addAction("恢复默认目录", self._reset_record_dir)
+        self.record_dir_btn.setMenu(dir_menu)
+        frame_toolbar.addWidget(self.record_dir_btn)
+
+        # 宽度：4 个按钮都是「16px 图标 + 4 个汉字」，**不得写死宽度**——实测 QSS 下
+        # sizeHint 已需 92px（带菜单下拉箭头的「记录目录」104px），字号调大后更多
+        # （12 号 104/116、14 号 116/128）。原先写死的 80px 在**默认字号**就裁字。
+        # 统一取下限（minimumWidth）而非固定宽度，切主题/改字号后无需重算。
+        fit_btn_width(self.csv_record_btn, load_btn,
+                      self.open_record_btn, self.record_dir_btn)
 
         self.csv_status_label = QLabel("未记录")
         self.csv_status_label.setStyleSheet("color: #888; font-size: 11px;")
         frame_toolbar.addWidget(self.csv_status_label)
+        self._update_record_dir_hint()
 
         frame_toolbar.addStretch()
         self.frame_autoscroll_cb = QCheckBox("自动滚动")
@@ -2032,9 +2127,9 @@ class TCPMonitorWidget(QWidget):
             set_btn(self.csv_record_btn, "success")
 
     def _start_csv_recording(self):
-        """开始 CSV 记录"""
+        """开始 CSV 记录（写入当前记录目录，见 ``record_dir()``）"""
         try:
-            output_dir = str(app_data_dir() / "Output")
+            output_dir = self.record_dir()
             os.makedirs(output_dir, exist_ok=True)
             filename = f"tcp_monitor_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
             self._csv_path = os.path.join(output_dir, filename)
@@ -2046,6 +2141,7 @@ class TCPMonitorWidget(QWidget):
             ])
             self._csv_count = 0
             self.csv_status_label.setText(f"记录中: {filename} (0帧)")
+            self.csv_status_label.setToolTip(f"记录文件：{self._csv_path}")
             self.csv_status_label.setStyleSheet("color: #C00000; font-size: 11px; font-weight: bold;")
         except Exception as e:
             QMessageBox.critical(self, "CSV 记录失败", f"无法创建日志文件:\n{e}")
@@ -2062,6 +2158,7 @@ class TCPMonitorWidget(QWidget):
             self._csv_writer = None
             basename = os.path.basename(self._csv_path) if self._csv_path else ""
             self.csv_status_label.setText(f"已停止: {basename} ({self._csv_count}帧)")
+            self.csv_status_label.setToolTip(f"记录文件：{self._csv_path}")
             self.csv_status_label.setStyleSheet("color: #888; font-size: 11px;")
 
     def _write_csv_record(self, flow_id: int, ts: float, direction: int,
@@ -2086,10 +2183,65 @@ class TCPMonitorWidget(QWidget):
         except Exception:
             pass
 
+    # ── 记录位置（目录可配 + 一键打开）─────────────────────────────
+
+    def record_dir(self) -> str:
+        """当前记录目录：用户选择优先，默认 = 数据目录下的 ``Output/``。"""
+        return resolve_record_dir(self._record_dir_cfg, default_record_dir())
+
+    def _update_record_dir_hint(self):
+        """刷新「记录目录」与「打开位置」按钮的 tooltip（当前目录 + 配置来源）。"""
+        cur = self.record_dir()
+        src = "用户设置" if (self._record_dir_cfg or "").strip() else "默认"
+        self.record_dir_btn.setToolTip(
+            f"记录目录（{src}）：{cur}\n\n点开菜单：选择记录目录 / 打开记录目录 / 恢复默认目录"
+        )
+        self.open_record_btn.setToolTip(
+            f"在文件管理器中打开记录位置（有记录文件时定位选中）\n当前目录：{cur}"
+        )
+
+    def _open_record_location(self):
+        """打开记录位置：有当前记录文件则**定位并选中**它，否则打开记录目录。"""
+        target_dir = self.record_dir()
+        try:
+            os.makedirs(target_dir, exist_ok=True)
+        except OSError as exc:
+            QMessageBox.warning(self, "打开记录位置失败", f"无法创建记录目录：\n{exc}")
+            return
+        try:
+            open_in_file_manager(self._csv_path, target_dir)
+        except OSError as exc:
+            QMessageBox.warning(self, "打开记录位置失败", f"{exc}\n\n位置：{target_dir}")
+
+    def _choose_record_dir(self):
+        """选择记录目录并记住（写入 ``tcp_monitor_config.json``，重启后仍生效）。"""
+        path = QFileDialog.getExistingDirectory(self, "选择记录目录", self.record_dir())
+        if not path:
+            return
+        self._record_dir_cfg = path
+        cfg = dict(self._record_cfg)
+        cfg["record_dir"] = path
+        self._record_cfg = cfg
+        if not save_record_config(cfg):
+            QMessageBox.warning(
+                self, "保存失败",
+                f"记录目录已生效，但配置写入失败（重启后会回到默认目录）：\n{path}",
+            )
+        self._update_record_dir_hint()
+
+    def _reset_record_dir(self):
+        """恢复默认记录目录（数据目录下的 ``Output/``）。"""
+        self._record_dir_cfg = ""
+        cfg = dict(self._record_cfg)
+        cfg.pop("record_dir", None)
+        self._record_cfg = cfg
+        save_record_config(cfg)
+        self._update_record_dir_hint()
+
     def _load_csv_recording(self):
-        """加载历史 CSV 记录"""
+        """加载历史 CSV 记录（默认从当前记录目录起选）"""
         path, _ = QFileDialog.getOpenFileName(
-            self, "加载 TCP 监控记录", "", "CSV文件 (*.csv)"
+            self, "加载 TCP 监控记录", self.record_dir(), "CSV文件 (*.csv)"
         )
         if not path:
             return
@@ -2175,6 +2327,7 @@ class TCPMonitorWidget(QWidget):
 
             self.status_label.setText(f"已加载 {len(flow_ids)} 条流，共 {seq} 帧")
             self.csv_status_label.setText(f"已加载: {os.path.basename(path)}")
+            self.csv_status_label.setToolTip(f"记录文件：{path}")
             self.csv_status_label.setStyleSheet("color: #4CAF50; font-size: 11px;")
 
         except Exception as e:

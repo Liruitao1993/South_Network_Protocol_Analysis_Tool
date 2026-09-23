@@ -115,7 +115,7 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.58"
+APP_VERSION = "1.23.59"
 BUILD_DATE = "2026-09-23"  # 编译日期，每次打包前更新
 
 # 作者 GitHub 仓库地址 —— 「关于」对话框 Star 按钮的**唯一来源**。
@@ -140,6 +140,22 @@ _WINDOW_STATE_TABLES = (
 )
 
 CHANGELOG = [
+    (
+        "1.23.59",
+        "2026-09-23",
+        [
+            "**TCP 监控新增「记录位置」能力**（现场：记录下来的 CSV 找不到、也不知道去哪找）：工具栏新增「打开位置」按钮——一键在资源管理器中**定位并选中当前记录文件**（无记录文件时打开记录目录）；新增「记录目录」菜单（选择记录目录… / 打开记录目录 / 恢复默认目录），目录可自选并**记住**（`tcp_monitor_config.json`，重启仍生效）；状态栏记录名悬停给出完整路径",
+            "记录目录解析收敛到**单一来源**：`record_dir()` = 用户配置优先，否则 `<数据目录>/Output`（与串口工具日志目录同一约定）；`_start_csv_recording` 不再硬编码 `app_data_dir()/Output`，故测试沙箱能真正拦住（不再往开发机真实数据目录写文件）",
+            "**顺带修复既有缺陷**：`monitor/tcp_monitor.py` 从未导入 `QFileDialog`，「加载记录」按钮一点即抛 `NameError`（自 TCP 监控 UI 引入以来潜伏——测试从未点过该按钮）；文件对话框起始目录同时改为当前记录目录",
+            "新增纯逻辑层（可脱离 GUI 单测）：`default_record_dir` / `load_record_config`（缺失/损坏/非对象/BOM 均回落空配置）/ `save_record_config`（原子写 + 失败返回 False）/ `resolve_record_dir` / `open_in_file_manager`（Windows `explorer /select` 定位文件，非 Windows 回落 `xdg-open`）",
+            "`gui_utils._STANDARD_ICON_MAP` 新增 `folder` 键（`SP_DirIcon`）——`set_btn_icon` 对未知键**静默跳过**（同「分享此帧」曾无图标的同类坑），故新按钮必须用合法键，并由测试断言图标非空",
+            "新增 `test/test_tcp_monitor_record_dir.py`（61 项：纯函数矩阵 / 目录可配与持久化 / 记录落盘位置 / 定位文件 / 异常与保存失败不静默 / `QFileDialog` 回归 / 图标键与路径单一来源静态守卫），已登记 `release_check.py` 门禁；**变异反证 5 条**（退回硬编码目录、忽略用户配置、去掉 `QFileDialog` 导入、不再定位文件、图标键改非法）均实测变红",
+            "**修复「应用层帧」工具栏 4 个按钮文字被裁**（现场截图：「记录目录」只显示成「记录目」）：根因是这 4 个按钮写死 `setFixedWidth(80)`，而 QSS 主题下它们的 `sizeHint().width()` 已是 **92px**（带菜单下拉箭头的「记录目录」**104px**）⇒ **默认字号就裁字**；字号可配置（7 套主题 × 任意字号），12 / 14 号时更需 104 / 116~128px。真正裁字的是**上限**（`setFixedWidth` 同时钉 min 与 max，而 QSS 的 `min-width` 又把 min 覆盖回去，只剩 max 生效）。现统一改走新增的 `gui_utils.fit_btn_width(...)`：取组内最宽者的 `sizeHint` 作为 `minimumWidth`（**只设下限不设上限**）——字号变大时 `sizeHint` 继续增长仍被布局满足，故切主题/改字号后**无需重算**，同时保持一行按钮等宽",
+            "**同一根因的第二处（在线监控器筛选栏）**：`monitor_widget.py` 的「帧类型 / MSDU类型」按钮写死 100 / 120px，默认 10 号字下只要单选「选择确认帧(SACK)」就显示成「选择确认帧(」（需 103px）。这类按钮**文案会变**，单按当前文案取下限不够 ⇒ 新增 `gui_utils.fit_btn_width_for_texts(btn, 候选文案全集)`（按全集最宽值取下限，量完恢复原文案；`QAbstractButton.setText` 不发信号故无副作用）；候选文案与运行时文案**共用** `monitor_widget._short_label`（截断长度 `_BTN_TEXT_MAX` 单一来源，防两处漂移）；「浏览」按钮（文案固定）改走 `fit_btn_width`——它原先 `setFixedWidth(60)` 与 QSS 的 `min-width` 冲突成 `min 68 > max 60`",
+            "新增 `test/test_btn_width_fit.py`（66 项：两个取宽函数的纯逻辑（含「未设上限 = 没写死」「不静默降掉既有更大下限」断言）/ 真机布局 10·12·14 号字下 4 个按钮不裁字且等宽 + 下限不依赖布局余量 / **反例自检**（改回 `setFixedWidth(80)` 后判据必红）/ 动态文案按钮走**真实勾选动作** / 运行中切字号·切主题（不重建控件）/ AST 静态守卫并自带正负样例），已登记 `release_check.py` 门禁",
+            "**真机取证**：用真实窗口渲染工具栏后 OCR —— 修复前只读出「记录目」、修复后完整读出「记录目录」；主窗口全量扫描 170 个可见按钮**零裁字**（动态文案按钮不在静态扫描范围内，故另立用例）；主窗口在**最小尺寸 1000×700** 下切 TCP 监控页，10 / 14 / 16 / 24 号字实测按钮均不裁字（24 号字需 168px、实得 180px）⇒ **无需**改 FlowLayout 折行。约定沉淀为 §8 陷阱 63",
+        ],
+    ),
     (
         "1.23.58",
         "2026-09-23",

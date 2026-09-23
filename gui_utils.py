@@ -9,6 +9,7 @@ from typing import Optional
 # 全部用 Qt 内置标准图标，零额外资源、跨平台稳定、随系统主题/高 DPI 自动适配。
 _STANDARD_ICON_MAP = {
     "open": QStyle.StandardPixmap.SP_DirOpenIcon,               # 打开/载入/浏览
+    "folder": QStyle.StandardPixmap.SP_DirIcon,                 # 目录/记录位置
     "save": QStyle.StandardPixmap.SP_DialogSaveButton,          # 保存/导出
     "export": QStyle.StandardPixmap.SP_DialogSaveButton,        # 导出（别名字，语义清晰）
     "open_file": QStyle.StandardPixmap.SP_DialogOpenButton,     # 打开文件
@@ -78,6 +79,69 @@ def set_btn(btn: QPushButton, kind: str = "primary", size: Optional[str] = None)
         style.unpolish(btn)
         style.polish(btn)
     return btn
+
+
+def fit_btn_width(*btns: QPushButton, extra: int = 0) -> int:
+    """把一组按钮的**最小宽度**统一为其中最宽者的自然尺寸，防止文字/图标被裁。
+
+    背景（2026-09-23 实测）：TCP 监控工具栏 4 个「16px 图标 + 4 个汉字」的按钮被写死
+    ``setFixedWidth(80)``，而 QSS 下它们的 ``sizeHint().width()`` 已是 **92**
+    （带菜单下拉箭头的「记录目录」**104**）⇒ 默认字号就被裁字；字号调到 12 / 14 时
+    更需 104 / 116~128。本项目字号**可配置**（`theme_settings`，7 套主题 × 任意字号），
+    故按钮宽度**不能写死**，只能取「按当前字体算出的下限」。
+
+    - 只设 ``minimumWidth``（下限），**不是** ``setFixedWidth``：字号变大时 ``sizeHint()``
+      继续增长，Qt 布局仍会按 sizeHint 放宽 ⇒ **不需要**在切主题/改字号后重算。
+      （真正裁字的是 ``maximumWidth``：``setFixedWidth`` 会同时钉住 min 与 max，
+      而 QSS 的 ``min-width`` 又会把 min 覆盖回去 ⇒ 只剩 max 生效 = 变成**上限**。）
+    - **必须在最后一次 setText / setIcon / setMenu 之后调用**：``sizeHint`` 是当场算的，
+      提前调用会按「还没换文案/还没加菜单箭头」的尺寸取下限（菜单箭头约 +12px）。
+      文案会变的按钮请改用 :func:`fit_btn_width_for_texts`。
+    - 统一取最大值是为了保持一行按钮等宽；``extra`` 供调用方额外留白。
+    - 调用方若已刻意设过更大的下限，取二者较大值（不静默降掉既有约束）。
+    - ``None`` 成员自动忽略（便于调用方直接传可能未创建、按协议显隐的按钮）。
+
+    返回实际采用的最小宽度（未处理任何按钮时返回 0）。
+    """
+    valid = [b for b in btns if b is not None]
+    if not valid:
+        return 0
+    width = max(b.sizeHint().width() for b in valid) + max(0, int(extra))
+    for b in valid:
+        b.setMinimumWidth(max(width, b.minimumWidth()))
+    return width
+
+
+def fit_btn_width_for_texts(btn: QPushButton, texts, extra: int = 0) -> int:
+    """**文案会变**的按钮：按候选文案**全集**取最小宽度（当前文案与状态都不变）。
+
+    单靠 :func:`fit_btn_width` 不够：它只按「当前文案」取下限，而按钮文案是运行时
+    变的（如在线监控器的「帧类型」按钮，勾选不同项显示不同文字）。实测
+    ``monitor_widget.RealtimeMonitorWidget.frame_type_btn`` 写死 ``setFixedWidth(100)``：
+    默认文案「全部」只需 68px 看着没事，一旦只勾选「选择确认帧(SACK)」就显示
+    ``选择确认帧(`` —— 10 号字需 **103px** ⇒ 默认字号就被截掉一个字。
+
+    做法：临时把每个候选文案设到按钮上量 ``sizeHint``，取最大值作为 ``minimumWidth``，
+    最后**恢复原文案**。``QAbstractButton.setText`` 不发信号（只有 QLineEdit/QComboBox
+    之类有 ``textChanged``），故不会触发业务回调。
+
+    返回实际采用的最小宽度。``texts`` 为空时回落为按当前文案取宽（等价
+    :func:`fit_btn_width`）。
+    """
+    candidates = [str(t) for t in (texts or [])]
+    if not candidates:
+        return fit_btn_width(btn, extra=extra)
+    original = btn.text()
+    widest = 0
+    try:
+        for text in candidates:
+            btn.setText(text)
+            widest = max(widest, btn.sizeHint().width())
+    finally:
+        btn.setText(original)
+    width = widest + max(0, int(extra))
+    btn.setMinimumWidth(max(width, btn.minimumWidth()))
+    return width
 
 
 class ZoomableTableWidget(QTableWidget):
