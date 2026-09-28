@@ -324,7 +324,9 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
 │   ├── batch_source_view.py        # 原始日志快照查看器 (SourceViewerDialog) - 批量摘要表右键「转到原始报文位置」，
 │   │                                 #   拖入/打开/粘贴建立不可变快照（回填式预处理只改输入框）；前半纯逻辑
 │   │                                 #   (hex_stream/find_frame_in_stream，无Qt可测)，后半只读行号编辑器+Ctrl+F搜索条（1.23.0 起）
-│   ├── message_tool_widget.py       # 报文工具标签页 (MessageToolWidget) - ASCII/HEX转换/CRC/校验
+│   ├── message_tool_widget.py       # 报文工具标签页 (MessageToolWidget) - ASCII/HEX转换/CRC/校验；
+│   │                                 #   数值→HEX（698.45/A-XDR 12 种基础类型，同时给大端/小端；纯逻辑
+│   │                                 #   `encode_numeric_value` 与 dl_t698_45_axdr 的字节宽度一一对应，1.23.60 起）
 │   ├── spectrum_widget.py           # 频谱图标签页 (SpectrumWidget/SpectrumCanvas) - 频谱仪参数 + trace 数值 → 仪器式网格频谱图；光标读数/MARK标记/两点Δ测量/峰值搜索 + 导出PNG（常驻，与协议无关；1.23.9 起）
 │   ├── feedback_dialog.py           # 问题反馈对话框 (FeedbackDialog) - 帮助菜单入口，提交到 Web 服务端共享 feedback.db（1.20.0 起）
 │   ├── share_dialog.py              # 报文分享对话框 (ShareDialog) - 单帧解析「分享此帧」，JSON POST /api/frameshare（1.21.0 起）
@@ -1073,6 +1075,14 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 ## 10. 变更日志
 
 > 详细版本变更记录请查看 `main_gui.py:CHANGELOG`（按版本倒序），或运行 `git log --oneline` 查看提交历史。本文档保留近期版本的摘要。
+
+### 1.23.60 — 2026-09-28
+
+- **报文工具新增「数值 → HEX（大端/小端）」转换**：选基础数据类型（DL/T 790.6-2010 = 698.45 APDU 的 A-XDR 中可用十进制表述的 12 种：bool / integer / unsigned / enum / long / long-unsigned / double-long / double-long-unsigned / long64 / long64-unsigned / float32 / float64），输入十进制值后一次输出**大端**与**小端**两种字节序 HEX
+- 类型表与编码器为**模块级纯逻辑**（`NUMERIC_TYPES` / `NUMERIC_TYPE_SPECS` / `encode_numeric_value`，零 Qt）：超范围、非十进制、bool 非 0/1、float 的 NaN/inf/溢出均给**可读中文原因**且不覆盖上次输出
+- 字节宽度与符号性**与 `dl_t698_45_axdr.AXDRCoder` 的各 `_decode_*` 一一对应**（测试交叉断言「类型在 AXDR_TAG 中存在 + 解码器已实现」），往返 oracle = 「编码 → 698.45 A-XDR 解码」；文档锚点：`2016`→`07 E0` / `180`→`00 B4` / `164`→`00 A4`（附录 H.1.1）、`-24880`→`FF FF 9E D0`（A-XDR 大端判据）
+- 新增 `test/test_message_tool_numeric.py`（278 项）并登记 `release_check.py:CORE_TESTS`；**变异反证 1 条**（小端改为直通 → 12 项变红）
+- 布局护栏随测试钉住：下拉/输入框 `visibleRegion` 非空（陷阱 56 类）、按钮 `width >= sizeHint` 且未设上限（陷阱 63 类）
 
 ### 1.23.59 — 2026-09-23
 

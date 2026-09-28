@@ -8,21 +8,97 @@
 - 格式化：大小写、去空格、加空格、统计
 - CRC / 校验和
 - HEX <-> bitstring 转换
+- 数值 -> HEX（按 698.45/A-XDR 基础数据类型编码，同时给出大端/小端）
 """
 
 import re
+import struct
 import crcmod
 import crcmod.predefined
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTextEdit, QCheckBox, QGridLayout, QMessageBox, QGroupBox, QComboBox,
+    QLineEdit,
 )
 
 
 # CRC 算法（与协议解析器一致）
 _crc24_func = crcmod.mkCrcFun(0x1800063, initCrc=0x000000, rev=True, xorOut=0x000000)
 _crc32_func = crcmod.mkCrcFun(0x104C11DB7, initCrc=0x00000000, rev=True, xorOut=0xFFFFFFFF)
+
+
+# --------------------------------------------------------------- 数值类型表
+# 基础数据类型（DL/T 790.6-2010 A-XDR，即 DL/T 698.45-2017 APDU 所用编码）。
+# kind: bool 布尔 / int 有符号整型 / uint 无符号整型 / float IEEE 754 浮点。
+# 字节宽度与符号性与 dl_t698_45_axdr.AXDRCoder 的各 _decode_* 实现一一对应。
+NUMERIC_TYPES = [
+    ("bool（布尔，1字节，0/1）", 1, "bool"),
+    ("integer（整型，1字节，-128~127）", 1, "int"),
+    ("unsigned（无符号整型，1字节，0~255）", 1, "uint"),
+    ("enum（枚举，1字节，0~255）", 1, "uint"),
+    ("long（长整型，2字节，-32768~32767）", 2, "int"),
+    ("long-unsigned（无符号长整型，2字节，0~65535）", 2, "uint"),
+    ("double-long（双长整型，4字节，有符号）", 4, "int"),
+    ("double-long-unsigned（无符号双长整型，4字节）", 4, "uint"),
+    ("long64（64位长整型，8字节，有符号）", 8, "int"),
+    ("long64-unsigned（无符号64位长整型，8字节）", 8, "uint"),
+    ("float32（单精度浮点，4字节）", 4, "float"),
+    ("float64（双精度浮点，8字节）", 8, "float"),
+]
+
+# 类型名 -> (字节数, kind)，供 UI 与测试按下拉文案取值
+NUMERIC_TYPE_SPECS = {label: (nbytes, kind) for label, nbytes, kind in NUMERIC_TYPES}
+
+
+def encode_numeric_value(text: str, nbytes: int, kind: str) -> tuple[str, str, str]:
+    """把十进制数值文本编码为 (大端 HEX, 小端 HEX, 规范化十进制文本)。
+
+    A-XDR 数据本身是大端（DL/T 790.6-2010），此处同时给出小端存放形式，便于
+    观察按本项目链路层惯例存放时的字节排列。失败抛 ValueError，消息为可直接
+    展示给用户的中文原因（格式错误 / 超出取值范围）。
+    """
+    text = text.strip()
+    if not text:
+        raise ValueError("请输入十进制数值")
+
+    if kind == "float":
+        try:
+            value = float(text)
+        except ValueError:
+            raise ValueError(f"'{text}' 不是合法的十进制浮点数") from None
+        if value != value:
+            raise ValueError("不支持 NaN")
+        if value in (float("inf"), float("-inf")):
+            raise ValueError("不支持正负无穷")
+        fmt = ">f" if nbytes == 4 else ">d"
+        try:
+            be = struct.pack(fmt, value)
+        except (OverflowError, struct.error):
+            raise ValueError(f"{value} 超出 float{nbytes * 8} 表示范围") from None
+        normalized = repr(value)
+    else:
+        try:
+            value = int(text, 10)
+        except ValueError:
+            raise ValueError(f"'{text}' 不是合法的十进制整数") from None
+        if kind == "bool":
+            if value not in (0, 1):
+                raise ValueError("bool 只能取 0（false）或 1（true）")
+        elif kind == "uint":
+            hi = (1 << (nbytes * 8)) - 1
+            if not 0 <= value <= hi:
+                raise ValueError(f"超出 {nbytes} 字节无符号范围 0~{hi}")
+        else:
+            hi = (1 << (nbytes * 8 - 1)) - 1
+            if not -hi - 1 <= value <= hi:
+                raise ValueError(f"超出 {nbytes} 字节有符号范围 {-hi - 1}~{hi}")
+        be = value.to_bytes(nbytes, "big", signed=(kind == "int"))
+        normalized = str(value)
+
+    be_hex = " ".join(f"{b:02X}" for b in be)
+    le_hex = " ".join(f"{b:02X}" for b in reversed(be))
+    return be_hex, le_hex, normalized
 
 
 class MessageToolWidget(QWidget):
@@ -113,6 +189,33 @@ class MessageToolWidget(QWidget):
         ext_grid.addWidget(self._btn("HEX→十进制", self._hex_to_decimal), row, 1)
 
         layout.addWidget(ext_group)
+
+        # ---------- 数值 → HEX（698.45/A-XDR 基础数据类型） ----------
+        num_group = QGroupBox("数值 → HEX（698.45 基础数据类型 · 同时给出大端/小端）")
+        num_grid = QGridLayout(num_group)
+        num_grid.setSpacing(6)
+
+        num_grid.addWidget(QLabel("类型"), 0, 0)
+        self.num_type_combo = QComboBox()
+        self.num_type_combo.addItems([label for label, _n, _k in NUMERIC_TYPES])
+        self.num_type_combo.setMinimumHeight(24)
+        self.num_type_combo.setToolTip(
+            "按 DL/T 790.6-2010（A-XDR）基础数据类型确定字节宽度与取值范围"
+        )
+        num_grid.addWidget(self.num_type_combo, 0, 1, 1, 3)
+
+        num_grid.addWidget(QLabel("十进制值"), 1, 0)
+        self.num_value_edit = QLineEdit()
+        self.num_value_edit.setMinimumHeight(24)
+        self.num_value_edit.setPlaceholderText(
+            "整数如 1234 / -24880；浮点类型如 1.5 / 1e-3"
+        )
+        self.num_value_edit.setToolTip("A-XDR 数据本身为大端；小端列仅为便于按本项目链路层惯例存放")
+        self.num_value_edit.returnPressed.connect(self._num_to_hex)
+        num_grid.addWidget(self.num_value_edit, 1, 1, 1, 2)
+        num_grid.addWidget(self._btn("数值 → HEX", self._num_to_hex), 1, 3)
+
+        layout.addWidget(num_group)
 
         # ---------- 输出区 ----------
         layout.addWidget(QLabel("输出"))
@@ -241,6 +344,31 @@ class MessageToolWidget(QWidget):
             f"十进制: {value}\n"
             f"十六进制: 0x{value:X}\n"
             f"字节序: {'小端(低字节在前)' if little else '大端(高字节在前)'}"
+        )
+
+    def _num_to_hex(self):
+        """数值→HEX：按所选 698.45/A-XDR 基础数据类型编码，输出大端与小端两种字节序"""
+        label = self.num_type_combo.currentText()
+        spec = NUMERIC_TYPE_SPECS.get(label)
+        if spec is None:
+            QMessageBox.warning(self, "错误", f"未知数据类型: {label}")
+            return
+        nbytes, kind = spec
+        text = self.num_value_edit.text().strip()
+        if not text:
+            QMessageBox.information(self, "提示", "请输入十进制数值")
+            return
+        try:
+            be_hex, le_hex, normalized = encode_numeric_value(text, nbytes, kind)
+        except ValueError as exc:
+            QMessageBox.warning(self, "格式错误", str(exc))
+            return
+        self._set_output(
+            f"类型: {label}\n"
+            f"十进制值: {normalized}\n"
+            f"字节数: {nbytes}\n"
+            f"大端(高字节在前): {be_hex}\n"
+            f"小端(低字节在前): {le_hex}"
         )
 
     def _byte_length(self):

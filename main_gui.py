@@ -115,8 +115,8 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.59"
-BUILD_DATE = "2026-09-23"  # 编译日期，每次打包前更新
+APP_VERSION = "1.23.60"
+BUILD_DATE = "2026-09-28"  # 编译日期，每次打包前更新
 
 # 作者 GitHub 仓库地址 —— 「关于」对话框 Star 按钮的**唯一来源**。
 # 改地址只改这一处（按钮文案/提示/跳转都读它，不要在别处再写死一份）。
@@ -140,6 +140,17 @@ _WINDOW_STATE_TABLES = (
 )
 
 CHANGELOG = [
+    (
+        "1.23.60",
+        "2026-09-28",
+        [
+            "**报文工具新增「数值 → HEX（大端/小端）」转换**：先选基础数据类型，再输入十进制值，一次给出**大端**与**小端**两种字节序的 HEX 字节串。类型取自 DL/T 790.6-2010（698.45 APDU 的 A-XDR）中可用十进制表述的 12 种：bool / integer / unsigned / enum / long / long-unsigned / double-long / double-long-unsigned / long64 / long64-unsigned / float32 / float64 —— 沿用协议 8 既有词汇，不另造第二套类型名",
+            "类型自带字节宽度与取值范围：超范围、非十进制、bool 非 0/1、float 的 NaN/inf/超出 float32 范围均给出**可读中文原因**（不静默出错），且不覆盖上一次输出；空白板一键「清空」沿用既有按钮",
+            "编码器为**模块级纯逻辑**（`NUMERIC_TYPES` / `NUMERIC_TYPE_SPECS` / `encode_numeric_value`，零 Qt、可脱离 GUI 单测）；下拉项与规格表同源，测试断言无哑条目、无重名覆盖",
+            "字节宽度/符号性与 `dl_t698_45_axdr.AXDRCoder` 的各 `_decode_*` **一一对应**，由「编码 → 698.45 A-XDR 解码」往返 oracle 验证（解析值、原始值、消耗字节数三查）；并钉住协议文档锚点：`2016`→`07 E0`、`180`→`00 B4`、`164`→`00 A4`（附录 H.1.1）与 `-24880`→`FF FF 9E D0`（A-XDR 大端判据，`dl_t698_45_axdr` 文件头记录的历史修复实例）",
+            "新增 `test/test_message_tool_numeric.py`（278 项：类型表与解码器一致性 / 往返 oracle / 文档锚点 / 各类型 min·max 与 ±1 边界 / 错误路径中文原因 / offscreen GUI 真实点击与 returnPressed 接线 · 错误路径不覆盖输出 / 下拉与输入框 `visibleRegion` 非空 · 按钮 `width >= sizeHint` 不裁字），已登记 `release_check.py` 门禁；**变异反证 1 条**（把「小端 = 大端逆序」改成直通）实测 12 项变红",
+        ],
+    ),
     (
         "1.23.59",
         "2026-09-23",
