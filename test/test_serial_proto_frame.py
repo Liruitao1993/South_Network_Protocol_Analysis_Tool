@@ -50,8 +50,9 @@ def section(title):
 F68 = b"\x68\xD0\x00" + bytes(range(256))[:204] + b"\x16"          # 208 字节
 # 645：68 + 地址(6B) + 68 + 控制码 + 数据长度(1B@9) + … + 16H，整帧 = L + 12
 F645 = bytes.fromhex("6812345678901268110433333333AA16")            # 16 字节
-# 698.45：68 + L(2B 小端) + 68 + … + 16H，整帧 = L + 3
-F698 = b"\x68\x11\x00\x68" + b"\x20" * 15 + b"\x16"                # 20 字节
+# 698.45：68 + L(2B 小端) + C(1B) + … + FCS + 16H，**无第二个 68H**，整帧 = L + 2
+# （DL/T 698.45-2017 6.2.2 a：L 是不含起始/结束字符的数据长度；现场实测帧）
+F698 = bytes.fromhex("681F00C32602313104000090017F8D850109200402010105FFFF9ED000006D1716")  # 33 字节
 # DLMS Wrapper：版本 0001 + 源端口(2B) + 目的端口(2B) + 长度(2B 大端@6) + APDU
 FWRAP = bytes.fromhex("000100000000000A") + bytes(10)              # 18 字节
 # HDLC：7EH + 地址 + 控制 + 载荷 + FCS(2) + 7EH
@@ -68,7 +69,7 @@ def main():
           str(stw.declared_frame_len(F68)))
     check("645 帧 → 16（L + 12）", stw.declared_frame_len(F645) == 16,
           str(stw.declared_frame_len(F645)))
-    check("698.45 帧 → 20（L + 3）", stw.declared_frame_len(F698) == 20,
+    check("698.45 帧 → 33（L + 2）", stw.declared_frame_len(F698) == 33,
           str(stw.declared_frame_len(F698)))
     check("非 68H 开头 → 0", stw.declared_frame_len(b"\x01\x02" + bytes(10)) == 0)
     check("不足 8 字节 → 0（分不清三种结构）",
@@ -85,8 +86,8 @@ def main():
     check("6 dlt645 → 16",
           stw.frame_length_for("dlt645", F645) == 16,
           str(stw.frame_length_for("dlt645", F645)))
-    check("8 dlt698_45 → 20",
-          stw.frame_length_for("dlt698_45", F698) == 20,
+    check("8 dlt698_45 → 33（L + 2）",
+          stw.frame_length_for("dlt698_45", F698) == 33,
           str(stw.frame_length_for("dlt698_45", F698)))
     check("4 dlms_wrapper → 18（8 + 长度域 10）",
           stw.frame_length_for("dlms_wrapper", FWRAP) == 18,
@@ -96,7 +97,7 @@ def main():
           str(stw.frame_length_for("hdlc_7e", FHDLC)))
 
     # 自证失败 / 不匹配：一律 0（交回既有路径，不猜）
-    check("ft12_68 遇 698 结构（第 4 字节 68H）→ 0（不误判）",
+    check("ft12_68 遇 698 帧（按南网口径到齐却非 16H）→ 0（不误判）",
           stw.frame_length_for("ft12_68", F698) == 0,
           str(stw.frame_length_for("ft12_68", F698)))
     check("ft12_68 遇 645 结构（第 8 字节 68H）→ 0（不误判）",
@@ -104,7 +105,7 @@ def main():
           str(stw.frame_length_for("ft12_68", F645)))
     check("dlt645 遇南网/国网帧（第 8 字节非 68H）→ 0",
           stw.frame_length_for("dlt645", F68) == 0)
-    check("dlt698_45 遇南网/国网帧（第 4 字节非 68H）→ 0",
+    check("dlt698_45 遇南网/国网帧（末字节自证是南网）→ 0",
           stw.frame_length_for("dlt698_45", F68) == 0)
     check("dlms_wrapper 版本非 0001 → 0",
           stw.frame_length_for("dlms_wrapper", b"\x00\x02" + bytes(16)) == 0)
@@ -348,7 +349,7 @@ def main():
 
     section("[11] 反例自检（严格策略确实比启发式更严）")
     # 启发式能认出 698 帧，但指定 ft12_68 时必须拒绝（否则会按南网/国网切错帧）
-    check("启发式认 698 帧（20）", stw.declared_frame_len(F698) == 20)
+    check("启发式认 698 帧（33 = L + 2）", stw.declared_frame_len(F698) == 33)
     check("指定 ft12_68 时拒绝 698 帧", stw.frame_length_for("ft12_68", F698) == 0)
     check("两者结论确实不同（判据有效）",
           stw.declared_frame_len(F698) != stw.frame_length_for("ft12_68", F698))

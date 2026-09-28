@@ -467,7 +467,11 @@ def extract_68_frames(clean: str) -> list[str]:
 
 
 def extract_69845_frames(clean: str) -> list[str]:
-    """提取 698.45 格式帧"""
+    """提取 698.45 格式帧
+
+    帧总长度 = L + 2（DL/T 698.45-2017 6.2.2 a：L 是不含起始/结束字符的数据长度，
+    且含两个长度域字节）。标准附录 H.1.1 示例：``68 1E 00 81 … 16`` 共 32B、L=30。
+    """
     frames = []
     i = 0
     while i < len(clean) - 7:
@@ -487,7 +491,7 @@ def extract_69845_frames(clean: str) -> list[str]:
         if length < 8 or length > 2048:
             i = pos + 2
             continue
-        total_len = length + 4
+        total_len = length + 2
         frame_hex_len = total_len * 2
         if pos + frame_hex_len > len(clean):
             i = pos + 2
@@ -620,7 +624,7 @@ def extract_frames_for_protocol(text: str, protocol_index: int) -> list[str]:
         return extract_wrapper_frames(text)
     elif protocol_index == 6:  # DLT645-2007：按行分割，每行一帧
         return [f.strip() for f in text.splitlines() if f.strip()]
-    elif protocol_index == 8:  # 698.45：68开头，16结束，长度域定义不同（总长度 = L + 4）
+    elif protocol_index == 8:  # 698.45：68 开头、16 结束，帧总长 = L + 2（6.2.2 a）
         clean = re.sub(r'[^0-9A-Fa-f]', '', text).upper()
         return extract_69845_frames(clean)
     elif protocol_index == 9:  # 新一代载波协议(通感一体化)：按行提取，过滤无效短帧

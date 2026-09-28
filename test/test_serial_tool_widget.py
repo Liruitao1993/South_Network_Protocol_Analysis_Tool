@@ -740,12 +740,12 @@ def main():
           raw_texts(w) == [stw.bytes_to_hex(f645)],
           str(raw_texts(w)))
 
-    # 场景 4b：698.45 结构（68 L(2B 小端) 68 … FCS 16，整帧 = L + 3）按特征字段判别
-    l698 = 17
-    f698 = b"\x68" + bytes([l698 & 0xFF, l698 >> 8]) + b"\x68" + b"\x20" * 15 + b"\x16"
-    check("698.45 帧长度 = 长度域 + 3", len(f698) == l698 + 3, str(len(f698)))
-    check("698.45 长度域解析 = 20",
-          stw.SerialToolWidget._declared_frame_len(f698) == 20,
+    # 场景 4b：698.45 结构（68 L(2B 小端) C … FCS 16，**无第二个 68H**，整帧 = L + 2）
+    f698 = bytes.fromhex(
+        "681F00C32602313104000090017F8D850109200402010105FFFF9ED000006D1716")
+    check("698.45 帧长度 = 长度域 + 2", len(f698) == 31 + 2, str(len(f698)))
+    check("698.45 长度域解析 = 33",
+          stw.SerialToolWidget._declared_frame_len(f698) == 33,
           str(stw.SerialToolWidget._declared_frame_len(f698)))
     w._reset_stats()
     w._rx_log_queue.clear()
@@ -872,7 +872,8 @@ def main():
     section("[19] 按命令协议断帧（协议锁存 + 策略分帧）")
     # 各协议的构造帧（与 test_serial_proto_frame.py 同源）
     f645 = bytes.fromhex("6812345678901268110433333333AA16")            # 645：L+12
-    f698 = b"\x68\x11\x00\x68" + b"\x20" * 15 + b"\x16"                # 698.45：L+3
+    f698 = bytes.fromhex(
+        "681F00C32602313104000090017F8D850109200402010105FFFF9ED000006D1716")  # 698.45：L+2
     fhdlc = b"\x7E\x10\x11\x12\x13\x7E"                                # HDLC 7EH 定界
     fwrap = bytes.fromhex("000100000000000A") + bytes(10)              # Wrapper：8+L
     w.rx_raw_radio.setChecked(True)

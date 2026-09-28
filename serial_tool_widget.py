@@ -1019,7 +1019,7 @@ STRATEGY_BY_PROTOCOL = {
     0: "ft12_68",        # 南网：68H + L(2B 小端)，整帧 = L
     7: "ft12_68",        # 国网：同上（gdw10376_parser.py:333）
     6: "dlt645",         # 645：68H + A(6) + 68H + C + L(1B@9) + …，整帧 = L + 12
-    8: "dlt698_45",      # 698.45：68H + L(2B 小端) + 68H + …，整帧 = L + 3
+    8: "dlt698_45",      # 698.45：68H + L(2B 小端) + C + …，整帧 = L + 2（无第二个 68H）
     2: "hdlc_7e",        # HDLC/国网DLMS：7EH 定界（7DH 转义）
     3: "hdlc_7e",        # DLMS-APDU(国网)：同上（国网 DLMS 走 HDLC 7E 定界）
     4: "dlms_wrapper",   # DLMS Wrapper：版本 0001 + … + L(2B 大端@6)，整帧 = 8 + L
@@ -1028,7 +1028,7 @@ STRATEGY_BY_PROTOCOL = {
 STRATEGY_NAMES = {
     "ft12_68": "68H+长度域(2B 小端)",
     "dlt645": "645 结构(68 A6 68)",
-    "dlt698_45": "698.45 结构(68 L L 68)",
+    "dlt698_45": "698.45 结构(68 L L C…)",
     "hdlc_7e": "HDLC 7EH 定界",
     "dlms_wrapper": "DLMS Wrapper 长度头",
 }
@@ -1038,49 +1038,64 @@ STRATEGY_NAMES = {
 END_CHAR_STRATEGIES = frozenset({"ft12_68", "dlt645", "dlt698_45"})
 
 
+def _sane_frame_len(n: int) -> int:
+    """整帧长度合理区间过滤：区间外视为不可信（返回 0）。"""
+    return n if RAW_MIN_FRAME_LEN <= n <= RAW_MAX_FRAME_LEN else 0
+
+
 def declared_frame_len(buf) -> int:
     """**未指定协议时**的启发式：推算缓冲起始处 68 帧的整帧长度；不可信返回 0。
 
-    按本项目三种「68H + 长度域」结构各自**固定的特征字段**判别（均以 16H 结尾），
-    判别顺序保证互斥（698.45 的第 4 字节恒为 68H，故 645 分支要排除它）：
-      - 698.45：``68H + 长度域 L(2B 小端) + 68H + 控制域 + … + FCS + 16H``，
-        特征 = **第 4 字节是第二个起始符 68H**；长度域 = 除两个 68H 与 16H 之外的
-        字节数（协议文档 6.2.2：bit0~bit13 为帧数据长度值），故整帧 = ``L + 3``。
-      - DLT645-2007：``68H + 地址(6B) + 68H + 控制码 + 数据长度 L(1B) + … + CS + 16H``，
-        特征 = **第 8 字节是第二个起始符 68H**；整帧 = ``L + 12``（固定开销 12 字节，
-        见 `dlt645_parser.py`）。
+    三种「68H + 长度域」结构（均以 16H 结尾）：
+
+      - DLT645-2007：``68H + 地址(6B) + 68H + 控制码 + 数据长度 L(1B@9) + … + CS + 16H``，
+        特征 = **第 8 字节是第二个起始符 68H**；整帧 = ``L + 12``。
       - 南网 / 国网：``68H + 长度域 L(2B 小端) + 控制域 + … + CS + 16H``，
-        特征 = 以上都不是；且 **L 就是整帧字节数**（见 `protocol_parser.py:72` 与
-        `gdw10376_parser.py:333`：``int.from_bytes(frame[1:3], 'little')``）。
+        **L 就是整帧字节数**（`protocol_parser.py:72`、`gdw10376_parser.py:333`）。
+      - 698.45：``68H + 长度域 L(2B 小端) + 控制域 + … + FCS + 16H`` —— **没有第二个
+        68H**；L = 传输帧中**不含起始/结束字符**的数据长度（协议文档 6.2.2 a，L 本身
+        含两个长度域字节）⇒ **整帧 = L + 2**（标准附录 H.1.1 示例：32 字节、L=30）。
+
+    ⚠ 南网/国网 与 698.45 的**前 3 字节形态完全相同**（都是 ``68 L L``，第 4 字节是
+    控制域而非定界符），故**不能**靠头部签名区分，只能用**末字节自证**：南网/国网的
+    末字节恒为 16H，所以「按 L 到齐却不是 16H」即否定南网/国网口径，改按 698.45 的
+    ``L + 2`` 判。历史上曾按「第 4 字节 = 68H」判定 698.45 —— 真实 698.45 帧没有这
+    个字节（1.23.60 修正），该判据恒不命中，导致 698 帧被按南网口径算出 L（比真实
+    整帧小 2）而永远切不开。
+
     长度域不可信时返回 0，交由时间聚合处理 —— 错切帧比不切更糟。
     """
     if len(buf) < 8 or buf[0] != 0x68:
         return 0                      # 不足 8 字节还分不清三种结构
-    if buf[3] == 0x68:                # 698.45：第二个起始符在第 4 字节
-        need = ((buf[1] | (buf[2] << 8)) & 0x3FFF) + 3
-    elif buf[7] == 0x68:              # 645：第二个起始符在第 8 字节
-        if len(buf) < 10:             # 数据长度在第 10 字节，还没收到
-            return 0
-        need = buf[9] + 12
-    else:                             # 南网 / 国网
-        need = buf[1] | (buf[2] << 8)
-    if need < RAW_MIN_FRAME_LEN or need > RAW_MAX_FRAME_LEN:
-        return 0
-    return need
+    lv = buf[1] | (buf[2] << 8)
+    n68 = _sane_frame_len(lv)                                  # 南网/国网：L 即整帧
+    data_len = lv & 0x3FFF
+    unit = (lv >> 14) & 0x01
+    n698 = _sane_frame_len((data_len * 1024 if unit else data_len) + 2)
+    n645 = _sane_frame_len(buf[9] + 12) if (buf[7] == 0x68 and len(buf) >= 10) else 0
+    # ① 末字节自证：已到齐且以 16H 收尾的那个口径就是它（南网/国网与 698 只能这样区分）
+    for n in (n68, n645, n698):
+        if n and len(buf) >= n and buf[n - 1] == 0x16:
+            return n
+    # ② 南网/国网口径已被末字节否定（按 L 已到齐却不是 16H）→ 只可能是 698.45
+    if n68 and len(buf) >= n68:
+        return n698
+    # ③ 都还没收全：按头部分辨（645 特征 = 第 8 字节是第二个起始符 68H）
+    return n645 or n68
 
 
 def frame_length_for(strategy: str, buf) -> int:
     """按协议分帧策略推算**整帧长度**；不可信返回 0。
 
-    68 家族三者的判别顺序与 :func:`declared_frame_len` 一致（先查第 4 字节、
-    再查第 8 字节），因为 ``68 L L 68``（698.45）与 ``68 A6 68``（645）的签名
-    可能同时命中。
-
     协议已知时 ``ft12_68`` **只要长度域收齐（3 字节）** 就按南网/国网口径取长度
     —— 不再等满 8 字节才开工（策略本身已是选择，等满 8 字节会在首片过短时误走
-    短静默窗口把整帧切碎，1.23.57 现场报障）。但**签名排除在字节够判时仍生效**
-    （``len(buf) >= 8`` 时排除第 4/第 8 字节为 68H 的 698.45 / 645 结构），否则
-    把 698 帧按南网口径切错帧；两者合起来既不会切碎整帧，也不会错认结构。
+    短静默窗口把整帧切碎，1.23.57 现场报障）。
+
+    **结构排除改为末字节自证**：南网/国网的 L 就是整帧、末字节恒为 16H，故「按 L
+    到齐却不是 16H」即否定本结构（典型：把 698.45 帧按本口径切 —— 其 L 比整帧小
+    2），返回 0 交回回退路径；645 另有「第 8 字节起始符 + 末字节」双重自证。历史上
+    的「第 4 字节 = 68H」判据基于**错误的** 698.45 帧格式（真实 698.45 帧没有第二个
+    68H），恒不命中且会误导排查，已于 1.23.60 删除。详见 `declared_frame_len`。
     """
     if not strategy or not buf:
         return 0
@@ -1090,19 +1105,29 @@ def frame_length_for(strategy: str, buf) -> int:
         # 协议已知：长度域在第 1~2 字节即可算整帧长；末字节 16H 由调用方自证。
         if len(buf) < 3 or buf[0] != 0x68:
             return 0
-        # 字节够判时仍做签名排除（AGENTS.md §8 陷阱 59）：698.45 的第 4 字节、
-        # 645 的第 8 字节恒为第二个起始符 68H，按南网口径切会把整帧切错。
-        if len(buf) >= 8 and (buf[3] == 0x68 or buf[7] == 0x68):
-            return 0
         need = buf[1] | (buf[2] << 8)
+        # 字节够判时排除「不是南网/国网结构」的输入（AGENTS.md §8 陷阱 59 的自证版）
+        if len(buf) >= 8 and buf[7] == 0x68 and len(buf) >= 10:
+            n645 = buf[9] + 12
+            if len(buf) >= n645 and buf[n645 - 1] == 0x16:
+                return 0                  # ① 645 结构（起始符 + 末字节双自证）
+        if len(buf) >= need and buf[need - 1] != 0x16:
+            return 0                      # ② 按南网口径到齐却非 16H → 不是本结构
     elif strategy == "dlt645":
         if len(buf) < 10 or buf[0] != 0x68 or buf[7] != 0x68:
             return 0
         need = buf[9] + 12
     elif strategy == "dlt698_45":
-        if len(buf) < 4 or buf[0] != 0x68 or buf[3] != 0x68:
+        # 真实 698.45 链路帧**没有第二个 68H**（68 | L(2B) | C | … | FCS | 16）；
+        # L 是不含首尾定界符的数据长度 ⇒ 整帧 = L + 2（6.2.2 a + 附录 H.1.1 自证）
+        if len(buf) < 3 or buf[0] != 0x68:
             return 0
-        need = ((buf[1] | (buf[2] << 8)) & 0x3FFF) + 3
+        lv = buf[1] | (buf[2] << 8)
+        n68 = lv                          # 南网/国网口径：L 即整帧
+        if len(buf) >= n68 and buf[n68 - 1] == 0x16:
+            return 0                      # 末字节自证是南网/国网帧，不是 698.45
+        data_len = lv & 0x3FFF
+        need = (data_len * 1024 if (lv >> 14) & 0x01 else data_len) + 2
     elif strategy == "dlms_wrapper":
         if len(buf) < 8 or buf[0] != 0x00 or buf[1] != 0x01:
             return 0
@@ -2266,7 +2291,7 @@ class SerialToolWidget(QWidget):
         # 68 家族：长度域/第二起始符签名还没收够 → 继续等（勿按短静默切开）
         min_hdr = {
             "ft12_68": 3,       # 长度域在第 1~2 字节
-            "dlt698_45": 4,     # 长度域在第 1~2，第二起始符在第 3
+            "dlt698_45": 3,     # 长度域在第 1~2 字节（真实 698.45 帧无第二个起始符）
             "dlt645": 10,       # 第二起始符在第 7，数据长度在第 9
         }.get(strategy or "")
         if strategy and buf[0] == 0x68 and min_hdr and len(buf) < min_hdr:

@@ -1050,13 +1050,14 @@ def _extract_69845_frames(clean: str) -> list:
     """提取698.45格式帧（DL/T 698.45-2017）
 
     帧格式: 68H | L(2B小端) | C(1B) | SA | CA | HCS(2B) | APDU | FCS(2B) | 16H
-    L = 控制域 + 地址域 + 链路用户数据的长度（不含68、LL、16）
-    帧总长度 = 1(68) + 2(LL) + L + 1(16) = L + 4
+    **L 语义（协议文档 6.2.2 a）：帧数据长度值 = 传输帧中不包含起始字符和结束字符
+    的数据长度 ⇒ 帧总长度 = L + 2**（L 本身含两个长度域字节）。标准附录 H.1.1
+    「登录」示例自证：``68 1E 00 81 … FCS FCS 16`` 共 **32** 字节、L=0x001E=30。
     验证规则:
       1. 起始字符 = 68H
       2. L >= 8（最小有效长度）
       3. 帧末尾 = 16H
-      4. 长度域一致性: 实际帧长 = L + 4
+      4. 长度域一致性: 实际帧长 = L + 2
     """
     frames = []
     i = 0
@@ -1082,8 +1083,8 @@ def _extract_69845_frames(clean: str) -> list:
             i = pos + 2
             continue
 
-        # 698.45: 帧总长度 = L + 4
-        total_len = length + 4
+        # 698.45: 帧总长度 = L + 2（6.2.2 a：L 不含首尾定界符，且含两个长度字节）
+        total_len = length + 2
         frame_hex_len = total_len * 2
 
         if pos + frame_hex_len > len(clean):
