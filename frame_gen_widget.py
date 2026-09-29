@@ -2162,7 +2162,7 @@ class FrameGenWidget(QWidget):
             oi_container = QWidget()
             oi_layout = QHBoxLayout(oi_container)
             oi_layout.setContentsMargins(4, 2, 4, 2)
-            oi_layout.addWidget(QLabel("OI  [对象标识 (2字节小端序)]"))
+            oi_layout.addWidget(QLabel("OI  [对象标识 (2字节大端序, A-XDR)]"))
             oi_preset_combo = QComboBox()
             oi_preset_combo.addItem("-- 预设OI --", None)
             for oi_val, oi_name in OI_PRESET_LIST:

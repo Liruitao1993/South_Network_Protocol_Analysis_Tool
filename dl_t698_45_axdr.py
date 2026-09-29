@@ -1,6 +1,15 @@
 """DL/T 790.6-2010 A-XDR 编解码器
 
 698.45 协议中 APDU 使用 A-XDR 编码规则。
+
+⚠ 两层字节序不同，改本文件前必读：
+- 链路层（长度域 L / HCS / FCS / 地址域）是**小端**，由 dl_t698_45_parser.py 负责，本文件不涉及；
+- APDU 内的 A-XDR 数据（本文件全部编解码逻辑）是**大端**（DL/T 790.6-2010 属 XDR 体系）。
+  判据为协议文档《面向对象的用电信息数据交换协议》附录 H.1.1：`00 B4`=心跳周期 180s、
+  `07 E0`=2016 年、`00 A4`=164ms，只有大端成立。两层不可互相套用。
+
+历史：1.23.59 之前整型/浮点按小端解码（组帧同步小端），导致解析值与标准/官方工具不符
+（实测 `FF FF 9E D0` 被读成 -794886145，正确为 -24880）。
 """
 
 import struct
@@ -115,7 +124,7 @@ class AXDRCoder:
     def _decode_integer(self, data: bytes, offset: int) -> Tuple[dict, int]:
         if offset + 1 >= len(data):
             raise ValueError("integer 数据不足")
-        val = int.from_bytes(data[offset + 1:offset + 2], 'little', signed=True)
+        val = int.from_bytes(data[offset + 1:offset + 2], 'big', signed=True)  # 单字节，无端序
         return {"类型": "integer", "原始值": data[offset + 1:offset + 2].hex().upper(),
                 "解析值": val, "说明": "1字节有符号整数"}, 2
 
@@ -129,44 +138,44 @@ class AXDRCoder:
     def _decode_long(self, data: bytes, offset: int) -> Tuple[dict, int]:
         if offset + 2 >= len(data):
             raise ValueError("long 数据不足")
-        val = int.from_bytes(data[offset + 1:offset + 3], 'little', signed=True)
+        val = int.from_bytes(data[offset + 1:offset + 3], 'big', signed=True)
         return {"类型": "long", "原始值": data[offset + 1:offset + 3].hex().upper(),
-                "解析值": val, "说明": "2字节有符号整数(小端)"}, 3
+                "解析值": val, "说明": "2字节有符号整数(大端)"}, 3
 
     def _decode_long_unsigned(self, data: bytes, offset: int) -> Tuple[dict, int]:
         if offset + 2 >= len(data):
             raise ValueError("long-unsigned 数据不足")
-        val = int.from_bytes(data[offset + 1:offset + 3], 'little')
+        val = int.from_bytes(data[offset + 1:offset + 3], 'big')
         return {"类型": "long-unsigned", "原始值": data[offset + 1:offset + 3].hex().upper(),
-                "解析值": val, "说明": "2字节无符号整数(小端)"}, 3
+                "解析值": val, "说明": "2字节无符号整数(大端)"}, 3
 
     def _decode_double_long(self, data: bytes, offset: int) -> Tuple[dict, int]:
         if offset + 4 >= len(data):
             raise ValueError("double-long 数据不足")
-        val = int.from_bytes(data[offset + 1:offset + 5], 'little', signed=True)
+        val = int.from_bytes(data[offset + 1:offset + 5], 'big', signed=True)
         return {"类型": "double-long", "原始值": data[offset + 1:offset + 5].hex().upper(),
-                "解析值": val, "说明": "4字节有符号整数(小端)"}, 5
+                "解析值": val, "说明": "4字节有符号整数(大端)"}, 5
 
     def _decode_double_long_unsigned(self, data: bytes, offset: int) -> Tuple[dict, int]:
         if offset + 4 >= len(data):
             raise ValueError("double-long-unsigned 数据不足")
-        val = int.from_bytes(data[offset + 1:offset + 5], 'little')
+        val = int.from_bytes(data[offset + 1:offset + 5], 'big')
         return {"类型": "double-long-unsigned", "原始值": data[offset + 1:offset + 5].hex().upper(),
-                "解析值": val, "说明": "4字节无符号整数(小端)"}, 5
+                "解析值": val, "说明": "4字节无符号整数(大端)"}, 5
 
     def _decode_long64(self, data: bytes, offset: int) -> Tuple[dict, int]:
         if offset + 8 >= len(data):
             raise ValueError("long64 数据不足")
-        val = int.from_bytes(data[offset + 1:offset + 9], 'little', signed=True)
+        val = int.from_bytes(data[offset + 1:offset + 9], 'big', signed=True)
         return {"类型": "long64", "原始值": data[offset + 1:offset + 9].hex().upper(),
-                "解析值": val, "说明": "8字节有符号整数(小端)"}, 9
+                "解析值": val, "说明": "8字节有符号整数(大端)"}, 9
 
     def _decode_long64_unsigned(self, data: bytes, offset: int) -> Tuple[dict, int]:
         if offset + 8 >= len(data):
             raise ValueError("long64-unsigned 数据不足")
-        val = int.from_bytes(data[offset + 1:offset + 9], 'little')
+        val = int.from_bytes(data[offset + 1:offset + 9], 'big')
         return {"类型": "long64-unsigned", "原始值": data[offset + 1:offset + 9].hex().upper(),
-                "解析值": val, "说明": "8字节无符号整数(小端)"}, 9
+                "解析值": val, "说明": "8字节无符号整数(大端)"}, 9
 
     def _decode_enum(self, data: bytes, offset: int) -> Tuple[dict, int]:
         if offset + 1 >= len(data):
@@ -178,14 +187,14 @@ class AXDRCoder:
     def _decode_float32(self, data: bytes, offset: int) -> Tuple[dict, int]:
         if offset + 4 >= len(data):
             raise ValueError("float32 数据不足")
-        val = struct.unpack('<f', data[offset + 1:offset + 5])[0]
+        val = struct.unpack('>f', data[offset + 1:offset + 5])[0]
         return {"类型": "float32", "原始值": data[offset + 1:offset + 5].hex().upper(),
                 "解析值": val, "说明": "IEEE 754 单精度浮点"}, 5
 
     def _decode_float64(self, data: bytes, offset: int) -> Tuple[dict, int]:
         if offset + 8 >= len(data):
             raise ValueError("float64 数据不足")
-        val = struct.unpack('<d', data[offset + 1:offset + 9])[0]
+        val = struct.unpack('>d', data[offset + 1:offset + 9])[0]
         return {"类型": "float64", "原始值": data[offset + 1:offset + 9].hex().upper(),
                 "解析值": val, "说明": "IEEE 754 双精度浮点"}, 9
 
@@ -263,14 +272,14 @@ class AXDRCoder:
         if offset + 10 >= len(data):
             raise ValueError("date_time 数据不足")
         val = data[offset + 1:offset + 11]
-        year = int.from_bytes(val[0:2], 'little')
+        year = int.from_bytes(val[0:2], 'big')  # A-XDR 大端（文档 H.1.1: 07 E0 = 2016）
         month = val[2]
         day = val[3]
         week = val[4]
         hour = val[5]
         minute = val[6]
         second = val[7]
-        ms = val[8] | (val[9] << 8)
+        ms = (val[8] << 8) | val[9]  # 大端（文档 H.1.1: 00 A4 = 164ms）
         week_map = {0: "星期日", 1: "星期一", 2: "星期二", 3: "星期三",
                     4: "星期四", 5: "星期五", 6: "星期六", 0xFF: "无效"}
         dt_str = f"{year}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}.{ms:03d}"
@@ -282,7 +291,7 @@ class AXDRCoder:
         if offset + 5 >= len(data):
             raise ValueError("date 数据不足")
         val = data[offset + 1:offset + 6]
-        year = int.from_bytes(val[0:2], 'little')
+        year = int.from_bytes(val[0:2], 'big')  # A-XDR 大端
         month = val[2]
         day = val[3]
         week = val[4]
@@ -323,7 +332,7 @@ class AXDRCoder:
     def _decode_OI(self, data: bytes, offset: int) -> Tuple[dict, int]:
         if offset + 2 >= len(data):
             raise ValueError("OI 数据不足")
-        val = int.from_bytes(data[offset + 1:offset + 3], 'little')
+        val = int.from_bytes(data[offset + 1:offset + 3], 'big')
         return {"类型": "OI", "原始值": data[offset + 1:offset + 3].hex().upper(),
                 "解析值": f"0x{val:04X}", "说明": f"对象标识={val}"}, 3
 
@@ -331,7 +340,7 @@ class AXDRCoder:
         if offset + 4 >= len(data):
             raise ValueError("OAD 数据不足")
         val = data[offset + 1:offset + 5]
-        oi = int.from_bytes(val[0:2], 'little')
+        oi = int.from_bytes(val[0:2], 'big')
         attr = val[2]
         attr_no = attr & 0x1F
         attr_feat = (attr >> 5) & 0x07
@@ -345,7 +354,7 @@ class AXDRCoder:
         if offset + 4 >= len(data):
             raise ValueError("OMD 数据不足")
         val = data[offset + 1:offset + 5]
-        oi = int.from_bytes(val[0:2], 'little')
+        oi = int.from_bytes(val[0:2], 'big')
         method = val[2]
         mode = val[3]
         return {"类型": "OMD", "原始值": val.hex().upper(),
@@ -357,7 +366,7 @@ class AXDRCoder:
             raise ValueError("TI 数据不足")
         val = data[offset + 1:offset + 4]
         unit = val[0]
-        interval = int.from_bytes(val[1:3], 'little')
+        interval = int.from_bytes(val[1:3], 'big')
         unit_map = {0: "秒", 1: "分", 2: "时", 3: "日", 4: "月", 5: "年"}
         return {"类型": "TI", "原始值": val.hex().upper(),
                 "解析值": {"单位": unit_map.get(unit, f"未知({unit})"), "间隔值": interval},
@@ -391,7 +400,7 @@ class AXDRCoder:
         if offset + 4 >= len(data):
             raise ValueError("Scaler_Unit 数据不足")
         val = data[offset + 1:offset + 5]
-        scaler = int.from_bytes(val[0:1], 'little', signed=True)
+        scaler = int.from_bytes(val[0:1], 'big', signed=True)  # 单字节，无端序
         unit = val[1]
         return {"类型": "Scaler_Unit", "原始值": val.hex().upper(),
                 "解析值": {"换算": scaler, "单位": unit},
@@ -411,37 +420,37 @@ class AXDRCoder:
         return b''
 
     def _encode_integer(self, value: int) -> bytes:
-        return struct.pack('<b', value)
+        return struct.pack('>b', value)
 
     def _encode_unsigned(self, value: int) -> bytes:
-        return struct.pack('<B', value)
+        return struct.pack('>B', value)
 
     def _encode_long(self, value: int) -> bytes:
-        return struct.pack('<h', value)
+        return struct.pack('>h', value)
 
     def _encode_long_unsigned(self, value: int) -> bytes:
-        return struct.pack('<H', value)
+        return struct.pack('>H', value)
 
     def _encode_double_long(self, value: int) -> bytes:
-        return struct.pack('<i', value)
+        return struct.pack('>i', value)
 
     def _encode_double_long_unsigned(self, value: int) -> bytes:
-        return struct.pack('<I', value)
+        return struct.pack('>I', value)
 
     def _encode_long64(self, value: int) -> bytes:
-        return struct.pack('<q', value)
+        return struct.pack('>q', value)
 
     def _encode_long64_unsigned(self, value: int) -> bytes:
-        return struct.pack('<Q', value)
+        return struct.pack('>Q', value)
 
     def _encode_enum(self, value: int) -> bytes:
-        return struct.pack('<B', value)
+        return struct.pack('>B', value)
 
     def _encode_float32(self, value: float) -> bytes:
-        return struct.pack('<f', value)
+        return struct.pack('>f', value)
 
     def _encode_float64(self, value: float) -> bytes:
-        return struct.pack('<d', value)
+        return struct.pack('>d', value)
 
     def _encode_octet_string(self, value: bytes) -> bytes:
         length = len(value)
@@ -452,7 +461,7 @@ class AXDRCoder:
             return bytes([0x80 | len(length_bytes)]) + length_bytes + value
 
     def _encode_OI(self, value: int) -> bytes:
-        return struct.pack('<H', value)
+        return struct.pack('>H', value)
 
     def _encode_OAD(self, value: dict) -> bytes:
         oi = value.get("OI", 0)
@@ -460,7 +469,7 @@ class AXDRCoder:
             oi = int(oi, 16)
         attr = value.get("属性编号", 0) | (value.get("属性特征", 0) << 5)
         index = value.get("元素索引", 0)
-        return struct.pack('<HBB', oi, attr, index)
+        return struct.pack('>HBB', oi, attr, index)
 
     def _encode_OMD(self, value: dict) -> bytes:
         oi = value.get("OI", 0)
@@ -468,10 +477,10 @@ class AXDRCoder:
             oi = int(oi, 16)
         method = value.get("方法标识", 0)
         mode = value.get("操作模式", 0)
-        return struct.pack('<HBB', oi, method, mode)
+        return struct.pack('>HBB', oi, method, mode)
 
     def _encode_bool(self, value) -> bytes:
-        return struct.pack('<B', 1 if value else 0)
+        return struct.pack('>B', 1 if value else 0)
 
     def _encode_bit_string(self, value: bytes) -> bytes:
         length = len(value)

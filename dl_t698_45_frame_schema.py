@@ -1,7 +1,8 @@
 """DL/T 698.45 帧生成器 - APDU 字段元数据 Schema
 
 定义 698.45 常用的下行 APDU 命令（请求帧）的字段结构。
-所有多字节整数默认采用小端序（698.45 协议规范）。
+APDU 内多字节字段按 **A-XDR 大端**（DL/T 790.6-2010；文档附录 H.1.1：00 B4 = 180s）；
+链路层长度域 / FCS 为小端（见 dl_t698_45_frame_gen.py），两层不可互相套用。
 """
 
 from typing import Dict, Any, Tuple
@@ -59,7 +60,7 @@ DLT69845_FIELD_SCHEMA: Dict[Tuple[str, str], Dict[str, Any]] = {
         "fields": [
             {"name": "PIID", "type": "piid", "length": 1, "default": 1, "desc": "PIID = 服务优先级(bit7) + 服务序号(bit6-0)"},
             {"name": "请求类型", "type": "uint8", "length": 1, "default": 0, "desc": "0=登录, 1=心跳, 2=退出登录"},
-            {"name": "心跳周期", "type": "uint16", "length": 2, "endian": "little", "default": 0, "desc": "心跳周期(秒)"},
+            {"name": "心跳周期", "type": "uint16", "length": 2, "endian": "big", "default": 0, "desc": "心跳周期(秒)"},
         ],
     },
 
@@ -74,10 +75,10 @@ DLT69845_FIELD_SCHEMA: Dict[Tuple[str, str], Dict[str, Any]] = {
         "fields": [
             {"name": "PIID", "type": "piid", "length": 1, "default": 1, "desc": "PIID = 服务优先级(bit7) + 服务序号(bit6-0)"},
             {"name": "期望安全参数", "type": "uint8", "length": 1, "default": 0, "desc": "0=明文, 1=密文, 2=密文+MAC"},
-            {"name": "客户机APDU最大长度", "type": "uint16", "length": 2, "endian": "little", "default": 1024, "desc": "宣告自身APDU最大长度"},
+            {"name": "客户机APDU最大长度", "type": "uint16", "length": 2, "endian": "big", "default": 1024, "desc": "宣告自身APDU最大长度"},
             {"name": "期望帧最大窗口尺寸", "type": "uint8", "length": 1, "default": 1, "desc": "收发双方一次允许不确认的帧总数"},
-            {"name": "期望帧最大帧长", "type": "uint16", "length": 2, "endian": "little", "default": 1024, "desc": "期望的帧最大帧长"},
-            {"name": "期望超时时间", "type": "uint16", "length": 2, "endian": "little", "default": 60, "desc": "期望的应用连接超时时间(s)"},
+            {"name": "期望帧最大帧长", "type": "uint16", "length": 2, "endian": "big", "default": 1024, "desc": "期望的帧最大帧长"},
+            {"name": "期望超时时间", "type": "uint16", "length": 2, "endian": "big", "default": 60, "desc": "期望的应用连接超时时间(s)"},
         ],
     },
 
@@ -108,7 +109,7 @@ DLT69845_FIELD_SCHEMA: Dict[Tuple[str, str], Dict[str, Any]] = {
         ),
         "fields": [
             {"name": "PIID", "type": "piid", "length": 1, "default": 1, "desc": "PIID = 服务优先级(bit7) + 服务序号(bit6-0)"},
-            {"name": "OI", "type": "oi", "length": 2, "default": 0x0000, "desc": "对象标识 (2字节小端序)"},
+            {"name": "OI", "type": "oi", "length": 2, "default": 0x0000, "desc": "对象标识 (2字节大端序, A-XDR)"},
             {"name": "属性标识", "type": "uint8", "length": 1, "default": 2, "desc": "对象属性标识"},
            {"name": "索引", "type": "uint8", "length": 1, "default": 0, "desc": "元素索引 (OAD字节4, 0=无)"},
         ],
@@ -141,7 +142,7 @@ DLT69845_FIELD_SCHEMA: Dict[Tuple[str, str], Dict[str, Any]] = {
         ),
         "fields": [
             {"name": "PIID", "type": "piid", "length": 1, "default": 1, "desc": "PIID = 服务优先级(bit7) + 服务序号(bit6-0)"},
-            {"name": "OI", "type": "oi", "length": 2, "default": 0x0000, "desc": "对象标识 (2字节小端序)"},
+            {"name": "OI", "type": "oi", "length": 2, "default": 0x0000, "desc": "对象标识 (2字节大端序, A-XDR)"},
             {"name": "属性标识", "type": "uint8", "length": 1, "default": 2, "desc": "对象属性标识"},
            {"name": "索引", "type": "uint8", "length": 1, "default": 0, "desc": "元素索引 (OAD字节4, 0=无)"},
             {"name": "数据内容", "type": "bytes", "length": 1, "default": "", "desc": "要设置的数据值 (十六进制)"},
@@ -159,7 +160,7 @@ DLT69845_FIELD_SCHEMA: Dict[Tuple[str, str], Dict[str, Any]] = {
         ),
         "fields": [
             {"name": "PIID", "type": "piid", "length": 1, "default": 1, "desc": "PIID = 服务优先级(bit7) + 服务序号(bit6-0)"},
-            {"name": "OI", "type": "oi", "length": 2, "default": 0x0000, "desc": "对象标识 (2字节小端序)"},
+            {"name": "OI", "type": "oi", "length": 2, "default": 0x0000, "desc": "对象标识 (2字节大端序, A-XDR)"},
             {"name": "方法标识", "type": "uint8", "length": 1, "default": 1, "desc": "对象方法标识"},
             {"name": "参数", "type": "bytes", "length": 1, "default": "", "desc": "方法参数 (十六进制, 可选)"},
         ],

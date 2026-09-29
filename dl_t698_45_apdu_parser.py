@@ -1201,8 +1201,33 @@ class DLT69845APDUParser:
 
     # --- LINK 服务 ---
 
+    @staticmethod
+    def _date_time_naked(raw: bytes) -> dict:
+        """10 字节 date_time 定长解码（SEQUENCE 内定长字段不带 tag / 长度域）
+
+        协议文档附录 H.1.1：`07 E0 05 13 04 08 05 00 00 A4` = 2016-05-19 08:05:00.164
+        （年 2 字节大端、毫秒 2 字节大端——A-XDR 大端）。
+        """
+        year = int.from_bytes(raw[0:2], 'big')
+        month, day, week = raw[2], raw[3], raw[4]
+        hour, minute, second = raw[5], raw[6], raw[7]
+        ms = (raw[8] << 8) | raw[9]
+        week_map = {0: "星期日", 1: "星期一", 2: "星期二", 3: "星期三",
+                    4: "星期四", 5: "星期五", 6: "星期六", 0xFF: "无效"}
+        return {
+            "类型": "date_time",
+            "原始值": raw.hex().upper(),
+            "解析值": f"{year}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}.{ms:03d}",
+            "说明": f"年={year}, 月={month}, 日={day}, 星期={week_map.get(week, week)}, "
+                    f"时={hour}, 分={minute}, 秒={second}, 毫秒={ms}",
+        }
+
     def _parse_link_request(self, data: bytes) -> dict:
-        """LINK-Request: 0x01 PIID 请求类型 心跳周期 时间标签"""
+        """LINK-Request: 0x01 | PIID(1B) | 请求类型(1B, ENUMERATED) | 心跳周期(2B, 大端) | [请求时间 date_time(10B)]
+
+        协议文档表38；SEQUENCE 内定长字段**不带 tag**，附录 H.1.1 示例自证：
+        `01 00 00 00 B4 07 E0 05 13 04 08 05 00 00 A4` → 登录 / 180s / 2016-05-19 08:05:00.164。
+        """
         offset = 1
         result = {}
         # PIID (unsigned)
@@ -1210,52 +1235,69 @@ class DLT69845APDUParser:
         offset += 1
         result["PIID"] = self._parse_piid(piid_byte)
 
-        # 请求类型 (enum)
-        req_type, consumed = self.axdr.decode(data, offset)
-        offset += consumed
+        # 请求类型 (ENUMERATED, 1 字节，无 tag)
         req_type_map = {0: "登录", 1: "心跳", 2: "退出登录"}
-        req_type["说明"] = req_type_map.get(req_type["解析值"], f"未知({req_type['解析值']})")
-        result["请求类型"] = req_type
+        req_byte = data[offset] if offset < len(data) else 0
+        offset += 1
+        result["请求类型"] = {
+            "类型": "enum",
+            "原始值": f"0x{req_byte:02X}",
+            "解析值": req_byte,
+            "说明": req_type_map.get(req_byte, f"未知({req_byte})"),
+        }
 
-        # 心跳周期 (long-unsigned)
-        heartbeat, consumed = self.axdr.decode(data, offset)
-        offset += consumed
-        result["心跳周期"] = heartbeat
+        # 心跳周期 (long-unsigned, 2 字节大端，无 tag)
+        if offset + 2 <= len(data):
+            raw = data[offset:offset + 2]
+            heartbeat = int.from_bytes(raw, 'big')
+            offset += 2
+            result["心跳周期"] = {
+                "类型": "long-unsigned",
+                "原始值": raw.hex().upper(),
+                "解析值": heartbeat,
+                "说明": f"心跳周期={heartbeat}s",
+            }
 
-        # 时间标签 (date_time_s, optional)
-        if offset < len(data):
-            time_tag, consumed = self.axdr.decode(data, offset)
-            offset += consumed
-            result["时间标签"] = time_tag
+        # 请求时间 (date_time, 10 字节定长，可选)
+        if offset + 10 <= len(data):
+            result["请求时间"] = self._date_time_naked(data[offset:offset + 10])
+            offset += 10
 
         return result
 
     def _parse_link_response(self, data: bytes) -> dict:
-        """LINK-Response: 0x81 PIID-ACD 结果 心跳周期 时间标签"""
+        """LINK-Response: 0x81 | PIID(1B) | 结果(1B: bit7=时钟可信, bit0~2=结果) | 请求时间 | 收到时间 | 响应时间
+
+        协议文档表39（结果与时钟可信标志同在 1 字节）；SEQUENCE 内定长字段**不带 tag**，
+        附录 H.1.1 响应示例自证：`81 00 80 07 E0 …`（结果 0x80 = 可信 + 成功）。
+        """
         offset = 1
         result = {}
-        # PIID-ACD (unsigned)
+        # PIID (unsigned)
         piid_byte = data[offset]
         offset += 1
-        result["PIID-ACD"] = self._parse_piid(piid_byte, is_acd=True)
+        result["PIID"] = self._parse_piid(piid_byte)
 
-        # 结果 (enum)
-        res, consumed = self.axdr.decode(data, offset)
-        offset += consumed
-        res_map = {0: "成功", 1: "地址不匹配", 2: "地址不存在"}
-        res["说明"] = res_map.get(res["解析值"], f"未知({res['解析值']})")
-        result["结果"] = res
+        # 结果 (1 字节：bit0~2=结果，bit7=时钟可信标志，无 tag)
+        res_map = {0: "成功", 1: "地址重复", 2: "非法设备", 3: "容量不足"}
+        res_byte = data[offset] if offset < len(data) else 0
+        offset += 1
+        res_code = res_byte & 0x07
+        clock_trusted = bool(res_byte & 0x80)
+        result["结果"] = {
+            "类型": "enum",
+            "原始值": f"0x{res_byte:02X}",
+            "解析值": res_code,
+            "时钟可信": clock_trusted,
+            "说明": f"{res_map.get(res_code, f'保留({res_code})')}，"
+                    f"时钟{'可信' if clock_trusted else '不可信'}",
+        }
 
-        # 心跳周期 (long-unsigned)
-        heartbeat, consumed = self.axdr.decode(data, offset)
-        offset += consumed
-        result["心跳周期"] = heartbeat
-
-        # 时间标签 (optional)
-        if offset < len(data):
-            time_tag, consumed = self.axdr.decode(data, offset)
-            offset += consumed
-            result["时间标签"] = time_tag
+        # 请求时间 / 收到时间 / 响应时间（各 10 字节定长 date_time）
+        for name in ("请求时间", "收到时间", "响应时间"):
+            if offset + 10 <= len(data):
+                result[name] = self._date_time_naked(data[offset:offset + 10])
+                offset += 10
 
         return result
 

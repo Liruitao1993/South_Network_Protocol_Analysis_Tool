@@ -100,6 +100,22 @@ create one owner for:
 
 Rendering code may format fields, but it must not redefine the payload contract.
 
+### Mistake 5: 把「同一协议的两层字节序」当成一层（端序一刀切）
+
+**Bad**: 给某协议修字节序时用「全文件替换 `little`→`big`」一把梭，把**链路层**（长度域 / HCS / FCS /
+地址域）和 **APDU / 数据域**当成同一种端序。
+
+**Why it's bad**: 电力通信协议常常是两层不同端序。协议8（DL/T 698.45-2017）就是典型——**链路层
+L/HCS/FCS 是小端**，而 **APDU 内 A-XDR 数据是多字节大端**（DL/T 790.6-2010 §7.1）。一刀切会「修好
+数据域、改坏链路层」；更危险的是，若既有测试的期望值本来就按错误端序写死，它会掩护回归（假绿）。
+协议12（模组化终端功能模块接口）是同一形态的另一例。
+
+**Good**: 先判断「这个字段属于哪一层」，再按该层端序显式书写；两层各自有 oracle 自证，改完必须
+**链路层回归 + 数据域 oracle** 两头都测。
+
+**Rule**: 改任何协议的多字节字段前，先在 `AGENTS.md` 查该协议的「字节序」列与陷阱清单
+（协议8 → §5.6「两层字节序」条 + 陷阱 64；协议12 → 陷阱 61）。这是本项目最高频的跨层陷阱。
+
 ---
 
 ## Checklist for Cross-Layer Features
@@ -110,6 +126,7 @@ Before implementation:
 - [ ] Identified all layer boundaries
 - [ ] Defined format at each boundary
 - [ ] Decided where validation happens
+- [ ] 若字段属「两层不同端序」的协议（协议8 链路层小端 / A-XDR 大端等），已分别按层判明端序，未一刀切
 
 After implementation:
 

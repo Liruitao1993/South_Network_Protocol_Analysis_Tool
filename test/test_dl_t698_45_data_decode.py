@@ -9,14 +9,14 @@
 - 链路层表格展示（parse_to_table 含 数据业务 行）
 """
 
-import _path_setup  # noqa: E402
+import _path_setup  # noqa: E402,F401
 
 
 def _enc_array(vals, val_tag=0x05, val_size=4):
-    """构造 A-XDR array：tag=0x01 + 元素个数 + 元素"""
+    """构造 A-XDR array：tag=0x01 + 元素个数 + 元素（多字节大端）"""
     body = b""
     for v in vals:
-        body += bytes([val_tag]) + v.to_bytes(val_size, "little")
+        body += bytes([val_tag]) + v.to_bytes(val_size, "big")
     return bytes([0x01, len(vals)]) + body
 
 
@@ -27,7 +27,7 @@ def _enc_structure(*items):
 
 
 def _enc_double_long(v):
-    return bytes([0x05]) + v.to_bytes(4, "little")
+    return bytes([0x05]) + v.to_bytes(4, "big")
 
 
 def _enc_date_time_s(year=2024, month=5, day=1, hour=12, minute=0, second=0):
@@ -208,7 +208,7 @@ def test_anhui_generation_volume():
     from dl_t698_45_data_decode import decode_oad_data
     from dl_t698_45_axdr import AXDRCoder
     c = AXDRCoder()
-    dat = c.decode(bytes([0x15]) + struct.pack('<Q', 1234567))[0]
+    dat = c.decode(bytes([0x15]) + struct.pack('>Q', 1234567))[0]
     r = decode_oad_data(0x2801, 2, dat)
     assert r == {"总发电量": "123.4567 kWh"}, r
     print("test_anhui_generation_volume PASSED")
@@ -220,7 +220,7 @@ def test_anhui_generation_time():
     from dl_t698_45_data_decode import decode_oad_data
     from dl_t698_45_axdr import AXDRCoder
     c = AXDRCoder()
-    dat = c.decode(bytes([0x06]) + struct.pack('<I', 245))[0]
+    dat = c.decode(bytes([0x06]) + struct.pack('>I', 245))[0]
     r = decode_oad_data(0x2802, 2, dat)
     assert r == {"总发电时间": "245 分"}, r
     print("test_anhui_generation_time PASSED")

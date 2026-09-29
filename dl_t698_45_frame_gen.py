@@ -51,7 +51,8 @@ class DLT69845FrameGenerator:
                               req_type: int = 0, heartbeat: int = 0) -> bytes:
         """生成 LINK-Request 帧"""
         # APDU: 01 [PIID] [req_type] [heartbeat]
-        apdu = bytes([0x01, piid, req_type]) + struct.pack('<H', heartbeat)
+        # 心跳周期属 A-XDR 层 → 大端（协议文档 H.1.1: 00 B4 = 180s）
+        apdu = bytes([0x01, piid, req_type]) + struct.pack('>H', heartbeat)
         # DIR=0, PRM=1, SC=0, func=1 (链路管理)
         control = 0x41  # 0100 0001
         return self._assemble_frame(sa, ca, control, apdu)
@@ -59,7 +60,7 @@ class DLT69845FrameGenerator:
     def generate_link_response(self, sa: bytes, ca: int = 0, piid_acd: int = 0,
                                result: int = 0, heartbeat: int = 0) -> bytes:
         """生成 LINK-Response 帧"""
-        apdu = bytes([0x81, piid_acd, result]) + struct.pack('<H', heartbeat)
+        apdu = bytes([0x81, piid_acd, result]) + struct.pack('>H', heartbeat)
         # DIR=1, PRM=1, SC=0, func=1
         control = 0xC1  # 1100 0001
         return self._assemble_frame(sa, ca, control, apdu)
@@ -171,17 +172,17 @@ class DLT69845FrameGenerator:
             elif name == "请求类型":
                 body += _struct.pack("B", int(val) & 0xFF)
             elif name == "心跳周期":
-                body += _struct.pack("<H", int(val) & 0xFFFF)
+                body += _struct.pack(">H", int(val) & 0xFFFF)
             elif name == "期望安全参数":
                 body += _struct.pack("B", int(val) & 0xFF)
             elif name == "客户机APDU最大长度":
-                body += _struct.pack("<H", int(val) & 0xFFFF)
+                body += _struct.pack(">H", int(val) & 0xFFFF)
             elif name == "期望帧最大窗口尺寸":
                 body += _struct.pack("B", int(val) & 0xFF)
             elif name == "期望帧最大帧长":
-                body += _struct.pack("<H", int(val) & 0xFFFF)
+                body += _struct.pack(">H", int(val) & 0xFFFF)
             elif name == "期望超时时间":
-                body += _struct.pack("<H", int(val) & 0xFFFF)
+                body += _struct.pack(">H", int(val) & 0xFFFF)
             elif name == "断开原因":
                 body += _struct.pack("B", int(val) & 0xFF)
             elif name == "安全参数":

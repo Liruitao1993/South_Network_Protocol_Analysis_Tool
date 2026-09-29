@@ -1,6 +1,6 @@
 # 南网协议解析工具
 
-[![Version](https://img.shields.io/badge/version-1.23.62-blue)]()
+[![Version](https://img.shields.io/badge/version-1.23.63-blue)]()
 [![Python](https://img.shields.io/badge/Python-3.8%2B-brightgreen)]()
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)]()
 [![License](https://img.shields.io/badge/License-MIT-green)]()
@@ -53,7 +53,7 @@
 | 5 | DLMS-APDU 裸报文 | IEC 62056-46 | 大端 | 无 |
 | 6 | DLT645-2007 电表协议 | DL/T 645-2007 | BCD，低字节在前 | 累加和 & 0xFF |
 | 7 | 国网协议 | Q/GDW 10376.2-2024（含福建增补 AFN 50H~56H） | 小端 | 8 位位组算术和 |
-| 8 | 698.45 协议 | DL/T 698.45-2017 | 小端 | CRC-16（crcmod `x-25`） |
+| 8 | 698.45 协议 | DL/T 698.45-2017 | 小端（链路层）/**大端（A-XDR 数据）** | CRC-16（crcmod `x-25`） |
 | 9 | 新一代载波协议（通感一体化） | 通感一体化宽带载波通信规约 | 小端 | CRC-32（MAC 帧）+ CRC-24（PBCS） |
 | 10 | 国网新一代双模通信互联互通 | 国网新一代双模通信互联互通技术规范 | 小端 | CRC-32（MAC 帧） |
 | 11 | HDC 1.0 双模互联互通 | Q/GDW 12087.42-2020 | 小端（MAC 地址大端） | CRC-24（FC/PB）+ CRC-32（MAC） |

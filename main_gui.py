@@ -115,7 +115,7 @@ from system_integration.sys_tray import SystemTrayManager
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.62"
+APP_VERSION = "1.23.63"
 BUILD_DATE = "2026-09-29"  # 编译日期，每次打包前更新
 
 # 作者 GitHub 仓库地址 —— 「关于」对话框 Star 按钮的**唯一来源**。
@@ -140,6 +140,17 @@ _WINDOW_STATE_TABLES = (
 )
 
 CHANGELOG = [
+    (
+        "1.23.63",
+        "2026-09-29",
+        [
+            "**修复协议8（698.45）A-XDR 数据域字节序错误**：APDU 内的 A-XDR 数据域原按**小端**解码/编码，而标准规定 APDU 编码规则为 A-XDR（DL/T 790.6—2010）⇒ 多字节**大端**。现场实测帧 `… 05 FF FF 9E D0 …`（OAD `20 04 02 01` = 有功功率分相数值组）本工具原解析 `-794886145`（小端 `0xD09EFFFF`），现修正为 **-24880**（大端 `0xFFFF9ED0`），与官方工具一致。修正范围：整型（long / long-unsigned / double-long / double-long-unsigned / long64 / long64-unsigned）、浮点（float32 / float64）、`date_time` / `date` 的年与毫秒、OI/OAD/OMD 的 OI、TI 间隔值；**解码与编码两侧同步**（组帧↔解析自洽）",
+            "**链路层保持小端不变**（长度域 `L`(2B)、HCS(2B)、FCS(2B)、地址域反转）—— 依据协议文档 L347（链路层「低字节在前，高字节在后」）与 §7.1（APDU 编码规则遵循 A-XDR）；两层字节序**不可互相套用**，不得「一刀切」",
+            "**顺带修复 LINK 预连接不带 tag**：`_parse_link_request` / `_parse_link_response`（标准表38/39）原把请求类型 / 结果 / 心跳周期 / 时间标签当作**带 tag** 的 A-XDR 元素解，导致标准附录 H.1.1 示例直接解析失败；按 SEQUENCE 内定长字段不带 tag 规则改为定长切分（与协议12「陷阱 61」同一条规则）。修正后附录 H.1.1 登录请求解析出 请求类型=登录 / 心跳周期=180s / 时间=2016-05-19 08:05:00.164",
+            "**组帧侧同步**：`dl_t698_45_frame_gen.py` / `dl_t698_45_frame_schema.py` 的心跳周期、客户机 APDU 最大长度、期望帧最大帧长、期望超时时间等 2 字节字段改大端（`>H`）；链路层长度域与 FCS 仍为小端",
+            "**依据（oracle，可复查）**：协议文档 **附录 H.1.1「登录」**逐字节示例 —— `00 B4`=心跳周期 **180s**、`07 E0`=**2016** 年、`00 A4`=**164**ms、`02 5F`=607ms、`02 DA`=730ms。新增 `test/test_dl_t698_45_endian.py`（48 项：H.1.1 请求/响应双 oracle + 实测帧 -24880 + 8 整型 2 浮点编解码往返 + 链路层小端回归）；`test_dl_t698_45.py` / `test_dl_t698_45_data_decode.py` 中原按**错误小端**写死的期望值同步重写",
+        ],
+    ),
     (
         "1.23.62",
         "2026-09-29",

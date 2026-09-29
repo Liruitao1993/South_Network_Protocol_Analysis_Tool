@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Web 落地页 PROTOCOLS 契约（index/name/standard/endian/check）+ 防漂移断言 + 「协议解析改动必须同时核对两侧」：据此判定 README 协议表协议8 行必须与协议12 行同一两层次格式。"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "本任务即典型跨层缺陷（链路层小端 vs APDU A-XDR 大端），按其「层边界最易出错」清单逐层核对两层未被一刀切。"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "检查端序判据是否单源：frame_schema 的 endian 键、frame_gen 的硬编码 >H、axdr 编解码三处是否同一契约，未新增第二份端序清单。"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "本项目 .trellis/spec 仅此一个条目层（无后端层），作为规范入口核对项目硬约束；本任务无匹配的后端/解析层 spec。"}
+{"file": ".trellis/spec/guides/index.md", "reason": "思维导索引，确认本任务适用的跨层与代码复用两份指南。"}
+{"file": "AGENTS.md", "reason": "项目权威规范：§1 协议表协议8 行、§5.6 两层字节序条、§8 陷阱64（本次新增）为 AC1/AC6/AC7 的判据与文档同步来源。"}

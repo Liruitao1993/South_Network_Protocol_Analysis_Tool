@@ -2,7 +2,7 @@
 
 
 
-import _path_setup  # noqa: E402
+import _path_setup  # noqa: E402,F401
 
 def test_link_request_login():
     """测试 LINK-Request 登录帧解析"""
@@ -38,15 +38,15 @@ def test_axdr_basic():
     assert result["解析值"] == 5
     assert consumed == 2
 
-    # 测试 long-unsigned
-    data = bytes([0x12, 0x34, 0x12])  # long-unsigned = 0x1234
+    # 测试 long-unsigned（A-XDR 大端：数值 0x1234 编码为 12 34）
+    data = bytes([0x12, 0x12, 0x34])  # long-unsigned = 0x1234
     result, consumed = coder.decode(data)
     assert result["类型"] == "long-unsigned"
     assert result["解析值"] == 0x1234
     assert consumed == 3
 
-    # 测试 OAD
-    data = bytes([0x51, 0x01, 0x00, 0x02, 0x00])  # OAD: OI=0x0001, attr=0x02, index=0x00
+    # 测试 OAD（OI 大端：0x0001 编码为 00 01）
+    data = bytes([0x51, 0x00, 0x01, 0x02, 0x00])  # OAD: OI=0x0001, attr=0x02, index=0x00
     result, consumed = coder.decode(data)
     assert result["类型"] == "OAD"
     assert result["解析值"]["OI"] == "0x0001"
