@@ -645,3 +645,24 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 
 - 工作区内另一会话同期在做「顶部栏折叠 1.23.41」等改动（`main_gui.py` 在我收尾前几分钟仍被写入），本次按用户要求把全部未提交改动一并提交；仅排除明显临时调试产物（`test/_tmp_*`、`test/out*.txt`）
 - 收尾前曾出现一次 `test_nanwang_custom_di` / `test_menu_wiring` 报 `MainWindow` 缺 `_top_bar_toggle_style` 的偶发失败——实为另一会话正在写 `main_gui.py` 的中间态；随后连跑两次均全过（92/92、13/13），非本任务回归
+
+
+## Session 24: 协议8 698.45 A-XDR 字节序修复（数据域大端）
+
+**Date**: 2026-09-29
+**Task**: 协议8 698.45 A-XDR 字节序修复（数据域大端）
+**Branch**: `feat/serial-tool-protocol-parse`
+
+### Summary
+
+协议8 两层字节序修正：链路层(L/HCS/FCS/地址)保持小端，APDU 内 A-XDR 全部多字节改大端(DL/T 790.6-2010 §7.1)。实测帧 05 FF FF 9E D0 由 -794886145 修正为 -24880。含解码/编码同步、组帧 '>H'、LINK-Request/Response 按 SEQUENCE 不带 tag 解析；新增 test/test_dl_t698_45_endian.py(48 项 oracle+链路层回归)；AGENTS.md §5.6/陷阱64 + 跨层指南 + 版本 1.23.63 与 iss 同步。trellis-check 全 AC PASS，drawer 4 处小端文案残留已修。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `05fe755` | (see git log) |
+
+### Status
+
+[OK] **Completed**
