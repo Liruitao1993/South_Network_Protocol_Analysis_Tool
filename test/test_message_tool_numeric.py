@@ -1,4 +1,4 @@
-"""报文工具「数值 → HEX（大端/小端）」回归测试（1.23.60 起）。
+"""报文工具「数值 ⟷ HEX（大端/小端）」回归测试（1.23.60 起；1.23.62 补 HEX→数值方向）。
 
 覆盖：
   [1] 类型表：与 dl_t698_45_axdr 的已实现解码器一一对应（无哑条目、无遗漏）
@@ -7,8 +7,10 @@
       以及 A-XDR 大端判据 FF FF 9E D0 = -24880
   [4] 边界值（各类型 min/max）与「小端 = 大端逆序」不变式
   [5] 错误路径：格式错误 / 超范围 / bool 非 0-1 / NaN / inf 均给中文原因且不改输出
-  [6] offscreen GUI：下拉项与表同源、按钮真实点击接线、returnPressed 接线、
-      空输入提示、错误弹窗不落输出
+  [6] HEX→数值：与编码器**严格互逆**（全类型 × 边界值）、文档锚点、连续/带分隔写法等价
+  [7] HEX→数值错误路径：空 / 非 HEX / 奇数位 / 字节数与类型不符，均不静默截断
+  [8] offscreen GUI：下拉项与表同源、两个方向按钮真实点击接线、回车接线、
+      空输入提示、错误弹窗不落输出、布局与按钮不裁字
 
 运行: QT_QPA_PLATFORM=offscreen python -u test/test_message_tool_numeric.py
 """
@@ -249,7 +251,73 @@ def main():
         f"{be_hex}",
     )
 
-    print("== [6] offscreen GUI ==")
+    print("== [6] HEX→数值：与编码器严格互逆 ==")
+    for label, nbytes, kind in mtw.NUMERIC_TYPES:
+        key = type_key(label)
+        for text in probes[key]:
+            be_hex, le_hex, normalized = mtw.encode_numeric_value(text, nbytes, kind)
+            want = normalized.split("（")[0]
+            be_v, le_v, hx = mtw.decode_numeric_value(be_hex, nbytes, kind)
+            # 编码的大端 HEX → 解码的「大端列」必须回到原值
+            check(f"{key}({text}) 大端 HEX 解码：大端列 = 原值",
+                  be_v.split("（")[0] == want, f"{be_v!r}")
+            check(f"{key}({text}) 回显规范化 HEX = 编码大端", hx == be_hex, f"{hx} vs {be_hex}")
+            # 编码的小端 HEX → 解码的「小端列」必须回到原值
+            le_v2_be, le_v2_le, _hx2 = mtw.decode_numeric_value(le_hex, nbytes, kind)
+            check(f"{key}({text}) 小端 HEX 解码：小端列 = 原值",
+                  le_v2_le.split("（")[0] == want, f"{le_v2_le!r}")
+            # 两端对称：大端 HEX 的「小端列」== 小端 HEX 的「大端列」（多字节时两者都是换序值）
+            check(f"{key}({text}) 两端结果互换对称",
+                  le_v2_be == le_v if nbytes > 1 else be_v == le_v,
+                  f"{le_v2_be} vs {le_v}")
+            # 连续无分隔写法（如 FFFF9ED0）必须与带空格写法等价
+            check(f"{key}({text}) 连续写法等价",
+                  mtw.decode_numeric_value(be_hex.replace(" ", ""), nbytes, kind)
+                  == (be_v, le_v, hx))
+            # 错误字节数必须报错，不静默截断
+            try:
+                mtw.decode_numeric_value(be_hex, nbytes + 1, kind)
+                check(f"{key}({text}) 字节数不符应报错", False, "未抛 ValueError")
+            except ValueError as exc:
+                check(f"{key}({text}) 字节数不符报错可读", "需要" in str(exc), f"实际: {exc}")
+
+    # 文档锚点：A-XDR 大端判据（dl_t698_45_axdr.py 文件头记录的历史修复实例）
+    be_v, le_v, hx = mtw.decode_numeric_value("FF FF 9E D0", 4, "int")
+    check("double-long FF FF 9E D0 大端 = -24880（A-XDR 正确值）", be_v == "-24880", be_v)
+    check("double-long FF FF 9E D0 小端 = -794886145（历史误读值）", le_v == "-794886145", le_v)
+    check("回显 HEX 规范化", hx == "FF FF 9E D0", hx)
+    check("long-unsigned 07 E0 大端 = 2016（附录 H.1.1 年份）",
+          mtw.decode_numeric_value("07E0", 2, "uint")[0] == "2016",
+          mtw.decode_numeric_value("07E0", 2, "uint")[0])
+    check("bool 01 → 1（true）", mtw.decode_numeric_value("01", 1, "bool")[0] == "1（true）")
+    check("bool 00 → 0（false）", mtw.decode_numeric_value("00", 1, "bool")[0] == "0（false）")
+    check("分隔符容错（逗号/分号/冒号/0x 前缀）",
+          mtw.decode_numeric_value("0xFF,FF;9E:D0", 4, "int")[0] == "-24880")
+    check("float32 3F C0 00 00 大端 = 1.5",
+          mtw.decode_numeric_value("3F C0 00 00", 4, "float")[0] == "1.5",
+          mtw.decode_numeric_value("3F C0 00 00", 4, "float")[0])
+
+    print("== [7] HEX→数值错误路径（不静默截断） ==")
+    hex_errs = [
+        ("", 4, "int", "请输入 HEX 值"),
+        ("   ", 4, "int", "请输入 HEX 值"),
+        ("0G", 1, "int", "非 HEX 字符"),
+        ("FFF", 2, "int", "奇数"),
+        ("FF FF", 4, "int", "需要 4 字节，实际 2 字节"),
+        ("FF FF FF FF FF", 4, "int", "需要 4 字节，实际 5 字节"),
+        ("07 E0", 1, "uint", "需要 1 字节，实际 2 字节"),
+    ]
+    for text, nbytes, kind, want in hex_errs:
+        try:
+            mtw.decode_numeric_value(text, nbytes, kind)
+            check(f"HEX 错误路径 {kind}({text!r}) 应报错", False, "未抛 ValueError")
+        except ValueError as exc:
+            check(f"HEX 错误路径 {kind}({text!r}) 原因可读", want in str(exc), f"实际: {exc}")
+    # 反例：字节数正确时不得报错（判据不能过严）
+    check("反例：4 字节类型给 4 字节不报错",
+          mtw.decode_numeric_value("00 00 04 D2", 4, "uint")[0] == "1234")
+
+    print("== [8] offscreen GUI ==")
     app = QApplication.instance() or QApplication([])
     widget = mtw.MessageToolWidget()
     check("窗口构造成功", widget is not None)
@@ -316,6 +384,54 @@ def main():
     widget.num_value_edit.setText("abc")
     btn.click()
     check("非数字弹警告", any(k == "warning" and "不是合法的十进制整数" in m for k, m in MSGS), f"{MSGS}")
+
+    # ---- HEX → 数值（对称方向）----
+    HEX_VIS = widget.num_hex_edit.visibleRegion().boundingRect()
+    check("HEX 输入框真实绘制", HEX_VIS.height() > 10 and HEX_VIS.width() > 100, f"{HEX_VIS}")
+    btn_hex = next((b for b in widget.findChildren(QPushButton) if b.text() == "HEX → 数值"), None)
+    check("「HEX → 数值」按钮存在（无死按钮）", btn_hex is not None)
+    check(
+        "HEX→数值 按钮不裁字（width >= sizeHint）",
+        btn_hex.width() >= btn_hex.sizeHint().width(),
+        f"width={btn_hex.width()} sizeHint={btn_hex.sizeHint().width()}",
+    )
+    check("HEX→数值 按钮未写死上限", btn_hex.maximumWidth() > 100000, f"{btn_hex.maximumWidth()}")
+
+    MSGS.clear()
+    widget.num_type_combo.setCurrentText("double-long（双长整型，4字节，有符号）")
+    widget.num_hex_edit.setText("FF FF 9E D0")
+    btn_hex.click()
+    out = widget.output_text.toPlainText()
+    check("HEX→数值：大端解析 = -24880", "大端解析(高字节在前): -24880" in out, out)
+    check("HEX→数值：小端解析 = -794886145", "小端解析(低字节在前): -794886145" in out, out)
+    check("HEX→数值：回显规范化 HEX", "HEX 值: FF FF 9E D0" in out, out)
+    check("HEX→数值：正常路径无弹窗", not MSGS, f"{MSGS}")
+
+    # 回车接线（连续无分隔写法）
+    widget.num_type_combo.setCurrentText("long-unsigned（无符号长整型，2字节，0~65535）")
+    widget.num_hex_edit.setText("07E0")
+    widget.num_hex_edit.returnPressed.emit()
+    check("HEX 回车触发解码", "大端解析(高字节在前): 2016" in widget.output_text.toPlainText(),
+          widget.output_text.toPlainText())
+
+    MSGS.clear()
+    widget.num_type_combo.setCurrentText("double-long（双长整型，4字节，有符号）")
+    before = widget.output_text.toPlainText()
+    widget.num_hex_edit.setText("FF FF")
+    btn_hex.click()
+    check("字节数不符弹警告且提示需要几字节",
+          any(k == "warning" and "需要 4 字节" in m for k, m in MSGS), f"{MSGS}")
+    check("HEX 错误路径不覆盖输出", widget.output_text.toPlainText() == before)
+
+    MSGS.clear()
+    widget.num_hex_edit.setText("")
+    btn_hex.click()
+    check("HEX 空输入提示", any(k == "information" and "请输入 HEX 值" in m for k, m in MSGS), f"{MSGS}")
+
+    MSGS.clear()
+    widget.num_hex_edit.setText("FFF")
+    btn_hex.click()
+    check("HEX 奇数位弹警告", any(k == "warning" and "奇数" in m for k, m in MSGS), f"{MSGS}")
 
     widget.deleteLater()
     app.processEvents()

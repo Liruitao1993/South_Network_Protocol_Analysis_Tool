@@ -325,8 +325,9 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
 │   │                                 #   拖入/打开/粘贴建立不可变快照（回填式预处理只改输入框）；前半纯逻辑
 │   │                                 #   (hex_stream/find_frame_in_stream，无Qt可测)，后半只读行号编辑器+Ctrl+F搜索条（1.23.0 起）
 │   ├── message_tool_widget.py       # 报文工具标签页 (MessageToolWidget) - ASCII/HEX转换/CRC/校验；
-│   │                                 #   数值→HEX（698.45/A-XDR 12 种基础类型，同时给大端/小端；纯逻辑
-│   │                                 #   `encode_numeric_value` 与 dl_t698_45_axdr 的字节宽度一一对应，1.23.60 起）
+│   │                                 #   数值⟷HEX（698.45/A-XDR 12 种基础类型，**两个方向**都同时给大端/小端；
+│   │                                 #   纯逻辑 `encode_numeric_value` / `decode_numeric_value` 严格互逆，
+│   │                                 #   字节宽度与 dl_t698_45_axdr 一一对应；1.23.60 起 / 1.23.62 补 HEX→数值）
 │   ├── spectrum_widget.py           # 频谱图标签页 (SpectrumWidget/SpectrumCanvas) - 频谱仪参数 + trace 数值 → 仪器式网格频谱图；光标读数/MARK标记/两点Δ测量/峰值搜索 + 导出PNG（常驻，与协议无关；1.23.9 起）
 │   ├── feedback_dialog.py           # 问题反馈对话框 (FeedbackDialog) - 帮助菜单入口，提交到 Web 服务端共享 feedback.db（1.20.0 起）
 │   ├── share_dialog.py              # 报文分享对话框 (ShareDialog) - 单帧解析「分享此帧」，JSON POST /api/frameshare（1.21.0 起）
@@ -1076,6 +1077,12 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 ## 10. 变更日志
 
 > 详细版本变更记录请查看 `main_gui.py:CHANGELOG`（按版本倒序），或运行 `git log --oneline` 查看提交历史。本文档保留近期版本的摘要。
+
+### 1.23.62 — 2026-09-29
+
+- **报文工具补齐「HEX → 数值」**（对称 1.23.60 的「数值 → HEX」）：同一分组框与类型下拉，输入 HEX 后同时给出**大端/小端两个解析值**；浮点按 IEEE 754（`3F C0 00 00` → 1.5），有符号/无符号按类型位宽（`FF FF 9E D0` 作 double-long → 大端 -24880 / 小端 -794886145）
+- 新增纯逻辑 `hex_text_to_bytes`（容忍分隔符与 `0x`、连续写法，拒奇数位/非 HEX）与 `decode_numeric_value`；与 `encode_numeric_value` **严格互逆**（同类型下 `解码(编码(x)) == x`），字节数不符**不静默截断**而报可读错误
+- `test/test_message_tool_numeric.py` 278 → **469 项**（[6] 互逆+文档锚点 / [7] HEX 错误路径 / [8] GUI 对称方向）；**变异反证 3 条**（大小端互换 / 有符号位丢失 / 去掉字节数守卫）分别 20 / 13 / 21 项变红
 
 ### 1.23.61 — 2026-09-28
 

@@ -8,7 +8,7 @@
 - 格式化：大小写、去空格、加空格、统计
 - CRC / 校验和
 - HEX <-> bitstring 转换
-- 数值 -> HEX（按 698.45/A-XDR 基础数据类型编码，同时给出大端/小端）
+- 数值 <-> HEX（按 698.45/A-XDR 基础数据类型编解码，两个方向都同时给出大端/小端）
 """
 
 import re
@@ -101,6 +101,50 @@ def encode_numeric_value(text: str, nbytes: int, kind: str) -> tuple[str, str, s
     return be_hex, le_hex, normalized
 
 
+def hex_text_to_bytes(text: str) -> bytes:
+    """把 HEX 文本解析为字节串（容忍空格/逗号/分号/冒号/顿号/斜杠/竖线/连字符与 0x 前缀）。
+
+    连续无分隔写法（``FFFF9ED0``）按字节切分。失败抛 ValueError，消息可直接展示；
+    **奇数位与非 HEX 字符都拒绝**，不做静默截断。
+    """
+    cleaned = re.sub(r"(?i)0x", "", text)
+    cleaned = re.sub(r"[\s,;:、，／/|\\-]+", "", cleaned)
+    if not cleaned:
+        raise ValueError("请输入 HEX 值")
+    bad = re.findall(r"[^0-9A-Fa-f]", cleaned)
+    if bad:
+        raise ValueError(f"含非 HEX 字符 '{bad[0]}'")
+    if len(cleaned) % 2:
+        raise ValueError(f"HEX 长度为奇数（{len(cleaned)} 位），无法按字节解析")
+    return bytes.fromhex(cleaned)
+
+
+def decode_numeric_value(text: str, nbytes: int, kind: str) -> tuple[str, str, str]:
+    """把 HEX 文本按基础类型解码为 (大端解析值, 小端解析值, 规范化 HEX)。
+
+    与 :func:`encode_numeric_value` **严格互逆**：同类型下 ``解码(编码(x)) == x``
+    （大端列取编码的大端结果，小端列取小端结果）。失败抛 ValueError，消息可直接
+    展示（格式错误 / 字节数与该类型不符 —— 不做静默截断）。
+    """
+    data = hex_text_to_bytes(text)
+    if len(data) != nbytes:
+        raise ValueError(f"该类型需要 {nbytes} 字节，实际 {len(data)} 字节")
+    norm_hex = " ".join(f"{b:02X}" for b in data)
+    if kind == "bool":
+        val = 1 if data[0] else 0
+        shown = f"{val}（{'true' if val else 'false'}）"
+        return shown, shown, norm_hex
+    if kind == "float":
+        fmt = ">f" if nbytes == 4 else ">d"
+        be_val = struct.unpack(fmt, data)[0]
+        le_val = struct.unpack(fmt, bytes(reversed(data)))[0]
+        return repr(be_val), repr(le_val), norm_hex
+    signed = kind == "int"
+    be_val = int.from_bytes(data, "big", signed=signed)
+    le_val = int.from_bytes(data, "little", signed=signed)
+    return str(be_val), str(le_val), norm_hex
+
+
 class MessageToolWidget(QWidget):
     """报文工具标签页 — 对齐截图布局（两行按钮 + 16进制复选框）"""
 
@@ -190,8 +234,8 @@ class MessageToolWidget(QWidget):
 
         layout.addWidget(ext_group)
 
-        # ---------- 数值 → HEX（698.45/A-XDR 基础数据类型） ----------
-        num_group = QGroupBox("数值 → HEX（698.45 基础数据类型 · 同时给出大端/小端）")
+        # ---------- 数值 ⟷ HEX（698.45/A-XDR 基础数据类型） ----------
+        num_group = QGroupBox("数值 ⟷ HEX（698.45 基础数据类型 · 两个方向都给出大端/小端）")
         num_grid = QGridLayout(num_group)
         num_grid.setSpacing(6)
 
@@ -214,6 +258,17 @@ class MessageToolWidget(QWidget):
         self.num_value_edit.returnPressed.connect(self._num_to_hex)
         num_grid.addWidget(self.num_value_edit, 1, 1, 1, 2)
         num_grid.addWidget(self._btn("数值 → HEX", self._num_to_hex), 1, 3)
+
+        num_grid.addWidget(QLabel("HEX 值"), 2, 0)
+        self.num_hex_edit = QLineEdit()
+        self.num_hex_edit.setMinimumHeight(24)
+        self.num_hex_edit.setPlaceholderText("如 FF FF 9E D0，或连续写 FFFF9ED0")
+        self.num_hex_edit.setToolTip(
+            "字节数必须与所选类型一致（见下拉项）；解析同时给出大端/小端两种结果"
+        )
+        self.num_hex_edit.returnPressed.connect(self._hex_to_num)
+        num_grid.addWidget(self.num_hex_edit, 2, 1, 1, 2)
+        num_grid.addWidget(self._btn("HEX → 数值", self._hex_to_num), 2, 3)
 
         layout.addWidget(num_group)
 
@@ -369,6 +424,31 @@ class MessageToolWidget(QWidget):
             f"字节数: {nbytes}\n"
             f"大端(高字节在前): {be_hex}\n"
             f"小端(低字节在前): {le_hex}"
+        )
+
+    def _hex_to_num(self):
+        """HEX→数值：按所选 698.45/A-XDR 基础类型解码，同时给出大端/小端两种字节序结果"""
+        label = self.num_type_combo.currentText()
+        spec = NUMERIC_TYPE_SPECS.get(label)
+        if spec is None:
+            QMessageBox.warning(self, "错误", f"未知数据类型: {label}")
+            return
+        nbytes, kind = spec
+        text = self.num_hex_edit.text().strip()
+        if not text:
+            QMessageBox.information(self, "提示", "请输入 HEX 值")
+            return
+        try:
+            be_val, le_val, norm_hex = decode_numeric_value(text, nbytes, kind)
+        except ValueError as exc:
+            QMessageBox.warning(self, "格式错误", str(exc))
+            return
+        self._set_output(
+            f"类型: {label}\n"
+            f"HEX 值: {norm_hex}\n"
+            f"字节数: {nbytes}\n"
+            f"大端解析(高字节在前): {be_val}\n"
+            f"小端解析(低字节在前): {le_val}"
         )
 
     def _byte_length(self):
