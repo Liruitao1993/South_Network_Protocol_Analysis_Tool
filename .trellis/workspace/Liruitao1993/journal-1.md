@@ -906,7 +906,7 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 
 | Hash | Message |
 |------|---------|
-| `e2a0a9f` | (see git log) |
+| `601a8ba` | feat(蓝牙工具): 特征码自动优选 + 一键探测 + 按设备记忆（连上即可收发） |
 
 ### Testing
 
