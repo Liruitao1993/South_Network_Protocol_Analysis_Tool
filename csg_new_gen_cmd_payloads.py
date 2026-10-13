@@ -1003,6 +1003,7 @@ _TEST_EXT_ID_MAP = {
     0x0006: "MAC层OFDMA配置",
     0x0007: "非组网场景TEI配置",
     0x0008: "业务报文Bitloading收发开关",
+    0x0009: "报文聚合传输测试模式",
 }
 
 
@@ -1470,6 +1471,23 @@ def _parse_test_ext_0008(data: bytes, base_offset: int) -> list:
     return table
 
 
+def _parse_test_ext_0009(data: bytes, base_offset: int) -> list:
+    """0x0009: 报文聚合传输测试模式（通感一体物联版，文档 1.4.9）
+
+    数据域结构（data[x] = 文档字节 x+3）:
+      字节3 (data[0]): 报文聚合数目(8bit) —— 要求聚合发送的MAC帧个数
+    """
+    table = []
+    if len(data) < 1:
+        _f(table, "❌ 解析失败", "", "", "报文聚合传输测试模式数据不足1字节", None, None)
+        return table
+    count = data[0]
+    _f(table, "报文聚合数目", f"0x{count:02X}", str(count),
+       "要求聚合发送的MAC帧个数", base_offset, base_offset)
+    _remaining(table, data, 1, base_offset)
+    return table
+
+
 def _parse_test_ext_payload(ext_id: int, data: bytes, base_offset: int) -> list:
     """根据扩展ID分发解析"""
     parsers = {
@@ -1481,6 +1499,7 @@ def _parse_test_ext_payload(ext_id: int, data: bytes, base_offset: int) -> list:
         0x0006: _parse_test_ext_0006,
         0x0007: _parse_test_ext_0007,
         0x0008: _parse_test_ext_0008,
+        0x0009: _parse_test_ext_0009,
     }
     parser = parsers.get(ext_id)
     if parser:

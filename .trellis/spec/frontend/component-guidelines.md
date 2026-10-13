@@ -260,6 +260,21 @@ engine = self._engine_factory()            # 否则才是发给本虚拟表的�
 - **新用例走整链而非直调 helper**：只断言 helper 时，gate/分支接线写错也测不出（复盘：gate 改成永不成立，直调用例仍全绿）。用**整帧 → parse_to_table → 摘要**断言，并补一条「同类非目标帧不被污染」的回归网。
 - **名称自带括号时不要追加数值**：解析器的保留项写成 `保留(14)`、`…测试模式(暂未使用)`，直接拼 `({value})` 会得到 `保留(14)(14)`。
 
+### 7b. 协议9 2.0 测试扩展 ID 的新增契约
+
+> 源自任务 10-13-csg-test-ext-0009（新增扩展 ID `0x0009`「报文聚合传输测试模式」）。
+
+- **新增一个扩展 ID 必须同时改四处，缺一处就是「半通」**：
+  ① 解析：`csg_new_gen_cmd_payloads._TEST_EXT_ID_MAP` + `_parse_test_ext_<id>` + `_parse_test_ext_payload` 的 `parsers` 分派；
+  ② 组帧：`csg_new_gen_frame_gen.TEST_EXT_ID_MAP` + `build_ext_<id>` + `_EXT_BUILDERS` + **`test_modes()`**；
+  ③ 仿照回填：`csg_frame_reverse._fill_ext` 的 `elif ext_id == 0x<id>` 分支；
+  ④ 摘要：只要进 ① 的表就自动生效（`batch_core.extract_test_mode_content` 的 `扩展ID:<名称>` 回退），但**必须补断言**。
+  只加映射表不加 `test_modes()` 的典型症状：能解析却**不能在组帧页选到**、仿照回填提示「扩展ID=N 无对应模式」。
+- **`test_modes()` 是「组帧页模式下拉 + 仿照回填候选 + `mode_by_key`」的公共入口**（界面不硬编码模式清单）；新增模式后 `test_csg_frame_gen_gui.test_all_test_modes_build_linked_frames`（遍历全部模式组帧 + 校验回读）与 `test_csg_frame_reverse`（全量反解）会自动覆盖新模式，**必须全绿**才算接线正确。
+- **字节口径**：`ext_data[x] = 文档字节 x+3`（见 `_parse_test_ext_0005` docstring）——文档各扩展表用「字节3/4/5…」编号，而扩展数据从文档字节 3 开始。新增字段前先核这条，别按表里的字面下标切。
+- **界面不得写死模式数量**：`csg_test_frame_gen_widget._MODE_COUNT = len(fg.test_modes())` 是唯一来源（历史坑：docstring 写 26、下拉写 24、tooltip 写 26，三者互不一致且都错）。
+- **字段名 / 模式 key / 参数名要同名同值贯穿四处**（解析行名、`TestMode.key`、`ModeField.name`）——摘要按行名匹配、反解按 key+参数名回填，改名会静默失效。
+
 ### 8. Qt 陷阱（本项目实测）
 - **offscreen 无字体**：`QT_QPA_PLATFORM=offscreen` 下 `QFontDatabase: Cannot find font directory ...`，绘制出的文字是豆腐块 → 断言只能查尺寸/颜色/像素多样性；**要目视核对文字排版必须用默认平台**（`QApplication([])` 不设 offscreen + `widget.grab()` / `QImage.save()`，不需要窗口真的可见）。
 - **`bytes(image.constBits())` 必须持有 QImage 引用**：`bytes(canvas.render_image(w, h).constBits())`（临时对象上取 buffer）会 **access violation（0xC0000005）**；先 `img = ...` 再 `bytes(img.constBits())`。

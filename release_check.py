@@ -59,6 +59,7 @@ CORE_TESTS = [
     "test/test_csg_batch_prefix.py",
     "test/test_csg_batch_parse_level.py",
     "test/test_csg_hrf_mac.py",
+    "test/test_csg_test_ext_0009.py",
     "test/test_gw_new_gen.py",
     "test/test_gw_monitor_summary.py",
     "test/test_gw_app_summary_detail.py",

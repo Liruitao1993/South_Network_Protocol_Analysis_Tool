@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/10-13-csg-test-ext-0009/research/doc-0x0009-facts.md", "reason": "复核用事实基线：字节口径与文档原文，用于判断实现是否与规范一致（例如 报文聚合数目 必须取扩展数据第 0 字节整字节）"}
+{"file": ".trellis/tasks/10-13-csg-test-ext-0009/implement.md", "reason": "复核用执行计划：4 个审查点判据、变异反证 3 条、回归套件清单与 pwsh 环境铁律（AGENTS 陷阱 62）"}
