@@ -360,6 +360,80 @@ def main():
     check("策略表每个值都在 STRATEGY_NAMES 里有中文名",
           all(v in stw.STRATEGY_NAMES for v in stw.STRATEGY_BY_PROTOCOL.values()))
 
+    section("[12] 前导 FEH 唤醒字节（68 家族分帧，1.23.78）")
+    # 现场帧（用户报障）：4×FE + 35 字节 698.45 帧（L=0x21）—— 修前首字节 FE 使分帧
+    # 函数一律返回 0，一帧被 10ms 静默窗口切成两行。
+    FE39 = stw.hex_str_to_bytes(
+        "FE FE FE FE 68 21 00 C3 05 06 05 04 03 02 01 00 EA 33 85 01 2C 40 "
+        "01 02 00 01 09 06 01 02 03 04 05 06 00 00 1A 38 16")
+    check("现场帧 = 39 字节", len(FE39) == 39, str(len(FE39)))
+    for _n in (0, 1, 2, 4):
+        _buf = b"\xfe" * _n + FE39[4:]
+        check(f"{_n} 个前导 FE：dlt698_45 → {35 + _n}",
+              stw.frame_length_for("dlt698_45", _buf) == 35 + _n,
+              str(stw.frame_length_for("dlt698_45", _buf)))
+        check(f"{_n} 个前导 FE：未指定协议启发式 → {35 + _n}",
+              stw.declared_frame_len(_buf) == 35 + _n,
+              str(stw.declared_frame_len(_buf)))
+    check("ft12_68 / dlt645 同样跳前导（返回含前导的总长）",
+          stw.frame_length_for("ft12_68", b"\xfe\xfe" + F68) == 210
+          and stw.frame_length_for("dlt645", b"\xfe\xfe" + F645) == 18,
+          f"{stw.frame_length_for('ft12_68', b'\xfe\xfe' + F68)} / "
+          f"{stw.frame_length_for('dlt645', b'\xfe\xfe' + F645)}")
+    check("HDLC 不跳前导（首字节必须是 7EH）",
+          stw.frame_length_for("hdlc_7e", b"\xfe\xfe" + FHDLC) == 0)
+    check("DLMS Wrapper 不跳前导",
+          stw.frame_length_for(
+              "dlms_wrapper", b"\xfe\xfe\x00\x01\x00\x01\x00\x10\x00\x00\x00\x00") == 0)
+    check("带 FE 的非 68 数据不误判（返回 0 → 交回时间聚合）",
+          stw.frame_length_for("dlt698_45", b"\xfe\xfe\x11\x22\x33\x44") == 0
+          and stw.declared_frame_len(b"\xfe\xfe\x11\x22\x33\x44") == 0)
+    check("纯 FE 缓冲返回 0（不抛异常）",
+          stw.frame_length_for("dlt698_45", b"\xfe" * 4) == 0
+          and stw.declared_frame_len(b"\xfe" * 7) == 0)
+    check("只认**帧首连续** FE（帧中间的 FE 不参与）",
+          stw.declared_frame_len(FE39[4:]) == 35
+          and stw.declared_frame_len(b"\xfe" + FE39[4:]) == 36)
+    check("_wakeup_base 只在 68 家族非 0",
+          stw._wakeup_base("ft12_68", FE39) == 4
+          and stw._wakeup_base("dlt645", FE39) == 4
+          and stw._wakeup_base("dlt698_45", FE39) == 4
+          and stw._wakeup_base("hdlc_7e", FE39) == 0
+          and stw._wakeup_base("dlms_wrapper", FE39) == 0)
+
+    section("[13] 断帧参数（方式 + 4 个超时）默认/夹紧/缺失回落")
+    check("FRAMING_MODE_OPTIONS = 自动 / 仅按字节超时",
+          [k for k, _ in stw.FRAMING_MODE_OPTIONS] == ["auto", "timeout_only"],
+          str(stw.FRAMING_MODE_OPTIONS))
+    _d = stw.merge_params({})
+    check("默认值 = 原模块常量（老配置零行为变化）",
+          _d["rx_byte_idle_ms"] == stw.RAW_FLUSH_DELAY_MS == 10
+          and _d["rx_raw_max_hold_ms"] == stw.RAW_MAX_HOLD_MS == 200
+          and _d["rx_frame_idle_ms"] == stw.FRAME_IDLE_MS == 300
+          and _d["rx_frame_hold_max_ms"] == stw.FRAME_HOLD_MAX_MS == 5000
+          and _d["rx_framing_mode"] == "auto",
+          str({k: _d[k] for k in ("rx_byte_idle_ms", "rx_frame_hold_max_ms",
+                                  "rx_framing_mode")}))
+    check("CONFIG_VERSION 不因「只新增键」而变（仍是 2）",
+          stw.CONFIG_VERSION == 2, str(stw.CONFIG_VERSION))
+    check("越界夹紧：上限",
+          stw.merge_params({"rx_byte_idle_ms": 10 ** 9})["rx_byte_idle_ms"]
+          == stw.FRAME_TIMEOUT_RANGES["rx_byte_idle_ms"][1])
+    check("越界夹紧：下限",
+          stw.merge_params({"rx_frame_hold_max_ms": 0})["rx_frame_hold_max_ms"]
+          == stw.FRAME_TIMEOUT_RANGES["rx_frame_hold_max_ms"][0])
+    check("非法类型回落默认",
+          stw.merge_params({"rx_frame_idle_ms": "abc"})["rx_frame_idle_ms"] == stw.FRAME_IDLE_MS)
+    check("非法断帧方式回落 auto",
+          stw.merge_params({"rx_framing_mode": "zzz"})["rx_framing_mode"] == "auto")
+    check("合法值原样保留",
+          stw.merge_params({"rx_byte_idle_ms": 50})["rx_byte_idle_ms"] == 50
+          and stw.merge_params({"rx_framing_mode": "timeout_only"})["rx_framing_mode"]
+          == "timeout_only")
+    check("RANGES 与 DEFAULTS 的键一一对应",
+          set(stw.FRAME_TIMEOUT_RANGES) == set(stw.FRAME_TIMEOUT_DEFAULTS),
+          str(sorted(stw.FRAME_TIMEOUT_RANGES)))
+
     print()
     print("=" * 64)
     if FAIL:

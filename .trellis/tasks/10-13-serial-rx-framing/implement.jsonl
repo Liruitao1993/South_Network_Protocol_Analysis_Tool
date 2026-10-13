@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/10-13-serial-rx-framing/research/serial-framing-facts.md", "reason": "事实基线：现场 39B 帧（4×FE + 698.45 L=0x21）+ 复现数据（含 FE 判 0、剥离后 35）、现有分帧常量/函数锚点、相关陷阱（49/58/59/60/63/75）、受影响测试"}
+{"file": ".trellis/tasks/10-13-serial-rx-framing/design.md", "reason": "契约表（前导 FE 单一来源 wakeup_prefix / 长度含前导的返回口径 / 参数范围与默认）+ 关键取舍 + 兼容性风险与回滚"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "PySide6 页面组件规范（子控件惰性创建、按钮不写死宽度、offscreen 断言口径），本次新增「断帧设置」分组控件时适用"}

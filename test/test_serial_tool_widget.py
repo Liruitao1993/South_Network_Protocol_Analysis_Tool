@@ -2472,6 +2472,191 @@ def main():
     check("空命令表点清除不抛异常", w19.cmd_table.rowCount() == 0)
     w19.cleanup()
 
+    section("[34] 断帧：协议特征认前导 FE + 可调字节超时（1.23.78）")
+    # 现场帧（用户 2026-10-13 报障）：4×FE 前导 + 35 字节 698.45 链路帧（L=0x21）
+    FE_FRAME_HEX = (
+        "FE FE FE FE 68 21 00 C3 05 06 05 04 03 02 01 00 EA 33 85 01 2C 40 "
+        "01 02 00 01 09 06 01 02 03 04 05 06 00 00 1A 38 16"
+    )
+    fe_full = stw.hex_str_to_bytes(FE_FRAME_HEX)
+    fe_head, fe_tail = fe_full[:14], fe_full[14:]
+    check("现场帧 = 39 字节（4×FE + 35）",
+          len(fe_full) == 39 and fe_full[:4] == b"\xfe\xfe\xfe\xfe", str(len(fe_full)))
+    check("带前导也能算出整帧长度（协议 8 → dlt698_45）",
+          stw.frame_length_for("dlt698_45", fe_head) == 39,
+          str(stw.frame_length_for("dlt698_45", fe_head)))
+    check("剥离前导后 = 35（698 = L+2）",
+          stw.frame_length_for("dlt698_45", fe_full[4:]) == 35)
+    check("无协议启发式同样认前导 FE",
+          stw.declared_frame_len(fe_full) == 39, str(stw.declared_frame_len(fe_full)))
+    check("HDLC / DLMS Wrapper 不加前导容忍",
+          stw._wakeup_base("hdlc_7e", fe_full) == 0
+          and stw._wakeup_base("dlms_wrapper", fe_full) == 0)
+    check("无 FE 输入返回长度不含前导（恒等：base=0）",
+          stw.frame_length_for("dlt698_45", fe_full[4:]) == 35
+          and stw.declared_frame_len(fe_full[4:]) == 35)
+    check("纯 FE 缓冲不抛异常（返回 0 → 交回时间聚合）",
+          stw.frame_length_for("dlt698_45", b"\xfe\xfe") == 0
+          and stw.declared_frame_len(b"\xfe\xfe\xfe") == 0)
+
+    w22 = stw.SerialToolWidget()
+    w22.set_parse_provider(None)
+    w22.chk_show_parse.setChecked(False)
+    w22.chk_match.setChecked(False)
+    w22.rx_raw_radio.setChecked(True)
+    check("断帧方式默认 = 自动", w22._framing_mode() == stw.FRAMING_MODE_AUTO,
+          w22._framing_mode())
+    check("断帧方式下拉 2 项、首项为自动",
+          w22.framing_mode_combo.count() == 2
+          and w22.framing_mode_combo.itemData(0) == stw.FRAMING_MODE_AUTO,
+          str([w22.framing_mode_combo.itemData(i)
+               for i in range(w22.framing_mode_combo.count())]))
+    check("四个超时控件默认 = 模块常量",
+          w22._timeouts() == (stw.RAW_FLUSH_DELAY_MS, stw.RAW_MAX_HOLD_MS,
+                              stw.FRAME_IDLE_MS, stw.FRAME_HOLD_MAX_MS),
+          str(w22._timeouts()))
+
+    # ── 核心回归：两块交付、块间隔 50ms（> 字节静默 10ms）也必须只出 1 行 ──
+    w22._last_tx_protocol = 8                       # 命令协议 = 698.45
+    w22._reset_stats()
+    w22._rx_log_queue.clear()
+    w22._raw_buffer.clear()
+    w22._on_raw_data(fe_head)
+    w22._raw_last_time = time.perf_counter() - 0.050    # 模拟 50ms 块间隔
+    w22._flush_raw_display()
+    check("首块后（间隔 50ms > 字节静默 10ms）不输出（按协议等整帧）",
+          len(w22._rx_log_queue) == 0, str(raw_texts(w22)))
+    w22._on_raw_data(fe_tail)
+    w22._flush_raw_display()
+    check("补齐后恰好 1 行（修前会被切成 2 行）",
+          len(w22._rx_log_queue) == 1, str([len(t.split()) for t in raw_texts(w22)]))
+    check("输出 = 完整 39 字节（含前导）",
+          raw_texts(w22) == [stw.bytes_to_hex(fe_full)],
+          " ".join(raw_texts(w22))[:48])
+    check("RX 帧数只加 1", w22._rx_frames == 1, str(w22._rx_frames))
+
+    # ── 对照：同节奏切到「仅按字节超时」→ 首块即刷出（证明该口径真生效）──
+    w22.framing_mode_combo.setCurrentIndex(
+        w22.framing_mode_combo.findData(stw.FRAMING_MODE_TIMEOUT))
+    check("切到「仅按字节超时」后方式生效",
+          w22._framing_mode() == stw.FRAMING_MODE_TIMEOUT, w22._framing_mode())
+    w22._reset_stats()
+    w22._rx_log_queue.clear()
+    w22._raw_buffer.clear()
+    w22._on_raw_data(fe_head)
+    w22._raw_last_time = time.perf_counter() - 0.050
+    w22._flush_raw_display()
+    check("仅按字节超时：首块即刷出（不再按协议等整帧）",
+          raw_texts(w22) == [stw.bytes_to_hex(fe_head)],
+          f"{len(raw_texts(w22))} 行")
+    w22.framing_mode_combo.setCurrentIndex(
+        w22.framing_mode_combo.findData(stw.FRAMING_MODE_AUTO))
+
+    # ── 无 FE 的 698 帧：既有行为不回归（两块交付仍是 1 行）──
+    w22._reset_stats()
+    w22._rx_log_queue.clear()
+    w22._raw_buffer.clear()
+    w22._on_raw_data(fe_full[4:8])
+    w22._raw_last_time = time.perf_counter() - 0.050
+    w22._flush_raw_display()
+    check("无 FE 帧首块后不输出", len(w22._rx_log_queue) == 0)
+    w22._on_raw_data(fe_full[8:])
+    w22._flush_raw_display()
+    check("无 FE 帧补齐后 1 行 = 35 字节",
+          raw_texts(w22) == [stw.bytes_to_hex(fe_full[4:])],
+          f"{len(raw_texts(w22))} 行")
+
+    # ── 可调字节超时：两片间隔 50ms 的**无协议**裸数据 ──
+    w22._last_tx_protocol = None                    # 未指定协议 → 按字节超时
+    w22.byte_idle_spin.setValue(100)
+    w22._reset_stats()
+    w22._rx_log_queue.clear()
+    w22._raw_buffer.clear()
+    w22._on_raw_data(b"\x01\x02\x03")               # 非 68 数据 → 无结构可判
+    w22._raw_last_time = time.perf_counter() - 0.050
+    w22._flush_raw_display()
+    check("字节静默 100ms：间隔 50ms 不刷出（合成一行）",
+          len(w22._rx_log_queue) == 0, str(raw_texts(w22)))
+    w22._on_raw_data(b"\x04\x05")
+    w22._raw_last_time = time.perf_counter() - 0.150
+    w22._flush_raw_display()
+    check("静默超过 100ms → 整体刷成 1 行（5 字节）",
+          raw_texts(w22) == ["01 02 03 04 05"], str(raw_texts(w22)))
+    w22.byte_idle_spin.setValue(5)                  # 调小 → 同节奏被拆成两行
+    w22._reset_stats()
+    w22._rx_log_queue.clear()
+    w22._raw_buffer.clear()
+    w22._on_raw_data(b"\x11\x12\x13")
+    w22._raw_last_time = time.perf_counter() - 0.050
+    w22._flush_raw_display()
+    check("字节静默 5ms：间隔 50ms 已超时 → 立即刷出行（可观测的差异）",
+          raw_texts(w22) == ["11 12 13"], str(raw_texts(w22)))
+    w22.byte_idle_spin.setValue(stw.DEFAULT_PARAMS["rx_byte_idle_ms"])
+
+    # ── 断帧说明行（现场自查）──
+    w22._last_tx_protocol = 8
+    text8 = w22._framing_summary_text()
+    check("协议 8 的说明行 = 698.45 结构特征 + 前导 FE 自动跳过",
+          text8.startswith("[断帧] 方式=") and "dlt698_45" in text8
+          and "前导 FE 自动跳过" in text8 and "协议帧等待上限" in text8, text8)
+    w22._last_tx_protocol = None
+    text_none = w22._framing_summary_text()
+    check("未指定协议时说明行 = 按字节超时（不冒充协议断帧）",
+          "未指定协议" in text_none, text_none)
+    w22.framing_mode_combo.setCurrentIndex(
+        w22.framing_mode_combo.findData(stw.FRAMING_MODE_TIMEOUT))
+    check("仅按字节超时时说明行明确「忽略协议结构」",
+          "忽略协议结构" in w22._framing_summary_text(),
+          w22._framing_summary_text())
+    w22._rx_log_queue.clear()
+    logged = []
+    _orig_log = w22._log
+    w22._log = lambda text, kind="sys": logged.append((kind, text))
+    try:
+        w22._log_framing_summary()                  # 手动一次
+        w22.framing_mode_combo.setCurrentIndex(     # 切方式一次
+            w22.framing_mode_combo.findData(stw.FRAMING_MODE_AUTO))
+        QApplication.processEvents()
+    finally:
+        w22._log = _orig_log
+    check("说明行走既有 _log 且不逐帧打印（手动 1 行 + 切方式 1 行）",
+          len(logged) == 2
+          and all(k == "sys" and t.startswith("[断帧]") for k, t in logged),
+          str([t[:24] for _, t in logged]))
+
+    # ── 参数持久化往返 + 新控件不裁字（AGENTS §8 陷阱 63 判据）──
+    w22.byte_idle_spin.setValue(120)
+    w22.frame_idle_spin.setValue(900)
+    w22.frame_hold_spin.setValue(9000)
+    w22.raw_hold_spin.setValue(500)
+    w22._save_persisted()
+    w23 = stw.SerialToolWidget()
+    check("落盘读回：四个超时 + 断帧方式",
+          w23._timeouts() == (120, 500, 900, 9000)
+          and w23._framing_mode() == stw.FRAMING_MODE_AUTO,
+          f"{w23._timeouts()} / {w23._framing_mode()}")
+    check("重复载入幂等（断帧控件值不被载入过程改写）",
+          (w23._apply_params(), w23._timeouts())[1] == (120, 500, 900, 9000),
+          str(w23._timeouts()))
+    w23._save_timer.stop()
+    w23.byte_idle_spin.setValue(77)
+    check("用户改超时 → 触发去抖保存", w23._save_timer.isActive() is True)
+    w23._save_timer.stop()
+    w23.show()
+    QApplication.processEvents()
+    bad_fit = [name for name, spin in (("字节静默", w23.byte_idle_spin),
+                                       ("帧等待静默", w23.frame_idle_spin),
+                                       ("帧等待上限", w23.frame_hold_spin),
+                                       ("聚合最长持有", w23.raw_hold_spin))
+               if spin.width() < spin.sizeHint().width()]
+    check("四个超时控件不裁字（width >= sizeHint）", not bad_fit,
+          f"{bad_fit} / {[(s.width(), s.sizeHint().width()) for s in (w23.byte_idle_spin, w23.frame_hold_spin)]}")
+    check("断帧设置控件未写死上限（仍可随主题/字号变宽）",
+          all(s.maximumWidth() > 10000 for s in (w23.byte_idle_spin, w23.frame_idle_spin,
+                                                 w23.frame_hold_spin, w23.raw_hold_spin)))
+    w23.cleanup()
+    w22.cleanup()
+
     print()
     print("=" * 64)
     if FAIL:

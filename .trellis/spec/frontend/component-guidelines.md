@@ -275,6 +275,29 @@ engine = self._engine_factory()            # 否则才是发给本虚拟表的�
 - **界面不得写死模式数量**：`csg_test_frame_gen_widget._MODE_COUNT = len(fg.test_modes())` 是唯一来源（历史坑：docstring 写 26、下拉写 24、tooltip 写 26，三者互不一致且都错）。
 - **字段名 / 模式 key / 参数名要同名同值贯穿四处**（解析行名、`TestMode.key`、`ModeField.name`）——摘要按行名匹配、反解按 key+参数名回填，改名会静默失效。
 
+### 7c. 串口工具断帧（协议特征 / 前导 FE / 可调超时）
+
+> 源自任务 10-13-serial-rx-framing（1.23.78：修「带前导 FE 的一帧被切成两条 `[RX]`」+ 断帧设置）。
+
+- **前导 FE 只有一个来源**：`wakeup_prefix.wakeup_prefix_len`（经 `serial_tool_widget._wakeup_base` 调用）。
+  **禁止**在分帧层另写 FE 扫描（同 AGENTS §8 陷阱 75 的单一来源原则）。
+- **长度返回值「含前导」**：`frame_length_for` / `declared_frame_len` 返回 `base + 结构长度`，
+  这样三个调用点（`_emit_protocol_frames` / `_emit_structured_frames` / `_flush_raw_display`）
+  的 `buf[need-1] == 0x16` 自证与 `del buf[:need]` 语义**零改动**。改这里时别「顺手」改成返回结构长度。
+- **前导只对 68 家族生效**（`ft12_68` / `dlt645` / `dlt698_45` + 未指定协议的启发式）；
+  HDLC（`7EH` 定界）与 DLMS Wrapper（`00 01`）**不得**加前导容忍（首字节另有语义）。
+- **「只有 FE」= 帧已开始未收全**：`_frame_incomplete` 必须先算 `base`，`base >= len(buf)` 返回 True；
+  纯 FE 噪声由「协议帧等待上限」兜底刷出 —— 任何情况下**不得丢字节**。
+- **断帧设置 5 键**（`rx_framing_mode` + 4 个超时）：默认值 = 原模块常量（`FRAME_TIMEOUT_DEFAULTS` 是唯一来源）
+  ⇒ **只新增键，`CONFIG_VERSION` 不动**（改既有默认值才需要迁移）。`FRAME_TIMEOUT_RANGES`
+  同时是 UI spin range 与 `merge_params` 夹紧的来源，**不要**在两处各写一份范围。
+- **`timeout_only` 必须三处同时跳过结构路径**：`_on_raw_data`（收到即切）、`_flush_raw_display`（定时器）、
+  `_flush_raw_display_now`（切模式/收尾）。漏一处就会出现「选了仅按字节超时却仍按协议切帧」。
+- **说明行只在该输出时输出**：`_log_framing_summary()` 仅在**设置变更 / 协议变化 / 每轮开始**时调用；
+  逐帧打印会冲垮日志（AGENTS §8 陷阱 58 的 burst 精神）。
+- **回归**：`test/test_serial_proto_frame.py` [12]/[13]（前导 FE 矩阵 + 参数默认/夹紧）、
+  `test/test_serial_tool_widget.py` [34]（现场帧两块交付只出 1 行、`timeout_only` 对照、持久化、控件不裁字）。
+
 ### 8. Qt 陷阱（本项目实测）
 - **offscreen 无字体**：`QT_QPA_PLATFORM=offscreen` 下 `QFontDatabase: Cannot find font directory ...`，绘制出的文字是豆腐块 → 断言只能查尺寸/颜色/像素多样性；**要目视核对文字排版必须用默认平台**（`QApplication([])` 不设 offscreen + `widget.grab()` / `QImage.save()`，不需要窗口真的可见）。
 - **`bytes(image.constBits())` 必须持有 QImage 引用**：`bytes(canvas.render_image(w, h).constBits())`（临时对象上取 buffer）会 **access violation（0xC0000005）**；先 `img = ...` 再 `bytes(img.constBits())`。

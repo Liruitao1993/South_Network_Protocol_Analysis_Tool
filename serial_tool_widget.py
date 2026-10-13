@@ -5,7 +5,9 @@
   - 命令表：**选择（勾选框）** / 名称 / 发送数据(HEX) / 匹配方式 / 预期响应 / **协议**，可增删改与上下移；
     **只发勾选的命令**（全选 / 全不选 / 反选），按表内顺序
   - 发送：按毫秒级间隔循环发送，次数 0 = 无限；间隔用「先 sleep + 尾段忙等」保精度
-  - 接收：原始数据（**帧结构优先 + 时间聚合兜底**）/ 按帧尾分割（帧尾可配）
+  - 接收：原始数据（**协议特征断帧 + 时间聚合兜底**；68 家族自动跳过帧首前导 FEH）/
+    按帧尾分割（帧尾可配）。**断帧设置**（1.23.78）：断帧方式（自动 / 仅按字节超时）
+    + 4 个可调超时（字节静默 / 聚合最长持有 / 协议帧等待静默 / 协议帧等待上限）
   - 响应匹配：6 种方式，接收数据从待匹配**队首**连续比对（按**累积**接收数据，
     跨交付块也能命中），超时计失败并输出可比对的诊断
   - 统计：收发帧数/字节、匹配成功/失败/成功率、运行时长；彩色日志（可节流）
@@ -35,6 +37,8 @@ import re
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
+import wakeup_prefix
+
 # ── 常量（匹配方式照搬源工具）──────────────────────────────────────────
 
 # 波特率**不在本页**：端口与波特率统一由顶部「串口配置」管理（见 set_serial_worker）
@@ -62,6 +66,33 @@ DEFAULT_FRAME_TAIL = "FE 16"
 DEFAULT_PARSE_MAX_LINES = 0
 PARSE_MAX_LINES_RANGE = (0, 2000)
 
+# 断帧方式（1.23.78）：auto = 有协议按协议结构特征断帧/拼帧、无协议按字节超时聚合
+# （并保留 68 结构自证增强）；timeout_only = 忽略协议结构与启发式，**纯按字节超时**聚合。
+FRAMING_MODE_AUTO = "auto"
+FRAMING_MODE_TIMEOUT = "timeout_only"
+FRAMING_MODE_OPTIONS = (
+    (FRAMING_MODE_AUTO, "自动（协议特征优先）"),
+    (FRAMING_MODE_TIMEOUT, "仅按字节超时"),
+)
+
+# 断帧超时的**默认值**（毫秒）—— 唯一来源：既供 DEFAULT_PARAMS 取值，也供下方历史常量
+# `RAW_FLUSH_DELAY_MS` / `RAW_MAX_HOLD_MS` / `FRAME_IDLE_MS` / `FRAME_HOLD_MAX_MS` 取值
+# （老代码与既有测试仍引用那几个常量，故保留其名字）。
+FRAME_TIMEOUT_DEFAULTS: Dict[str, int] = {
+    "rx_byte_idle_ms": 10,          # 无结构可判时的字节静默窗口（「字节超时」本体）
+    "rx_raw_max_hold_ms": 200,      # 持续流下强制刷出的最长持有（防缓冲无界）
+    "rx_frame_idle_ms": 300,        # 已认出一帧但未收全时的静默容忍
+    "rx_frame_hold_max_ms": 5000,   # 一帧的绝对等待上限（防中途断流挂死）
+}
+
+# 断帧超时的可调范围（毫秒）：UI spin 与参数夹紧**共用一份**，避免两处漂移。
+FRAME_TIMEOUT_RANGES: Dict[str, Tuple[int, int]] = {
+    "rx_byte_idle_ms": (1, 2000),
+    "rx_raw_max_hold_ms": (10, 60000),
+    "rx_frame_idle_ms": (10, 60000),
+    "rx_frame_hold_max_ms": (100, 600000),
+}
+
 # 默认参数（默认值与源工具一致：100ms / 1 次 / 5000ms；波特率由顶部串口配置决定）
 DEFAULT_PARAMS: Dict[str, object] = {
     "interval_ms": 100,
@@ -79,6 +110,10 @@ DEFAULT_PARAMS: Dict[str, object] = {
     "log_auto_save": False,    # 勾选即实时把日志写入文件
     "log_dir": "",             # 空 = 默认目录（数据目录下的 Output/）
     "log_timestamp": True,     # 文件里每行加毫秒时间戳前缀
+    # 断帧（1.23.78）：默认值 = 原模块常量（见 FRAME_TIMEOUT_DEFAULTS）⇒ 老配置
+    # 零行为变化；只**新增键**，因此不需要 CONFIG_VERSION 迁移（改既有默认值才需要）。
+    **FRAME_TIMEOUT_DEFAULTS,
+    "rx_framing_mode": FRAMING_MODE_AUTO,
 }
 
 # 落盘文件名（app_paths.data_path 下）
@@ -648,6 +683,15 @@ def merge_params(params: Optional[dict]) -> dict:
     except (TypeError, ValueError):
         lines = DEFAULT_PARSE_MAX_LINES
     merged["parse_max_lines"] = max(lo, min(hi, lines))   # 0 = 不限制
+    # 断帧参数（1.23.78）：夹到合法范围（与 UI 的 spin range 共用 FRAME_TIMEOUT_RANGES）
+    for key, (lo, hi) in FRAME_TIMEOUT_RANGES.items():
+        try:
+            value = int(merged.get(key, DEFAULT_PARAMS[key]))
+        except (TypeError, ValueError):
+            value = int(DEFAULT_PARAMS[key])
+        merged[key] = max(lo, min(hi, value))
+    if merged.get("rx_framing_mode") not in (FRAMING_MODE_AUTO, FRAMING_MODE_TIMEOUT):
+        merged["rx_framing_mode"] = FRAMING_MODE_AUTO
     return merged
 
 
@@ -925,6 +969,7 @@ from PySide6.QtWidgets import (  # noqa: E402
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
@@ -980,12 +1025,12 @@ LOG_FLUSH_BURST = 20
 # 串口驱动常把**同一帧**拆成多次 read 交付（低波特率甚至逐字节），若按每次
 # read 输出一行，一帧会被打成多行、RX 帧数也被虚增（实测报障）。
 # 源工具用 1ms 静默聚合；这里取 10ms，兼容低波特率下逐字节交付的情形。
-RAW_FLUSH_DELAY_MS = 10
+RAW_FLUSH_DELAY_MS = FRAME_TIMEOUT_DEFAULTS["rx_byte_idle_ms"]
 # 聚合窗口的检查间隔（毫秒）
 RAW_FLUSH_TICK_MS = 5
 # 聚合缓冲最长持有时间（毫秒）。设备**持续流式**发送时读间隔始终小于静默窗口，
 # 只靠静默判定会让缓冲无界增长且永不显示；超过该时长强制刷出（作为一行）。
-RAW_MAX_HOLD_MS = 200
+RAW_MAX_HOLD_MS = FRAME_TIMEOUT_DEFAULTS["rx_raw_max_hold_ms"]
 # 「按帧结构分帧」的整帧长度合理区间（字节）。长度域算出该区间外的值视为不可信，
 # 退回时间聚合，避免把任意以 68H 开头的数据当成帧。
 RAW_MIN_FRAME_LEN = 8
@@ -993,9 +1038,9 @@ RAW_MAX_FRAME_LEN = 8192
 # 已声明整帧长度、但还没收全时的容忍静默（毫秒）。实测串口驱动把一帧拆成多次交付时，
 # 交付块间隔可 **大于 10ms 静默窗口**（208 字节的国网帧被拆成 4 行即为实例），
 # 所以一旦长度域已给出整帧长度，就不必再靠猜——按结构等到收全为止。
-FRAME_IDLE_MS = 300
+FRAME_IDLE_MS = FRAME_TIMEOUT_DEFAULTS["rx_frame_idle_ms"]
 # 已声明长度帧的绝对等待上限（毫秒），防设备中途断流导致缓冲一直挂着
-FRAME_HOLD_MAX_MS = 5000
+FRAME_HOLD_MAX_MS = FRAME_TIMEOUT_DEFAULTS["rx_frame_hold_max_ms"]
 
 # HDLC 帧最小长度（字节）：7EH + 地址 + 控制 + FCS(2) + 7EH
 HDLC_MIN_FRAME_LEN = 6
@@ -1037,6 +1082,25 @@ STRATEGY_NAMES = {
 # DLMS Wrapper 由版本 + 长度域自证，都不需要额外的末字节校验。
 END_CHAR_STRATEGIES = frozenset({"ft12_68", "dlt645", "dlt698_45"})
 
+# 68 家族的分帧要认**前导 FEH 唤醒字节**（规范依据见 AGENTS §8 陷阱 75：
+# DL/T 698.45-2017 §6.3.1 b)、DL/T 645-2007 §5.3.1）——判定复用 wakeup_prefix
+# **单一来源**，不要在分帧层另写一份 FE 扫描。
+# 现场报障（2026-10-13）：`FE FE FE FE 68 21 00 … 38 16`（39B，698.45）因首字节是 FE
+# 被判「判不出长度」→ 走 10ms 静默窗口 → 一帧被切成两条 [RX]。
+# HDLC（7EH 定界）与 DLMS Wrapper（00 01 版本头）**不**加前导容忍：它们首字节另有
+# 语义（定界符/版本号），加容忍只会掩盖错帧。
+FE_WAKEUP_STRATEGIES = frozenset({"ft12_68", "dlt645", "dlt698_45"})
+
+
+def _wakeup_base(strategy: Optional[str], buf) -> int:
+    """分帧前要跳过的前导 FE 字节数（非 68 家族恒为 0）。
+
+    ``strategy is None`` = 未指定协议的启发式路径（它只处理 68 家族结构）⇒ 同样跳过。
+    """
+    if strategy is not None and strategy not in FE_WAKEUP_STRATEGIES:
+        return 0
+    return wakeup_prefix.wakeup_prefix_len(buf)
+
 
 def _sane_frame_len(n: int) -> int:
     """整帧长度合理区间过滤：区间外视为不可信（返回 0）。"""
@@ -1064,24 +1128,31 @@ def declared_frame_len(buf) -> int:
     整帧小 2）而永远切不开。
 
     长度域不可信时返回 0，交由时间聚合处理 —— 错切帧比不切更糟。
+
+    **前导 FEH**（1.23.78）：68 家族帧可带帧首连续 `0xFE`（规范依据见 §8 陷阱 75），
+    故先按 :func:`_wakeup_base` 跳过前导再判定三种结构，且返回值**含前导字节数**
+    （调用方仍按 ``buf[need-1] == 0x16`` 自证）。
     """
-    if len(buf) < 8 or buf[0] != 0x68:
+    base = _wakeup_base(None, buf)
+    if len(buf) - base < 8 or buf[base] != 0x68:
         return 0                      # 不足 8 字节还分不清三种结构
-    lv = buf[1] | (buf[2] << 8)
+    lv = buf[base + 1] | (buf[base + 2] << 8)
     n68 = _sane_frame_len(lv)                                  # 南网/国网：L 即整帧
     data_len = lv & 0x3FFF
     unit = (lv >> 14) & 0x01
     n698 = _sane_frame_len((data_len * 1024 if unit else data_len) + 2)
-    n645 = _sane_frame_len(buf[9] + 12) if (buf[7] == 0x68 and len(buf) >= 10) else 0
+    n645 = (_sane_frame_len(buf[base + 9] + 12)
+            if (buf[base + 7] == 0x68 and len(buf) - base >= 10) else 0)
     # ① 末字节自证：已到齐且以 16H 收尾的那个口径就是它（南网/国网与 698 只能这样区分）
     for n in (n68, n645, n698):
-        if n and len(buf) >= n and buf[n - 1] == 0x16:
-            return n
+        if n and len(buf) - base >= n and buf[base + n - 1] == 0x16:
+            return base + n           # 含前导
     # ② 南网/国网口径已被末字节否定（按 L 已到齐却不是 16H）→ 只可能是 698.45
-    if n68 and len(buf) >= n68:
-        return n698
+    if n68 and len(buf) - base >= n68:
+        return base + n698 if n698 else 0
     # ③ 都还没收全：按头部分辨（645 特征 = 第 8 字节是第二个起始符 68H）
-    return n645 or n68
+    n = n645 or n68
+    return base + n if n else 0
 
 
 def frame_length_for(strategy: str, buf) -> int:
@@ -1096,39 +1167,17 @@ def frame_length_for(strategy: str, buf) -> int:
     2），返回 0 交回回退路径；645 另有「第 8 字节起始符 + 末字节」双重自证。历史上
     的「第 4 字节 = 68H」判据基于**错误的** 698.45 帧格式（真实 698.45 帧没有第二个
     68H），恒不命中且会误导排查，已于 1.23.60 删除。详见 `declared_frame_len`。
+
+    **前导 FEH**（1.23.78）：68 家族帧可带帧首连续 `0xFE`（规范依据见 §8 陷阱 75），
+    故 68 家族三种策略先按 :func:`_wakeup_base` 跳过前导，下标一律偏移 ``base``，
+    返回值**含前导字节数**；HDLC / DLMS Wrapper 不加前导容忍。
     """
     if not strategy or not buf:
         return 0
+    base = 0
     if strategy == "hdlc_7e":
         return hdlc_frame_len(buf)
-    if strategy == "ft12_68":
-        # 协议已知：长度域在第 1~2 字节即可算整帧长；末字节 16H 由调用方自证。
-        if len(buf) < 3 or buf[0] != 0x68:
-            return 0
-        need = buf[1] | (buf[2] << 8)
-        # 字节够判时排除「不是南网/国网结构」的输入（AGENTS.md §8 陷阱 59 的自证版）
-        if len(buf) >= 8 and buf[7] == 0x68 and len(buf) >= 10:
-            n645 = buf[9] + 12
-            if len(buf) >= n645 and buf[n645 - 1] == 0x16:
-                return 0                  # ① 645 结构（起始符 + 末字节双自证）
-        if len(buf) >= need and buf[need - 1] != 0x16:
-            return 0                      # ② 按南网口径到齐却非 16H → 不是本结构
-    elif strategy == "dlt645":
-        if len(buf) < 10 or buf[0] != 0x68 or buf[7] != 0x68:
-            return 0
-        need = buf[9] + 12
-    elif strategy == "dlt698_45":
-        # 真实 698.45 链路帧**没有第二个 68H**（68 | L(2B) | C | … | FCS | 16）；
-        # L 是不含首尾定界符的数据长度 ⇒ 整帧 = L + 2（6.2.2 a + 附录 H.1.1 自证）
-        if len(buf) < 3 or buf[0] != 0x68:
-            return 0
-        lv = buf[1] | (buf[2] << 8)
-        n68 = lv                          # 南网/国网口径：L 即整帧
-        if len(buf) >= n68 and buf[n68 - 1] == 0x16:
-            return 0                      # 末字节自证是南网/国网帧，不是 698.45
-        data_len = lv & 0x3FFF
-        need = (data_len * 1024 if (lv >> 14) & 0x01 else data_len) + 2
-    elif strategy == "dlms_wrapper":
+    if strategy == "dlms_wrapper":
         if len(buf) < 8 or buf[0] != 0x00 or buf[1] != 0x01:
             return 0
         wlen = int.from_bytes(bytes(buf[6:8]), "big")
@@ -1136,10 +1185,38 @@ def frame_length_for(strategy: str, buf) -> int:
             return 0
         need = 8 + wlen
     else:
-        return 0                      # 其余协议没有自证的长度域/定界符
+        # ── 68 家族：先跳过前导 FEH，其后所有下标偏移 base ──
+        base = _wakeup_base(strategy, buf)
+        if len(buf) - base < 3 or buf[base] != 0x68:
+            return 0
+        if strategy == "ft12_68":
+            # 协议已知：长度域在第 1~2 字节即可算整帧长；末字节 16H 由调用方自证。
+            need = buf[base + 1] | (buf[base + 2] << 8)
+            # 字节够判时排除「不是南网/国网结构」的输入（AGENTS.md §8 陷阱 59 的自证版）
+            if len(buf) - base >= 8 and buf[base + 7] == 0x68 and len(buf) - base >= 10:
+                n645 = buf[base + 9] + 12
+                if len(buf) - base >= n645 and buf[base + n645 - 1] == 0x16:
+                    return 0              # ① 645 结构（起始符 + 末字节双自证）
+            if len(buf) - base >= need and buf[base + need - 1] != 0x16:
+                return 0                  # ② 按南网口径到齐却非 16H → 不是本结构
+        elif strategy == "dlt645":
+            if len(buf) - base < 10 or buf[base + 7] != 0x68:
+                return 0
+            need = buf[base + 9] + 12
+        elif strategy == "dlt698_45":
+            # 真实 698.45 链路帧**没有第二个 68H**（68 | L(2B) | C | … | FCS | 16）；
+            # L 是不含首尾定界符的数据长度 ⇒ 整帧 = L + 2（6.2.2 a + 附录 H.1.1 自证）
+            lv = buf[base + 1] | (buf[base + 2] << 8)
+            n68 = lv                      # 南网/国网口径：L 即整帧
+            if len(buf) - base >= n68 and buf[base + n68 - 1] == 0x16:
+                return 0                  # 末字节自证是南网/国网帧，不是 698.45
+            data_len = lv & 0x3FFF
+            need = (data_len * 1024 if (lv >> 14) & 0x01 else data_len) + 2
+        else:
+            return 0                      # 其余策略没有自证的长度域/定界符
     if need < RAW_MIN_FRAME_LEN or need > RAW_MAX_FRAME_LEN:
         return 0
-    return need
+    return base + need                    # 含前导（调用方按 buf[need-1] 自证）
 
 
 def hdlc_frame_len(buf) -> int:
@@ -1765,6 +1842,56 @@ class SerialToolWidget(QWidget):
         rx_layout.addWidget(self.parse_lines_spin)
         rx_layout.addStretch()
         left_layout.addWidget(rx_group)
+
+        # 断帧设置（1.23.78）：断帧方式 + 4 个可调超时（UI 与参数夹紧共用 FRAME_TIMEOUT_RANGES）
+        framing_group = QGroupBox("断帧设置")
+        framing_grid = QGridLayout(framing_group)
+        framing_grid.setContentsMargins(6, 4, 6, 4)
+        framing_grid.setHorizontalSpacing(6)
+        framing_grid.setVerticalSpacing(4)
+        self.framing_mode_combo = QComboBox()
+        for value, label in FRAMING_MODE_OPTIONS:
+            self.framing_mode_combo.addItem(label, value)
+        self.framing_mode_combo.setToolTip(
+            "自动（推荐）：指定了命令协议时按该协议的**结构特征**断帧并拼接\n"
+            "（68 家族自动跳过帧首前导 FEH）；未指定协议时按「字节静默超时」断帧，\n"
+            "并叠加 68 结构自证（长度域到齐且末字节 16H 即立即成帧）\n"
+            "仅按字节超时：忽略协议结构与自证，完全按超时聚合"
+        )
+        self.framing_mode_combo.currentIndexChanged.connect(self._on_framing_changed)
+        framing_grid.addWidget(QLabel("断帧方式："), 0, 0)
+        framing_grid.addWidget(self.framing_mode_combo, 0, 1)
+
+        self.byte_idle_spin = self._framing_spin(
+            "rx_byte_idle_ms",
+            "字节静默超时：无结构可判时的静默窗口，读静默超过它就把已收数据刷成一行。\n"
+            "调大 = 更不容易把一帧切成多行（代价：帧显示更晚）；\n"
+            "调小 = 更实时（慢设备的一帧可能被切开）")
+        framing_grid.addWidget(QLabel("字节静默超时："), 0, 2)
+        framing_grid.addWidget(self.byte_idle_spin, 0, 3)
+
+        self.frame_idle_spin = self._framing_spin(
+            "rx_frame_idle_ms",
+            "协议帧等待静默：已按协议认出「一帧已开始但没收到全」时的等待窗口。\n"
+            "调大 = 慢设备/分片交付也能拼回整帧；调小 = 出错帧更快刷出")
+        framing_grid.addWidget(QLabel("协议帧等待静默："), 1, 0)
+        framing_grid.addWidget(self.frame_idle_spin, 1, 1)
+
+        self.frame_hold_spin = self._framing_spin(
+            "rx_frame_hold_max_ms",
+            "协议帧等待上限：一帧的**绝对**等待上限（含持续未到齐），\n"
+            "防设备中途断流把缓冲永久挂住（到点即按原样刷出，不丢字节）")
+        framing_grid.addWidget(QLabel("协议帧等待上限："), 1, 2)
+        framing_grid.addWidget(self.frame_hold_spin, 1, 3)
+
+        self.raw_hold_spin = self._framing_spin(
+            "rx_raw_max_hold_ms",
+            "聚合最长持有：持续流式接收时的兜底 —— 读间隔始终小于静默窗口时，\n"
+            "超过它就强制刷成一行，防止缓冲无界增长")
+        framing_grid.addWidget(QLabel("聚合最长持有："), 2, 0)
+        framing_grid.addWidget(self.raw_hold_spin, 2, 1)
+        framing_grid.addWidget(QLabel("未指定协议 → 按字节静默超时断帧"), 2, 2, 1, 2)
+        left_layout.addWidget(framing_group)
         splitter.addWidget(left)
 
         # 右：统计 + 日志
@@ -2173,9 +2300,10 @@ class SerialToolWidget(QWidget):
             self._raw_first_time = time.perf_counter()
         self._raw_buffer.extend(data)
         self._raw_last_time = time.perf_counter()
-        strategy = STRATEGY_BY_PROTOCOL.get(self._last_tx_protocol)
-        if strategy:
-            self._emit_protocol_frames(strategy)
+        if self._framing_mode() != FRAMING_MODE_TIMEOUT:
+            strategy = STRATEGY_BY_PROTOCOL.get(self._last_tx_protocol)
+            if strategy:
+                self._emit_protocol_frames(strategy)
 
     @staticmethod
     def _declared_frame_len(buf) -> int:
@@ -2271,12 +2399,16 @@ class SerialToolWidget(QWidget):
 
         实测串口驱动的交付块间隔可大于 10ms 静默窗口，靠静默判定会把一帧切成多行；
         只要能算出还差多少字节（或 HDLC 已见到头标志），就按结构等到收全为止
-        （受 ``FRAME_IDLE_MS`` / ``FRAME_HOLD_MAX_MS`` 上限约束）。
+        （受「断帧设置」里的**协议帧等待静默 / 协议帧等待上限**约束，两者现场可调）。
 
         **头标志已出现、但长度域还没收够字节时也算未收全**（1.23.43 实测报障）：
         首片只有 1~2 字节的 ``68`` 时读不出长度；若当「非协议帧」走 10ms 静默窗口，
         首片会被单独刷出，缓冲从下一片起不再以 68 开头 → 整帧被切成多行
         （实测国网 F112 响应拆成 4 条 ``[RX]``）。
+
+        **前导 FE 也算「帧已开始」**（1.23.78 现场报障）：68 家族帧可带帧首连续 ``0xFE``
+        （规范依据见 §8 陷阱 75），故先跳过前导再判长度 —— 否则首字节 0xFE 会让
+        ``frame_length_for`` 判 0，一帧被 10ms 静默切成两行。
         """
         buf = self._raw_buffer
         if not buf:
@@ -2288,15 +2420,20 @@ class SerialToolWidget(QWidget):
                 return True
             need = frame_length_for(strategy, buf)
             return bool(need) and len(buf) < need
-        # 68 家族：长度域/第二起始符签名还没收够 → 继续等（勿按短静默切开）
+        # 68 家族（含未指定协议的启发式）：先跳过前导 FEH
+        base = _wakeup_base(strategy, buf)
+        if base >= len(buf):
+            return True          # 只见到前导 FE（还没见到帧头）→ 继续等（有等待上限兜底）
+        rest = len(buf) - base
+        # 长度域/第二起始符签名还没收够 → 继续等（勿按短静默切开）
         min_hdr = {
             "ft12_68": 3,       # 长度域在第 1~2 字节
             "dlt698_45": 3,     # 长度域在第 1~2 字节（真实 698.45 帧无第二个起始符）
             "dlt645": 10,       # 第二起始符在第 7，数据长度在第 9
         }.get(strategy or "")
-        if strategy and buf[0] == 0x68 and min_hdr and len(buf) < min_hdr:
+        if buf[base] == 0x68 and min_hdr and rest < min_hdr:
             return True
-        if not strategy and buf[0] == 0x68 and len(buf) < 8:
+        if not strategy and buf[base] == 0x68 and rest < 8:
             # 启发式：还不够区分 698/645/南网国网三种结构
             return True
         if strategy:
@@ -2304,6 +2441,70 @@ class SerialToolWidget(QWidget):
         else:
             need = declared_frame_len(buf)
         return bool(need) and len(buf) < need
+
+    # ── 断帧设置（1.23.78）：方式 + 4 个超时 ─────────────────────────
+
+    def _framing_mode(self) -> str:
+        """断帧方式（取控件值；非法值回落 ``auto``）。"""
+        data = self.framing_mode_combo.currentData()
+        return data if data in (FRAMING_MODE_AUTO, FRAMING_MODE_TIMEOUT) else FRAMING_MODE_AUTO
+
+    def _timeouts(self) -> Tuple[int, int, int, int]:
+        """当前断帧超时（毫秒）：字节静默 / 聚合最长持有 / 协议帧等待静默 / 协议帧等待上限。"""
+        return (
+            int(self.byte_idle_spin.value()),
+            int(self.raw_hold_spin.value()),
+            int(self.frame_idle_spin.value()),
+            int(self.frame_hold_spin.value()),
+        )
+
+    def _framing_summary_text(self) -> str:
+        """一行「此刻按什么断帧」说明（现场自查；只在设置变更/每轮开始时输出）。"""
+        mode = self._framing_mode()
+        byte_idle, raw_hold, frame_idle, frame_hold = self._timeouts()
+        proto = self._last_tx_protocol
+        if mode == FRAMING_MODE_TIMEOUT:
+            basis = "仅按字节超时（忽略协议结构与自证）"
+        else:
+            strategy = STRATEGY_BY_PROTOCOL.get(proto)
+            if strategy:
+                basis = f"协议特征 {strategy}（{STRATEGY_NAMES.get(strategy, strategy)}）"
+                if strategy in FE_WAKEUP_STRATEGIES:
+                    basis += "，前导 FE 自动跳过"
+            elif proto is None:
+                basis = "未指定协议 → 按字节超时（叠加 68 结构自证）"
+            else:
+                basis = f"当前协议（{protocol_short_name(proto)}）无自证分帧依据 → 按字节超时"
+        return (
+            f"[断帧] 方式={dict(FRAMING_MODE_OPTIONS).get(mode, mode)}；依据={basis}；"
+            f"超时 字节静默 {byte_idle}ms / 聚合最长持有 {raw_hold}ms / "
+            f"协议帧等待静默 {frame_idle}ms / 协议帧等待上限 {frame_hold}ms"
+        )
+
+    def _log_framing_summary(self) -> None:
+        """输出断帧依据说明行（**不逐帧打印**：只在设置变更 / 每轮开始时调用）。"""
+        self._log(self._framing_summary_text(), "sys")
+
+    def _framing_spin(self, key: str, tooltip: str) -> QSpinBox:
+        """按 ``FRAME_TIMEOUT_RANGES`` 造一个断帧超时 spin（UI 与参数夹紧同源）。"""
+        lo, hi = FRAME_TIMEOUT_RANGES[key]
+        spin = QSpinBox()
+        spin.setRange(lo, hi)
+        spin.setValue(int(DEFAULT_PARAMS[key]))
+        spin.setSuffix(" ms")
+        # 只设下限、不设上限：QSS 主题与系统字号下「5000 ms」的 sizeHint 会变，
+        # 写死宽度会让文字被裁（AGENTS §8 陷阱 63 的同类判据）。
+        spin.setMinimumWidth(96)
+        spin.setToolTip(tooltip)
+        spin.valueChanged.connect(lambda _=0: self._schedule_save())
+        spin.editingFinished.connect(self._log_framing_summary)
+        return spin
+
+    def _on_framing_changed(self, _index: int = 0):
+        """切换断帧方式：先按旧口径把缓冲刷出，避免两种口径的数据混在一行。"""
+        self._flush_raw_display_now()
+        self._schedule_save()
+        self._log_framing_summary()
 
     def _emit_raw_chunk(self):
         """把当前聚合缓冲整体作为一行刷出（**不解析**：这不是一个完整帧）。"""
@@ -2318,22 +2519,29 @@ class SerialToolWidget(QWidget):
         指定了命令协议且该协议有自证分帧依据时，**只**按该协议切帧（不再用启发式，
         避免"你告诉了我协议却按另一种结构切"）；否则退回启发式。剩余部分再按
         「静默窗口 / 最长持有」决定是否作为一行刷出。
+
+        「仅按字节超时」（``FRAMING_MODE_TIMEOUT``）时**跳过**前面两条结构路径，
+        完全按字节超时聚合（用户显式选择的兜底口径）。
+        四个时间窗都取自「断帧设置」（可调，默认 = 原常量）。
         """
         if not self._raw_buffer:
             return
         strategy = STRATEGY_BY_PROTOCOL.get(self._last_tx_protocol)
-        if strategy:
-            if self._emit_protocol_frames(strategy):
+        auto = self._framing_mode() != FRAMING_MODE_TIMEOUT
+        if auto:
+            if strategy:
+                if self._emit_protocol_frames(strategy):
+                    return
+            elif self._emit_structured_frames():
                 return
-        elif self._emit_structured_frames():
-            return
         now = time.perf_counter()
         idle_ms = (now - self._raw_last_time) * 1000
         held_ms = (now - self._raw_first_time) * 1000
-        if self._frame_incomplete(strategy):
-            if idle_ms < FRAME_IDLE_MS and held_ms < FRAME_HOLD_MAX_MS:
+        byte_idle, raw_hold, frame_idle, frame_hold = self._timeouts()
+        if auto and self._frame_incomplete(strategy):
+            if idle_ms < frame_idle and held_ms < frame_hold:
                 return
-        elif idle_ms < RAW_FLUSH_DELAY_MS and held_ms < RAW_MAX_HOLD_MS:
+        elif idle_ms < byte_idle and held_ms < raw_hold:
             # 持续流式接收时读间隔始终小于静默窗口 → 最长持有兜底，防无界增长
             return
         self._emit_raw_chunk()
@@ -2363,11 +2571,12 @@ class SerialToolWidget(QWidget):
         """立即刷出原始聚合缓冲（忽略静默窗口；切模式/收尾时用）。"""
         if not self._raw_buffer:
             return
-        strategy = STRATEGY_BY_PROTOCOL.get(self._last_tx_protocol)
-        if strategy:
-            self._emit_protocol_frames(strategy)   # 已收全的帧仍逐帧刷出
-        else:
-            self._emit_structured_frames()
+        if self._framing_mode() != FRAMING_MODE_TIMEOUT:
+            strategy = STRATEGY_BY_PROTOCOL.get(self._last_tx_protocol)
+            if strategy:
+                self._emit_protocol_frames(strategy)   # 已收全的帧仍逐帧刷出
+            else:
+                self._emit_structured_frames()
         if self._raw_buffer:                # 残帧整体作为一行，不丢数据
             self._emit_raw_chunk()
         self._raw_first_time = 0.0
@@ -2691,6 +2900,23 @@ class SerialToolWidget(QWidget):
         if tail:
             self._frame_tail = tail
         self.frame_tail_edit.setEnabled(self.rx_frame_radio.isChecked())
+        # 断帧设置（1.23.78）：载入时屏蔽信号，避免触发 _schedule_save / _log
+        mode = str(p.get("rx_framing_mode", FRAMING_MODE_AUTO))
+        if mode not in (FRAMING_MODE_AUTO, FRAMING_MODE_TIMEOUT):
+            mode = FRAMING_MODE_AUTO
+        self.framing_mode_combo.blockSignals(True)
+        self.framing_mode_combo.setCurrentIndex(
+            max(0, self.framing_mode_combo.findData(mode)))
+        self.framing_mode_combo.blockSignals(False)
+        for key, spin in (
+            ("rx_byte_idle_ms", self.byte_idle_spin),
+            ("rx_raw_max_hold_ms", self.raw_hold_spin),
+            ("rx_frame_idle_ms", self.frame_idle_spin),
+            ("rx_frame_hold_max_ms", self.frame_hold_spin),
+        ):
+            spin.blockSignals(True)
+            spin.setValue(int(p.get(key, DEFAULT_PARAMS[key])))
+            spin.blockSignals(False)
         # 日志文件：目录取自参数（无控件）；自动保存**放最后** —— 勾选会立刻创建
         # 日志文件，那时其它控件必须都已就绪（否则 _log 会碰到不存在的控件）
         self.chk_log_timestamp.setChecked(bool(p.get("log_timestamp", True)))
@@ -2710,6 +2936,11 @@ class SerialToolWidget(QWidget):
             "auto_scroll": bool(self.chk_auto_scroll.isChecked()),
             "parse_enabled": bool(self.chk_show_parse.isChecked()),
             "parse_max_lines": int(self.parse_lines_spin.value()),
+            "rx_framing_mode": self._framing_mode(),
+            "rx_byte_idle_ms": int(self.byte_idle_spin.value()),
+            "rx_raw_max_hold_ms": int(self.raw_hold_spin.value()),
+            "rx_frame_idle_ms": int(self.frame_idle_spin.value()),
+            "rx_frame_hold_max_ms": int(self.frame_hold_spin.value()),
             "log_auto_save": bool(self.chk_auto_save_log.isChecked()),
             # 目录没有控件（只在「选择目录…」里改），直接取参数现值
             "log_dir": str(self._params.get("log_dir") or ""),
@@ -2811,6 +3042,8 @@ class SerialToolWidget(QWidget):
             scope = f"{len(messages)} 条命令"
         self._log(f"[发送] 开始：{scope} × {loops}，间隔 "
                   f"{self.interval_spin.value()}ms", "sys")
+        # 断帧依据（1.23.78）：每轮开始时输出一次，便于现场确认「按什么在断帧」
+        self._log_framing_summary()
 
     def _stop_send(self):
         if self._sender:
@@ -2853,7 +3086,12 @@ class SerialToolWidget(QWidget):
         proto = None
         if 0 <= msg_index < len(self.commands):
             proto = coerce_protocol(self.commands[msg_index].get("protocol"))
-            self._last_tx_protocol = proto
+            if proto != self._last_tx_protocol:
+                self._last_tx_protocol = proto
+                # 断帧依据随协议变化 → 输出一条（不逐帧打印）
+                self._log_framing_summary()
+            else:
+                self._last_tx_protocol = proto
         label = f"#{seq + 1} {name}".strip()
         self._tx_log_queue.append(("raw", f"{label} {bytes_to_hex(data)}"))
         # 状态：先记「通过（已发出）」；若这条命令还要等匹配，下面会改成「发送中」

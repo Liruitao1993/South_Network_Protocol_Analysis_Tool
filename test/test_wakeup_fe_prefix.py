@@ -457,6 +457,9 @@ def test_negative_controls_and_single_source():
         "protocol_registry.py",          # 表格位移/行构造
         "dl_t698_45_validator.py",
         "dlt645_validator.py",
+        # 串口工具分帧层（1.23.78）：68 家族分帧同样认前导 FEH（`_wakeup_base`），
+        # 刻意**复用**同一实现而不是另写扫描 —— 长度返回值含前导，见 AGENTS §8 陷阱 59/75。
+        "serial_tool_widget.py",
     }
     import_re = re.compile(r"^\s*(?:from\s+wakeup_prefix\s+import|import\s+wakeup_prefix\b)", re.M)
     # 反例：文档式提及（如 CHANGELOG 文案）不得被判为「第二份实现」

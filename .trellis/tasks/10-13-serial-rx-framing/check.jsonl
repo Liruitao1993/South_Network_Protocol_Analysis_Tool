@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/10-13-serial-rx-framing/research/serial-framing-facts.md", "reason": "复核事实基线：现场帧逐字节与复现数据（含 FE 判 0 / 剥离后 35），以及「前导 FE 只对 68 家族生效」的规范依据"}
+{"file": ".trellis/tasks/10-13-serial-rx-framing/implement.md", "reason": "复核判据：审查点 A~F、变异反证 3 条、回归套件与 pwsh 环境铁律（AGENTS §8 陷阱 62）"}
