@@ -1020,7 +1020,7 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 
 | Hash | Message |
 |------|---------|
-| `d9616ee` | (see git log) |
+| `02cd050` | feat(蓝牙工具): 自定义报文区空间治理（封顶 3 行 + 内部滚动 + 可折叠 + 竖向分栏） |
 
 ### Testing
 
