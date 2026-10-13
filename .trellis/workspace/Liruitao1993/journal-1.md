@@ -960,3 +960,42 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Next Steps
 
 - 版本/文档四件套（main_gui APP_VERSION=1.23.80+CHANGELOG、AGENTS §8 陷阱 69、README、两个 .iss）留在工作区，随发版批次提交
+
+
+## Session 30: 蓝牙自定义按钮：按协议替换地址 + 重算校验（发送时生效）
+
+**Date**: 2026-10-13
+**Task**: 蓝牙自定义按钮：按协议替换地址 + 重算校验（发送时生效）
+**Branch**: `main`
+
+### Summary
+
+新增 frame_addr_fix.py（六协议地址定位+校验重算，全部复用既有实现）；按钮可绑 protocol/addr，发送时替换、发送框保持原模板；失败不发
+
+### Main Changes
+
+- frame_addr_fix.py: fields_for/parse_address（写法双认）/apply（自证→定位→替换→复用协议实现重算）；协议模块按需导入（698 依赖可选 crcmod）
+- bluetooth_core: normalize_button 宽容保留 protocol/addr（旧按钮零影响）
+- bluetooth_tool_widget: 对话框协议下拉+动态地址框+预览；_apply_button_address 只在发送时替换；失败弹框+日志不发；tooltip 标注
+- v1 支持 0/6/7/8/13/14；无地址域/福建增补/长度不符/原帧校验不符 → 可读拒绝（先自证再改）
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `acf4366` | (see git log) |
+
+### Testing
+
+- [OK] test_bluetooth_addr_fix.py 96 项（六协议真帧 oracle：替换后该协议校验器 0 fail）；core 145 / widget 200 / worker 106 / wiring 36 全绿
+- [OK] 变异反证 4 条（645 不重算 2 红 / 地址不反转 9 红 / 698 不重算 HCS+FCS 2 红 / 不校验长度 2 红）逐字节还原 md5 一致
+- [OK] 端到端冒烟：真 worker+真页面 offscreen，点绑定按钮写出 68 33 ... 33 E5 16，发送框仍为原始模板
+- [OK] release_check.py --with-gui：PASS=132 FAIL=2 WARN=0（2 项 COM2 被运行实例占用，既有环境红）
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 版本/文档四件套（main_gui APP_VERSION=1.23.81+CHANGELOG、AGENTS §8 陷阱 69、README、两个 .iss、spec §7f）留在工作区，随发版批次提交
