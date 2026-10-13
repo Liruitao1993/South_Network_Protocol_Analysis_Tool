@@ -88,9 +88,12 @@ PROBE_TIMEOUT_RANGE = (200, 5000)
 PROBE_MAX_CANDIDATES = 6        # 一键探测最多尝试的候选数
 CHAR_MAP_MAX = 20               # 按设备地址记忆的条数上限（超出按 ts 淘汰最旧）
 
-# 自定义报文按钮
+#: 自定义报文按钮
 MAX_CUSTOM_BUTTONS = 64
 BUTTON_NAME_MAX = 32
+#: 按钮「地址参数」的字段名/值长度上限（坏配置不得撑爆界面）
+ADDR_KEY_MAX = 16
+ADDR_VALUE_MAX = 64
 
 # 配置文件名（app_paths.data_path 下，与 serial_tool_config.json 同级）
 SETTINGS_NAME = "bluetooth_tool_config.json"
@@ -232,6 +235,23 @@ def merge_settings(raw) -> dict:
     return out
 
 
+def normalize_addr_map(raw) -> dict:
+    """规范化按钮的**地址参数**：``{字段 key: 文本}``（非 dict / 空键空值一律丢弃）。
+
+    「协议 + 地址」是 1.23.81 新增能力（发送前按协议替换地址并重算校验）；旧配置没有这两个键
+    ⇒ 返回空 dict / 不写 protocol，行为与改动前完全一致。
+    """
+    if not isinstance(raw, dict):
+        return {}
+    out: dict = {}
+    for key, value in raw.items():
+        name = str(key or "").strip()[:ADDR_KEY_MAX]
+        text = str(value or "").strip()[:ADDR_VALUE_MAX]
+        if name and text:
+            out[name] = text
+    return out
+
+
 def normalize_button(raw, fallback_name: str = "未命名") -> Optional[dict]:
     """规范化一个自定义报文按钮；内容为空的按钮返回 None（没有意义）。"""
     if not isinstance(raw, dict):
@@ -241,11 +261,22 @@ def normalize_button(raw, fallback_name: str = "未命名") -> Optional[dict]:
     if not data:
         return None
     is_hex = raw.get("isHex", raw.get("is_hex", True))
-    return {
+    button = {
         "name": name[:BUTTON_NAME_MAX],
         "data": data,
         "isHex": _as_bool(is_hex, True),
     }
+    # 协议 + 地址（可选；缺省不写键 ⇒ 旧文件/旧版本互不影响）
+    protocol_raw = raw.get("protocol", raw.get("protocol_index"))
+    if protocol_raw is not None and str(protocol_raw).strip() != "":
+        try:
+            button["protocol"] = int(protocol_raw)
+        except (TypeError, ValueError):
+            pass
+    addr = normalize_addr_map(raw.get("addr", raw.get("address")))
+    if addr:
+        button["addr"] = addr
+    return button
 
 
 def normalize_buttons(raw, limit: int = MAX_CUSTOM_BUTTONS) -> List[dict]:

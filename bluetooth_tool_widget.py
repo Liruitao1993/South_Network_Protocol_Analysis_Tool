@@ -74,6 +74,7 @@ from PySide6.QtWidgets import (
 import app_icons
 import app_paths
 import bluetooth_core as core
+import frame_addr_fix
 from bluetooth_worker import BLEAK_MISSING_HINT, BluetoothWorker
 from gui_utils import (
     ZoomableTableWidget,
@@ -586,13 +587,19 @@ def parse_button_lines(text: str, limit: int = core.MAX_CUSTOM_BUTTONS
 
 
 class ButtonEditDialog(QDialog):
-    """新增 / 编辑一个自定义报文按钮（名称 + 内容 + HEX/ASCII）。"""
+    """新增 / 编辑一个自定义报文按钮（名称 + 内容 + HEX/ASCII +（可选）协议与地址参数）。
+
+    「协议 + 地址」是 1.23.81 新增：绑定后**发送前**按该协议替换帧内地址域并重算校验
+    （地址位置/字节序/校验算法都取自协议自身的实现，见 `frame_addr_fix`）。
+    """
 
     def __init__(self, parent=None, button=None):
         super().__init__(parent)
         source = dict(button or {})
         self.setWindowTitle("编辑报文按钮" if button else "新增报文按钮")
-        self.resize(480, 250)
+        self.resize(520, 420)
+        self._addr_edits: Dict[str, QLineEdit] = {}
+        self._addr_values: Dict[str, str] = dict(core.normalize_addr_map(source.get("addr")))
 
         self.edit_name = QLineEdit(str(source.get("name") or ""))
         self.edit_name.setMaxLength(core.BUTTON_NAME_MAX)
@@ -636,6 +643,35 @@ class ButtonEditDialog(QDialog):
         layout.addLayout(fmt_row)
         layout.addWidget(self.lbl_hint)
 
+        # ── 协议 + 地址参数（可选：发送前按协议替换地址并重算校验）──
+        self.combo_protocol = QComboBox()
+        self.combo_protocol.addItem("（不处理）", None)
+        for label, index in frame_addr_fix.supported_choices():
+            self.combo_protocol.addItem(label, index)
+        proto_row = QHBoxLayout()
+        proto_row.addWidget(QLabel("协议："))
+        proto_row.addWidget(self.combo_protocol, 1)
+        layout.addLayout(proto_row)
+
+        self.addr_group = QGroupBox("地址参数（发送时替换地址并重算校验）")
+        self.addr_form = QFormLayout(self.addr_group)
+        self.addr_form.setSpacing(6)
+        self.lbl_addr_hint = QLabel("")
+        self.lbl_addr_hint.setWordWrap(True)
+        self.addr_form.addRow(self.lbl_addr_hint)
+        layout.addWidget(self.addr_group)
+
+        stored_protocol = source.get("protocol")
+        position = -1
+        if stored_protocol is not None:
+            try:
+                position = self.combo_protocol.findData(int(stored_protocol))
+            except (TypeError, ValueError):
+                position = -1
+        self.combo_protocol.setCurrentIndex(position if position > 0 else 0)
+        self.combo_protocol.currentIndexChanged.connect(self._rebuild_addr_fields)
+        self._rebuild_addr_fields()
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -655,6 +691,7 @@ class ButtonEditDialog(QDialog):
         text = self.edit_content.toPlainText()
         if not text.strip():
             self.lbl_hint.setText("")
+            self._refresh_addr_hint()
             return
         if self.radio_hex.isChecked():
             decoded = hex_str_to_bytes(text)
@@ -664,6 +701,89 @@ class ButtonEditDialog(QDialog):
                 self.lbl_hint.setText(f"✓ HEX {len(decoded)} 字节")
         else:
             self.lbl_hint.setText(f"✓ ASCII {len(text.strip().encode('utf-8'))} 字节")
+        self._refresh_addr_hint()
+
+    # ── 协议 + 地址参数 ─────────────────────────────────────────────────
+
+    def _rebuild_addr_fields(self):
+        """按所选协议重建地址输入行（字段声明来自 `frame_addr_fix`，界面不硬编码协议细节）。"""
+        for key, edit in list(self._addr_edits.items()):
+            self._addr_values[key] = edit.text()
+            edit.deleteLater()
+        self._addr_edits = {}
+        while self.addr_form.rowCount() > 1:       # 末行是提示，保留
+            self.addr_form.removeRow(0)
+
+        index = self.combo_protocol.currentData()
+        fields = frame_addr_fix.fields_for(index) if index is not None else ()
+        self.addr_group.setVisible(bool(fields))
+        if not fields:
+            self.lbl_addr_hint.setText("")
+            return
+        for position, spec in enumerate(fields):
+            edit = QLineEdit(self._addr_values.get(spec.key, ""))
+            edit.setPlaceholderText(spec.hint)
+            edit.textChanged.connect(self._refresh_addr_hint)
+            self._addr_edits[spec.key] = edit
+            self.addr_form.insertRow(position, f"{spec.label}：", edit)
+        self._refresh_addr_hint()
+
+    def _current_frame_bytes(self) -> bytes:
+        """内容框里的报文（HEX 且合法时）；否则空 —— 用于地址长度与替换预览。"""
+        if not self.radio_hex.isChecked():
+            return b""
+        return hex_str_to_bytes(self.edit_content.toPlainText()) or b""
+
+    @staticmethod
+    def _addr_lengths(frame: bytes) -> Dict[str, int]:
+        """由帧决定的地址长度（目前只有 698.45 的 SA：地址特征字节低 4 位 + 1）。"""
+        if len(frame) < 12 or frame[0] != 0x68 or frame[-1] != 0x16:
+            return {}
+        declared = frame[1] | (frame[2] << 8)
+        if declared != len(frame) - 2:
+            return {}
+        return {"sa": 1 + (frame[4] & 0x0F)}
+
+    def _refresh_addr_hint(self):
+        """实时回显「地址会写成什么字节」；内容框可解析时给出替换后的校验变化预览。"""
+        if not hasattr(self, "combo_protocol"):
+            return
+        index = self.combo_protocol.currentData()
+        fields = frame_addr_fix.fields_for(index) if index is not None else ()
+        if not fields:
+            self.lbl_addr_hint.setText("")
+            return
+        values = {key: edit.text().strip() for key, edit in self._addr_edits.items()}
+        filled = {key: text for key, text in values.items() if text}
+        if not filled:
+            self.lbl_addr_hint.setText("填写地址后：发送时按协议替换地址并重算校验（发送框保持原报文）")
+            return
+
+        frame = self._current_frame_bytes()
+        lengths = self._addr_lengths(frame)
+        good, bad = [], []
+        for spec in fields:
+            text = values.get(spec.key, "")
+            if not text:
+                continue
+            data, err = frame_addr_fix.parse_address(text, spec, lengths.get(spec.key, spec.length))
+            if err and spec.kind == frame_addr_fix.KIND_SA698 and not lengths.get("sa"):
+                good.append(f"· {spec.label}：长度按帧内确定")
+            elif err:
+                bad.append(f"⚠ {spec.label}：{err}")
+            else:
+                good.append(f"✓ {spec.label} → {len(data)} 字节：{data.hex(' ')}")
+        if frame:
+            preview = frame_addr_fix.apply(frame, index, filled)
+            if preview.ok:
+                good.append("✓ 按当前报文预览：" + "；".join(preview.notes))
+            else:
+                bad.append(f"⚠ 按当前报文预览失败：{preview.error}")
+        text = "<br>".join(
+            [f'<span style="color:{_LOG_COLORS["fail"]}">{line}</span>' for line in bad]
+            + [f'<span style="color:{_LOG_COLORS["rx"]}">{line}</span>' for line in good]
+        )
+        self.lbl_addr_hint.setText(text)
 
     def _on_accept(self):
         if not self.edit_name.text().strip():
@@ -678,11 +798,34 @@ class ButtonEditDialog(QDialog):
                 self, "HEX 无效", f"内容不是有效的 HEX：\n{hex_input_error(text)}"
             )
             return
+        if not self._check_addr_on_accept():
+            return
         self.accept()
 
+    def _check_addr_on_accept(self) -> bool:
+        """选了协议就必须填地址且地址合法（长度/写法与帧一致），否则不让保存。"""
+        index = self.combo_protocol.currentData()
+        if index is None:
+            return True
+        values = {key: edit.text().strip() for key, edit in self._addr_edits.items()}
+        if not any(values.values()):
+            QMessageBox.warning(self, "未填地址", "已选择协议，请至少填写一个地址（否则发送时会直接报错）。")
+            return False
+        fields = {spec.key: spec for spec in frame_addr_fix.fields_for(index)}
+        lengths = self._addr_lengths(self._current_frame_bytes())
+        for key, value in values.items():
+            spec = fields.get(key)
+            if spec is None or not value:
+                continue
+            _data, err = frame_addr_fix.parse_address(value, spec, lengths.get(key, spec.length))
+            if err:
+                QMessageBox.warning(self, "地址无效", f"{spec.label}：{err}")
+                return False
+        return True
+
     def value(self) -> dict:
-        """对话框结果（已规范化的按钮字典）。"""
-        return core.normalize_button(
+        """对话框结果（已规范化的按钮字典，含可选的 `protocol` / `addr`）。"""
+        button = core.normalize_button(
             {
                 "name": self.edit_name.text().strip(),
                 "data": self.edit_content.toPlainText().strip(),
@@ -690,6 +833,15 @@ class ButtonEditDialog(QDialog):
             },
             "未命名",
         ) or {}
+        index = self.combo_protocol.currentData()
+        if index is not None and button:
+            button["protocol"] = int(index)
+            addr = core.normalize_addr_map(
+                {key: edit.text() for key, edit in self._addr_edits.items()}
+            )
+            if addr:
+                button["addr"] = addr
+        return button
 
 
 class BatchButtonDialog(QDialog):
@@ -2551,11 +2703,24 @@ class BluetoothToolWidget(QWidget):
         for index, spec in enumerate(self._buttons):
             button = QPushButton(str(spec.get("name") or f"报文{index + 1}"))
             set_btn(button, "accent", "sm")
-            button.setToolTip(
-                f"{spec.get('data') or ''}\n"
-                f"格式：{'HEX' if spec.get('isHex', True) else 'ASCII'}\n"
-                "单击发送；右键可编辑 / 删除 / 移位"
-            )
+            tooltip = [
+                f"{spec.get('data') or ''}",
+                f"格式：{'HEX' if spec.get('isHex', True) else 'ASCII'}",
+            ]
+            protocol = spec.get("protocol")
+            if protocol is not None:
+                fields = {f.key: f for f in frame_addr_fix.fields_for(protocol)}
+                values = core.normalize_addr_map(spec.get("addr"))
+                detail = "，".join(
+                    f"{fields[key].label}={text}" for key, text in values.items() if key in fields
+                )
+                label = frame_addr_fix.protocol_label(protocol) or f"协议{protocol}"
+                tooltip.append(
+                    f"地址替换：{label}" + (f"（{detail}）" if detail else "")
+                    + "\n发送时替换地址并重算校验；发送框仍显示原始报文"
+                )
+            tooltip.append("单击发送；右键可编辑 / 删除 / 移位")
+            button.setToolTip("\n".join(tooltip))
             button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             button.customContextMenuRequested.connect(
                 lambda pos, i=index, b=button: self._on_custom_context_menu(pos, i, b)
@@ -2571,16 +2736,40 @@ class BluetoothToolWidget(QWidget):
             self.custom_grid.addWidget(placeholder, 0, 0, 1, BUTTON_GRID_COLUMNS)
         self.custom_group.setTitle(f"自定义报文（{len(self._buttons)}）")
 
+    def _apply_button_address(self, spec: dict, payload: bytes, name: str):
+        """按按钮绑定的协议/地址替换地址并重算校验；未绑定或未填地址 → 原样返回。
+
+        Returns: ``(要发送的字节, 错误说明)``；错误时**不得发送**（调用方负责提示）。
+        """
+        protocol = spec.get("protocol")
+        values = core.normalize_addr_map(spec.get("addr"))
+        if protocol is None or not values:
+            return payload, ""
+        result = frame_addr_fix.apply(payload, protocol, values)
+        if not result.ok:
+            return payload, result.error
+        label = frame_addr_fix.protocol_label(protocol) or f"协议{protocol}"
+        self._log(f"[地址] 「{name}」{label}：" + "；".join(result.notes), "ble")
+        return result.frame, ""
+
     def _on_custom_clicked(self, index: int):
         if not 0 <= index < len(self._buttons):
             return
         spec = self._buttons[index]
+        name = str(spec.get("name") or f"报文{index + 1}")
         payload, error = parse_plain_text(
             str(spec.get("data") or ""), "hex" if spec.get("isHex", True) else "ascii"
         )
         if error:
-            QMessageBox.warning(self, "报文无效", f"「{spec.get('name')}」{error}")
+            QMessageBox.warning(self, "报文无效", f"「{name}」{error}")
             return
+        payload, fix_error = self._apply_button_address(spec, payload, name)
+        if fix_error:
+            # 失败必须让用户看见且**一个字节都不发**（弹框 + 日志，同「弹框必留日志」口径）
+            QMessageBox.warning(self, "地址替换失败", f"「{name}」{fix_error}")
+            self._log(f"[地址] 「{name}」未发送：{fix_error}", "fail")
+            return
+        # 发送框保持**原始模板**（用户口径）：替换只作用于真正写出去的字节
         self.edit_send.setText(str(spec.get("data") or ""))
         self._send_payload(payload)
 

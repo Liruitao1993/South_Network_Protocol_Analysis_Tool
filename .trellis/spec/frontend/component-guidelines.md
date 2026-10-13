@@ -348,6 +348,34 @@ engine = self._engine_factory()            # 否则才是发给本虚拟表的�
 - **变异反证（本任务已做，均干净变红后还原）**：① 去掉连接后轮询 → 5 项红；
   ② 去掉发送前刷新 → 5 项红（分包退回 `[20]*15`）；③ `mtu_is_unnegotiated` 改 `<`（不含 23）→ 2 项红。
 
+### 7f. 蓝牙自定义按钮「按协议替换地址 + 重算校验」（`frame_addr_fix.py`）
+
+> 源自任务 10-13-bt-button-addr-checksum（1.23.81：按钮能填协议与地址，发送时按协议换地址并重算校验）。
+
+- **单一职责**：新模块 `frame_addr_fix.py`（纯逻辑、无 Qt）只做三件事 —— 声明字段（`fields_for`）、
+  解析地址文本（`parse_address`）、替换+重算（`apply`）。**界面不硬编码协议细节**：对话框按 `fields_for`
+  动态生成 1~2 个输入框，标签/提示都来自字段声明。
+- **地址定位与校验算法一律复用既有实现**（禁止第二份偏移/算法表）：
+  645 → `DLT645FrameGenerator.build_frame(..., scramble=False)`；698.45 →
+  `DLT69845FrameGenerator._assemble_frame`（HCS/FCS 自动）；依瓦 → `yw645_wire.encode_frame`；
+  南网上行 → `csg_uplink_wire.encode_frame`（保留 `resolve_layout` 的原长度域形态）；
+  南网/国网 → 字节拼接 + `Frame.calculate_checksum` / `GDWFrame.calculate_checksum`。
+- **布局事实（探针实测，改前先看 `research/layout-probe`）**：南网 `68 L L C [源6B+目的6B] …`（地址仅当
+  控制域 **D5=0x20**，**无第二个 68H**）；国网 `68 L L C 信息域6B [源6B+中继6B×n+目的6B] AFN …`（地址存在
+  当且仅当信息域 byte0 **bit2=1**，长度 `12+6×高 4 位`，福建增补 AFN 0x50~0x56 不支持）；
+  645/依瓦 `68 A6 68 C L DATA CS 16`（前者低字节在前、后者高字节在前）；698.45
+  `68 L(2) C 地址特征(1B) SA(1+低4位) CA(1B) HCS(2) APDU FCS(2) 16`；南网上行见 `resolve_layout`。
+- **先自证再改**：结构（`68…16`、长度域自洽）+ **原帧校验**都必须通过才允许替换；地址在线长度必须与帧内
+  一致；无地址域/协议不支持/福建增补 → 可读错误（**不猜、不静默发原帧**）。
+- **地址写法双认**：含分隔符/`0x` → 在线顺序原样；纯书写序 → 协议编码（自动字节序/BCD）。提示行必须回显
+  「将写入 N 字节：…」，且内容框可解析时给出替换后预览（校验旧→新）。
+- **依赖**：协议模块**按需导入**（`dl_t698_45_frame_gen` 依赖可选 `crcmod`，模块级导入会让没装 crcmod
+  的机器连蓝牙页都打不开）。
+- **回归**：`test/test_bluetooth_addr_fix.py`（96 项：六协议真帧 oracle + 错误矩阵 + 反例自检）、
+  `test_bluetooth_core.py` [12]（按钮新键）、`test_bluetooth_widget.py` [13]（对话框联动/预览/发送替换/
+  失败不发/发送框不被改写）。**变异反证**（本任务已做）：645 不重算校验 → 2 项红；地址不反转 → 9 项红；
+  698 不重算 HCS/FCS → 2 项红；不校验长度 → 2 项红。
+
 ### 8. Qt 陷阱（本项目实测）
 - **offscreen 无字体**：`QT_QPA_PLATFORM=offscreen` 下 `QFontDatabase: Cannot find font directory ...`，绘制出的文字是豆腐块 → 断言只能查尺寸/颜色/像素多样性；**要目视核对文字排版必须用默认平台**（`QApplication([])` 不设 offscreen + `widget.grab()` / `QImage.save()`，不需要窗口真的可见）。
 - **`bytes(image.constBits())` 必须持有 QImage 引用**：`bytes(canvas.render_image(w, h).constBits())`（临时对象上取 buffer）会 **access violation（0xC0000005）**；先 `img = ...` 再 `bytes(img.constBits())`。

@@ -11,6 +11,7 @@
   [7] BleReassembler：静默超时切帧、分包重组、不同特征码独立成帧、
       flush / pending_bytes / set_timeout 不丢数据
   [8] 反例自检（判据确实会失败，而不是恒真）
+  [12] 自定义按钮的协议/地址参数（1.23.81）：保留/回落/坏值宽容/落盘往返
 
 运行: python test/test_bluetooth_core.py
 """
@@ -505,6 +506,58 @@ def test_mtu_negotiation():
           (core.chunk_size_for_mtu(core.MTU_DEFAULT), core.MIN_CHUNK))
 
 
+def test_button_protocol_addr():
+    section("[12] 自定义按钮的协议/地址参数（1.23.81）")
+
+    button = core.normalize_button({
+        "name": "抄读", "data": "68 11", "protocol": "6",
+        "addr": {"addr": " 000000000033 ", "src": "", "dst": None},
+    })
+    check("protocol 字符串数字 → int", button.get("protocol") == 6, button)
+    check("addr 过滤空值、去空白", button.get("addr") == {"addr": "000000000033"}, button)
+
+    plain = core.normalize_button({"name": "旧按钮", "data": "68 11"})
+    check("旧按钮（无这两个键）→ **不写键**（旧配置/旧版本互不影响）",
+          "protocol" not in plain and "addr" not in plain, plain)
+
+    for bad in ("abc", "", None, "  "):
+        b = core.normalize_button({"name": "x", "data": "68", "protocol": bad})
+        check(f"坏 protocol（{bad!r}）→ 丢弃", "protocol" not in b, b)
+
+    for bad in ("not a dict", ["a"], 5, None):
+        b = core.normalize_button({"name": "x", "data": "68", "addr": bad})
+        check(f"坏 addr（{type(bad).__name__}）→ 丢弃", "addr" not in b, b)
+
+    long_key = "k" * 40
+    long_val = "9" * 200
+    b = core.normalize_button({"name": "x", "data": "68", "protocol": 0,
+                               "addr": {long_key: long_val}})
+    key = next(iter(b["addr"]))
+    check("超长键/值被截断（坏配置不撑爆界面）",
+          len(key) <= core.ADDR_KEY_MAX
+          and len(b["addr"][key]) <= core.ADDR_VALUE_MAX,
+          (len(key), len(b["addr"][key])))
+
+    buttons = core.normalize_buttons([
+        {"name": "a", "data": "68", "protocol": 6, "addr": {"addr": "1"}},
+        {"name": "b", "data": "69"},
+    ])
+    check("normalize_buttons 全链路保留",
+          buttons[0].get("protocol") == 6 and buttons[0].get("addr") == {"addr": "1"}
+          and "protocol" not in buttons[1], buttons)
+
+    with tempfile.TemporaryDirectory(prefix="bt_core_addr_") as tmp:
+        path = os.path.join(tmp, "cfg.json")
+        check("save_settings 受理", core.save_settings(path, buttons, {"packet_timeout": 0.5}))
+        loaded, _settings = core.load_settings(path)
+        check("落盘 → 读回：protocol/addr 不丢",
+              loaded[0].get("protocol") == 6 and loaded[0].get("addr") == {"addr": "1"},
+              loaded)
+
+    check("normalize_addr_map 直接调用：非 dict → 空",
+          core.normalize_addr_map("x") == {} and core.normalize_addr_map(None) == {})
+
+
 def test_negatives():
     section("[7] 反例自检（判据有效）")
 
@@ -535,6 +588,7 @@ def main():
     test_probe_session()
     test_char_map()
     test_mtu_negotiation()
+    test_button_protocol_addr()
     test_negatives()
 
     print()

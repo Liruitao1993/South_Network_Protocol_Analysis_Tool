@@ -126,6 +126,8 @@ CORE_TESTS = [
     "test/test_serial_tool_widget.py",
     "test/test_serial_proto_frame.py",
     "test/test_serial_worker_write_raw.py",
+    # 蓝牙工具（core 纯逻辑 / worker 注入假 bleak / widget offscreen 假 worker，均不碰硬件）
+    "test/test_bluetooth_addr_fix.py",
     "test/test_web_frame_gen_utils.py",
     "test/test_web_parse_fixes.py",
     "test/test_web_all_protocols.py",

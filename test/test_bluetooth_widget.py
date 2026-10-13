@@ -16,7 +16,8 @@
   [10] 日志：自动保存文件内容与窗口一致、写统计尾并关闭
   [11] cleanup 幂等、restyle_for_theme 不抛
   [12] MTU / 写上限实时化：默认值文案、实时更新标签与缓存、不重订阅、对话框刷新
-  [13] 反例自检
+  [13] 自定义按钮的「协议 + 地址」：下拉联动、动态字段、预览、发送时替换+重算、失败不发
+  [14] 反例自检
 
 运行: python test/test_bluetooth_widget.py
 """
@@ -46,6 +47,7 @@ SANDBOX = _config_sandbox.install()
 
 import bluetooth_core as core  # noqa: E402
 import bluetooth_tool_widget as btw  # noqa: E402
+import frame_addr_fix as fix  # noqa: E402
 
 PASS = 0
 FAIL = 0
@@ -1175,8 +1177,160 @@ def test_mtu_live_limits():
     tab.cleanup()
 
 
+# ── [13] 自定义按钮的「协议 + 地址」（1.23.81）──────────────────────────────
+
+DLT645_FRAME = "68 00 00 00 00 00 00 68 11 04 33 33 34 33 B2 16"
+
+
+def test_button_address():
+    section("[13] 自定义按钮：协议 + 地址替换（1.23.81）")
+
+    # ── 对话框：协议下拉 + 动态地址框 + 实时预览 ──
+    dialog = btw.ButtonEditDialog()
+    try:
+        check("协议下拉含「（不处理）」+ 6 个支持协议",
+              dialog.combo_protocol.count() == 1 + len(fix.SUPPORTED_PROTOCOLS),
+              dialog.combo_protocol.count())
+        check("默认不处理 → 地址区隐藏",
+              dialog.combo_protocol.currentData() is None and dialog.addr_group.isVisible() is False)
+
+        dialog.combo_protocol.setCurrentIndex(dialog.combo_protocol.findData(6))
+        QApplication.processEvents()
+        check("协议6 → 出现 1 个地址框（表地址）",
+              list(dialog._addr_edits) == ["addr"]
+              and dialog.addr_form.labelForField(dialog._addr_edits["addr"]) is not None,
+              list(dialog._addr_edits))
+        dialog.combo_protocol.setCurrentIndex(dialog.combo_protocol.findData(0))
+        QApplication.processEvents()
+        check("协议0 → 两个地址框（源/目的）",
+              list(dialog._addr_edits) == ["src", "dst"], list(dialog._addr_edits))
+        check("字段提示来自声明（含写法说明）",
+              "12 位" in dialog._addr_edits["src"].placeholderText(),
+              dialog._addr_edits["src"].placeholderText())
+
+        # 切到 698 需要两个框（SA/CA），并保持已有输入不丢
+        dialog._addr_edits["src"].setText("000000000009")
+        dialog.combo_protocol.setCurrentIndex(dialog.combo_protocol.findData(8))
+        QApplication.processEvents()
+        check("协议8 → SA/CA 两框", list(dialog._addr_edits) == ["sa", "ca"],
+              list(dialog._addr_edits))
+        dialog.combo_protocol.setCurrentIndex(dialog.combo_protocol.findData(0))
+        QApplication.processEvents()
+        check("切回协议0 → 之前填的源地址保留",
+              dialog._addr_edits["src"].text() == "000000000009",
+              dialog._addr_edits["src"].text())
+
+        # 预览：内容框放真帧 → 提示给出字节与校验变化
+        dialog.edit_content.setPlainText(DLT645_FRAME)
+        dialog.combo_protocol.setCurrentIndex(dialog.combo_protocol.findData(6))
+        QApplication.processEvents()
+        dialog._addr_edits["addr"].setText("000000000033")
+        QApplication.processEvents()
+        hint = dialog.lbl_addr_hint.text()
+        check("地址提示给出「将写入的字节」", "33 00 00 00 00 00" in hint, hint[:160])
+        check("内容框可解析时给出替换后预览（含校验变化）",
+              "按当前报文预览" in hint and "校验和" in hint, hint[:200])
+
+        dialog._addr_edits["addr"].setText("00 01")
+        QApplication.processEvents()
+        check("非法地址（在线字节长度不符）→ 提示报错", "⚠" in dialog.lbl_addr_hint.text(),
+              dialog.lbl_addr_hint.text()[:120])
+        dialog._addr_edits["addr"].setText("000000000033")
+        QApplication.processEvents()
+
+        # value() 往返
+        saved = dialog.value()
+        check("value() 带 protocol 与 addr", saved.get("protocol") == 6
+              and saved.get("addr") == {"addr": "000000000033"}, saved)
+        check("value() 仍保留原字段", saved.get("data") == DLT645_FRAME and saved.get("isHex") is True)
+
+        # 选了协议但地址为空 → 不允许保存
+        dialog._addr_edits["addr"].setText("")
+        QApplication.processEvents()
+        accepted = {"v": False}
+        with patch.object(btw.QDialog, "accept", lambda self: accepted.update(v=True)):
+            dialog._on_accept()
+        check("选了协议但地址为空 → 拦下（不 accept）", accepted["v"] is False, accepted)
+
+        # 编辑时回填已有参数
+        dialog2 = btw.ButtonEditDialog(button={
+            "name": "抄读", "data": DLT645_FRAME, "isHex": True,
+            "protocol": 6, "addr": {"addr": "000000000099"},
+        })
+        try:
+            check("编辑回填：协议与地址都回来了",
+                  dialog2.combo_protocol.currentData() == 6
+                  and dialog2._addr_edits["addr"].text() == "000000000099",
+                  (dialog2.combo_protocol.currentData(), dialog2._addr_edits["addr"].text()))
+        finally:
+            dialog2.deleteLater()
+    finally:
+        dialog.deleteLater()
+
+    # ── 发送路径：点按钮时替换 + 重算；发送框保持原模板 ──
+    worker = FakeBluetoothWorker()
+    tab = make_tab(worker)
+    worker.become_connected()          # 发送路径要求已连接（否则只提示、不落到 worker）
+    QApplication.processEvents()
+    bound = [{
+        "name": "抄读（换地址）", "data": DLT645_FRAME, "isHex": True,
+        "protocol": 6, "addr": {"addr": "000000000033"},
+    }]
+    tab._set_buttons(bound)
+    tab.btn_send.setEnabled(True)
+    worker.sent.clear()
+    tab._on_custom_clicked(0)
+    QApplication.processEvents()
+    expect = fix.apply(bytes.fromhex(DLT645_FRAME.replace(" ", "")), 6, {"addr": "000000000033"})
+    check("点按钮发出的是**替换后**的帧",
+          expect.ok and worker.sent == [expect.frame], (worker.sent, expect.error))
+    check("替换后帧地址为 33 00 00 00 00 00 且校验已重算",
+          bool(worker.sent) and worker.sent[0][1:7] == bytes.fromhex("330000000000")
+          and worker.sent[0][-2] == 0xE5,
+          worker.sent[0].hex(" ") if worker.sent else "")
+    check("发送框仍是**原始模板**（未被改写）",
+          tab.edit_send.text() == DLT645_FRAME, tab.edit_send.text())
+    check("日志说明改了什么（地址 + 校验 旧→新）",
+          "地址域 表地址" in log_text(tab) and "校验和" in log_text(tab),
+          log_text(tab)[-200:])
+
+    # 未绑定协议/地址的按钮 → 行为与改动前一致（原始字节）
+    tab._set_buttons([{"name": "原样", "data": DLT645_FRAME, "isHex": True}])
+    worker.sent.clear()
+    tab._on_custom_clicked(0)
+    QApplication.processEvents()
+    check("未绑定参数的按钮逐字节原样发送",
+          worker.sent == [bytes.fromhex(DLT645_FRAME.replace(" ", ""))], worker.sent)
+
+    # 地址非法 → 一个字节都不发 + 日志外显
+    tab._set_buttons([{
+        "name": "坏地址", "data": DLT645_FRAME, "isHex": True,
+        "protocol": 6, "addr": {"addr": "00 01"},
+    }])
+    worker.sent.clear()
+    tab._on_custom_clicked(0)
+    QApplication.processEvents()
+    check("地址非法 → 不发送任何字节", worker.sent == [], worker.sent)
+    check("地址非法 → 日志写明未发送原因", "未发送" in log_text(tab), log_text(tab)[-160:])
+
+    # 按钮 tooltip 标注绑定的协议/地址
+    tab._set_buttons(bound)
+    QApplication.processEvents()
+    check("按钮 tooltip 标注地址替换（协议与地址）",
+          "地址替换" in tab._custom_buttons[0].toolTip()
+          and "000000000033" in tab._custom_buttons[0].toolTip(),
+          tab._custom_buttons[0].toolTip())
+
+    # 落盘往返：protocol/addr 不丢
+    check("落盘后按钮参数保留（_buttons 里的规范化结果）",
+          tab._buttons[0].get("protocol") == 6
+          and tab._buttons[0].get("addr") == {"addr": "000000000033"},
+          tab._buttons[0])
+    tab.cleanup()
+
+
 def test_negatives():
-    section("[13] 反例自检（判据有效）")
+    section("[14] 反例自检（判据有效）")
 
     worker = FakeBluetoothWorker()
     tab = make_tab(worker)
@@ -1211,6 +1365,7 @@ def main():
     test_cleanup_and_theme()
     test_char_autodetect_and_probe()
     test_mtu_live_limits()
+    test_button_address()
     test_negatives()
 
     print()
