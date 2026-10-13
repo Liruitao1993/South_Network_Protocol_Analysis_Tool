@@ -206,6 +206,7 @@ sys.modules["bleak"] = _fake_bleak
 
 from PySide6.QtCore import QCoreApplication  # noqa: E402
 
+import bluetooth_core as core  # noqa: E402
 import bluetooth_worker as bw  # noqa: E402
 
 
@@ -234,6 +235,7 @@ class Recorder:
         self.sent = []
         self.connections = []
         self.characteristics = []
+        self.mtu_updates = []
         self.scan_finished = []
         self.scan_errors = []
         self.connect_errors = []
@@ -247,6 +249,7 @@ class Recorder:
         worker.data_sent.connect(lambda d: self.sent.append(bytes(d)))
         worker.connection_changed.connect(self.connections.append)
         worker.characteristics_updated.connect(lambda c: self.characteristics.append(list(c)))
+        worker.mtu_updated.connect(lambda m, c: self.mtu_updates.append((m, list(c))))
         worker.scan_finished.connect(self.scan_finished.append)
         worker.scan_error.connect(self.scan_errors.append)
         worker.connect_error.connect(self.connect_errors.append)
@@ -541,6 +544,138 @@ def test_subscribe_finished():
         worker.shutdown()
 
 
+def live_char(client, uuid):
+    """取假 client 上的**活特征码对象**（worker 发送前就是重读它）。"""
+    for service in getattr(client, "services", None) or []:
+        for char in getattr(service, "characteristics", None) or []:
+            if str(getattr(char, "uuid", "")) == uuid:
+                return char
+    return None
+
+
+def test_mtu_poll():
+    section("[7] MTU 协商轮询（1.23.80）")
+
+    interval, timeout = bw.MTU_POLL_INTERVAL, bw.MTU_POLL_TIMEOUT
+    bw.MTU_POLL_INTERVAL, bw.MTU_POLL_TIMEOUT = 0.02, 0.4
+    try:
+        # ── 迟到协商：连接时还是 ATT 默认值，轮询期间结果到达 ──
+        reset_fakes()
+        FakeClient.mtu = core.MTU_DEFAULT
+        worker = bw.BluetoothWorker()
+        rec = Recorder(worker)
+        worker.set_characteristics([RECV_UUID], [SEND_UUID])
+        worker.connect_device("AA:01", "迟到设备")
+        check("连接受理", wait_for(lambda: worker.is_connected() is True))
+        check("连接时读到的是 ATT 默认值（协商结果未回）",
+              worker.mtu_size() == core.MTU_DEFAULT, worker.mtu_size())
+        check("连接信号先于等待发出（界面不被拖住）",
+              wait_for(lambda: True in rec.connections and bool(rec.characteristics)),
+              (rec.connections, len(rec.characteristics)))
+
+        client = FakeClient.instances[-1]
+        # 只改 MTU：**单次属性写**，读侧没有中间态窗口。特征码上限的实时重读由下面
+        # 「发送前重读」两段覆盖（那里测试线程写完才发起发送，天然无竞态）。
+        client.mtu_size = 247
+        check("轮询把 MTU 自动更新为协商值（无需重连）",
+              wait_for(lambda: worker.mtu_size() == 247), worker.mtu_size())
+        check("更新写进日志（口径：旧 → 新 + 特征码上限）",
+              wait_for(lambda: any("MTU 协商更新：23 → 247" in m
+                                   and "特征码免响应写上限 24 字节" in m for m in rec.logs)),
+              [m for m in rec.logs if "协商更新" in m])
+        check("发出 mtu_updated（携带完整特征码列表，4 条）",
+              wait_for(lambda: any(m == 247 and len(c) == 4 for m, c in rec.mtu_updates)),
+              rec.mtu_updates[-1:])
+        worker.shutdown()
+
+        # ── 对端只支持 ATT 默认值：超时只提示一行，不报错、不发信号 ──
+        reset_fakes()
+        FakeClient.mtu = core.MTU_DEFAULT
+        worker = bw.BluetoothWorker()
+        rec = Recorder(worker)
+        worker.connect_device("AA:01", "只支持默认值")
+        check("连接受理（默认值设备）", wait_for(lambda: worker.is_connected() is True))
+        check("超时后只提示一行（不是错误）",
+              wait_for(lambda: any("未收到 MTU 协商结果" in m for m in rec.logs)),
+              [m for m in rec.logs if "MTU" in m])
+        check("没有把它当错误上报", rec.errors == [], rec.errors)
+        check("读数不变、且**不**发 mtu_updated（无变化不该刷界面）",
+              worker.mtu_size() == core.MTU_DEFAULT and rec.mtu_updates == [],
+              (worker.mtu_size(), rec.mtu_updates))
+        worker.shutdown()
+
+        # ── 发送前重读：协商结果在连接**之后**才到，本次发送就按新值分包 ──
+        reset_fakes()
+        FakeClient.mtu = core.MTU_DEFAULT
+        worker = bw.BluetoothWorker()
+        rec = Recorder(worker)
+        worker.set_characteristics([RECV_UUID], [SEND_UUID])
+        worker.connect_device("AA:01", "发送前才协商好")
+        check("连接受理（发送前重读）", wait_for(lambda: worker.is_connected() is True))
+        check("等轮询收尾", wait_for(lambda: any("未收到 MTU 协商结果" in m for m in rec.logs)))
+        client = FakeClient.instances[-1]
+        client.writes.clear()
+        rec.sent.clear()
+        rec.mtu_updates.clear()
+        client.mtu_size = 247
+        check("send_data 受理", worker.send_data(bytes(range(256)) + b"\x00" * 44) is True)
+        check("等发送完成", wait_for(lambda: bool(rec.sent)), rec.errors)
+        sizes = [len(d) for _u, d, _r in client.writes]
+        check("按发送那一刻的实时 MTU 分包（300 字节：20 会切 15 包，247 只切 2 包）",
+              sizes == [200, 100], sizes)
+        check("日志来源写的是实时协商值（协商 MTU 247 − 3）",
+              wait_for(lambda: any("单包上限 200 字节" in m and "协商 MTU 247" in m
+                                   for m in rec.logs)),
+              [m for m in rec.logs if "单包上限" in m])
+        check("发送前刷新也发 mtu_updated（界面同步跟上）",
+              bool(rec.mtu_updates) and rec.mtu_updates[-1][0] == 247, rec.mtu_updates[-1:])
+
+        # 同一连接内特征码实时上限也会变（Windows 上两者同源，但读取路径不同）
+        worker.set_characteristics([RECV_UUID], [LOW_MTU_SEND_UUID])
+        check("切到窄通道（连接时上限 24）",
+              wait_for(lambda: worker.send_uuids() == [LOW_MTU_SEND_UUID]))
+        client.writes.clear()
+        rec.sent.clear()
+        live_char(client, LOW_MTU_SEND_UUID).max_write_without_response_size = 150
+        worker.send_data(bytes(range(256)) + b"\x00" * 44)
+        check("等窄通道发送完成", wait_for(lambda: bool(rec.sent)), rec.errors)
+        sizes = [len(d) for _u, d, _r in client.writes]
+        check("按特征码**实时**上限分包（24 → 150：300 字节切 150+150）",
+              sizes == [150, 150], sizes)
+        check("日志来源写的是特征码实时上限 150",
+              wait_for(lambda: any("单包上限 150 字节" in m and "特征码免响应写上限 150" in m
+                                   for m in rec.logs)),
+              [m for m in rec.logs if "单包上限" in m])
+        check("刷新信号里带的就是最新上限（150，不是连接时的 24）",
+              bool(rec.mtu_updates)
+              and {c["uuid"]: c["max_write"] for c in rec.mtu_updates[-1][1]}
+              .get(LOW_MTU_SEND_UUID) == 150,
+              rec.mtu_updates[-1:])
+        worker.shutdown()
+
+        # ── 断开打断轮询：静默收尾，不抛异常、不再提示 ──
+        reset_fakes()
+        FakeClient.mtu = core.MTU_DEFAULT
+        # 这段的轮询超时取 1.5s：**远大于**「断开被处理」的耗时（否则断言会退化成
+        # 「断开与超时谁先到」的竞态），又**小于**下面的观察窗口 —— 若「断开打断轮询」失效，
+        # 轮询会在 1.5s 打出超时提示，断言即可抓住
+        bw.MTU_POLL_TIMEOUT = 1.5
+        worker = bw.BluetoothWorker()
+        rec = Recorder(worker)
+        worker.connect_device("AA:01", "连上就断")
+        check("连接受理（连上就断）", wait_for(lambda: worker.is_connected() is True))
+        worker.disconnect_device()
+        check("断开完成", wait_for(lambda: worker.is_connected() is False))
+        time.sleep(1.8)                     # 超过轮询超时
+        QCoreApplication.processEvents()
+        check("断开后轮询静默收尾（没有超时提示、没有错误）",
+              not any("未收到 MTU 协商结果" in m for m in rec.logs) and rec.errors == [],
+              (rec.logs[-3:], rec.errors))
+        worker.shutdown()
+    finally:
+        bw.MTU_POLL_INTERVAL, bw.MTU_POLL_TIMEOUT = interval, timeout
+
+
 def test_negatives():
     section("[6] 反例自检（判据有效）")
 
@@ -579,6 +714,7 @@ def main():
     test_connect_retry()
     test_drop_and_missing_bleak()
     test_subscribe_finished()
+    test_mtu_poll()
     test_negatives()
 
     print()

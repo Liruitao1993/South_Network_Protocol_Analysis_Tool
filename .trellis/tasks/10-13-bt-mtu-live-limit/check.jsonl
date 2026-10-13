@@ -1,0 +1,3 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": "test/test_bluetooth_worker.py", "reason": "假 bleak 注入范式；本次新增失败/竞态用例的落点"}
+{"file": "test/test_bluetooth_widget.py", "reason": "offscreen + 假 worker 断言范式（标签/信号/不重订阅）"}

@@ -15,7 +15,8 @@
   [9] 持久化往返（新页面读回同一份配置）
   [10] 日志：自动保存文件内容与窗口一致、写统计尾并关闭
   [11] cleanup 幂等、restyle_for_theme 不抛
-  [12] 反例自检
+  [12] MTU / 写上限实时化：默认值文案、实时更新标签与缓存、不重订阅、对话框刷新
+  [13] 反例自检
 
 运行: python test/test_bluetooth_widget.py
 """
@@ -98,6 +99,7 @@ class FakeBluetoothWorker(QObject):
     disconnected = Signal()
     connection_changed = Signal(bool)
     characteristics_updated = Signal(list)
+    mtu_updated = Signal(int, list)
     subscribe_finished = Signal(list, bool)
     notification_received = Signal(str, bytes)
     frame_received = Signal(str, bytes)
@@ -125,6 +127,7 @@ class FakeBluetoothWorker(QObject):
         self.shutdowns = 0
         self.fail_send = False
         self.fail_subscribe = False
+        self.char_sets = 0      # set_characteristics 调用次数（实时上限更新**不得**触发重订阅）
 
     # 查询
     def is_connected(self):
@@ -188,6 +191,7 @@ class FakeBluetoothWorker(QObject):
         return True
 
     def set_characteristics(self, recv, send):
+        self.char_sets += 1
         self._recv = list(recv or [])
         self._send = list(send or [])
         # 与真实 worker 同形：订阅阶段结束就发一次（一键探测据此决定何时才写）
@@ -1070,8 +1074,109 @@ def test_char_autodetect_and_probe():
     tab.cleanup()
 
 
+# ── [12] MTU / 写上限实时化（1.23.80）─────────────────────────────────────
+
+def test_mtu_live_limits():
+    section("[12] MTU / 写上限实时化（1.23.80）")
+
+    worker = FakeBluetoothWorker()
+    tab = make_tab(worker)
+    # 模拟「连接那一刻协商结果还没回来」：MTU 仍是 ATT 默认值
+    worker.become_connected(mtu=core.MTU_DEFAULT)
+    QApplication.processEvents()
+    check("MTU 为默认值时文案明示「ATT 默认值 / 协商结果未回」",
+          "23" in tab.lbl_info_mtu.text() and "ATT 默认值" in tab.lbl_info_mtu.text()
+          and "20" in tab.lbl_info_mtu.text(),
+          tab.lbl_info_mtu.text())
+
+    chars = [
+        {"uuid": RECV_UUID, "short": "0xFFF1", "service_short": "0xFFF0",
+         "service_uuid": "0000fff0-0000-1000-8000-00805f9b34fb",
+         "properties": ["notify"], "description": "上报通道",
+         "can_recv": True, "can_send": False, "max_write": 0},
+        {"uuid": SEND_UUID, "short": "0xFFF2", "service_short": "0xFFF0",
+         "service_uuid": "0000fff0-0000-1000-8000-00805f9b34fb",
+         "properties": ["write", "write-without-response"], "description": "下发通道",
+         "can_recv": False, "can_send": True, "max_write": 20},
+    ]
+    worker.characteristics_updated.emit(chars)
+    QApplication.processEvents()
+    sets_before = worker.char_sets
+    recv_before, send_before = worker.recv_uuids(), worker.send_uuids()
+
+    # 协商结果到了（worker 侧 `_refresh_live_limits` 会发这个信号）
+    chars2 = [dict(c) for c in chars]
+    chars2[1]["max_write"] = 244
+    worker.mtu_updated.emit(247, chars2)
+    QApplication.processEvents()
+    check("MTU 标签更新为协商后的值（无需重连）",
+          "247" in tab.lbl_info_mtu.text() and "ATT 默认值" not in tab.lbl_info_mtu.text(),
+          tab.lbl_info_mtu.text())
+    check("新上限写进界面缓存（对话框下次打开即最新）",
+          any(int(c.get("max_write") or 0) == 244 for c in tab._chars),
+          [(c.get("short"), c.get("max_write")) for c in tab._chars])
+    check("实时更新**不**重订阅、不改写特征码选择",
+          worker.char_sets == sets_before
+          and worker.recv_uuids() == recv_before and worker.send_uuids() == send_before,
+          (worker.char_sets, sets_before, worker.recv_uuids(), worker.send_uuids()))
+
+    # 打开中的「特征码…」对话框：刷新读数但保留勾选
+    dialog = btw.CharacteristicSelectDialog(chars, [RECV_UUID], [SEND_UUID])
+    tab._chars_dialog = dialog
+    try:
+        checked = dialog.selected_send()
+        row = next(i for i in range(dialog._send_list.count())
+                   if "0xFFF2" in dialog._send_list.item(i).text())
+        dialog.refresh_chars(chars2)
+        check("对话框刷新后保留勾选", dialog.selected_send() == checked, dialog.selected_send())
+        check("对话框刷新后显示新上限",
+              "244" in dialog._send_list.item(row).toolTip(),
+              dialog._send_list.item(row).toolTip()[:80])
+    finally:
+        tab._chars_dialog = None
+        dialog.deleteLater()
+
+    # 模态期间到达：`_on_choose_characteristics` 必须把引用交给页面并转调 refresh_chars
+    class RecordingDialog:
+        refreshed = 0
+        last = None
+        DialogCode = QDialog.DialogCode
+
+        def __init__(self, *a, **k):
+            type(self).refreshed = 0
+            type(self).last = None
+
+        def exec(self):
+            # 模拟「对话框开着的时候 MTU 协商结果到达」
+            worker.mtu_updated.emit(247, chars2)
+            QApplication.processEvents()
+            return QDialog.DialogCode.Rejected
+
+        def selected_recv(self):
+            return []
+
+        def selected_send(self):
+            return []
+
+        def refresh_chars(self, characteristics):
+            type(self).refreshed += 1
+            type(self).last = characteristics
+
+    with patch.object(btw, "CharacteristicSelectDialog", RecordingDialog):
+        tab.btn_chars.click()
+        QApplication.processEvents()
+    check("对话框打开期间到达的实时上限会被刷新",
+          RecordingDialog.refreshed == 1
+          and any(int(c.get("max_write") or 0) == 244
+                  for c in (RecordingDialog.last or [])),
+          (RecordingDialog.refreshed, RecordingDialog.last))
+    check("对话框关闭后引用被清空（不留悬空引用）", tab._chars_dialog is None)
+
+    tab.cleanup()
+
+
 def test_negatives():
-    section("[12] 反例自检（判据有效）")
+    section("[13] 反例自检（判据有效）")
 
     worker = FakeBluetoothWorker()
     tab = make_tab(worker)
@@ -1105,6 +1210,7 @@ def main():
     test_log_file()
     test_cleanup_and_theme()
     test_char_autodetect_and_probe()
+    test_mtu_live_limits()
     test_negatives()
 
     print()

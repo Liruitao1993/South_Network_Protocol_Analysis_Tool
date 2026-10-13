@@ -48,6 +48,29 @@ DEFAULT_CONNECT_RETRIES = 3
 DEFAULT_MAX_CHUNK = 200
 MIN_CHUNK = 20  # ATT 默认 MTU 23 − 3
 
+# MTU 协商是**操作系统异步完成**的（Windows 上应用层只能读、不能请求），
+# 因此连接瞬间读到的可能还是 ATT 默认值 23 —— 必须**轮询等一会儿**再取。
+# 现场依据：截图里同一台设备「有时 20 字节、有时 512 字节」；bleak 官方文档
+# （backends/characteristic.py）也写明「可能先读到默认值 20，过一会儿再读才是更高值」，
+# 并建议用「== 20 就 sleep 再读」的循环。
+MTU_DEFAULT = 23                # ATT 默认 MTU（负载 = 23 − 3 = 20）
+MTU_POLL_INTERVAL = 0.25        # 秒：轮询间隔
+MTU_POLL_TIMEOUT = 3.0          # 秒：等协商结果的最长时间
+
+
+def mtu_is_unnegotiated(value) -> bool:
+    """MTU 是否仍处在「未协商 / 未知」状态（需要再等一会儿）。
+
+    判据单一来源：**只看是否 ≤ ATT 默认值 23**。0 / ``None`` / 非法值同样视为未协商。
+    注意「对端确实只支持 23」和「协商结果还没回报」在这里不可区分（都返回 True），
+    所以调用方**超时后不得报错**，只提示一行（对端可能只支持默认值）。
+    """
+    try:
+        mtu = int(value)
+    except (TypeError, ValueError):
+        return True
+    return mtu <= MTU_DEFAULT
+
 # 界面日志与解析输出
 DEFAULT_LOG_LINES = 5000
 LOG_LINE_TRIM_STEP = 500

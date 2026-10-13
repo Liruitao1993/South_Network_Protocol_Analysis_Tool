@@ -40,8 +40,11 @@ from bluetooth_core import (
     DEFAULT_SCAN_TIMEOUT,
     DEFAULT_SEND_PACKET_DELAY,
     MIN_CHUNK,
+    MTU_POLL_INTERVAL,
+    MTU_POLL_TIMEOUT,
     BleReassembler,
     chunk_size_for_mtu,
+    mtu_is_unnegotiated,
     short_uuid,
     split_chunks,
 )
@@ -74,6 +77,13 @@ class BluetoothWorker(QObject):
 
     # 特征码与数据
     characteristics_updated = Signal(list)        # [{uuid, properties, description, can_recv, ...}]
+    # MTU / 特征码写上限**实时变化**（1.23.80）：(协商到的 MTU, 最新特征码 dict 列表)。
+    # 与 `characteristics_updated` **不可互相替代**：后者的语义是「特征码枚举完成」，
+    # 界面收到后会走「沿用/优选 → set_characteristics（重新订阅）」，用它刷上限会产生
+    # 多余重订阅与日志；本信号只用于更新读数，界面**不得**回写特征码选择。
+    # MTU 由操作系统异步协商（Windows 上应用层只能读不能请求），连接时读到的可能还是
+    # ATT 默认值 23 ⇒ worker 会轮询等一会儿，并在**每次发送前**重读（见 `_refresh_live_limits`）。
+    mtu_updated = Signal(int, list)
     # 订阅完成（1.23.79）：(已成功订阅的 uuid 列表, 是否无失败)。**一键探测**必须先等到它再写，
     # 否则首个回包会在订阅生效前丢掉；`set_characteristics` 传空接收通道时也发一次（列表为空）。
     subscribe_finished = Signal(list, bool)
@@ -101,6 +111,10 @@ class BluetoothWorker(QObject):
         self._device_name = ""
         self._device_address = ""
         self._characteristics: List[dict] = []
+        # 特征码**活对象**（uuid → bleak 特征码对象）：只用于在发送前重读实时上限
+        # （bleak 的 `max_write_without_response_size` 是实时 property）。
+        # **不进**投给界面的 dict（界面 dict 保持纯数据）。
+        self._char_objects: dict = {}
         self._recv_uuids: List[str] = []
         self._send_uuids: List[str] = []
 
@@ -336,6 +350,8 @@ class BluetoothWorker(QObject):
             )
             if self._recv_uuids:
                 await self._subscribe_coro()
+            # MTU 协商是异步的：放在 connected / 订阅**之后**等结果，界面不被拖住（1.23.80）
+            await self._poll_mtu_if_needed(client)
             return
 
         self.connect_error.emit(last_error or "连接失败")
@@ -352,6 +368,7 @@ class BluetoothWorker(QObject):
     async def _disconnect_coro(self) -> None:
         client, self._client = self._client, None
         self._connected = False
+        self._char_objects.clear()   # 活对象随连接失效，防被重读
         self._cancel_monitor()
         for uuid, frame in self._reassembler.flush():
             self.frame_received.emit(uuid, frame)
@@ -370,12 +387,89 @@ class BluetoothWorker(QObject):
             return
         self._client = None
         self._connected = False
+        self._char_objects.clear()   # 活对象随连接失效，防被重读
         self._cancel_monitor()
         for uuid, frame in self._reassembler.flush():
             self.frame_received.emit(uuid, frame)
         self.disconnected.emit()
         self.connection_changed.emit(False)
         self.log_message.emit("蓝牙设备已断开连接")
+
+    # ── MTU / 写上限实时化（1.23.80）────────────────────────────────────────
+    #
+    # ATT_MTU 由**操作系统异步协商**（Windows 上应用层只能读、不能请求），连接瞬间读到的
+    # 可能还是 ATT 默认值 23（负载 20）⇒ 现场表现是「同一台设备有时 20 字节、有时 512 字节」。
+    # 两条措施：① 连接后轮询等协商结果；② **每次发送前重读**，分包按发送那一刻的真实上限。
+
+    def _refresh_live_limits(self) -> bool:
+        """重读 MTU 与各特征码实时上限；**有变化才**更新 + 发信号 + 记日志。
+
+        Returns:
+            是否有变化。无 client / 未连接 / 读数异常时静默返回 False（不抛）。
+        """
+        client = self._client
+        if client is None or not self._connected:
+            return False
+        try:
+            mtu = int(getattr(client, "mtu_size", 0) or 0)
+        except Exception:
+            mtu = 0
+        mtu_changed = bool(mtu) and mtu != self._mtu
+        old_mtu = self._mtu
+        if mtu_changed:
+            self._mtu = mtu
+
+        limit_changed = False
+        for info in self._characteristics:
+            obj = self._char_objects.get(str(info.get("uuid", "")))
+            if obj is None:
+                continue
+            try:
+                value = int(getattr(obj, "max_write_without_response_size", 0) or 0)
+            except Exception:
+                continue
+            if value and value != int(info.get("max_write") or 0):
+                info["max_write"] = value
+                limit_changed = True
+
+        if not (mtu_changed or limit_changed):
+            return False
+
+        # 日志口径与 `_chunk_plan` 一致：只说读数，不在这里推导分包尺寸（推导唯一实现在
+        # `core.chunk_size_for_mtu` / `_chunk_plan`）
+        best = max([int(c.get("max_write") or 0) for c in self._characteristics] or [0])
+        if mtu_changed:
+            self.log_message.emit(
+                f"MTU 协商更新：{old_mtu or '未知'} → {self._mtu}"
+                + (f"（特征码免响应写上限 {best} 字节）" if best else "")
+            )
+        else:
+            self.log_message.emit(f"特征码免响应写上限更新为 {best} 字节（协商 MTU={self._mtu}）")
+        self.mtu_updated.emit(int(self._mtu), [dict(c) for c in self._characteristics])
+        return True
+
+    async def _poll_mtu_if_needed(self, client) -> None:
+        """连接后轮询等 MTU 协商结果（仅当仍是默认值/未知时）。
+
+        位置在 `connected` 与订阅**之后** ⇒ 界面与订阅不被等待拖住；等待期间用户已经可以
+        收发（发送前还会重读一次）。超时**只提示一行**，不得报错：对端确实只支持默认值时
+        与「结果还没回报」在读数上不可区分。
+        """
+        if not mtu_is_unnegotiated(self._mtu):
+            return
+        waited = 0.0
+        while waited < MTU_POLL_TIMEOUT:
+            await asyncio.sleep(MTU_POLL_INTERVAL)
+            waited += MTU_POLL_INTERVAL
+            if self._closing or not self._connected or self._client is not client:
+                return  # 断开 / 换设备 / 退出：静默收尾
+            if self._refresh_live_limits():
+                return  # 协商结果到了（日志与信号已在刷新里发出）
+        if not self._closing and self._connected and self._client is client:
+            self.log_message.emit(
+                f"{MTU_POLL_TIMEOUT:.1f} 秒内未收到 MTU 协商结果，按当前值分包"
+                f"（MTU={self._mtu or '未知'}；对端可能只支持 ATT 默认值，不影响收发）"
+            )
 
     # ── 特征码 / 订阅 ─────────────────────────────────────────────────────
 
@@ -391,12 +485,14 @@ class BluetoothWorker(QObject):
                 services = None
 
         infos: List[dict] = []
+        objects: dict = {}
         for service in services or []:
             for char in getattr(service, "characteristics", None) or []:
                 props = [str(p) for p in (getattr(char, "properties", None) or [])]
+                uuid = str(getattr(char, "uuid", ""))
                 infos.append({
-                    "uuid": str(getattr(char, "uuid", "")),
-                    "short": short_uuid(getattr(char, "uuid", "")),
+                    "uuid": uuid,
+                    "short": short_uuid(uuid),
                     "service_uuid": str(getattr(service, "uuid", "")),
                     "service_short": short_uuid(getattr(service, "uuid", "")),
                     "properties": props,
@@ -405,6 +501,8 @@ class BluetoothWorker(QObject):
                     "can_send": ("write" in props) or ("write-without-response" in props),
                     "max_write": int(getattr(char, "max_write_without_response_size", 0) or 0),
                 })
+                objects[uuid] = char
+        self._char_objects = objects
         return infos
 
     def set_characteristics(self, recv_uuids, send_uuids) -> None:
@@ -532,6 +630,9 @@ class BluetoothWorker(QObject):
         if client is None:
             self.error_occurred.emit("蓝牙未连接，无法发送")
             return
+        # 发送前重读实时上限（1.23.80）：MTU 可能刚协商完 —— 分包必须按**此刻**的真实值，
+        # 否则重连前读到的 20（ATT 默认）会让每一次发送都白拆包
+        self._refresh_live_limits()
         chunk_size, chunk_source = self._chunk_plan(targets)
         chunks = split_chunks(payload, chunk_size)
         # 分包不可消除（ATT 层物理上限）：把「为什么分包 / 单包上限是多少」写在日志里，

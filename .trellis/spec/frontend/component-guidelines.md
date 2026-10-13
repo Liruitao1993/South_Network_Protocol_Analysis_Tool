@@ -318,6 +318,36 @@ engine = self._engine_factory()            # 否则才是发给本虚拟表的�
 - **对话框结论要文字化**：不可用方向标「（不可写）/（不可通知）」（置灰在 QSS 主题下不可见 —— 陷阱 71），
   列表按打分置顶并预选优选结果。
 
+### 7e. 蓝牙 MTU / 写上限实时化（连接后轮询 + 发送前重读）
+
+> 源自任务 10-13-bt-mtu-live-limit（1.23.80：修「同一台设备有时 20 字节、有时 512 字节」）。
+
+- **现象与根因**：`ATT_MTU` 由**操作系统异步协商**（Windows 上应用层只能读、不能请求 ——
+  MS 文档 `GattSession.MaxPduSizeChanged`：*you can't change the value used by Windows itself*），
+  连接瞬间读到的常常还是 ATT 默认值 **23**（负载 `23-3=20`）；bleak 官方文档亦写明「可能先读到 20、
+  过一会儿再读才是高值」。旧实现只在连接时读一次快照 ⇒ 一旦读到 20 就整条连接期都用 20。
+- **判据单一来源**：`bluetooth_core.mtu_is_unnegotiated(value)`（`≤ MTU_DEFAULT=23`，含 0/`None`/非法值）；
+  `MTU_POLL_INTERVAL=0.25` / `MTU_POLL_TIMEOUT=3.0` 与 `MIN_CHUNK` 同处。
+  **「对端确实只支持 23」与「结果还没回报」在读数上不可区分** ⇒ 超时**只打一行提示，不得报错**。
+- **两条措施（缺一不可）**：
+  ① `_connect_coro` 在 `connected` 与订阅**之后** `await self._poll_mtu_if_needed(client)`
+  （放前面会让界面/订阅白等 3 秒；断开/换 client/`_closing` 立即静默返回）；
+  ② `_write_coro` 在 `_chunk_plan()` **之前** `self._refresh_live_limits()` —— 分包按**发送那一刻**的真实值。
+- **活对象私有持有**：`_collect_characteristics` 顺手把 bleak 特征码对象存进 `self._char_objects`
+  （重读实时 property 用），**不进**投给界面的 dict；断开/掉线时 `clear()`。
+- **`mtu_updated = Signal(int, list)`**（MTU, 最新特征码 dict）与 `characteristics_updated` **不可互相替代**：
+  后者语义是「枚举完成」，界面收到会走「沿用/优选 → `set_characteristics`（**重新订阅**）」，
+  拿它刷上限会产生多余重订阅、改写用户已选通道。界面 `_on_limits_updated` 只更新 `_chars` 缓存 +
+  MTU/特征码标签 + 刷新**打开中**的对话框（`CharacteristicSelectDialog.refresh_chars`，保勾选与当前行）；
+  MTU 文案抽在 `_mtu_text()`（连接时与实时更新共用），默认值时必须写出「ATT 默认值，协商结果未回」。
+- **有变化才发**：无变化时 `_refresh_live_limits` 完全静默（不刷日志、不发信号），否则每包都会刷 UI。
+- **回归**：`test_bluetooth_core.py` [11]（判据边界 + 常量关系）、`test_bluetooth_worker.py` [7]
+  （迟到协商 / 只支持默认值 / 发送前重读 MTU 与特征码两条路径 / 断开打断）、`test_bluetooth_widget.py` [12]
+  （标签、缓存、**不重订阅**用 `worker.char_sets` 计数钉住、对话框刷新）。
+  **测轮询时先改特征码上限、再改 MTU**（轮询只认「MTU 变了」就结束该轮，反序会出现中间态 ⇒ 随机红）。
+- **变异反证（本任务已做，均干净变红后还原）**：① 去掉连接后轮询 → 5 项红；
+  ② 去掉发送前刷新 → 5 项红（分包退回 `[20]*15`）；③ `mtu_is_unnegotiated` 改 `<`（不含 23）→ 2 项红。
+
 ### 8. Qt 陷阱（本项目实测）
 - **offscreen 无字体**：`QT_QPA_PLATFORM=offscreen` 下 `QFontDatabase: Cannot find font directory ...`，绘制出的文字是豆腐块 → 断言只能查尺寸/颜色/像素多样性；**要目视核对文字排版必须用默认平台**（`QApplication([])` 不设 offscreen + `widget.grab()` / `QImage.save()`，不需要窗口真的可见）。
 - **`bytes(image.constBits())` 必须持有 QImage 引用**：`bytes(canvas.render_image(w, h).constBits())`（临时对象上取 buffer）会 **access violation（0xC0000005）**；先 `img = ...` 再 `bytes(img.constBits())`。

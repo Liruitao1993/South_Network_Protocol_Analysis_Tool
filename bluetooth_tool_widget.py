@@ -452,6 +452,25 @@ class CharacteristicSelectDialog(QDialog):
         if list_widget.currentRow() < 0 and list_widget.count():
             list_widget.setCurrentRow(0)
 
+    def refresh_chars(self, characteristics):
+        """用新的实时写上限刷新两侧列表，**保留勾选与当前行**（1.23.80）。
+
+        同一台设备的特征码集合不变 ⇒ 行序稳定，可按行号恢复当前位置；
+        用户已勾选的内容原样保留（这是刷新读数，不是重置选择）。
+        """
+        self._chars = [dict(c) for c in (characteristics or []) if isinstance(c, dict)]
+        recv_selected = self.selected_recv()
+        send_selected = self.selected_send()
+        recv_row = self._recv_list.currentRow()
+        send_row = self._send_list.currentRow()
+        self._fill(self._recv_list, "can_recv", recv_selected)
+        self._fill(self._send_list, "can_send", send_selected)
+        if 0 <= recv_row < self._recv_list.count():
+            self._recv_list.setCurrentRow(recv_row)
+        if 0 <= send_row < self._send_list.count():
+            self._send_list.setCurrentRow(send_row)
+        self._sync_detail()
+
     def _set_all(self, list_widget: QListWidget, checked: bool):
         for row in range(list_widget.count()):
             item = list_widget.item(row)
@@ -801,6 +820,8 @@ class BluetoothToolWidget(QWidget):
         self._pending_connect: Dict[str, str] = {}
         # 已发现的特征码（连接后由 worker 投递）
         self._chars: List[dict] = []
+        # 打开中的「特征码…」对话框（收到实时上限更新时刷新它；关闭后置 None）
+        self._chars_dialog = None
         self._recv_uuids: List[str] = []
         self._send_uuids: List[str] = []
         # 载入配置期间屏蔽「开启虚拟模式」之类的提示（避免每次启动都刷一条 warn）
@@ -907,6 +928,7 @@ class BluetoothToolWidget(QWidget):
             (worker.disconnected, self._on_disconnected),
             (worker.connection_changed, self._on_connection_changed),
             (worker.characteristics_updated, self._on_characteristics_updated),
+            (worker.mtu_updated, self._on_limits_updated),
             (worker.subscribe_finished, self._probe_subscribed),
             (worker.frame_received, self._on_frame_received),
             (worker.send_progress, self._on_send_progress),
@@ -1611,6 +1633,23 @@ class BluetoothToolWidget(QWidget):
         self.lbl_info_device.setText(name or address)
         self.lbl_info_address.setText(address)
 
+    def _mtu_text(self, mtu) -> str:
+        """MTU 行文案（**单一实现**：连接时与实时更新共用）。
+
+        `mtu_is_unnegotiated` 为真时明确写出「ATT 默认值、协商结果未回」——
+        现场困惑正来自这里（同一台设备有时显示 20、有时显示 512）。
+        """
+        try:
+            value = int(mtu or 0)
+        except (TypeError, ValueError):
+            value = 0
+        if not value:
+            return "未知（按 ATT 最小值 20 字节分包）"
+        text = f"{value} 字节（单包上限 {core.chunk_size_for_mtu(value)}）"
+        if core.mtu_is_unnegotiated(value):
+            text += " —— ATT 默认值，协商结果未回；发送前会再读一次"
+        return text
+
     def _on_connected(self, name: str, address: str):
         self.btn_connect.setEnabled(False)
         self.btn_disconnect.setEnabled(True)
@@ -1624,10 +1663,7 @@ class BluetoothToolWidget(QWidget):
                 mtu = int(worker.mtu_size() or 0)
             except Exception:
                 mtu = 0
-        self.lbl_info_mtu.setText(
-            f"{mtu} 字节（单包上限 {core.chunk_size_for_mtu(mtu)}）" if mtu
-            else "未知（按 ATT 最小值 20 字节分包）"
-        )
+        self.lbl_info_mtu.setText(self._mtu_text(mtu))
         # 换到一台**没记过**的设备：清掉上一台的选择（否则会压住自动优选 ——
         # `_on_characteristics_updated` 只在「未选过」时才优选）。同设备重连或首次连接不清。
         previous_device = str(self._settings.get("last_device") or "").strip()
@@ -1700,6 +1736,31 @@ class BluetoothToolWidget(QWidget):
                 "可用「特征码…」手工改，或点「自动探测」实测一遍",
                 "sys",
             )
+
+    def _on_limits_updated(self, mtu, characteristics):
+        """MTU / 特征码写上限**实时变化**（1.23.80）：只更新读数缓存与标签。
+
+        **不得**在这里调 `_apply_characteristics`：那会把「沿用/优选」再跑一遍并
+        `set_characteristics`（重新订阅）—— `characteristics_updated` 的语义是
+        「特征码枚举完成」，两者不可混用，用户已选的特征码也不允许被改写。
+        """
+        chars = [dict(c) for c in (characteristics or []) if isinstance(c, dict)]
+        if chars:
+            self._chars = chars
+            recv_ready = sum(1 for c in chars if c.get("can_recv"))
+            send_ready = sum(1 for c in chars if c.get("can_send"))
+            self.lbl_info_chars.setText(
+                f"{len(chars)} 个（可接收 {recv_ready} / 可发送 {send_ready}）"
+            )
+        self.lbl_info_mtu.setText(self._mtu_text(mtu))
+        dialog = self._chars_dialog
+        if dialog is not None and hasattr(dialog, "refresh_chars"):
+            try:
+                dialog.refresh_chars(chars or self._chars)
+            except RuntimeError:
+                # 对话框已被销毁（模态窗口在等待期被关掉）
+                self._chars_dialog = None
+        self._refresh_status_line()
 
     @staticmethod
     def _auto_pick(characteristics) -> Tuple[List[str], List[str]]:
@@ -1916,7 +1977,13 @@ class BluetoothToolWidget(QWidget):
         dialog = CharacteristicSelectDialog(
             characteristics, self._recv_uuids, self._send_uuids, self
         )
-        if dialog.exec() != QDialog.DialogCode.Accepted:
+        # 打开期间把引用交给页面：收到 `mtu_updated`（MTU 协商结果迟到）时刷新其读数
+        self._chars_dialog = dialog
+        try:
+            accepted = dialog.exec() == QDialog.DialogCode.Accepted
+        finally:
+            self._chars_dialog = None
+        if not accepted:
             return
         recv = dialog.selected_recv()
         send = dialog.selected_send()

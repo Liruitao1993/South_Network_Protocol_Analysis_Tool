@@ -481,6 +481,30 @@ def test_char_map():
           and f"D{core.CHAR_MAP_MAX + 4:02d}" in kept, f"{len(kept)}/{sorted(kept)[:2]}")
 
 
+def test_mtu_negotiation():
+    section("[11] mtu_is_unnegotiated / 轮询常量（1.23.80）")
+
+    check("0 → 未协商", core.mtu_is_unnegotiated(0) is True)
+    check("None → 未协商", core.mtu_is_unnegotiated(None) is True)
+    check("非数字 → 未协商", core.mtu_is_unnegotiated("x") is True)
+    check("空串 → 未协商", core.mtu_is_unnegotiated("") is True)
+    check("23（ATT 默认）→ 未协商", core.mtu_is_unnegotiated(core.MTU_DEFAULT) is True)
+    check("22 → 未协商", core.mtu_is_unnegotiated(22) is True)
+    check("24 → 已协商", core.mtu_is_unnegotiated(24) is False)
+    check("247 → 已协商", core.mtu_is_unnegotiated(247) is False)
+    check("517（规范上限）→ 已协商", core.mtu_is_unnegotiated(517) is False)
+    check("字符串数字按数值判（'23' → 未协商）",
+          core.mtu_is_unnegotiated("23") is True)
+
+    check("MTU_DEFAULT 就是 ATT 默认 23", core.MTU_DEFAULT == 23, core.MTU_DEFAULT)
+    check("轮询间隔 < 超时（否则只轮一次就到期）",
+          0 < core.MTU_POLL_INTERVAL < core.MTU_POLL_TIMEOUT,
+          (core.MTU_POLL_INTERVAL, core.MTU_POLL_TIMEOUT))
+    check("默认值口径一致：MTU 23 → 单包 20",
+          core.chunk_size_for_mtu(core.MTU_DEFAULT) == core.MIN_CHUNK,
+          (core.chunk_size_for_mtu(core.MTU_DEFAULT), core.MIN_CHUNK))
+
+
 def test_negatives():
     section("[7] 反例自检（判据有效）")
 
@@ -510,6 +534,7 @@ def main():
     test_char_selection()
     test_probe_session()
     test_char_map()
+    test_mtu_negotiation()
     test_negatives()
 
     print()
