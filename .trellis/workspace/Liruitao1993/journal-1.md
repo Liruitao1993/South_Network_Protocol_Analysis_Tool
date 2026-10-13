@@ -1073,3 +1073,24 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Next Steps
 
 - 版本/文档四件套留在工作区随发版批次提交（1.23.82 的 CHANGELOG/README 条目已按修正后行为改写）
+
+
+## Session 33: 串口工具批量替换通信地址（复用 frame_addr_fix + 撤销）
+
+**Date**: 2026-10-14
+**Task**: 串口工具批量替换通信地址（复用 frame_addr_fix + 撤销）
+**Branch**: `main`
+
+### Summary
+
+串口工具命令表新增「替换地址」：对勾选/全部命令按所选协议替换地址域并重算校验，写回表内 data_hex（复用 frame_addr_fix，单一来源）；三态 ok/kept/skipped；前导 FEH 只对协议 6/8 剥/恢复；可选写协议列与同步替换预期响应（仅纯 HEX 写法且能自证）；汇总弹框三态计数 + 撤销本次替换。测试 test_serial_addr_fix.py 104 项 + test_serial_tool_widget.py 段[35] 536 项；变异反证 5 条全红后逐字节还原；release_check --with-gui PASS=133 FAIL=2 WARN=0（2 项为 COM1/COM2 串口回环环境红）。任务 10-14-serial-batch-addr 已归档。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e97b145` | (see git log) |
+
+### Status
+
+[OK] **Completed**
