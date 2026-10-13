@@ -999,3 +999,40 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Next Steps
 
 - 版本/文档四件套（main_gui APP_VERSION=1.23.81+CHANGELOG、AGENTS §8 陷阱 69、README、两个 .iss、spec §7f）留在工作区，随发版批次提交
+
+
+## Session 31: 蓝牙自定义报文区空间治理（封顶+滚动+折叠+竖向分栏）
+
+**Date**: 2026-10-14
+**Task**: 蓝牙自定义报文区空间治理（封顶+滚动+折叠+竖向分栏）
+**Branch**: `main`
+
+### Summary
+
+64 个按钮不再压没日志：封顶 3 行+内部滚动、CollapsibleSection 折叠（记忆状态）、右栏竖向 QSplitter 可拖拽（尺寸记忆）
+
+### Main Changes
+
+- bluetooth_core: CUSTOM_ROWS_MAX / RIGHT_SPLIT_DEFAULT,RANGE / normalize_right_split / merge_settings 两个新键
+- bluetooth_tool_widget: QScrollArea 封顶（按 sizeHint 实算，字号变化重算）+ CollapsibleSection + 竖向分栏（尺寸只在真实布局后采集）
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d9616ee` | (see git log) |
+
+### Testing
+
+- [OK] widget 219 项（+18 新节 [14]：封顶/滚动/不压扁/日志高度/收起展开/分栏记忆与重启恢复）、core 161 项（+16 配置宽容）
+- [OK] 变异反证 4 条（不套用封顶 1 红 / 封顶行高写死 1 红 / 不采集分栏 2 红 / 不恢复折叠态 1 红）逐字节还原 md5 一致
+- [OK] 冒烟：64 按钮 → 滚动区 76px 封顶 + 448 滚动范围（不封顶对照 169px）；收起后 23px
+- [OK] release_check --with-gui：PASS=131 FAIL=2（COM 口被运行实例占用，既有环境红）
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 版本/文档四件套（APP_VERSION=1.23.82+CHANGELOG、AGENTS §8 陷阱 69、README、两个 .iss、spec §7g）留在工作区随发版批次提交
