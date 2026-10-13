@@ -126,6 +126,8 @@ CORE_TESTS = [
     "test/test_serial_tool_widget.py",
     "test/test_serial_proto_frame.py",
     "test/test_serial_worker_write_raw.py",
+    # 串口工具批量替换通信地址（纯逻辑：六协议真帧 oracle + 前导 FE 门控 + 预期响应口径）
+    "test/test_serial_addr_fix.py",
     # 蓝牙工具（core 纯逻辑 / worker 注入假 bleak / widget offscreen 假 worker，均不碰硬件）
     "test/test_bluetooth_addr_fix.py",
     "test/test_web_frame_gen_utils.py",

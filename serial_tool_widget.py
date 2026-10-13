@@ -34,9 +34,11 @@
 import json
 import os
 import re
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Mapping, Optional, Tuple
 
+import frame_addr_fix
 import wakeup_prefix
 
 # ── 常量（匹配方式照搬源工具）──────────────────────────────────────────
@@ -58,6 +60,15 @@ MATCH_TYPES: Dict[str, str] = {
 
 # 「HEX 通配」里的通配记号：`XX`（项目既有约定）与 `??`（等价别名）
 HEX_WILDCARD_TOKENS = ("XX", "??")
+
+# 只有这四种匹配方式的「预期响应」是**纯 HEX**（其余是通配 / 正则 / 不匹配）——
+# 批量替换地址时只能对它们做「同步替换地址」（见 `batch_fix_commands`）
+HEX_MATCH_TYPES = ("contains", "equals", "starts_with", "ends_with")
+
+# 规范里定义了「帧前导 FEH 唤醒字节」的协议（DL/T 645-2007 §5.3.1、DL/T 698.45-2017 §6.3.1 b)）。
+# 批量替换地址前要先剥离、替换后再**原样恢复**；其余协议规范里没有前导码，
+# 带 FE 的帧就该报错，剥了等于「救活」错帧（见 AGENTS §8 陷阱 75）。
+FE_WAKEUP_PROTOCOLS = (6, 8)
 
 DEFAULT_FRAME_TAIL = "FE 16"
 
@@ -479,6 +490,163 @@ def load_hex_messages(filepath: str) -> List[bytes]:
             if msg:
                 messages.append(msg)
     return messages
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 纯函数：批量替换通信地址（按协议替换地址域 + 重算校验）
+#
+# 复用 `frame_addr_fix`（纯逻辑无 Qt，1.23.81 起蓝牙页在用）—— 地址定位、字节序、
+# 校验算法**只有一个来源**；这里只做「串口命令表」这层的编排：
+#   ① 只写回发送数据，且只有替换成功才算（失败/不适用一律原样保留 + 可读原因）；
+#   ② 可选把协议写进命令的 ``protocol`` 键（「加载报文文件」导入的报文是 None）；
+#   ③ 可选同步替换「预期响应」里的地址（能自证才替换）。
+# 写回由调用方负责（本层不修改入参），因此撤销点天然存在。
+# ══════════════════════════════════════════════════════════════════════
+
+# 一条命令的处理结果三态
+ADDR_STATUS_OK = "ok"            # 替换成功：data_hex 是替换后的帧
+ADDR_STATUS_KEPT = "kept"        # 尝试了但没换成：原样保留 + error
+ADDR_STATUS_SKIPPED = "skipped"  # 不该处理（发送数据本身不是有效 HEX）
+
+# 批量替换日志的明细上限（其余汇总一行 —— 几百条逐条刷会挤掉收发日志）
+ADDR_BATCH_LOG_LIMIT = 20
+
+
+@dataclass
+class AddrBatchItem:
+    """`batch_fix_commands` 对**一条命令**的处理结果（不修改原命令）。"""
+
+    index: int                   #: commands 里的原下标
+    name: str
+    status: str                  #: ok | kept | skipped
+    data_hex: str                #: status == ok 时为替换后的帧，否则是原值
+    protocol: Optional[int]      #: 要写入协议列的值（None = 不改该键）
+    match_hex: str               #: 预期响应（原值，或同步替换后的值）
+    match_changed: bool
+    notes: List[str] = field(default_factory=list)  #: 地址域/校验 旧→新
+    error: str = ""              #: kept / skipped 的可读原因
+
+
+def fix_frame_text(data_hex: str, protocol_index,
+                   values: Mapping[str, str]) -> Tuple[str, List[str], str]:
+    """按协议替换地址并重算校验 → ``(新 hex, notes, error)``；error 非空表示**未改动**。
+
+    前导 FEH：只对协议 6 / 8 剥离并**原样恢复**（依据 DL/T 645-2007 §5.3.1、
+    DL/T 698.45-2017 §6.3.1 b)，见 AGENTS §8 陷阱 75）；其余协议规范里没有前导码，
+    带 FE 的帧本就该报错，剥了等于「救活」错帧。
+
+    成功后 hex 统一成**空格分隔**格式（与「加载报文文件」/ 导出同格式）。
+    """
+    raw = hex_str_to_bytes(data_hex)
+    if raw is None:
+        return str(data_hex or ""), [], f"发送数据不是有效的 HEX：{hex_input_error(data_hex)}"
+    prefix = b""
+    body = raw
+    if coerce_protocol(protocol_index) in FE_WAKEUP_PROTOCOLS:
+        body, stripped = wakeup_prefix.strip_wakeup_prefix(raw)
+        prefix = raw[:stripped]
+    result = frame_addr_fix.apply(body, protocol_index, values)
+    if not result.ok:
+        return str(data_hex or ""), [], str(result.error or "地址替换失败")
+    return bytes_to_hex(prefix + bytes(result.frame)), list(result.notes), ""
+
+
+def batch_fix_commands(commands: List[dict], indices: List[int], protocol_index,
+                       values: Mapping[str, str], write_protocol: bool = True,
+                       fix_match: bool = True) -> List[AddrBatchItem]:
+    """批量替换：逐条给出「新值 / 原因」，**不修改 `commands`**（写回交给调用方）。
+
+    - ``indices``：作用范围（勾选行或全部），非 int / 越界下标一律忽略；
+    - ``write_protocol``：把协议索引写进作用范围内**每条**命令的 ``protocol`` 键
+      （与单条替换成败无关 —— 「这批报文属于协议 X」是用户声明，写进去接收侧才能
+      按该协议断帧解析）；协议非法（None）时不写；
+    - ``fix_match``：只在发送数据**替换成功**时，对 ``match_type ∈ HEX_MATCH_TYPES``
+      且非空的预期响应尝试同步替换；通配 / 正则 / 不匹配 / 自证失败一律保持原样并记入 notes。
+    """
+    proto = coerce_protocol(protocol_index)
+    items: List[AddrBatchItem] = []
+    for index in list(indices or []):
+        if isinstance(index, bool) or not isinstance(index, int):
+            continue
+        if not (0 <= index < len(commands)):
+            continue
+        cmd = commands[index] if isinstance(commands[index], dict) else {}
+        raw_hex = str(cmd.get("data_hex") or "")
+        item = AddrBatchItem(
+            index=index,
+            name=str(cmd.get("name") or "") or f"命令{index + 1}",
+            status=ADDR_STATUS_SKIPPED,
+            data_hex=raw_hex,
+            protocol=None,
+            match_hex=str(cmd.get("match_hex") or ""),
+            match_changed=False,
+        )
+        if hex_str_to_bytes(raw_hex) is None:
+            item.error = f"发送数据不是有效的 HEX：{hex_input_error(raw_hex)}"
+        else:
+            try:
+                new_hex, notes, error = fix_frame_text(raw_hex, protocol_index, values)
+            except Exception as exc:                     # noqa: BLE001 - 一条出错不许中断整批
+                new_hex, notes, error = raw_hex, [], f"{type(exc).__name__}: {exc}"
+            if error:
+                item.status = ADDR_STATUS_KEPT
+                item.error = error
+            else:
+                item.status = ADDR_STATUS_OK
+                item.data_hex = new_hex
+                item.notes = notes
+                _fix_expected_response(cmd, item, protocol_index, values, fix_match)
+        if write_protocol and proto is not None:
+            item.protocol = proto
+        items.append(item)
+    return items
+
+
+def _fix_expected_response(cmd: dict, item: AddrBatchItem, protocol_index,
+                           values: Mapping[str, str], fix_match: bool) -> None:
+    """（内部）同步替换预期响应里的地址 —— 只动**纯 HEX 写法**，且能自证才写回。"""
+    if not fix_match or not item.match_hex.strip():
+        return
+    match_type = str(cmd.get("match_type") or "none")
+    if match_type not in HEX_MATCH_TYPES:
+        item.notes.append(
+            f"预期响应未替换（匹配方式「{match_type_label(match_type)}」不是纯 HEX 写法）"
+        )
+        return
+    try:
+        new_match, _notes, error = fix_frame_text(item.match_hex, protocol_index, values)
+    except Exception as exc:                             # noqa: BLE001 - 同上
+        new_match, error = item.match_hex, f"{type(exc).__name__}: {exc}"
+    if error:
+        item.notes.append(f"预期响应未替换（{error}）")
+        return
+    item.match_hex = new_match
+    item.match_changed = True
+    item.notes.append("预期响应已同步替换地址并重算校验")
+
+
+def addr_batch_summary(items: List[AddrBatchItem]) -> Tuple[str, str]:
+    """汇总文案 ``(首行, 明细)``（纯逻辑，便于单测 / 弹框复用）。"""
+    ok = [it for it in items if it.status == ADDR_STATUS_OK]
+    kept = [it for it in items if it.status == ADDR_STATUS_KEPT]
+    skipped = [it for it in items if it.status == ADDR_STATUS_SKIPPED]
+    changed = [it for it in items if it.match_changed]
+
+    head = f"已替换 {len(ok)} 条"
+    if kept:
+        head += f" / 未替换（自证失败）{len(kept)} 条"
+    if skipped:
+        head += f" / 跳过 {len(skipped)} 条"
+    if changed:
+        head += f"；其中 {len(changed)} 条的预期响应也同步替换"
+    if not items:
+        head = "作用范围内没有命令"
+
+    lines = [f"· {it.name}：{it.error}" for it in (kept + skipped)[:3]]
+    rest = len(kept) + len(skipped) - len(lines)
+    if rest > 0:
+        lines.append(f"· …另有 {rest} 条未替换（原因见日志与命令表）")
+    return head, "\n".join(lines)
 
 
 # ── 纯函数：命令归一化与配置持久化 ────────────────────────────────────
@@ -1487,6 +1655,216 @@ class SerialCommandDialog(QDialog):
         }
 
 
+class BatchAddrDialog(QDialog):
+    """批量替换通信地址：选协议 + 填地址 + 选作用范围。
+
+    界面**不硬编码协议细节**：地址输入行按 `frame_addr_fix.fields_for(协议)` 动态生成，
+    标签与占位提示都来自字段声明（与蓝牙页 `ButtonEditDialog` 的地址区同一范式）。
+
+    长度校验的分工：这里只拦「空地址 / 写法非法」（698 的 SA 长度由帧内地址特征字节决定，
+    此处无法推导，按「待定」放行）；**精确长度与帧结构自证由 `frame_addr_fix.apply` 负责**
+    （预览行与执行结果都会给出可读结论）。
+    """
+
+    def __init__(self, parent=None, commands=None, checked_indices=None):
+        super().__init__(parent)
+        self.setWindowTitle("批量替换通信地址")
+        self.setMinimumWidth(560)
+        self._commands = list(commands or [])
+        self._checked = [i for i in (checked_indices or [])
+                         if isinstance(i, int) and not isinstance(i, bool)
+                         and 0 <= i < len(self._commands)]
+        self._addr_edits: Dict[str, QLineEdit] = {}
+        self._addr_values: Dict[str, str] = {}
+
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+
+        self.combo_protocol = QComboBox()
+        for label, index in frame_addr_fix.supported_choices():
+            self.combo_protocol.addItem(label, index)
+        self.combo_protocol.setToolTip(
+            "按这个协议替换地址域并重算校验（地址位置/字节序/校验算法都取自该协议自身实现）"
+        )
+        self.combo_protocol.currentIndexChanged.connect(self._rebuild_addr_fields)
+        form.addRow("协议：", self.combo_protocol)
+
+        self.combo_scope = QComboBox()
+        self.combo_scope.addItem(f"勾选的命令（{len(self._checked)} 条）", "checked")
+        self.combo_scope.addItem(f"全部命令（{len(self._commands)} 条）", "all")
+        # 没有勾选任何命令时默认「全部」（否则作用范围恒为空）
+        self.combo_scope.setCurrentIndex(0 if self._checked else 1)
+        self.combo_scope.currentIndexChanged.connect(self._refresh_hint)
+        form.addRow("作用范围：", self.combo_scope)
+
+        self.chk_write_protocol = QCheckBox("同时把该协议写入这些命令的「协议」列")
+        self.chk_write_protocol.setChecked(True)
+        self.chk_write_protocol.setToolTip(
+            "「加载报文文件」导入的报文协议为空 → 写入后接收侧才能按该协议断帧并解析响应"
+        )
+        form.addRow("", self.chk_write_protocol)
+
+        self.chk_fix_match = QCheckBox("同时替换「预期响应」中的地址")
+        self.chk_fix_match.setChecked(True)
+        self.chk_fix_match.setToolTip(
+            "只处理纯 HEX 写法的预期响应（包含/完全相等/开头匹配/结尾匹配），"
+            "且必须能通过结构+校验自证才替换；通配 / 正则 / 自证失败一律保持原样"
+        )
+        form.addRow("", self.chk_fix_match)
+        layout.addLayout(form)
+
+        self.addr_group = QGroupBox("地址参数（替换地址域并重算校验）")
+        self.addr_form = QFormLayout(self.addr_group)
+        self.addr_form.setSpacing(6)
+        self.lbl_addr_hint = QLabel("")
+        self.lbl_addr_hint.setWordWrap(True)
+        self.addr_form.addRow(self.lbl_addr_hint)
+        layout.addWidget(self.addr_group)
+
+        self.lbl_preview = QLabel("")
+        self.lbl_preview.setWordWrap(True)
+        layout.addWidget(self.lbl_preview)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self._on_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self._rebuild_addr_fields()
+
+    # ── 取值接口 ────────────────────────────────────────────────────────
+
+    def protocol_index(self) -> Optional[int]:
+        data = self.combo_protocol.currentData()
+        return int(data) if data is not None else None
+
+    def scope(self) -> str:
+        return str(self.combo_scope.currentData() or "checked")
+
+    def scope_indices(self) -> List[int]:
+        if self.scope() == "all":
+            return list(range(len(self._commands)))
+        return list(self._checked)
+
+    def write_protocol(self) -> bool:
+        return bool(self.chk_write_protocol.isChecked())
+
+    def fix_match(self) -> bool:
+        return bool(self.chk_fix_match.isChecked())
+
+    def values(self) -> Dict[str, str]:
+        return {key: edit.text().strip() for key, edit in self._addr_edits.items()}
+
+    # ── 地址输入区 ──────────────────────────────────────────────────────
+
+    def _rebuild_addr_fields(self):
+        """按所选协议重建地址输入行（字段声明来自 `frame_addr_fix`）。"""
+        for key, edit in list(self._addr_edits.items()):
+            self._addr_values[key] = edit.text()
+            edit.deleteLater()
+        self._addr_edits = {}
+        while self.addr_form.rowCount() > 1:          # 末行是提示，保留
+            self.addr_form.removeRow(0)
+
+        index = self.protocol_index()
+        fields = frame_addr_fix.fields_for(index) if index is not None else ()
+        self.addr_group.setVisible(bool(fields))
+        if not fields:
+            self.lbl_addr_hint.setText("")
+            self._refresh_hint()
+            return
+        for position, spec in enumerate(fields):
+            edit = QLineEdit(self._addr_values.get(spec.key, ""))
+            edit.setPlaceholderText(spec.hint)
+            edit.textChanged.connect(self._refresh_hint)
+            self._addr_edits[spec.key] = edit
+            self.addr_form.insertRow(position, f"{spec.label}：", edit)
+        self._refresh_hint()
+
+    def _refresh_hint(self):
+        """回显「地址会写成什么字节」+ 作用范围内样例命令的替换预览。"""
+        if not hasattr(self, "lbl_addr_hint"):
+            return
+        index = self.protocol_index()
+        fields = frame_addr_fix.fields_for(index) if index is not None else ()
+        values = self.values()
+        filled = {key: text for key, text in values.items() if text}
+
+        good, bad = [], []
+        for spec in fields:
+            text = values.get(spec.key, "")
+            if not text:
+                continue
+            data, err = frame_addr_fix.parse_address(text, spec, spec.length)
+            if err and spec.kind == frame_addr_fix.KIND_SA698:
+                good.append(f"· {spec.label}：长度按帧内地址特征确定")
+            elif err:
+                bad.append(f"⚠ {spec.label}：{err}")
+            else:
+                good.append(f"· {spec.label} → {data.hex(' ').upper()}（{len(data)} 字节）")
+        self.lbl_addr_hint.setText(
+            "\n".join(good + bad)
+            or "填写地址后：确定即替换作用范围内每条命令的地址并重算校验"
+        )
+        self.lbl_preview.setText(self._preview_text(index, filled))
+
+    def _sample_command(self) -> Optional[dict]:
+        """作用范围内第一条「发送数据能解析成 HEX」的命令（预览样例）。"""
+        for i in self.scope_indices()[:20]:
+            cmd = self._commands[i]
+            if hex_str_to_bytes(str(cmd.get("data_hex") or "")) is not None:
+                return cmd
+        return None
+
+    def _preview_text(self, index, filled: Dict[str, str]) -> str:
+        if not filled:
+            return ""
+        sample = self._sample_command()
+        if sample is None:
+            return "预览：作用范围内没有可解析的发送数据"
+        name = str(sample.get("name") or "样例")
+        new_hex, notes, error = fix_frame_text(str(sample.get("data_hex") or ""), index, filled)
+        if error:
+            return f"预览（{name}）：⚠ 未替换 —— {error}"
+        body = "\n  ".join(notes) if notes else new_hex
+        return f"预览（{name}）：\n  {body}"
+
+    # ── 确定 ────────────────────────────────────────────────────────────
+
+    def _on_accept(self):
+        index = self.protocol_index()
+        values = self.values()
+        if not values:
+            QMessageBox.warning(self, "未选择协议", "请选择要替换的协议。")
+            return
+        if not any(values.values()):
+            QMessageBox.warning(
+                self, "未填地址", "请至少填写一个地址（地址为空时替换必然失败）。"
+            )
+            return
+        if not self.scope_indices():
+            QMessageBox.warning(
+                self, "作用范围为空",
+                "所选作用范围内没有命令：请先在命令表「选择」列勾选，或把范围改成「全部命令」。",
+            )
+            return
+        fields = {spec.key: spec for spec in frame_addr_fix.fields_for(index)}
+        for key, text in values.items():
+            spec = fields.get(key)
+            if spec is None or not text:
+                continue
+            _data, err = frame_addr_fix.parse_address(text, spec, spec.length)
+            # 698 SA 的长度由帧内地址特征字节决定，这里推导不出 → 交给 apply 判定
+            if err and spec.kind == frame_addr_fix.KIND_SA698:
+                continue
+            if err:
+                QMessageBox.warning(self, "地址无效", f"{spec.label}：{err}")
+                return
+        self.accept()
+
+
 class SerialToolWidget(QWidget):
     """串口工具页：命令发送 + 响应匹配 + 统计 + 彩色日志。"""
 
@@ -1518,6 +1896,10 @@ class SerialToolWidget(QWidget):
         self._finalize_elapsed = 0.0
         # 发送代次：上一轮遗留的收尾定时器不得影响新一轮发送
         self._send_generation = 0
+
+        # 批量替换通信地址的撤销点：[(原下标, (原 data_hex, 原 protocol, 原 match_hex)), …]
+        # 只保留最近一次（再次替换即覆盖）；命令被删除/移动后越界条目会被自动忽略
+        self._addr_batch_undo: List[tuple] = []
 
         # 匹配
         self._tx_total = 0
@@ -1758,6 +2140,18 @@ class SerialToolWidget(QWidget):
             set_btn_icon(btn, icon)
             btn.clicked.connect(slot)
             cmd_btns.addWidget(btn)
+        # 批量替换通信地址（按协议替换地址域 + 重算校验 + 可撤销）
+        self.btn_batch_addr = QPushButton("替换地址")
+        set_btn(self.btn_batch_addr, "secondary")
+        set_btn_icon(self.btn_batch_addr, "refresh")
+        self.btn_batch_addr.setToolTip(
+            "批量替换通信地址：按所选协议把作用范围内每条命令的地址域换成现场表计地址，\n"
+            "并重算校验（改地址后校验必然变，否则对端直接丢帧）；\n"
+            "可同时把协议写入命令的「协议」列、并同步替换「预期响应」中的地址；\n"
+            "替换后记得核对命令表内容（一次批量替换可撤销一次）"
+        )
+        self.btn_batch_addr.clicked.connect(self._on_batch_addr_clicked)
+        cmd_btns.addWidget(self.btn_batch_addr)
         cmd_layout.addLayout(cmd_btns)
         left_layout.addWidget(cmd_group, 1)
 
@@ -2869,6 +3263,127 @@ class SerialToolWidget(QWidget):
         self._rebuild_cmd_table()
         self._log(f"[命令] 已从文件加载 {len(messages)} 条报文", "sys")
         self._schedule_save()
+
+    # ── 批量替换通信地址 ─────────────────────────────────────────────────
+
+    def _cmd_scope_indices(self, scope: str) -> List[int]:
+        """作用范围 → 命令下标列表（``all`` = 全部，其余 = 勾选行）。"""
+        if scope == "all":
+            return list(range(len(self.commands)))
+        return self._checked_rows()
+
+    def _on_batch_addr_clicked(self):
+        """「替换地址」按钮：对话框取值 → 纯逻辑批量替换 → 写回 + 汇总。"""
+        if not self.commands:
+            QMessageBox.information(self, "串口工具", "请先添加命令")
+            return
+        if self._running:
+            QMessageBox.information(
+                self, "串口工具", "发送中不能替换地址（命令内容正在被使用）"
+            )
+            return
+        dlg = BatchAddrDialog(
+            self, commands=self.commands, checked_indices=self._checked_rows()
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        items = batch_fix_commands(
+            self.commands,
+            self._cmd_scope_indices(dlg.scope()),
+            dlg.protocol_index(),
+            dlg.values(),
+            write_protocol=dlg.write_protocol(),
+            fix_match=dlg.fix_match(),
+        )
+        undo = self._apply_addr_batch(items)
+        self._show_addr_batch_summary(items, undo)
+
+    def _apply_addr_batch(self, items: List[AddrBatchItem]) -> List[tuple]:
+        """把批量替换结果写回命令表（**不弹任何对话框**，便于测试与复用）。
+
+        写回前记录撤销快照（每条命令的 ``data_hex`` / ``protocol`` / ``match_hex``），
+        返回 ``[(原下标, 原值三元组), …]``（无实际改动则为空）。
+        """
+        undo: List[tuple] = []
+        for item in items:
+            if not (0 <= item.index < len(self.commands)):
+                continue
+            cmd = self.commands[item.index]
+            before = (
+                str(cmd.get("data_hex") or ""),
+                cmd.get("protocol"),
+                str(cmd.get("match_hex") or ""),
+            )
+            after = (
+                item.data_hex,
+                item.protocol if item.protocol is not None else cmd.get("protocol"),
+                item.match_hex,
+            )
+            if before == after:
+                continue
+            undo.append((item.index, before))
+            cmd["data_hex"] = item.data_hex
+            if item.protocol is not None:
+                cmd["protocol"] = item.protocol
+            cmd["match_hex"] = item.match_hex
+
+        self._addr_batch_undo = undo
+        if undo:
+            self._rebuild_cmd_table()
+            self._schedule_save()
+        self._log_addr_batch(items)
+        return undo
+
+    def _log_addr_batch(self, items: List[AddrBatchItem]):
+        """逐条日志（明细上限 `ADDR_BATCH_LOG_LIMIT`，其余汇总一行）。"""
+        head, detail = addr_batch_summary(items)
+        self._log(f"[地址] 批量替换：{head}", "sys")
+        shown = items[:ADDR_BATCH_LOG_LIMIT]
+        for item in shown:
+            if item.status == ADDR_STATUS_OK:
+                self._log(f"[地址] {item.name}：{'；'.join(item.notes)}", "ok")
+            else:
+                self._log(f"[地址] {item.name}：未替换（{item.error}）", "fail")
+        if len(items) > len(shown):
+            self._log(f"[地址] …另有 {len(items) - len(shown)} 条（详见汇总）", "sys")
+        for line in detail.splitlines():
+            self._log(f"[地址] {line}", "sys")
+
+    def _show_addr_batch_summary(self, items: List[AddrBatchItem], undo: List[tuple]):
+        """汇总弹框（无实际改动时不提供「撤销本次替换」按钮）。"""
+        head, detail = addr_batch_summary(items)
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setWindowTitle("批量替换通信地址")
+        box.setText(head)
+        if detail:
+            box.setInformativeText(detail)
+        box.setStandardButtons(QMessageBox.StandardButton.Ok)
+        undo_btn = None
+        if undo:
+            undo_btn = box.addButton(
+                f"撤销本次替换（{len(undo)} 条）", QMessageBox.ButtonRole.ActionRole
+            )
+        box.exec()
+        if undo_btn is not None and box.clickedButton() is undo_btn:
+            self._undo_addr_batch()
+
+    def _undo_addr_batch(self):
+        """撤销**最近一次**批量替换（只恢复该批命令的 3 个键）。"""
+        undo = list(self._addr_batch_undo or [])
+        if not undo:
+            QMessageBox.information(self, "串口工具", "没有可撤销的批量替换")
+            return
+        for index, (data_hex, protocol, match_hex) in undo:
+            if not (0 <= index < len(self.commands)):
+                continue
+            self.commands[index]["data_hex"] = data_hex
+            self.commands[index]["protocol"] = protocol
+            self.commands[index]["match_hex"] = match_hex
+        self._addr_batch_undo = []
+        self._rebuild_cmd_table()
+        self._schedule_save()
+        self._log(f"[地址] 已撤销上一次批量替换（{len(undo)} 条）", "sys")
 
     # ── 持久化 ───────────────────────────────────────────────────────
 

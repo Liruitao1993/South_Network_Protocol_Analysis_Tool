@@ -15,7 +15,7 @@ This directory contains guidelines for frontend development. Fill in each file w
 | Guide | Description | Status |
 |-------|-------------|--------|
 | [Directory Structure](./directory-structure.md) | Module organization and file layout | To fill |
-| [Component Guidelines](./component-guidelines.md) | Component patterns, props, composition | 已填充（PySide6 新标签页组件规范 + 虚拟表「从站+主站下发」双角色契约 + Web 首页/路由搬迁契约） |
+| [Component Guidelines](./component-guidelines.md) | Component patterns, props, composition | 已填充（PySide6 新标签页组件规范 + 虚拟表「从站+主站下发」双角色契约 + Web 首页/路由搬迁契约 + 串口工具批量替换地址契约 §7h） |
 | [Hook Guidelines](./hook-guidelines.md) | Custom hooks, data fetching patterns | To fill |
 | [State Management](./state-management.md) | Local state, global state, server state | To fill |
 | [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |

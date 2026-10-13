@@ -8,6 +8,8 @@
   [5] 参数合并（缺失/类型不符/越界回落默认值）
   [6] 配置读写往返、源工具裸列表导入、导出为裸列表、损坏文件回落
   [7] 反例自检（判据有效）
+  [20]~[35] 解析输出 / burst / 协议字段 / 勾选 / 匹配方式 / 日志文件 / 状态图标 / 断帧 /
+            **批量替换通信地址**（1.23.83）
 
 运行: QT_QPA_PLATFORM=offscreen python -u test/test_serial_tool_widget.py
 """
@@ -25,9 +27,11 @@ import time  # noqa: E402
 
 from PySide6.QtCore import QObject, QPoint, Qt, Signal  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
-from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
+from PySide6.QtWidgets import QApplication, QDialog, QMessageBox  # noqa: E402
 
 import _config_sandbox  # noqa: E402
+
+import protocol_registry as pr  # noqa: E402
 
 # 构造 MainWindow 之前必须屏蔽模态框（否则 offscreen 下永久阻塞）
 from unittest.mock import patch  # noqa: E402
@@ -2656,6 +2660,223 @@ def main():
                                                  w23.frame_hold_spin, w23.raw_hold_spin)))
     w23.cleanup()
     w22.cleanup()
+
+    section("[35] 批量替换通信地址（按协议替换地址域 + 重算校验 + 撤销）")
+    # 同源现场帧（[34] 里的 4×FE 前导 698.45 帧）+ 645 真帧 + 南网真帧
+    F645 = "68 00 00 00 00 00 00 68 11 04 33 33 34 33 B2 16"
+    F698_FE = ("FE FE FE FE 68 21 00 C3 05 06 05 04 03 02 01 00 EA 33 85 01 "
+               "2C 40 01 02 00 01 09 06 01 02 03 04 05 06 00 00 1A 38 16")
+    FSOUTH = ("68 28 00 20 00 00 00 00 00 00 22 00 00 00 00 00 02 00 01 02 02 "
+              "E8 00 00 00 1E 00 09 00 01 02 03 04 05 06 07 08 09 85 16")
+
+    w24 = stw.SerialToolWidget()
+    check("「替换地址」按钮存在", isinstance(w24.btn_batch_addr, stw.QPushButton)
+          and w24.btn_batch_addr.text() == "替换地址", w24.btn_batch_addr.text())
+    check("按钮未写死宽度（只设下限，可随字号变宽）",
+          w24.btn_batch_addr.maximumWidth() > 10000,
+          str(w24.btn_batch_addr.maximumWidth()))
+    w24.show()
+    QApplication.processEvents()
+    check("按钮不裁字（width >= sizeHint，须在 show 之后量）",
+          w24.btn_batch_addr.width() >= w24.btn_batch_addr.sizeHint().width(),
+          f"{w24.btn_batch_addr.width()} / {w24.btn_batch_addr.sizeHint().width()}")
+
+    # 三条 645 报文（模拟「加载报文文件」导入：protocol=None）+ 带前导 FE 的 698 帧 + 南网帧
+    w24.commands = [
+        {"name": "读电能1", "data_hex": F645, "match_type": "equals",
+         "match_hex": F645, "protocol": None, "enabled": True, "send_count": 1},
+        {"name": "读电能2", "data_hex": F645, "match_type": "contains",
+         "match_hex": "68 D0", "protocol": None, "enabled": True, "send_count": 1},
+        {"name": "读电能3", "data_hex": F645, "match_type": "none",
+         "match_hex": "", "protocol": None, "enabled": True, "send_count": 1},
+        {"name": "698带前导", "data_hex": F698_FE, "match_type": "none",
+         "match_hex": "", "protocol": None, "enabled": True, "send_count": 1},
+        {"name": "南网帧", "data_hex": FSOUTH, "match_type": "none",
+         "match_hex": "", "protocol": None, "enabled": True, "send_count": 1},
+        # 645 帧带 4×FE 前导（前导只对 6/8 剥离并原样恢复）
+        {"name": "645带前导", "data_hex": "FE FE FE FE " + F645, "match_type": "none",
+         "match_hex": "", "protocol": None, "enabled": True, "send_count": 1},
+    ]
+    w24._rebuild_cmd_table()
+    before = [dict(c) for c in w24.commands]
+    logged: list = []                      # 第一批替换的日志（_log 被临时替换）
+
+    # ── 对话框：字段联动 / 预览 / 确定前校验 ──
+    dlg = stw.BatchAddrDialog(w24, commands=w24.commands, checked_indices=[0, 1])
+    check("对话框：协议下拉 = frame_addr_fix 支持集",
+          [dlg.combo_protocol.itemData(i) for i in range(dlg.combo_protocol.count())]
+          == list(stw.frame_addr_fix.SUPPORTED_PROTOCOLS),
+          str([dlg.combo_protocol.itemData(i) for i in range(dlg.combo_protocol.count())]))
+    check("对话框：有勾选时默认作用范围 = 勾选的命令",
+          dlg.scope() == "checked" and dlg.scope_indices() == [0, 1],
+          f"{dlg.scope()} / {dlg.scope_indices()}")
+    dlg.combo_protocol.setCurrentIndex(dlg.combo_protocol.findData(0))
+    check("切到南网 → 地址字段变 源地址+目的地址",
+          list(dlg._addr_edits) == ["src", "dst"], str(list(dlg._addr_edits)))
+    dlg.combo_protocol.setCurrentIndex(dlg.combo_protocol.findData(8))
+    check("切到 698 → 地址字段变 SA+CA",
+          list(dlg._addr_edits) == ["sa", "ca"], str(list(dlg._addr_edits)))
+    dlg.combo_protocol.setCurrentIndex(dlg.combo_protocol.findData(6))
+    check("切回 645 → 地址字段变 表地址",
+          list(dlg._addr_edits) == ["addr"], str(list(dlg._addr_edits)))
+
+    dlg._addr_edits["addr"].setText("000000000033")
+    dlg._refresh_hint()
+    check("提示行回显将写入的字节（低字节在前）",
+          "33 00 00 00 00 00" in dlg.lbl_addr_hint.text(), dlg.lbl_addr_hint.text())
+    check("预览行给出地址域/校验 旧→新",
+          "地址域" in dlg.lbl_preview.text() and "校验" in dlg.lbl_preview.text(),
+          dlg.lbl_preview.text()[:60])
+
+    dlg._addr_edits["addr"].setText("")
+    dlg._on_accept()
+    check("未填地址 → 拦下（不接受）",
+          dlg.result() != int(QDialog.DialogCode.Accepted), str(dlg.result()))
+    dlg._addr_edits["addr"].setText("00 00")
+    dlg._on_accept()
+    check("地址长度不符 → 拦下", dlg.result() != int(QDialog.DialogCode.Accepted),
+          str(dlg.result()))
+    dlg._addr_edits["addr"].setText("000000000033")
+    dlg._on_accept()
+    check("地址合法 → 接受", dlg.result() == int(QDialog.DialogCode.Accepted))
+    dlg.deleteLater()
+
+    dlg2 = stw.BatchAddrDialog(w24, commands=w24.commands, checked_indices=[])
+    check("无勾选时默认作用范围 = 全部命令",
+          dlg2.scope() == "all" and dlg2.scope_indices() == list(range(6)),
+          f"{dlg2.scope()} / {dlg2.scope_indices()}")
+    dlg2.deleteLater()
+
+    # ── 走真实按钮路径（只把两个 exec 换成自动应答）──
+    def _auto_accept_dialog(self):
+        self.combo_protocol.setCurrentIndex(self.combo_protocol.findData(6))
+        self._rebuild_addr_fields()
+        self._addr_edits["addr"].setText("000000000033")
+        self._on_accept()
+        return self.result()
+
+    with patch.object(QMessageBox, "exec", lambda self: 0), \
+            patch.object(stw.BatchAddrDialog, "exec", _auto_accept_dialog):
+        _orig_log = w24._log
+        w24._log = lambda text, color=None: logged.append(text)
+        try:
+            w24._on_batch_addr_clicked()
+        finally:
+            w24._log = _orig_log
+
+    check("645 三条：地址域已替换（低字节在前）",
+          all(w24.commands[i]["data_hex"].startswith("68 33 00 00 00 00 00 68")
+              for i in range(3)),
+          [w24.commands[i]["data_hex"][:24] for i in range(3)])
+    check("南网帧 / 带前导 698 帧：未替换（结构自证失败，原样保留）",
+          w24.commands[3]["data_hex"] == before[3]["data_hex"]
+          and w24.commands[4]["data_hex"] == before[4]["data_hex"])
+    check("645 带前导 FE：替换成功且前导原样保留",
+          w24.commands[5]["data_hex"].startswith("FE FE FE FE 68 33 00 00 00 00 00 68"),
+          w24.commands[5]["data_hex"][:32])
+    check("645 带前导 FE：替换后该校验器 0 fail",
+          pr.make_validator(6).verify(
+              stw.hex_str_to_bytes(w24.commands[5]["data_hex"])).fail_count == 0)
+    check("协议列写入全部 6 条（含未替换的）",
+          [c["protocol"] for c in w24.commands] == [6] * 6,
+          str([c["protocol"] for c in w24.commands]))
+    check("可自证整帧的预期响应同步替换",
+          stw.hex_str_to_bytes(w24.commands[0]["match_hex"])[1:7]
+          == bytes.fromhex("330000000000"), w24.commands[0]["match_hex"][:24])
+    check("片段式预期响应保持原样",
+          w24.commands[1]["match_hex"] == "68 D0", w24.commands[1]["match_hex"])
+    check("表内单元格同步刷新（第 2 列 = 新 HEX）",
+          w24.cmd_table.item(0, 2).text() == w24.commands[0]["data_hex"],
+          w24.cmd_table.item(0, 2).text()[:24])
+    check("表内协议列显示协议短名",
+          w24.cmd_table.item(0, 5).text() == stw.protocol_short_name(6),
+          w24.cmd_table.item(0, 5).text())
+    check("替换后有撤销点（6 条）", len(w24._addr_batch_undo) == 6,
+          str(len(w24._addr_batch_undo)))
+    check("批量替换触发落盘（去抖定时器在跑）", w24._save_timer.isActive() is True)
+    w24._save_timer.stop()
+    check("日志记录了汇总与逐条结果（含未替换原因）",
+          any("[地址] 批量替换：" in t for t in logged)
+          and any("读电能1" in t for t in logged)
+          and any("未替换" in t for t in logged),
+          str([t[:28] for t in logged[:4]]))
+
+    # ── 落盘往返（新实例读回替换后的命令）──
+    w24._save_persisted()
+    w25 = stw.SerialToolWidget()
+    check("落盘读回：地址与协议列都是替换后的值",
+          w25.commands[0]["data_hex"] == w24.commands[0]["data_hex"]
+          and w25.commands[0]["protocol"] == 6,
+          f"{w25.commands[0]['data_hex'][:24]} / {w25.commands[0]['protocol']}")
+    w25._save_timer.stop()
+    w25.cleanup()
+
+    # ── 撤销 ──
+    w24._undo_addr_batch()
+    check("撤销后逐字节恢复（HEX / 协议列 / 预期响应）",
+          all(w24.commands[i] == before[i] for i in range(6)),
+          str([w24.commands[i]["data_hex"][:18] for i in range(6)]))
+    check("撤销后撤销点清空", w24._addr_batch_undo == [])
+    check("撤销也落盘", w24._save_timer.isActive() is True)
+    w24._save_timer.stop()
+    check("撤销后表内单元格也恢复",
+          w24.cmd_table.item(0, 2).text() == before[0]["data_hex"]
+          and w24.cmd_table.item(0, 5).text() == stw.PROTOCOL_NONE_LABEL,
+          w24.cmd_table.item(0, 5).text())
+
+    # ── 只替换勾选行 + 关掉协议列写入 ──
+    w24.commands = [dict(c) for c in before]
+    w24._rebuild_cmd_table()
+    w24._set_all_checkboxes(False)
+    w24.cmd_table.item(1, 0).setCheckState(Qt.CheckState.Checked)
+    QApplication.processEvents()
+
+    def _auto_accept_scope(self):
+        self.combo_protocol.setCurrentIndex(self.combo_protocol.findData(6))
+        self._rebuild_addr_fields()
+        self._addr_edits["addr"].setText("000000000033")
+        self.chk_write_protocol.setChecked(False)
+        self._on_accept()
+        return self.result()
+
+    with patch.object(QMessageBox, "exec", lambda self: 0), \
+            patch.object(stw.BatchAddrDialog, "exec", _auto_accept_scope):
+        w24._on_batch_addr_clicked()
+    check("只处理勾选行（第 2 条）",
+          w24.commands[1]["data_hex"].startswith("68 33 00 00 00 00 00")
+          and w24.commands[0]["data_hex"] == before[0]["data_hex"],
+          w24.commands[1]["data_hex"][:24])
+    check("取消勾选「写入协议列」→ 协议列保持原值",
+          all(c["protocol"] is None for c in w24.commands),
+          str([c["protocol"] for c in w24.commands]))
+    w24._save_timer.stop()
+
+    # ── 发送中禁止替换 + 无命令时的提示 ──
+    snapshot = [dict(c) for c in w24.commands]
+    w24._running = True
+    with patch.object(QMessageBox, "exec", lambda self: 0), \
+            patch.object(stw.BatchAddrDialog, "exec", _auto_accept_scope):
+        w24._on_batch_addr_clicked()
+    w24._running = False
+    check("发送中点了也不改任何命令（且不弹对话框）",
+          [dict(c) for c in w24.commands] == snapshot)
+
+    w26 = stw.SerialToolWidget()
+    w26.commands = []
+    w26._rebuild_cmd_table()
+    no_cmd_ok = True
+    try:
+        with patch.object(QMessageBox, "exec", lambda self: 0):
+            w26._on_batch_addr_clicked()      # 无命令：只提示，不抛异常
+    except Exception as exc:                   # noqa: BLE001
+        no_cmd_ok = f"{type(exc).__name__}: {exc}"
+    check("无命令时点按钮 → 只提示不抛异常、不留撤销点",
+          no_cmd_ok is True and w26._addr_batch_undo == [] and w26.commands == [],
+          str(no_cmd_ok))
+    w26._save_timer.stop()
+    w26.cleanup()
+    w24._save_timer.stop()
+    w24.cleanup()
 
     print()
     print("=" * 64)

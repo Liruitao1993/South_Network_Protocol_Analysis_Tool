@@ -405,6 +405,53 @@ engine = self._engine_factory()            # 否则才是发给本虚拟表的�
 - **变异反证（本任务已做，均干净变红后逐字节还原）**：① 上限改回固定封顶 → 2 项红；
   ② 工具栏放回折叠内容 → 3 项红；③ 不设最小高度提示 → 1 项红；④ 不采集分栏尺寸 → 2 项红。
 
+### 7h. 串口工具「批量替换通信地址」（复用 `frame_addr_fix`，写回表内）
+
+> 源自任务 10-14-serial-batch-addr（1.23.83：用户 → 「串口工具页添加报文时也应该能批量替换通信地址，
+> 按对应协议替换并重新计算校验」）。与 §7f（蓝牙页「发送时替换」）**同一引擎、不同时机**。
+
+- **Scope / Trigger**：一批报文（尤其「加载报文文件」导入的、`protocol=None`）要发给另一台表计，
+  需要**按协议改地址域 + 重算校验**。触发点是「写回表内」而非「发送时套用」——
+  表里看到的就是要发的内容，导出/复制一致。
+- **单一职责**：串口页只做**编排**，地址定位/字节序/校验算法全部走 `frame_addr_fix`
+  （§7f 的复用表照旧，**禁止第二份偏移或算法清单**）。新增纯逻辑：
+  `fix_frame_text(data_hex, protocol, values) -> (new_hex, notes, error)`、
+  `batch_fix_commands(commands, indices, protocol, values, write_protocol, fix_match) -> List[AddrBatchItem]`
+  （**不修改入参**）、`addr_batch_summary(items) -> (首行, 明细)`；GUI 侧 `_on_batch_addr_clicked` /
+  `_apply_addr_batch`（返回撤销快照）/ `_undo_addr_batch`。
+- **三态语义**（`ADDR_STATUS_*`）：`ok`（已替换，`data_hex` 是新帧）/ `kept`（尝试失败：结构或**原帧校验**不符、
+  地址写错、协议不支持 → **原样保留 + `error` 可读**）/ `skipped`（发送数据本身不是有效 HEX）。
+  **失败绝不洗白、绝不静默改半条**（同陷阱 23 精神）；一条出错只影响该条（整批不中断）。
+- **前导 FEH**：只在 `FE_WAKEUP_PROTOCOLS = (6, 8)` 内剥离并**原样恢复**（依据 DL/T 645 §5.3.1、
+  DL/T 698.45 §6.3.1 b)）；其余协议带前导必须报错 —— 剥了等于「救活」错帧（AGENTS §8 陷阱 75）。
+  剥离走 `wakeup_prefix.strip_wakeup_prefix`（**唯一实现**）。
+- **协议列写入与替换成败解耦**：勾选时对作用范围内**每条**命令写 `protocol`（「这批报文属于协议 X」是用户声明；
+  导入的报文协议为空 → 写入后接收侧才能按它断帧解析）。UI 用三态计数 + 逐条原因区分，避免用户误读成「都换成功了」。
+- **预期响应**：只在发送数据**替换成功**时尝试，且只动 `HEX_MATCH_TYPES = ("contains","equals","starts_with","ends_with")`
+  当 `match_hex` 非空；「能自证才替换」由 `frame_addr_fix.apply` 的第一步（结构 + 原帧校验）天然保证；
+  通配 / 正则 / 自证失败 → 保持原样 + `notes` 说明（**不得静默改坏匹配规则**）。
+- **作用范围**：对话框显式选择（默认「勾选的命令（N 条）」，无勾选时默认「全部命令（M 条）」）；
+  `indices` 里越界 / 非 int / bool 一律忽略。
+- **撤销**：`_apply_addr_batch` 返回 `[(原下标, (原 data_hex, 原 protocol, 原 match_hex)), …]`，
+  只保留最近一次（再次替换覆盖）；汇总弹框内 `addButton("撤销本次替换", ActionRole)`（**无改动时不给按钮**）。
+  发送中禁止替换。回滚范围明确：只恢复这 3 个键。
+- **日志/弹框节流**：明细上限 `ADDR_BATCH_LOG_LIMIT = 20` 行 + 「另有 N 条」（同 AGENTS §8 陷阱 58 的 burst 精神）；
+  汇总弹框每类最多 3 条原因。弹框走 `QMessageBox.exec`，**测试要 patch 掉 `exec`**（否则 offscreen 阻塞）。
+- **对话框**：协议下拉取自 `frame_addr_fix.supported_choices()`；地址输入行按 `fields_for` 动态重建（保输入值）；
+  提示行回显「将写入 N 字节：…」，并给作用范围内**样例命令**的替换预览（成功给 notes，失败给 error）。
+  确定前只拦「空地址 / 写法非法」；**698 SA 的长度由帧内地址特征字节决定**（此处推导不出 → 放行，精确长度交给
+  `apply` 判定并给出可读结论）。
+- **回归**：`test/test_serial_addr_fix.py`（104 项：六协议真帧 oracle = 替换后**该协议校验器 0 fail** +
+  非地址/校验字节不变、前导 FE 门控、预期响应五类、作用范围/无效下标、不修改入参、兜底不中断、汇总文案）+
+  `test_serial_tool_widget.py` [35]（536 项：按钮不裁字、对话框字段联动/预览/校验、端到端替换（含带前导 645 帧）
+  与落盘读回、撤销、只处理勾选行、发送中禁止）。
+- **变异反证（本任务已做，均干净变红后逐字节还原）**：① 前导 FE 不恢复 → 4+1 项红；
+  ② 前导门控失效（全协议剥）→ 5 项红；③ 发送未成功也去改预期响应 → 1 项红；
+  ④ 就地修改入参 → 2 项红；⑤ 关闭协议列写入失效 → 1+1 项红。
+- **已知边界（复用既有引擎的固有口径，勿当缺陷修）**：依瓦定制645 的帧与 645 **同形**（结构 + 原帧校验都过），
+  因此选「645」处理依瓦帧也会成功（地址按 645 字节序写）—— 用户需选对协议；
+  `frame_addr_fix` v1 只支持 0/6/7/8/13/14，9/10/11/12 给出可读「暂不支持」。
+
 ### 8. Qt 陷阱（本项目实测）
 - **offscreen 无字体**：`QT_QPA_PLATFORM=offscreen` 下 `QFontDatabase: Cannot find font directory ...`，绘制出的文字是豆腐块 → 断言只能查尺寸/颜色/像素多样性；**要目视核对文字排版必须用默认平台**（`QApplication([])` 不设 offscreen + `widget.grab()` / `QImage.save()`，不需要窗口真的可见）。
 - **`bytes(image.constBits())` 必须持有 QImage 引用**：`bytes(canvas.render_image(w, h).constBits())`（临时对象上取 buffer）会 **access violation（0xC0000005）**；先 `img = ...` 再 `bytes(img.constBits())`。
