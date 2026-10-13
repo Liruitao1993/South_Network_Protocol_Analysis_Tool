@@ -883,3 +883,43 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 
 - 版本/文档四件套随发版批次提交（HEAD 上落后工作区数千行、与 release_check 的版本硬校验强耦合）
 - 可选加固：test_dlt645_sim_lme_query.py / test_dlt645_sim_event_word.py 的「串口回环（COM1↔COM2，可选）」段在端口被占用时会直接判 FAIL（本次见到 COM1 PermissionError(13)，同期另一进程持 COM9）——建议改为端口不可用时明确跳过，避免门禁被硬件占用误伤
+
+
+## Session 28: 蓝牙工具：特征码自动优选 + 一键探测 + 按设备记忆
+
+**Date**: 2026-10-13
+**Task**: 蓝牙工具：特征码自动优选 + 一键探测 + 按设备记忆
+**Branch**: `main`
+
+### Summary
+
+用户诉求：软件主要按 HEX 收发报文，给一堆特征码让用户挑体验很差，要能更快收发。定位到旧 `_auto_pick` 取设备枚举顺序里第一个可用写/通知码（实测常落到 2A00 设备名 / 2A19 电量 / DFU）。本次做三件事：① 按「同码可写可通知 > 厂商透传族谱 > 名称含 tx/rx/串口」打分优选并降权标准 GATT/OTA（打分表只在 bluetooth_core 一处）；② 新增「自动探测」按钮，按打分顺序逐个「订阅 → 写探测帧 → 等回包」，命中即锁定、失败逐条给原因、全败恢复原选择；③ 按设备地址记忆 char_map（换设备自动重新优选）。为使探测时序正确新增 bluetooth_worker.subscribe_finished。
+
+### Main Changes
+
+- bluetooth_core：rank_characteristics / pick_auto / probe_candidates / ProbeSession / resolve_probe_payload（parse 由界面注入）/ char_map 记忆 + settings 三个新键（默认 = 原值，CONFIG_VERSION 不动）
+- bluetooth_worker：subscribe_finished 信号（订阅失败与空接收通道两条路径都发）
+- bluetooth_tool_widget：连接后「按地址沿用 → 打分优选」；换设备清掉上一台的选择；探测按钮 + QTimer 分步驱动（仅 session.step 变化才推进）；全败恢复；状态行收发摘要；对话框置顶+预选+不可用方向文字标注
+- 文档与版本（未随本次提交，留在工作区）：main_gui APP_VERSION 1.23.78→1.23.79 + CHANGELOG、AGENTS §3/§8 陷阱 69/§10、README（徽章/版本行/蓝牙功能行/更新记录）、两个 .iss 已 --sync-iss；spec §7d
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e2a0a9f` | (see git log) |
+
+### Testing
+
+- [OK] test_bluetooth_core 116 项 / test_bluetooth_worker 81 项 / test_bluetooth_widget 169 项 / test_bluetooth_tab_wiring 36 项 全绿
+- [OK] 变异反证 3 条：打分排序失效 → 12 项红（自动优选明确变回 0x2A19）；订阅失败也照写 → 3 项红；记忆写同一全局键 → 3 项红；每条跑完 md5 逐字节还原
+- [OK] 真机（offscreen + 假 worker）smoke：连上→自动优选 0xFFE1（发送/接收）+ 依据日志 + 状态行摘要 + 按地址记忆；点探测→写出发送框帧→收到回包→锁定记忆；对话框 0xFFE1 置顶预选、「0x2A00 …（不可写）」文字标注
+- [OK] release_check.py --with-gui → PASS=131 FAIL=2，两项失败均为 test_dlt645_sim_lme_query / test_dlt645_sim_event_word 的「串口回环（COM1↔COM2）」段：实测 COM1/COM2 同时被 PID 8096（用户正在运行的主程序实例）占用（PermissionError13），与本改动无关（两测试不导入蓝牙模块）；同日早前 PASS=133 FAIL=0 已证
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 可选加固：把 test_dlt645_sim_lme_query.py / test_dlt645_sim_event_word.py 的串口回环段改为「端口打不开时明确跳过」，避免门禁被硬件占用误伤（这两次均因此变红）
+- 版本/文档四件套随发版批次提交（与前两个任务同处置：HEAD 落后数千行且与 release_check 版本硬校验强耦合）
