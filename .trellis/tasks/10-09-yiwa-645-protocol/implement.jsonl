@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "项目硬约束：Web 路由语义（/ 首页 vs /app 工具）·依赖单向（landing_web 不得 import reflex_web）·颜色只用 var(--token) 禁裸 hex；并索引到 PySide6 新标签页组件规范与 Web 首页/路由搬迁契约。协议13 需同时改桌面 Tab 可见性与 Web 首页协议表。"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "PySide6 新增标签页组件规范 + 虚拟表双角色契约 + Web 首页契约。本任务新增组帧页（挂 frame_gen_widget 的 QStackedWidget）与查询页，必须遵循该组件模式与测试断言点。"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "「写新代码前先搜索」清单。本任务的核心约束是单一来源：±0x33/长度拼接/CS/地址编解码只能在 yw645_wire.py 一份，DI 表只能在 yw645_di.py 一份，禁止第二份实现（AGENTS.md 陷阱 48/55/61 的同类教训）。"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "跨层数据流与契约定义。本任务链路为 线格式 → 解析器 → 批量提取 → GUI 表格/查询页 → 预设/组帧，以及桌面↔Web 两端同源，属于典型跨层改动。"}
+{"file": "协议文档/13.依瓦定制645协议/依瓦定制645协议.md", "reason": "协议权威定义原文（帧结构/地址域/COMMAND/长度域/数据域/CS/附录A）。所有字段语义、枚举与示例的最终依据；实现不得凭记忆推断。"}
+{"file": ".trellis/tasks/10-09-yiwa-645-protocol/research/yiwa-645-protocol-facts.md", "reason": "逐字节验证证据档：9 条示例的完整帧与 CS 计算值、X2 的数据项切分自证、±0x33 双形态刻画、X7 不可作 oracle 的理由、帧尾 0x16 不可作定界、D1~D5 文档缺陷清单、与 645 的结构差异对照表、可复现验证脚本。"}
+{"file": ".trellis/tasks/10-09-yiwa-645-protocol/design.md", "reason": "技术设计：模块划分与边界、线格式编解码单一来源、解析器元组契约（(名称,原始值,解析值,说明,起偏移,末偏移闭区间)）、0x33 与 items 形态判别算法、DI 双索引、批量提取自证算法与互斥性、组帧器、接入点清单、D1~D5 处置、测试设计与变异反证清单、回滚方案。"}

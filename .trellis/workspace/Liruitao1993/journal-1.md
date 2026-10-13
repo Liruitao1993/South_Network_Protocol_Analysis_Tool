@@ -802,3 +802,44 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Status
 
 [OK] **Completed**
+
+
+## Session 26: 协议9 2.0 测试扩展 0x0009（报文聚合传输测试模式）
+
+**Date**: 2026-10-13
+**Task**: 协议9 2.0 测试扩展 0x0009（报文聚合传输测试模式）
+**Branch**: `main`
+
+### Summary
+
+按用户提供的《宽带双模通信模块（通感一体物联版）相关测试命令定义_260922》给协议9 补齐 2.0 测试扩展 0x0009「报文聚合传输测试模式」（数据区 1 字节 = 报文聚合数目，8bit）。文档 1.4 逐项核对后确认唯一缺口就是 0x0009（0x0001~0x0008 早已支持；第 2 章表61 模式 1~13 文档自标「原有」且代码已覆盖）。改动落在四处：解析映射+专属函数+分派表、组帧映射+builder+_EXT_BUILDERS+test_modes()（组帧页与仿照回填的唯一入口）、csg_frame_reverse._fill_ext 回填分支、摘要自动生效（补断言）。字节口径沿用 ext_data[x] = 文档字节 x+3。
+
+### Main Changes
+
+- csg_new_gen_cmd_payloads：_TEST_EXT_ID_MAP[0x0009] + _parse_test_ext_0009（整字节，无位域）+ 分派表；数据域缺失时给 ❌ 行不返回空表
+- csg_new_gen_frame_gen：TEST_EXT_ID_MAP / build_ext_0009(agg_count=1) / _EXT_BUILDERS / test_modes() 新增 ext_agg（模式数 24 → 25）
+- csg_frame_reverse._fill_ext：0x0009 → params['agg_count']，粘贴现成帧可「回填 → 原样重建」（unmapped 为空）
+- csg_test_frame_gen_widget：三处互不一致且过期的模式数量文案（26/24/26）→ 模块级 _MODE_COUNT = len(fg.test_modes())
+- 文档与版本（未随本次提交，留在工作区）：main_gui APP_VERSION 1.23.76→1.23.77 + CHANGELOG 1.23.77 条目、AGENTS §1/§5.7/§10、README（徽章/版本/功能表/模块表/更新记录）、两个 .iss 已用 --sync-iss 对齐
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `74b305c` | (see git log) |
+
+### Testing
+
+- [OK] python test/test_csg_test_ext_0009.py → 76 项断言 / 0 失败（映射与模式清单、0x00·0x01·0x05·0xFF golden 含偏移 20、数据域缺失容错、未登记扩展ID 0x000A 护栏、组帧逐字节与越界、app 与 auto 两级闭环、仿照回填逐字节重建、摘要片段）
+- [OK] 回归全绿：test_csg_new_gen / test_csg_summary / test_csg_frame_reverse / test_csg_frame_templates / test_csg_link_frame_gen / test_csg_batch_prefix / test_csg_batch_parse_level / test_csg_hrf_mac；GUI test_csg_frame_gen_gui(139 项) 与 test_collapsible_section(51 项)
+- [OK] 变异反证 3 条：解析位宽取低 4bit → 3 项红；组帧数据域写 2 字节 → 5 项红；反解删 0x0009 分支 → 5 项红（每条跑完 md5 逐字节还原）
+- [OK] python release_check.py --with-gui → PASS=133 FAIL=0 WARN=0（APP_VERSION / CHANGELOG / README 徽章 / .iss 四项一致）；test_modular_iface.py 首跑命中已知间歇 0xC0000409（PASS=430 FAIL=0，重跑 rc=0），与本次改动无关
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 版本/文档四件套（main_gui.py、AGENTS.md、README.md、两个 .iss）随发版批次提交——HEAD 上它们落后工作区数百~数千行（含其它会话在途内容），单独摘取会与 release_check 的「CHANGELOG 顶部版本 = APP_VERSION」硬校验冲突
+- 可选：同族 csg_link_frame_gen.py / csg_frame_templates.py / collapsible_section.py 仍整体未入库（另会话 1.23.64/65 批次），与 csg_test_frame_gen_widget.py 属同一功能集

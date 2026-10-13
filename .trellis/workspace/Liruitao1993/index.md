@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 25
+- **Total Sessions**: 26
 - **Last Active**: 2026-10-13
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~804 | Active |
+| `journal-1.md` | ~845 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 26 | 2026-10-13 | 协议9 2.0 测试扩展 0x0009（报文聚合传输测试模式） | `74b305c` | `main` |
 | 25 | 2026-10-13 | 协议8/6 前导 FEH 唤醒字节合规修复 | `3da40c1` | `main` |
 | 24 | 2026-09-29 | 协议8 698.45 A-XDR 字节序修复（数据域大端） | `05fe755` | `feat/serial-tool-protocol-parse` |
 | 23 | 2026-09-17 | 协议6 主动上报状态字/模式字位表入库 + 电表运行状态字1~7 位号纠错（v1.23.23） | `0f10205`, `497a64b` | `main` |

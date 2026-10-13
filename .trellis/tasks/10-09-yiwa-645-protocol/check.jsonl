@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/guides/index.md", "reason": "复核用思维触发器清单：跨层改动自检（数据格式在层间变化、多消费方共享数据）、代码复用自检（改了常量/新增 helper 前必须搜索）、以及「验证 AI 交叉评审结论」的判据（避免把内部可信数据源误报为注入风险、避免同义反复测试）。"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "复核 GUI 侧契约：新标签页组件的挂载方式、Tab 可见性与注册表一致性断言点、Web 首页/data-testid 断言口径。用于核对协议13 的 Tab 可见性、组帧页与查询页实现是否偏离既有范式。"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "复核 Web 侧硬约束：路由语义、依赖单向、禁止裸 hex 颜色。协议13 需改 landing_web.PROTCOLS 与 Web 查询页，用于核对无死链与无 token 违规。"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复核「单一来源」是否真的成立：确认 ±0x33/长度拼接/CS/地址编解码只有 yw645_wire.py 一份、DI 表只有 yw645_di.py 一份、Web 侧经 import 复用而非复制、批量提取与串口策略未出现第二份长度公式。"}
+{"file": "协议文档/13.依瓦定制645协议/依瓦定制645协议.md", "reason": "复核字段语义、枚举与长度定义是否与协议原文一致；特别核对 COMMAND 位定义、附录A 两行、以及「请求不带 FL/回复带 FL」的要求。"}
+{"file": ".trellis/tasks/10-09-yiwa-645-protocol/research/yiwa-645-protocol-facts.md", "reason": "复核逐字节 oracle 与文档缺陷处置：9 条示例的完整帧/CS、X2 切分、±0x33 双形态、X7 不得作 oracle、D1~D5 是否都按处置方案落地（尤其 D1 不得出现推测的写模式命令码）。"}
+{"file": ".trellis/tasks/10-09-yiwa-645-protocol/prd.md", "reason": "验收标准 AC1~AC16 与范围边界（Scope 明确不做项）。复核时逐条对照并核对证据，同时确认未越界实现范围外内容（如串口协议13 策略、Web 组帧）。"}
+{"file": ".trellis/tasks/10-09-yiwa-645-protocol/implement.md", "reason": "执行计划与审查点 A~F、变异反证清单、回滚点、环境铁律（GUI 测试须经 pwsh，避免 cmd 直起 python 导致的 0xC0000409 假红）。复核需确认各阶段验证命令确实跑过且结果被记录。"}
