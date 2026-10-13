@@ -17,7 +17,8 @@
   [11] cleanup 幂等、restyle_for_theme 不抛
   [12] MTU / 写上限实时化：默认值文案、实时更新标签与缓存、不重订阅、对话框刷新
   [13] 自定义按钮的「协议 + 地址」：下拉联动、动态字段、预览、发送时替换+重算、失败不发
-  [14] 反例自检
+  [14] 自定义报文区空间治理：滚动封顶、日志不被挤没、收起/展开、分栏尺寸记忆
+  [15] 反例自检
 
 运行: python test/test_bluetooth_widget.py
 """
@@ -33,7 +34,15 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from unittest.mock import patch  # noqa: E402
 
 from PySide6.QtCore import QObject, Qt, Signal  # noqa: E402
-from PySide6.QtWidgets import QApplication, QDialog, QLabel, QMessageBox  # noqa: E402
+from PySide6.QtWidgets import (  # noqa: E402
+    QApplication,
+    QDialog,
+    QGroupBox,
+    QLabel,
+    QMessageBox,
+    QScrollArea,
+    QSplitter,
+)
 
 import _config_sandbox  # noqa: E402
 
@@ -268,6 +277,13 @@ def drain(tab):
 def log_text(tab):
     drain(tab)
     return tab.log_text.toPlainText()
+
+
+def settle(times: int = 6):
+    """让布局/滚动条彻底安定：重建大量控件或改动分栏后，一次 `processEvents` 不够
+    （滚动条范围要等内部控件 resize 后才更新，否则断言会读到 0 而误判）。"""
+    for _ in range(max(1, int(times))):
+        QApplication.processEvents()
 
 
 # ── [1] 纯助手 ──────────────────────────────────────────────────────────────
@@ -1329,8 +1345,111 @@ def test_button_address():
     tab.cleanup()
 
 
+# ── [14] 自定义报文区空间治理（1.23.82）──────────────────────────────────
+
+def test_custom_area_space():
+    section("[14] 自定义报文区空间治理（1.23.82）")
+
+    tab = make_tab(FakeBluetoothWorker())
+    tab.resize(1200, 800)
+    tab.show()
+    settle()
+
+    check("自定义区在 QScrollArea 内（可封顶 + 内部滚动）",
+          isinstance(tab.custom_scroll, QScrollArea)
+          and tab.custom_scroll.widget() is tab.custom_host)
+    check("竖向分栏器存在、且不允许把任一侧拖成 0",
+          isinstance(tab.right_splitter, QSplitter)
+          and tab.right_splitter.orientation() == Qt.Orientation.Vertical
+          and tab.right_splitter.childrenCollapsible() is False)
+    check("分栏上侧就是日志组",
+          tab.right_splitter.count() == 2
+          and isinstance(tab.right_splitter.widget(0), QGroupBox))
+
+    # ── 少量按钮：贴合内容、没有滚动条 ──
+    tab._set_buttons([{"name": f"报文{i}", "data": "68 11", "isHex": True} for i in range(3)])
+    settle()
+    cap = tab._custom_scroll_cap()
+    check("封顶 = 3 行按钮（按真实 sizeHint 算，非写死像素）",
+          cap >= 3 * max(b.sizeHint().height() for b in tab._custom_buttons), cap)
+    check("按钮少时**不出现**纵向滚动条",
+          tab.custom_scroll.verticalScrollBar().isVisible() is False,
+          (tab.custom_scroll.height(), cap))
+
+    # ── 40 个按钮：内容超封顶 → 内部滚动，日志不被挤没 ──
+    tab._set_buttons([{"name": f"按钮{i}", "data": "68 11", "isHex": True} for i in range(40)])
+    settle()
+    cap = tab._custom_scroll_cap()
+    log_group = tab.right_splitter.widget(0)
+    check("自定义区高度不超过封顶（按钮再多也不长大）",
+          tab.custom_scroll.height() <= cap + 2,
+          (tab.custom_scroll.height(), cap))
+    check("内容确实超过封顶（判据非恒真：不是「本来就没多少内容」）",
+          tab.custom_host.sizeHint().height() > cap,
+          (tab.custom_host.sizeHint().height(), cap))
+    check("出现纵向滚动条（其余按钮靠滚动查看）",
+          tab.custom_scroll.verticalScrollBar().maximum() > 0,
+          tab.custom_scroll.verticalScrollBar().maximum())
+    check("按钮没有被压扁（高度 ≥ sizeHint；否则是「压扁」不是「滚动」）",
+          all(b.height() >= b.sizeHint().height() - 1 for b in tab._custom_buttons),
+          [(b.height(), b.sizeHint().height()) for b in tab._custom_buttons[:3]])
+    check("日志区仍保有可用高度（未被按钮挤没）",
+          log_group.height() >= 120, log_group.height())
+
+    # ── 给下半区足够空间：自定义区仍应封顶（多余空间不喂给按钮区）──
+    tab.right_splitter.setSizes([200, 600])
+    settle(8)
+    cap = tab._custom_scroll_cap()
+    check("分栏给足空间时自定义区仍不超过封顶（多余空间留给空白）",
+          tab.custom_scroll.height() <= cap + 2,
+          (tab.custom_scroll.height(), cap, tab.right_splitter.sizes()))
+    tab.right_splitter.setSizes([520, 300])
+    settle()
+
+    # ── 收起 / 展开：收起时只占一行标题 ──
+    expanded_height = tab.custom_group.height()
+    tab.custom_group.set_expanded(False)
+    settle()
+    check("收起后内容被隐藏", tab.custom_group.is_content_hidden() is True)
+    check("收起后本区高度骤减（≈ 标题行）",
+          tab.custom_group.height() <= tab.custom_group.header_button.sizeHint().height() + 14,
+          (expanded_height, tab.custom_group.height()))
+    check("收起状态写进配置（custom_collapsed=True）",
+          tab._settings.get("custom_collapsed") is True, tab._settings.get("custom_collapsed"))
+    tab.custom_group.set_expanded(True)
+    settle()
+    check("再展开恢复正常且配置同步",
+          tab.custom_group.is_content_hidden() is False
+          and tab._settings.get("custom_collapsed") is False)
+
+    # ── 竖向分栏：拖动（setSizes 等效）后尺寸被采集 ──
+    tab.right_splitter.setSizes([520, 300])
+    settle()
+    sizes = tab.right_splitter.sizes()
+    check("分栏尺寸被写进设置", tab._collect_settings().get("right_split") == list(sizes), sizes)
+    check("分栏尺寸不是默认值（说明确实按控件状态采集）",
+          list(sizes) != list(core.RIGHT_SPLIT_DEFAULT), sizes)
+
+    # ── 落盘 → 重启恢复 ──
+    tab.custom_group.set_expanded(False)
+    settle()
+    tab._save_persisted()
+    tab.cleanup()
+
+    tab2 = make_tab(FakeBluetoothWorker())
+    tab2.resize(1200, 800)
+    tab2.show()
+    settle()
+    check("重启后保持收起状态", tab2.custom_group.is_content_hidden() is True)
+    got = tab2.right_splitter.sizes()
+    check("重启后恢复分栏尺寸（±6px 容差）",
+          len(got) == 2 and abs(got[0] - sizes[0]) <= 6 and abs(got[1] - sizes[1]) <= 6,
+          (list(sizes), got))
+    tab2.cleanup()
+
+
 def test_negatives():
-    section("[14] 反例自检（判据有效）")
+    section("[15] 反例自检（判据有效）")
 
     worker = FakeBluetoothWorker()
     tab = make_tab(worker)
@@ -1366,6 +1485,7 @@ def main():
     test_char_autodetect_and_probe()
     test_mtu_live_limits()
     test_button_address()
+    test_custom_area_space()
     test_negatives()
 
     print()

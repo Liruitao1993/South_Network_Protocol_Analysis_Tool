@@ -558,6 +558,58 @@ def test_button_protocol_addr():
           core.normalize_addr_map("x") == {} and core.normalize_addr_map(None) == {})
 
 
+def test_custom_area_settings():
+    section("[13] 自定义报文区空间治理（1.23.82）")
+
+    check("封顶行数常量 = 3", core.CUSTOM_ROWS_MAX == 3, core.CUSTOM_ROWS_MAX)
+    check("默认展开（custom_collapsed=False）",
+          core.merge_settings({})["custom_collapsed"] is False)
+    check("坏 custom_collapsed 值回落 False",
+          core.merge_settings({"custom_collapsed": "x"})["custom_collapsed"] is False,
+          core.merge_settings({"custom_collapsed": "x"})["custom_collapsed"])
+    check("custom_collapsed=1/True → True",
+          core.merge_settings({"custom_collapsed": 1})["custom_collapsed"] is True
+          and core.merge_settings({"custom_collapsed": True})["custom_collapsed"] is True)
+
+    default = list(core.RIGHT_SPLIT_DEFAULT)
+    check("默认分栏尺寸 = RIGHT_SPLIT_DEFAULT",
+          core.merge_settings({})["right_split"] == default,
+          core.merge_settings({})["right_split"])
+    check("合法分栏尺寸原样保留",
+          core.merge_settings({"right_split": [300, 200]})["right_split"] == [300, 200])
+    check("字符串数字也认（手改 JSON）",
+          core.merge_settings({"right_split": ["300", "200"]})["right_split"] == [300, 200])
+    for bad in ("x", None, 5, [1], [1, 2, 3], {"a": 1}):
+        check(f"坏分栏尺寸（{bad!r}）→ 回落默认",
+              core.merge_settings({"right_split": bad})["right_split"] == default,
+              core.merge_settings({"right_split": bad})["right_split"])
+    low, high = core.RIGHT_SPLIT_RANGE
+    out = core.merge_settings({"right_split": [-5, 99999]})["right_split"]
+    check("越界逐项夹紧（负值→默认，超大→上限）",
+          out == [default[0], high], out)
+    check("normalize_right_split 直接调用宽容",
+          core.normalize_right_split(None) == default
+          and core.normalize_right_split([0, 10]) == [default[0], low]
+          and core.normalize_right_split([low - 1, 10]) == [low, low],
+          (core.normalize_right_split(None), core.normalize_right_split([0, 10]),
+           core.normalize_right_split([low - 1, 10])))
+    check("落盘往返保留这两个键",
+          _settings_roundtrip({"settings": {"custom_collapsed": True,
+                                            "right_split": [321, 123]}}),
+          "见 detail")
+
+
+def _settings_roundtrip(payload) -> bool:
+    """把 settings 写盘再读回（坏文件宽容的同一入口）。"""
+    with tempfile.TemporaryDirectory(prefix="bt_core_space_") as tmp:
+        path = os.path.join(tmp, "cfg.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False)
+        _buttons, settings = core.load_settings(path)
+    return (settings.get("custom_collapsed") is True
+            and settings.get("right_split") == [321, 123])
+
+
 def test_negatives():
     section("[7] 反例自检（判据有效）")
 
@@ -589,6 +641,7 @@ def main():
     test_char_map()
     test_mtu_negotiation()
     test_button_protocol_addr()
+    test_custom_area_settings()
     test_negatives()
 
     print()

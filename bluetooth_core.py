@@ -95,6 +95,13 @@ BUTTON_NAME_MAX = 32
 ADDR_KEY_MAX = 16
 ADDR_VALUE_MAX = 64
 
+# ── 自定义报文区的空间治理（1.23.82）──────────────────────────────────────
+#: 按钮网格最多显示几行，超出**内部滚动**（按钮再多也不挤占日志空间）
+CUSTOM_ROWS_MAX = 3
+#: 右栏竖向分栏（日志 ↔ 发送+自定义）的默认高度（px）与合法范围
+RIGHT_SPLIT_DEFAULT = (420, 240)
+RIGHT_SPLIT_RANGE = (60, 4000)
+
 # 配置文件名（app_paths.data_path 下，与 serial_tool_config.json 同级）
 SETTINGS_NAME = "bluetooth_tool_config.json"
 SETTINGS_VERSION = 1
@@ -127,6 +134,9 @@ DEFAULT_SETTINGS: Dict[str, object] = {
     "log_auto_save": False,      # 勾选即实时把日志写入文件
     "log_dir": "",               # 空 = 默认目录（数据目录下的 Output/）
     "log_timestamp": True,       # 文件里每行加毫秒时间戳前缀
+    # 自定义报文区空间治理（1.23.82）：收起状态 + 右栏竖向分栏高度（日志, 下半区）
+    "custom_collapsed": False,
+    "right_split": list(RIGHT_SPLIT_DEFAULT),
 }
 
 SCAN_INTERVAL_RANGE = (3, 600)
@@ -232,6 +242,29 @@ def merge_settings(raw) -> dict:
         out["probe_timeout_ms"] = int(
             _clamp(_as_int(raw["probe_timeout_ms"], PROBE_TIMEOUT_MS), *PROBE_TIMEOUT_RANGE)
         )
+    # 自定义报文区空间治理（1.23.82）
+    if "custom_collapsed" in raw:
+        out["custom_collapsed"] = _as_bool(raw["custom_collapsed"], False)
+    if "right_split" in raw:
+        out["right_split"] = normalize_right_split(raw["right_split"])
+    return out
+
+
+def normalize_right_split(raw) -> list:
+    """右栏竖向分栏尺寸 ``[日志, 下半区]``（px）：长度/类型/越界一律宽容处理。
+
+    坏值（非序列、长度≠2、非数字、越界）逐项回落/夹紧到 ``RIGHT_SPLIT_RANGE``，
+    绝不抛异常——配置坏掉不该让蓝牙页打不开。
+    """
+    low, high = RIGHT_SPLIT_RANGE
+    if not isinstance(raw, (list, tuple)) or len(raw) != 2:
+        return list(RIGHT_SPLIT_DEFAULT)
+    out = []
+    for index, item in enumerate(raw):
+        value = _as_int(item, -1)
+        if value <= 0:
+            value = RIGHT_SPLIT_DEFAULT[index]
+        out.append(int(_clamp(value, low, high)))
     return out
 
 

@@ -376,6 +376,28 @@ engine = self._engine_factory()            # 否则才是发给本虚拟表的�
   失败不发/发送框不被改写）。**变异反证**（本任务已做）：645 不重算校验 → 2 项红；地址不反转 → 9 项红；
   698 不重算 HCS/FCS → 2 项红；不校验长度 → 2 项红。
 
+### 7g. 蓝牙自定义报文区的空间治理（封顶 + 滚动 + 折叠 + 竖向分栏，1.23.82）
+
+> 源自任务 10-14-bt-custom-buttons-space（按钮越加越多 → 改前 64 个 ≈ 22 行 ≈ 700px 把日志压没）。
+
+- **结构**：右栏 = `QSplitter(Vertical)`（`日志` ↔ `发送区 + 自定义区`，`childrenCollapsible=False`）；
+  自定义区 = `CollapsibleSection(key="custom_buttons")`，内容 = `QScrollArea`（包 3 列按钮网格）+ 工具栏行。
+- **封顶单一来源**：`core.CUSTOM_ROWS_MAX = 3`；高度由 `_custom_scroll_cap()` 按按钮 `sizeHint()` 实算
+  （**禁止写死像素**：字号可配置，见陷阱 63），`_apply_custom_scroll_cap()` 在「按钮重建后」与
+  `restyle_for_theme()` 各调一次。
+- **配置键**：`custom_collapsed`(bool，True=收起) 与 `right_split`([日志,下半区] px)；两者都经
+  `bluetooth_core.merge_settings` → `normalize_right_split()` 宽容夹紧（坏值不抛）。
+  **`right_split` 只在两侧都有真实高度时才采集**（未 show 时 `sizes()` 可能是 `[0,0]`，否则会用默认值
+  覆盖用户的设置）。
+- **效果（实测，offscreen 1200×800，64 个按钮，分栏 `[200,600]`）**：滚动区 76px（=封顶）+ 滚动范围 448；
+  不封顶则 169px 一路长高。收起后整区 23px（=标题行）。按钮很少（1 行）时无滚动条、高度贴合内容。
+- **测试注意**：几何断言前要 `settle()` 多泵几次事件（一次 `processEvents` 时滚动条范围还是 0 ⇒ 误判）；
+  **封顶的效果必须在「分栏给足空间」那一档量**——默认分栏下封顶/不封顶都被压成 3 行，量不出差别（假绿）。
+- **回归**：`test_bluetooth_widget.py` [14]（结构/封顶/滚动/不压扁/日志高度/折叠/分栏记忆与重启恢复）、
+  `test_bluetooth_core.py` [13]（配置宽容）。
+- **变异反证（本任务已做，均干净变红后逐字节还原）**：① 不套用封顶 → 1 项红；② 封顶行高写死小像素 →
+  1 项红；③ 不采集分栏尺寸 → 2 项红；④ 载入不恢复折叠态 → 1 项红。
+
 ### 8. Qt 陷阱（本项目实测）
 - **offscreen 无字体**：`QT_QPA_PLATFORM=offscreen` 下 `QFontDatabase: Cannot find font directory ...`，绘制出的文字是豆腐块 → 断言只能查尺寸/颜色/像素多样性；**要目视核对文字排版必须用默认平台**（`QApplication([])` 不设 offscreen + `widget.grab()` / `QImage.save()`，不需要窗口真的可见）。
 - **`bytes(image.constBits())` 必须持有 QImage 引用**：`bytes(canvas.render_image(w, h).constBits())`（临时对象上取 buffer）会 **access violation（0xC0000005）**；先 `img = ...` 再 `bytes(img.constBits())`。

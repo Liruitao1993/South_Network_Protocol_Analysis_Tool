@@ -63,6 +63,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QRadioButton,
+    QScrollArea,
     QSpinBox,
     QSplitter,
     QTableWidgetItem,
@@ -76,6 +77,7 @@ import app_paths
 import bluetooth_core as core
 import frame_addr_fix
 from bluetooth_worker import BLEAK_MISSING_HINT, BluetoothWorker
+from collapsible_section import CollapsibleSection
 from gui_utils import (
     ZoomableTableWidget,
     fit_btn_width,
@@ -1336,9 +1338,26 @@ class BluetoothToolWidget(QWidget):
         outer = QVBoxLayout(panel)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(6)
-        outer.addWidget(self._build_log_group(), 1)
-        outer.addWidget(self._build_send_group())
-        outer.addWidget(self._build_custom_group())
+        # 右栏的「日志 ↔（发送区 + 自定义报文区）」用**竖向分栏**分开，可拖拽分配空间（1.23.82）：
+        # 有人现场要长日志、有人常点自定义按钮，交给用户比自己定比例更合适。
+        # `childrenCollapsible=False`：不允许把任一侧拖成 0（否则用户会「找不回」日志或发送区）。
+        self.right_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.right_splitter.setChildrenCollapsible(False)
+        self.right_splitter.addWidget(self._build_log_group())
+
+        bottom = QWidget()
+        bottom_layout = QVBoxLayout(bottom)
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_layout.setSpacing(6)
+        bottom_layout.addWidget(self._build_send_group())
+        bottom_layout.addWidget(self._build_custom_group())
+        bottom_layout.addStretch()
+        self.right_splitter.addWidget(bottom)
+
+        self.right_splitter.setStretchFactor(0, 1)      # 多余空间优先给日志
+        self.right_splitter.setStretchFactor(1, 0)
+        self.right_splitter.splitterMoved.connect(lambda *_a: self._schedule_save())
+        outer.addWidget(self.right_splitter, 1)
         return panel
 
     # ── 日志区 ──────────────────────────────────────────────────────────
@@ -1506,17 +1525,33 @@ class BluetoothToolWidget(QWidget):
 
     # ── 自定义报文 ──────────────────────────────────────────────────────
 
-    def _build_custom_group(self) -> QGroupBox:
-        self.custom_group = QGroupBox("自定义报文")
-        layout = QVBoxLayout(self.custom_group)
-        layout.setContentsMargins(6, 8, 6, 6)
-        layout.setSpacing(4)
+    def _build_custom_group(self) -> QWidget:
+        """自定义报文区：**可折叠 + 高度封顶 + 内部滚动**（1.23.82）。
+
+        按钮越加越多时，若让它按内容撑开，日志窗口会被挤到看不见（上限 64 个 ≈ 22 行 ≈ 700px）。
+        这里做三件事：① 按钮网格放进滚动区并**封顶约 3 行**（超出内部滚动）；② 整区可折叠
+        （收起时只占一行标题，状态写进配置）；③ 工具栏行留在内容区（折叠即连工具栏一起收起，
+        展开后照常新增/编辑）。
+        """
+        self.custom_group = CollapsibleSection("自定义报文", key="custom_buttons", expanded=True)
+        self.custom_section = self.custom_group          # 语义别名（新代码用这个）
+        layout = self.custom_group.content_layout()
 
         self.custom_host = QWidget()
         self.custom_grid = QGridLayout(self.custom_host)
         self.custom_grid.setContentsMargins(0, 0, 0, 0)
         self.custom_grid.setSpacing(4)
-        layout.addWidget(self.custom_host)
+
+        self.custom_scroll = QScrollArea()
+        self.custom_scroll.setWidgetResizable(True)
+        self.custom_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.custom_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.custom_scroll.setWidget(self.custom_host)
+        self.custom_scroll.setMaximumHeight(self._custom_scroll_cap())
+        layout.addWidget(self.custom_scroll)
+        self.custom_group.toggled.connect(self._on_custom_collapsed_toggled)
 
         row = QHBoxLayout()
         row.setSpacing(6)
@@ -1560,6 +1595,34 @@ class BluetoothToolWidget(QWidget):
                       self.btn_custom_export, self.btn_custom_import,
                       self.btn_custom_clear)
         return self.custom_group
+
+    def _apply_custom_scroll_cap(self):
+        """重新套用滚动区封顶高度（按钮重建后 / 主题或字号变化时调用）。
+
+        **封顶按真实 ``sizeHint`` 算**：本项目字号可配置（AGENTS 陷阱 63），不得写死像素；
+        封顶生效后，超出部分由滚动区承担（实测：给足分栏空间时 40 个按钮的滚动区仍为封顶高度，
+        不封顶则会一路长高把空间吃光）。
+        """
+        self.custom_scroll.setMaximumHeight(self._custom_scroll_cap())
+
+    def _custom_scroll_cap(self) -> int:
+        """滚动区封顶高度 = ``core.CUSTOM_ROWS_MAX`` 行按钮（含间距与少量边距）。
+
+        **不写死像素**：本项目字号可配置（AGENTS 陷阱 63），高度按真实按钮 ``sizeHint``
+        （无按钮时按字体）计算；按钮重建后、换主题/字号后都要重算。
+        """
+        spacing = int(self.custom_grid.spacing()) if self.custom_grid.count() >= 0 else 0
+        if self._custom_buttons:
+            row_height = max(button.sizeHint().height() for button in self._custom_buttons)
+        else:
+            row_height = self.fontMetrics().height() + 14
+        rows = max(1, int(core.CUSTOM_ROWS_MAX))
+        return int(row_height) * rows + spacing * (rows - 1) + 8
+
+    def _on_custom_collapsed_toggled(self, expanded: bool):
+        """展开/收起 → 记进配置（下次启动保持；收起时本区只占一行标题）。"""
+        self._settings["custom_collapsed"] = not bool(expanded)
+        self._schedule_save()
 
     # ── 状态行 ──────────────────────────────────────────────────────────
 
@@ -2734,7 +2797,9 @@ class BluetoothToolWidget(QWidget):
         if not self._buttons:
             placeholder = QLabel("（暂无自定义报文按钮，点「新增…」或「批量新增…」添加）")
             self.custom_grid.addWidget(placeholder, 0, 0, 1, BUTTON_GRID_COLUMNS)
-        self.custom_group.setTitle(f"自定义报文（{len(self._buttons)}）")
+        self.custom_group.set_title(f"自定义报文（{len(self._buttons)}）")
+        # 按钮尺寸就绪后重算最小高度与封顶（字号/主题变化时由 restyle_for_theme 再算一次）
+        self._apply_custom_scroll_cap()
 
     def _apply_button_address(self, spec: dict, payload: bytes, name: str):
         """按按钮绑定的协议/地址替换地址并重算校验；未绑定或未填地址 → 原样返回。
@@ -2980,6 +3045,14 @@ class BluetoothToolWidget(QWidget):
             self._update_log_state_label()
             self._refresh_send_hint()
 
+            # 空间治理（1.23.82）：折叠状态 + 竖向分栏尺寸（quiet：不触发保存/日志）
+            self.custom_group.set_expanded_quiet(
+                not bool(settings.get("custom_collapsed", False))
+            )
+            self.right_splitter.setSizes(
+                core.normalize_right_split(settings.get("right_split"))
+            )
+
             # 下面两项会触发信号槽（写日志 / 开文件），放最后
             self.chk_virtual.setChecked(bool(settings.get("virtual_mode", False)))
             if bool(settings.get("log_auto_save", False)):
@@ -3029,7 +3102,13 @@ class BluetoothToolWidget(QWidget):
             "log_timestamp": self.chk_log_stamp.isChecked(),
             "recv_uuids": list(self._recv_uuids),
             "send_uuids": list(self._send_uuids),
+            "custom_collapsed": not self.custom_group.is_expanded(),
         })
+        # 竖向分栏尺寸：只在**真实布局过**（两侧都有高度）时才写，否则会用手心尺寸覆盖掉
+        # 用户上次的设置（未 show 时 sizes() 可能是 [0, 0]）
+        sizes = list(self.right_splitter.sizes())
+        if len(sizes) == 2 and sizes[0] > 0 and sizes[1] > 0:
+            settings["right_split"] = sizes
         return settings
 
     def _schedule_save(self):
@@ -3085,6 +3164,9 @@ class BluetoothToolWidget(QWidget):
         self._update_log_state_label()
         self._refresh_status_line()
         self._refresh_send_hint()
+        # 字号可能变化 → 重算按钮最小高度与封顶（否则会裁字 / 被压扁）
+        if hasattr(self, "custom_scroll"):
+            self._apply_custom_scroll_cap()
 
     # ── 收尾 ────────────────────────────────────────────────────────────
 
