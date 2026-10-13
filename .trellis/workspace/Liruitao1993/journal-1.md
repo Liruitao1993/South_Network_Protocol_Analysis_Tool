@@ -666,3 +666,139 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Status
 
 [OK] **Completed**
+
+
+## Session 25: 协议9（南网新一代载波）接入「协议组帧」页
+
+**Date**: 2026-09-30
+**Task**: 09-30-csg-link-layer-frame-gen —— GUI 协议9 组帧，折叠窗口填字段，SOF 帧与测试模式帧优先
+**Branch**: `main`
+
+### Summary
+
+协议9 的组帧控件（csg_link_frame_gen / csg_new_gen_frame_gen / csg_test_frame_gen_widget）此前只存在于工作区，**没有接到 GUI**（改动前 frame_gen_widget.py 里没有任何 csg 分支，`git grep csg_new_gen_frame_gen` 在已跟踪文件里零命中）。本次按注册表 `frame_gen_mode="csg"` 接线：组帧页左栏改 `QStackedWidget`（0=常规动态表单 / 1=协议9 链路层组帧），五层折叠表单 ①FC ②物理块 ③MAC 头 ④MSDU ⑤ED 封装，进页面默认勾选「组装链路层」+ 默认 SOF 帧；SOF（BPLC/ISAC、长/短 MAC 头、多物理块）/ 信标 / SACK 三型 + **24 个测试模式**全部闭环（FCCS/PBCS/CRC-32 回读「校验通过」）。过程中发现并修掉 3 个真缺陷 + 1 条可见性口径，新增 71 项 offscreen GUI 端到端测试。版本 1.23.64。
+
+### Main Changes
+
+- **接线**：`protocol_registry.ProtocolSpec(frame_gen_mode="csg", preset_mode=None)`；`frame_gen_widget.py` 左栏 `QStackedWidget` 托管 `CsgTestFrameGenWidget(link_layer_default=True)`（栈而非直接塞 `_form_layout`：`_rebuild_form` 会走 `_clear_layout` 递归销毁子控件）；`set_protocol_mode("csg")` 分支隐藏 DI/AFN/mode_group/EB 区与「添加到预设」；`_do_realtime_update_csg` / `_generate_csg_frame` 把 hex 与解析行送进共享的 `result_hex` / `preview_table`；`reset()` 补栈索引复位（mode_group 是栈外兄弟节点，`_rebuild_form(None)` 会把它重新显出来）
+- **预设页可见性口径**：`main_gui._on_protocol_changed` 由 `frame_gen_mode is not None` 改判 `preset_mode is not None` —— 协议9 有组帧页但无预设库，原判据会露出**空的**预设页，且「添加到预设」会经 `preset_buttons._get_path` 的兜底分支误写 `GW_command.json`
+- **修真缺陷 ①**：信标时间戳/周期是 32bit 字段，`QSpinBox.setRange(0, 0xFFFFFFFF)` 抛 `OverflowError` 打断 `_rebuild_fc_fields` ⇒ 切信标帧即崩、输出仍是上一帧类型的 MPDU。改为先夹 `0x7FFFFFFF`
+- **修真缺陷 ②**：`build_link_frame` 预按 `cfg.std_version` 反查 cmt_index（ISAC 136B → TMI 16），使 `_ensure_cmt_index` 的「信标按 BPLC 语义反查」特例被跳过 ⇒ 信标帧报「载波映射表索引 超出 4bit 范围：16」。改为只由 `build_fc → _ensure_cmt_index` 解析
+- **修真缺陷 ③**：`FrameBuildResult.hex()` 的 `mac_frame` 写成 `mac_header + msdu`，SACK 两者皆 `None` ⇒ `TypeError`；该层字典**无条件求值**，故任何 `hex(层)`（含 `parse_rows` 内的 `hex("app")`）都崩、预览整块空掉。改 None 安全拼接，无该层时抛可读 `FrameBuildError`
+- **测试**：新增 `test/test_csg_frame_gen_gui.py`（71 项）；`test_csg_link_frame_gen.py`(176) 入 `CORE_TESTS`，`test_collapsible_section.py`(51) 与前者入 `GUI_TESTS`；`test_protocol_registry.py` 组帧集更新为 `{0,6,7,8,9,12}` 并断言协议9 `preset_mode is None`
+- **文档/版本**：`APP_VERSION`/`BUILD_DATE` → 1.23.64 / 2026-09-30、`main_gui.CHANGELOG` 1.23.64（8 条）、两个 `.iss`、README（badge / 功能表 / 组帧与预设页说明 / 文件清单 / 测试命令）、CLAUDE.md（版本 + 标签页可见性）、AGENTS.md §5.7 组帧页 + **陷阱 65** + §10 摘要
+
+### Testing
+
+- [OK] `release_check.py --with-gui`：直接跑 → PASS=114 FAIL=0 WARN=1（唯一 WARN 是 `BUILD_DATE` 未对齐当天，已修）；版本对齐后直接跑 → PASS=114 **FAIL=1 WARN=0**，唯一 FAIL = `test/test_modular_iface.py`，而该测试自身输出 `结果: PASS=430 FAIL=0`、进程退出码 `-1073740791`（= `0xC0000409`）⇒ **陷阱 62 的 fastfail 假红**（`modular_iface*` 未被本次改动触碰，`git status` 可证）。按陷阱 62 用 `pwsh -File` 包一层重跑 → **PASS=115 FAIL=0 WARN=0**，exit 0
+- [OK] 新增 `test/test_csg_frame_gen_gui.py` 71 项：SOF/信标/SACK 三型闭环、24 模式全量（每帧 FCCS/PBCS/CRC-32 三项「校验通过」+ 接入指示=1 + MAC 头原始 TEI = FC 源/目的 TEI）、输出层次四档、折叠状态收集/恢复与容错、配置快照往返、协议切换回退、按钮不裁字（`show()` 之后按 `sizeHint` 量）
+- [OK] 旁证未回退：`test_csg_new_gen.py`、`test_csg_pbcs_fill_gui.py`(12)、`test_csg_pb_highlight_gui.py`(16)、`test_dlt645_frame_gen_gui.py`(73)、`test_btn_width_fit.py`(66)、`test_button_icons.py`(10)、`test_csg_sequence_gui.py`(37)
+- [OK] 独立核对：链路层组帧与解析器 auto 回读闭环（SOF/信标/SACK/多 PB/长短头，FCCS/PBCS/CRC-32 均「校验通过」、TEI oracle）；全部改动文件 `py_compile` 通过；`main_gui.CHANGELOG[0]` 无残留转义符
+- [备注] 定位过程中踩到「**没有 QApplication 就构造 QWidget**」= Qt 致命错误（`0xC0000409`、stdout 全空、退出码 `-1073740791`），与陷阱 62 手感完全一致、极易误判为环境问题；已在测试的 `_fresh_gen()` 里固定先建 app
+
+### Notes
+
+- **未提交**：本次改动与上一会话遗留的未跟踪文件（`csg_link_frame_gen.py` / `csg_new_gen_frame_gen.py` / `csg_test_frame_gen_widget.py` / `collapsible_section.py` / 三个新测试 / `.trellis/tasks/09-30-csg-link-layer-frame-gen/`）**均未 commit**，等用户确认后统一提交
+- **该任务文档与实际不符（重要）**：`09-30-csg-link-layer-frame-gen/prd.md` / `design.md` 里称作「既有」的 `test_csg_new_gen_frame_gen.py`(144 项) / `test_csg_frame_gen_gui.py`(117 项) **并不存在**，design 要改的 `frame_gen_widget._do_realtime_update_csg` 等三处也从未存在过；「现有页面 465 行」的说法同样无据。本次按**实际代码状态**接线，「复用既有页面」的前提不成立，已在 AGENTS.md §5.7 / 陷阱 65 按事实重写口径
+- 工作区根目录遗留 `temp_csg_diff.patch`（只含 `csg_new_gen_parser.py` 的 diff，与本功能无关，上一会话产物），未删除
+- 协议9 暂无预设命令库；若要补，需在 `preset_buttons._get_path` 增加 csg 路径并放开组帧页「添加到预设」按钮
+
+
+## Session 26: 协议9 组帧「仿照报文回填 + 模板」与右栏布局
+
+**Date**: 2026-09-30
+**Task**: 协议9 组帧 —— 粘贴现成报文自动回填参数（可存本地模板）+ 响应解析默认收起
+**Branch**: `main`
+
+### Summary
+
+按用户需求做两件事：①「实时解析预览」腾空间——响应帧解析对纯组帧场景（协议9）默认收起，加开关随时打开；②**核心**：从官方测试系统拷一帧报文粘进来，自动反解出**全部可识别参数**回填表单，用户只改要变的字段再生成；这套参数可命名存本地，下次「加载模板 → 改关键字段 → 出新帧」。新增纯逻辑 `csg_frame_reverse.py`（反解）+ `csg_frame_templates.py`（存档），组帧页新增「⓪ 仿照报文 / 模板」折叠区。顺带修掉一个**32bit 字段装不进 QSpinBox** 的真缺陷。用户对三个口径的选择：手工 HEX 保真兜底（推荐）/ 模板存完整参数集 + 原始参考报文（推荐）/ 仅协议9 默认收起（推荐）。
+
+### Main Changes
+
+- **反解（`csg_frame_reverse.py`，纯逻辑）**：ED..EE（plc2 / 广西台体）→ 整帧 MPDU → ①FC ②物理块 ③MAC 头 ④MSDU → 应用层帧 → 测试帧 BDU。**取值一律以解析器行为唯一基准**，按「偏移区间」区分 FC(0~15)/物理块头(16~19)/MAC 及以内(≥20)，同名标签（如 `源TEI` 在 FC 与 2.0 扩展里都出现）不串味；长字段（MSDU 负载 / 物理块体 / B 表）的「原始值」列被解析器用 `...` 截断，改为按 `偏移~结束偏移`（第 5 列是闭区间末偏移）从原始字节切。**24 个模式全部可反解**（表61 取模式号高 4 位并回算 `header_len_layout`；2.0 扩展按扩展 ID 分派；A 组取测试数据区频段）
+- **回填即逐字节反证**：`_verify_against()` 用**真实组帧路径**重建并与原帧对比；不一致时把原 MSDU 载荷写进 ④ 区「手工载荷」再比一次（保真兜底），提示里明确"此后改应用层/模式参数不影响载荷"；`unmapped` 记录表单表达不了的字段（报文标识符非 `0x0101` 等）。另给「对比当前输出」报告首个不一致字节偏移
+- **模板存档（`csg_frame_templates.py`）**：`csg_frame_templates.json`（`app_paths.data_path`，已 gitignore），存完整参数集 + 原始参考报文 + 状态摘要；「临时文件 + `os.replace`」原子写；坏文件宽容（非 JSON / 顶层非对象 / 条目缺字段都只跳过并给原因）。`frame_state()` / `apply_frame_state()` 是 state 唯一口径，**apply 顺序不可改**：先切帧类型/标准版本/模式（它们会重建字段控件）再写字段值
+- **修真缺陷：32bit 字段装不进 QSpinBox**。ED 时间戳是真实 Unix 秒量级（`0x68xxxxxx` > `0x7FFFFFFF`），此前上限被夹到 `0x7FFFFFFF` —— 既填不进真实时间戳、回填时 `setValue` 还直接抛 `OverflowError`；信标时间戳/周期同理（陷阱 65 第一条只覆盖了信标）。新增宽整数文本框 `_WideIntEdit`（十进制 / `0x` 十六进制，信号 `textChanged`），并把**所有**回填写值收敛到 `_write_widget_value()`（先夹控件范围再 setValue）
+- **右栏布局**：「显示响应解析」复选框 + `resp_group` 引用；`_apply_resp_visibility()` 只覆盖显示状态、不改用户偏好 → 协议9 强制收起、其它协议按 `frame_gen_mode` 之外的原状显示（逐协议核对过：**只有协议9 行为变化**）
+- **文档/版本**：1.23.65（APP_VERSION / 两个 .iss / README badge）、`main_gui.CHANGELOG`（7 条）、README（功能表 / 组帧章节 / 文件清单 / 测试命令）、CLAUDE.md、AGENTS.md §5.7 + 陷阱 65 扩写 + §10 摘要
+
+### Testing
+
+- [OK] `release_check.py --with-gui` → **PASS=117 FAIL=0 WARN=0**，exit 0（新登记 3 个测试全部 PASS）
+- [OK] 新增 `test/test_csg_frame_reverse.py` **96 项**（纯逻辑）：层次识别 / 24 模式全量反解（应用层帧 + ED+MPDU 两条路径，应用层帧逐字节还原）/ 三型定界符 / BPLC 与 ISAC / 两种 ED 公共头 / ED 32bit 时间戳与信标满 32bit 字段 / 错误路径可读原因 / **变异反证**（改载荷字节 → 反解结果随之变化；改 TEI → 被反解出来）
+- [OK] 新增 `test/test_csg_frame_templates.py` **92 项**：存档往返 / 同名覆盖（不重复、保留 created）/ 名称校验 9 类非法字符 / **坏文件宽容**（非 JSON、顶层非对象、空文件、坏条目跳过）/ 原子写不残留 `.tmp` / 数量上限 / 路径契约；每个用例用独立临时文件，不碰真实数据目录
+- [OK] `test/test_csg_frame_gen_gui.py` **139 项**（原 71 项，新增）：⓪ 区六段折叠齐备、粘贴整帧 → 回填各层（**ED 32bit 时间戳 > 0x7FFFFFFF 也被正确回填**）、改字段后输出变化且 FCCS/CRC-32 重算通过、**保真兜底**（报文标识符改成 0x0202 → 提示走手工 HEX 且「对比当前输出」报告逐字节一致）、对比报告首个偏移、非法/空输入可读提示、模板存档往返（命令行不通 QInputDialog/QMessageBox，用打桩绕过）、响应解析开关（协议9 默认收起、勾上显示、切走再回来按偏好）、预览表高度
+- [OK] 旁证未回退：`test_csg_link_frame_gen.py`(176)、`test_collapsible_section.py`(51)、`test_csg_new_gen.py`、`test_protocol_registry.py`、`test_dlt645_frame_gen_gui.py`(73)、`test_btn_width_fit.py`(66)、`test_csg_pbcs_fill_gui.py`、`test_csg_pb_highlight_gui.py`
+- [备注] 排查中再次踩到「没有 QApplication 就构造 QWidget」= `0xC0000409`、stdout 全空（与陷阱 62 手感相同）；已在测试的 `_fresh_gen()` 固定先建 app
+- [备注] `test_modular_iface.py` 本轮**间歇性**以 `0xC0000409` 退出（连跑 3 次：1 次崩溃 2 次正常，测试自身始终 `PASS=430 FAIL=0`）⇒ 陷阱 62 记录的「本机已知 MainWindow 关闭期 fastfail」，`release_check` 的总 FAIL 因此在 0/1 之间摆动；该模块本次未被改动（`git status` 可证），`pwsh -File` 包一层**并不能**稳定规避
+
+### Notes
+
+- **未提交**：本会话与上一会话的改动**仍未 commit**（用户未要求提交）
+- 交付前逐项核对了三处「只在协议9 生效」：预设页可见性、左栏栈索引、响应解析开关（`preset_mode` 判据逐协议打印对比过）
+- 协议9 模板文件是**用户私有运行时数据**，已在 `.gitignore` 加 `/csg_frame_templates.json`
+- 已知边界（不是缺陷）：若原帧使用表单未建模的常量（报文标识符非 `0x0101`、业务标识非 `0xF0`、保留位非 0），结构化还原不成立 → 走「手工 HEX 保真」，此时改应用层/模式参数不影响载荷（提示里已写明）
+
+### Build
+
+- `BUILD_DATE` = 2026-09-30（当天）/ `APP_VERSION` = 1.23.65 → `pyinstaller 南网协议解析工具.spec --noconfirm` **一次通过**
+- 产物：`dist/南网协议解析工具_v1.23.65_20260930135352.exe`（**98.1 MB**，13:55:48）；文件属性 `FileVersion` / `ProductVersion` = **1.23.65.0**（spec 自动从 `main_gui.APP_VERSION` 生成，与窗口标题同源，无需手工同步）
+- **打包前补了 spec 漏项**：`hiddenimports` 少 6 个协议9 组帧模块（`csg_test_frame_gen_widget` / `csg_link_frame_gen` / `csg_new_gen_frame_gen` / `csg_frame_reverse` / `csg_frame_templates` / `collapsible_section`）。性质说明：它们都是**静态 import**，PyInstaller 静态分析本就能找到，**不是必崩**；但该文件的既有约定是「静态 import 也显式声明保险」，缺了就是漏项（其中 4 个是 1.23.64 遗留、2 个是本轮新增）。已补齐；`Analysis-00.toc` 确认 6 个模块**全部进包**，`warn-南网协议解析工具.txt` 里**零** csg/collapsible 相关缺失
+- 打包日志告警只有既有噪声、**0 个 ERROR**：`importlib_resources.trees`、SQLAlchemy 可选驱动（`pysqlite2`/`MySQLdb`/`psycopg2`）、pyserial 的 macOS ctypes 导入（`IOKit`/`CoreFoundation`）
+- 冒烟：exe 能起来并**跑完整个 import 图**（`try_connect_existing` 在 main_gui 顶层 import 之后才执行，能走到这一步说明冻结尾包模块完整），随后按单实例逻辑把参数交给**正在运行的源码实例**（PID 19724 `python main_gui.py`）并 `exit 0`。**未能以「主实例」身份验证窗口与组帧页** —— 用户当时正开着源码实例，会被抢占；要补需先关掉再跑一次（可通过 `--minimized` 起、确认存活后收掉）
+
+### 1.23.66 — 批量解析工具栏合并成两行
+
+- **需求**：批量解析页「预处理」与「脚本」两行占纵向空间，要求合并到一行
+- **⚠ 本会话与另一个会话并发改了同一批文件**（详见本节末「并发收口」）。最终设计以对方方案为准，我在其基础上收口并把文档/数字对齐
+- **最终布局**：`row0 = 核心操作(5) + 弹性空隙 + 导出(4) + 帧计数徽章`、`row1 = 预处理: + 命令框 + 保存/删除/执行/帮助 ｜ 脚本: + 脚本框 + 加载/运行/移除/帮助`，两行都是 `FlowLayout(stretch=True)`；解析**进度条与「取消」移到页面底部状态行**（只在解析中出现的瞬态控件）
+- **关键发现 ①（否则合并白做）**：4 个导出按钮合计 ~470px，**留在合并行里单行需 ~1700px ⇒ 1366×768 下照样折行**。第一版就是栽在这里（我先把导出留在合并行，实测单行阈值 1820px）。导出移到核心行右端后才真正省下行高
+- **关键发现 ②**：可编辑 `QComboBox` 的 `sizeHint()` **把 `placeholderText` 算进宽度** —— 我写的那条 40 字符示例实测 **481px**（比最长的一条命令还宽），把整行顶到 2012px。换成短示例 `如: hex_extract dedup` 后 371 → **250px**。**不要**用 `setMaximumWidth` 压制（会让宽屏剩余宽度全浪费），宽屏吃满整行改由 `FlowLayout` 的权重分配实现
+- **`FlowLayout` 新增可选 `stretch` 权重**（对方实现）：`FlowLayout(..., stretch=True)` + `addWidget(w, stretch)` / `addStretch()`，默认关闭 ⇒ 顶部协议组行为不变；「宽屏吃满整行」与「窄屏自动折行、永不重叠」同时成立（`QHBoxLayout` 只有前者、单纯 FlowLayout 只有后者）
+- **修复：拉伸与折行共存时的控件重叠** —— 拉伸只改宽度、x 仍按原始 `sizeHint` 排，被拉宽的下拉框会盖住同行右侧按钮（**我在 1920/2560 宽下实测 9~10 处重叠**，如 `QComboBox×保存`/`×删除`/`×脚本:`）。对方 16:19 那次写入用「被拉宽的项把同行后续项一起右推」的 `shift` 累加修好了；我复测确认 2560→760 全宽度**零重叠**
+- **实测阈值**（offscreen，`layout.itemAt(i).geometry()` 判行）：窗口 **≥1264px 两行各自一行**（工具栏 52px，原三行 80px ⇒ 净省一行）；1230~1263px 只有 `row1` 折行（82px）；**<1230px 两行都折**（1000px 默认窗口下 104px，比原三行**多** ~24px —— 这是「导出留在工具栏右上角、不改用户习惯」的代价，已写进 AGENTS 陷阱 66）
+- **测试**：`test/test_batch_toolbar_layout.py`（**59 项**，入 `GUI_TESTS`）。**刻意不绑定「哪个按钮在哪一行」**，只守布局性质：两行且都是 FlowLayout、`stretch` 真生效（下拉框宽于 `sizeHint`）、**1366 基准两行各自一行**、宽窗每行一行、徽章贴行右端、瞬态控件不在工具栏行内、命令框 `sizeHint() ≤ 320`、**2560→760 共 13 个宽度 × 两行零重叠**、相邻项不重叠
+- **测试踩坑（保留）**：①跨 `QTabWidget` 页面**不能用 `mapTo(win)` 判行** —— offscreen 下量出 x=2563 这种超出窗口的离谱坐标；要用 `layout.itemAt(i).geometry()`；②行数要按**容差聚类**（同一行内各项高度不同，`top()` 会差 55/57/61 几像素，直接 `set()` 会误判成多行）；③`QLabel` 是 `QFrame` 子类，数分组竖线必须用**精确类型** `type(w) is QFrame`
+
+#### 并发收口（重要，供后续参考）
+
+- 现象：本会话工作期间，仓库根目录出现 6 个**不是我建的** `scratch_*.py`（`scratch_measure_toolbar.py` 15:52、`scratch_combo_min.py` 15:53、`scratch_combo_live.py`/`scratch_combo_min2.py` 15:54、`scratch_min_override.py` 15:56、`scratch_ph.py` 16:01），`main_gui.py` 里也出现非我所写的改动；连续两次 `git diff` 行号不一致 ⇒ 判定有并发写入
+- 处置：先**探活**（连测 3 次 `main_gui.py` 的 SHA256 + mtime，90 秒内未变、最后写入 16:19 ⇒ 对方已停手），再把**当前工作区当作基线**收口，不擅自回退对方改动
+- 教训：**未跟踪文件也会被并发改写**。我用 `write` 覆盖 `test/test_batch_toolbar_layout.py` 时，把对方扩到 38 项的版本（含「1366 基准」「徽章贴行右端」「命令框 `sizeHint` 上限」三条断言）一并覆盖且**无法从 git 恢复**（该文件从未入库）。已按对方 CHANGELOG/AGENTS 的文字记录把那三条断言补回（现 59 项），并把文档里所有「38 项」修正为 59 项。**下次动未跟踪文件前先读一遍**
+- 对方产物状态：`main_gui.py` 工具栏 + `FlowLayout` stretch + `main_gui.CHANGELOG` 1.23.66 + AGENTS 陷阱 66/§10 均已由对方写好，我只修正了测试项数与（journal 这节）描述；对方的 `scratch_*.py` 仍在仓库根目录未删（非我所建，等用户决定）
+
+### exe 抗杀毒加固（清单 + UPX + 元数据）
+
+- **需求**：用户希望减少杀毒软件拦截/锁文件，问「添加软件相关信息」是否有用
+- **做了什么（`南网协议解析工具.spec`）**：
+  - `EXE(manifest=...)` 补 **`assemblyIdentity`**（`liruitao.SouthNetworkProtocolAnalysisTool` + 版本号）——这是默认清单里**唯一缺**的一项，"谁家的什么软件什么版本"的汇编层身份
+  - `upx=True` → **`upx=False`**（显式关闭）
+  - 版本资源补 `Comments`（用途说明）
+- **⚠ 踩坑（重要）**：`PyInstaller.utils.win32.winmanifest.create_application_manifest()` 是**整份替换**、不是合并（只额外保证 `requestedExecutionLevel` 与 Common-Controls 两项）。第一版我只传 `<assemblyIdentity>`，结果把默认清单的 **`supportedOS`（5 条）与 `longPathAware` 一起冲掉** —— 构建后逐项核对产物清单才发现（`longPathAware` 丢了会让 >260 字符路径失效）。改为在 spec 里写**完整清单**（assemblyIdentity + trustInfo/asInvoker + compatibility/5×supportedOS + longPathAware + Common-Controls），比默认只多一条 assemblyIdentity
+- **实测澄清**：`upx=True` 其实**一直没生效** —— PyInstaller 只在 `CONF['upx_available']` 为真时才用 UPX，本机 PATH 上只有 `upx.BAT`（它不认），构建日志里没有 `UPX is available` 那行、产物里 `UPX!` 标记 0 处。写死 `False` 是去掉"以后 UPX 真可用时会静默启用"的隐患
+- **产物**：`dist/南网协议解析工具_v1.23.66_20260930170014.exe`（98.1 MB，sha256 `d3ea241fd77b2b78…`）。核对：清单五项齐全（`assemblyIdentity` / `requestedExecutionLevel` / `longPathAware` / `Common-Controls` / `supportedOS`×5 全 True）、`FileVersion`/`ProductVersion` 1.23.66.0、`Comments` 已填、`UPX!` = 0
+- **冒烟**：新 exe 起动后正常走到单实例转交（用户的源码实例在跑）`exit 0` ⇒ 清单合法、启动路径正常（清单非法会以 `0xC0000142` 类失败，不会是 0）。中间那版清单不完整的产物已删除
+- **如实结论**：清单/元数据只让 exe"看起来像正规程序"，**不是**误报解药。被拦的真实主因是 ①没有代码签名 ②onefile 自解压到 `%TEMP%\_MEIxxxxx` 再执行（与释放器同构）③每次重建哈希都不同、云信誉归零。已把这条现实边界写进 **AGENTS §2.2 第 5/6 条**
+- **顺带发现的既有问题**：`南网解析工具.iss` 的 `[Files]` 取的是 `dist\协议解析工具\协议解析工具.exe`（**文件夹形态**），但该目录**停更在 2026-08-11**，当前没有任何 spec 会重新生成它 ⇒ 用该 .iss 打包会装到 8 月那份旧程序。要修就得给 spec 补一条 onedir（COLLECT）产物；这同时也正是抗杀毒最有效的结构性改动，等用户定夺
+
+
+## Session 25: 协议8/6 前导 FEH 唤醒字节合规修复
+
+**Date**: 2026-10-13
+**Task**: 协议8/6 前导 FEH 唤醒字节合规修复
+**Branch**: `main`
+
+### Summary
+
+按 DL/T 698.45 §6.3.1 b) 与 DL/T 645 §5.3.1 容忍帧首 FEH 前导：新增 wakeup_prefix.py 单源，协议8/6 解析器入口剥离 + 表格首行前导行 + 帧内行偏移整体位移 + 两校验器同预处理；蓝牙分包日志给出单包上限/MTU 来源。新增 test_wakeup_fe_prefix.py（73 项）入 CORE_TESTS，4 条变异反证。CHANGELOG/AGENTS/README/.iss 版本条目与 1.23.64~75 未提交批次同文件交错，留待该批提交。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3da40c1` | (see git log) |
+
+### Status
+
+[OK] **Completed**
