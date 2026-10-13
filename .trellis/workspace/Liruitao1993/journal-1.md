@@ -923,3 +923,40 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 
 - 可选加固：把 test_dlt645_sim_lme_query.py / test_dlt645_sim_event_word.py 的串口回环段改为「端口打不开时明确跳过」，避免门禁被硬件占用误伤（这两次均因此变红）
 - 版本/文档四件套随发版批次提交（与前两个任务同处置：HEAD 落后数千行且与 release_check 版本硬校验强耦合）
+
+
+## Session 29: 蓝牙工具：MTU/写上限实时化（连接后轮询 + 发送前重读）
+
+**Date**: 2026-10-13
+**Task**: 蓝牙工具：MTU/写上限实时化（连接后轮询 + 发送前重读）
+**Branch**: `main`
+
+### Summary
+
+修「同一台设备有时 20 字节、有时 512 字节」：ATT_MTU 由 OS 异步协商，旧实现只读一次快照。新增 mtu_is_unnegotiated 判据 + 连接后轮询 + 每次发送前 _refresh_live_limits + 独立信号 mtu_updated
+
+### Main Changes
+
+- bluetooth_core: 新增 MTU_DEFAULT/MTU_POLL_INTERVAL/MTU_POLL_TIMEOUT/mtu_is_unnegotiated（判据单一来源）
+- bluetooth_worker: _char_objects 持活对象、_refresh_live_limits、_poll_mtu_if_needed（connected 之后）、_write_coro 发送前重读、新信号 mtu_updated、断开清空
+- bluetooth_tool_widget: _mtu_text 单一文案、_on_limits_updated（只更新读数、不重订阅）、CharacteristicSelectDialog.refresh_chars、模态期间交接引用
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `231d575` | (see git log) |
+
+### Testing
+
+- [OK] test_bluetooth_core 129 项 / test_bluetooth_worker 106 项 / test_bluetooth_widget 177 项 / test_bluetooth_tab_wiring 36 项 全绿
+- [OK] 变异反证 4 条（去轮询 5 红、去发送前刷新 6 红、判据改 < 2 红、对话框刷新失效 1 红）逐条实测变红后逐字节还原
+- [OK] release_check.py --with-gui：PASS=130 FAIL=3（3 项既有环境红：COM1 被占用 ×2、test_modular_iface Qt 退出期 fastfail 而自身 PASS=430 FAIL=0）
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 版本/文档四件套（main_gui APP_VERSION=1.23.80+CHANGELOG、AGENTS §8 陷阱 69、README、两个 .iss）留在工作区，随发版批次提交
