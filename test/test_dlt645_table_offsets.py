@@ -246,8 +246,10 @@ def test_single_source_guard():
     check("E 测试侧无转表复制体（test_web_all_protocols 已改 import 产品实现）",
           not copy_stmt.search(all_proto_src) and copy_fields not in all_proto_src)
 
+    # 「实际帧长」口径：长度取自行内真实帧字节（带 FE 前导时取剥离后的帧 frame，
+    # 见 AGENTS §8 前导 FE 陷阱），而不是长度域声明的值（同 §8 陷阱 49）
     check("E protocol_registry 已用实际帧长（frame_len/cs_pos/end_pos）",
-          "frame_len = len(data)" in reg_src
+          re.search(r"frame_len = len\((?:data|frame)\)", reg_src) is not None
           and "cs_pos = max(0, frame_len - 2)" in reg_src
           and "end_pos = max(0, frame_len - 1)" in reg_src)
     check("E protocol_registry 已不再有声明长度赋值语句", not copy_stmt.search(reg_src))

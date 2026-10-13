@@ -143,6 +143,7 @@ hiddenimports = reflex_hidden + [
     "parser_registry",
     "hdc10_parser",
     "hdc10_mme_parser",
+    "wakeup_prefix",  # 前导 FE 唤醒字节单一来源（协议8/6 解析器与校验器顶层 import）
 
     # ---- 项目模块：校验器 ----
     "validator",

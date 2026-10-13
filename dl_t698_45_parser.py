@@ -7,6 +7,13 @@ import struct
 from typing import Dict, Any, List, Optional, Tuple
 import crcmod.predefined
 
+from wakeup_prefix import (
+    make_wakeup_row,
+    shift_row_offsets,
+    strip_wakeup_prefix,
+    wakeup_display,
+)
+
 
 class DLT69845Parser:
     """698.45 链路层帧解析器"""
@@ -178,11 +185,24 @@ class DLT69845Parser:
             "链路用户数据": {"原始字节": ..., "APDU": ...},
             "帧校验FCS": {...},
             "结束符": {...},
+            "唤醒前导": {"字节数": N, "原始值": "FE FE ...", "说明": ...},  # 仅当前导存在
             "解析状态": "成功" / "失败",
             "错误信息": ...,
         }
         """
         result = {"解析状态": "成功", "原始数据": frame_bytes.hex().upper()}
+
+        # 前导 FE 唤醒字节（DL/T 698.45-2017 §6.3.1 b)「在有效数据帧前加 4 个 FEH」）：
+        # 前导码不是帧内容，剥离后再解析；上面的 `原始数据` 已固化用户原始输入（含 FE）。
+        # 判定单一来源 = wakeup_prefix（勿在别处再写一份扫描）。
+        frame_bytes, skipped = strip_wakeup_prefix(frame_bytes)
+        if skipped:
+            result["唤醒前导"] = {
+                "字节数": skipped,
+                "原始值": wakeup_display(skipped),
+                "说明": "规范 §6.3.1 b) 前导码（FEH），非帧内容，解析已跳过",
+            }
+
         try:
             n = len(frame_bytes)
             if n < 8:
@@ -271,14 +291,24 @@ class DLT69845Parser:
         """解析为 GUI 表格格式
 
         Returns: [(字段名, 原始值, 解析值, 说明, byte_start, byte_end), ...]
+
+        带 FE 前导时：首行给出「唤醒前导字节」，其后**所有帧内行的偏移整体 +skip**，
+        使高亮始终与用户输入的原始报文（含 FE）对齐。
         """
         table_data = []
+        total_len = len(frame_bytes)
         result = self.parse(frame_bytes)
-        n = len(frame_bytes)
+        skip = int(result.get("唤醒前导", {}).get("字节数", 0) or 0)
 
         if result.get("解析状态") == "失败":
+            if skip:
+                table_data.append(make_wakeup_row(
+                    skip,
+                    "规范 §6.3.1 b) 前导码（FEH），非帧内容，解析已跳过",
+                ))
             table_data.append(("❌ 解析失败", "-", "-", result.get("错误信息", ""), None, None))
-            table_data.append(("原始数据", result.get("原始数据", ""), "-", f"共{n}字节", None, None))
+            table_data.append(("原始数据", result.get("原始数据", ""), "-",
+                               f"共{total_len}字节", None, None))
             return table_data
 
         # 帧头
@@ -357,6 +387,14 @@ class DLT69845Parser:
 
         # 结束符
         table_data.append(("结束符", "0x16", "-", "帧结束标志", offset_after_addr, offset_after_addr))
+
+        # 前导 FE：插入首行，并把**所有非空偏移**整体后移（高亮落在原始报文正确字节）
+        if skip:
+            table_data = shift_row_offsets(table_data, skip)
+            table_data.insert(0, make_wakeup_row(
+                skip,
+                "规范 §6.3.1 b) 前导码（FEH），非帧内容，解析已跳过",
+            ))
 
         return table_data
 

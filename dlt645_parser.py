@@ -8,6 +8,7 @@ from dlt645_data_codec import (
     split_write_request, split_change_password, split_clear_command,
 )
 from dlt645_pv_ext import merge_pv_di_map, is_pv_di, parse_pv_di
+from wakeup_prefix import strip_wakeup_prefix
 
 # LME自定义DI集合（手册《LME产品相关信息生产运维接口手册_V2.4》中走645框架的接口）
 _LME_DI_CODES = (DI_STA_VERSION_SINGLE, DI_DUAL_ENTRY)
@@ -45,9 +46,15 @@ class DLT645Parser:
         与「校验判据」分离的理由见 AGENTS.md §8 陷阱 23：校验和不符时帧内内容
         仍可完整解析，只应提示正确值，**不得**返回空白结果（用户报障场景）。
         同仓先例：protocol_parser.py 的南网解析器（照常解析 + 记录校验值/计算值/结果）。
+
+        入口先剥离帧首 FE 前导（DL/T645-2007 §5.3.1「建议先发送 4 个字节 FEH」）
+        ⇒ 本方法对**已剥离**的输入幂等（前导已在上面被去掉时 skipped=0）。
         """
-        if len(data) < 12:
-            return False, f"帧长度不足 12 字节（实际 {len(data)} 字节）"
+        frame, skipped = strip_wakeup_prefix(data)
+        if len(frame) < 12:
+            extra = f"，另有 {skipped} 字节 FE 前导已跳过" if skipped else ""
+            return False, f"帧长度不足 12 字节（实际 {len(frame)} 字节{extra}）"
+        data = frame
         if data[0] != 0x68 or data[7] != 0x68:
             bad = []
             if data[0] != 0x68:
@@ -64,21 +71,33 @@ class DLT645Parser:
         """正确的校验和 CS = 起始符 68H 到数据域最后 1 字节的算术和 & 0xFF
 
         （DL/T645-2007 §6.2；单一来源：check_frame 与 parse 均调本方法，勿另写一份）
+
+        带 FE 前导（§5.3.1 前导字节）时以**剥离后**的帧计算 —— 前导码不在 CS 范围内；
+        无前导时是恒等操作（既有守卫 ``calc_checksum(f) == sum(f[0:-2]) & 0xFF`` 继续成立）。
         """
-        return sum(data[0:-2]) & 0xFF
+        frame, _ = strip_wakeup_prefix(data)
+        return sum(frame[0:-2]) & 0xFF
 
     @staticmethod
     def check_frame(data: bytes) -> bool:
-        """结构 + 校验全部通过（既有公开入口，语义不变）"""
-        ok, _ = DLT645Parser.check_structure(data)
-        return bool(ok) and DLT645Parser.calc_checksum(data) == data[-2]
+        """结构 + 校验全部通过（既有公开入口，语义不变）
+
+        带 FE 前导（DL/T645-2007 §5.3.1）时按剥离后的帧判定；无前导时与改动前一致。
+        """
+        frame, _ = strip_wakeup_prefix(data)
+        ok, _ = DLT645Parser.check_structure(frame)
+        return bool(ok) and DLT645Parser.calc_checksum(frame) == frame[-2]
 
     @staticmethod
     def parse(data: bytes) -> dict:
+        # 前导 FE 唤醒字节（DL/T645-2007 §5.3.1 前导字节）：非帧内容，剥离后再解析；
+        # `raw_hex` 保留用户原始输入（含 FE）便于追溯。单一来源 = wakeup_prefix。
+        _original = data
+        data, wakeup_len = strip_wakeup_prefix(data)
         result = {
             'valid': False,
             'protocol': 'DLT645-2007',
-            'raw_hex': data.hex().upper(),
+            'raw_hex': _original.hex().upper(),
             'address': '',
             'control': 0,
             'control_desc': '',
@@ -92,6 +111,8 @@ class DLT645Parser:
             'checksum_expected': 0,
             'structure_valid': False,
             'structure_error': '',
+            # 前导 FE 唤醒字节数（DL/T645-2007 §5.3.1；0 = 无前导）
+            'wakeup_len': wakeup_len,
             'fields': []
         }
 
@@ -109,13 +130,14 @@ class DLT645Parser:
 
         if len(data) < 12:
             # 连最短帧都不够，字段位置无法可靠定位：给出帧长说明 + 原始 hex（可接受的降级）
+            # 展示**用户原始输入**（含 FE 前导）与 `raw_hex` 同源，避免「贴进去的和看到的不一样」
             result['error'] = (f"{struct_err}，无法定位完整字段"
                                "（DL/T645-2007 最短帧：68H + 地址(6B) + 68H + 控制码"
                                " + 数据长度 + CS + 16H = 12 字节）")
             result['fields'] = [
-                ('❌ 帧长度不足', f"{len(data)} 字节",
+                ('❌ 帧长度不足', f"{len(_original)} 字节",
                  'DL/T645-2007 最短帧：68H + 地址(6B) + 68H + 控制码 + 数据长度 + CS + 16H = 12 字节'),
-                ('原始数据', data.hex().upper(), f"{len(data)} 字节"),
+                ('原始数据', _original.hex().upper(), f"{len(_original)} 字节"),
             ]
             return result
 

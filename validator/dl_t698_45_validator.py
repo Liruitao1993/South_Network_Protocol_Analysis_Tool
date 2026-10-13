@@ -3,6 +3,7 @@
 from typing import List
 from validator.base import BaseValidator, CheckItem, CheckLevel, ValidationResult
 from dl_t698_45_parser import DLT69845Parser
+from wakeup_prefix import strip_wakeup_prefix
 
 
 class DLT69845Validator(BaseValidator):
@@ -13,7 +14,22 @@ class DLT69845Validator(BaseValidator):
 
     def verify(self, frame_bytes: bytes) -> ValidationResult:
         checks: List[CheckItem] = []
+
+        # 前导 FE 唤醒字节（DL/T 698.45-2017 §6.3.1 b)）：
+        # 校验必须与解析同预处理——否则会出现「解析成功但校验报起始符错误」。
+        # 判定单一来源 = wakeup_prefix（AGENTS §8 前导 FE 陷阱）。
+        original = frame_bytes
+        frame_bytes, skipped = strip_wakeup_prefix(frame_bytes)
         n = len(frame_bytes)
+
+        if skipped:
+            checks.append(CheckItem(
+                name="前导唤醒字节",
+                level=CheckLevel.PASS,
+                expected="无",
+                actual=f"{original[:skipped].hex(' ').upper()}（{skipped} 字节）",
+                message=f"跳过 {skipped} 字节 FE 前导码（规范 §6.3.1 b) 前导码，非帧内容）",
+            ))
 
         # 1. 起始字符
         if n < 1:

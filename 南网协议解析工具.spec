@@ -131,6 +131,7 @@ a = Analysis(
         'hdc10_mme_parser',
         'protocol_registry',  # 协议能力注册表（main_gui 顶层 import，显式声明保险）
         'parser_registry',  # 解析器懒加载（同上）
+        'wakeup_prefix',  # 前导 FE 唤醒字节单一来源（协议8/6 解析器与校验器顶层 import）
         'validator.hdc10_validator',
         'validator.gw_new_gen_validator',  # make_validator 走 importlib，需显式声明
         'obis_lookup',

@@ -1,6 +1,7 @@
 """DLT645-2007 电表协议验证器"""
 
 from .base import BaseValidator, ValidationResult, CheckItem, CheckLevel
+from wakeup_prefix import strip_wakeup_prefix
 
 
 class DLT645Validator(BaseValidator):
@@ -12,6 +13,21 @@ class DLT645Validator(BaseValidator):
     def verify(self, frame_bytes: bytes) -> ValidationResult:
         """验证 DLT645 帧的合法性"""
         result = ValidationResult(protocol="DLT645-2007", valid=True)
+
+        # 前导 FE 唤醒字节（DL/T645-2007 §5.3.1「建议先发送 4 个字节 FEH」）：
+        # 校验与解析同预处理——先剥离再走全部检查（最小长度/起始符/结束符/CS/数据长度）。
+        # 判定单一来源 = wakeup_prefix。
+        original = frame_bytes
+        frame_bytes, skipped = strip_wakeup_prefix(frame_bytes)
+
+        if skipped:
+            result.checks.append(CheckItem(
+                name="前导唤醒字节",
+                level=CheckLevel.PASS,
+                expected="无",
+                actual=f"{original[:skipped].hex(' ').upper()}（{skipped} 字节）",
+                message=f"跳过 {skipped} 字节 FE 前导码（规范 §5.3.1 前导字节，非帧内容）",
+            ))
 
         # 1. 最小帧长度校验
         check = self._check_min_length(frame_bytes, 12, "DLT645")

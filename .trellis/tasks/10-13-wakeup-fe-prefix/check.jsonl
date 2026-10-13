@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/guides/index.md", "reason": "复核用思维触发器：跨层改动自检（同一语义在层间变形：字节偏移在「剥离前/剥离后」两套坐标系间位移）、代码复用自检（新增 helper 前必须搜索既有实现），以及「验证 AI 评审结论」的判据（避免同义反复测试、避免把正常行为误报为缺陷）。"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复核「单一来源」是否真的成立：FE 判定只在 wakeup_prefix.py 一份；协议8 表格与协议6 表格共用同一位移函数；校验器不复制解析器的剥离逻辑（传入原始字节让解析器自己剥离）；Web 侧无第二份同义实现。"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "复核「解析内核唯一实现，两端调用」契约与 table_data 消费方容错约定：新增的「唤醒前导字节」行不得破坏摘要提取、查询页匹配、批量详情与导出等既有消费方。"}
+{"file": ".trellis/tasks/10-13-wakeup-fe-prefix/research/fe-prefix-evidence.md", "reason": "复核实现是否与证据档逐条对齐（报障帧字段值、规范原文行号、调用路径覆盖、蓝牙分包算式与单包上限 20、既有行为锚点），以及证据档若被实测推翻是否已先行更新。"}
+{"file": ".trellis/tasks/10-13-wakeup-fe-prefix/prd.md", "reason": "逐条核对 AC1~AC11 的证据；确认未越界（协议 0/7/9/10/11/12/13 不变、分帧策略不改、虚拟表不改、不放宽 645「建议」为「必须」、不改包间延迟默认值）。"}
+{"file": ".trellis/tasks/10-13-wakeup-fe-prefix/design.md", "reason": "复核实现与设计一致性：解析器层剥离而非调用点剥离、偏移整体位移而非重写输入框、两个表格构建方共用位移函数、不改清单是否被遵守。"}
+{"file": ".trellis/tasks/10-13-wakeup-fe-prefix/implement.md", "reason": "复核执行计划是否按阶段落地、5 个审查点结论是否有实测证据、4 条变异反证是否真的观察到变红（含还原）、验证命令是否经 pwsh 执行、回滚点是否可用。"}

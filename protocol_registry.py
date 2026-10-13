@@ -14,6 +14,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Optional, Tuple
 
+from wakeup_prefix import make_wakeup_row, shift_row_offsets
+
 
 @dataclass(frozen=True)
 class ProtocolSpec:
@@ -391,13 +393,17 @@ class DLT645GuiParser:
 
     def parse_to_table(self, data):
         result = self.parser.parse(data)
+        # 前导 FE 唤醒字节（DL/T645-2007 §5.3.1 前导字节）：非帧内容，
+        # frame_len 以**剥离后**的帧为准；表格首行给出前导，其余行偏移整体 +wakeup_len。
+        wakeup_len = int(result.get("wakeup_len", 0) or 0)
+        frame = data[wakeup_len:] if wakeup_len else data
         table = []
         data_len = result.get("data_length", 0)
         # 字节偏移一律以**实际帧长**为准：1.23.22 起「声明长度与实际不符」的帧也会走到
         # 这里（不再拒解析），用声明长度推出来的偏移会越界（见 AGENTS §8 陷阱 49）。
         # 合法帧满足 frame_len == 10 + data_len + 2，此时以下三式与旧公式完全相同
         # ⇒ 合法帧输出逐行不变（硬约束）。
-        frame_len = len(data)
+        frame_len = len(frame)
         data_end = max(0, min(10 + data_len - 1, frame_len - 3))
         cs_pos = max(0, frame_len - 2)
         end_pos = max(0, frame_len - 1)
@@ -440,6 +446,14 @@ class DLT645GuiParser:
                 byte_start, byte_end = end_pos, end_pos
 
             table.append((field, raw, parsed_value, desc, byte_start, byte_end))
+
+        # 前导 FE：插入首行，并把**所有非空偏移**整体后移（高亮落在原始报文正确字节）
+        if wakeup_len:
+            table = shift_row_offsets(table, wakeup_len)
+            table.insert(0, make_wakeup_row(
+                wakeup_len,
+                "规范 §5.3.1 前导字节（FEH），非帧内容，解析已跳过",
+            ))
 
         return table
 

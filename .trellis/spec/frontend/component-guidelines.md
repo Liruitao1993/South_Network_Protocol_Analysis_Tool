@@ -438,3 +438,98 @@ def landing_page(*, version: Any = "", exe_available: Any = False, ...) -> rx.Co
 ```
 
 > **Warning（dev/prod 分叉）**：`reflex run --env dev` 时前端(:3000)与后端(:8000)是**跨源绝对地址**通信，**没有任何代理规则**——`:3000/api/*`、`/download/*`、`/fbimg/*`、`/ping` 全部返回 `200 + text/html`（SPA 兜底），只有直连 `:8000` 才是真资源（`.web/env.json` 的 `EVENT: ws://localhost:8000/_event` 是判据）。**Web 页面里不要用相对 URL 引用后端静态资源**；prod（`run_app.py` 单端口挂载）才同源可用。相关遗留缺陷见 `AGENTS.md §8` 陷阱 35。
+
+
+---
+
+## Scenario: 68 家族前导 FEH 唤醒字节（协议8 / 协议6，1.23.76 起）
+
+> 源自任务 `10-13-wakeup-fe-prefix`（用户报障：蓝牙工具收到 `FE FE FE FE 68 21 00 C3 …` 的 39 字节 698 回包，报「起始字符错误: 0xFE」，一字段都解不出）。适用于「输入字节流里含有**不属于帧内容**的链路层包裹」的任何协议改动。
+
+### 1. Scope / Trigger
+
+- Trigger：**链路层契约变化**（帧首允许前导码）+ **跨层数据变形**（同一份字节偏移在「剥离前 / 剥离后」两套坐标系间位移）+ 规范依据（DL/T 698.45-2017 §6.3.1 b)「在有效数据帧前加 4 个 FEH 作为前导码」；DL/T 645-2007 §5.3.1「建议先发送 4 个字节 FEH，以唤醒接收方」）。
+- 不适用：协议 0/7/9/10/11/12/13（无规范依据，行为必须保持不变）。
+
+### 2. Signatures
+
+```python
+# wakeup_prefix.py —— 全仓唯一判定实现（纯逻辑，无 Qt，不 import 任何 parser）
+WAKEUP_BYTE = 0xFE
+WAKEUP_FIELD_NAME = "唤醒前导字节"
+def wakeup_prefix_len(data: bytes) -> int                      # 帧首连续 0xFE 个数
+def strip_wakeup_prefix(data: bytes) -> tuple[bytes, int]      # 无前导时**恒等返回**
+def wakeup_display(skipped: int) -> str                        # "FE FE FE FE"
+def make_wakeup_row(skipped: int, note: str) -> tuple          # (行名, 原始值, "-", note, 0, n-1)
+def shift_row_offsets(rows: list, delta: int) -> list          # 仅位移「第5、6列同时为 int」的行
+
+# 协议8：DLT69845Parser.parse → 结果新增 result["唤醒前导"] = {字节数, 原始值, 说明}
+# 协议6：DLT645Parser.parse  → 结果新增 result["wakeup_len"] = int
+# 两者 parse_to_table 首行 = make_wakeup_row(...)（6 元组，偏移 0..skip-1）
+```
+
+### 3. Contracts
+
+| 项 | 契约 |
+|---|---|
+| 剥离口径 | 只剥**帧首连续** `0xFE`（0~N 个，不假定恰好 4 个）；**帧中间的 FE 不动**；68 家族首字节恒 `68` ⇒ 零误伤 |
+| `原始数据` / `raw_hex` | **必须保留用户原始输入（含 FE）**，便于追溯与高亮 |
+| 表格偏移坐标系 | = **用户输入**（含 FE）：解析器内部按剥离后帧计算，表格构建方整体 `+skip`（`起始字符` = skip~skip） |
+| 校验器 | 与解析**同预处理**：先剥离再走全部检查；`skip > 0` 时首项追加 PASS `前导唤醒字节`（否则出现「解析成功但校验报起始符错误」） |
+| 协议6 细节 | `check_structure` / `check_frame` / `calc_checksum` **都要**按剥离后帧判定（否则 CS 把前导算进和里）；`DLT645GuiParser.frame_len` 必须用剥离后长度（否则「校验和 / 帧结束符」偏移越界）；`fields` 列表**不加**前导行（形状守卫依赖） |
+| 不动的地方 | 批量/Web 帧提取（本就从 `68H` 起同步）、串口/蓝牙分帧策略表（带 FE 走既有时间聚合，整段交链路层兜住） |
+
+### 4. Validation & Error Matrix
+
+| 输入 | 期望 |
+|---|---|
+| `FE×4 + 合法帧` | 解析成功、HCS/FCS 通过、表格首行为前导行、偏移整体 +4、校验全 PASS |
+| `FE×1 / ×2 / ×8 + 合法帧` | 同上（起止偏移 = `(0, k-1)`） |
+| 无 FE 合法帧 | **逐行逐字节与改动前相同**（硬约束） |
+| 全 `FE` | 剥离后为空 → 失败「帧长度不足」（不臆造、不空白） |
+| `FE…` 后非 `68` | 失败（起始字符错误），前导行偏移仍正确 |
+| 带 FE 但 CS 错 | 解析继续并给出「⚠ 校验和错误 / 正确值」；校验器 FAIL（**前导不放宽任何判据**） |
+
+### 5. Good / Base / Bad Cases
+
+- **Good**：链路层剥离 + 表格位移 + 校验器剥离三处同时落地，且判定只有 `wakeup_prefix.py` 一份。
+- **Base**：无前导帧走恒等路径 —— 既有测试（`test_dlt645_tolerant_parse.py` 13 行基线、`test_dlt645_table_offsets.py` 偏移矩阵）继续作为零回归锚点。
+- **Bad**：在调用点各自 `strip()`（5~6 处，且未来调用方会漏）；只改解析不改表格（高亮落到错误字节，比解析失败更隐蔽）；只改解析不改校验器（自相矛盾）。
+
+### 6. Tests Required
+
+`test/test_wakeup_fe_prefix.py`（73 项，`release_check.py:CORE_TESTS`），断言点：
+
+1. `wakeup_prefix` 纯逻辑：0/1/2/4/8 前缀、帧内 FE 不动、空输入、全 FE、`make_wakeup_row` 形状、`shift_row_offsets` 跳过 `None` 与 `delta=0` 恒等
+2. 协议8：报障帧 golden（状态/HCS/FCS/OAD/数据）+ 首行与 `(4,4)/(16,17)/(36,37)/(38,38)` 偏移 + 无 FE 冻结锚点（行数、关键行值）+ 局部/全 FE/非 68 降级
+3. 协议6：`valid`/CS/`wakeup_len`/`raw_hex` + 表格逐行 `+4` + 13 行基线不变 + 虚拟表从站不受影响
+4. 两个校验器：带 FE 全 PASS（含前导项）、无 FE 项不变、坏 CS 仍 FAIL
+5. 护栏：协议 0/7/9/10/11/12/13 对带 FE 输入**不产生前导行且行为不变**
+6. 批量/Web：`batch_core._extract_69845_frames` 与 `web_utils.extract_69845_frames` 结果一致
+7. offscreen GUI：单帧页粘贴报障帧 → 首行为前导行；`MainWindow._serial_parse_provider`（串口/蓝牙共用）返回非失败表；`verify_single` 通过
+8. 反例自检 + 单一来源源码守卫（按 `import` 锚定，文档提及不算）
+
+**变异反证（必须实测变红后还原，本任务已做）**：① `wakeup_prefix_len` 恒返回 0 → 4 项红；② 表格不位移 → 4 项红；③ 校验器不剥离 → 2 项红；④ 协议6 `parse` 不剥离 → 6 项红。
+
+### 7. Wrong vs Correct
+
+#### Wrong
+```python
+# ① 各调用点各自剥离（parse_single / _serial_parse_provider / 快捷小窗 / Web / 校验…必漏一处）
+frame = frame_bytes.lstrip(b"\xfe")          # 连帧中间的 FE 一起剥，且 5~6 处复制
+# ② 只改解析不改表格：高亮按「剥离后」坐标系，点「起始字符」落到第 0 字节
+table_data = self.parse(frame)["..."].build()  # 偏移未 +skip
+# ③ 只改解析不改校验器：用户看到「解析成功」+「校验：起始字符错误」
+checks.append(self._check_start_char(frame_bytes, 0x68, 0))   # frame_bytes 仍含 FE
+```
+
+#### Correct
+```python
+# ① 链路层唯一判定（wakeup_prefix.py），解析器入口就地重绑，下游零改动
+frame_bytes, skipped = strip_wakeup_prefix(frame_bytes)
+# ② 表格层用同一位移函数（协议8 与协议6 共用，禁止各写一份）
+table_data = shift_row_offsets(table_data, skip)
+table_data.insert(0, make_wakeup_row(skip, "…非帧内容，解析已跳过"))
+# ③ 校验器同一判定；HCS/FCS 交给已容忍的解析器（传原始字节，不复制剥离逻辑）
+frame, skip = strip_wakeup_prefix(frame_bytes)
+```

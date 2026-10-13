@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "本任务的核心约束是**单一来源**：前导 FE 的判定只能有一份（wakeup_prefix.py），表格偏移位移规则也只能有一份（shift_row_offsets），协议8 与协议6 的表格构建方必须共用；且禁止在 Web 侧另写一份剥离逻辑（改前先搜索既有实现）。"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "本改动是典型跨层链路：串行链路层（前导码）→ 解析器（起始符判据/偏移）→ GUI 表格（偏移用于字节高亮）→ 校验器（结论一致性）。跨层思考指南用于核对「偏移在层间变化」「多消费方共享同一解析结果」两类自检项。"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "含本项目硬契约：「解析内核 parser_*.py / validator/* 是唯一实现，两端调用，不要在 Web 侧再包一层同义实现」（本任务正是该契约的落地）；另含「解析器 table_data 数值提取必须容错」与测试要求（PYTHONIOENCODING=utf-8 等），用于核对新增表格行不影响既有消费方。"}
+{"file": ".trellis/tasks/10-13-wakeup-fe-prefix/research/fe-prefix-evidence.md", "reason": "证据档（含规范原文摘录与行号，故不必注入 1.5MB 的协议全文）：报障帧逐字节复核（39 字节 → 剥离 4 字节后 35 = L+2 + HCS/FCS 双通过）、698 §6.3.1 b) 前导码与 §6.3.1 c) 空闲间隔、645 §5.3.1 前导字节、parse_to_table 调用路径地图（为什么必须改在解析器层）、蓝牙分包算式与实测单包上限 20、既有行为锚点清单。"}
+{"file": ".trellis/tasks/10-13-wakeup-fe-prefix/design.md", "reason": "技术设计：为什么把 FE 容忍放在链路层解析器（三方案对照 + 漂移风险）、wakeup_prefix.py 的 API 与判定口径、六个文件的逐点改法（含 645 表格 9 个偏移分支）、不改清单、偏移正确性论证、风险与回滚。"}
+{"file": ".trellis/tasks/10-13-wakeup-fe-prefix/implement.md", "reason": "执行计划：阶段 0~6 的顺序清单、5 个审查点的判据、验证命令清单（既有套件 + 新增套件 + release_check）、4 条变异反证、回滚点、环境铁律（GUI 测试须经 pwsh，避免 0xC0000409 假红）。"}

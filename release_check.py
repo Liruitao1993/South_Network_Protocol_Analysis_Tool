@@ -120,6 +120,8 @@ CORE_TESTS = [
     "test/test_message_tool_numeric.py",
     "test/test_dl_t698_45_extract.py",
     "test/test_dl_t698_45_endian.py",
+    # 前导 FE 唤醒字节（协议8/6）：解析/表格偏移/校验一致性 + offscreen GUI（AGENTS §8 前导 FE 陷阱）
+    "test/test_wakeup_fe_prefix.py",
     "test/test_serial_tool_widget.py",
     "test/test_serial_proto_frame.py",
     "test/test_serial_worker_write_raw.py",
