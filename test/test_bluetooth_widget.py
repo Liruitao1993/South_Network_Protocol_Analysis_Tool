@@ -40,7 +40,6 @@ from PySide6.QtWidgets import (  # noqa: E402
     QGroupBox,
     QLabel,
     QMessageBox,
-    QScrollArea,
     QSplitter,
 )
 
@@ -1347,6 +1346,10 @@ def test_button_address():
 
 # ── [14] 自定义报文区空间治理（1.23.82）──────────────────────────────────
 
+def _custom_buttons(count: int):
+    return [{"name": f"报文{i}", "data": "68 11", "isHex": True} for i in range(count)]
+
+
 def test_custom_area_space():
     section("[14] 自定义报文区空间治理（1.23.82）")
 
@@ -1355,8 +1358,8 @@ def test_custom_area_space():
     tab.show()
     settle()
 
-    check("自定义区在 QScrollArea 内（可封顶 + 内部滚动）",
-          isinstance(tab.custom_scroll, QScrollArea)
+    check("按钮区在专用滚动容器内（最小高度不被内层网格撑大）",
+          isinstance(tab.custom_scroll, btw.ButtonScrollArea)
           and tab.custom_scroll.widget() is tab.custom_host)
     check("竖向分栏器存在、且不允许把任一侧拖成 0",
           isinstance(tab.right_splitter, QSplitter)
@@ -1366,54 +1369,65 @@ def test_custom_area_space():
           tab.right_splitter.count() == 2
           and isinstance(tab.right_splitter.widget(0), QGroupBox))
 
-    # ── 少量按钮：贴合内容、没有滚动条 ──
-    tab._set_buttons([{"name": f"报文{i}", "data": "68 11", "isHex": True} for i in range(3)])
+    # ── 上下限：下限 1 行、上限按内容（空间够就不滚动）──
+    tab._set_buttons(_custom_buttons(10))
     settle()
-    cap = tab._custom_scroll_cap()
-    check("封顶 = 3 行按钮（按真实 sizeHint 算，非写死像素）",
-          cap >= 3 * max(b.sizeHint().height() for b in tab._custom_buttons), cap)
-    check("按钮少时**不出现**纵向滚动条",
-          tab.custom_scroll.verticalScrollBar().isVisible() is False,
-          (tab.custom_scroll.height(), cap))
+    low, high = tab._custom_scroll_limits()
+    row_h = max(b.sizeHint().height() for b in tab._custom_buttons)
+    check("下限 = 1 行按钮高度",
+          low == row_h + tab.custom_grid.spacing() * 0 + 8, (low, row_h))
+    check("上限 = 内容高度（10 个按钮 = 4 行，> 3 行）",
+          high >= 4 * row_h and high > 3 * row_h, (high, row_h))
+    check("限制已套用到容器",
+          tab.custom_scroll.maximumHeight() == high
+          and tab.custom_scroll.minimumSizeHint().height() == low,
+          (tab.custom_scroll.maximumHeight(), tab.custom_scroll.minimumSizeHint().height()))
 
-    # ── 40 个按钮：内容超封顶 → 内部滚动，日志不被挤没 ──
-    tab._set_buttons([{"name": f"按钮{i}", "data": "68 11", "isHex": True} for i in range(40)])
-    settle()
-    cap = tab._custom_scroll_cap()
-    log_group = tab.right_splitter.widget(0)
-    check("自定义区高度不超过封顶（按钮再多也不长大）",
-          tab.custom_scroll.height() <= cap + 2,
-          (tab.custom_scroll.height(), cap))
-    check("内容确实超过封顶（判据非恒真：不是「本来就没多少内容」）",
-          tab.custom_host.sizeHint().height() > cap,
-          (tab.custom_host.sizeHint().height(), cap))
-    check("出现纵向滚动条（其余按钮靠滚动查看）",
-          tab.custom_scroll.verticalScrollBar().maximum() > 0,
-          tab.custom_scroll.verticalScrollBar().maximum())
+    # ── D1：腾出空间后按钮要显示全（不再无谓滚动）──
+    tab.right_splitter.setSizes([200, 600])
+    settle(8)
+    check("日志上拖腾出空间后：10 个按钮**全部显示、无滚动条**",
+          tab.custom_scroll.verticalScrollBar().maximum() == 0,
+          (tab.custom_scroll.height(), high,
+           tab.custom_scroll.verticalScrollBar().maximum()))
+    check("按钮区确实吃到了腾出的空间（高度 = 内容高度）",
+          tab.custom_scroll.height() >= high - 2,
+          (tab.custom_scroll.height(), high))
+
+    # ── 空间真不够时仍然滚动（64 个按钮 = 22 行）──
+    tab._set_buttons(_custom_buttons(64))
+    settle(8)
+    high64 = tab._custom_scroll_limits()[1]
+    bar = tab.custom_scroll.verticalScrollBar()
+    check("按钮多于可用空间时才出现滚动条",
+          bar.maximum() > 0 and tab.custom_scroll.height() <= high64,
+          (tab.custom_scroll.height(), high64, bar.maximum()))
     check("按钮没有被压扁（高度 ≥ sizeHint；否则是「压扁」不是「滚动」）",
           all(b.height() >= b.sizeHint().height() - 1 for b in tab._custom_buttons),
           [(b.height(), b.sizeHint().height()) for b in tab._custom_buttons[:3]])
-    check("日志区仍保有可用高度（未被按钮挤没）",
-          log_group.height() >= 120, log_group.height())
 
-    # ── 给下半区足够空间：自定义区仍应封顶（多余空间不喂给按钮区）──
-    tab.right_splitter.setSizes([200, 600])
+    # ── 默认分栏下日志仍不被挤没 ──
+    tab.right_splitter.setSizes(list(core.RIGHT_SPLIT_DEFAULT))
     settle(8)
-    cap = tab._custom_scroll_cap()
-    check("分栏给足空间时自定义区仍不超过封顶（多余空间留给空白）",
-          tab.custom_scroll.height() <= cap + 2,
-          (tab.custom_scroll.height(), cap, tab.right_splitter.sizes()))
-    tab.right_splitter.setSizes([520, 300])
-    settle()
+    log_group = tab.right_splitter.widget(0)
+    check("默认分栏 + 64 个按钮：日志不被挤没",
+          log_group.height() >= 200
+          and log_group.height() >= log_group.minimumSizeHint().height(),
+          (log_group.height(), log_group.minimumSizeHint().height()))
 
-    # ── 收起 / 展开：收起时只占一行标题 ──
+    # ── D2：编辑工具栏常驻（不随折叠收起）──
+    check("编辑按钮不在折叠内容里（折叠区外面）",
+          not tab.custom_group.content.isAncestorOf(tab.btn_custom_add))
+
     expanded_height = tab.custom_group.height()
     tab.custom_group.set_expanded(False)
     settle()
-    check("收起后内容被隐藏", tab.custom_group.is_content_hidden() is True)
-    check("收起后本区高度骤减（≈ 标题行）",
-          tab.custom_group.height() <= tab.custom_group.header_button.sizeHint().height() + 14,
+    check("收起后按钮网格被隐藏", tab.custom_group.is_content_hidden() is True)
+    check("收起后本区只剩标题行", tab.custom_group.height() <= expanded_height - 10,
           (expanded_height, tab.custom_group.height()))
+    check("**收起后编辑按钮仍可见可用**（常驻底部）",
+          tab.btn_custom_add.isVisible() is True
+          and tab.btn_custom_clear.isVisible() is True)
     check("收起状态写进配置（custom_collapsed=True）",
           tab._settings.get("custom_collapsed") is True, tab._settings.get("custom_collapsed"))
     tab.custom_group.set_expanded(True)
@@ -1422,15 +1436,11 @@ def test_custom_area_space():
           tab.custom_group.is_content_hidden() is False
           and tab._settings.get("custom_collapsed") is False)
 
-    # ── 竖向分栏：拖动（setSizes 等效）后尺寸被采集 ──
+    # ── 分栏尺寸采集与重启恢复 ──
     tab.right_splitter.setSizes([520, 300])
     settle()
     sizes = tab.right_splitter.sizes()
     check("分栏尺寸被写进设置", tab._collect_settings().get("right_split") == list(sizes), sizes)
-    check("分栏尺寸不是默认值（说明确实按控件状态采集）",
-          list(sizes) != list(core.RIGHT_SPLIT_DEFAULT), sizes)
-
-    # ── 落盘 → 重启恢复 ──
     tab.custom_group.set_expanded(False)
     settle()
     tab._save_persisted()
@@ -1441,6 +1451,7 @@ def test_custom_area_space():
     tab2.show()
     settle()
     check("重启后保持收起状态", tab2.custom_group.is_content_hidden() is True)
+    check("重启后编辑按钮仍然可见", tab2.btn_custom_add.isVisible() is True)
     got = tab2.right_splitter.sizes()
     check("重启后恢复分栏尺寸（±6px 容差）",
           len(got) == 2 and abs(got[0] - sizes[0]) <= 6 and abs(got[1] - sizes[1]) <= 6,

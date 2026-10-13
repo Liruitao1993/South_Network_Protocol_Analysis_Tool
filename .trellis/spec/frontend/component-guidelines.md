@@ -376,27 +376,34 @@ engine = self._engine_factory()            # 否则才是发给本虚拟表的�
   失败不发/发送框不被改写）。**变异反证**（本任务已做）：645 不重算校验 → 2 项红；地址不反转 → 9 项红；
   698 不重算 HCS/FCS → 2 项红；不校验长度 → 2 项红。
 
-### 7g. 蓝牙自定义报文区的空间治理（封顶 + 滚动 + 折叠 + 竖向分栏，1.23.82）
+### 7g. 蓝牙自定义报文区的空间治理（按钮随空间自动 + 工具栏常驻，1.23.82）
 
-> 源自任务 10-14-bt-custom-buttons-space（按钮越加越多 → 改前 64 个 ≈ 22 行 ≈ 700px 把日志压没）。
+> 源自任务 10-14-bt-custom-buttons-space（按钮越加越多 → 改前 64 个 ≈ 22 行 ≈ 700px 把日志压没）
+> 与 10-14-bt-custom-buttons-fit（复核后修正：固定 3 行封顶会「腾出空间还白白滚动」，编辑按钮也不该被折叠藏起来）。
 
 - **结构**：右栏 = `QSplitter(Vertical)`（`日志` ↔ `发送区 + 自定义区`，`childrenCollapsible=False`）；
-  自定义区 = `CollapsibleSection(key="custom_buttons")`，内容 = `QScrollArea`（包 3 列按钮网格）+ 工具栏行。
-- **封顶单一来源**：`core.CUSTOM_ROWS_MAX = 3`；高度由 `_custom_scroll_cap()` 按按钮 `sizeHint()` 实算
-  （**禁止写死像素**：字号可配置，见陷阱 63），`_apply_custom_scroll_cap()` 在「按钮重建后」与
-  `restyle_for_theme()` 各调一次。
-- **配置键**：`custom_collapsed`(bool，True=收起) 与 `right_split`([日志,下半区] px)；两者都经
-  `bluetooth_core.merge_settings` → `normalize_right_split()` 宽容夹紧（坏值不抛）。
-  **`right_split` 只在两侧都有真实高度时才采集**（未 show 时 `sizes()` 可能是 `[0,0]`，否则会用默认值
-  覆盖用户的设置）。
-- **效果（实测，offscreen 1200×800，64 个按钮，分栏 `[200,600]`）**：滚动区 76px（=封顶）+ 滚动范围 448；
-  不封顶则 169px 一路长高。收起后整区 23px（=标题行）。按钮很少（1 行）时无滚动条、高度贴合内容。
-- **测试注意**：几何断言前要 `settle()` 多泵几次事件（一次 `processEvents` 时滚动条范围还是 0 ⇒ 误判）；
-  **封顶的效果必须在「分栏给足空间」那一档量**——默认分栏下封顶/不封顶都被压成 3 行，量不出差别（假绿）。
-- **回归**：`test_bluetooth_widget.py` [14]（结构/封顶/滚动/不压扁/日志高度/折叠/分栏记忆与重启恢复）、
-  `test_bluetooth_core.py` [13]（配置宽容）。
-- **变异反证（本任务已做，均干净变红后逐字节还原）**：① 不套用封顶 → 1 项红；② 封顶行高写死小像素 →
-  1 项红；③ 不采集分栏尺寸 → 2 项红；④ 载入不恢复折叠态 → 1 项红。
+  自定义区 = `CollapsibleSection(key="custom_buttons")`，内容 = `ButtonScrollArea`（本页子类，包 3 列按钮网格）；
+  **5 个编辑按钮 + 提示在折叠区外面**（`_build_custom_group()` 返回的容器持有），折叠/展开都可见。
+- **高度语义（不要退回硬封顶）**：`_custom_scroll_limits() -> (下限, 上限)`：
+  下限 = 1 行按钮高（`core.CUSTOM_MIN_ROWS`）；上限 = **按钮全部显示所需高度**（按行数×行高+间距算，
+  **不要读 `custom_host.sizeHint()`**，重建后它是旧值/0）。⇒ 空间够就全显示、不够才滚动。
+- **`ButtonScrollArea` 不可换成裸 `QScrollArea`**：后者的 `minimumSizeHint()` 会跟着内层网格走，
+  按钮一多就把「最小高度」透传给分栏器（实测下半区最小 559px、日志只剩 177px）。
+  **下半区也不要加尾部 `addStretch()`**，否则腾出的空间被弹性空隙吃掉。
+- **折叠**：收起时本区尺寸策略锁 `Maximum`（标题与工具栏之间不留大片空白），展开恢复 `Preferred`；
+  状态写 `settings["custom_collapsed"]`。
+- **配置键**：`custom_collapsed`(bool) / `right_split`([日志,下半区] px)，走
+  `bluetooth_core.merge_settings` → `normalize_right_split()` 宽容夹紧（坏值不抛）；
+  `right_split` **只在两侧都有真实高度时才采集**。
+- **效果（实测，offscreen 1200×800）**：10 个按钮 + 腾出空间（分栏 ≈ [177,559]）→ 按钮区 96px（=内容）、
+  **滚动条 0**；64 个按钮 + 同样空间 → 按钮区用满 396px、滚动条 128（内容 528）；默认分栏（[496,240]）
+  + 64 个按钮 → 日志 496px 不被挤；收起 → 本区 23px（标题行）+ 工具栏仍可见。
+  **对照旧实现（上限钉死 3 行）**：同样腾出空间 → 10 个按钮仍只 3 行 + 滚动条。
+- **测试注意**：几何断言前要 `settle()` 多泵几次事件；**必须分别量「默认分栏」与「拖大分栏」两档**
+  （只在默认档量会漏掉「腾出空间后仍滚动」这个缺陷）。
+- **回归**：`test_bluetooth_widget.py` [14]、`test_bluetooth_core.py` [13]。
+- **变异反证（本任务已做，均干净变红后逐字节还原）**：① 上限改回固定封顶 → 2 项红；
+  ② 工具栏放回折叠内容 → 3 项红；③ 不设最小高度提示 → 1 项红；④ 不采集分栏尺寸 → 2 项红。
 
 ### 8. Qt 陷阱（本项目实测）
 - **offscreen 无字体**：`QT_QPA_PLATFORM=offscreen` 下 `QFontDatabase: Cannot find font directory ...`，绘制出的文字是豆腐块 → 断言只能查尺寸/颜色/像素多样性；**要目视核对文字排版必须用默认平台**（`QApplication([])` 不设 offscreen + `widget.grab()` / `QImage.save()`，不需要窗口真的可见）。

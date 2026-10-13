@@ -561,7 +561,8 @@ def test_button_protocol_addr():
 def test_custom_area_settings():
     section("[13] 自定义报文区空间治理（1.23.82）")
 
-    check("封顶行数常量 = 3", core.CUSTOM_ROWS_MAX == 3, core.CUSTOM_ROWS_MAX)
+    check("最少可见行数常量 = 1（封顶概念取消，上限按内容算）",
+          core.CUSTOM_MIN_ROWS == 1, core.CUSTOM_MIN_ROWS)
     check("默认展开（custom_collapsed=False）",
           core.merge_settings({})["custom_collapsed"] is False)
     check("坏 custom_collapsed 值回落 False",

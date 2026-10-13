@@ -39,7 +39,7 @@ import re
 from collections import deque
 from typing import Dict, List, Optional, Tuple
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -64,6 +64,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QSplitter,
     QTableWidgetItem,
@@ -110,6 +111,32 @@ LOG_FLUSH_BURST = 40
 
 # 自定义报文按钮网格列数
 BUTTON_GRID_COLUMNS = 3
+
+
+class ButtonScrollArea(QScrollArea):
+    """自定义报文按钮的滚动容器：**最小高度由本页显式给定**（默认只 1 行）。
+
+    为什么不能直接用 `QScrollArea`：它的 `minimumSizeHint()` 会跟着**内层网格**的最小尺寸走，
+    按钮一多就把这个「最小高度」透传给父布局 ⇒ 分栏器被迫给下半区留出上千像素、日志被挤没
+    （实测 64 个按钮时下半区最小高度 559px，日志只剩 177px）。这里把最小高度按住，只保留
+    「空间不够就滚动」的行为。
+    """
+
+    def __init__(self, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self._min_height_hint = 0
+
+    def set_min_height_hint(self, value: int) -> None:
+        """设置最小高度提示（布局据此给下限；不再随内层网格增长）。"""
+        self._min_height_hint = max(0, int(value))
+        self.updateGeometry()
+
+    def min_height_hint(self) -> int:
+        return int(self._min_height_hint)
+
+    def minimumSizeHint(self):  # noqa: N802 - Qt 命名
+        return QSize(0, self._min_height_hint)
+
 
 # 设备表列
 DEVICE_COLUMNS = ("名称", "地址", "信号", "状态")
@@ -1351,7 +1378,8 @@ class BluetoothToolWidget(QWidget):
         bottom_layout.setSpacing(6)
         bottom_layout.addWidget(self._build_send_group())
         bottom_layout.addWidget(self._build_custom_group())
-        bottom_layout.addStretch()
+        # 不加尾部 addStretch：腾出来的空间应当喂给自定义区（按钮区随空间长大到「全显示」，
+        # 多出来的留白落在按钮与工具栏之间），否则空白会被弹性空隙吃掉、按钮区一直是窄的。
         self.right_splitter.addWidget(bottom)
 
         self.right_splitter.setStretchFactor(0, 1)      # 多余空间优先给日志
@@ -1526,32 +1554,39 @@ class BluetoothToolWidget(QWidget):
     # ── 自定义报文 ──────────────────────────────────────────────────────
 
     def _build_custom_group(self) -> QWidget:
-        """自定义报文区：**可折叠 + 高度封顶 + 内部滚动**（1.23.82）。
+        """自定义报文区：**按钮随可用空间自动 + 编辑工具栏常驻 + 整区可折叠**（1.23.82）。
 
-        按钮越加越多时，若让它按内容撑开，日志窗口会被挤到看不见（上限 64 个 ≈ 22 行 ≈ 700px）。
-        这里做三件事：① 按钮网格放进滚动区并**封顶约 3 行**（超出内部滚动）；② 整区可折叠
-        （收起时只占一行标题，状态写进配置）；③ 工具栏行留在内容区（折叠即连工具栏一起收起，
-        展开后照常新增/编辑）。
+        两块分开：
+
+        * `CollapsibleSection`（可折叠）里只放**按钮网格**（在滚动区里，上下限见
+          `_apply_custom_scroll_limits()`：空间够就全显示、不够才滚动）；
+        * 5 个编辑按钮 + 提示**留在折叠区外面**（用户口径：编辑入口要一直待在底部，
+          不该跟着按钮一起被收起）。
         """
         self.custom_group = CollapsibleSection("自定义报文", key="custom_buttons", expanded=True)
         self.custom_section = self.custom_group          # 语义别名（新代码用这个）
-        layout = self.custom_group.content_layout()
 
         self.custom_host = QWidget()
         self.custom_grid = QGridLayout(self.custom_host)
         self.custom_grid.setContentsMargins(0, 0, 0, 0)
         self.custom_grid.setSpacing(4)
 
-        self.custom_scroll = QScrollArea()
+        self.custom_scroll = ButtonScrollArea()
         self.custom_scroll.setWidgetResizable(True)
         self.custom_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.custom_scroll.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
         self.custom_scroll.setWidget(self.custom_host)
-        self.custom_scroll.setMaximumHeight(self._custom_scroll_cap())
-        layout.addWidget(self.custom_scroll)
+        self.custom_group.content_layout().addWidget(self.custom_scroll)
         self.custom_group.toggled.connect(self._on_custom_collapsed_toggled)
+        self._apply_custom_scroll_limits()
+
+        container = QWidget()
+        outer = QVBoxLayout(container)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(4)
+        outer.addWidget(self.custom_group)
 
         row = QHBoxLayout()
         row.setSpacing(6)
@@ -1590,39 +1625,57 @@ class BluetoothToolWidget(QWidget):
 
         hint = QLabel("提示：报文按钮上点右键可编辑 / 删除 / 移位")
         row.addWidget(hint)
-        layout.addLayout(row)
+        outer.addLayout(row)
         fit_btn_width(self.btn_custom_add, self.btn_custom_batch,
                       self.btn_custom_export, self.btn_custom_import,
                       self.btn_custom_clear)
-        return self.custom_group
+        return container
 
-    def _apply_custom_scroll_cap(self):
-        """重新套用滚动区封顶高度（按钮重建后 / 主题或字号变化时调用）。
+    def _apply_custom_scroll_limits(self):
+        """重新套用滚动区高度上下限（按钮重建后 / 主题或字号变化时调用）。
 
-        **封顶按真实 ``sizeHint`` 算**：本项目字号可配置（AGENTS 陷阱 63），不得写死像素；
-        封顶生效后，超出部分由滚动区承担（实测：给足分栏空间时 40 个按钮的滚动区仍为封顶高度，
-        不封顶则会一路长高把空间吃光）。
+        **上限 = 按钮全部显示所需高度**（空间够就不滚动，用户报障点）；**下限 = ``core.CUSTOM_MIN_ROWS``
+        行按钮高度**（分栏仍可把它压小 ⇒ 日志不被按钮挤没，但不会被压成 0）。
+        两个高度都按真实 ``sizeHint`` 算：本项目字号可配置（AGENTS 陷阱 63），不得写死像素。
         """
-        self.custom_scroll.setMaximumHeight(self._custom_scroll_cap())
+        low, high = self._custom_scroll_limits()
+        self.custom_scroll.set_min_height_hint(low)
+        self.custom_scroll.setMaximumHeight(high)
 
-    def _custom_scroll_cap(self) -> int:
-        """滚动区封顶高度 = ``core.CUSTOM_ROWS_MAX`` 行按钮（含间距与少量边距）。
+    def _custom_scroll_limits(self) -> Tuple[int, int]:
+        """``(最小高度, 最大高度)``：最小 = 1 行按钮；最大 = **按钮全部显示所需高度**（≥ 最小）。
 
-        **不写死像素**：本项目字号可配置（AGENTS 陷阱 63），高度按真实按钮 ``sizeHint``
-        （无按钮时按字体）计算；按钮重建后、换主题/字号后都要重算。
+        高度**按行数算**（行数 × 行高 + 间距），不读 `custom_host.sizeHint()`：重建按钮后布局的
+        sizeHint 还是旧值（首次甚至为 0），用它算出来的上限会把按钮全压成一行。
         """
         spacing = int(self.custom_grid.spacing()) if self.custom_grid.count() >= 0 else 0
         if self._custom_buttons:
             row_height = max(button.sizeHint().height() for button in self._custom_buttons)
         else:
             row_height = self.fontMetrics().height() + 14
-        rows = max(1, int(core.CUSTOM_ROWS_MAX))
-        return int(row_height) * rows + spacing * (rows - 1) + 8
+        columns = max(1, int(BUTTON_GRID_COLUMNS))
+        rows = max(1, -(-len(self._custom_buttons) // columns))      # 向上取整
+        content = int(row_height) * rows + spacing * (rows - 1) + spacing
+        min_rows = max(1, int(core.CUSTOM_MIN_ROWS))
+        low = int(row_height) * min_rows + spacing * (min_rows - 1) + 8
+        return low, max(low, content)
 
     def _on_custom_collapsed_toggled(self, expanded: bool):
         """展开/收起 → 记进配置（下次启动保持；收起时本区只占一行标题）。"""
         self._settings["custom_collapsed"] = not bool(expanded)
+        self._sync_custom_section_policy()
         self._schedule_save()
+
+    def _sync_custom_section_policy(self):
+        """收起时本区不吸收多余高度（否则标题行与工具栏之间会留一大块空白）。
+
+        展开时用 `Preferred`：本区可以长大，多余高度喂给里面的滚动区（按钮显示得更多）；
+        收起时用 `Maximum`：最多占「标题行」那么高，多余高度留在工具栏下方。
+        """
+        vertical = (QSizePolicy.Policy.Preferred if self.custom_group.is_expanded()
+                    else QSizePolicy.Policy.Maximum)
+        self.custom_group.setSizePolicy(QSizePolicy.Policy.Preferred, vertical)
+        self.custom_group.updateGeometry()
 
     # ── 状态行 ──────────────────────────────────────────────────────────
 
@@ -2799,7 +2852,7 @@ class BluetoothToolWidget(QWidget):
             self.custom_grid.addWidget(placeholder, 0, 0, 1, BUTTON_GRID_COLUMNS)
         self.custom_group.set_title(f"自定义报文（{len(self._buttons)}）")
         # 按钮尺寸就绪后重算最小高度与封顶（字号/主题变化时由 restyle_for_theme 再算一次）
-        self._apply_custom_scroll_cap()
+        self._apply_custom_scroll_limits()
 
     def _apply_button_address(self, spec: dict, payload: bytes, name: str):
         """按按钮绑定的协议/地址替换地址并重算校验；未绑定或未填地址 → 原样返回。
@@ -3049,6 +3102,7 @@ class BluetoothToolWidget(QWidget):
             self.custom_group.set_expanded_quiet(
                 not bool(settings.get("custom_collapsed", False))
             )
+            self._sync_custom_section_policy()
             self.right_splitter.setSizes(
                 core.normalize_right_split(settings.get("right_split"))
             )
@@ -3166,7 +3220,7 @@ class BluetoothToolWidget(QWidget):
         self._refresh_send_hint()
         # 字号可能变化 → 重算按钮最小高度与封顶（否则会裁字 / 被压扁）
         if hasattr(self, "custom_scroll"):
-            self._apply_custom_scroll_cap()
+            self._apply_custom_scroll_limits()
 
     # ── 收尾 ────────────────────────────────────────────────────────────
 
