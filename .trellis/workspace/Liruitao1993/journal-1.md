@@ -1036,3 +1036,40 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Next Steps
 
 - 版本/文档四件套（APP_VERSION=1.23.82+CHANGELOG、AGENTS §8 陷阱 69、README、两个 .iss、spec §7g）留在工作区随发版批次提交
+
+
+## Session 32: 蓝牙自定义报文区修复：按钮随可用空间自动 + 编辑工具栏常驻
+
+**Date**: 2026-10-14
+**Task**: 蓝牙自定义报文区修复：按钮随可用空间自动 + 编辑工具栏常驻
+**Branch**: `main`
+
+### Summary
+
+修用户复核的两个缺陷：腾出空间后按钮仍只 3 行+滚动条 / 编辑按钮被折叠藏起来；按钮区改为内容驱动高度（空间够就全显示），工具栏移出折叠区常驻
+
+### Main Changes
+
+- bluetooth_core: CUSTOM_ROWS_MAX(3) → CUSTOM_MIN_ROWS(1)（下限 1 行；上限按内容算）
+- bluetooth_tool_widget: 新增 ButtonScrollArea（minimumSizeHint 由本页给定，避免内层网格最小高度透传给分栏器）+ _custom_scroll_limits/_apply_custom_scroll_limits + 去掉下半区尾部 addStretch + 工具栏移出折叠区 + 收起时锁 Maximum 尺寸策略
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8d33eb1` | (see git log) |
+
+### Testing
+
+- [OK] widget 221 项（[14] 重写：腾出空间后无滚动条 / 只有装不下才滚动 / 默认分栏日志不被挤 / 折叠后编辑按钮仍可见 / 分栏记忆与重启恢复）、core 161 项
+- [OK] 变异反证 4 条（上限改回固定封顶 2 红 / 工具栏放回折叠内容 3 红 / 不设最小高度 1 红 / 不采集分栏尺寸 2 红）逐字节还原 md5 一致
+- [OK] 冒烟：10 按钮+腾出空间 → 96px 滚动条 0；64 按钮 → 396px/滚动 128；默认分栏 64 按钮 → 日志 496px；收起 → 23px 且工具栏可见；对照旧实现 3 行+滚动条 16
+- [OK] release_check --with-gui：PASS=130 FAIL=3（2 项 COM 口占用 + modular_iface Qt 退出期 fastfail，既有环境红）；BUILD_DATE 已更新为 2026-10-14 以清掉 WARN
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 版本/文档四件套留在工作区随发版批次提交（1.23.82 的 CHANGELOG/README 条目已按修正后行为改写）

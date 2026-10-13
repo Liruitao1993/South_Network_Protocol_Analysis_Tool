@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 31
+- **Total Sessions**: 32
 - **Last Active**: 2026-10-14
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1038 | Active |
+| `journal-1.md` | ~1075 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 32 | 2026-10-14 | 蓝牙自定义报文区修复：按钮随可用空间自动 + 编辑工具栏常驻 | `8d33eb1` | `main` |
 | 31 | 2026-10-14 | 蓝牙自定义报文区空间治理（封顶+滚动+折叠+竖向分栏） | `02cd050` | `main` |
 | 30 | 2026-10-13 | 蓝牙自定义按钮：按协议替换地址 + 重算校验（发送时生效） | `acf4366` | `main` |
 | 29 | 2026-10-13 | 蓝牙工具：MTU/写上限实时化（连接后轮询 + 发送前重读） | `231d575` | `main` |
