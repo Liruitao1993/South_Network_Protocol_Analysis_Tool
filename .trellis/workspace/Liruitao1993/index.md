@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 26
+- **Total Sessions**: 27
 - **Last Active**: 2026-10-13
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~845 | Active |
+| `journal-1.md` | ~885 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 27 | 2026-10-13 | 串口工具：协议特征断帧认前导 FEH + 可调断帧超时 | `4a94111` | `main` |
 | 26 | 2026-10-13 | 协议9 2.0 测试扩展 0x0009（报文聚合传输测试模式） | `74b305c` | `main` |
 | 25 | 2026-10-13 | 协议8/6 前导 FEH 唤醒字节合规修复 | `3da40c1` | `main` |
 | 24 | 2026-09-29 | 协议8 698.45 A-XDR 字节序修复（数据域大端） | `05fe755` | `feat/serial-tool-protocol-parse` |

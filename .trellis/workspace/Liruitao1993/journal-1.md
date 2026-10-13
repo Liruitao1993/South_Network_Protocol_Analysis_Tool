@@ -843,3 +843,43 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 
 - 版本/文档四件套（main_gui.py、AGENTS.md、README.md、两个 .iss）随发版批次提交——HEAD 上它们落后工作区数百~数千行（含其它会话在途内容），单独摘取会与 release_check 的「CHANGELOG 顶部版本 = APP_VERSION」硬校验冲突
 - 可选：同族 csg_link_frame_gen.py / csg_frame_templates.py / collapsible_section.py 仍整体未入库（另会话 1.23.64/65 批次），与 csg_test_frame_gen_widget.py 属同一功能集
+
+
+## Session 27: 串口工具：协议特征断帧认前导 FEH + 可调断帧超时
+
+**Date**: 2026-10-13
+**Task**: 串口工具：协议特征断帧认前导 FEH + 可调断帧超时
+**Branch**: `main`
+
+### Summary
+
+用户现场报障：协议 8 下同一帧被切成两条 [RX]。实测根因是分帧函数一律要求首字节 0x68，前导 FE 使 frame_length_for 返回 0、_frame_incomplete 也判 False → 退回 10ms 静默窗口把首片单独刷出（1.23.76 只保证链路层能解析，帧表/统计/匹配窗口仍碎）。本次让 68 家族分帧认前导 FE（复用 wakeup_prefix单一来源、返回值含前导 ⇒ 三处调用点零改动），并新增「断帧设置」把 4 个断帧超时与断帧方式交现场可调，另给出「此刻按什么断帧」的自查说明行。
+
+### Main Changes
+
+- serial_tool_widget：_wakeup_base + 68 家族分帧（frame_length_for / declared_frame_len / _frame_incomplete）认前导 FE，返回值含前导；HDLC/Wrapper 不加
+- 新增断帧设置 5 键（rx_framing_mode + 4 个超时），默认 = 原常量 ⇒ 只新增键、CONFIG_VERSION 不动；FRAME_TIMEOUT_RANGES 是 UI 与 merge_params 的唯一范围来源
+- timeout_only 在 _on_raw_data / _flush_raw_display / _flush_raw_display_now 三处统一跳过结构路径；_log_framing_summary 只在设置变更/协议变化/每轮开始输出
+- test_wakeup_fe_prefix：单一来源白名单加入 serial_tool_widget.py（分帧层复用而非另写扫描）
+- 文档与版本（未随本次提交，留在工作区）：main_gui APP_VERSION 1.23.77→1.23.78 + CHANGELOG、AGENTS §3/§8 陷阱 59 与 75/§10、README（徽章/版本行/串口通信行/更新记录）、两个 .iss 已 --sync-iss；spec §7c
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4a94111` | (see git log) |
+
+### Testing
+
+- [OK] test_serial_proto_frame.py（147 项）+ test_serial_tool_widget.py（501 项）全绿；现场帧 14+25 两块交付、块间隔 50ms（> 字节静默 10ms）→ 只出 1 行 39 字节
+- [OK] 变异反证 3 条：不跳前导 FE → proto 9 红 / widget 4 红（其中「首块后不输出」失败即用户看到的断帧）；返回长度不含前导 → 4+4 红；断帧方式失效 → 3 红；每条跑完 md5 逐字节还原
+- [OK] release_check.py --with-gui → PASS=133 FAIL=0 WARN=0（APP_VERSION/CHANGELOG/README 徽章/.iss 四项一致）
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 版本/文档四件套随发版批次提交（HEAD 上落后工作区数千行、与 release_check 的版本硬校验强耦合）
+- 可选加固：test_dlt645_sim_lme_query.py / test_dlt645_sim_event_word.py 的「串口回环（COM1↔COM2，可选）」段在端口被占用时会直接判 FAIL（本次见到 COM1 PermissionError(13)，同期另一进程持 COM9）——建议改为端口不可用时明确跳过，避免门禁被硬件占用误伤
