@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/10-13-bt-char-autodetect/research/char-select-facts.md", "reason": "复核事实基线：现状痛点与可复用 API，用于判断实现是否真的替换了「第一个可用」的朴素逻辑"}
+{"file": ".trellis/tasks/10-13-bt-char-autodetect/implement.md", "reason": "复核判据：审查点 A~E、变异反证 3 条、四份蓝牙测试与 pwsh 环境铁律"}

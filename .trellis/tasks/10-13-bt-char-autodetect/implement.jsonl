@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/10-13-bt-char-autodetect/research/char-select-facts.md", "reason": "事实基线：现状（_auto_pick 取第一个/全局存储/无探测/对话框列全部）、可复用的发送与配置 API、既有四份蓝牙测试与相关陷阱（69/71）"}
+{"file": ".trellis/tasks/10-13-bt-char-autodetect/design.md", "reason": "契约表（打分/优选/探测/载荷/配置键/订阅就绪信号的唯一来源）+ 打分表 + 关键取舍（默认零副作用、纯逻辑下沉、失败原因三分类）+ 兼容性风险"}
+{"file": ".trellis/tasks/10-13-bt-char-autodetect/implement.md", "reason": "执行顺序与审查点 A~E、变异反证 3 条、回归套件与 pwsh 环境铁律"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "PySide6 页面组件规范（子控件惰性创建、按钮不写死宽度、offscreen 断言口径），本次新增探测按钮与状态行时适用"}

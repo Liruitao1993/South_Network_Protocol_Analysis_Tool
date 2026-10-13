@@ -298,6 +298,26 @@ engine = self._engine_factory()            # 否则才是发给本虚拟表的�
 - **回归**：`test/test_serial_proto_frame.py` [12]/[13]（前导 FE 矩阵 + 参数默认/夹紧）、
   `test/test_serial_tool_widget.py` [34]（现场帧两块交付只出 1 行、`timeout_only` 对照、持久化、控件不裁字）。
 
+### 7d. 蓝牙特征码优选与探测
+
+> 源自任务 10-13-bt-char-autodetect（1.23.79：连上即可收发，不再让用户在特征码列表里挑）。
+
+- **打分优选只有一个实现**：`bluetooth_core.rank_characteristics` / `pick_auto`（权重 `CHAR_SCORE_*`、
+  族谱 `PASSTHROUGH_UUIDS` 均在 `bluetooth_core`）。**界面禁止再写「取第一个可用」** —— 历史实现正是那样，
+  实测常选到设备名 `2A00` / 电量 `2A19` / DFU；反例自检见 `test_bluetooth_widget.py` [11]。
+- **接线顺序**：`_on_characteristics_updated` = 「① 按设备地址沿用 → ② 打分优选 → ③ 提示」；
+  **换到没记过的设备要先清掉上一台的选择**（`_on_connected` 里按 `last_device` 比较），否则上一台的通道会压住优选。
+- **探测必须等 `subscribe_finished` 再写**：订阅是异步的；状态机 `core.ProbeSession`
+  （`select → write → wait`，事件 `on_subscribed / on_written / on_frame / on_timeout`）纯逻辑，
+  界面只「按意图调 worker + QTimer + 喂事件」，且**仅当 `session.step` 变化时才推进**（防重复下发同一意图），
+  **不许 sleep 阻塞 GUI**。
+- **全败恢复原选择**；成功才写 `char_map[address] = {recv, send, source, ts}`（`remember_choice`；
+  `CHAR_MAP_MAX=20` 按 `ts` 淘汰；坏条目逐条丢弃）。
+- **探测载荷**：`core.resolve_probe_payload(..., parse)` 的 `parse` **由界面注入** `parse_plain_text`
+  （纯逻辑层不 import Qt 侧实现，也不写第二份「什么算合法 HEX」）；HEX 写错 → 拒绝且一个字节都不写。
+- **对话框结论要文字化**：不可用方向标「（不可写）/（不可通知）」（置灰在 QSS 主题下不可见 —— 陷阱 71），
+  列表按打分置顶并预选优选结果。
+
 ### 8. Qt 陷阱（本项目实测）
 - **offscreen 无字体**：`QT_QPA_PLATFORM=offscreen` 下 `QFontDatabase: Cannot find font directory ...`，绘制出的文字是豆腐块 → 断言只能查尺寸/颜色/像素多样性；**要目视核对文字排版必须用默认平台**（`QApplication([])` 不设 offscreen + `widget.grab()` / `QImage.save()`，不需要窗口真的可见）。
 - **`bytes(image.constBits())` 必须持有 QImage 引用**：`bytes(canvas.render_image(w, h).constBits())`（临时对象上取 buffer）会 **access violation（0xC0000005）**；先 `img = ...` 再 `bytes(img.constBits())`。
