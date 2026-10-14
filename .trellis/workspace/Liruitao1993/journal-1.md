@@ -1131,3 +1131,38 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Next Steps
 
 - 版本取 1.23.84（1.23.83 已属并行任务的串口工具批量替换地址）；版本/文档四件套留在工作区随发版批次提交
+
+
+## Session 35: 推送到 GitHub（排除参考项目/敏感文件）+ 编译 exe 1.23.84
+
+**Date**: 2026-10-14
+**Task**: 推送到 GitHub（排除参考项目/敏感文件）+ 编译 exe 1.23.84
+**Branch**: `main`
+
+### Summary
+
+把工作区项目源码+文档全量推送到 GitHub（排除 1.3GB 参考项目 蓝牙转串口工具02 与运行时敏感文件），随后编译 Windows exe
+
+### Main Changes
+
+- gitignore 新增：/蓝牙转串口工具02/（1.3GB 参考学习项目）、/llm_preprocess_config.json（LLM API 配置可能含密钥）、/admin_config.json、/reflex_web/reflex_web/data/（反馈库+用户上传）、/dlt645_sim_data.json、/AGENTS.md.backup.*、/_tmp_*.py、/.aoci/、/aoci*.txt、/.acl-recovery/（提交 c2c5e05）
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0eff521` | (see git log) |
+
+### Testing
+
+- [OK] 推送前检查：工作区敏感串扫描（sk-/api_key 模式）0 命中；暂存集 >3MB 文件 0 个；待推 blob 261 个 14.4MB
+- [OK] 推送结果：86949fe..0eff521 main -> main（fast-forward，34 提交）；复核远程树不含 蓝牙转串口工具02/llm_preprocess_config/admin_config/feedback.db/dlt645_sim_data/aoci.txt
+- [OK] 编译：pyinstaller 南网协议解析工具.spec --noconfirm → EXIT=0，dist/南网协议解析工具_v1.23.84_20261014160516.exe（104,480,306 字节，16:08），FileVersion/ProductVersion=1.23.84.0；7 条 WARNING 均为可选后端/驱动（bleak corebluetooth、pysqlite2/MySQLdb/psycopg2、macOS 框架路径）
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 如需发给用户/发布：dist 下该 exe；Web 版发布走 reflex_web/build_embedded_deploy.py
