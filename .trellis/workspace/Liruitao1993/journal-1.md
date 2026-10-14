@@ -1094,3 +1094,40 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Status
 
 [OK] **Completed**
+
+
+## Session 34: 蓝牙自定义按钮：按协议类别批量替换地址
+
+**Date**: 2026-10-14
+**Task**: 蓝牙自定义按钮：按协议类别批量替换地址
+**Branch**: `main`
+
+### Summary
+
+自定义报文区新增「批量地址…」：选协议→默认勾选该协议按钮→填一次地址→一次写入；逐按钮用自己的报文预检（失败默认不勾、强行勾选二次确认后跳过）；支持批量清除绑定；抽取 frame_addr_fix 共享校验入口
+
+### Main Changes
+
+- frame_addr_fix: +addr_lengths_for_frame(frame) +check_values(protocol, values, frame)（单一来源，单按钮对话框改调之，行为文案不变）
+- bluetooth_tool_widget: +BatchAddressDialog（只产补丁，写回统一走 _set_buttons）+_on_custom_batch_address +工具栏「批量地址…」（6 按钮、去掉行内提示标签）
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1171fbc` | (see git log) |
+
+### Testing
+
+- [OK] test_bluetooth_addr_fix.py 111 项（[6] 共享入口边界 + 与 apply 同源对拍）；test_bluetooth_widget.py 270 项（[16]/[16b] 对话框直测 + 端到端写回/tooltip/日志/落盘/发送用新地址/清除还原 + 工具栏宽度 + [15] 反例）
+- [OK] 变异反证 4 条：默认勾选全勾 9 项红 / 只选本协议改全选 5 项红 / 跳过时不弹二次确认 2 项红 / 清除只删 protocol 1 项红，逐字节还原 md5 一致
+- [OK] 冒烟（offscreen）：默认只勾 1/4、坏 HEX 行标原因且默认不勾、强行勾选→二次确认→跳过、清除模式补丁 protocol=None、10/14/16/24 号字 6 按钮全不裁字
+- [OK] release_check --with-gui：PASS=131 FAIL=4（2 项 .iss 版本不一致已用 --sync-iss 修好 + 2 项 COM 口被运行实例占用的既有环境红）→ 修后 --sync-iss 运行 PASS=121 FAIL=2 WARN=0
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 版本取 1.23.84（1.23.83 已属并行任务的串口工具批量替换地址）；版本/文档四件套留在工作区随发版批次提交
