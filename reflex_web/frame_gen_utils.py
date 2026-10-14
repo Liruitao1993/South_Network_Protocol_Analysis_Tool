@@ -386,7 +386,7 @@ def _encode_axdr_item(coder, item: Dict[str, Any]) -> bytes:
         raw = bytes.fromhex(str(value).replace(" ", "")) if isinstance(value, str) and value else b""
         if length > 0:
             raw = raw.ljust(length, b'\x00')[:length]
-        return bytes([tag]) + coder._encode_length(len(raw)) + raw
+        return coder.encode(raw, tag)
     if t in ("visible-string", "UTF8-string"):
         data = str(value).encode('ascii' if t == "visible-string" else 'utf-8', errors='replace')
         if length > 0:
@@ -396,7 +396,7 @@ def _encode_axdr_item(coder, item: Dict[str, Any]) -> bytes:
         raw = bytes.fromhex(str(value).replace(" ", "")) if isinstance(value, str) and value else b""
         if length > 0:
             raw = raw.ljust(length, b'\x00')[:length]
-        return bytes([tag]) + coder._encode_length(len(raw)) + raw
+        return coder.encode(raw, tag)
     if t == "OI":
         return coder.encode(int(value), tag)
     if t in ("OAD", "OMD"):

@@ -936,6 +936,18 @@ class OILookup:
         },
     }
 
+    # 实例（OI）级方法名覆盖表：仅用于基类未登记或与基类不同的实例方法
+    OI_METHOD_NAME_MAP = {
+        0xF001: {
+            7: "启动传输",
+            8: "写文件",
+            9: "读文件",
+            10: "软件比对",
+            13: "执行升级",
+            14: "启动传输（带块大小/版本/下载方标识）",
+        },
+    }
+
     # OI 到 class_id 的映射（从协议文档附录A提取）
     OI_TO_CLASS_ID = {
         0x0000: 1, 0x0010: 1, 0x0011: 1, 0x0012: 1, 0x0013: 1, 0x0019: 1, 0x0020: 1, 0x0021: 1,
@@ -1054,6 +1066,11 @@ class OILookup:
         return None
 
     def get_method_name(self, oi: int, method_id: int) -> Optional[str]:
+        oi_methods = self.OI_METHOD_NAME_MAP.get(oi)
+        if oi_methods:
+            name = oi_methods.get(method_id)
+            if name:
+                return name
         class_id = self.OI_TO_CLASS_ID.get(oi)
         if class_id is None:
             return None

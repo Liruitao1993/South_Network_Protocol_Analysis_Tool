@@ -233,12 +233,14 @@ class AXDRCoder:
                 "解析值": s, "说明": f"{length}字节UTF-8"}, 1 + llen + length
 
     def _decode_bit_string(self, data: bytes, offset: int) -> Tuple[dict, int]:
-        length, llen = self._decode_length(data, offset + 1)
-        if offset + 1 + llen + length > len(data):
+        # 长度域是位宽（规范 bit-string(SIZE(n)) 的 n 为位数），内容占 ceil(bits/8) 字节
+        bits, llen = self._decode_length(data, offset + 1)
+        nbytes = (bits + 7) // 8
+        if offset + 1 + llen + nbytes > len(data):
             raise ValueError("bit-string 数据不足")
-        val = data[offset + 1 + llen:offset + 1 + llen + length]
+        val = data[offset + 1 + llen:offset + 1 + llen + nbytes]
         return {"类型": "bit-string", "原始值": val.hex().upper(),
-                "解析值": val.hex().upper(), "说明": f"{length}字节"}, 1 + llen + length
+                "解析值": val.hex().upper(), "说明": f"{bits}位"}, 1 + llen + nbytes
 
     # --- 复合类型 ---
 
@@ -302,15 +304,17 @@ class AXDRCoder:
                 "说明": f"年={year}, 月={month}, 日={day}, 星期={week_map.get(week, week)}"}, 6
 
     def _decode_time(self, data: bytes, offset: int) -> Tuple[dict, int]:
-        if offset + 4 >= len(data):
+        # 规范类型表 `time 27 / octet-string SIZE(3)`；§7.3.x `time ::= SEQUENCE{hour, minute, second}`
+        # ⇒ 定长 3 字节、无长度域（与 _encode_time 对称）
+        if offset + 3 >= len(data):
             raise ValueError("time 数据不足")
-        val = data[offset + 1:offset + 5]
+        val = data[offset + 1:offset + 4]
         hour = val[0]
         minute = val[1]
         second = val[2]
         return {"类型": "time", "原始值": val.hex().upper(),
                 "解析值": f"{hour:02d}:{minute:02d}:{second:02d}",
-                "说明": f"时={hour}, 分={minute}, 秒={second}"}, 5
+                "说明": f"时={hour}, 分={minute}, 秒={second}"}, 4
 
     def _decode_date_time_s(self, data: bytes, offset: int) -> Tuple[dict, int]:
         if offset + 7 >= len(data):
@@ -483,8 +487,8 @@ class AXDRCoder:
         return struct.pack('>B', 1 if value else 0)
 
     def _encode_bit_string(self, value: bytes) -> bytes:
-        length = len(value)
-        return self._encode_length(length) + value
+        # 长度域写位宽（与 _decode_bit_string 的位数口径对称）
+        return self._encode_length(len(value) * 8) + value
 
     def _encode_visible_string(self, value: str) -> bytes:
         data = value.encode('ascii', errors='replace')
@@ -496,21 +500,22 @@ class AXDRCoder:
         length = len(data)
         return self._encode_length(length) + data
 
+    # 以下定长类型（SIZE 固定）不带长度域：encode() 已加 tag，这里只返回定长值字节，与各自解码器对称。
     def _encode_date_time(self, value) -> bytes:
         """date_time: octet-string SIZE(10)"""
-        return self._encode_octet_string(value if isinstance(value, bytes) else bytes.fromhex(str(value).replace(' ', '')))
+        return value if isinstance(value, bytes) else bytes.fromhex(str(value).replace(' ', ''))
 
     def _encode_date(self, value) -> bytes:
         """date: octet-string SIZE(5)"""
-        return self._encode_octet_string(value if isinstance(value, bytes) else bytes.fromhex(str(value).replace(' ', '')))
+        return value if isinstance(value, bytes) else bytes.fromhex(str(value).replace(' ', ''))
 
     def _encode_time(self, value) -> bytes:
         """time: octet-string SIZE(3)"""
-        return self._encode_octet_string(value if isinstance(value, bytes) else bytes.fromhex(str(value).replace(' ', '')))
+        return value if isinstance(value, bytes) else bytes.fromhex(str(value).replace(' ', ''))
 
     def _encode_date_time_s(self, value) -> bytes:
         """date_time_s: octet-string SIZE(7)"""
-        return self._encode_octet_string(value if isinstance(value, bytes) else bytes.fromhex(str(value).replace(' ', '')))
+        return value if isinstance(value, bytes) else bytes.fromhex(str(value).replace(' ', ''))
 
     def _encode_TI(self, value) -> bytes:
         """TI: octet-string SIZE(6)"""
