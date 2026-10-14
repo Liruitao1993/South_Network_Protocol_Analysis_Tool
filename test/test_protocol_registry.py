@@ -13,6 +13,7 @@ from protocol_registry import (  # noqa: E402
     protocols_with_frame_gen,
     protocols_with_monitor,
     protocols_with_sequence_diagram,
+    protocols_with_upgrade,
 )
 
 
@@ -81,6 +82,14 @@ def test_virtual_meter_only_698():
     assert get_protocol(6).has_archive is False
 
 
+def test_upgrade_only_698():
+    assert get_protocol(8).has_upgrade is True
+    assert set(protocols_with_upgrade()) == {8}
+    for i in range(len(all_protocols())):
+        if i != 8:
+            assert get_protocol(i).has_upgrade is False, i
+
+
 def test_validator_map_covers_all_protocols():
     m = build_validator_map()
     n = len(all_protocols())
@@ -142,4 +151,5 @@ if __name__ == "__main__":
     test_extract_strategies()
     test_build_gui_parser_wrappers()
     test_lookup_builder_methods()
+    test_upgrade_only_698()
     print("protocol_registry tests OK")

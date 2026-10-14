@@ -126,6 +126,8 @@ CORE_TESTS = [
     "test/test_message_tool_numeric.py",
     "test/test_dl_t698_45_extract.py",
     "test/test_dl_t698_45_endian.py",
+    # 协议8 文件传输升级（纯逻辑）：三帧逐字节 golden（含 doc 实帧）/ 分包矩阵 / SA / 确认判定 / 校验值
+    "test/test_dl698_upgrade.py",
     # 前导 FE 唤醒字节（协议8/6）：解析/表格偏移/校验一致性 + offscreen GUI（AGENTS §8 前导 FE 陷阱）
     "test/test_wakeup_fe_prefix.py",
     "test/test_serial_tool_widget.py",
@@ -164,6 +166,9 @@ CORE_TESTS = [
 # 可选 offscreen GUI（慢；主题套件本机既有 12 项失败，仅报告不阻断默认）
 GUI_TESTS = [
     "test/test_quick_parse_panel.py",
+    # 协议8 文件传输升级页（offscreen 假串口：逐包确认/重试/超时/中止/进度/拖放/不裁字）+ 真实 MainWindow 接线
+    "test/test_dl698_upgrade_gui.py",
+    "test/test_dl698_upgrade_tab_wiring.py",
     "test/test_csg_sequence_gui.py",
     "test/test_csg_pb_highlight_gui.py",
     "test/test_csg_pbcs_fill_gui.py",

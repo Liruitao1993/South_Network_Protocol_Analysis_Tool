@@ -147,6 +147,7 @@ def test_tab_visibility():
         ("_dlt645_sim_tab_index", spec.has_dlt645_sim, "645虚拟表"),
         ("_monitor_tab_index", spec.has_monitor, "监控器"),
         ("_seq_diagram_tab_index", spec.has_sequence_diagram, "通信时序图"),
+        ("_upgrade_tab_index", spec.has_upgrade, "升级"),
     ]
     for attr, expected, label in pairs:
         idx = getattr(win, attr, None)

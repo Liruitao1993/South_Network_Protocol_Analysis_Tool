@@ -3157,6 +3157,14 @@ class MainWindow(QMainWindow):
             self._bluetooth_tool_placeholder, app_icons.load_icon("bluetooth"), "蓝牙工具"
         )
 
+        # 协议8 698.45 文件传输升级页（懒加载，仅协议8 可见；创建即隐藏，构造期
+        # _on_protocol_changed 可能一次都不触发，协议专属 tab 必须在创建处设隐藏）
+        self._upgrade_placeholder = QWidget()
+        self._upgrade_tab_index = self.tab_widget.addTab(
+            self._upgrade_placeholder, app_icons.load_icon("hard-drive-upload"), "升级"
+        )
+        self.tab_widget.setTabVisible(self._upgrade_tab_index, False)
+
         # 实时监控器页面（南网新一代(9)/国网新一代(10) 专用，默认隐藏）
         self.monitor_tab = RealtimeMonitorWidget()
         self.monitor_tab.set_serial_worker(self.serial_worker)
@@ -4427,6 +4435,8 @@ class MainWindow(QMainWindow):
             self._ensure_bluetooth_tool_tab()
         elif index == getattr(self, "_seq_diagram_tab_index", -1):
             self._ensure_seq_diagram_tab()
+        elif index == getattr(self, "_upgrade_tab_index", -1):
+            self._ensure_upgrade_tab()
 
     def _ensure_frame_gen_tab(self):
         if hasattr(self, "frame_gen_tab"):
@@ -4574,6 +4584,23 @@ class MainWindow(QMainWindow):
         tab.refresh_requested.connect(self._generate_sequence_diagram)
         self._replace_lazy_tab(
             self._seq_diagram_placeholder, self._seq_diagram_tab_index, tab
+        )
+        apply_chinese_context_menus(tab)
+        return tab
+
+    def _ensure_upgrade_tab(self):
+        """懒加载创建 698.45 文件传输升级页（仅协议8 可见；复用共享串口）。"""
+        if hasattr(self, "upgrade_tab"):
+            return self.upgrade_tab
+        from dlt698_upgrade_widget import Dlt698UpgradeWidget
+
+        tab = Dlt698UpgradeWidget()
+        self.upgrade_tab = tab
+        # 复用主窗口共享的串口线程（与组帧页/串口工具页同一约定）：端口/波特率只在
+        # 顶部「串口配置」设置，本页只订阅 raw_data_received、经 write_raw 发送，不自建句柄。
+        tab.set_serial_worker(self.serial_worker)
+        self._replace_lazy_tab(
+            self._upgrade_placeholder, self._upgrade_tab_index, tab
         )
         apply_chinese_context_menus(tab)
         return tab
@@ -4858,6 +4885,9 @@ class MainWindow(QMainWindow):
             self.tab_widget.setTabVisible(
                 self._dlt645_sim_tab_index, spec.has_dlt645_sim
             )
+        # 协议8 698.45 文件传输升级：注册表 has_upgrade（仅协议8 可见）
+        if hasattr(self, "_upgrade_tab_index"):
+            self.tab_widget.setTabVisible(self._upgrade_tab_index, spec.has_upgrade)
         # 档案管理 / 拓扑信息
         if hasattr(self, "_archive_tab_index"):
             self.tab_widget.setTabVisible(self._archive_tab_index, spec.has_archive)
@@ -8623,6 +8653,14 @@ class MainWindow(QMainWindow):
         if bluetooth_tool is not None:
             try:
                 bluetooth_tool.cleanup()
+            except Exception:
+                pass
+
+        # 6d) 698.45 升级页：停逐包确认定时器 + 断开串口信号 + 落盘（不得关闭串口）
+        upgrade = getattr(self, "upgrade_tab", None)
+        if upgrade is not None:
+            try:
+                upgrade.cleanup()
             except Exception:
                 pass
 
@@ -13315,6 +13353,11 @@ class MainWindow(QMainWindow):
         if getattr(self, "bluetooth_tool_tab", None) is not None:
             try:
                 self.bluetooth_tool_tab.restyle_for_theme(self._is_dark_theme())
+            except RuntimeError:
+                pass
+        if getattr(self, "upgrade_tab", None) is not None:
+            try:
+                self.upgrade_tab.restyle_for_theme(self._is_dark_theme())
             except RuntimeError:
                 pass
         # 字段树与解析结果表同字号（主题 QSS 已含 QTreeWidget）

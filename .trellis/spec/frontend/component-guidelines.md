@@ -484,6 +484,43 @@ engine = self._engine_factory()            # 否则才是发给本虚拟表的�
   ② `_select_scope` 改成全选 → 5 项红；③ 跳过失败项时不弹二次确认（静默跳过）→ 2 项红；
   ④ 清除模式只删 `protocol` 不删 `addr` → 1 项红。
 
+### 7j. 协议专属「升级」页 / 长流程串口传输页（698.45 文件传输升级）
+
+> 源自任务 10-14-dlt698-file-transfer-upgrade（协议8 分布式产品升级：启动传输 → 写文件×N → 执行升级）。
+> 适用面：**任何协议专属、走共享串口、需要逐帧确认的长流程页面**（下一候选：批量写参数 / 任务下发）。
+
+- **创建即隐藏**：`setup_ui` 里 `addTab` 之后**当场** `self.tab_widget.setTabVisible(idx, False)`。构造期
+  `_on_protocol_changed` 可能一次都不触发（`protocol_combo.addItem` 在 `connect` 之前，`main_gui.py:2792` vs `:2802`），
+  只靠协议回调设初值会把空 tab 露出来。实例：`main_gui.py` `_upgrade_placeholder` / `_upgrade_tab_index`（tab 创建段，蓝牙工具之后）。
+- **显隐一律读注册表**：`_on_protocol_changed` 里 `setTabVisible(self._upgrade_tab_index, spec.has_upgrade)`。能力字段
+  `has_upgrade` 声明在 `protocol_registry.ProtocolSpec`（紧跟 `has_sequence_diagram`），**只有协议8 `True`**，
+  helper `protocols_with_upgrade()`；断言 `test_protocol_registry.py::test_upgrade_only_698`，
+  可见性矩阵对拍 `test_yw645_gui.py::test_tab_visibility` 的 `pairs` 行 `("_upgrade_tab_index", spec.has_upgrade, "升级")`。
+- **懒加载三件套**：`_ensure_lazy_tab` 加分支 → `_ensure_upgrade_tab()`：`hasattr` 守卫 → **函数内** import
+  `dlt698_upgrade_widget.Dlt698UpgradeWidget` → `tab.set_serial_worker(self.serial_worker)` → `_replace_lazy_tab(...)` →
+  `apply_chinese_context_menus(tab)`（样板照 `_ensure_serial_tool_tab`）。函数内 import 是铁律：`dl_t698_45_*` 顶层
+  `import crcmod`（可选依赖），模块级导入会让没装 crcmod 的机器连主窗口都打不开。
+  新增 `def` **绝不能插进 `__init__`/`setup_ui` 的语句流中间**（AGENTS §8 陷阱 68：后续 UI 代码会变成上一个方法内的死代码）。
+- **共享串口只订阅 `raw_data_received`、只用 `write_raw` 发送，不得用 `frame_received`**：`SerialWorker._process_buffer` 只认
+  645 双 68H 与 FT1.2；698 整帧长度 = `L+2` ⇒ 必落「找第一个 0x16」容错分支被截断（600B 载荷含 0x16 概率 ≈90%）。
+  页面自组帧走单一来源 `frame_deframe.frame_length_for("dlt698_45", buf)`（L+2 + 末字节 `16H` 自证 + 前导 FEH 容忍，
+  见 §7c 同源判据）。发送用 `write_raw`（静默）+ 本页自建 TX/RX 日志行（`send_frame` 的 `[发送]` 会刷屏，AGENTS 陷阱 58）。
+- **逐包确认 = 单发 `QTimer` + 状态标志位，不建 `QThread`**：状态机 `idle → starting → transferring(i) → finishing → done/failed/aborted`；
+  每发一帧起一次 `setSingleShot(True)` 定时器，收到匹配确认停表推进；超时/否定 → 同一包重试（PIID 自增），**重试用尽整体停止**、
+  不再发后续帧。照 `test_plan_widget.TestPlanWidget` 既有范式（免线程回收、免 `thread_registry`）。
+  确认判定用 `DLT69845Parser` 的解析结果（APDU 类型 + OMD + DAR），不用字符串/字节比对。
+- **耗时 / 失败 / 超时必外显**：进度只按**已确认**包累加（`已确认字节/总字节` + `第 x/N 包`）；失败与超时**既写日志行、又弹框**
+  （结束态），绝不静默停在半截（口径同 §7f/§7h 的「不静默跳过」）。
+- **按钮宽度一律 `gui_utils.fit_btn_width`**（只设下限、不 `setFixedWidth`，陷阱 63）。
+- **大文件分包参数必须可配且持久化**：每包字节数 / 超时(ms) / 重试次数（连同 SA、CA、文件信息、校验类型与值）全可编辑，
+  落 `app_paths.data_path("dlt698_upgrade_config.json")`（原子写 + 坏文件宽容；**按属性访问** `app_paths.data_path`，
+  便于测试沙箱重定向）。`cleanup()` = 停表 + 断串口信号 + 落盘，**不得关闭串口**；主题走 `restyle_for_theme(dark)`，
+  在 `_restyle_for_theme` 里带 `getattr(...) is not None` 守卫 + `except RuntimeError: pass`。
+
+- **RX 重同步必须能丢弃「不可能成为帧头」的字节**（1.23.85 独立复核发现）：只跳过「首字节非 `68`/`FE`」不足以防卡死 —— 一次线噪（`FE FE 99 …`，或长度域被噪成「按长度到齐却非 `16H`」）会让缓冲头**永久占位**，此后所有确认都收不到（HOLD 上限 262144B 实际不可达）⇒ 一次噪声 = 整轮失败。正确判据：**只有「当前既无半截帧在等、也切不出整帧」时才丢弃**，丢多少交给 `frame_deframe`（不在页面里另写分帧算术）。回归段：`test_dl698_upgrade_gui.py::test_resync_edges`（含「真半帧一个字节都不许丢」反例）。
+- **传输进行中必须冻结会改变计划的输入**（同轮发现）：换升级包 / 改 SA·块大小 / 点「清除」三类操作，要么**拒绝并提示先「中止」**，要么**完整复位状态与按钮门控**。否则轻则 `_on_ack` 抛 `IndexError`（在 Qt 槽里被吞掉 → 状态机静默卡死），重则**静默改发另一个文件的数据**（新文件包数够时顺序继续）。回归段：`test_mid_transfer_controls`。
+- 新增的「测试断言」必须自查判别力：**只投「整帧」验证「断信号后不再处理」是恒真的**（整帧会被正常处理掉、缓冲恒为 0），要投一段**半帧**才能区分「断/未断」（1.23.85 实测：把 `_detach` 换 no-op，只投整帧的版本照样绿）。
+
 ### 8. Qt 陷阱（本项目实测）
 - **offscreen 无字体**：`QT_QPA_PLATFORM=offscreen` 下 `QFontDatabase: Cannot find font directory ...`，绘制出的文字是豆腐块 → 断言只能查尺寸/颜色/像素多样性；**要目视核对文字排版必须用默认平台**（`QApplication([])` 不设 offscreen + `widget.grab()` / `QImage.save()`，不需要窗口真的可见）。
 - **`bytes(image.constBits())` 必须持有 QImage 引用**：`bytes(canvas.render_image(w, h).constBits())`（临时对象上取 buffer）会 **access violation（0xC0000005）**；先 `img = ...` 再 `bytes(img.constBits())`。

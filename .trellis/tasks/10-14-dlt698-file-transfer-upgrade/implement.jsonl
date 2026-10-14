@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "PySide6 页面/按钮/折叠区/Qt 陷阱规范（阶段3 UI 必读）"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "质量门禁与自检要求"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "前端规范入口清单"}
+{"file": ".trellis/tasks/10-14-dlt698-file-transfer-upgrade/research/protocol-facts.md", "reason": "逐字节 golden 与 A-XDR/SA 协议口径（AC3/AC4/AC5 依据）"}
+{"file": ".trellis/tasks/10-14-dlt698-file-transfer-upgrade/research/repo-reuse.md", "reason": "串口/分帧/接线复用点与必须修复的既有缺陷"}

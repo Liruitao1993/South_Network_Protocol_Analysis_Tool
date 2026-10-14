@@ -43,6 +43,7 @@ class ProtocolSpec:
     has_monitor: bool = False
     monitor_wrapper: Optional[str] = None  # plc2 | hplc
     has_sequence_diagram: bool = False
+    has_upgrade: bool = False
     # 解析级别族：None | csg | gw | hdc10（GUI 控件共用/复用）
     parse_level_family: Optional[str] = None
     # ED..EE 监控包装：单帧「ED监控协议」勾选 + 包装头格式下拉 + 字节剔除
@@ -188,6 +189,7 @@ _PROTOS: Tuple[ProtocolSpec, ...] = (
         lookup_tab_title="OAD查询",
         frame_gen_mode="dlt698",
         has_virtual_meter=True,
+        has_upgrade=True,
         preset_mode="dlt698",
         extract_strategy="dlt698_45",
         validator_class="validator.dl_t698_45_validator:DLT69845Validator",
@@ -360,6 +362,10 @@ def protocols_with_frame_gen() -> Tuple[int, ...]:
 
 def protocols_with_sequence_diagram() -> Tuple[int, ...]:
     return tuple(p.index for p in _PROTOS if p.has_sequence_diagram)
+
+
+def protocols_with_upgrade() -> Tuple[int, ...]:
+    return tuple(p.index for p in _PROTOS if p.has_upgrade)
 
 
 def protocols_with_monitor() -> Tuple[int, ...]:
@@ -601,6 +607,7 @@ __all__ = [
     "name_to_index",
     "protocols_with_frame_gen",
     "protocols_with_sequence_diagram",
+    "protocols_with_upgrade",
     "protocols_with_monitor",
     "frame_gen_mode_for",
     "preset_mode_for",
