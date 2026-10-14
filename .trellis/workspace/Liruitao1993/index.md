@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 35
-- **Last Active**: 2026-10-14
+- **Total Sessions**: 36
+- **Last Active**: 2026-10-15
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1168 | Active |
+| `journal-1.md` | ~1189 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 36 | 2026-10-15 | 协议8 698.45 文件传输升级（启动传输/写文件/执行升级）+「升级」页 | `6a2efea` | `main` |
 | 35 | 2026-10-14 | 推送到 GitHub（排除参考项目/敏感文件）+ 编译 exe 1.23.84 | `0eff521` | `main` |
 | 34 | 2026-10-14 | 蓝牙自定义按钮：按协议类别批量替换地址 | `1171fbc` | `main` |
 | 33 | 2026-10-14 | 串口工具批量替换通信地址（复用 frame_addr_fix + 撤销） | `e97b145` | `main` |

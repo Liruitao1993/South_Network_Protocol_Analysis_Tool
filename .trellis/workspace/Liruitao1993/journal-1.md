@@ -1166,3 +1166,24 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Next Steps
 
 - 如需发给用户/发布：dist 下该 exe；Web 版发布走 reflex_web/build_embedded_deploy.py
+
+
+## Session 36: 协议8 698.45 文件传输升级（启动传输/写文件/执行升级）+「升级」页
+
+**Date**: 2026-10-15
+**Task**: 协议8 698.45 文件传输升级（启动传输/写文件/执行升级）+「升级」页
+**Branch**: `main`
+
+### Summary
+
+新增 dl_t698_45_upgrade.py（纯逻辑）+ dlt698_upgrade_widget.py（仅协议8 可见的升级页）+ frame_deframe.py（分帧单一来源）；修 dl_t698_45_axdr 三处口径（bit-string 按位、定长时间类型不带长度域、time 3 字节）并收口 frame_gen_widget/reflex_web 的 A-XDR 自定义模式；协议口径按 doc 实帧逐字节验证（62 字节启动升级帧全等）；trellis-check 复核修掉 3 处阻塞级缺陷（RX 重同步卡死/传输中改输入/清除后门控不复位）；release_check --with-gui PASS=138 FAIL=0 WARN=0
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6a2efea` | (see git log) |
+
+### Status
+
+[OK] **Completed**
