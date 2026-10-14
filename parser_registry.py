@@ -19,6 +19,8 @@ _PARSER_SPECS: Dict[str, Tuple[str, str]] = {
     "gw_new_gen": ("gw_new_gen_parser", "GWNewGenParser"),
     "hdc10": ("hdc10_parser", "HDC10Parser"),
     "modular": ("modular_iface_parser", "ModularIfaceParser"),
+    "yw645": ("yw645_parser", "YW645Parser"),
+    "csg_uplink": ("csg_uplink_parser", "CSGUplinkParser"),
 }
 
 _INSTANCES: Dict[str, Any] = {}

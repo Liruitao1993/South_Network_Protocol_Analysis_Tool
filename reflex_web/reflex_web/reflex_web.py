@@ -364,6 +364,7 @@ class State(rx.State):
         {"label": "[9] 新一代载波协议 (通感一体化)", "value": "9"},
         {"label": "[10] 国网新一代双模通信互联互通", "value": "10"},
         {"label": "[11] HDC 1.0 双模互联互通 (Q/GDW 12087.42-2020)", "value": "11"},
+        {"label": "[13] 依瓦定制645 (依瓦定制645协议 V1.0)", "value": "13"},
     ]
 
     # ── 协议切换 ─────────────────────────────────────────────
@@ -516,6 +517,16 @@ class State(rx.State):
             from hdc10_parser import HDC10Parser
 
             return HDC10Parser()
+        elif p == 13:
+            # 依瓦定制645：与桌面同一解析器（yw645_parser），不在 Web 侧另写解析逻辑
+            from yw645_parser import YW645Parser
+
+            return YW645Parser()
+        elif p == 14:
+            # 南网上行通信规约：与桌面同一解析器（csg_uplink_parser）
+            from csg_uplink_parser import CSGUplinkParser
+
+            return CSGUplinkParser()
         else:
             from protocol_parser import ProtocolFrameParser
 
@@ -655,10 +666,15 @@ class State(rx.State):
             self.message_type = "success"
             # 缓存本次解析的报文与协议名（供「分享此帧」使用）
             self.last_parsed_hex = " ".join(f"{b:02X}" for b in frame_bytes)
-            self.last_protocol_name = str(
-                self.PROTOCOL_OPTIONS[self.current_protocol]["label"]
-                if 0 <= self.current_protocol < len(self.PROTOCOL_OPTIONS)
-                else "不确定"
+            # 按 value 查标签（**不按位置索引**）：协议下拉存在索引空洞
+            # （已支持 13、尚未支持 12），位置索引会让协议13 退成「不确定」。
+            self.last_protocol_name = next(
+                (
+                    str(opt.get("label", ""))
+                    for opt in self.PROTOCOL_OPTIONS
+                    if str(opt.get("value")) == str(self.current_protocol)
+                ),
+                "不确定",
             )
 
         except Exception as e:
@@ -894,7 +910,7 @@ class State(rx.State):
                     )
 
                     # 状态/类型/摘要：全表扫描 ❌ 行 + 空表判定
-                    ok_name = get_frame_summary(result, self.current_protocol)
+                    ok_name = get_frame_summary(result, self.current_protocol, frame_bytes)
                     status, type_name, summary = web_utils.batch_frame_outcome(
                         result, ok_name
                     )
@@ -7721,6 +7737,19 @@ def frame_gen_tab() -> rx.Component:
                         ),
                     ),
                     spacing="2",
+                ),
+                # 协议13（依瓦定制645）：Web 端组帧本期未实现（prd R7.4 范围声明），
+                # 在组帧页给可见提示，不得静默缺失。
+                rx.cond(
+                    State.current_protocol == 13,
+                    rx.callout(
+                        "协议13（依瓦定制645）的组帧暂未在 Web 端提供，请使用桌面版「协议组帧」页；"
+                        "另注：协议文档未定义写模式命令码，桌面版亦仅提供占位项。",
+                        icon="info",
+                        color_scheme="amber",
+                        size="1",
+                        width="100%",
+                    ),
                 ),
                 # 南网 DI 选择 (协议 0)
                 rx.cond(

@@ -115,8 +115,8 @@ _SITE_INFO_ELEM_MAP = {
 
 def _parse_header_meter_down(payload: bytes, base_offset: int) -> Tuple[int, list]:
     """抄表下行报文头(表3): 8字节
-    字节0: 协议版本(6b) + 报文头长度高2位(2b)
-    字节1: 报文头长度低4位(4b) + 未应答重试(1b) + 否认重试(1b) + 最大重试次数(2b)
+    字节0: 协议版本(6b) + 报文头长度低2位(2b)
+    字节1: 报文头长度高4位(4b) + 未应答重试(1b) + 否认重试(1b) + 最大重试次数(2b)
     字节2: 规约类型(低4b) + 转发数据长度低4位(高4b)
     字节3: 转发数据长度高4位(低4b) + 保留(高4b)
     字节4-5: 报文序号(16b, 小端序)
@@ -130,10 +130,10 @@ def _parse_header_meter_down(payload: bytes, base_offset: int) -> Tuple[int, lis
         return 0, table
     b0 = payload[0]
     version = b0 & 0x3F
-    hdr_len_high = (b0 >> 6) & 0x03
     b1 = payload[1]
-    hdr_len_low = b1 & 0x0F
-    hdr_len = (hdr_len_high << 4) | hdr_len_low
+    # 报文头长度(6bit): 字节1[bit3-0] 是高 4 位、字节0[bit7-6] 是低 2 位，
+    # 值即报文头的字节数（与表3 的 8 字节自洽；口径同本文件 _parse_comm_test）
+    hdr_len = ((b1 & 0x0F) << 2) | ((b0 >> 6) & 0x03)
     retry_no_resp = (b1 >> 4) & 0x01
     retry_deny = (b1 >> 5) & 0x01
     max_retry = (b1 >> 6) & 0x03
@@ -171,8 +171,8 @@ def _parse_header_meter_down(payload: bytes, base_offset: int) -> Tuple[int, lis
 
 def _parse_header_meter_up(payload: bytes, base_offset: int) -> Tuple[int, list]:
     """抄表上行报文头(表4): 8字节
-    字节0: 协议版本(6b) + 报文头长度高2位(2b)
-    字节1: 报文头长度低4位(4b) + 应答状态(4b)
+    字节0: 协议版本(6b) + 报文头长度低2位(2b)
+    字节1: 报文头长度高4位(4b) + 应答状态(4b)
     字节2: 规约类型(低4b) + 转发数据长度低4位(高4b)
     字节3: 转发数据长度高4位(低4b) + 保留(高4b)
     字节4-5: 报文序号(16b, 小端序)
@@ -185,10 +185,10 @@ def _parse_header_meter_up(payload: bytes, base_offset: int) -> Tuple[int, list]
         return 0, table
     b0 = payload[0]
     version = b0 & 0x3F
-    hdr_len_high = (b0 >> 6) & 0x03
     b1 = payload[1]
-    hdr_len_low = b1 & 0x0F
-    hdr_len = (hdr_len_high << 4) | hdr_len_low
+    # 报文头长度(6bit): 字节1[bit3-0] 是高 4 位、字节0[bit7-6] 是低 2 位，
+    # 值即报文头的字节数（与表4 的 8 字节自洽；口径同本文件 _parse_comm_test）
+    hdr_len = ((b1 & 0x0F) << 2) | ((b0 >> 6) & 0x03)
     resp_status = (b1 >> 4) & 0x0F
     b2 = payload[2]
     proto_type = b2 & 0x0F
@@ -216,8 +216,8 @@ def _parse_header_meter_up(payload: bytes, base_offset: int) -> Tuple[int, list]
 
 def _parse_header_generic(payload: bytes, base_offset: int, direction: int) -> Tuple[int, list]:
     """通用报文头(校时/通信测试/升级等): 4字节
-    字节0: 协议版本(6b) + 报文头长度高2位(2b)
-    字节1: 报文头长度低4位(4b) + 保留/控制(4b)
+    字节0: 协议版本(6b) + 报文头长度低2位(2b)
+    字节1: 报文头长度高4位(4b) + 保留/控制(4b)
     字节2: 保留(低4b) + 数据长度低4位(高4b)
     字节3: 数据长度高4位(低4b) + 保留(高4b)
 
@@ -228,10 +228,10 @@ def _parse_header_generic(payload: bytes, base_offset: int, direction: int) -> T
         return 0, table
     b0 = payload[0]
     version = b0 & 0x3F
-    hdr_len_high = (b0 >> 6) & 0x03
     b1 = payload[1]
-    hdr_len_low = b1 & 0x0F
-    hdr_len = (hdr_len_high << 4) | hdr_len_low
+    # 报文头长度(6bit): 字节1[bit3-0] 是高 4 位、字节0[bit7-6] 是低 2 位，
+    # 值即报文头的字节数（口径同本文件 _parse_comm_test）
+    hdr_len = ((b1 & 0x0F) << 2) | ((b0 >> 6) & 0x03)
     ctrl = (b1 >> 4) & 0x0F
     b2 = payload[2]
     b3 = payload[3]
@@ -805,10 +805,10 @@ def _parse_event_report(payload: bytes, direction: int, base_offset: int) -> lis
         return table
     b0 = payload[0]
     version = b0 & 0x3F
-    hdr_len_high = (b0 >> 6) & 0x03
     b1 = payload[1]
-    hdr_len_low = b1 & 0x0F
-    hdr_len = (hdr_len_high << 4) | hdr_len_low
+    # 报文头长度(6bit): 字节1[bit3-0] 是高 4 位、字节0[bit7-6] 是低 2 位，
+    # 值即报文头的字节数（口径同本文件 _parse_comm_test）
+    hdr_len = ((b1 & 0x0F) << 2) | ((b0 >> 6) & 0x03)
     dir_bit = (b1 >> 4) & 0x01
     start_bit = (b1 >> 5) & 0x01
     func_code = (b1 >> 6) & 0x03
@@ -967,10 +967,10 @@ def _parse_query_node_registration(payload: bytes, direction: int, base_offset: 
         return table
     b0 = payload[0]
     version = b0 & 0x3F
-    hdr_len_high = (b0 >> 6) & 0x03
     b1 = payload[1]
-    hdr_len_low = b1 & 0x0F
-    hdr_len = (hdr_len_high << 4) | hdr_len_low
+    # 报文头长度(6bit): 字节1[bit3-0] 是高 4 位、字节0[bit7-6] 是低 2 位，
+    # 值即报文头的字节数（口径同本文件 _parse_comm_test）
+    hdr_len = ((b1 & 0x0F) << 2) | ((b0 >> 6) & 0x03)
     ctrl = (b1 >> 4) & 0x0F
     _f(table, "协议版本号", f"{version}", str(version), "固定为1", base_offset, base_offset)
     _f(table, "报文头长度", f"{hdr_len}", str(hdr_len), "下行=20, 上行=36",
@@ -1097,10 +1097,10 @@ def _parse_start_node_registration(payload: bytes, direction: int, base_offset: 
         return table
     b0 = payload[0]
     version = b0 & 0x3F
-    hdr_len_high = (b0 >> 6) & 0x03
     b1 = payload[1]
-    hdr_len_low = b1 & 0x0F
-    hdr_len = (hdr_len_high << 4) | hdr_len_low
+    # 报文头长度(6bit): 字节1[bit3-0] 是高 4 位、字节0[bit7-6] 是低 2 位，
+    # 值即报文头的字节数（口径同本文件 _parse_comm_test）
+    hdr_len = ((b1 & 0x0F) << 2) | ((b0 >> 6) & 0x03)
     ctrl = (b1 >> 4) & 0x0F
     force_resp = (ctrl >> 3) & 0x01
     reg_param = ctrl & 0x07
@@ -1130,10 +1130,10 @@ def _parse_stop_node_registration(payload: bytes, direction: int, base_offset: i
         return table
     b0 = payload[0]
     version = b0 & 0x3F
-    hdr_len_high = (b0 >> 6) & 0x03
     b1 = payload[1]
-    hdr_len_low = b1 & 0x0F
-    hdr_len = (hdr_len_high << 4) | hdr_len_low
+    # 报文头长度(6bit): 字节1[bit3-0] 是高 4 位、字节0[bit7-6] 是低 2 位，
+    # 值即报文头的字节数（口径同本文件 _parse_comm_test）
+    hdr_len = ((b1 & 0x0F) << 2) | ((b0 >> 6) & 0x03)
     _f(table, "协议版本号", f"{version}", str(version), "固定为1", base_offset, base_offset)
     _f(table, "报文头长度", f"{hdr_len}", str(hdr_len), "固定为8", base_offset, base_offset + 1)
     _f(table, "保留", _hex(payload[2:4]), "2字节", "", base_offset + 2, base_offset + 3)
@@ -1157,10 +1157,10 @@ def _parse_confirm_deny(payload: bytes, direction: int, base_offset: int) -> lis
         return table
     b0 = payload[0]
     version = b0 & 0x3F
-    hdr_len_high = (b0 >> 6) & 0x03
     b1 = payload[1]
-    hdr_len_low = b1 & 0x0F
-    hdr_len = (hdr_len_high << 4) | hdr_len_low
+    # 报文头长度(6bit): 字节1[bit3-0] 是高 4 位、字节0[bit7-6] 是低 2 位，
+    # 值即报文头的字节数（口径同本文件 _parse_comm_test）
+    hdr_len = ((b1 & 0x0F) << 2) | ((b0 >> 6) & 0x03)
     dir_bit = (b1 >> 4) & 0x01
     confirm_bit = (b1 >> 5) & 0x01
     _f(table, "协议版本号", f"{version}", str(version), "固定为1", base_offset, base_offset)
@@ -1257,10 +1257,10 @@ def _parse_file_transfer(payload: bytes, direction: int, base_offset: int) -> li
         return table
     b0 = payload[0]
     version = b0 & 0x3F
-    hdr_len_high = (b0 >> 6) & 0x03
     b1 = payload[1]
-    hdr_len_low = b1 & 0x0F
-    hdr_len = (hdr_len_high << 4) | hdr_len_low
+    # 报文头长度(6bit): 字节1[bit3-0] 是高 4 位、字节0[bit7-6] 是低 2 位，
+    # 值即报文头的字节数（口径同本文件 _parse_comm_test）
+    hdr_len = ((b1 & 0x0F) << 2) | ((b0 >> 6) & 0x03)
     block_size = _uint16_le(payload, 2)
     _f(table, "协议版本号", f"{version}", str(version), "固定为1", base_offset, base_offset)
     _f(table, "报文头长度", f"{hdr_len}", str(hdr_len), "", base_offset, base_offset + 1)
@@ -1371,10 +1371,10 @@ def _parse_query_site_info(payload: bytes, direction: int, base_offset: int) -> 
         return table
     b0 = payload[0]
     version = b0 & 0x3F
-    hdr_len_high = (b0 >> 6) & 0x03
     b1 = payload[1]
-    hdr_len_low = b1 & 0x0F
-    hdr_len = (hdr_len_high << 4) | hdr_len_low
+    # 报文头长度(6bit): 字节1[bit3-0] 是高 4 位、字节0[bit7-6] 是低 2 位，
+    # 值即报文头的字节数（口径同本文件 _parse_comm_test）
+    hdr_len = ((b1 & 0x0F) << 2) | ((b0 >> 6) & 0x03)
     _f(table, "协议版本号", f"{version}", str(version), "固定为1", base_offset, base_offset)
     _f(table, "报文头长度", f"{hdr_len}", str(hdr_len), "", base_offset, base_offset + 1)
 
@@ -1533,10 +1533,10 @@ def _parse_district_transformer(payload: bytes, base_offset: int, direction: int
     offset = 0
     b0 = payload[0]
     version = b0 & 0x3F
-    hdr_len_high = (b0 >> 6) & 0x03
     b1 = payload[1]
-    hdr_len_low = b1 & 0x0F
-    hdr_len = (hdr_len_high << 4) | hdr_len_low
+    # 报文头长度(6bit): 字节1[bit3-0] 是高 4 位、字节0[bit7-6] 是低 2 位，
+    # 值即报文头的字节数（口径同本文件 _parse_comm_test）
+    hdr_len = ((b1 & 0x0F) << 2) | ((b0 >> 6) & 0x03)
     dir_bit = (b1 >> 4) & 0x01
     start_bit = (b1 >> 5) & 0x01
     phase = (b1 >> 6) & 0x03
@@ -1645,10 +1645,10 @@ def _parse_query_id_info(payload: bytes, base_offset: int, direction: int) -> li
     offset = 0
     b0 = payload[0]
     version = b0 & 0x3F
-    hdr_len_high = (b0 >> 6) & 0x03
     b1 = payload[1]
-    hdr_len_low = b1 & 0x0F
-    hdr_len = (hdr_len_high << 4) | hdr_len_low
+    # 报文头长度(6bit): 字节1[bit3-0] 是高 4 位、字节0[bit7-6] 是低 2 位，
+    # 值即报文头的字节数（口径同本文件 _parse_comm_test）
+    hdr_len = ((b1 & 0x0F) << 2) | ((b0 >> 6) & 0x03)
     dir_bit = (b1 >> 4) & 0x01
     id_type = (b1 >> 5) & 0x07
     _f(table, "协议版本号", f"{version}", str(version), "固定为1", base_offset, base_offset)
@@ -1695,10 +1695,10 @@ def _parse_precise_time_sync(payload: bytes, base_offset: int, direction: int) -
     offset = 0
     b0 = payload[0]
     version = b0 & 0x3F
-    hdr_len_high = (b0 >> 6) & 0x03
     b1 = payload[1]
-    hdr_len_low = b1 & 0x0F
-    hdr_len = (hdr_len_high << 4) | hdr_len_low
+    # 报文头长度(6bit): 字节1[bit3-0] 是高 4 位、字节0[bit7-6] 是低 2 位，
+    # 值即报文头的字节数（口径同本文件 _parse_comm_test）
+    hdr_len = ((b1 & 0x0F) << 2) | ((b0 >> 6) & 0x03)
     b2 = payload[2]
     b3 = payload[3]
     # 数据长度: payload[3]低4位为高位, payload[2]高4位为低位 → 组合成8位

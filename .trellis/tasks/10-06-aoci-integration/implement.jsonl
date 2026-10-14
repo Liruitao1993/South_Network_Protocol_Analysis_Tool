@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "本任务跨三层边界:Git 文件清单/AOCI Safe Inventory 角色、Windows 宿主(aoci.exe)/WSL bash(pwshu)、AOCI MCP stdio/pi 会话加载时机;按其层边界清单核对角色冻结时序-UTF8 编码-pi 重启才生效三处最容易出错的边界"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "握手探针必须单源(test/test_aoci_integration.py 的 mcp_handshake 同时充当 Step7 验证与回归断言);scope 规则与预算判据不得出现第二份清单;据此检查是否引入重复实现"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "确认本项目 spec 仅 frontend 一层(无后端层):AOCI 属工具链/认知层改动,交付物落 docs/AOCI认知层使用指南.md + AGENTS.md §12 指针,不新增 spec 层"}

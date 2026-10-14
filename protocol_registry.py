@@ -33,7 +33,7 @@ class ProtocolSpec:
     # 查询页类型：di_nw | command_plc | obis | di_dlt645 | afn | oad | csg | gw | hdc10 | None
     lookup_kind: Optional[str] = None
     lookup_tab_title: Optional[str] = None
-    # 组帧模式：south | dlt645 | gdw | dlt698 | None
+    # 组帧模式：south | dlt645 | gdw | dlt698 | modular | csg | None
     frame_gen_mode: Optional[str] = None
     # Tab / 附属能力
     has_archive: bool = False
@@ -202,6 +202,8 @@ _PROTOS: Tuple[ProtocolSpec, ...] = (
         aliases=("新一代载波", "载波"),
         lookup_kind="csg",
         lookup_tab_title="业务标识查询",
+        # 协议9 组帧：链路层（FC/PBH/MAC 头）五层折叠组帧；无独立预设命令库（preset_mode 保持 None）
+        frame_gen_mode="csg",
         has_monitor=True,
         monitor_wrapper="plc2",
         has_sequence_diagram=True,
@@ -268,6 +270,41 @@ _PROTOS: Tuple[ProtocolSpec, ...] = (
         lookup_tab_title="信息类查询",
         extract_strategy="modular",
         validator_class="validator.modular_iface_validator:ModularIfaceValidator",
+        parser_wrapper="direct",
+    ),
+    ProtocolSpec(
+        index=13,
+        name="[13] 依瓦定制645",
+        short_name="依瓦定制645",
+        parser_key="yw645",
+        placeholder="请输入依瓦定制645报文，例如：68 04 50 00 00 00 13 68 30 02 37 14 B4 16",
+        aliases=("依瓦", "依瓦定制", "依瓦645", "依瓦定制645", "yiwa", "yw645"),
+        lookup_kind="di_yw645",
+        lookup_tab_title="DI查询",
+        # 组帧/预设（阶段 4 接入）：组帧页为独立子控件 YW645FrameGenWidget（地址高字节在前/
+        # 广播 + 模式 + 数据项表格），不复用协议6 的 645 schema；预设库独立落 YW645_command.json
+        # （preset_buttons._get_path 有显式分支——其兜底是 GW_COMMAND_PATH，不显式分支会把依瓦帧
+        # 写进 GW_command.json，同 AGENTS 陷阱 65 记录的协议9 事故）。
+        frame_gen_mode="yw645",
+        preset_mode="yw645",
+        extract_strategy="yw645",
+        validator_class="validator.yw645_validator:YW645Validator",
+        parser_wrapper="direct",
+    ),
+    ProtocolSpec(
+        index=14,
+        name="[14] 南网上行通信规约 (Q/CSG 11109004-2013)",
+        short_name="南网上行通信规约",
+        parser_key="csg_uplink",
+        placeholder="请输入南网上行通信规约报文，例如：68 14 00 14 00 68 40 06 03 44 87 D6 12 00 0C 10 01 01 00 00 01 00 78 56 34 12 2F 16",
+        aliases=("南网上行", "南网上行通信规约", "上行通信规约", "计量自动化终端上行", "csg_uplink", "csg11109004"),
+        lookup_kind="di_csg_uplink",
+        lookup_tab_title="DI查询",
+        # 帧格式：68H + L(2B 小端) + L(重复一次) + 68H + C + A(7B) + 应用层 + CS + 16H（5.1.1 图2/图3）
+        frame_gen_mode="csg_uplink",
+        preset_mode="csg_uplink",
+        extract_strategy="csg_uplink",
+        validator_class="validator.csg_uplink_validator:CSGUplinkValidator",
         parser_wrapper="direct",
     ),
 )
@@ -546,6 +583,8 @@ def lookup_builder_method(kind: Optional[str]) -> Optional[str]:
         "gw": "_create_gw_new_gen_lookup_content",
         "hdc10": "_create_hdc10_lookup_content",
         "modular": "_create_modular_iface_lookup_content",
+        "di_yw645": "_create_yw645_lookup_content",
+        "di_csg_uplink": "_create_csg_uplink_lookup_content",
     }
     if not kind:
         return None

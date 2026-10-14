@@ -68,6 +68,14 @@ QUERY_CONFIG = {
         "title": "报文ID/端口查询",
         "columns": ["类别", "代码", "名称"],
     },
+    13: {  # 依瓦定制645（附录A 通用参数类）
+        "title": "DI 查询",
+        "columns": ["ID", "数据项名称", "长度", "数据类型", "读/写", "说明"],
+    },
+    14: {  # 南网上行通信规约（附 A/B/D/E 数据标识）
+        "title": "DI 查询",
+        "columns": ["DI", "数据标识名称", "数据格式", "字节数", "单位", "读/写", "归属表"],
+    },
 }
 
 
@@ -448,6 +456,74 @@ def _search_hdc10(keyword: str = "") -> List[List[str]]:
         return [[f"加载失败: {e}", "", ""]]
 
 
+def _search_yw645_di(keyword: str = "") -> List[List[str]]:
+    """依瓦定制645（协议13）附录A 数据项查询
+
+    数据源**单一来源** = ``yw645_di.DI_TABLE``（解析器 / 组帧下拉 / 桌面查询页同源），
+    **禁止**在 Web 侧再抄一份 DI 清单（AGENTS.md 陷阱 48/55/61）。
+
+    列口径与桌面 ``main_gui._create_yw645_lookup_content`` 一致：ID 显示为空格分列
+    （``00 10``）；关键词过滤覆盖 ID 十六进制两种写法 + 名称 + 长度 + 数据类型 +
+    读/写 + 说明。
+    """
+    try:
+        from yw645_di import DI_TABLE
+
+        keyword_upper = (keyword or "").strip().upper()
+        results = []
+        for entry in DI_TABLE:
+            did = str(entry.get("id", "")).upper()
+            spaced = f"{did[:2]} {did[2:]}".strip()
+            name = entry.get("name", "")
+            length = entry.get("length", "")
+            dtype = entry.get("dtype", "")
+            rw = entry.get("rw", "")
+            note = entry.get("note", "")
+            row = [spaced, name, length, dtype, rw, note]
+            if not keyword_upper:
+                results.append(row)
+                continue
+            haystack = f"{did} {spaced} {name} {length} {dtype} {rw} {note}".upper()
+            if keyword_upper in haystack:
+                results.append(row)
+        return results
+    except Exception as e:
+        return [[f"加载失败: {e}", "", "", "", "", ""]]
+
+
+def _search_csg_uplink_di(keyword: str = "") -> List[List[str]]:
+    """南网上行通信规约（协议14）附 A/B/D/E 数据标识查询。
+
+    数据源**单一来源** = ``csg_uplink_di.DI_ENTRIES``（解析器 / 组帧下拉 / 桌面查询页同源），
+    **禁止**在 Web 侧再抄一份 DI 清单（AGENTS.md 陷阱 48/55/61）。
+    列口径与桌面 ``main_gui._create_csg_uplink_lookup_content`` 一致。
+    """
+    try:
+        from csg_uplink_di import DI_ENTRIES
+
+        keyword_upper = (keyword or "").strip().upper()
+        results = []
+        for entry in DI_ENTRIES:
+            di = str(entry.get("di", "")).upper()
+            spaced = " ".join(di[i:i + 2] for i in range(0, len(di), 2))
+            name = entry.get("name", "")
+            fmt = entry.get("fmt", "")
+            nbytes = entry.get("nbytes", "")
+            unit = entry.get("unit", "")
+            rw = ("读" if entry.get("read") else "") + ("写" if entry.get("write") else "")
+            group = entry.get("group", "")
+            row = [spaced, name, fmt, nbytes, unit, rw, group]
+            if not keyword_upper:
+                results.append(row)
+                continue
+            haystack = f"{di} {spaced} {name} {fmt} {nbytes} {unit} {group}".upper()
+            if keyword_upper in haystack:
+                results.append(row)
+        return results
+    except Exception as e:
+        return [[f"加载失败: {e}", "", "", "", "", "", ""]]
+
+
 # 查询函数映射
 _SEARCH_FUNCTIONS = {
     0: _search_south_di,
@@ -462,6 +538,8 @@ _SEARCH_FUNCTIONS = {
     9: _search_csg_service,
     10: _search_gw_newgen,
     11: _search_hdc10,
+    13: _search_yw645_di,
+    14: _search_csg_uplink_di,
 }
 
 

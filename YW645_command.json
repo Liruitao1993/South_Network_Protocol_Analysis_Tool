@@ -1,0 +1,158 @@
+{
+  "commands": [
+    {
+      "id": "yw00_read_dev_type",
+      "button_name": "读取·设备类型（广播，读模式请求）",
+      "group_name": "读模式",
+      "description": "广播读取设备类型（附录A ID 0010，长度 1 字节，01=电表）",
+      "protocol": "yw645",
+      "frame_hex": "68 AA AA AA AA AA AA 68 10 02 33 43 54 16",
+      "config": {
+        "protocol_mode": "yw645",
+        "yw645": {
+          "template_key": "read_dev_type",
+          "addr": "",
+          "broadcast": true,
+          "mode": "read_req",
+          "with_fl": null,
+          "items": [
+            {
+              "id": "0010",
+              "data": ""
+            }
+          ],
+          "body": "",
+          "write_cmd": ""
+        }
+      }
+    },
+    {
+      "id": "yw01_read_dev_id",
+      "button_name": "读取·设备号（广播，读模式请求）",
+      "group_name": "读模式",
+      "description": "广播读取设备号（附录A ID 0020，最大 12 字节，BCD 表号）",
+      "protocol": "yw645",
+      "frame_hex": "68 AA AA AA AA AA AA 68 10 02 33 53 64 16",
+      "config": {
+        "protocol_mode": "yw645",
+        "yw645": {
+          "template_key": "read_dev_id",
+          "addr": "",
+          "broadcast": true,
+          "mode": "read_req",
+          "with_fl": null,
+          "items": [
+            {
+              "id": "0020",
+              "data": ""
+            }
+          ],
+          "body": "",
+          "write_cmd": ""
+        }
+      }
+    },
+    {
+      "id": "yw02_read_batch",
+      "button_name": "批量读取·设备类型+设备号（广播）",
+      "group_name": "读模式",
+      "description": "文档示例：读设备类型和设备号（数据域 00 10 00 20，长度 4 字节）",
+      "protocol": "yw645",
+      "frame_hex": "68 AA AA AA AA AA AA 68 10 04 33 43 33 53 DC 16",
+      "config": {
+        "protocol_mode": "yw645",
+        "yw645": {
+          "template_key": "read_batch",
+          "addr": "",
+          "broadcast": true,
+          "mode": "read_req",
+          "with_fl": null,
+          "items": [
+            {
+              "id": "0010",
+              "data": ""
+            },
+            {
+              "id": "0020",
+              "data": ""
+            }
+          ],
+          "body": "",
+          "write_cmd": ""
+        }
+      }
+    },
+    {
+      "id": "yw03_read_rsp_sample",
+      "button_name": "读模式返回·设备类型+设备号（表号 103000000010）",
+      "group_name": "读模式",
+      "description": "文档示例 X2 的回复内容（ID 0010=01 电表、ID 0020=6 字节表号）",
+      "protocol": "yw645",
+      "frame_hex": "68 10 30 00 00 00 10 68 20 0D 33 43 34 34 33 53 39 43 63 33 33 33 43 6C 16",
+      "config": {
+        "protocol_mode": "yw645",
+        "yw645": {
+          "template_key": "read_rsp_sample",
+          "addr": "103000000010",
+          "broadcast": false,
+          "mode": "read_rsp",
+          "with_fl": null,
+          "items": [
+            {
+              "id": "0010",
+              "data": "01"
+            },
+            {
+              "id": "0020",
+              "data": "103000000010"
+            }
+          ],
+          "body": "",
+          "write_cmd": ""
+        }
+      }
+    },
+    {
+      "id": "yw04_pass_req",
+      "button_name": "透传模式请求（CIU→表计，表号 45000000013）",
+      "group_name": "透传模式",
+      "description": "文档示例 X3：数据域线上为 37 14（未混淆 04 E1）",
+      "protocol": "yw645",
+      "frame_hex": "68 04 50 00 00 00 13 68 30 02 37 14 B4 16",
+      "config": {
+        "protocol_mode": "yw645",
+        "yw645": {
+          "template_key": "pass_req",
+          "addr": "45000000013",
+          "broadcast": false,
+          "mode": "pass_req",
+          "with_fl": null,
+          "items": [],
+          "body": "04E1",
+          "write_cmd": ""
+        }
+      }
+    },
+    {
+      "id": "yw05_pass_rsp",
+      "button_name": "透传模式返回（表计→CIU，表号 103000000010）",
+      "group_name": "透传模式",
+      "description": "文档示例 X9：数据域线上为 37 13（未混淆 04 E0）",
+      "protocol": "yw645",
+      "frame_hex": "68 10 30 00 00 00 10 68 40 02 37 13 AC 16",
+      "config": {
+        "protocol_mode": "yw645",
+        "yw645": {
+          "template_key": "pass_rsp",
+          "addr": "103000000010",
+          "broadcast": false,
+          "mode": "pass_rsp",
+          "with_fl": null,
+          "items": [],
+          "body": "04E0",
+          "write_cmd": ""
+        }
+      }
+    }
+  ]
+}

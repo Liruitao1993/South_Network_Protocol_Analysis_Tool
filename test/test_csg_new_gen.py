@@ -4,7 +4,7 @@
 直接运行: python test_csg_new_gen.py
 """
 
-import _path_setup  # noqa: E402
+import _path_setup  # noqa: E402,F401
 
 from csg_new_gen_parser import CSGNewGenParser
 
@@ -526,6 +526,112 @@ def test_compact_beacon_real():
     assert "CCO" in rows["角色/层级数"][2], rows.get("角色/层级数")
     print("[OK] 精简信标载荷表73解析通过")
 
+def test_std_beacon_proxy_role_entry_real():
+    """标准信标载荷（表51）用户实测帧：6 条条目，含 0x10 代理角色条目 + 0x02 时隙分配条目
+
+    实帧 112 字节（载荷头 6B + 管理信息 106B；输入是裁剪后的 PB 载荷，未含校验序列）：
+    1) 0x10 代理角色条目**实机按 1 字节长度字段发送**（表59/表72 写的是 16 比特）——
+       按 2 字节读得到 0x6004=24580 字节的荒谬长度，把其后所有字节（含 0x02 条目）吞成
+       「代理角色条目 28字节 / 代理站点数 14」，即用户报的条目长度解析缺陷；
+    2) 末条 0x02 时隙分配条目长度 31 = 固定 27 + 1×CSMA时隙信息(4B)（CSMA相线个数=1），
+       条目正好结束在载荷末尾 ⇒ 末 4 字节 30 75 00 00 属该条目的 CSMA时隙信息，
+       **不是**帧载荷校验序列（旧逻辑无条件吞末 4 字节 ⇒ 该条目少 4 字节、且多出伪 CRC 行）。
+    """
+    parser = CSGNewGenParser()
+    payload = bytes.fromhex(
+        "4a0264103300060116000140016666666666660000640000000000000006223c"
+        "000000150000000000000000000000000000000000000000006666666666660c"
+        "040a040b0a85995932823dc73710046000021f0000000100fa00320000000000"
+        "c7ba523c307500003000000030750000")
+    assert len(payload) == 112
+    table = parser._parse_beacon_payload(payload, 16)
+
+    # 6 条条目全部解析出来（旧实现第 6 条被 0x10 的超长声明吞掉）
+    types = find_all_fields(table, "条目类型")
+    assert [r[1] for r in types] == ["01", "06", "0C", "0B", "10", "02"], [r[1] for r in types]
+
+    # 0x10 代理角色条目：长度字段实发 1 字节（0x04）⇒ 1 个代理站点、TEI=96
+    lens = find_all_fields(table, "条目长度")
+    assert [r[2] for r in lens] == ["22", "34", "4", "10", "4", "31"], [r[2] for r in lens]
+    assert lens[4][1] == "04" and "长度字段实发 1 字节" in lens[4][3], lens[4]
+    proxy = find_field(table, "代理角色条目")
+    assert proxy[2] == "2字节" and "代理站点数: 1" in proxy[3], proxy
+    proxies = find_all_fields(table, "代理[")
+    assert len(proxies) == 1 and proxies[0][2] == "96", proxies
+    assert (proxies[0][4], proxies[0][5]) == (95, 96), proxies[0]
+    # 1 个代理站点为奇数 ⇒ 内容 2 字节 = 12bit TEI + 4bit 尾保留位（表72）
+    tail = find_field(table, "条目尾保留位")
+    assert tail is not None and tail[2] == "4bit" and "保留" in tail[3], tail
+
+    # 末条 0x02 时隙分配条目：内容完整 28 字节，末 4 字节是 CSMA时隙信息
+    assert find_field(table, "CSMA相线个数")[2] == "1", find_field(table, "CSMA相线个数")
+    assert find_field(table, "信标周期长度")[2] == "30000x100us", find_field(table, "信标周期长度")
+    rf = find_field(table, "RF信标时隙长度")
+    assert rf[2] == "48ms" and (rf[4], rf[5]) == (120, 121), rf
+    var = find_field(table, "可变长时隙信息")
+    assert var[2] == "4字节" and "= 4字节" in var[3], var
+
+    # 输入载荷未含校验序列 ⇒ 明确提示，且不得把末 4 字节当成 CRC
+    crc = find_field(table, "帧载荷校验序列")
+    assert crc is not None and crc[2] == "未包含", crc
+    assert [r for r in table if r[0].strip() == "帧载荷校验序列" and r[1] != "-"] == [], crc
+
+    # 同一载荷后面真接 4 字节校验序列 ⇒ 仍认作帧载荷校验序列，条目解析结果不变
+    table2 = parser._parse_beacon_payload(payload + bytes.fromhex("11223344"), 16)
+    assert [r[2] for r in find_all_fields(table2, "条目长度")] == ["22", "34", "4", "10", "4", "31"]
+    crc2 = [r for r in table2 if r[0].strip() == "帧载荷校验序列"]
+    assert crc2 and crc2[0][2] == "0x44332211", crc2
+    print("[OK] 标准信标 0x10 代理角色条目长度字段 / 末条裁剪解析通过")
+
+
+def test_std_beacon_proxy_role_entry_12bit_real():
+    """标准信标载荷（表51）用户实测帧：0x10 代理角色条目按**连续 12 比特位流**解包（表72）
+
+    实帧 114 字节（载荷头 6B + 管理信息 108B；输入是裁剪后的 PB 载荷，未含校验序列）：
+    条目4 = ``10 06 00 01 70 00`` —— 条目长度字段 2 字节（表59：0x10 的长度字段大小 = 2），
+    内容 3 字节 = 24 比特 = **2 个** 12 比特 TEI：
+      代理节点1TEI = 内容字节0 bits0-7(0x01) + 内容字节1 bits0-3(0x0) = 1
+      代理节点2TEI = 内容字节1 bits4-7(0x7) + 内容字节2 bits0-7(0x00) = 7
+    旧实现按「每 2 字节一个 TEI」切（且用 ``ln//2`` 当站点数）⇒ 只输出 1 个站点、TEI=1，
+    第 2 个 TEI（内容字节1 高4位 + 内容字节2）被整段丢掉，即用户报的「代理角色 TEI 解析不对」。
+    """
+    parser = CSGNewGenParser()
+    parts = [
+        "4A 02 62 10 33 00",                                  # 载荷头 6B
+        "06",                                                  # 信标条目数 = 6
+        "01 16 00 01 40 01 66 66 66 66 66 66 00 00 64 00 00 00 00 00 00 00",   # 条目0 站点能力条目 22B
+        "06 22 3C 00 00 00 0D 00 00 00" + " 00" * 18 + " 66 66 66 66 66 66",   # 条目1 路由参数条目 34B
+        "0C 04 0A 04",                                          # 条目2 无线路由参数条目 4B
+        "0B 0A 0F 77 5A 32 94 AC EB 55",                        # 条目3 万年历同步条目 10B
+        "10 06 00 01 70 00",                                    # 条目4 代理角色条目 6B
+        "02 1F 00 00 00 01 00 C8 00 32 00 00 00 00 00 99 2C 77 5A 30 75 00 00"
+        " 26 00 00 00 30 75 00 00",                             # 条目5 时隙分配条目 31B
+    ]
+    payload = bytes.fromhex(" ".join(parts))
+    assert len(payload) == 114, len(payload)
+    table = parser._parse_beacon_payload(payload, 16)
+
+    # 条目链未被 0x10 条目打乱：仍是 6 条
+    types = find_all_fields(table, "条目类型")
+    assert [r[1] for r in types] == ["01", "06", "0C", "0B", "10", "02"], [r[1] for r in types]
+    lens = find_all_fields(table, "条目长度")
+    assert [r[2] for r in lens] == ["22", "34", "4", "10", "6", "31"], [r[2] for r in lens]
+    assert lens[4][1] == "06 00" and "长度字段实发" not in lens[4][3], lens[4]
+
+    # 0x10：3 字节内容 ⇒ 2 个代理站点，TEI = 1 / 7（12 比特连续位流，跨半字节）
+    proxy = find_field(table, "代理角色条目")
+    assert proxy[2] == "3字节" and "代理站点数: 2" in proxy[3], proxy
+    proxies = find_all_fields(table, "代理[")
+    assert [r[2] for r in proxies] == ["1", "7"], proxies
+    assert [r[0].strip() for r in proxies] == ["代理[0]TEI", "代理[1]TEI"], proxies
+    assert (proxies[0][4], proxies[0][5]) == (96, 97), proxies[0]
+    assert (proxies[1][4], proxies[1][5]) == (97, 98), proxies[1]
+    # 偶数个代理站点 ⇒ 表72 无末尾保留位
+    assert find_field(table, "条目尾保留位") is None, find_field(table, "条目尾保留位")
+
+    # 既有的 1 个代理站点帧（内容 60 00 = 12bit TEI + 4bit 保留）不受影响
+    print("[OK] 标准信标 0x10 代理角色条目 12bit 连续位流解析通过")
+
 
 def test_isac_sof_bitloading_pb_size():
     """ISAC-PLC SOF 数据帧: Bitloading标识=1 时字节6低2bit为物理块大小码(表23)。
@@ -597,6 +703,8 @@ def main():
     test_net_frame_real()
     test_aggregated_frame_app_layer()
     test_compact_beacon_real()
+    test_std_beacon_proxy_role_entry_real()
+    test_std_beacon_proxy_role_entry_12bit_real()
     test_isac_sof_bitloading_pb_size()
     test_isac_sof_tmi_mode()
     print("=" * 50)

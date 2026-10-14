@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "验收要求:回归测试落 test/ 且文件头含 import _path_setup # noqa: E402,F401、登记 release_check.py 门禁、不得改动协议行为;据此核对 AC7 与 AC9(git status 只含预期文件)"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复核单源:握手探针只一处实现、每条 scope 规则 --reason 只写一处、用法文档不复制 AGENTS.md 既有契约(只给指针)"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "复核三层边界都留下可自证证据:认知资产未被 Git 忽略(Git<->AOCI)、tools/list 返回 9 工具(MCP<->pi)、pwshu 强制 UTF-8 下中文仓库路径无编码错误(WSL<->Windows)"}

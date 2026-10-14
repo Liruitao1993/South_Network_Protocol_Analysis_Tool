@@ -24,12 +24,31 @@ from gui_utils import apply_chinese_context_menus, setup_chinese_context_menu, s
 from app_paths import data_path
 
 
-# 南网、国网、698.45、DLT645、模组化 各自独立的预设文件
+# 南网、国网、698.45、DLT645、模组化、依瓦定制645 各自独立的预设文件
 NW_COMMAND_PATH = data_path("NW_command.json")
 GW_COMMAND_PATH = data_path("GW_command.json")
 DLT698_COMMAND_PATH = data_path("DLT698_command.json")
 DLT645_COMMAND_PATH = data_path("DLT645_command.json")
 MODULAR_COMMAND_PATH = data_path("MODULAR_command.json")
+# 协议13（依瓦定制645）预设命令种子数据（YW645_command.json）
+YW645_COMMAND_PATH = data_path("YW645_command.json")
+# 协议14（南网上行通信规约）预设命令种子数据（CSG_UPLINK_command.json）
+CSG_UPLINK_COMMAND_PATH = data_path("CSG_UPLINK_command.json")
+
+
+#: set_protocol 支持的协议标识（顺序无关，仅用于校验）
+SUPPORTED_PROTOCOLS = ("south", "gdw", "dlt698", "dlt645", "modular", "yw645", "csg_uplink")
+
+#: 协议标识 → 中文显示名（日志/对话框共用，避免多处各写一份）
+PROTOCOL_DISPLAY = {
+    "south": "南网",
+    "gdw": "国网",
+    "dlt698": "698.45",
+    "dlt645": "DLT645",
+    "modular": "模组化",
+    "yw645": "依瓦定制645",
+    "csg_uplink": "南网上行通信规约",
+}
 
 
 def _get_path(protocol: str) -> Path:
@@ -41,6 +60,14 @@ def _get_path(protocol: str) -> Path:
         return DLT645_COMMAND_PATH
     if protocol == "modular":
         return MODULAR_COMMAND_PATH
+    # ⚠ 协议13 必须走显式分支：本函数原本的兜底是 GW_COMMAND_PATH，
+    # 少这一条会把依瓦帧写进 GW_command.json（污染国网命令库，
+    # 同 AGENTS 陷阱 65 记录的协议9 事故）。
+    if protocol == "yw645":
+        return YW645_COMMAND_PATH
+    # ⚠ 协议14 同理必须显式分支（否则南网上行帧会落 GW_command.json）。
+    if protocol == "csg_uplink":
+        return CSG_UPLINK_COMMAND_PATH
     return GW_COMMAND_PATH
 
 
@@ -115,7 +142,8 @@ class AddPresetDialog(QDialog):
 
         # 协议显示
         proto_names = {"south": "南网协议", "gdw": "国网协议", "dlt698": "698.45 协议",
-                       "dlt645": "DLT645-2007 电表协议", "modular": "模组化终端功能模块接口"}
+                       "dlt645": "DLT645-2007 电表协议", "modular": "模组化终端功能模块接口",
+                       "yw645": "依瓦定制645"}
         proto_label = QLabel(
             f"协议: {proto_names.get(self._protocol, self._protocol)}"
         )
@@ -218,11 +246,10 @@ class PresetButtonWidget(QWidget):
 
     def set_protocol(self, protocol: str):
         """切换当前显示的协议预设"""
-        if protocol in ("south", "gdw", "dlt698", "dlt645", "modular") and protocol != self._protocol:
+        if protocol in SUPPORTED_PROTOCOLS and protocol != self._protocol:
             self._protocol = protocol
             self.load_buttons()
-            proto_display = {"south": "南网", "gdw": "国网", "dlt698": "698.45",
-                             "dlt645": "DLT645", "modular": "模组化"}[protocol]
+            proto_display = PROTOCOL_DISPLAY.get(protocol, protocol)
             self.log_text.append(f"[系统] 已切换至 {proto_display}预设命令")
 
     def setup_ui(self):
@@ -289,6 +316,10 @@ class PresetButtonWidget(QWidget):
             return None  # 645 预设无自定义路径，回退模块默认 DLT645_command.json
         if self._protocol == "modular":
             return None  # 模组化预设无自定义路径，回退模块默认 MODULAR_command.json
+        if self._protocol == "yw645":
+            return None  # 依瓦定制645预设无自定义路径，回退模块默认 YW645_command.json
+        if self._protocol == "csg_uplink":
+            return None  # 南网上行预设无自定义路径，回退模块默认 CSG_UPLINK_command.json
         return self._gw_path
 
     def set_file_paths(self, nw_path: Optional[Path] = None, gw_path: Optional[Path] = None):
@@ -375,8 +406,7 @@ class PresetButtonWidget(QWidget):
         )
 
         # 日志输出
-        proto_display = {"south": "南网", "gdw": "国网", "dlt698": "698.45",
-                         "dlt645": "DLT645", "modular": "模组化"}.get(protocol, protocol)
+        proto_display = PROTOCOL_DISPLAY.get(protocol, protocol)
         log_line = (
             f"[{self._current_time()}] [{proto_display}] [{group_name}] "
             f"{btn_name}  ->  {frame_hex}"

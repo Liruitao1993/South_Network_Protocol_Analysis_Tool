@@ -210,7 +210,7 @@ LIGHT_QSS = """
     }
 
     /* ========== 表格 / 字段树（样式保持一致） ========== */
-    QTableWidget, QTreeWidget {
+    QTableWidget, QTreeWidget, QListWidget {
         border: 1px solid #cccccc;
         border-radius: 4px;
         background-color: #ffffff;
@@ -220,17 +220,17 @@ LIGHT_QSS = """
         alternate-background-color: #e8e8e8;
         outline: 0;
     }
-    QTableWidget::item:!alternate, QTreeWidget::item:!alternate {
+    QTableWidget::item:!alternate, QTreeWidget::item:!alternate, QListWidget::item:!alternate {
         background-color: #ffffff;
         color: #000000;
         padding: 2px 4px;
     }
-    QTableWidget::item:alternate, QTreeWidget::item:alternate {
+    QTableWidget::item:alternate, QTreeWidget::item:alternate, QListWidget::item:alternate {
         background-color: #e8e8e8;
         color: #000000;
         padding: 2px 4px;
     }
-    QTableWidget::item:selected, QTreeWidget::item:selected {
+    QTableWidget::item:selected, QTreeWidget::item:selected, QListWidget::item:selected {
         background-color: #2196F3;
         color: white;
     }
@@ -555,7 +555,7 @@ DARK_QSS = """
     }
 
     /* ========== 表格 / 字段树 ========== */
-    QTableWidget, QTreeWidget {
+    QTableWidget, QTreeWidget, QListWidget {
         border: 1px solid #555555;
         border-radius: 4px;
         background-color: #2b2b2b;
@@ -565,17 +565,17 @@ DARK_QSS = """
         alternate-background-color: #333333;
         outline: 0;
     }
-    QTableWidget::item:!alternate, QTreeWidget::item:!alternate {
+    QTableWidget::item:!alternate, QTreeWidget::item:!alternate, QListWidget::item:!alternate {
         background-color: #2b2b2b;
         color: #e0e0e0;
         padding: 2px 4px;
     }
-    QTableWidget::item:alternate, QTreeWidget::item:alternate {
+    QTableWidget::item:alternate, QTreeWidget::item:alternate, QListWidget::item:alternate {
         background-color: #333333;
         color: #e0e0e0;
         padding: 2px 4px;
     }
-    QTableWidget::item:selected, QTreeWidget::item:selected {
+    QTableWidget::item:selected, QTreeWidget::item:selected, QListWidget::item:selected {
         background-color: #42a5f5;
         color: white;
     }
@@ -937,7 +937,7 @@ GLASS_QSS = """
     }
 
     /* ========== 表格 / 字段树 ========== */
-    QTableWidget, QTreeWidget {
+    QTableWidget, QTreeWidget, QListWidget {
         border: 1px solid rgba(180, 200, 235, 180);
         border-radius: 6px;
         background-color: rgba(255, 255, 255, 170);
@@ -947,17 +947,17 @@ GLASS_QSS = """
         alternate-background-color: rgba(219, 234, 254, 215);
         outline: 0;
     }
-    QTableWidget::item:!alternate, QTreeWidget::item:!alternate {
+    QTableWidget::item:!alternate, QTreeWidget::item:!alternate, QListWidget::item:!alternate {
         background-color: rgba(255, 255, 255, 200);
         color: #1f2937;
         padding: 2px 4px;
     }
-    QTableWidget::item:alternate, QTreeWidget::item:alternate {
+    QTableWidget::item:alternate, QTreeWidget::item:alternate, QListWidget::item:alternate {
         background-color: rgba(219, 234, 254, 215);
         color: #1f2937;
         padding: 2px 4px;
     }
-    QTableWidget::item:selected, QTreeWidget::item:selected {
+    QTableWidget::item:selected, QTreeWidget::item:selected, QListWidget::item:selected {
         background-color: rgba(59, 130, 246, 200);
         color: white;
     }
@@ -1383,7 +1383,7 @@ MICA_QSS = """
     }
 
     /* ========== 表格 / 字段树 ========== */
-    QTableWidget, QTreeWidget {
+    QTableWidget, QTreeWidget, QListWidget {
         border: 1px solid #e0e0e0;
         border-radius: 4px;
         background-color: #fcfcfc;
@@ -1393,17 +1393,17 @@ MICA_QSS = """
         alternate-background-color: #f0f6fc;
         outline: 0;
     }
-    QTableWidget::item:!alternate, QTreeWidget::item:!alternate {
+    QTableWidget::item:!alternate, QTreeWidget::item:!alternate, QListWidget::item:!alternate {
         background-color: #ffffff;
         color: #1a1a1a;
         padding: 2px 4px;
     }
-    QTableWidget::item:alternate, QTreeWidget::item:alternate {
+    QTableWidget::item:alternate, QTreeWidget::item:alternate, QListWidget::item:alternate {
         background-color: #f0f6fc;
         color: #1a1a1a;
         padding: 2px 4px;
     }
-    QTableWidget::item:selected, QTreeWidget::item:selected {
+    QTableWidget::item:selected, QTreeWidget::item:selected, QListWidget::item:selected {
         background-color: #005fb8;
         color: white;
     }
@@ -1610,7 +1610,7 @@ VISTA_INPUT_QSS = """
         selection-background-color: #3399ff;
         selection-color: #ffffff;
     }
-    QTableWidget::item, QTableView::item, QTreeWidget::item {
+    QTableWidget::item, QTableView::item, QTreeWidget::item, QListView::item, QListWidget::item {
         padding: 2px 4px;
     }
     QHeaderView::section {

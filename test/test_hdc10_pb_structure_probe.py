@@ -171,7 +171,7 @@ def main():
     check("A2 业务报文头 8 字节", _val(rows, "终端主动并发抄表报文头") == "8字节",
           str(_val(rows, "终端主动并发抄表报文头")))
     check("A2 协议版本号 = 1", _val(rows, "协议版本号") == "1", str(_val(rows, "协议版本号")))
-    check("A2 报文头长度 = 2×4B=8B", _val(rows, "报文头长度") == "2×4B=8B", str(_val(rows, "报文头长度")))
+    check("A2 报文头长度 = 8字节", _val(rows, "报文头长度") == "8字节", str(_val(rows, "报文头长度")))
     check("A2 转发数据规约类型 = 3 (DL/T698.45)",
           _val(rows, "转发数据规约类型") == "3", str(_val(rows, "转发数据规约类型")))
     check("A2 转发数据长度 = 46字节", _val(rows, "转发数据长度") == "46字节", str(_val(rows, "转发数据长度")))

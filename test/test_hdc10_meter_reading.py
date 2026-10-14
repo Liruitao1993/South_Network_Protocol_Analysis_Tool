@@ -102,9 +102,9 @@ def test_proto_ver_is_one():
 
 
 def test_meter_reading_header_fields():
-    """抄表报文头：头长 2×4B=8B / 配置字 0 / 规约类型 3=DL/T698.45 / 报文序号"""
+    """抄表报文头：头长 8 字节 / 配置字 0 / 规约类型 3=DL/T698.45 / 报文序号"""
     rows = _parse(USER_FRAME_CONCURRENT, "app")
-    assert _val(rows, "报文头长度") == "2×4B=8B", "报文头长度 = 2 个 4 字节块"
+    assert _val(rows, "报文头长度") == "8字节", "报文头长度 = 报文头字节数（8）"
     assert _val(rows, "配置字") == "0", "并发抄表配置字 0（未重试/否认重试0/最大重试0）"
     assert _val(rows, "转发数据规约类型") == "3", "规约类型 3 = DL/T698.45"
     assert _val(rows, "报文序号") == "17543", "报文序号 0x4487 = 17543"

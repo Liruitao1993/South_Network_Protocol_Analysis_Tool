@@ -1,0 +1,323 @@
+{
+  "commands": [
+    {
+      "id": "csgu00_confirm",
+      "button_name": "确认/否定（AFN=00H）",
+      "group_name": "基本",
+      "description": "全部确认/否定应答（DA=0000H，DI=E0000000H，内容 00=确定）",
+      "protocol": "csg_uplink",
+      "frame_hex": "68 11 00 11 00 68 4B 00 00 00 01 00 00 00 00 60 00 00 00 00 00 E0 00 8C 16",
+      "config": {
+        "protocol_mode": "csg_uplink",
+        "csg_uplink": {
+          "a1": "000000",
+          "a2": "1",
+          "a3": "0",
+          "dir": 0,
+          "prm": 0,
+          "con": false,
+          "pseq": 0,
+          "afn": 0,
+          "rows": [
+            [
+              "00",
+              "00",
+              "E0000000",
+              "00"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "csgu01_read_region",
+      "button_name": "读参数·终端地市区县码（AFN=0AH）",
+      "group_name": "读参数",
+      "description": "读取终端省地市区县码（附 A E0000120H，2 字节 BCD）",
+      "protocol": "csg_uplink",
+      "frame_hex": "68 10 00 10 00 68 4B 00 00 00 01 00 00 00 0A 60 00 00 20 01 00 E0 B7 16",
+      "config": {
+        "protocol_mode": "csg_uplink",
+        "csg_uplink": {
+          "a1": "000000",
+          "a2": "1",
+          "a3": "0",
+          "dir": 0,
+          "prm": 0,
+          "con": false,
+          "pseq": 0,
+          "afn": 5,
+          "rows": [
+            [
+              "00",
+              "00",
+              "E0000120",
+              ""
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "csgu02_read_term_time",
+      "button_name": "读参数·终端时间（AFN=0AH）",
+      "group_name": "读参数",
+      "description": "读取终端时间（附 A E0000130H，6 字节 BCD YYMMDDhhmmss）",
+      "protocol": "csg_uplink",
+      "frame_hex": "68 10 00 10 00 68 4B 00 00 00 01 00 00 00 0A 60 00 00 30 01 00 E0 C7 16",
+      "config": {
+        "protocol_mode": "csg_uplink",
+        "csg_uplink": {
+          "a1": "000000",
+          "a2": "1",
+          "a3": "0",
+          "dir": 0,
+          "prm": 0,
+          "con": false,
+          "pseq": 0,
+          "afn": 5,
+          "rows": [
+            [
+              "00",
+              "00",
+              "E0000130",
+              ""
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "csgu03_read_fwd_energy",
+      "button_name": "读当前数据·正向有功总电能（AFN=0CH, p1）",
+      "group_name": "读当前数据",
+      "description": "读取测量点 p1 当前正向有功总电能（附 C 复用 645 DI 00010000H，4 字节）",
+      "protocol": "csg_uplink",
+      "frame_hex": "68 10 00 10 00 68 4B 00 00 00 01 00 00 00 0C 60 01 01 00 00 01 00 BB 16",
+      "config": {
+        "protocol_mode": "csg_uplink",
+        "csg_uplink": {
+          "a1": "000000",
+          "a2": "1",
+          "a3": "0",
+          "dir": 0,
+          "prm": 0,
+          "con": false,
+          "pseq": 0,
+          "afn": 6,
+          "rows": [
+            [
+              "01",
+              "01",
+              "00010000",
+              ""
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "csgu04_read_rev_energy",
+      "button_name": "读当前数据·反向有功总电能（AFN=0CH, p1）",
+      "group_name": "读当前数据",
+      "description": "读取测量点 p1 当前反向有功总电能（645 DI 00020000H）",
+      "protocol": "csg_uplink",
+      "frame_hex": "68 10 00 10 00 68 4B 00 00 00 01 00 00 00 0C 60 01 01 00 00 02 00 BC 16",
+      "config": {
+        "protocol_mode": "csg_uplink",
+        "csg_uplink": {
+          "a1": "000000",
+          "a2": "1",
+          "a3": "0",
+          "dir": 0,
+          "prm": 0,
+          "con": false,
+          "pseq": 0,
+          "afn": 6,
+          "rows": [
+            [
+              "01",
+              "01",
+              "00020000",
+              ""
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "csgu05_read_alarm",
+      "button_name": "读告警数据（AFN=13H）",
+      "group_name": "读告警",
+      "description": "读取告警数据（附 D 告警 DI E2000001H）",
+      "protocol": "csg_uplink",
+      "frame_hex": "68 10 00 10 00 68 4B 00 00 00 01 00 00 00 13 60 00 00 01 00 00 E2 A2 16",
+      "config": {
+        "protocol_mode": "csg_uplink",
+        "csg_uplink": {
+          "a1": "000000",
+          "a2": "1",
+          "a3": "0",
+          "dir": 0,
+          "prm": 0,
+          "con": false,
+          "pseq": 0,
+          "afn": 12,
+          "rows": [
+            [
+              "00",
+              "00",
+              "E2000001",
+              ""
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "csgu06_nm_ledger",
+      "button_name": "网管扩展·查询设备台账（AFN=0A）",
+      "group_name": "深化应用（网管扩展）",
+      "description": "深化应用 4.1：查询通信模块台账（DI=E0 80 04 02，通信模块信息数据项集合 65 字节）",
+      "protocol": "csg_uplink",
+      "frame_hex": "68 10 00 10 00 68 4A 00 00 00 01 00 00 00 0A 7C 01 02 02 04 80 E0 3A 16",
+      "config": {
+        "protocol_mode": "csg_uplink",
+        "csg_uplink": {
+          "a1": "000000",
+          "a2": "1",
+          "a3": "0",
+          "dir": 0,
+          "prm": 0,
+          "con": true,
+          "pseq": 12,
+          "afn": 5,
+          "rows": [
+            [
+              "01",
+              "02",
+              "E0800402",
+              ""
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "csgu07_nm_topology",
+      "button_name": "网管扩展·查询网络拓扑（AFN=0C）",
+      "group_name": "深化应用（网管扩展）",
+      "description": "深化应用 4.5：查询网络拓扑（DI=E1 00 60 14，示例实帧所用 DI0；节点总数量+起始序号+n×19B）",
+      "protocol": "csg_uplink",
+      "frame_hex": "68 10 00 10 00 68 4B 00 00 00 01 00 00 00 0C 63 02 02 14 60 00 E1 14 16",
+      "config": {
+        "protocol_mode": "csg_uplink",
+        "csg_uplink": {
+          "a1": "000000",
+          "a2": "1",
+          "a3": "0",
+          "dir": 0,
+          "prm": 0,
+          "con": false,
+          "pseq": 3,
+          "afn": 6,
+          "rows": [
+            [
+              "02",
+              "02",
+              "E1006014",
+              ""
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "csgu08_nm_selfcheck",
+      "button_name": "网管扩展·查询节点自检（AFN=0C）",
+      "group_name": "深化应用（网管扩展）",
+      "description": "深化应用 4.11：查询节点自检（DI=E1 00 60 10，过零自检/串口485/上次离网/复位原因）",
+      "protocol": "csg_uplink",
+      "frame_hex": "68 10 00 10 00 68 4B 00 00 00 01 00 00 00 0C 63 02 02 10 60 00 E1 10 16",
+      "config": {
+        "protocol_mode": "csg_uplink",
+        "csg_uplink": {
+          "a1": "000000",
+          "a2": "1",
+          "a3": "0",
+          "dir": 0,
+          "prm": 0,
+          "con": false,
+          "pseq": 3,
+          "afn": 6,
+          "rows": [
+            [
+              "02",
+              "02",
+              "E1006010",
+              ""
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "csgu09_nm_band",
+      "button_name": "网管扩展·设置工作频段（AFN=04）",
+      "group_name": "深化应用（网管扩展）",
+      "description": "深化应用 4.9：设置宽带载波频段（DI=E0 00 00 40，内容 01=2.441~5.615MHz）",
+      "protocol": "csg_uplink",
+      "frame_hex": "68 11 00 11 00 68 4A 00 00 00 01 00 00 00 04 71 00 00 40 00 00 E0 01 E1 16",
+      "config": {
+        "protocol_mode": "csg_uplink",
+        "csg_uplink": {
+          "a1": "000000",
+          "a2": "1",
+          "a3": "0",
+          "dir": 0,
+          "prm": 0,
+          "con": true,
+          "pseq": 1,
+          "afn": 3,
+          "rows": [
+            [
+              "00",
+              "00",
+              "E0000040",
+              "01"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "csgu10_nm_restart",
+      "button_name": "网管扩展·从节点重启（AFN=04）",
+      "group_name": "深化应用（网管扩展）",
+      "description": "深化应用 4.12：从节点重启（DI=E0 00 00 41，内容 00=重启）",
+      "protocol": "csg_uplink",
+      "frame_hex": "68 11 00 11 00 68 4B 00 00 00 01 00 00 00 04 60 00 00 41 00 00 E0 00 D1 16",
+      "config": {
+        "protocol_mode": "csg_uplink",
+        "csg_uplink": {
+          "a1": "000000",
+          "a2": "1",
+          "a3": "0",
+          "dir": 0,
+          "prm": 0,
+          "con": false,
+          "pseq": 0,
+          "afn": 3,
+          "rows": [
+            [
+              "00",
+              "00",
+              "E0000041",
+              "00"
+            ]
+          ]
+        }
+      }
+    }
+  ]
+}

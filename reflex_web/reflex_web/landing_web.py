@@ -249,6 +249,20 @@ PROTOCOLS = [
         "endian": "小端",
         "check": "CRC-16/PPP FCS（x-25）",
     },
+    {
+        "index": "13",
+        "name": "依瓦定制645",
+        "standard": "依瓦定制645协议 V1.0",
+        "endian": "地址域高字节在前 / 数据域逐字节",
+        "check": "8 位位组算术和（数据域 ±0x33）",
+    },
+    {
+        "index": "14",
+        "name": "南网上行通信规约",
+        "standard": "Q/CSG 11109004-2013",
+        "endian": "低字节在前（长度L/地址域/多字节字段）",
+        "check": "8 位位组算术和（控制域+地址域+链路用户数据）",
+    },
 ]
 
 # 命令行：参数名与 main_gui.py `_handle_cli_args` 逐个一致

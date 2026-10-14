@@ -2570,22 +2570,10 @@ class CSGNewGenParser:
         table.append(("  信标周期计数", ' '.join(f'{b:02X}' for b in data[8:12]),
                        str(cycle), f"信标周期序号: {cycle} (与FC可变区域一致)", base_offset + 8, base_offset + 11))
         remaining = data[12:]
-        if len(remaining) > 4:
-            mgmt_info = remaining[:-4]
-            crc_bytes = remaining[-4:]
-            crc_val = int.from_bytes(crc_bytes, 'little')
-            if len(mgmt_info) > 0:
-                bcn_tbl = self._parse_beacon_entries(mgmt_info, base_offset + 12)
-                table.extend(bcn_tbl)
-            table.append(("  帧载荷校验序列",
-                           ' '.join(f'{b:02X}' for b in crc_bytes),
-                           f"0x{crc_val:08X}", f"信标载荷CRC-32=0x{crc_val:08X}",
-                           base_offset + 12 + len(mgmt_info), base_offset + len(data) - 1))
-        elif remaining:
-            table.append(("  信标载荷尾部",
-                           ' '.join(f'{b:02X}' for b in remaining),
-                           f"{len(remaining)}字节", "信标管理信息/CRC",
-                           base_offset + 12, base_offset + len(data) - 1))
+        if remaining:
+            bcn_tbl, consumed = self._parse_beacon_entries(remaining, base_offset + 12)
+            table.extend(bcn_tbl)
+            table.extend(self._beacon_tail_rows(remaining, consumed, base_offset + 12))
         return table
 
     def _parse_std_beacon_payload(self, data: bytes, base_offset: int = 0) -> list:
@@ -2621,22 +2609,10 @@ class CSGNewGenParser:
                        base_offset + 5, base_offset + 5))
         offset += 1
         remaining = data[offset:]
-        if len(remaining) > 4:
-            mgmt_info = remaining[:-4]
-            crc_bytes = remaining[-4:]
-            crc_val = int.from_bytes(crc_bytes, 'little')
-            if len(mgmt_info) > 0:
-                bcn_tbl = self._parse_beacon_entries(mgmt_info, base_offset + offset)
-                table.extend(bcn_tbl)
-            table.append(("  帧载荷校验序列",
-                           ' '.join(f'{b:02X}' for b in crc_bytes),
-                           f"0x{crc_val:08X}", f"信标载荷CRC-32=0x{crc_val:08X}",
-                           base_offset + offset + len(mgmt_info), base_offset + offset + len(remaining) - 1))
-        elif remaining:
-            table.append(("  信标载荷尾部",
-                           ' '.join(f'{b:02X}' for b in remaining),
-                           f"{len(remaining)}字节", "信标管理信息/CRC",
-                           base_offset + offset, base_offset + len(remaining) - 1))
+        if remaining:
+            bcn_tbl, consumed = self._parse_beacon_entries(remaining, base_offset + offset)
+            table.extend(bcn_tbl)
+            table.extend(self._beacon_tail_rows(remaining, consumed, base_offset + offset))
         return table
 
     # ── 信标条目解析（表57-72）──
@@ -2656,58 +2632,109 @@ class CSGNewGenParser:
         0x10: ("代理角色条目", 2),
     }
 
-    def _parse_beacon_entries(self, data: bytes, base_offset: int = 0) -> list:
-        """解析信标管理信息条目列表（表57-72）"""
+    def _parse_beacon_entries(self, data: bytes, base_offset: int = 0):
+        """解析信标管理信息条目列表（表57-72）
+
+        返回 ``(行列表, 已消费字节数)``；已消费字节数供调用方确定其后的
+        帧载荷校验序列位置。
+
+        长度字段宽度按表59 取，但**实机存在与表59 不符的条目**（实测 0x10 代理角色
+        条目按 1 字节长度发送，表59/表72 写的是 16 比特）：此时按规格宽度读出的
+        "长度"会远超剩余字节，自动退回 1 字节长度字段重读（声明长度合法时仍按表59）。
+        """
         table = []
         if len(data) < 1:
-            return table
+            return table, 0
         entry_count = data[0]
         table.append(("  信标条目数", f"{entry_count:02X}", str(entry_count),
-                       f"共{entry_count}个信标条目", base_offset, base_offset))
+                      f"共{entry_count}个信标条目", base_offset, base_offset))
         off = 1
         idx = 0
         while off < len(data) and idx < entry_count:
-            if off >= len(data):
-                break
+            type_at = off
             entry_type = data[off]
-            entry_info = self.BEACON_ENTRY_MAP.get(entry_type, (f"厂家自定义" if 0x80 <= entry_type <= 0xEF else f"保留(0x{entry_type:02X})", 1))
+            if entry_type == 0x00:
+                # 表59: 0x00 为非法值 —— 其后是补齐字节/校验序列，不应再当条目解析
+                break
+            entry_info = self.BEACON_ENTRY_MAP.get(
+                entry_type, ("厂家自定义" if 0x80 <= entry_type <= 0xEF else f"保留(0x{entry_type:02X})", 1))
             entry_name = entry_info[0]
             len_size = entry_info[1]
-            off += 1
-            if off + len_size > len(data):
+            len_at = off + 1
+            avail = len(data) - len_at          # 长度字段及内容可用的总字节数
+            if avail < len_size:
                 break
-            entry_len = int.from_bytes(data[off:off + len_size], 'little')
-            off += len_size
-            # 长度包含条目类型(1B)+长度字段(len_size B)，需减去
-            data_len = entry_len - 1 - len_size
-            if data_len < 0:
-                data_len = 0
-            entry_data = data[off:off + data_len] if off + data_len <= len(data) else data[off:]
-            entry_base = base_offset + off
-            off += data_len
+            entry_len = int.from_bytes(data[len_at:len_at + len_size], 'little')
+            note = ""
+            content_len = entry_len - 1 - len_size
+            if len_size > 1 and (content_len < 0 or content_len > avail - len_size):
+                len1 = data[len_at]
+                if len1 >= 2 and len1 - 2 <= avail - 1:
+                    note = (f" [长度字段实发 1 字节：{len_size} 字节声明值 0x{entry_len:04X}"
+                            f" 超出剩余 {avail} 字节，已按 1 字节解析]")
+                    entry_len, len_size, content_len = len1, 1, len1 - 2
+            content_at = len_at + len_size
+            entry_base = base_offset + content_at
+            if content_len < 0:
+                content_len = 0
+                note += " [长度字段非法，按 0 字节处理]"
+            if content_at + content_len > len(data):
+                content_len = len(data) - content_at
+                note += f" [声明长度超出剩余 {content_len} 字节，已按剩余字节解析]"
+            entry_data = data[content_at:content_at + content_len]
+            off = content_at + content_len
 
             # 条目类型和长度字段
-            type_raw = f"{entry_type:02X}"
-            table.append(("  条目类型", type_raw, str(entry_type),
-                           f"条目{idx}类型: {entry_name} (0x{entry_type:02X})",
-                           base_offset + off - data_len - len_size - 1, base_offset + off - data_len - len_size - 1))
-            len_raw = ' '.join(f'{b:02X}' for b in data[off - data_len - len_size:off - data_len])
+            table.append(("  条目类型", f"{entry_type:02X}", str(entry_type),
+                          f"条目{idx}类型: {entry_name} (0x{entry_type:02X})",
+                          base_offset + type_at, base_offset + type_at))
+            len_raw = ' '.join(f'{b:02X}' for b in data[len_at:len_at + len_size])
             table.append(("  条目长度", len_raw, str(entry_len),
-                           f"条目{idx}长度: {entry_len}字节 (含类型和长度字段)",
-                           base_offset + off - data_len - len_size, base_offset + off - data_len - 1))
+                          f"条目{idx}长度: {entry_len}字节 (含类型和长度字段){note}",
+                          base_offset + len_at, base_offset + len_at + len_size - 1))
 
             # 详细解析条目内容
             detail = self._parse_beacon_entry_detail(entry_type, entry_data, entry_base)
             if detail:
                 table.extend(detail)
             else:
+                raw = ' '.join(f'{b:02X}' for b in entry_data[:12]) + ("..." if len(entry_data) > 12 else "")
                 table.append(("  信标条目",
-                               f"{entry_type:02X} {entry_len:02X} " + ' '.join(f'{b:02X}' for b in entry_data[:12]) + ("..." if len(entry_data) > 12 else ""),
-                               f"类型:{entry_name} 长度:{entry_len}",
-                               f"条目{idx}: {entry_name} ({entry_len}字节)",
-                               entry_base - entry_len - len_size - 1, entry_base + entry_len - 1))
+                              f"{entry_type:02X} {len_raw} {raw}",
+                              f"类型:{entry_name} 长度:{entry_len}",
+                              f"条目{idx}: {entry_name} ({entry_len}字节)",
+                              base_offset + type_at, base_offset + off - 1))
             idx += 1
-        return table
+        return table, off
+
+    def _beacon_tail_rows(self, remaining: bytes, consumed: int, base: int) -> list:
+        """信标管理信息之后的字段：帧载荷校验序列（4B）+ 可能的补齐字节
+
+        **不再无条件把载荷末 4 字节当校验序列**：先按条目解析结果定位条目末尾，
+        再在其后的剩余字节里取末 4 字节。实机存在输入载荷已被裁剪到最后一个条目
+        （未含校验序列，如只截了 PB 载荷的有效部分）的情况，此时末 4 字节属最后
+        一个条目的内容，按旧逻辑会被吞掉、导致该条目少 4 字节。
+        """
+        rows = []
+        tail = remaining[consumed:]
+        if len(tail) >= 4:
+            crc_bytes = tail[-4:]
+            crc_val = int.from_bytes(crc_bytes, 'little')
+            desc = f"信标载荷CRC-32=0x{crc_val:08X}"
+            if len(tail) > 4:
+                desc += f"（条目之后另有 {len(tail) - 4} 字节补齐/保留）"
+            rows.append(("  帧载荷校验序列", ' '.join(f'{b:02X}' for b in crc_bytes),
+                         f"0x{crc_val:08X}", desc,
+                         base + len(remaining) - 4, base + len(remaining) - 1))
+        elif tail:
+            rows.append(("  信标载荷尾部", ' '.join(f'{b:02X}' for b in tail),
+                         f"{len(tail)}字节", "不足4字节，无法作为帧载荷校验序列",
+                         base + consumed, base + len(remaining) - 1))
+        elif remaining:
+            rows.append(("  帧载荷校验序列", "-", "未包含",
+                         "输入载荷在最后一个条目处结束，未含4字节帧载荷校验序列（如 PB 载荷已裁剪）",
+                         base + len(remaining) - 1, base + len(remaining) - 1))
+        return rows
 
     def _parse_beacon_entry_detail(self, etype: int, data: bytes, base: int) -> list:
         """详细解析单个信标条目内容（data已去除条目类型和长度字段），每字段一行"""
@@ -2757,8 +2784,19 @@ class CSGNewGenParser:
                 plen = self._read_u32_le(data, 16)
                 _f("信标周期长度", ' '.join(f'{b:02X}' for b in data[16:20]), f"{plen}x100us", f"信标周期长度: {plen}*100us", 16, 19)
             if ln >= 22:
-                rf_sl = data[19] | ((data[20] & 0x03) << 8)
-                _f("RF信标时隙长度", ' '.join(f'{b:02X}' for b in data[19:21]), f"{rf_sl}ms", f"RF信标时隙长度: {rf_sl}ms", 19, 20)
+                # 表62：RF信标时隙长度紧跟信标周期长度（条目字节 19-22）之后，占条目字节 23-24。
+                # 表62 该行写的字节号“22/23”与信标周期长度重叠，为文档笔误（按 23-24 才自洽：
+                # 信标周期长度 19-22 + RF 23-24 + 保留 22bit，固定区恰好 27 字节）
+                rf_sl = data[20] | ((data[21] & 0x03) << 8)
+                _f("RF信标时隙长度", ' '.join(f'{b:02X}' for b in data[20:22]), f"{rf_sl}ms", f"RF信标时隙长度: {rf_sl}ms", 20, 21)
+            # 固定区共 24 字节（条目字节 3-26）；其后按各计数展开可变长时隙信息（表63-65）
+            if ln > 24:
+                exp_len = data[0] * 2 + data[2] * 4 + data[7] * 4
+                _f("可变长时隙信息",
+                   ' '.join(f'{b:02X}' for b in data[24:min(ln, 36)]) + ("..." if ln > 36 else ""),
+                   f"{ln - 24}字节",
+                   f"非中央信标信息×{data[0]}(2B) + CSMA时隙信息×{data[2]}(4B) + 绑定CSMA时隙信息×{data[7]}(4B)"
+                   f" = {exp_len}字节（实际 {ln - 24} 字节）", 24, ln - 1)
         elif etype == 0x06 and ln >= 32:  # 路由参数条目（表66）
             rp = self._read_u16_le(data, 0)
             _f("路由周期", ' '.join(f'{b:02X}' for b in data[0:2]), f"{rp}s", f"路由周期: {rp}秒", 0, 1)
@@ -2815,10 +2853,33 @@ class CSGNewGenParser:
                 _f("CSMA时隙长度", ' '.join(f'{b:02X}' for b in data[15:17]),
                    f"{csma_len_e}ms", f"CSMA时隙持续: {csma_len_e}ms", 15, 16)
         elif etype == 0x10 and ln >= 2:  # 代理角色条目（表72）
-            _f("代理角色条目", ' '.join(f'{b:02X}' for b in data[:min(8,ln)]), f"{ln}字节", f"代理站点数: {ln//2}", 0, ln - 1)
-            for i in range(0, min(ln - 1, 40), 2):
-                tei = data[i] | ((data[i + 1] & 0x0F) << 8)
-                _f(f"代理[{i//2}]TEI", ' '.join(f'{b:02X}' for b in data[i:i+2]), str(tei), f"代理站点TEI: {tei}", i, i + 1)
+            # 表72：长度字段之后是 N 个**连续 12 比特**的代理节点 TEI（LSB 优先位流）——
+            #   代理节点1TEI = 表72 字节3 bits0-7 + 字节4 bits0-3（= 本函数的内容字节0/1）
+            #   代理节点2TEI = 表72 字节4 bits4-7 + 字节5 bits0-7（= 内容字节1/2）  ……
+            # 站点个数不在条目里单独计数，只能由内容比特数推出（表72：内容 = 12N 比特，
+            # 奇数个站点时末尾补 4 比特保留位）⇒ N = 内容比特数 // 12。
+            # 不能按「每 2 字节一个 TEI」切：实帧 `10 06 00 01 70 00` 的内容是 3 字节 = 2 个
+            # 12 比特 TEI（1 和 7），按 2 字节切只解出 1 个、且第 2 个 TEI（内容字节1 高4位 +
+            # 内容字节2）会被整段丢掉——这就是现场报的「代理角色 TEI 解析不对」。
+            n_nodes = ln * 8 // 12
+            used_bits = n_nodes * 12
+            rem_bits = ln * 8 - used_bits
+            raw_hex = ' '.join(f'{b:02X}' for b in data[:min(8, ln)]) + ("..." if ln > 8 else "")
+            _f("代理角色条目", raw_hex, f"{ln}字节",
+               f"代理站点数: {n_nodes}（{ln}字节 = {n_nodes}×12bit"
+               + ("，尾4bit保留" if rem_bits == 4 else (f"，尾{rem_bits}bit未定义" if rem_bits else "")) + "）",
+               0, ln - 1)
+            for i in range(n_nodes):
+                bit0 = i * 12
+                s = bit0 // 8
+                e = min((bit0 + 11) // 8, ln - 1)
+                tei = self._extract_bits(data, bit0, 12)
+                _f(f"代理[{i}]TEI", ' '.join(f'{b:02X}' for b in data[s:e + 1]), str(tei),
+                   f"代理站点{i + 1}TEI: {tei}", s, e)
+            if rem_bits:
+                s = used_bits // 8
+                _f("条目尾保留位", ' '.join(f'{b:02X}' for b in data[s:]), f"{rem_bits}bit",
+                   f"保留（代理站点个数为奇数，尾 {rem_bits} 比特保留位）", s, ln - 1)
         else:
             return []  # 未识别类型，让调用方显示原始数据
         return t

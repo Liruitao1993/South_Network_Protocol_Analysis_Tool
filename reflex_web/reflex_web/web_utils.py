@@ -9,7 +9,7 @@
 import re
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 # 确保项目根目录在路径中
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -20,6 +20,10 @@ if str(ROOT) not in sys.path:
 # 桌面/Web 共用批量核心：测试类报文摘要片段（协议9 表61 / 协议10 检测扩展命令）
 # 必须放在 sys.path 注入之后（batch_core 在仓库根目录）
 from batch_core import TEST_MODE_SENTINELS, extract_test_mode_content  # noqa: E402
+
+# 协议13（依瓦定制645）批量提取：**单一来源** = 桌面线格式模块 yw645_wire，
+# 严禁在 Web 侧复刻 hex 游标提取逻辑（AGENTS 陷阱 31/55/61 的同一个教训）。
+from yw645_wire import extract_yw645_frames  # noqa: E402
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -629,6 +633,12 @@ def extract_frames_for_protocol(text: str, protocol_index: int) -> list[str]:
         return extract_69845_frames(clean)
     elif protocol_index == 9:  # 新一代载波协议(通感一体化)：按行提取，过滤无效短帧
         return extract_csg_new_gen_frames(text)
+    elif protocol_index == 13:  # 依瓦定制645：委托 yw645_wire（桌面同源，含自证式切帧）
+        return extract_yw645_frames(text)
+    elif protocol_index == 14:  # 南网上行通信规约：68 + L(2B 重复一次) + 68 定长切帧（桌面同源）
+        clean = re.sub(r'[^0-9A-Fa-f]', '', text).upper()
+        from csg_uplink_wire import extract_csg_uplink_frames
+        return [f.hex().upper() for f in extract_csg_uplink_frames(bytes.fromhex(clean))]
     elif protocol_index == 10 or protocol_index == 11:  # 国网新一代双模：按行提取，每行一帧
         # ED..EE 监控包装帧先解包（可能一行拼多帧）——与桌面 batch_core 同源，
         # 否则首字节 0xED 会被当成应用层端口号解析（用户报障：协议11 ED 帧解析成
@@ -1116,10 +1126,25 @@ def get_hdc10_summary(table_data: list) -> str:
     return " | ".join([p for p in parts if p]) if parts else (str(table_data[0][0]) if table_data[0] else "空")
 
 
-def get_frame_summary(table_data: list, protocol_index: int) -> str:
-    """统一摘要提取入口"""
+def get_frame_summary(
+    table_data: list, protocol_index: int, frame_bytes: Optional[bytes] = None
+) -> str:
+    """统一摘要提取入口。
+
+    ``frame_bytes``（可选）：协议13（依瓦定制645）的摘要**单一来源**是解析器的
+    ``YW645Parser.get_summary(frame)``，需要原始帧字节；批量链路（``parse_batch``）
+    会传入。其余协议忽略该参数（保持既有 2 参调用兼容）。
+    """
     if not table_data:
         return "空"
+
+    if protocol_index == 13:
+        # 依瓦定制645：摘要委托解析器 get_summary（**不在 Web 侧另写字段拼接**）。
+        # 未传帧字节时（仅非常规调用/测试）落回下方通用兜底，避免复制第二份实现。
+        if frame_bytes:
+            from yw645_parser import YW645Parser
+
+            return YW645Parser().get_summary(frame_bytes)
 
     if protocol_index == 9:
         return get_csg_new_gen_summary(table_data)

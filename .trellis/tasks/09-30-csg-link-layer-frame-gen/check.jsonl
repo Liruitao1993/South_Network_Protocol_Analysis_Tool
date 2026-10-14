@@ -1,0 +1,4 @@
+{"file": "AGENTS.md", "reason": "验收核对：陷阱 23（不得返回空/静默）、45（按符号名而非行号）、62（从 cmd 跑 GUI 测试的 0xC0000409 假红识别）、63（按钮不裁字的判据必须在 show() 之后量）"}
+{"file": ".trellis/tasks/09-30-csg-link-layer-frame-gen/prd.md", "reason": "Acceptance Criteria 与 Out of Scope 清单，逐条核对交付范围"}
+{"file": ".trellis/tasks/09-30-csg-link-layer-frame-gen/research/03-parser-cross-check.md", "reason": "核对 9 条硬契约是否被代码满足，以及 e2e oracle 的三级设计（fc_only / pb_only / mac_only / auto）"}
+{"file": ".trellis/tasks/09-30-csg-link-layer-frame-gen/implement.md", "reason": "S1~S5 的评审门与变异反证清单；核对基线记录表是否被真实填写"}

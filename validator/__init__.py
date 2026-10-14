@@ -11,10 +11,11 @@ from .csg_new_gen_validator import CSGNewGenValidator
 from .gw_new_gen_validator import GWNewGenValidator
 from .hdc10_validator import HDC10Validator
 from .modular_iface_validator import ModularIfaceValidator
+from .yw645_validator import YW645Validator
 
 __all__ = [
     'ValidationResult', 'CheckItem', 'CheckLevel', 'BaseValidator',
     'NWValidator', 'GDWValidator', 'HDLCValidator', 'PLCRFValidator', 'DLT645Validator',
     'DLT69845Validator', 'CSGNewGenValidator', 'GWNewGenValidator', 'HDC10Validator',
-    'ModularIfaceValidator',
+    'ModularIfaceValidator', 'YW645Validator',
 ]

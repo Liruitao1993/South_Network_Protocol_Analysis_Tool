@@ -1,0 +1,5 @@
+{"file": "AGENTS.md", "reason": "§8 陷阱 54（协议9/11 跨字节位域必须 LSB-first，不得按首字节=高位组装）、陷阱 23（字段不符时容错显示）、陷阱 45（行号漂移，按符号名检索）、陷阱 62（cmd 直跑 GUI 测试假红）、陷阱 63（按钮宽度不得写死）—— 本次组帧实现直接受这几条约束"}
+{"file": ".trellis/tasks/09-30-csg-link-layer-frame-gen/research/03-parser-cross-check.md", "reason": "字段依据与 9 条硬契约（接入指示=1 / MSDU 头长度随帧头类型 / 三处 CRC 覆盖范围 / PB 体长=总长-8）以及复用清单，实现时逐条遵守"}
+{"file": ".trellis/tasks/09-30-csg-link-layer-frame-gen/research/01-fc-field-tables.md", "reason": "FC 四个变体的逐字段 bit 偏移（SOF-BPLC 表20 / SOF-ISAC 数据帧 表23 / 信标 表18 / SACK 表30）"}
+{"file": ".trellis/tasks/09-30-csg-link-layer-frame-gen/research/02-mac-pb-tables.md", "reason": "MAC 长/短帧头、MSDU 长短头、物理块头与 PBCS 的逐字段定义与文档自带 TEI 位序 oracle"}
+{"file": ".trellis/tasks/09-30-csg-link-layer-frame-gen/design.md", "reason": "模块边界、put_bits_le 与 _extract_bits 互逆契约、FC 变体偏移表、UI 五层折叠结构与联动规则矩阵"}

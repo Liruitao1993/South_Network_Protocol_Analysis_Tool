@@ -5,6 +5,8 @@
 覆盖：
 - 7 套内置主题 apply 不崩溃，style/QSS 正确切换（毛玻璃/云母为参数化动态 QSS；
   apply 在主题 QSS 末尾追加统一按钮 QSS，断言用前缀匹配）
+- **QListWidget 必须与表格同款覆盖**（静态选择器断言 + 分别注入深色/浅色系统调色板后的
+  实际渲染文字对比度断言）——见 1c 节注释
 - 字体族/字号设置生效
 - ThemeSettingsDialog：创建、取值、恢复默认、取消还原
 使用 offscreen 平台，无需显示器。
@@ -13,6 +15,7 @@
 import os
 import sys
 import traceback
+from collections import Counter
 
 import _path_setup  # noqa: E402,F401
 
@@ -22,7 +25,14 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 # 沙箱到临时目录，避免把 offscreen 合成几何写进开发机真实配置。
 # 放在 import 块**之后**：install() 是语句，插在 import 之间会让后续 import 触发 E402。
 import _config_sandbox  # noqa: E402
-from PySide6.QtWidgets import QApplication, QStyleFactory
+from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtGui import QColor, QPalette  # noqa: E402
+from PySide6.QtWidgets import (  # noqa: E402
+    QApplication,
+    QListWidget,
+    QStyle,
+    QStyleFactory,
+)
 
 from theme_settings import (
     GLASS_DEFAULTS,
@@ -159,6 +169,141 @@ except Exception:
     failed += 1
     print("  [FAIL] 毛玻璃参数抛异常")
     traceback.print_exc()
+
+# ---------------- 1c. 列表（QListWidget）主题覆盖 ----------------
+# 回归缺陷：QListWidget 原先未纳入任何主题的「表格 / 字段树」选择器组。在**深色系统**
+# 下（实测本机 Windows 深色模式 colorScheme=Dark），未主题化的交替行会取调色板的
+# AlternateBase（深色），而浅色主题又用 `* { color: #000000 }` 强制黑字 →
+# 「特征码」对话框隔行黑字压深底，读数时才看得见（对比度实测 1.35）。
+# 两道防线：① 静态 —— 凡主题给 QTableWidget 的规则必须同时给 QListWidget；
+#           ② 渲染 —— 分别注入深色/浅色系统调色板，实测交替行与普通行文字对比度。
+section("列表主题覆盖 (QListWidget)")
+
+
+def _theme_qss(t):
+    """主题的**有效** QSS（毛玻璃/云母为参数化生成；原生主题返回空串）。"""
+    if t.get("win_blur"):
+        return build_glass_qss()
+    if t.get("mica"):
+        return build_mica_qss()
+    return t["qss"] or ""
+
+
+def _rel_lum(rgb):
+    def _c(v):
+        v = v / 255.0
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+
+    return 0.2126 * _c(rgb[0]) + 0.7152 * _c(rgb[1]) + 0.0722 * _c(rgb[2])
+
+
+def _contrast(a, b):
+    la, lb = _rel_lum(a), _rel_lum(b)
+    hi, lo = max(la, lb), min(la, lb)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _row_text(lw, row):
+    """返回 (行底色, 文字色估计, 对比度)。
+
+    只取**文字区**（跳过勾选框，否则勾选框图元的高对比像素会掩盖文字问题），
+    文字色 = 该区域内偏离底色最大的像素。
+    """
+    img = lw.viewport().grab().toImage()
+    dpr = img.devicePixelRatio() or 1.0
+    rect = lw.visualItemRect(lw.item(row))
+    st = lw.style()
+    skip = (
+        st.pixelMetric(QStyle.PixelMetric.PM_IndicatorWidth, None, lw)
+        + st.pixelMetric(QStyle.PixelMetric.PM_CheckBoxLabelSpacing, None, lw)
+        + 4
+    )
+    x0 = max(0, int((rect.left() + skip) * dpr))
+    x1 = min(img.width() - 1, int((rect.right() - 1) * dpr))
+    y0 = max(0, int((rect.top() + 2) * dpr))
+    y1 = min(img.height() - 1, int((rect.bottom() - 2) * dpr))
+    colors = [
+        img.pixelColor(x, y).getRgb()[:3]
+        for y in range(y0, y1 + 1)
+        for x in range(x0, x1 + 1)
+    ]
+    if not colors:
+        return None, None, None
+    bg = Counter(colors).most_common(1)[0][0]
+    text = max(colors, key=lambda c: _contrast(c, bg))
+    return bg, text, _contrast(text, bg)
+
+
+def _system_palette(base: str, alt: str, text: str, window: str, btn: str):
+    """构造「系统调色板」：QSS 未覆盖处（如列表交替行底色）由它兜底。"""
+    p = QPalette()
+    for role, name in (
+        (QPalette.ColorRole.Window, window),
+        (QPalette.ColorRole.WindowText, text),
+        (QPalette.ColorRole.Base, base),
+        (QPalette.ColorRole.AlternateBase, alt),
+        (QPalette.ColorRole.Text, text),
+        (QPalette.ColorRole.Button, btn),
+        (QPalette.ColorRole.ButtonText, text),
+        (QPalette.ColorRole.Highlight, "#0078d4"),
+        (QPalette.ColorRole.HighlightedText, "#ffffff"),
+    ):
+        p.setColor(role, QColor(name))
+    return p
+
+
+# 两个方向都要过：主题与系统调色板不一致时，未覆盖的交替行会取到「另一侧」的底色
+# （实测本机 Windows 深色模式的 AlternateBase = #001a68 是个深色，浅色主题下黑字压深底）。
+_INJECTED = (
+    (
+        "深色系统",
+        _system_palette("#2d2d2d", "#001a68", "#ffffff", "#1e1e1e", "#3c3c3c"),
+    ),
+    (
+        "浅色系统",
+        _system_palette("#ffffff", "#f7f7f7", "#000000", "#efefef", "#f0f0f0"),
+    ),
+)
+
+_palette_backup = app.palette()
+for _t in THEMES:
+    _q = _theme_qss(_t)
+    if not _q:
+        continue  # 原生主题（fusion / windows）无 QSS，配色完全由调色板自洽给出
+    # ① 静态：表格规则必须同时覆盖列表（新主题漏写会在本条变红）
+    _missing = [
+        line.strip()
+        for line in _q.splitlines()
+        if "QTableWidget" in line and "QListWidget" not in line
+    ]
+    check(
+        f"{_t['id']} 列表与表格同款覆盖",
+        not _missing,
+        f"缺 QListWidget 的表格规则 {len(_missing)} 条: {_missing[:2]}",
+    )
+    # ② 渲染：两种系统调色板下，交替行/普通行文字都必须可读
+    for _sys_name, _sys_pal in _INJECTED:
+        ThemeManager.apply(app, _t["id"], "Microsoft YaHei", 10)
+        app.setPalette(_sys_pal)
+        _lw = QListWidget()
+        _lw.setAlternatingRowColors(True)
+        for _i in range(4):
+            _lw.addItem(f"0000fff{_i}  notify/write 长度 {_i}0")
+        _lw.resize(360, 150)
+        _lw.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+        _lw.show()
+        app.processEvents()
+        for _row, _kind in ((1, "交替行"), (0, "普通行")):
+            _bg, _tx, _cr = _row_text(_lw, _row)
+            check(
+                f"{_t['id']} {_sys_name} {_kind}文字可读",
+                _cr is not None and _cr >= 4.5,
+                f"底色={_bg} 文字={_tx} 对比度={None if _cr is None else round(_cr, 2)}",
+            )
+        _lw.close()
+        _lw.deleteLater()
+app.setPalette(_palette_backup)
+del _palette_backup
 
 # 未知主题回退默认（回退到带 QSS 的 default 主题）
 ThemeManager.apply(app, "not_exist_theme")

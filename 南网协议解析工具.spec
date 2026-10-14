@@ -25,6 +25,22 @@ except Exception:
 _build_ts = datetime.now().strftime("%Y%m%d%H%M%S")
 _exe_name = f"南网协议解析工具_v{_app_version}_{_build_ts}"
 
+# 1b. 蓝牙（bleak）依赖收集
+# Windows 上的 BLE 后端通过 winrt 命名空间包分发（winrt.windows.devices.bluetooth.*，
+# 数量多且随版本变动），逐个手写 hiddenimports 必漏 —— 用 collect_submodules 全收。
+# 未安装 bleak 时返回空表：蓝牙页自动降级为「提示安装」，不影响其余页面。
+_ble_imports = []
+try:
+    from PyInstaller.utils.hooks import collect_submodules
+
+    for _pkg in ("bleak", "winrt"):
+        try:
+            _ble_imports.extend(collect_submodules(_pkg))
+        except Exception:
+            pass
+except Exception:
+    pass
+
 # 2. 动态生成 Windows 版本信息文件（FileVersion/ProductVersion 与 APP_VERSION 对齐）
 _vparts = []
 for _p in _app_version.split("."):
@@ -52,7 +68,8 @@ _version_info_file.write_text(
     "      [\n"
     "      StringTable(\n"
     "        u'080404B0',\n"
-    "        [StringStruct(u'CompanyName', u'liruitao'),\n"
+    "        [StringStruct(u'Comments', u'电力通信多协议报文解析与组帧工具（南网/国网/645/698.45/新一代载波/HDC 等 12 种协议）'),\n"
+    "        StringStruct(u'CompanyName', u'liruitao'),\n"
     "        StringStruct(u'FileDescription', u'南网协议解析工具'),\n"
     f"        StringStruct(u'FileVersion', u'{_vstr}'),\n"
     "        StringStruct(u'InternalName', u'南网协议解析工具'),\n"
@@ -68,6 +85,59 @@ _version_info_file.write_text(
 )
 print(f"==> 构建目标: {_exe_name}.exe (APP_VERSION={_app_version})")
 
+# 3. 应用清单（manifest）——补 `assemblyIdentity`
+#
+# 为什么只补这一项：PyInstaller 默认清单已经带了 trustInfo(asInvoker) / compatibility
+# (Win7~11 的 5 个 supportedOS) / longPathAware / Common-Controls 依赖，唯独**没有
+# assemblyIdentity** —— 也就是「这是谁家的什么软件、什么版本」这条汇编层身份信息。
+# 补上它，exe 在系统与安全软件眼里才是一套"有作者、有版本的正规程序集"。
+#
+# ⚠ **必须给完整清单**：`create_application_manifest()` 是**整份替换**、不是合并
+#   （它只额外保证 requestedExecutionLevel 与 Common-Controls 两项）。第一版我只传了
+#   `<assemblyIdentity>`，结果把 supportedOS 与 longPathAware 一起冲掉了 —— 实测对比
+#   构建产物才发现（`longPathAware`/`supportedOS` 从 True 变 False）。故这里照默认清单
+#   写全，再在里面加 assemblyIdentity。
+# ⚠ 特意**不**声明 dpiAware / dpiAwareness：本程序的高 DPI 缩放由 Qt 启动时自己设置，
+#   清单里再声明一次会改变现有缩放行为（本项目有大量高 DPI 布局适配，不宜顺手改）。
+# ⚠ 本清单只改"身份信息"，不申请提权（asInvoker 保持默认），对运行行为无影响。
+_manifest_xml = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+    '<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">\n'
+    '  <assemblyIdentity type="win32" '
+    'name="liruitao.SouthNetworkProtocolAnalysisTool" '
+    f'version="{_vstr}" processorArchitecture="*"/>\n'
+    '  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">\n'
+    '    <security>\n'
+    '      <requestedPrivileges>\n'
+    '        <requestedExecutionLevel level="asInvoker" uiAccess="false"/>\n'
+    '      </requestedPrivileges>\n'
+    '    </security>\n'
+    '  </trustInfo>\n'
+    '  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">\n'
+    '    <application>\n'
+    '      <supportedOS Id="{e2011457-1546-43c5-a5fe-008deee3d3f0}"/>\n'
+    '      <supportedOS Id="{35138b9a-5d96-4fbd-8e2d-a2440225f93a}"/>\n'
+    '      <supportedOS Id="{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}"/>\n'
+    '      <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}"/>\n'
+    '      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>\n'
+    '    </application>\n'
+    '  </compatibility>\n'
+    '  <application xmlns="urn:schemas-microsoft-com:asm.v3">\n'
+    '    <windowsSettings>\n'
+    '      <longPathAware '
+    'xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>\n'
+    '    </windowsSettings>\n'
+    '  </application>\n'
+    '  <dependency>\n'
+    '    <dependentAssembly>\n'
+    '      <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" '
+    'version="6.0.0.0" processorArchitecture="*" '
+    'publicKeyToken="6595b64144ccf1df" language="*"/>\n'
+    '    </dependentAssembly>\n'
+    '  </dependency>\n'
+    '</assembly>\n'
+)
+
 a = Analysis(
     ['main_gui.py'],
     pathex=[SPECPATH],
@@ -77,6 +147,8 @@ a = Analysis(
         ('dlt645_di.json', '.'),
         ('DLT645_command.json', '.'),  # 协议6 预设命令种子数据
         ('MODULAR_command.json', '.'),  # 协议12 预设命令种子数据
+        ('YW645_command.json', '.'),  # 协议13 预设命令种子数据
+        ('CSG_UPLINK_command.json', '.'),  # 协议14 预设命令种子数据
         ('gdw_custom_afn.json', '.'),
         ('meter_sim_data.json', '.'),  # 虚拟表（698.45 从站模拟器）档案种子数据
         ('icons', 'icons'),
@@ -142,6 +214,13 @@ a = Analysis(
         'thread_registry',  # QThread 注册中心（main_gui 顶层 import，显式声明保险）
         'proc_stats',  # 状态栏 CPU/内存采样（main_gui 顶层 import，纯标准库，显式声明保险）
         'frame_gen_widget',
+        # 协议9（南网新一代载波）组帧家族（frame_gen_widget → csg_test_frame_gen_widget 顶层 import）
+        'csg_test_frame_gen_widget',  # 组帧页：五层折叠表单 + 仿照报文/模板面板
+        'csg_link_frame_gen',  # 链路层组帧（FC / 物理块 / MAC 头 / MSDU / 整帧 MPDU）
+        'csg_new_gen_frame_gen',  # 应用层组帧 + 24 个测试模式
+        'csg_frame_reverse',  # 仿照报文回填（把现成报文反解成组帧参数）
+        'csg_frame_templates',  # 仿照模板本地存档（csg_frame_templates.json）
+        'collapsible_section',  # 通用可折叠区组件（组帧页六段折叠区）
         'gdw_eb_di_fields',  # EB 数据标识字段定义（被 frame_gen_widget 静态 import）
         'gdw_eb_di_lookup',  # EB 数据标识查询（被 frame_gen_widget 静态 import）
         'archive_widget',
@@ -154,6 +233,22 @@ a = Analysis(
         'modular_iface_axdr',  # 模组化 A-XDR 编解码单源
         'modular_iface_data',  # 模组化静态表单源（信息类/单位/子接口）
         'validator.modular_iface_validator',  # make_validator importlib
+        # 协议13（依瓦定制645）
+        'yw645_parser',  # 依瓦定制645 解析（parser_registry 懒加载）
+        'yw645_wire',  # 依瓦定制645 线格式单源
+        'yw645_di',  # 依瓦定制645 数据项表
+        'yw645_frame_gen',  # 依瓦定制645 组帧
+        'yw645_frame_gen_widget',  # 依瓦定制645 组帧页（frame_gen_widget 静态 import）
+        'validator.yw645_validator',  # make_validator importlib
+        # 协议14（南网上行通信规约 Q/CSG 11109004-2013）
+        'csg_uplink_parser',  # 解析（parser_registry 懒加载）
+        'csg_uplink_wire',  # 线格式单源
+        'csg_uplink_di',  # AFN/DI 索引（导入时合并网管扩展）
+        'csg_uplink_di_data',  # DI 数据表（生成物）
+        'csg_uplink_nm',  # 网管（深化应用）扩展：DI/枚举/结构化解码
+        'csg_uplink_frame_gen',  # 组帧
+        'csg_uplink_frame_gen_widget',  # 组帧页（frame_gen_widget 静态 import）
+        'validator.csg_uplink_validator',  # make_validator importlib
         'dlt645_sim',  # DLT645 虚拟表包（从站引擎 + LME 下发，dlt645_meter_sim_widget 静态 import）
         'dlt645_sim.engine',
         'dlt645_sim.archive',
@@ -176,12 +271,16 @@ a = Analysis(
         'lua_script_engine',
         'py_script_engine',  # Python 脚本预处理引擎
         'batch_source_view',  # 原始日志快照查看器（main_gui 顶层静态 import，显式声明保险）
+        # 蓝牙工具（main_gui 内**函数级**惰性 import，静态分析扫不到，必须显式声明）
+        'bluetooth_core',
+        'bluetooth_worker',
+        'bluetooth_tool_widget',
         # 可选依赖
         'crcmod',
         'serial',
         'serial.tools',
         'serial.tools.list_ports',
-    ],
+    ] + _ble_imports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -225,7 +324,12 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    # UPX 压缩：**显式关闭**。UPX 压缩壳是被杀毒启发式重点关照的特征（"自解压+壳"
+    # 与恶意软件同构），会让 Defender/其它引擎更容易拦；体积收益不值得。
+    # 说明：本次构建日志里没有 PyInstaller 的「UPX is available」一行 ⇒ 本机 UPX 并未
+    # 被它认定可用（PATH 上只有 upx.BAT），所以当前 exe 其实没被 UPX 压过（实测 exe 内
+    # `UPX!` 标记 0 处）。这里写 False 是把"以后 UPX 变得可用时会静默启用"这个隐患一并去掉。
+    upx=False,
     upx_exclude=[
         'vcruntime140.dll',
         'python313.dll',
@@ -240,4 +344,5 @@ exe = EXE(
     entitlements_file=None,
     icon='app_icon.ico',
     version=str(_version_info_file),
+    manifest=_manifest_xml,  # 补 assemblyIdentity（其余清单项由 PyInstaller 合并保留）
 )

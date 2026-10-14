@@ -45,13 +45,25 @@ def test_name_to_index_aliases():
 
 
 def test_frame_gen_protocols():
-    assert set(protocols_with_frame_gen()) == {0, 6, 7, 8, 12}
+    assert set(protocols_with_frame_gen()) == {0, 6, 7, 8, 9, 12, 13, 14}
     assert get_protocol(0).frame_gen_mode == "south"
     assert get_protocol(6).frame_gen_mode == "dlt645"
     assert get_protocol(6).preset_mode == "dlt645"
     # 模组化接口：组帧页 + 预设均已接线
     assert get_protocol(12).frame_gen_mode == "modular"
     assert get_protocol(12).preset_mode == "modular"
+    # 协议13（依瓦定制645）：组帧页（独立子控件，不复用协议6 schema）+ 独立预设库
+    # （preset_buttons._get_path 有显式 yw645 分支 → YW645_command.json，不走 GW 兜底）
+    assert get_protocol(13).frame_gen_mode == "yw645"
+    assert get_protocol(13).preset_mode == "yw645"
+    # 协议14（南网上行通信规约）：组帧页（独立子控件）+ 独立预设库
+    # （preset_buttons._get_path 有显式 csg_uplink 分支 → CSG_UPLINK_command.json）
+    assert get_protocol(14).frame_gen_mode == "csg_uplink"
+    assert get_protocol(14).preset_mode == "csg_uplink"
+    # 协议9（南网新一代载波）：有组帧页（链路层组帧），但**没有**预设库 ——
+    # 预设页可见性按 preset_mode 判定，故 preset_mode 必须保持 None。
+    assert get_protocol(9).frame_gen_mode == "csg"
+    assert get_protocol(9).preset_mode is None
 
 
 def test_sequence_and_monitor_capabilities():

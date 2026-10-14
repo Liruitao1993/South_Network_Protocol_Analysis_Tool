@@ -34,9 +34,9 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 
 ## 1. 项目概览
 
-多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.23.58`）。
+多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.23.77`）。
 
-**支持的协议（共 13 种，对应 GUI 协议下拉框 `current_protocol` 索引）：**
+**支持的协议（共 15 种，对应 GUI 协议下拉框 `current_protocol` 索引）：**
 
 | 索引 | 协议名（GUI显示） | 标准号 | 字节序 | 校验算法 |
 | ------ | ------------------ | -------- | -------- | ---------- |
@@ -53,10 +53,12 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 | 10 | 国网新一代双模通信互联互通 | 国网新一代双模通信互联互通技术规范 | 小端 | CRC-32（MAC帧） |
 | 11 | HDC 1.0 双模互联互通 | Q/GDW 12087.42-2020 | 小端（MAC 地址大端） | CRC-24（FC/PB）+ CRC-32（MAC） |
 | 12 | 模组化终端功能模块接口 | Q/GDW 模组化终端功能模块接口协议 | 小端（链路层 L/C/FCS）/**大端（A-XDR 数据）** | CRC-16/PPP FCS（x-25） |
+| 13 | 依瓦定制645 | 依瓦定制645协议 V1.0 | 地址域高字节在前 / 数据域逐字节 | 8位位组算术和（数据域 ±0x33） |
+| 14 | 南网上行通信规约 | Q/CSG 11109004-2013 | 小端（长度L/地址域/多字节字段） | 8位位组算术和（控制域+地址域+链路用户数据） |
 
 > 协议覆盖差异：**HDC 1.0（索引 11）在 PySide6 主程序与 Reflex Web 版均支持**（2026-09-15 核实）。Web 版无实时监控器/档案/拓扑；组帧与预设标签页在 Web 存在但协议 9/10/11 均不支持（与桌面一致），协议11 另有「无实时监控器/组帧/预设」的说明见 §8 陷阱 27。**「频谱图」标签页两端都有**（与协议无关，常驻）：桌面 `spectrum_widget.py`（QPainter 自绘），Web `reflex_web/reflex_web/spectrum_web.py`（SVG）——两侧共用同一份纯逻辑层。**Web 另有主题系统**（浅色/深色/跟随系统 + 6 个预设 + 5 个强调色，`reflex_web/reflex_web/theme_web.py`，token 化 CSS）；桌面为 7 套 QSS 主题（`theme_settings.py`，含毛玻璃/云母，Web 无对应）。NiceGUI/TUI 版本已于 2026-08-17 移除。
 
-> **Web 路由（1.23.14 起，改链接前必读）**：`/` = **产品首页**（落地页，介绍桌面客户端：Hero/功能卡/12 协议表/命令行与系统集成/下载区/页脚，实现在 `reflex_web/reflex_web/landing_web.py`）；`/app` = **在线工具**（原主页的 9 个标签页，函数名 `index()` 已更名 `tool_page()`）；`/share`、`/feedback`、`/feedback-admin` 不变。首页数据全部读 `reflex_web/downloads/`（`version.json` 版本、`*.exe` 体积、`client_screenshot.png` 截图，缺图降级占位卡）。**新增/修改站内链接时必须按语义选目标**（回介绍页 `/`、回工具 `/app`），`landing_web.INTERNAL_LINKS` 是落地页侧的唯一来源，`test/test_web_landing.py` 有死链白名单守卫。
+> **Web 路由（1.23.14 起，改链接前必读）**：`/` = **产品首页**（落地页，介绍桌面客户端：Hero/功能卡/协议表/命令行与系统集成/下载区/页脚，实现在 `reflex_web/reflex_web/landing_web.py`）；`/app` = **在线工具**（原主页的 9 个标签页，函数名 `index()` 已更名 `tool_page()`）；`/share`、`/feedback`、`/feedback-admin` 不变。首页数据全部读 `reflex_web/downloads/`（`version.json` 版本、`*.exe` 体积、`client_screenshot.png` 截图，缺图降级占位卡）。**新增/修改站内链接时必须按语义选目标**（回介绍页 `/`、回工具 `/app`），`landing_web.INTERNAL_LINKS` 是落地页侧的唯一来源，`test/test_web_landing.py` 有死链白名单守卫。
 
 修改协议相关文档/代码时注意区分。
 
@@ -233,6 +235,16 @@ python reflex_web/build_offline_deploy.py --port 8091                # UV 包
    - `BUILD_DATE`：编译日期，每次打包前必须更新
    - 两者共同构成完整版本标识，便于区分不同时间编译的版本
 
+5. **`EXE(...)` 的清单与 UPX 两条硬约束（2026-09-30 起，别改回去）**：
+
+   - **`manifest=` 传的必须是完整清单**：PyInstaller 的 `winmanifest.create_application_manifest()` 是**整份替换**而不是合并（它只额外保证 `requestedExecutionLevel` 与 `Microsoft.Windows.Common-Controls` 两项）。第一版只传了 `<assemblyIdentity>`，结果把默认清单里的 `supportedOS`（5 个）与 `longPathAware` **一起冲掉**——`longPathAware` 丢了会让 >260 字符路径失效，属实打实的回归。现在 spec 里写的是一份**完整清单**（assemblyIdentity + trustInfo/asInvoker + compatibility/5×supportedOS + longPathAware + Common-Controls），只比默认多一条 `assemblyIdentity`（"谁家的什么软件什么版本"这条汇编层身份，默认清单没有它）。
+     - 校验方法（改完必做）：构建后在产物里搜 `<assembly` 取出清单，逐项确认 `assemblyIdentity` / `requestedExecutionLevel` / `longPathAware` / `Common-Controls` / `supportedOS`(应为 5 条) **全部为 True**。
+     - 特意**不**声明 `dpiAware` / `dpiAwareness`：高 DPI 缩放由 Qt 启动时自己设置，清单里再声明一次会改变现有缩放行为（本项目有大量高 DPI 布局适配）。
+   - **`upx=False`（显式关闭）**：UPX 压缩壳是杀毒启发式的重点特征（"自解压 + 加壳"与恶意软件同构）。本机 `PATH` 上只有 `upx.BAT`，PyInstaller 未认定其可用（构建日志没有 `UPX is available` 那行、产物里 `UPX!` 标记 0 处），所以**历史上并未真的压过**；写死 `False` 是为了去掉"以后 UPX 变得可用就静默启用"的隐患。
+   - 与之配套的版本资源补了 `Comments`（用途说明），`CompanyName`/`FileDescription`/`InternalName`/`LegalCopyright`/`ProductName` 保持原样。
+
+6. **杀毒误报的现实边界（重要，别指望元数据能解决）**：上面的清单/元数据只让 exe "看起来像正规程序"，**不是**误报的解药。本程序被拦的实际主因依次是：①**没有代码签名**（无发布者、零信誉）；②**onefile 自解压**——每次运行解到 `%TEMP%\_MEIxxxxx` 再执行，与"释放器"行为同构；③**每次重建哈希都不同**（文件名带时间戳），云信誉永远从零开始。真正有效的顺序：**代码签名**（OV/EV 证书或 Azure Trusted Signing）> **改 onedir**（安装脚本 `南网解析工具.iss` 取的就是文件夹形态 `dist\协议解析工具\协议解析工具.exe`，但该目录已停更在 2026-08-11、当前没有任何 spec 会重新生成它）> 向微软提交误报 > 本机加 Defender 排除项。
+
 ---
 
 ## 3. 架构总览
@@ -250,6 +262,8 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
 │                             #   （不用共享单例）；`parse_one_frame` 是「单帧解析」的唯一实现，
 │                             #   worker 与详情按需重解析共用；1.23.15 起）
 ├── custom_di_store.py        # 南网自定义DI存储单源（纯逻辑无Qt：custom_di.json 读写/校验/upsert/批量删；main_gui·lookup_pages·protocol_parser 共用）
+├── wakeup_prefix.py          # 68 家族前导 FEH 唤醒字节单源（1.23.76）：判定/剥离/表格前导行/偏移位移；
+│                             #   协议8（§6.3.1 b）与协议6（§5.3.1）的解析器·校验器共用，其余协议禁止引用（见 §8 陷阱 75）
 ├── 协议解析器（parser）── 每个返回嵌套 dict，字段约定见 §4
 │   ├── protocol_parser.py          # 南网 (ProtocolFrameParser) ~4450行 [最大单文件]
 │   │   └── protocol_tool.py          # ControlField(ctypes) + Frame(dataclass) 组帧
@@ -277,6 +291,15 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
 │   └── modular_iface_axdr.py     # A-XDR 编解码单源（表4 类型/8 类 APDU/date_time/Scaler_Unit/fcstab/verify_frame）
 │   └── modular_iface_data.py     # 静态表单源（附录 B/C/D~L/M + 表1/2/3/5/11/13；DT 命名/单位/子接口）
 ├── modular_iface_frame_gen.py # 模组化组帧（整帧/ACK/NAK/APDU 模板，纯逻辑）
+├── yw645_parser.py            # 依瓦定制645 (YW645Parser) — 协议13
+│   ├── yw645_wire.py          # 依瓦定制645 线格式单源（地址/12bit 长度/CS/±0x33/切帧）
+│   ├── yw645_di.py            # 依瓦定制645 数据项表（附录A）
+│   └── yw645_frame_gen.py / yw645_frame_gen_widget.py  # 组帧逻辑 / 组帧页
+├── csg_uplink_parser.py       # 南网上行通信规约 (CSGUplinkParser) — 协议14 Q/CSG 11109004-2013
+│   ├── csg_uplink_wire.py     # 线格式单源（68H+L(2B小端)×2+68H+C+A+CS+16H / 地址域 / 切帧）
+│   ├── csg_uplink_di.py       # AFN/数据密度/错误码 + DI 索引单源
+│   ├── csg_uplink_di_data.py  # DI 数据表（tools/gen_csg_uplink_di.py 从 PDF 抽取的生成物）
+│   └── csg_uplink_frame_gen.py / csg_uplink_frame_gen_widget.py  # 组帧逻辑 / 组帧页
 └── (解析级别：新一代 auto/fc_pb/fc_efc/fc_only/app/pb_only；国网新一代&HDC 1.0 auto/fc_pb/fc_only/mac_only/pb_only/fc_mac/app；通道：PLC 载波 / HRF 无线)
 │
 ├── 查询/映射模块（lookup）── 单例 get_xxx_lookup() 提供全局实例
@@ -349,7 +372,19 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
 │   ├── monitor_widget.py            # 实时监控器 (RealtimeMonitorWidget) - 串口原始字节流自动组帧/CSV记录
 │   ├── monitor/tcp_monitor.py       # TCP流量监控 (TCPMonitorWidget) - scapy抓包/流重组/自动解析
 │   ├── serial_worker.py             # 串口后台线程 (SerialWorker) - 打开/读取/FT1.2+645 分帧/发送（write_raw 静默写，供高速发送）
-│   ├── serial_tool_widget.py        # 串口工具 (SerialToolWidget) - 命令表循环发送 + 响应匹配 + 统计 + 按协议断帧解析 + 日志自动保存到文件（集成自 USB 负载测试工具）
+│   ├── serial_tool_widget.py        # 串口工具 (SerialToolWidget) - 命令表循环发送 + 响应匹配 + 统计 + 按协议断帧解析 + 断帧设置（可调超时/断帧方式，认前导 FE）
+│   │                                #   + 日志自动保存到文件 + **批量替换通信地址**（按协议替换地址域+重算校验+撤销，复用 frame_addr_fix；纯逻辑 `batch_fix_commands`，1.23.83）（集成自 USB 负载测试工具）
+│   ├── bluetooth_core.py            # 蓝牙纯逻辑（无 Qt / 无 bleak）：配置持久化（原子写+坏文件宽容）、按 MTU 分包、BleReassembler 静默超时切帧、
+│   │                                #   特征码打分优选 / ProbeSession 探测状态机 / 按设备地址记忆 char_map（1.23.79）/ 按钮的 protocol+addr 参数（1.23.81）
+│   ├── frame_addr_fix.py            # 按协议替换地址域 + 重算校验（纯逻辑，无 Qt；**按需导入**协议模块 —— 698 依赖可选 crcmod）：
+│   │                                #   字段声明 fields_for / parse_address（在线 hex 与协议书写序双认）/ apply（自证→定位→替换→复用协议实现重算）
+│   │                                #   v1 支持 0/6/7/8/13/14；地址定位与校验全部复用既有实现（见 §8 陷阱 69）（1.23.81）
+│   ├── bluetooth_worker.py          # 蓝牙通信线程 (BluetoothWorker, QObject + 私有 asyncio 事件循环) - 扫描/连接/特征码枚举/订阅/写/重组；
+│   │                                #   含 subscribe_finished（探测时序依赖）+ MTU/写上限实时化（1.23.80：连接后轮询协商结果 + 每次发送前重读）
+│   ├── bluetooth_tool_widget.py     # 蓝牙工具 (BluetoothToolWidget) - 扫描连接 + 特征码自动优选/一键探测/按设备记忆 + 收发解析 + 自定义报文按钮（可绑协议+地址）
+│   │                                #   + 虚拟串口透传（集成自蓝牙转串口工具02）；右栏「日志 ↔ 发送+自定义」为竖向 QSplitter，
+│   │                                #   自定义区 = CollapsibleSection + ButtonScrollArea（高度按内容自动 + 工具栏常驻，1.23.82）；
+│   │                                #   工具栏 6 个按钮（含「批量地址…」= 按协议类别批量替换 / 清除地址，1.23.84）
 │   ├── system_integration/          # 系统集成包（Windows）
 │   │   ├── sys_tray.py              #   系统托盘（关闭最小化/显示隐藏/自启/退出）
 │   │   ├── global_hotkey.py         #   全局热键（默认 Ctrl+Alt+X，唤出快捷解析小窗）
@@ -395,6 +430,8 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
 │   ├── csg_new_gen_validator.py    # 新一代载波 (CSGNewGenValidator)
 │   ├── gw_new_gen_validator.py     # 国网新一代双模 (GWNewGenValidator)
 │   └── hdc10_validator.py          # HDC 1.0 双模 (HDC10Validator) - 定界符/版本/FCCS(CRC-24)
+│   └── yw645_validator.py          # 依瓦定制645 (YW645Validator) - 起始符/CS/±0x33/DI 命中
+│   └── csg_uplink_validator.py     # 南网上行通信规约 (CSGUplinkValidator) - 68H×2/L/C/A/AFN/CS/16H
 │
 ├── 监听/报表/模板/可视化编辑
 │   ├── monitor_widget.py           # 实时监控器（南网新一代/国网新一代，96..16 / ED..EE 解帧）
@@ -572,6 +609,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
   - **语义**：模式字 1 = 该事件允许主动上报（使能）；状态字 1 = 该事件已发生；**两表存在不变量 状态字 Bit(32+n) ≡ 模式字 Bit(n)（n=32..63）**
   - **「电表运行状态字 1~7」位号已于 1.23.23 修正**（原表 8 个字无一正确，且状态字3 的「供电方式」实为 Bit2~Bit1 两位域）；详见 §8 陷阱 50
 - **校验器**：`validator/dlt645_validator.py`
+- **前导 FEH 唤醒字节（1.23.76 起）**：§5.3.1「在主站发送帧信息之前，建议先发送 4 个字节 FEH，以唤醒接收方」⇒ `parse` / `check_structure` / `check_frame` / `calc_checksum` 与校验器统一**先剥离帧首连续 `0xFE`** 再判定（单一来源 `wakeup_prefix.py`），`DLT645GuiParser` 表格首行给「唤醒前导字节」且其余行偏移整体 `+skip`；详见 §8 陷阱 75
 - **参考文档**：
   - `DLT645-2007.md` — 主协议（Markdown）
   - `DLT645-2007 多功能电表通信协议.pdf` — 原始 PDF
@@ -601,6 +639,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
 - **组帧**：`dl_t698_45_frame_gen.py` + `dl_t698_45_frame_schema.py`
 - **校验器**：`validator/dl_t698_45_validator.py`
 - **依赖**：`crcmod`（`Crc('x-25')`）
+- **前导 FEH 前导码（1.23.76 起，规范 §6.3.1 b)）**：链路帧允许（本协议标准为「要求」）在帧前带 `FEH` 前导码 ⇒ `DLT69845Parser.parse` / `parse_to_table` 与 `DLT69845Validator` 统一**先剥离帧首连续 `0xFE`**（单一来源 `wakeup_prefix.py`），`原始数据` 保留用户原始输入（含 FE），表格首行给「唤醒前导字节」且其余行偏移整体 `+skip`；详见 §8 陷阱 75
 - **参考文档**：`面向对象的用电信息数据交换协议(20210910).md`
   - **帧长公式（1.23.61 修正；三处实现曾错，改前必读）**：`L` 是「传输帧中**不包含**起始字符和结束字符的数据长度」（6.2.2 a)，L 本身含两个长度域字节）⇒ **整帧 = `L + 2`**；真实链路帧**没有第二个 68H**（`68 | L(2B 小端) | 控制域 | SA | CA | HCS | APDU | FCS | 16`）。自证：附录 H.1.1「登录」示例 32 字节、L=0x001E=30。批量提取（`main_gui._extract_69845_frames` / `batch_core._extract_69845_frames` / `reflex_web.web_utils.extract_69845_frames`）与串口分帧（`serial_tool_widget` 的 `dlt698_45` 策略）都必须按 `L + 2`；因南网/国网与 698.45 前 3 字节同形（`68 L L`），三者互斥只能靠**末字节自证**（南网/国网 L = 整帧、末字节恒 16H）。回归：`test/test_dl_t698_45_extract.py`
   - **CRC 范围**：文档明确定义 HCS/FCS 各自覆盖的字段，**哪些字段参与 CRC 必须查文档**
@@ -614,7 +653,21 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
   - `csg_new_gen_cmd_payloads.py` — 应用层命令业务数据单元解析（依据第5部分）
 - **校验器**：`validator/csg_new_gen_validator.py`
 - **GUI 特性**：协议索引 9 时显示解析级别下拉（auto / fc_pb / fc_efc / fc_only / app / pb_only），pb_only 模式可指定 SOF/信标/ACK/NET 帧类型；由 `_csg_parse_level` 控制
+- **组帧页（1.23.64 新增）**：协议9 也支持「协议组帧」（`protocol_registry` 的 `frame_gen_mode="csg"`，`preset_mode` 保持 `None`）。组帧页左栏是 `QStackedWidget`：第 0 页常规动态表单、**第 1 页协议9 链路层组帧**（`csg_test_frame_gen_widget.CsgTestFrameGenWidget`）。五层折叠表单：①FC 帧控制 / ②物理块 PBH+PBCS / ③MAC 帧头 / ④MSDU / ⑤ED 封装；进页面默认勾选「组装链路层」、默认帧类型 **SOF 帧**
+  - 组帧器 `csg_link_frame_gen.py`（`put_bits_le` ↔ 解析器 `_extract_bits` 严格互逆；FCCS / PBCS 为 CRC-24，MAC 帧尾 ICV 为 CRC-32，全部自动算）+ 复用 `csg_new_gen_frame_gen.py` 的 **25 个测试模式**（1.23.77 新增 2.0 测试扩展 `0x0009`「报文聚合传输测试模式」：`报文聚合数目` 1 字节，解析/组帧/仿照回填/摘要四处同构）
+  - 定界符三型：**SOF**（BPLC / ISAC-PLC 两版本、长/短 MAC 头、多物理块）｜**信标**（FC 后直接载荷，无物理块与 MAC 头）｜**选择确认帧 SACK**（仅 FC 16 字节）
+  - 输出层次四档：`ed`（ED..EE 封装，推荐下发）/ `app`（应用层帧）/ `bdu`（仅测试帧数据单元）/ `mpdu`（整帧 FC + 物理块）
+  - **协议9 无预设命令库** ⇒ 预设命令页不显示（可见性按 `preset_mode` 判定，见陷阱 65），组帧页「添加到预设」按钮隐藏
+  - **仿照报文回填（1.23.65 新增，⓪ 折叠区）**：粘贴一帧现成报文 → `csg_frame_reverse.reverse_frame()` 反解出各组帧参数 → 回填表单 → 只改要变的字段再生成。分层：ED..EE 封装（plc2 / 广西台体）→ 整帧 MPDU → ①FC ②物理块 ③MAC 头 ④MSDU → 应用层帧 → 测试帧 BDU；**字段取值一律以解析器行（`parse_to_table`）为唯一基准**，用「偏移区间」区分 FC(0~15) / 物理块头(16~19) / MAC 及以内(≥20)，避免 `源TEI` 这类同名标签串味。长字段（MSDU 负载 / 物理块体 / B 表）的「原始值」列会被解析器用 `...` **截断**，必须按 `偏移~结束偏移`（第 5 列是**闭区间**末偏移）从原始字节切
+  - **回填后必须逐字节反证**：GUI 侧用真实组帧路径重建一次并与原帧对比（`csg_test_frame_gen_widget._verify_against`）；表单表达不了的字段（报文标识符非 `0x0101`、业务标识非 `0xF0`、保留位非 0）记入 `unmapped` 并按「手工 HEX 保真」兜底（把原 MSDU 载荷写进 ④ 区手工载荷），提示里明确说明"此后改应用层/模式参数不影响载荷"
+  - **模板本地存储**：`csg_frame_templates.py` → `csg_frame_templates.json`（`app_paths.data_path`，已 gitignore），存完整参数集 + 原始参考报文 + 状态摘要；「临时文件 + `os.replace`」原子写，读取对坏文件宽容。state 口径由 `csg_test_frame_gen_widget.frame_state()` / `apply_frame_state()` 定义（`apply` 的顺序不能改：**先切帧类型/标准版本/模式**——它们会重建字段控件——**再写字段值**）
+  - **右栏「显示响应解析」开关**：协议9 是纯组帧场景，进页面强制收起（把高度让给实时解析预览），其它协议按用户偏好显示；`_apply_resp_visibility()` 只覆盖显示状态、不改偏好
+  - 回归：`test/test_csg_frame_gen_gui.py`（139 项，offscreen GUI 端到端）+ `test/test_csg_link_frame_gen.py`（176 项）+ `test/test_csg_frame_reverse.py`（96 项，纯逻辑）+ `test/test_csg_frame_templates.py`（92 项）+ `test/test_csg_test_ext_0009.py`（76 项，2.0 测试扩展 `0x0009` 解析/组帧/回填/摘要）+ `test/test_collapsible_section.py`（51 项）
 - **解析重点**：支持多物理块重组、聚合帧级联块应用层解析、NET 帧可变区域解析；批量解析支持监控日志前缀剥离与业务摘要；ED..EE 包装的数据域若为《测试装置通信控制协议V1.1》工装板/功能驱动板控制帧，也由协议9解析器识别展开
+- **信标条目解析的实机差异（2026-10-08 实测，改动前先读）**：
+  - **`0x10 代理角色条目` 实机按 1 字节长度字段发送**（表59/表72 写的是 16 比特）：按规格宽度读会得到 `04 60 → 0x6004 = 24580` 这类荒谬长度，把其后全部字节（含后续条目）吞成「代理角色条目 28字节 / 代理站点数 14」。`_parse_beacon_entries` 现按表59 宽度读，仅当**声明值超出剩余字节**时退回 1 字节重读（声明值合法时仍按表59），并在该条目「条目长度」行注明「长度字段实发 1 字节」；`0x00`（表59 非法值）处停止，不再把补齐/校验序列当条目
+  - **帧载荷校验序列不再无条件取末 4 字节**：旧逻辑先切掉末 4 字节再解析条目，输入若是**裁剪过的 PB 载荷（到最后一个条目为止、不含 BPCS）**，就会把最后一个条目的末 4 字节吞掉（实测该帧末 4 字节是 `0x02 时隙分配条目` 的 CSMA时隙信息）。现改为先按条目解析定位条目末尾，再在剩余字节里取末 4 字节（`_beacon_tail_rows`），无剩余字节时明确提示「未包含」、剩余多于 4 字节时注明补齐字节数
+  - **表62 时隙分配条目字段偏移**：RF信标时隙长度在信标周期长度（条目字节 19-22）之后，占条目字节 **23-24**（表62 该行印成 22/23，与信标周期长度重叠，属文档笔误）；固定区共 24 字节，其后才是按 `非中央信标时隙总数×2 + CSMA相线个数×4 + 绑定CSMA相线个数×4` 展开的可变长时隙信息区（解析器给「可变长时隙信息」行）
 - **参考文档**（位于 `南网新一代20260226校对/南网新一代20260226校对/` 子目录，每部分同时有 .docx 和 .md）：
   - `1-通感一体化低压电力线宽带载波通信规约 第1部分 总则（文本校对）.md` — 总则
   - `2-...第2部分 技术要求（文本校对）_力合微_20260304.md` — 技术要求
@@ -673,6 +726,26 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
 - **参考文档**：`协议文档/12.模组化功能协议/模组化终端功能模块接口协议.md`（anydoc 自同名 .docx 转换，1136 行）
 - **⚠ 两层字节序不同**：链路层 `68 | L(2B LE) | C(2B LE) | Data | FCS(2B LE) | 16` 是**小端**；APDU 内的 DT/整型/`date_time` 属 **A-XDR → 大端**。两者不可互相套用（1.23.57 的原实现即因此错位）
 - **回归**：`test/test_modular_iface.py`（430 项）+ `test/test_modular_iface_axdr.py`（185 项）；契约与错误排查见 §8 陷阱 61
+
+---
+
+### 5.11 南网上行通信规约（索引 14，**1.23.68 新增 / 1.23.69 修正长度域 / 1.23.70 网管扩展 + DI 字节序**）
+
+- **协议**：Q/CSG 11109004-2013《计量自动化终端上行通信规约》（南网 2013 版上行规约，与索引 0 的 Q/CSG1209021-2019 本地模块规约、索引 7 的国网 10376.2 同族但字段不同）
+- **帧格式**（5.1.1 图2）：`68H | L(2B 小端) | L(同值，重复一次) | 68H | C(1B) | A(7B) | 链路用户数据 | CS(1B) | 16H`；`L = 控制域+地址域+链路用户数据 = 8 + 应用层`，**长度域线上 4 字节、整帧 = L + 8**；`CS = (控制域+地址域+链路用户数据) 模 256 和`（5.1.5）
+- **⚠ 长度域 4 字节的证据链（1.23.69 修正，此前误按「单 2 字节 L」实现）**：① 5.1.2 + 图3 规定 L 是 **2 字节** 16 位（网络上限 16383 亦需 16 位）；② 图2/图11/图12 的固定报文头逐行画出 `68H / L / L / 68H`，而**图中一行即一个字段**（同图内 A(7B)、信息点标识(2B)、数据标识编码(4B) 各占一行），故两个 L 是两个字段；③ 条文解释「长度L由两个字节组成，两个重复的长度L必需完全一致，否则此帧为无效帧」+ 5.2.1「识别2个长度L」；④ 5.2.1「每帧接收的字符数为用户数据长度 L+8」= 68H(1)+L(4)+68H(1)+CS(1)+16H(1)。**四条互证，无一条需要「文档写错」来解释**
+- **切帧/解析容错**：`resolve_layout()` 按「结构 + 声明整帧长 + CS + 末字节 16H」在三种形态间择优 —— 规范 4 字节（`l16x2`）→ 单个 2 字节小端（`l16`，历史报文）→ FT1.2 双同值单字节（`ft12`）；**规范形态优先**。组帧 `encode_frame()` 只输出规范形态；解析摘要 `last_meta["len_form"]` 给出实际形态
+- **控制域 C**（5.1.3 图4）：D7 DIR / D6 PRM / D5 FCB(PRM=1)|ACD(PRM=0) / D4 FCV(PRM=1)|保留 / D3~D0 功能码（PRM=1 表2、PRM=0 表3）
+- **地址域 A**（5.1.4 表4）：A1 省地市区县码(3B **BCD**，线上低字节=区县码在前) + A2 终端地址(3B BIN 小端，0 无效/FFFFFF 广播) + A3 主站地址(1B BIN)
+- **应用层**（6.1 图5）：`AFN(1B) | SEQ(1B) | 信息体×N | [PW(16B)] | [Tp(5B)]`；SEQ D7 TpV / D6 FIR / D5 FIN / D4 CON / D3~D0 PSEQ|RSEQ；信息体 = `DA(2B: DA1 信息点元 + DA2 信息点组) + DI(4B) + 数据标识内容`；`pn = (DA2-1)*8 + bit + 1`
+- **AFN**：00 确认/否定、01 复位、02 链路接口检测、04 写参数、06 身份认证、0A 读参数、0C 读当前数据、0D 读历史数据、0E 读事件记录、0F 文件传输、10 中继转发、12 读任务数据、13 读告警数据、14 级联命令、15 用户自定义数据
+- **DI 单源**：`csg_uplink_di.py`（附 A 终端参数 / 附 B 测量点参数 / 附 D 告警 / 附 E 事件，共 282 条，由 `tools/gen_csg_uplink_di.py` 从条文解释 PDF 用 pdfplumber 抽取；**网管扩展并入 14 条**、另 2 条与附 D 同号合并，共 **296** 条）；**附 C 测量点数据**沿用 DL/T 645-2007 数据标识（附 C.2 首句「支持 DL/T 645—2007 中的数据标识，传输时不加 33H」）→ 复用 `dlt645_di.json`
+- **协议文档**：`协议文档/14.南网上行通信规约/中国南方电网有限责任公司计量自动化终端上行通信规约(条文解释).md`（+ PDF，2013 版）；`协议文档/14.南网上行通信规约/新一代计量自动化主站通信网络管理技术要求.md`（+ 同名 .docx，网络管理/深化应用扩展，**由 .docx 用 markitdown 转换**，含第 4 章拓展 DI 与 13 条实帧）
+- **⚠ 数据标识 DI 线上字节序 = 低字节在前**（1.23.70 修正）：表 `E1 00 60 12` 上线为 `12 60 00 E1`。依据：网管扩展文档 13 条实帧（send/rec 成对、CS 全部自洽）+ 5.1.1「低字节在前，高字节在后」+ 协议0（`protocol_parser` 用 `di_bytes[::-1]`）与 DL/T 645 同族约定。索引键一律**表序**（DI3 DI2 DI1 DI0），换算用 `csg_uplink_di.to_semantic_di()` / `to_wire_di()`；解析表并列显示「原始值=线上顺序、解析值=表序」；组帧 `InfoBody.to_bytes()` 自动转线上序
+- **网管（深化应用）扩展**（1.23.70 新增，文档第 4 章「终端上行规约（针对网络管理扩展）」）：单源 `csg_uplink_nm.py`（16 条 DI 记录 = 文档 15 个扩展 DI + 4.5 实帧别名 `E1006014`；含枚举 + 结构化解码 + 前缀规则），由 `csg_uplink_di` 合并进 `DI_ENTRIES`（`appx="N"`，同号 DI 如 `E2000033/34` 与附 D 名称合并）。DI 清单：`E08004xx` 通信模块台账（65B/14 项）、`E1006012` 入网从节点（3+6n）、`E1800052` 组网成功率（BCD×100）、`E1006009` 周边节点信道（3+16n）、`E1006004`/`E1006014` 网络拓扑（5+19n）、`E1006015` 模块类型+离线时长、`E2000033/34` 掉电/上电（ARD2）、`E1006005` 多网络信息、`E0000040` 频段、`E1006008` 入网被拒（3+6n）、`E1006010` 节点自检、`E0000041` 从节点重启、`E1006013` 并发数、`E1006016` 远程模块网管（21 项，**报文字段高位在前**）。解码结果按字段展开成解析表子行（`    ↳ 字段`）；`content_length(di, data)` 支持变长列表按内容推算，多信息体可正确切分
+- **⚠ 两处文档自身的出入（已按“并存 + 标注”处理）**：① 4.5 表列 DI0=`04`，而其 send/rec 实帧用 `14`（两条都收录，`E1006014` 名称已标注）；② 4.1 的 send 实帧控制域为 `4BH`（功能码 0BH=请求 2 级数据）而同帧 SEQ 的 CON=1，与 5.1.3.6「CON=1 → 功能码 0AH」不符（其余实帧自洽；组帧页按 5.1.3.6 生成 `4AH`，若要逐字节复现 4.1 实帧用 `build_frame(c=0x4B, …)`）
+- **组帧**：`csg_uplink_frame_gen.py`（`build_frame`/`InfoBody`/`templates`，线格式统一走 `csg_uplink_wire.encode_frame`）+ `csg_uplink_frame_gen_widget.py`；`frame_gen_mode`/`preset_mode="csg_uplink"`，预设库 `CSG_UPLINK_command.json`（6 → **11 条**种子，含 5 条网管扩展）
+- **回归**：`test/test_csg_uplink.py`（**126 项**：线格式三种长度域形态 / DI 索引 / 网管扩展解码 / 解析 / 校验 / 组帧 / 注册表，含文档 13 条实帧 valid + 7 条 send 实帧逐字节复现）
 
 ---
 
@@ -997,6 +1070,14 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
     - **「原始数据」接收模式必须做「帧结构优先、时间聚合兜底」**（实测报障两轮，改这里前必读）：① 串口驱动会把**同一帧**拆成多次 `read` 交付（低波特率甚至逐字节），按每次交付输出一行会让一帧打成多行、RX 帧数虚增；② **只做时间聚合不够**——实测 208 字节的国网帧被拆成 77+92+36+3 共 4 行，即**交付块间隔本身就大于静默窗口**（10ms），窗口调多大都不稳。正确做法是按长度域收全再输出：`_declared_frame_len()` 按**末字节自证**互斥判别三种结构（南网/国网与 698.45 的前 3 字节同形 `68 L L`，**不能**靠头部签名区分）—— 698.45：`68H + L(2B 小端) + 控制域 + … + FCS + 16H`，**没有第二个 68H**，L 是不含首尾定界符的数据长度（6.2.2 a)）⇒ 整帧 = `L + 2`（附录 H.1.1 示例 32 字节、L=30 自证；1.23.61 修正，原判据「第 4 字节恒为 68H」与 `L + 3` 均错）、DLT645-2007：`68H + 地址(6B) + 68H + 控制码 + 数据长度 L(1B) + … + 16H`，整帧 = `L + 12`、南网/国网：`68H + L(2B 小端) + … + CS + 16H`，**L 就是整帧字节数**（见 `protocol_parser.py:72` / `gdw10376_parser.py:333`）；**判据 = 「谁到齐且以 16H 收尾就是谁」**——南网/国网末字节恒为 16H，故「按 L 到齐却非 16H」即否定南网口径、改判 698.45 的 `L + 2`，不足 8 字节或长度域越界一律返回 0 退回时间聚合 —— **错切帧比不切更糟**。`_emit_structured_frames()` 只在**末字节确为 16H** 时才算自证（帧体内含 16H 不会被误切，两帧连在一次交付里会切成两行）。无结构裸数据仍走时间聚合：`RAW_FLUSH_DELAY_MS = 10` 静默窗口 + `RAW_MAX_HOLD_MS = 200` 最长持有（防持续流 `_raw_buffer` 无界增长且永不显示）；已声明长度但未收全时改用 `FRAME_IDLE_MS = 300` 容忍静默 + `FRAME_HOLD_MAX_MS = 5000` 绝对上限。**头标志 68 已出现但长度域还没收够字节时也算未收全**（1.23.57）——首片仅 1~2 字节时若走 10ms 静默会单独刷出首片，缓冲从下一片起不再以 68 开头、整帧被切碎（实测国网 F112 拆成 4 行）；协议已知时 `ft12_68` 3 字节即可算整帧长。切换接收模式与 `cleanup()` 时立即刷出（含未收全残帧），不丢数据。**取舍**：非 68 结构的裸数据两段间隔小于窗口会被合并成一行 —— 需要逐帧精确切分时用「按帧尾分割」模式。回归：`test/test_serial_tool_widget.py` 第 [17] 段（含首片仅 68 的四块交付复现）。
     - **`_save_timer` 必须先于 `_build_ui()/_load_persisted()` 创建**：载入持久化参数会触发控件 `toggled` → `_schedule_save()`，若定时器还没建好，信号槽内会抛 `AttributeError` 被 Qt **静默吞掉**（表现为配置保存失效，极难排查）。回归：`test/test_serial_tool_widget.py` 第 [18] 段。
     - **线程归属（已知取舍）**：接收数据经 `raw_data_received` 信号投递到 **GUI 线程**后再做匹配与分帧（源工具是在接收线程里直接匹配）。与既有组帧页同一口径、只保留一套串口层；常规表计流量无影响；解析也走同一口径（`set_parse_provider` 注入的回调在 GUI 线程执行）。若将来遇到极高接收速率（数千帧/秒）导致界面滞后，再把匹配与解析一起下沉到 worker 线程。
+    - **批量替换通信地址（1.23.83，改这条前必读）**：命令表工具行「替换地址」= 对**作用范围内（勾选行；无勾选=全部）每条命令**按所选协议替换地址域并重算校验，**写回表内 `data_hex`**（与蓝牙页那套「发送时替换」不同，这里表里看到的就是要发的内容）。
+      - **只复用 `frame_addr_fix`**（地址定位/字节序/校验算法单一来源，禁止在串口页另写第二份），串口页只做编排：纯逻辑 `fix_frame_text` / `batch_fix_commands` / `addr_batch_summary`（**不修改入参**，写回与撤销归 GUI），GUI 侧 `_on_batch_addr_clicked` / `_apply_addr_batch` / `_undo_addr_batch`。
+      - **三态**：`ok`（已替换）/ `kept`（尝试失败：结构或原帧校验不符、地址写错、协议不支持 → **原样保留 + 可读原因**）/ `skipped`（发送数据本身不是有效 HEX）。**失败绝不洗白、绝不静默改半条**。
+      - **前导 FEH 只对协议 6/8 剥离并原样恢复**（`FE_WAKEUP_PROTOCOLS`，依据见陷阱 75）；其余协议带前导就该报错 —— 剥了等于「救活」错帧。
+      - **协议列写入与替换成败解耦**：勾选「写入协议列」时，作用范围内**每条**命令都写（「这批报文属于协议 X」是用户声明，且「加载报文文件」导入的报文 `protocol=None`，写入后接收侧才能按它断帧解析）；未替换的条目靠汇总三态计数 + 逐条原因区分。
+      - **预期响应只在发送数据替换成功时动，且只动纯 HEX 写法**（`HEX_MATCH_TYPES` = contains/equals/starts_with/ends_with；通配 / 正则 / 不匹配保持原样并说明）——「能自证才替换」由 `frame_addr_fix.apply` 第一步的结构+校验自证天然保证。
+      - **撤销**只保留最近一次（快照 3 键：`data_hex` / `protocol` / `match_hex`），汇总弹框里点；全失败时不给撤销按钮。发送中禁止替换（命令内容正在被使用）。
+      - 回归：`test/test_serial_addr_fix.py`（104 项，六协议真帧 oracle = 替换后该协议**校验器 0 fail**）+ `test_serial_tool_widget.py` 段 [35]（536 项）。**变异反证 5 条**（前导不恢复 4+1 红 / 前导门控失效 5 红 / 未成功也改预期响应 1 红 / 就地改入参 2 红 / 关闭协议列写入失效 1+1 红）。
 
 59. **串口工具「按命令协议断帧 + 解析」（1.23.47 起，任务 09-22-serial-proto-parse）**：
     - **协议来源 = 最近一次发送命令的协议**（串口问答式，RX 就是这条 TX 的响应）：`_on_sent` 里 `_last_tx_protocol = coerce_protocol(commands[msg_index]["protocol"])` 锁存；同批命令协议不同时以**最后发出的**为准。为 `None`（不解析）时接收行为与 1.23.46 完全一致。
@@ -1009,7 +1090,8 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
     - **`parse_max_lines` 默认 `0` = 不限制**（可选 0~2000，spin box 0 显示为「不限制」）：现场实测国网「查询从节点ID信息」**一条应答帧就有 113 行**解析（22 行帧级字段 + 1 行从节点总数量 + **15 个节点 × 6 行**），默认截断会让现场看不到完整结果。`format_parse_rows` 里 `max_lines <= 0` 即不截断。**注意「113 行」与报文里的「从节点总数量 = 113」纯属数字巧合** —— 解析器只输出「本次应答数量」个节点（实测 15 个），不是 113 个。
     - **改参数默认值必须配配置迁移**（1.23.49 踩坑，通用教训）：参数一旦被保存过就会把**当时的默认值**写进 `serial_tool_config.json`，而 `merge_params` 只在「键不存在」时才用新默认值 —— 于是「改了默认值」对老用户**完全不生效**（实测：1.23.48 已把 `parse_max_lines` 默认改为 0，用户日志里仍显示「已省略 83 行」，因为 1.23.47 那次运行把 30 存进了配置）。做法：升 `CONFIG_VERSION` + 在 `load_config` 里按 `version` 调 `migrate_params`（旧默认值 → 新默认值，用户特意设过的其他值保留；回写后版本升级，不会来回抖动）。**以后改任何参数默认值都要照此办理**。回归：`test/test_serial_proto_frame.py` 第 [9] 段。
     - **`export_commands` 统一补齐并归一化 `protocol` 键**（程序内直接构造的命令可能缺它）；旧配置/旧导出文件缺该键 → `coerce_protocol` 回落 `None`（不解析）。回归：`test/test_serial_proto_frame.py`（84 项）+ `test/test_serial_tool_widget.py` 第 [19]~[23] 段。
-
+    - **前导 FEH 已由分帧层跳过（1.23.78）**：68 家族（`ft12_68` / `dlt645` / `dlt698_45` 三种策略**与未指定协议的启发式**）先按 `_wakeup_base`（= `wakeup_prefix.wakeup_prefix_len`，**单一来源，不要在分帧层另写 FE 扫描**）跳过帧首连续 `0xFE`，并且**返回值含前导字节数**（调用方仍按 `buf[need-1] == 0x16` 自证，故三个调用点零改动）；`_frame_incomplete` 里「只有 FE、还没见到 `68`」也算**已开始未收全**。HDLC（`7EH` 定界）与 DLMS Wrapper（`00 01` 版本头）**不**加前导容忍。现场收益：`FE FE FE FE 68 21 00 … 38 16`（39B 698.45）按 14+25 两块交付只出 **1 行**（修前 2 行）。回归：`test_serial_proto_frame.py` [12] + `test_serial_tool_widget.py` [34]。
+    - **断帧可调（1.23.78）**：`rx_framing_mode`（`auto` = 有协议按结构特征 / 无协议按字节超时+68 自证；`timeout_only` = 忽略结构）+ 4 个超时 `rx_byte_idle_ms` / `rx_raw_max_hold_ms` / `rx_frame_idle_ms` / `rx_frame_hold_max_ms`（默认 = 原常量 `RAW_FLUSH_DELAY_MS` / `RAW_MAX_HOLD_MS` / `FRAME_IDLE_MS` / `FRAME_HOLD_MAX_MS`）。因为**默认值等于旧常量、只新增键**，`CONFIG_VERSION` **不动**（改既有默认值才需要迁移，见陷阱 49）；`FRAME_TIMEOUT_RANGES` 是 UI spin range 与 `merge_params` 夹紧的**唯一来源**。`timeout_only` 下 `_on_raw_data` / `_flush_raw_display` / `_flush_raw_display_now` 全部跳过结构路径。断帧依据说明行走 `_log_framing_summary()`，只在**设置变更 / 协议变化 / 每轮开始**时输出 —— **不要**逐帧打印（AGENTS 陷阱 58 的 burst 精神）。
 60. **串口工具「日志自动保存到文件」的六条契约**（1.23.54 起，改 `serial_tool_widget.py` 日志相关代码前必读）：
     - **写入点是 `_log()`，且只能是它**：`_log` 是日志窗口的**唯一出口**（`_flush_log_queues` 也走它），文件写在 `_log` 里调 `_save_log_line` ⇒ **面板显示什么、文件里就是什么**。不要另开「按 `[TX]`/`[RX]` 前缀抓行」之类的第二套过滤 —— 那正是「显示发送/显示接收」关掉后两边不一致的来源。回归：`test/test_serial_tool_widget.py` 第 [31] 段（「面板新增的每一行都在文件里」「显示发送关闭 → 文件同步不写」两条）。
     - **文件不截断、窗口截断**：日志窗口 `setMaximumBlockCount(10000)`，文件一直追加 —— 现场跑完还能回到最早的帧。不要顺手给文件也加上限。
@@ -1061,6 +1143,108 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
     - **连带修复**：LINK 预连接 `_parse_link_request` / `_parse_link_response`（标准表38/39）原把请求类型/结果/心跳周期/时间标签当**带 tag** 的 A-XDR 元素解 ⇒ 标准附录 H.1.1 示例直接解析失败。SEQUENCE 内定长字段**不带 tag、不带长度域**（同陷阱 61 的规则），已改为定长切分（1B PIID / 1B 请求类型·结果 / 2B 心跳周期(大端) / 10B date_time ×N / bit7 时钟可信标志）。
     - **回归**：`test/test_dl_t698_45_endian.py`。改这里时注意：**历史解析值全部作废**（从错误变正确），既有测试里按旧小端写死的期望值必须同步重写。
 
+65. **协议9 组帧页（1.23.64 起）三个已修真缺陷 + 一条可见性口径**（改 `csg_test_frame_gen_widget.py` / `csg_link_frame_gen.py` / `csg_new_gen_frame_gen.py` / `frame_gen_widget.py` 前必读）：
+    - **QSpinBox 的上限是 C++ int，不是 `0xFFFFFFFF`**：信标时间戳 / 信标周期是 32bit 字段（`LinkFieldSpec.maximum=0xFFFFFFFF`），`spin.setRange(0, 0xFFFFFFFF)` 抛 `OverflowError`。而 `_rebuild_fc_fields` 是**一次遍历把字段建完**，异常会打断整个 ① 区重建 —— 现象是「切到信标帧后 FC 区还是 SOF 的字段、输出也仍是上一帧类型的 MPDU」，极易误判成「下拉信号没接上」。**ED 时间戳同理且更隐蔽**：它是真实 Unix 秒量级（`0x68xxxxxx` > `0x7FFFFFFF`），此前上限被夹到 `0x7FFFFFFF` —— 既填不进真实时间戳，回填时 `setValue` 还会直接抛 `OverflowError`（1.23.65 修）。现在满 32bit 字段一律用宽整数文本框 `_WideIntEdit`（接受十进制 / `0x` 十六进制，信号是 `textChanged` 不是 `valueChanged`），且**所有回填赋值统一走 `_write_widget_value()`（先夹到控件范围再 setValue）**，不要在任何地方直接 `setValue(int(x))`。
+    - **载波映射表索引只允许一个解析入口**：`_ensure_cmt_index` 对信标帧有特例（按 **BPLC** 语义反查：136→4 / 520→8）——因为表18 该字段只有 **4bit**，而 ISAC 的 TMI 可达 27。`build_link_frame` 里**不得**再按 `cfg.std_version` 预反查一次：那会让 `cmt_index` 不再是 `None`，特例被跳过，信标帧直接抛「载波映射表索引 超出 4bit 范围：16」。
+    - **`FrameBuildResult.hex(layer)` 的层字典是「无条件求值」的**：`mac_frame` 曾写成 `self.mac_header + self.msdu`，而 SACK 两者皆 `None`、信标只有 `msdu` ⇒ `TypeError` ——**任何** `hex(层)` 调用（包括 `parse_rows` 内部的 `hex("app")`）都会崩，GUI 预览整块空掉。派生层必须 None 安全；确实没有该层时要抛可读的 `FrameBuildError` 而不是 `TypeError`。
+    - **预设命令页可见性按 `preset_mode` 判定，不能沿用 `frame_gen_mode`**：协议9 有组帧页但没有预设库，按 `frame_gen_mode` 判定会多出一个**空的**预设页，且组帧页「添加到预设」会经 `preset_buttons._get_path` 的兜底分支把协议9 的帧写进 **`GW_command.json`**。协议9 下该按钮必须隐藏（`_on_add_to_preset_clicked` 亦加了拦截）。
+    - 回归：`test/test_csg_frame_gen_gui.py`（71 项：SOF/信标/SACK 三型闭环、24 模式全量、输出层次四档、折叠状态收集/恢复、协议切换回退、按钮不裁字）。
+
+66. **批量解析工具栏合并成两行（1.23.66 起）后的三条硬约束**（改 `create_batch_parse_tab` 工具栏 / `FlowLayout` 前必读）：
+    - **「预处理 + 脚本」这一行必须把导出按钮排除在外**：4 个导出按钮（导出 Excel / JSON / 选中 + 时序图）合计 ~470px，留在合并行里单行需 ~1700px ⇒ 1366×768 下照样折成两行，等于白合并（**实测**：这正是第一版的失败原因）。现布局是 `row0 = 核心操作 + 导出 + 帧计数`、`row1 = 预处理 + 脚本`，两行都是 `FlowLayout`（够宽一行、窄窗自动折行、永不重叠）。**实测阈值**：窗口 ≥ **1264px** 两行各自一行（工具栏 52px，原三行 80px）；1230~1263px 只有 `row1` 折行（82px）；< 1230px 两行都折（1000px 默认窗口下 104px，比原三行高 ~24px）—— 这是「把导出留在工具栏右上角、不改变用户习惯」付出的代价，接受它就别再把控件塞进这两行。
+    - **可编辑 `QComboBox` 的 `sizeHint()` 把 `placeholderText` 算进宽度**：命令框那条 40 字符长示例实测 **481px**（比最长的一条命令还宽），换短示例后 371 → 250px。**改这句占位符文案就是改布局宽度** —— 回归 `test/test_batch_toolbar_layout.py` 用 `sizeHint() <= 320` 钉住。**不要**改用 `setMaximumWidth` 压制：那会让宽屏剩余宽度全浪费、下拉框再也不跟着变宽。
+    - **`FlowLayout` 的 stretch 是可选能力**：`FlowLayout(..., stretch=True)` + `addWidget(w, stretch)` / `addStretch()`（默认关闭 ⇒ 顶部协议组口径不变）。`_row_widths()` 把行内剩余宽度按权重分给指定子项与弹性空隙；**拉伸只改宽度，`_do_layout` 必须把同一行后续项的 x 一起右移**，否则变宽的下拉框会盖住后面的按钮。
+    - 顺带：解析进度条与「取消」已从工具栏移到**底部状态栏**（只在解析中出现），别再往 `row0` 加随解析显隐的控件 —— 那会让第一行在 1366 下溢出。回归：`test/test_batch_toolbar_layout.py`（**59 项**：1366 基准两行各一行、宽窗一行且下拉框吃余宽、徽章贴行右端、进度条/取消在状态栏、命令框 `sizeHint() ≤ 320`、2560→760 十三个宽度零重叠）。
+
+67. **协议9 信标管理信息条目 `0x10`（代理角色条目）的代理站点 TEI 是「连续 12 比特位流」，不能按每 2 字节一个切（1.23.67 起，改 `_parse_beacon_entry_detail` 前必读）**：
+    - **表72 原文（第4部分 · 代理角色条目）**：`代理角色条目头` 字节0 bits0-7 = 8 比特（0x10）；`代理角色条目长度` 字节1 bits0-7 + 字节2 bits0-7 = **16 比特**（可变总长度）；`代理节点1TEI` 字节3 bits0-7 = **12 比特**（跨到 字节4 bits0-3）；`代理节点2TEI` 字节4 bits4-7 = 12 比特（跨到 字节5 bits0-7）；…… `代理节点NTEI` 可变字节 bits0-7 = 12 比特；`保留` 末字节 bits4-7 = 4 比特（「若总的代理站点个数为偶数个，则无此保留位」）。
+    - **表72 的规则**：长度字段之后是 N 个**连续 12 比特**的代理节点 TEI（LSB 优先）—— 代理节点1TEI = 内容字节0 bits0-7 + 内容字节1 bits0-3；代理节点2TEI = 内容字节1 bits4-7 + 内容字节2 bits0-7 ……（**位域跨半字节，相邻两个 TEI 共享同一个字节**）。与表61 站点TEI、`0x0E` 精简条目同一约定（都走 `_extract_bits`）。
+    - **条目里没有独立的站点计数字段** ⇒ 只能由内容比特数反推：`N = 内容字节数 × 8 // 12`（表72：内容 = 12N 比特，N 为奇数时末尾补 4 比特保留位）。
+    - **旧实现（按每 2 字节一个 TEI + `内容字节数//2` 当站点数）漏解**：用户现场帧 `10 06 00 01 70 00`（长度字段 2 字节 = 表72 的 6 → 条目长度 6 → **内容 3 字节 = 2 个 12 比特 TEI：1 和 7**）被解成「代理站点数: 1 / 代理[0]TEI = 1」，第 2 个 TEI（内容字节1 高4位 `0x7` + 内容字节2 `0x00`）**整段丢掉** —— 即用户报的「代理角色 TEI 解析不对」。另一帧 `10 04 60 00` 只有按**1 字节长度字段**才自洽（按 2 字节读得 `0x6004`=24580 的荒谬长度，会把其后条目全吞成「代理角色条目 28字节 / 代理站点数 14」），实测 `test_std_beacon_proxy_role_entry_real` 走的正是容错回退分支、`条目长度` 行带「长度字段实发 1 字节」注——两个真实帧一个走表59 正途、一个走回退，两条路径都在用。
+    - **固定长与可变长混用**：`0x10` 的条目长度随代理站点数变化（内容 = `12N` 比特补至整字节）⇒ 同一字段的字节偏移不固定，**不要**按固定偏移读；`条目尾保留位` 行仅在内容比特数 % 12 == 4 时出现（表72「代理站点个数为偶数个时无保留位」）。
+    - **长度字段宽度按表59 保持 2 字节**（`BEACON_ENTRY_MAP[0x10] = 2`），仅当 2 字节声明值超出剩余字节时才退回 1 字节重读（既有实机容错，勿删）—— 上面两个真实帧正好一个 2 字节、一个实发 1 字节，两条路径都在用。
+    - 回归：`test/test_csg_new_gen.py::test_std_beacon_proxy_role_entry_12bit_real`（用户实帧 114 字节：6 条条目链 22/34/4/10/6/31 不变、TEI = 1/7、高亮 96-97 与 97-98、偶数站点无尾保留位行）与 `test_std_beacon_proxy_role_entry_real`（奇数站点帧补「条目尾保留位 = `4bit`」断言）。**变异反证**：把 `n_nodes = ln * 8 // 12` 改回 `ln // 2`，新用例实测变红（`代理站点数: 1`）。
+    - **协议11（HDC 1.0）的同名条目 `0xC1` 不适用本条**（不是同一份规范）：本仓库 `hdc10_parser._parse_beacon_entry_content` **没有** `0xC1` 分支，代理角色内容目前只显示条目名 + 原始内容（`0xC0/0xF0` 时隙分配已实现）。若要补实现，先查 HDC 第4-2部分表46 的字段定义，**不要照抄新一代的 12 比特位流规则**。
+68. **组帧页（`frame_gen_widget.FrameGenWidget`）的 Qt 子控件只能「惰性创建」，且新增 `def` 绝不能插在 `__init__`/`setup_ui` 中间（2026-10-10 实测）**：
+    - `test_modular_iface.py::test_frame_gen_gui` 在 offscreen 下 `FrameGenWidget()` → `deleteLater()`，**退出期偶发 0xC0000409（STATUS_STACK_BUFFER_OVERRUN）**：它是 Qt 析构期的时序脆弱点，**新增整页 Qt 子控件会抬高触发率**（实测 HEAD 无 9/13/14 组帧页时 0/12；带 9/13 页时约 3/12）。
+      新增协议组帧页时：**子控件在 `_ensure_xxx_gen()` 里惰性 import+构造**（首次切到该协议才建），`left_stack` 里先放一个**空 `QScrollArea` 占位页**即可 —— 这样冒烟测试根本不构造新控件，不改变析构顺序。
+    - **另一个坑（真会造成 100% 崩溃且难查）**：把新 `def`（如 `_ensure_xxx_gen`）**插进 `__init__`/`setup_ui` 的语句流中间**，会让后续所有 UI 构建代码变成「上一个方法内的死代码」—— 表现为 `result_hex`/`preview_table` 等属性不存在、退出期崩、且 `ast` 能看到 `__init__` 只有 20 多行。**新增方法一律追加在类内其它方法之间（`def` 行不紧接语句块）**，改完用 `python -m py_compile` + 最小复现脚本（`QApplication` → `FrameGenWidget()` → `deleteLater()`，跑 6 次看退出码）自检。
+    - **信号→信号连接是红鲱鱼**：`table.itemChanged.connect(self.changed)`（无参自定义 Signal）在 PySide6 下并不会崩；排查时不要被它带偏，真正的差异在 Qt 对象数量/析构顺序。
+69. **蓝牙工具（`bluetooth_core.py` / `frame_addr_fix.py` / `bluetooth_worker.py` / `bluetooth_tool_widget.py`）的契约**（1.23.71 起，改蓝牙相关代码前必读）：
+    - **三层拆分，`main_gui.py` 只接线**：`bluetooth_core`（纯逻辑，**禁止** import Qt/bleak，故可脱 GUI 与硬件单测；含 `merge_settings` 宽容合并 + 夹紧、`save_settings` 原子写、`chunk_size_for_mtu`、`split_chunks`、`BleReassembler`）、`bluetooth_worker`（`QObject` + **私有 asyncio 事件循环线程** `"bluetooth-loop"`，`MONITOR_TICK=0.05` 轮询超时切帧）、`bluetooth_tool_widget`（UI + 三个对话框）。**BLE 线程由页面自持**（`_ensure_worker()` 惰性创建）：蓝牙设备不存在「COM 口全局独占」约束，故**不像串口那样由主窗口托管单例**；仍保留 `set_bluetooth_worker()` 注入入口供测试/主窗口托管。
+    - **串口侧必须复用主窗口共享的 `SerialWorker`**（`_ensure_bluetooth_tool_tab` 里 `tab.set_serial_worker(self.serial_worker)`）：本页**不做端口/波特率控件**，只订阅 `connection_changed` / `raw_data_received`；`cleanup()` **不得关闭串口**（端口生命周期归顶部「串口配置」与主窗口收尾）。各页各持 `SerialWorker` 会互抢同一个 COM 口（同陷阱 58）。
+    - **解析/协议/单帧三件事全部走注入**（widget **不得** import `main_gui`）：`set_parse_provider(self._serial_parse_provider)`（与串口工具页共用同一套 `_get_current_parser` + `build_gui_parser` 分派，保证逐字段一致）、`set_protocol_provider(self._bluetooth_protocol_provider)`（协议下拉跟随主窗口当前协议）、`set_send_to_single_handler(self._send_frame_to_single_parse)`。**主窗口收尾必须调 `bluetooth_tool_tab.cleanup()`**（`_shutdown_threads` 第 6c 步）—— 它 `shutdown()` BLE 线程并收尾日志文件；漏掉会让 asyncio 线程随进程一起被硬杀、日志尾（统计行/停止时间）丢失。
+    - **HEX 写错绝不静默降级为文本发送**（本工具相对原工具的关键安全改进）：`parse_plain_text(text, mode)` 的 `auto` 模式用 `looks_like_hex` 判「HEX 意图」（判据：按分隔符切分后**存在长度 ≥2 且全为 hex 字符的片段**），命中即按 HEX 解析，**失败就报错拒发**。原工具的「HEX 失败回落文本」会把 `68 12 0G` 这 8 个**字符的 UTF-8 字节**写到设备上 —— 静默发错比报错危险得多。`hex` 模式强制 HEX、`ascii` 模式强制 UTF-8 文本。
+    - **位数不成对（`68 12 0`）也必须拒发**：`serial_tool_widget.hex_str_to_bytes` 对奇数长度 HEX 是**静默补/丢**的（`68 12 0` → `68 12 00`），少打或多打一个字符就变成另一串字节。`hex_odd_nibble_error()` 专门拦这一条，**放在 `looks_like_hex` 之后调用**（先判是不是 HEX 意图，再判写没写对）。
+    - **未知 RSSI 必须按未知处理**：bleak 对未知信号强度报 `0`，而 `0` 比任何负阈值都「大」—— `rssi_level()` 里 `value >= 0` 一律返回 0 档（否则未知信号会显示成满格，与 `rssi_text(0) == "--"` 自相矛盾）。
+    - **分包按协商 MTU 算，不写死**：`chunk_size_for_mtu()` 用 `mtu_size - 3` 与特征码 `max_write_without_response_size` 取小并夹到 `[MIN_CHUNK, DEFAULT_MAX_CHUNK]`（原工具硬编码 200 字节）；写入先试 `response=False`，失败回落 `response=True`。**重组只有「静默超时切帧」一种语义**（不同特征码独立成帧），断开/掉线前 `flush()` 交出未成帧残包，不丢尾包。
+    - **MTU / 写上限必须「连接后轮询 + 每次发送前重读」，禁止把连接瞬间的快照用到底（1.23.80）**：ATT_MTU 由**操作系统异步协商**（Windows 上应用层只能读、不能请求，MS 文档 `GattSession.MaxPduSizeChanged`），连接那一刻读到的常常还是 ATT 默认值 **23（负载 20）** ⇒ 现场表现是「同一台设备有时 20 字节、有时 512 字节」。三条不可拆的约定：
+      ① **判据单一来源** `bluetooth_core.mtu_is_unnegotiated()`（`≤ MTU_DEFAULT=23`，含 0/`None`/非法值）；轮询参数 `MTU_POLL_INTERVAL=0.25` / `MTU_POLL_TIMEOUT=3.0` 与 `MIN_CHUNK` 同处。**「对端确实只支持 23」与「结果还没回报」在读数上不可区分**，故超时**只打一行提示、不得报错**；
+      ② `_connect_coro` 的 `await self._poll_mtu_if_needed(client)` 必须在 `connected` 与订阅**之后**（否则界面/订阅被白等 3 秒）；断开/换 client/`_closing` 立即静默返回；
+      ③ `_write_coro` 在 `_chunk_plan()` **之前**调 `_refresh_live_limits()` —— 分包按**发送那一刻**的真实值（否则重连前读到的 20 会让每次发送都白拆包）。刷新读的是 `_char_objects`（`_collect_characteristics` 顺手存的**活特征码对象**，断开时 clear），**不进**投给界面的 dict；**有变化才**更新 + 发 `mtu_updated` + 记日志，无变化完全静默（不得每包刷日志）。
+    - **`mtu_updated`（`Signal(int, list)`）与 `characteristics_updated` 不可互相替代**：后者语义是「特征码枚举完成」，界面收到会走「沿用/优选 → `_apply_characteristics` → `worker.set_characteristics`（**重新订阅**）」，拿它刷上限会产生多余重订阅、改写用户已选通道、并多打日志。界面 `_on_limits_updated` 只允许更新 `_chars` 缓存 + MTU/特征码标签 + 刷新**打开中**的特征码对话框（`refresh_chars`，保勾选与当前行），**禁止**调 `_apply_characteristics`；`test_bluetooth_widget.py` 用 `worker.char_sets` 计数钉住这一点。MTU 文案抽在 `_mtu_text()`（连接时与实时更新共用），默认值时要写出「ATT 默认值，协商结果未回」。
+    - **自定义按钮「协议 + 地址」= 发送时替换地址并重算校验（1.23.81）**：新模块 `frame_addr_fix.py`（纯逻辑、无 Qt），按钮字典新增可选键 `protocol`(int) 与 `addr`(dict[str,str])（`core.normalize_button` 宽容保留；旧按钮无这两个键 ⇒ 行为与改动前逐字节一致）。四条不可拆的约定：
+      ① **地址定位与校验算法一律复用既有实现**（不得另写偏移/算法表）：645 → `DLT645FrameGenerator.build_frame(..., scramble=False)`；698.45 → `DLT69845FrameGenerator._assemble_frame`（HCS/FCS 自动）；依瓦 → `yw645_wire.encode_frame`；南网上行 → `csg_uplink_wire.encode_frame`（保留 `resolve_layout` 的原长度域形态）；南网/国网 → 字节拼接 + `Frame.calculate_checksum` / `GDWFrame.calculate_checksum`。**南网 `68 L L C …` 没有第二个 68H**，地址域仅当控制域 **D5=0x20**；**国网**信息域 byte0 **bit2=通信模块标识**、地址域长度 = `12 + 6×高 4 位中继级别`，福建增补（AFN 0x50~0x56）明确不支持；
+      ② **先自证再改**：结构（`68…16`、长度域自洽）+ **原帧校验**都必须通过，否则拒绝（避免把别的协议的帧洗成看似合法的帧）；地址**在线长度必须与帧内一致**（改长度会连带改 L/HCS/FCS，v1 不做）；无地址域（南网 D5=0 / 国网 bit2=0）报「该帧不含地址域」；
+      ③ **地址写法双认**：含分隔符/`0x` → 按**在线顺序**原样写入；纯书写序（12 位表号 / 依瓦十进制 / 南网上行终端地址十进制）→ 按协议既有编码函数处理。界面提示行必须回显「将写入 N 字节：…」，内容框可解析时给出替换后预览（含校验旧→新）；
+      ④ **只在发送时替换**（`_on_custom_clicked` → `_apply_button_address`）：失败**弹框 + 日志且一个字节都不发**；成功日志给 notes；`edit_send` 仍显示**原始模板**（用户口径）。
+      `frame_addr_fix` 里协议模块**必须按需导入**（`dl_t698_45_frame_gen` 依赖可选 `crcmod`，模块级导入会让没装 crcmod 的机器连蓝牙页都打不开）；回归：`test/test_bluetooth_addr_fix.py`（96 项，六协议真帧 oracle = 替换后**该协议校验器 0 fail**）+ widget [13]。
+    - **自定义报文区的空间治理：按钮随空间自动 + 工具栏常驻 + 可折叠 + 竖向分栏（1.23.82）**：按钮多时**不得**让自定义区按内容一路长高（改前 64 个按钮 ≈ 22 行 ≈ 700px 直接把日志压没），也**不得按固定行数硬封顶**（用户复核：把日志上拖腾出空间后 10 个按钮仍只显示 3 行 + 白滚动条）。四条约定：
+      ① **高度 = 内容驱动 + 分栏约束**：`_custom_scroll_limits()` 返回 `(下限, 上限)` —— 下限 = 1 行按钮高（`core.CUSTOM_MIN_ROWS`），上限 = **按钮全部显示所需高度**（按「行数 × 行高 + 间距」算，**不要读 `custom_host.sizeHint()`**：重建后它是旧值/0，会把上限算成一行）；`_apply_custom_scroll_limits()` 在「按钮重建后」与 `restyle_for_theme()` 各调一次。于是**空间够就不滚动、不够才滚动**；
+      ② **滚动容器必须是本页的 `ButtonScrollArea`**（`minimumSizeHint()` 由本页显式给定）：直接用 `QScrollArea` 时它的 `minimumSizeHint()` 跟着内层网格走，按钮一多就把「最小高度」透传给分栏器（实测 64 个按钮 → 下半区最小 559px、日志只剩 177px）。并且**下半区不要加尾部 `addStretch()`**，否则腾出的空间被弹性空隙吃掉、按钮区永远长不大；
+      ③ **编辑工具栏在折叠区外**：5 个按钮 + 提示由 `_build_custom_group()` 返回的容器持有（折叠只收起按钮网格）；收起时把本区尺寸策略锁 `Maximum`（否则标题与工具栏之间留大片空白），展开恢复 `Preferred`；
+      ④ **配置宽容**：`custom_collapsed` / `right_split` 都走 `bluetooth_core.merge_settings` / `normalize_right_split`（坏类型/长度不对/越界逐项夹紧或回落默认，**不抛**）；`right_split` **只在两侧都有真实高度时才采集**（未 show 时 `sizes()` 可能是 `[0,0]`）。
+      另注：`custom_group` 就是那个 `CollapsibleSection`（既有断言 `tab.custom_group.title()` 继续可用）。回归：`test_bluetooth_widget.py` [14]（**几何断言前先 `settle()` 多泵几次事件** —— 重建大量控件后一次 `processEvents` 读到的滚动条范围还是 0；**并且要分别量「默认分栏」与「拖大分栏」两档**，只在默认档量会漏掉「腾出空间后仍滚动」这个缺陷）、`test_bluetooth_core.py` [13]。
+    - **弹框必须同时留日志**：内容无效 / 未连接 / 回调缺失等路径原先只弹 `QMessageBox`，用户一点确定就没了，现场排查只能靠日志 —— 一律**先 `_log()` 再弹框**。日志的**唯一写窗口点**是 `_append_log`、**唯一写文件点**是 `_save_log_line`（写失败必须告知用户并关掉自动保存，不许静默丢日志，同陷阱 60 的口径）。
+    - **落盘走 `app_paths.data_path` 属性访问**：配置存 `app_paths.data_path("bluetooth_tool_config.json")`（`_config_sandbox` 靠 patch `app_paths.data_path` 重定向，**不能** `from app_paths import data_path`）；日志目录默认 `<数据目录>/Output`（复用 `serial_tool_widget.default_log_dir()`，已 gitignore）。**`_save_timer` 必须先于 `_build_ui()` / `_load_persisted()` 创建** —— 载入配置会触发控件 `toggled` → `_schedule_save()`，那时若还没有 `_save_timer`，Qt 会吞掉 `AttributeError`，配置保存随之静默失效。
+    - **特征码自动优选只有一个实现（1.23.79）**：`bluetooth_core.rank_characteristics` / `pick_auto`（打分表 `CHAR_SCORE_*` 与族谱 `PASSTHROUGH_UUIDS` 也在这里，调参只改这一处）。**界面禁止再写「取第一个可用」** —— 历史实现正是那样，实测常选到 `2A00` 设备名 / `2A19` 电量 / DFU 特征码。接线顺序也要守：`_on_characteristics_updated` 是「① 按设备地址沿用 → ② 打分优选 → ③ 提示」，且**换到没记过的设备要先清掉上一台的选择**（否则上一台的通道会压住优选）。
+    - **一键探测必须等 `subscribe_finished` 才能写**：订阅是异步的，写完才等回包会丢掉首个响应。流程状态在纯逻辑 `core.ProbeSession`（`select → write → wait`，事件 `on_subscribed / on_written / on_frame / on_timeout`）；界面只做「按意图调 worker + QTimer + 喂事件」，并且**仅当该事件真的让阶段前进时才推进**（用 `session.step` 前后对比，防同一意图被重复下发）。**不许 sleep 阻塞 GUI**；候选无接收通道时 worker 也要发一次完成信号（否则探测挂着）。
+    - **探测结果与手工选择都按设备地址记忆**（`char_map`：`remember_choice / recall_choice / forget_choice`；上限 `CHAR_MAP_MAX = 20` 按 `ts` 淘汰；坏条目逐条丢弃不影响其它条目）。**全败时必须恢复探测前的选择**（否则界面停在「最后一个试过的候选」，用户以为选对了）；旧的全校 `recv_uuids/send_uuids` 仍写（兼容旧配置），但**命中地址优先**。
+    - **探测载荷优先发送框内容**：`core.resolve_probe_payload(..., parse)` 的 `parse` 由界面注入 `parse_plain_text` —— 纯逻辑层不 import Qt 侧实现，也**不写第二份「什么算合法 HEX」**。HEX 写错 → 拒绝且**一个字节都不写**；发送框为空 → 用 `probe_frame`（默认 `41 54`）；配置值是坏 HEX → 用内置默认并**明确告知**（不静默）。
+    - **对话框结论必须是文字**：不可用方向除置灰外还要标「（不可写）/（不可通知）」（QSS 主题下置灰看不见，见陷阱 71）；列表按打分**置顶并预选**优选结果，顶部给出推荐依据。
+    - **批量替换地址（按协议类别，1.23.84）**：底部工具栏「批量地址…」→ `BatchAddressDialog`（对话框**只给补丁、不直接改按钮列表**，写回统一走 `_set_buttons`）。五条约定：① **默认作用域** = 「已绑定所选协议」的按钮（清除模式 = 已绑定任意协议者），另有 全选/全不选/只选本协议；② **逐按钮用「自己的报文」预检**（`_precheck` → `frame_addr_fix.check_values` + `apply`），**只对勾选行**算错误（未勾选的行不许出现 ⚠ 噪声：给南网按钮换地址时 645 的按钮不该被标成「不是南网帧」）；③ 预检失败行标原因且**默认不勾**；强行勾上 → `QMessageBox.question` 二次确认「将跳过这 N 个」后照改其余，拒绝则**一个按钮都不改**，跳过项经 `result_skipped()` 逐条写 warn 日志；④ 全部失败时不 accept 且 `result_patches()` 为空（状态自洽，防止调用方误读补丁）；⑤ 清除模式（下拉第 0 项）返回 `{"protocol": None, "addr": {}}`，调用方**删两个键**。地址字段/长度/校验算法一律走 `frame_addr_fix`，**禁止第二份**。
+    - **地址判据的单一来源**：`frame_addr_fix.addr_lengths_for_frame(frame)`（由帧定 698.45 SA 长度）与 `check_values(protocol, values, frame) -> (回显项, [(标签, 原因)])` 是**唯一实现**，单按钮编辑对话框与批量对话框共用；界面只把回显项原样显示、把错误项拼成 `⚠ 标签：原因`（不要在纯逻辑里拼 UI 文案）。
+    - **工具栏宽度**：本区工具栏现有 6 个按钮（新增…/批量新增…/批量地址…/导出…/导入…/全部清除）+ 尾部 stretch，**没有行内提示标签**（「右键可编辑/删除/移位」已在每个按钮 tooltip 末行）。实测 10/14/16/24 号字下 `width ≥ sizeHint` 全不裁字；**不要**给带文字按钮写 `setFixedWidth`（陷阱 63）。
+    - **回归**：`test/test_bluetooth_core.py`（**161 项**，纯逻辑，含 `mtu_is_unnegotiated` 边界、按钮 `protocol`/`addr` 规范化、空间治理两个配置键）、`test/test_bluetooth_addr_fix.py`（**111 项**，六协议真帧 oracle + 错误矩阵 + 反例自检 + 共享校验入口 `addr_lengths_for_frame`/`check_values`）、`test/test_bluetooth_worker.py`（**106 项**，`sys.modules["bleak"]` 注入假 bleak，**不碰硬件**；含 MTU 轮询段：迟到协商 / 只支持默认值 / 发送前重读 / 断开打断）、`test/test_bluetooth_widget.py`（**270 项**，offscreen + 假 worker/假串口；含空间治理：内容驱动高度/滚动/不压扁/工具栏常驻/折叠/分栏记忆 + [16] 批量替换地址：默认作用域/逐行预检/二次确认跳过/清除/端到端/工具栏不裁字）、`test/test_bluetooth_tab_wiring.py`（36 项，构造真实 `MainWindow` 验证接线 —— **改本页接线只跑 widget 那份是假绿**）。五份都在 `release_check.py:CORE_TESTS`。**测试里不要把 `⚠`/`✓` 等字符直接塞进断言 detail**（Windows 控制台 GBK 会 `UnicodeEncodeError` 把测试进程带崩，widget/wiring 两份的 `check()` 已用 `_console_safe()` 兜底）；**断言与 detail 也不要假设 `attempts` 非空**（状态机被改坏时索引会先抛异常，把「变红」变成「崩溃」）。测 MTU 轮询时**先改特征码上限、再改 MTU**（轮询只看「MTU 变了」就结束该轮，反序会出现「MTU 已更新、上限还没读到」的中间态 ⇒ 断言随机）。测发送路径要**先 `worker.become_connected()`**（未连接时页面只提示、不落到 worker，会让「没发送」的断言假绿）。**测几何（滚动条范围/高度）要先 `settle()` 多泵几次事件**，且**封顶的效果要在「分栏给足空间」那一档量**（默认分栏下封顶与不封顶都被压成 3 行，量不出差别 ⇒ 判据假绿）。
+
+70. **主题 QSS 的「表格 / 字段树」组必须同时覆盖 `QListWidget`，新增视图类控件前必须先验「交替行」（1.23.72 起）**：
+    - **症状**：列表**隔行看不清**（非交替行正常）。**根因**：各主题的表格组（基类 + `::item:!alternate` / `::item:alternate` / `::item:selected` 四条）原先只写 `QTableWidget, QTreeWidget`，**`QListWidget` 一个都没覆盖**。QSS 是本项目**唯一**的色彩来源（`ThemeManager.apply` 只做 `app.setStyle()` + `setStyleSheet()`，**从不设 `QPalette`**），因此未被 QSS 覆盖的部件（这里是列表的 `alternate-background-color`）会退回**系统调色板** —— 主题与系统调色板不一致时就崩：深色系统（报障机实测 `AlternateBase = #001a68`，`AppsUseLightTheme=0`）+ 浅色主题（`* { color: #000000 }` 黑字）→ 实测对比度 **1.35**（同环境 glass 1.06 / mica 1.12）；反向的浅色系统 + 暗色主题（`color: #e0e0e0`）→ **1.23**。
+    - **修法**：补 `QListWidget` 进 5 套带 QSS 主题（default / dark / glass / mica / windowsvista）的**四条选择器组**，配色一律沿用该主题既有表格值（`build_glass_qss` / `build_mica_qss` 的参数化生成自动继承）。**不要在页面里写 light/dark 硬编码样式**（页面只提供 `restyle_for_theme(dark)` 钩子，件 69 之外的同一口径）。
+    - **新增任何视图类控件（`QListView` / `QTreeView` / `QTableView` / `QListWidget`…）前先问**：它的交替行 / 选中行 / 禁用态底色从哪来？只要没有 QSS 覆盖，就一定会被系统调色板接管。凡主题给 `QTableWidget` 的规则，`QListWidget` 必须同款——`test/test_theme_settings.py` 1c 节已把这条 + 「深/浅两种注入调色板下交替行与普通行文字对比度 ≥ 4.5」固化成断言，改主题后跑它，别只靠眼看。
+    - **量文字可读性别眼估**：`grab()` 取像后按「**只取文字区**（跳过勾选框 —— 勾选框图元的高对比像素会掩盖文字问题）+ 底色取众数 + 文字色取偏离底色最大者」算 WCAG 对比度。**注意 offscreen 合成的调色板是浅色的**：要复现系统深色模式必须 `app.setPalette()` 显式注入（测试就是这么做的），或干脆用真实平台跑一遍（不设 `QT_QPA_PLATFORM` + `Qt.WidgetAttribute.WA_DontShowOnScreen`，可避免弹窗又走真实调色板）。
+71. **`~ItemIsEnabled`（置灰条目）在 QSS 主题下**不会**变灰（2026-10-12 实测，尚未修）**：只要主题给该部件写过 `color`（或命中全局 `* { color }`），Qt 就把前景色塞进**所有**调色板组，`QStyleSheetStyle` 下 `QPalette::Disabled` 的置灰被一起覆盖 —— 于是 `bluetooth_tool_widget.CharacteristicSelectDialog` 里「置灰的条目表示该特征码不支持这一方向」的提示与实际渲染**不符**（5 套 QSS 主题下置灰条目与可用条目文字**同色**，实测均为 `#000000` / `#e0e0e0`；原生主题 `fusion` / `windows` 走 Qt 自己的 `Disabled` 组，置灰是正常的，但浅色系统下 `#bebebe` 压白底只有 1.86）。要真灰起来只能在主题里加 `QListWidget::item:disabled { color: … }`（Qt 确实认这个伪状态，实测生效），并注意 WCAG 对**非活动控件**不作对比度要求、别把置灰改得比现在还难读。
+
+72. **协议规定的校验位在现场可能「留空待硬件填充」——不得把「校验不过」当成「不是这种帧」，也不得据此改走另一条帧结构路径（1.23.73 起）**：
+    - **场景**（协议11 报障）：台体/模拟器把报文内容组好后落日志，**FCCS / PBCS / ICV 由硬件发射机在发射时填充**，日志里留空为全 0（报障帧 152 字节，前 45 字节有值、其余 0 填充）。这类帧**同样要能解析**，不能弹「解析不出内容」。
+    - **曾经的后果**：`hdc10_parser._detect_fc` 把 FCCS 当**唯一判据** → 判「无 FC」；而「判无 FC」分支里 **DT=0（信标）有启发式兜底、DT=1（SOF）没有** → 整帧按「裸 MAC 帧」解，吐一屏错位臆造（版本=1 单跳帧协议、MSDU长度=0、ICV 取到 `00 F0 FF FE` 校验失败、144 字节「多余数据」）。
+    - **判据口径（三条，缺一不可）**：① FCCS 通过 → 是完整 MPDU；② **FCCS 有值但校验不过 → 不是**（保持严格，防误判）；③ **FCCS 全 0 → 看帧体结构**（`_looks_like_fc_payload`）。结构判据 = 帧长 ≥ 26 + **只对 SOF 帧（`DT==1`）生效** + 偏移16 是合法 PBH 且置着帧起始位 + `_probe_pb_form(data[17:])` 打分 ≥ `_FC_BLANK_FCCS_MIN_SCORE`(=4)。阈值标定：真实单 PB 现场帧 44 条被误当 FC 解时打分分布 **{0: 28, 1: 16}（最高 1）**，报障帧 **6 分**。
+    - **`_looks_like_fc_payload` 绝不做 DT 泛化**：开头为 PBH 的物理块帧（`0x40/0xC0`）其 byte0 低 3 位同样是 0，按 DT=0 统一放开会把 PB 级输入误判成信标帧。
+    - **显式级别即契约，但必须有规范硬条件防劫持**：用户选 `fc_pb`/`fc_mac` 时用 `forced_fc` 尊重声明（不再因 FCCS 不过就偷偷改走 MAC 路径），条件 = `flen>=26` + `DT==1` + 标准版本号 0 + **偏移16 是置了帧起始位的首块 PBH**（表37：首块不带帧起始标志即自相矛盾）。**最后一条不能省**：60 条真实夹具里唯一低 3 位为 1 的 `0xC1` 开头 PB 帧，其 `frame_bytes[16]=0x06` 无帧起始位——省掉即被劫持（8 行 → 18 行错位臆造）。
+    - **`fc_mac` 同坑（连带）**：`_parse_pb_and_mac_header` 对**首块也跑**「是否省略 PBH」的探测，帧尾 0 填充让 `_probe_pb_form` 的「ICV 全 0」强证据**误命中** → 合法 PBH `0xC0` 被当 MAC 头（PB头=无、MSDU类型=0）。**SOF 首块置了帧起始位时直接采信 PBH**，与 `_parse_pb_block` 的 SOF 分支同条件（防两处漂移）。
+    - **「填充CRC-24」必须按协议门控**：`main_gui._fill_crc24` 的 eFC（字节29-31）与逐物理块 PBCS 是**协议9 专属布局**；协议11 的 FC 之后直接是物理块，按协议9 偏移回填会把 CRC 写进 MAC 帧头（实测「组网序列号」由 `0x01` 变 `0xE1`，静默改坏）。现在 `if self.current_protocol != 9` 直接跳过并提示「协议N … 无此布局」；**FCCS（字节13-15）保持对所有协议生效**。
+    - **文案口径**：留空一律给「未填充」而不是「校验失败」——FCCS 行 `⚠ 未填充(全 0)：…此处计算值应为 0x…`；PB 尾 3 字节全 0 给 `⚠ PBCS未填充`（与 `⚠ 无PBCS`＝截断区分），**都不判为错误**；FCCS 未通过仍按 FC 解析时追加 `⚠ FCCS 未通过` 行写明依据。
+    - 回归：`test/test_hdc10_blank_checksum.py`（**55 项**，`CORE_TESTS`）+ `test/test_hdc10_blank_checksum_gui.py`（**20 项**，`GUI_TESTS`）；**四处修复逐条变异反证全部变红**。
+73. **测试文件用 `os._exit()` 退出前必须 `sys.stdout.flush()`（2026-10-12 实测）**：`os._exit` **不冲刷 stdio 缓冲**，而 `release_check.run_test_script` 是**管道**读 stdout（非 tty → 全缓冲），于是「打印完就 `os._exit(1)`」的测试**只留下退出码、失败明细全丢**（实测 `test_hdc10_blank_checksum_gui.py` 初次只剩 `exit=1`、零输出；`test_csg_pbcs_fill_gui.py` / `test_hdc10_mme_full.py` 同样如此）。Qt offscreen 退出期析构可能原生崩溃、必须用 `os._exit` 避开的场合，**改成 `sys.stdout.flush(); os._exit(code)`**（或 `python -u`）；排查时也可先用 `PYTHONUNBUFFERED=1` 跑一遍看真实输出。
+74. **协议11（HDC 1.0）跨字节位域**只有一个**打包方向**：字节号小的段是**低位段**（1.23.75 修正；1.23.74 曾写成「`报文头长度` 是唯一例外、字节号小的存高位」，**该结论已被推翻，勿按它改回去**）：
+    - **`报文头长度`（6bit，值 = 报文头的「字节数」，不是 4 字节字）**：`(b1 & 0x0F) << 2 | (b0 >> 6)`——**字节0 的 bit7-6 是低 2 位、字节1 的 bit3-0 是高 4 位**。同字节邻居：字节0 bit0-5 = 协议版本号、字节1 bit4-7 = 该报文自有语义（测试模式/配置操作、未应答重传位 …）。
+    - **12bit「转发数据长度 / 模式持续时间 / 配置值」**：`((b2>>4)&0x0F) | (b3<<4)`，也是「字节号小的段为低位」；MAC 头 MSDU 长度、事件 0x008 功能码同理。口径统一 = `_bits_lsb`。
+    - **⚠ 为什么 1.23.74 那次「实测钉死」是错的（务必理解，否则会再错一次）**：旧口径 `(b0>>6)<<4 | (b1&0x0F)` 与正确值**只在字节0 的 bit7-6 == 0 时**给出相同的「总字节数」——此时 `4 × lowNibble == lowNibble << 2`。而当时用的三个校准帧（`01 53`→12B、`01 61`→4B、`01 02`→8B）**字节0 恰好都是 `0x01`**，因此完全无法判别方向；`01 53` 的「12 字节头」既等于 `3×4` 也等于「值 12 = 12 字节」，属**两个解释撞在同一条证据上**。用户 2026-10-12 的报障帧字节0 = `0x81`（bit7-6 = 0b10）才暴露：旧口径给 33（132B），正确值 6。
+    - **四条互证（改这一族字段前先核这四条）**：① 协议10 同字段同口径（`gw_new_gen_cmd_payloads._parse_comm_test`），真实帧 `81 61 20 00 00 00` 的 `报文头长度` = **6**，且该载荷**恰好 6 字节** = 整根报文头（`test/test_gw_ext_cmd.py` T13）；② 本协议 0x0A1 真实帧 `01 53` → 12 字节头，与实测 DATA 自字节 12 起自洽；③ 表2 扩展命令的报文头就是字节0~5 = 6 字节（用户报障帧 `81 C1` → 6）；④ 各报文自家的说明文字（抄表「固定为8」、通用「报文头 4 字节」、注册「下行=20, 上行=36」）与**新值逐一对上**（旧值 2/1/5/9 全对不上）。
+    - **协议10 的 `gw_new_gen_cmd_payloads` 已同步收口**（14 处 `hdr_len_high/low` 写法全改成同一公式；均为**显示用**，不影响切片）。**以后新增报文头解析一律写 `((b1 & 0x0F) << 2) | ((b0 >> 6) & 0x03)`，绝不要再写 `(((b0 >> 6) & 0x03) << 4) | (b1 & 0x0F)`（「字节0 存高位」）**。另注：协议10 的帧类型判定（`gw_new_gen_parser` 的 `hdr_len_high | (hdr_len_low << 2)` + 4~64 合理性区间）**一直是正确口径**——可作为第 ⑤ 条互证。
+    - **渲染口径**：`_hdr_len_cells` → 原始值给**按值序**的位段拼装式 `0b0001+0b10`（`+` = 按位拼接，直接可读为数值）、说明给字节/比特归属 + 移位拼装式 `0b10 | 0b0001<<2 = 6`（`_bit_span_note`，协议内只有一种方向，故**不再有 `lsb_first` 参数**）+ 「单位 字节」；解析值列 = `N字节`（不再是 `N×4B=MB`）。**别把 `_bit_span_note` 的 `lsb_first`/「高位段在前」分支加回来**——那是 1.23.74 的误判产物。
+    - **动说明列可能连带改摘要**：`batch_core.extract_test_mode_content` 按「(解析值, 说明, 原始值) 里第一个非数值者即模式名」探测 → **测试模式行的原始值必须保持十进制 `6`/`12`、解析值必须保持模式名**；`转发数据规约类型` 的说明被 `test_hdc10_comm_test_ext.py` 逐字断言 `== "DL/T698.45"`，不得追加尾注。
+    - **真实夹具要按 `pb_only` 级别跑**：`test/hdc10_real_frames.pkl` 的 60 条是 **PB 级**输入，`auto`/`fc_pb`/`fc_mac` 都到不了应用层（只有 `pb_only` 能解出 `报文头长度`）；60 条里只有 1 条带该行（帧 #25，`01 61` → 4）。
+    - 回归：`test/test_hdc10_bitfield_display.py`（**47 项**，`CORE_TESTS`），含用户报障帧（`81 C1` → 6 字节，反证旧口径 33）、**与协议10 同字节同值对拍**、「值 = 字节数」的偏移锚定（确认帧 span / 抄表 DATA 自字节 8 起）、10 组取值三处反解恒等、60 条夹具逐条反解。改这一族字段后**必须跑变异反证**（方向改回旧口径 → 应变红 16 项；位域渲染段序/单位改回旧样 → 应变红 17 项）。
+75. **68 家族前导 FEH 唤醒字节：按规范剥离，且剥离后「表格偏移必须整体位移」（1.23.76 起，改协议8/协议6 解析或校验前必读）**：
+    - **判据来自规范，不是「容错放宽」**：DL/T 698.45-2017 §6.3.1 字节规则 b)「在有效数据帧前加 4 个 FEH 作为前导码」（`协议文档/8.698.45协议/面向对象的用电信息数据交换协议(20210910).md:509`）；DL/T 645-2007 §5.3.1「在主站发送帧信息之前，建议先发送 4 个字节 FEH，以唤醒接收方。」（`DLT645-2007.md:486`）。**只有协议8/协议6 有这条依据** ⇒ 只在这两个协议启用；协议 0/7/9/10/11/12/13 行为一律不变（`test_wakeup_fe_prefix.py` 有逐协议护栏 + 「白名单之外无 `wakeup_prefix` 引用」源码守卫）。此前把首字节当起始符判据 ⇒ 带 FE 的**合法**帧一律报 `起始字符错误: 0xFE`（用户报障：39 字节全可见却一字段解不出）。
+    - **单一来源 = `wakeup_prefix.py`**（`wakeup_prefix_len` / `strip_wakeup_prefix` / `wakeup_display` / `make_wakeup_row` / `shift_row_offsets`，行名常量 `WAKEUP_FIELD_NAME`）。**禁止在调用方或 Web 侧另写一份扫描**（同一教训见陷阱 31/55/61）。
+    - **口径**：只跳过帧首**连续** `0xFE`（0~N 个，**不假定恰好 4 个**）；**帧中间的 FE 绝不跳**（那是普通数据）；68 家族首字节恒 `68` ⇒ `0xFE` 不可能是合法首字节，剥离零误伤。`strip_wakeup_prefix` 无前导时是**恒等操作** —— 这是「无 FE 帧逐行不变」硬约束依赖的基石。
+    - **三层必须同时改，缺一层就出错**：① **解析**（`DLT69845Parser.parse` / `DLT645Parser.parse` 先剥离再解析，`原始数据` / `raw_hex` 仍保留**用户原始输入**含 FE）；② **表格偏移**（`parse_to_table` 首行插「唤醒前导字节」行 + 所有帧内行偏移整体 `+skip`）——**漏掉这步比解析失败更隐蔽**：高亮会落在错误字节（点「起始字符」高亮到第 0 字节）；③ **校验器**（先剥离再走全部检查，`skip > 0` 时追加 PASS 说明项，否则出现「解析成功但校验报起始符错误」）。
+    - **协议6 的两处细节**：`check_structure` / `check_frame` / `calc_checksum` **都要**按剥离后的帧判定（否则 CS 把前导算进和里、`valid` 恒 False），且对已剥离输入幂等；`DLT645GuiParser.parse_to_table` 的 `frame_len` 必须用**剥离后**长度（否则「校验和 / 帧结束符」偏移越界）。协议6 的 `fields` 列表**不加**前导行（前导只在表格层）—— `test_dlt645_tolerant_parse.py` 的形状守卫依赖这一点。
+    - **不要动的地方**：批量/Web 帧提取（`main_gui._extract_69845_frames` / `batch_core._extract_69845_frames` / `web_utils.extract_69845_frames`）本就从 `68H` 起同步扫描、天然跳过前导 —— **不要**给它们加前导处理。**串口工具的分帧层在 1.23.78 起改为认前导**（见陷阱 59 末条：68 家族先按 `wakeup_prefix` 跳过帧首连续 FE、返回值含前导），蓝牙工具仍按静默超时切帧（`BleReassembler`，未改）；**串口工具的「批量替换通信地址」层（1.23.83）同样剥/恢复前导**，且门控为 `FE_WAKEUP_PROTOCOLS = (6, 8)` —— 其余协议带前导必须报错（见陷阱 58 末条）。
+    - **BLE 分包不可消除（顺带说明）**：ATT 层单包上限 = `MTU − 3`（协商 MTU=23 ⇒ 20 字节），**应用层无法一次写出 25 字节**；`bluetooth_worker._chunk_plan` 是尺寸与来源的唯一实现，分包时打一条含「单包上限 / 包数 / MTU 来源」的日志。**不要**为此改「包间延迟」默认值（改默认值需配置迁移，见陷阱 59）。
+    - 回归：`test/test_wakeup_fe_prefix.py`（**73 项**，`CORE_TESTS`：报障帧 golden / 局部前缀 / 全 FE 与「FE 后非 68」降级 / 无 FE 零回归锚点（协议6 冻结 13 行基线）/ 协议6 解析 + 表格偏移 + 虚拟表从站 / 两校验器 / 逐协议护栏 / 批量与 Web 提取 / offscreen GUI（单帧页 + 串口·蓝牙共用回调）/ 反例自检 + 单一来源守卫）+ `test_bluetooth_worker.py`（分包日志断言）。
+
 ## 9. 开发原则
 
 1. **协议定义优先**：遇到不确定的协议字段、字节序、校验范围，**先查 §5 对应文档**，不要凭记忆或猜测。
@@ -1085,6 +1269,119 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 ## 10. 变更日志
 
 > 详细版本变更记录请查看 `main_gui.py:CHANGELOG`（按版本倒序），或运行 `git log --oneline` 查看提交历史。本文档保留近期版本的摘要。
+
+### 1.23.79 — 2026-10-13
+
+- **蓝牙工具：特征码自动优选 + 一键探测 + 按设备记忆**（用户：本软件主要按 HEX 收发报文，给一堆特征码让用户挑体验很差，要能更快收发）。旧逻辑取设备枚举顺序里**第一个**可用写/通知码 —— 实测常落到 `2A00` 设备名 / `2A19` 电量 / DFU 特征码上；现按「同码可写可通知（透传回环）> 厂商透传族谱（Nordic UART `6E400002/3`、`FFE1`、`FFE5/FFE9`、`FFF0~FFF2`…）> 名称/描述含 `tx/rx/uart/串口`」打分排序，并**降权**标准 GATT 与 OTA/DFU。打分表与族谱**只在 `bluetooth_core` 一处**
+- **一键「自动探测」**（新增按钮）：按打分顺序逐个「订阅 → 写探测帧 → 等回包」，命中即锁定并报告「收到 N 字节回包」；失败逐条给出可读原因（订阅失败 / 写入失败 / 写入成功但无回包）；**全败恢复探测前的选择**并提示手工选。探测帧优先用发送框内容（HEX 写错直接拒绝），为空时用 `probe_frame`（默认 `41 54` = AT）
+- **协议时序**：新增 `bluetooth_worker.subscribe_finished` —— 订阅是异步的，写完才等回包会丢首个响应，探测必须先等到它；状态机 `core.ProbeSession` 纯逻辑 + 界面 QTimer 分步驱动，**不阻塞 GUI**，可中途停止
+- **按设备地址记忆**（`char_map`，`CHAR_MAP_MAX=20` 按 `ts` 淘汰）：同设备重连直接沿用；换到**没记过**的设备会清掉上一台的选择再重新优选。界面状态行显示「发送 → `0xFFE1` ｜ 接收 → `0xFFE1`」；「特征码…」对话框按打分**置顶并预选**、不可用方向**文字标注**（置灰在 QSS 下看不见，见陷阱 71）
+- 测试：`test_bluetooth_core.py`（**116 项**）/ `test_bluetooth_worker.py`（**81 项**，含订阅完成信号两条路径）/ `test_bluetooth_widget.py`（**169 项**，含反例自检「旧逻辑会选 `2A19`」）；**变异反证 3 条**（打分排序失效 → 12 项红；订阅失败也照写 → 3 项红；记忆写同一全局键 → 3 项红）逐条实测变红后逐字节还原
+- 配套：`APP_VERSION` `1.23.78 → 1.23.79`、README 徽章/功能表/更新记录、两个 `.iss` 同步；AGENTS §3 与 §8 陷阱 69 已更新；spec 新增「蓝牙特征码优选与探测」契约段落
+
+### 1.23.78 — 2026-10-13
+
+- **串口工具：协议特征断帧认前导 FEH**（现场报障：协议 8 下 `FE FE FE FE 68 21 00 … 38 16`（39 字节）被切成两条 `[RX]`）。根因是分帧函数一律要求首字节 `0x68`，前导 FE 使其判不出长度 → `_frame_incomplete` 也判 False → 退回 10ms 静默窗口。现 68 家族（`ft12_68` / `dlt645` / `dlt698_45` 与未指定协议的启发式）先按 `wakeup_prefix` 跳过帧首连续 FE 再算长度，**返回值含前导字节数**（调用方仍按 `buf[need-1] == 0x16` 自证 ⇒ 三处调用点零改动）；HDLC / DLMS Wrapper 不加前导容忍
+- **新增「断帧设置」**（接收模式下方）：断帧方式 `auto`（有协议→按协议特征断帧拼帧，无协议→按字节超时 + 68 结构自证）/ `timeout_only`（忽略协议结构）；4 个可调超时 `rx_byte_idle_ms` / `rx_raw_max_hold_ms` / `rx_frame_idle_ms` / `rx_frame_hold_max_ms`（默认 = 原模块常量 ⇒ 只新增键、`CONFIG_VERSION` 不动）；`FRAME_TIMEOUT_RANGES` 是 UI spin range 与 `merge_params` 夹紧的唯一来源
+- 断帧依据可自查：日志在**设置变更 / 协议变化 / 每轮开始**时输出一行 `[断帧] 方式=…；依据=…；超时 …`（不逐帧打印）
+- 测试：`test/test_serial_proto_frame.py`（**147 项**）+ `test/test_serial_tool_widget.py`（**501 项**，含现场帧 14+25 两块交付只出 1 行）；**变异反证 3 条**（不跳前导 FE / 长度不含前导 / 断帧方式失效）逐条实测变红后逐字节还原
+- 配套：`APP_VERSION` `1.23.77 → 1.23.78`、README 徽章与更新记录、两个 `.iss` 同步；AGENTS §8 陷阱 59 与 75 已更新
+
+### 1.23.77 — 2026-10-13
+
+- **协议9 新增 2.0 测试扩展 `0x0009`「报文聚合传输测试模式」**（依据《宽带双模通信模块（通感一体物联版）相关测试命令定义_260922》1.4.9：`报文聚合数目 | 字节3 | 位0-7 | 8bit`）。此前 `0x0001~0x0008` 已支持、`0x0009` 三处表全部缺失（解析映射表 / 解析分派表 / 组帧 `_EXT_BUILDERS`）；本次补齐，并保证**解析 · 组帧 · 仿照报文回填 · 批量摘要**四处同构
+- 字节口径沿用既有扩展约定 `ext_data[x] = 文档字节 x+3`（`_parse_test_ext_0005` docstring 已固化）⇒ `报文聚合数目` = 扩展数据第 0 字节（整字节，无位域）；解析/组帧/反解三处同名同值（`报文聚合数目` / 模式 key `ext_agg` / 参数 `agg_count`，组帧默认 1）
+- 顺带修正 `csg_test_frame_gen_widget.py` 三处**互不一致且都已过期**的模式数量文案（26 / 24 / 26）→ 模块级 `_MODE_COUNT = len(fg.test_modes())` 单一来源（现 25）
+- 测试：新增 `test/test_csg_test_ext_0009.py`（**76 项**，入 `CORE_TESTS`）；**变异反证 3 条**（解析位宽 / 组帧字节数 / 反解分支）逐条实测变红后逐字节还原
+- 配套：`APP_VERSION` `1.23.76 → 1.23.77`、README 版本徽章、两个 `.iss` 同步；AGENTS §5.7 模式数与回归清单已更新
+
+### 1.23.76 — 2026-10-13
+
+- **修复协议8/协议6「带 FEH 前导码的合法帧解析失败」**（用户报障：蓝牙工具收到 `FE FE FE FE 68 21 00 C3 …` 的 39 字节回包，报「❌ 解析失败  起始字符错误: 0xFE, 期望 0x68」，字节全可见却一字段都解不出）。根因是**规范符合性缺口**（不是容错不足）：DL/T 698.45-2017 §6.3.1 b) 规定「在有效数据帧前加 4 个 FEH 作为前导码」，DL/T 645-2007 §5.3.1「建议先发送 4 个字节 FEH 以唤醒接收方」，而旧实现把首字节当起始符判据
+- 新增 `wakeup_prefix.py` 作为**全仓唯一**前导判定实现（`wakeup_prefix_len` / `strip_wakeup_prefix` / `wakeup_display` / `make_wakeup_row` / `shift_row_offsets`，零依赖无 Qt）：只跳过帧首**连续** `0xFE`（0~N 个，不假定恰好 4 个、不动帧中 FE），无前导时恒等
+- 协议8：`parse` 剥离并记录 `唤醒前导`、`原始数据` 保留原始输入（含 FE）；`parse_to_table` 首行插「唤醒前导字节」+ 所有帧内行偏移整体 `+skip`（报障帧实测起始字符 4~4、HCS 16~17、FCS 36~37、结束符 38~38）
+- 协议6：`check_structure` / `check_frame` / `calc_checksum` / `parse` 统一按剥离后帧判定（幂等），新增 `wakeup_len`、`raw_hex` 保留原始输入；`DLT645GuiParser` 同款插行 + 偏移位移（帧起始符 1 = 4~4，校验和/帧结束符 = 末两字节），`fields` 形状不变
+- 两个校验器先剥离再走全部检查，`skip > 0` 时追加「前导唤醒字节」PASS 说明项，消除「解析成功但校验报起始符错误」；坏 CS 帧仍 FAIL
+- 蓝牙工具分包日志：`_chunk_plan` 为尺寸与来源的唯一实现，分包时输出「单包上限 / 包数 / 协商 MTU 与来源」说明（分包不可消除 —— ATT 层 `MTU−3`）
+- 范围**严格限定**协议8/协议6（逐协议护栏 + 白名单源码守卫）；批量/Web 帧提取不变（本就从 `68H` 起同步）
+- 测试：新增 `test/test_wakeup_fe_prefix.py`（**73 项**，入 `CORE_TESTS`）；`test_bluetooth_worker.py` 补分包日志断言、`test_dlt645_table_offsets.py` 适配前导行
+- 配套：`APP_VERSION` `1.23.75 → 1.23.76`、README 版本徽章、两个 `.iss` 同步；AGENTS §5.4/§5.6 各加前导约定、§8 新增陷阱 75
+
+### 1.23.75 — 2026-10-12
+
+- **修复协议11（HDC 1.0）`报文头长度` 解析错误**（用户报障：报文头 `81 C1 …` 被解成 33、表格显示 `33×4B=132B`，正确应为 **6**）。根因是该 6bit 跨字节位域的**拼装方向取反**——全协议唯一一处「字节号小的段存高位」；口径统一为 `((b1 & 0x0F) << 2) | ((b0 >> 6) & 0x03)`，且**值 = 报文头的字节数**（不再是 4 字节字）
+- 收口范围：协议11 全部 8 处 + 协议10 `gw_new_gen_cmd_payloads` 全部 14 处（后者的抄表/通用/注册等旧值同样与自家说明「固定为8」自相矛盾）
+- **四处互证**：① 协议10 真实帧 `81 61 20 00 00 00` → 6，且该载荷恰好 6 字节即整根报文头（`test_gw_ext_cmd.py` T13）；② 0x0A1 真实帧 `01 53` → 12 与 DATA 自字节 12 自洽；③ 表2 扩展命令报文头 = 字节0~5 = 6；④ 各报文自家说明（固定为8 / 通用 4 字节 / 下行20·上行36）与新值逐一对上。**旧口径只在字节0 bit7-6 == 0 时与「值=字节数」数值相同**（此时 `4×lowNibble == lowNibble<<2`），故 1.23.74 用 `01 53`/`01 61`/`01 02` 校准无法判别方向
+- 表格呈现同步：原始值 `0b0001+0b10`（按值序，可直接读为数值）、说明给归属 + 移位拼装式 + 「单位 字节」、解析值 `N字节`；`_bit_span_note` 去掉已无调用方的 `lsb_first` 参数与「高位段在前」分支
+- 测试：`test/test_hdc10_bitfield_display.py` 重写扩到 **47 项**（用户报障帧 / 与协议10 对拍 / 「值=字节数」偏移锚定 / 10 组取值自洽 / 旧口径 33 反证），4 个测试文件期望同步；**变异反证**：方向改回 → 16 项红、渲染段序改回 → 17 项红（还原后逐字节一致且全绿）
+- 顺带删掉 `main_gui.py:_extract_test_mode_content` 里一行**不可达的** `return frame_summary.extract_test_mode_content(...)`（1.23.42 收口时的遗留，是全仓唯一 F821）
+- 配套：`APP_VERSION` `1.23.74 → 1.23.75`、README 版本徽章、两个 `.iss` 同步；AGENTS §8 陷阱 74 **重写**（原文「两类位域方向相反、别互相纠正」已被本次证据推翻）
+
+### 1.23.74 — 2026-10-12
+
+> ⚠ **本条的口径结论已于 1.23.75 被推翻**（`报文头长度` 并非「字节号小的存高位」、单位也不是 4 字节字；该次「实测钉死」的两例无法判别方向）。位域在表格里的**呈现形式**仍沿用，**方向与单位以 1.23.75 及 §8 陷阱 74 为准**。
+
+- **协议11（HDC 1.0）跨字节位域在表格里「看得见」了**（用户追问：`报文头长度` 的 4B 是怎么拼出来的、如何体现 bit 组合关系）。原先只给 `1×4B=4B`，看不出 1 来自哪两个字节的哪几位
+- 新增纯函数 `_bit_slice` / `_bit_span_note` / `_hdr_len_cells`：**原始值列**给位段拼装式 `0b00+0b0001`（`+` = 按位拼接），**说明列**给 `0b00_0001 = 1`（`_` 标字节边界）+ 单位口径（4 字节字，类 IPv4 IHL）；相邻位域字段说明列追加「位域归属」（`报文头字节1[bit7-4]=4bit=0b0110`）。**偏移列本就高亮跨字节区间**（报障帧 = 字节 37-38），两侧合看即可核对 bit 占用
+- 覆盖 `报文头长度` 三处产出点（抄表 0x001~0x003 / 通信测试 0x006 / 升级状态 0x034），并把 0x034 的解析值由裸数字补成 `N×4B=MB`；0x006 检测扩展命令的 测试模式 / 12bit 配置值 / 安全测试模式 / PHR_MCS / PSDU_MCS / PbSIZE 均补归属
+- **关键发现（沉淀为 §8 陷阱 74）**：同一应用报文头里两类跨字节位域拼装方向**相反** —— `报文头长度` 是「字节号小的存高位」，12bit「转发数据长度/配置值」是「字节号小的存低位」（口径同 `_bits_lsb`）；两者都不得按另一种口径「顺手纠正」
+- 不动被判定的槽位：测试模式行原始值保持十进制 `6`、解析值保持模式名（`extract_test_mode_content` 靠「非数值者即名称」探测）；`转发数据规约类型` 说明被逐字断言，不加尾注
+- 新增 `test/test_hdc10_bitfield_display.py`（**38 项**，`CORE_TESTS`）：位序反证（`0x81/0x63` 正解 35 ≠ 反解的 50）、三处反解恒等（8 组取值 + 边界 0）、三类报文口径一致、60 条真实夹具逐条自洽（**夹具须用 `pb_only` 级别**）、0-5 字节 × 7 级别不抛异常
+
+### 1.23.73 — 2026-10-12
+
+- **修复协议11（HDC 1.0）台体日志帧「解析不出内容」**（用户现场报障：协议 [11] + 级别「FC+PB解析(完整MPDU)」）。台体把报文内容组好后落日志，**FCCS / PBCS / ICV 由硬件发射机在发射时填充**，日志里留空为全 0；这类留空帧必须能解析
+- 三条根因：① `_detect_fc` 拿 FCCS 当唯一判据 → 判「无 FC」，而 DT=0 有信标兜底、**DT=1（SOF）没有** → 整帧按裸 MAC 帧解，吐错位臆造；② `fc_mac` 的 `_parse_pb_and_mac_header` 对首块也跑「省略 PBH」探测，帧尾 0 填充让「ICV 全 0」证据误命中 → 合法 PBH 被当 MAC 头；③ `_fill_crc24` 的 **eFC 分支无协议门控** → 把 CRC-24 写进协议11 的 MAC 帧头（「组网序列号」`0x01` → `0xE1`）
+- 修法：新增 `_looks_like_fc_payload`（FCCS 全 0 时改判帧体结构，**只对 SOF 生效**、复用 `_probe_pb_form` 打分 ≥ 4）；`forced_fc` 尊重显式级别但加规范硬条件（偏移16 必是置帧起始位的首块 PBH，防劫持 PB 级输入）；SOF 首块直接采信 PBH；`_fill_crc24` 的 eFC/PBCS 门控到协议9（FCCS 仍对所有协议生效）；留空一律给「⚠ 未填充」而非「校验失败」
+- 端到端（用户原帧，auto 与 fc_pb 逐字符一致，54 行）：DT=1 SOF、PBH `0xC0`、MSDU类型 `0x30`、MSDU长度 8、端口 `0x11`、报文ID `0x0006`、ICV `C5 0F 88 0D` 校验正确 ✓、⚠ PBCS未填充
+- 新增 `test/test_hdc10_blank_checksum.py`（55 项，`CORE_TESTS`）与 `test/test_hdc10_blank_checksum_gui.py`（20 项，`GUI_TESTS`），四处修复**逐条变异反证全部变红**；约定沉淀为 §8 陷阱 72（另见陷阱 73：`os._exit` 前必须 flush）
+
+### 1.23.72 — 2026-10-12
+
+- **修复「特征码」选择对话框列表文字看不清**（用户现场报障：浅色主题下隔行看不清）。根因在**主题层**：各主题的「表格 / 字段树」选择器组（基类 + `::item:!alternate` / `::item:alternate` / `::item:selected`）只写 `QTableWidget, QTreeWidget`，**从未覆盖 `QListWidget`**；报障机是 Windows 深色模式（`AlternateBase = #001a68`），而 `LIGHT_QSS` 用 `* { color: #000000 }` 强制黑字 → 列表**交替行**变成「深色系统底 + 黑色主题字」，实测对比度 **1.35**（glass 1.06 / mica 1.12）；反向的「浅色系统 + 暗色主题」同样 **1.23**
+- 修法：`QListWidget` 补进 5 套带 QSS 主题的四条选择器组，配色沿用各主题既有表格值（`build_glass_qss` / `build_mica_qss` 自动继承）；`bluetooth_tool_widget` 一行样式未改（页面不写硬编码配色）。**同一根因还影响 `feedback_dialog` 的截图列表与 `main_gui` 的列表**，一并修好
+- `test/test_theme_settings.py` 新增 1c 节「列表主题覆盖」（48 → **73 项**）：静态「凡 `QTableWidget` 规则必须含 `QListWidget`」+ 注入深/浅两种系统调色板的真实渲染对比度（只取文字区、跳过勾选框）；**变异反证**：还原修复前写法 → 变红 9 项，还原后 73/73 全绿。约定沉淀为 §8 陷阱 70（另见陷阱 71：`~ItemIsEnabled` 置灰在 QSS 主题下不生效，已知未修）
+- 配套：`APP_VERSION` `1.23.71 → 1.23.72`、README 版本徽章、两个 `.iss` 同步；全量 `release_check.py` → PASS=117 / FAIL=0 / WARN=0
+
+### 1.23.71 — 2026-10-12
+
+- **新增「蓝牙工具」标签页：本项目首次具备 BLE 蓝牙通信能力**（集成自子工程 `蓝牙转串口工具02` 的 PySide6 版与 PyTauri 版传输核心）。始终可见、懒加载，与协议无关：扫描 BLE 设备 → 连接 → 选特征码 → 收发 → 解析 → 虚拟串口透传
+- 三个新独立模块：`bluetooth_core.py`（纯逻辑，无 Qt/bleak）、`bluetooth_worker.py`（`QObject` + 私有 asyncio 事件循环线程）、`bluetooth_tool_widget.py`（UI + 特征码选择/按钮编辑/批量导入三个对话框）；`main_gui.py` 只做懒加载接线（`_ensure_bluetooth_tool_tab`）、主题钩子与收尾（`_shutdown_threads` 第 6c 步）
+- 接线复用既有约定：串口侧复用主窗口**共享** `SerialWorker`（虚拟模式透传，端口/波特率只在顶部「串口配置」设置）；解析/协议/单帧三项能力全部注入，widget **不 import `main_gui`**
+- **相对原工具的实测改进**：按协商 MTU 与特征码 `max_write_without_response_size` 分包（原硬编码 200 字节）；重组只保留「静默超时切帧」单一语义且断开/掉线前交出残包；发送格式三态且 **HEX 写错绝不静默按文本发**、位数不成对也拒发；未选特征码时自动取首个可用通道并记日志；未知 RSSI（bleak 报 0）不再误显示满格
+- **弹框必留日志**：内容无效 / 未连接 / 回调缺失等原先只弹模态框的路径，现在同时写日志（弹框一点就没了，现场排查只能靠日志）
+- 新增 4 份测试并登记 `release_check.py:CORE_TESTS`：`test_bluetooth_core.py`（68 项）、`test_bluetooth_worker.py`（74 项，注入假 bleak）、`test_bluetooth_widget.py`（146 项，offscreen + 假 worker/假串口）、`test_bluetooth_tab_wiring.py`（36 项，真实 `MainWindow` 验证懒加载/注入/主题/收尾接线）；约定沉淀为 §8 陷阱 69
+- 配套：`main_gui.py` 的 `CHANGELOG` / `APP_VERSION`（`1.23.70 → 1.23.71`）、打包 spec（`collect_submodules('bleak')` + `collect_submodules('winrt')` 与三个新模块的 `hiddenimports`）、`.gitignore`（`bluetooth_tool_config.json`）、README（依赖 / 功能 / 模块 / 测试四处）
+
+### 1.23.67 — 2026-10-08
+
+- **修复协议9（南网新一代载波）信标帧 `0x10` 代理角色条目的代理站点 TEI 解析错误**（用户现场报障：「解析代理角色TEI的时候解析的不对，协议是12个bit位组合成一个TEI的」）：表72 规定长度字段之后是**连续 12 比特**的 TEI 位流（节点1TEI = 内容字节0 bits0-7 + 字节1 bits0-3，节点2TEI = 字节1 bits4-7 + 字节2 bits0-7），且**条目里没有独立计数字段**（只能由内容比特数反推 N = `字节数×8//12`）。旧实现按「每 2 字节一个 TEI」切、把 `内容字节数//2` 当站点数 ⇒ 用户帧 `10 06 00 01 70 00`（条目长度 6 → 内容 3 字节 = **2 个** 12 比特 TEI）只输出「代理站点数: 1 / 代理[0]TEI = 1」，第 2 个 TEI（=7）被整段丢掉。现场帧修复后：代理站点数 2 / 代理[0]TEI = 1 / 代理[1]TEI = 7
+- 修复：`csg_new_gen_parser._parse_beacon_entry_detail` 的 `0x10` 分支改为按 12 比特连续位流解包（复用 `_extract_bits`，LSB 优先，与表61 站点TEI 同一约定），每个 TEI 单独一行并给出**跨半字节**的字节范围（TEI2 落在内容字节 1~2）；末尾不足 12 比特时新增「条目尾保留位」行（表72 对奇数个代理站点的 4 比特保留位）。长度字段宽度不受影响（仍按表59 = 2 字节，声明值超限才退回 1 字节）
+- 回归：`test/test_csg_new_gen.py` 新增用户实帧用例（114 字节；逐条目长度 22/34/4/10/6/31、6 条条目链不变、TEI = 1/7、字节高亮 96-97 与 97-98、偶数站点时无尾保留位行），既有 1 个代理站点帧（`10 04 60 00` ⇒ TEI=96）断言保留并补「条目尾保留位 = 4bit」；**变异反证**：站点数改回 `ln // 2` 实测新用例变红。约定沉淀为 §8 陷阱 67
+
+### 1.23.66 — 2026-09-30
+
+- **批量解析工具栏合并成两行**：「CLI 预处理」与「Python 脚本」原是上下两行 → 合并进**同一个 `FlowLayout`**（组间竖线分隔），1366×768 与 1920 下都排成一行（工具栏区段 104px → 52px，省下一行）。合并的**关键前提是把 4 个导出按钮挪出这一行**（移到核心操作行右端，仍在工具栏右上角）：第一版把导出留在合并行，单行需 ~1700px，1366 下照样折成两行 = 白合并；解析进度条与「取消」同时移到状态栏（只在解析中出现）
+- **`FlowLayout` 新增可选 stretch 权重**（`FlowLayout(..., stretch=True)` + `addWidget(w, stretch)` / `addStretch()`，默认关闭 ⇒ 顶部协议组口径不变）：宽屏把行内剩余宽度分给两个下拉框（命令框 2 : 脚本框 1）与行右端的帧计数徽章；**拉伸后必须把同行后续项的 x 一起右移**，否则变宽的下拉框会盖住后面的按钮
+- **命令框占位符必须短**：可编辑 `QComboBox` 的 `sizeHint()` 会把 `placeholderText` 算进宽度（长示例 481px → 短示例 250px），长文案足以把合并行顶到折行；改用权重分配后不再需要给下拉框设 `maximumWidth`（那会浪费宽屏剩余宽度）
+- `test/test_batch_toolbar_layout.py`（**59 项**，offscreen）：工具栏只剩两行、**1366 基准宽度下两行各自一行**、宽窗一行且下拉框吃满余宽、帧计数徽章贴行右端、进度条/取消在状态栏、**2560→760 共 13 个宽度零重叠**、命令框 `sizeHint` 不得失控。**测试踩坑**：跨 `QTabWidget` 页面不能用 `mapTo(win)` 判行（offscreen 下给出 x=2563 的离谱坐标），要用 `layout.itemAt(i).geometry()` 并**容差聚类**判行（同行各项 `top()` 会差几像素）；另外 `QLabel` 是 `QFrame` 子类，数分割线必须用精确类型
+- `release_check.py --with-gui` → **PASS=118 FAIL=0 WARN=0**
+
+### 1.23.65 — 2026-09-30
+
+- **协议9 组帧页新增「⓪ 仿照报文 / 模板」**：粘贴一帧官方报文 → 自动反解回填各层参数（ED..EE 封装 / 整帧 MPDU / 应用层帧都能识别；24 个测试模式全部可反解，表61 模式号取高 4 位、2.0 扩展按扩展 ID 分派）→ 只改要变的字段再生成；参数集 + 原始参考报文可存成本地模板（`csg_frame_templates.json`，原子写 + 坏文件宽容），下次「加载模板 → 改关键字段 → 出新帧」
+- **回填即逐字节反证**：用真实组帧路径重建一次与原帧对比，一致才提示可放心微调；表单表达不了的字段（报文标识符非 `0x0101` / 业务标识非 `0xF0` / 保留位非 0）按「手工 HEX 保真」兜底并明确告知后续改动的影响范围；另有「对比当前输出」按钮报告首个不一致字节
+- **修复：32bit 字段装不进 QSpinBox** —— ED 时间戳是真实 Unix 秒量级（`0x68xxxxxx`），此前上限被夹到 `0x7FFFFFFF`，既填不进真实时间戳、回填 `setValue` 还直接抛 `OverflowError`；信标时间戳/周期同理。新增宽整数文本框 `_WideIntEdit`，并把所有回填赋值收敛到 `_write_widget_value()`（先夹范围再 setValue）
+- **右栏「显示响应解析」开关**：协议9 纯组帧场景默认收起、把高度让给实时解析预览，其它协议保持默认显示；开关状态记住用户偏好（协议9 只强制收起，随时可勾回）
+- 新增 `test/test_csg_frame_reverse.py`（**96 项**，纯逻辑：层次识别 / 24 模式全量反解 / 三型定界符 / 两种 ED 公共头 / 32bit 字段 / 错误路径 / 变异反证）与 `test/test_csg_frame_templates.py`（**92 项**：存档往返 / 同名覆盖 / 名称校验 / 坏文件宽容 / 原子写 / 上限），均入 `CORE_TESTS`；`test/test_csg_frame_gen_gui.py` 扩到 **139 项**。`release_check.py --with-gui` → **PASS=117 FAIL=0 WARN=0**
+
+### 1.23.64 — 2026-09-30
+
+- **协议9（南网新一代载波）接入「协议组帧」页**：注册表 `frame_gen_mode="csg"`（`preset_mode` 保持 `None`）。组帧页左栏改为 `QStackedWidget`（0=常规动态表单 / 1=协议9 链路层组帧）；五层折叠表单 ①FC 帧控制 ②物理块 PBH+PBCS ③MAC 帧头 ④MSDU ⑤ED 封装，进页面默认勾选「组装链路层」、默认帧类型 **SOF 帧**
+- **优先覆盖 SOF 帧 + 各类测试模式帧**：定界符三型 SOF（BPLC / ISAC-PLC、长/短 MAC 头、多物理块）/ 信标帧 / SACK；**24 个测试模式全部**能组出带链路层、且 FCCS / PBCS / CRC-32 三处「校验通过」的 MPDU（用 `CSGNewGenParser` 的 `parse_level="auto"` 回读反证，含接入指示=1 与 MAC 头原始 TEI = FC 源/目的 TEI 的语义不变量）
+- **修 3 个真缺陷**：①信标帧 32bit 字段 `QSpinBox.setRange` 溢出（`OverflowError`）打断 ① 区重建 —— 切信标帧即崩且输出仍是上一帧类型；②`build_link_frame` 预反查 `cmt_index` 使 `_ensure_cmt_index` 的信标 BPLC 特例失效（`载波映射表索引 超出 4bit 范围：16`）；③`FrameBuildResult.hex()` 的 `mac_frame` 对 `None` 不安全 ⇒ SACK / 信标预览整块空掉
+- **预设命令页可见性改按 `preset_mode`**（原 `frame_gen_mode`）：协议9 无预设库，原判据会露出空预设页、且「添加到预设」会经 `preset_buttons._get_path` 兜底分支误写 `GW_command.json`；协议9 下该按钮隐藏并带提示。0/6/7/8/12 有预设库的协议行为不变
+- 新增 `test/test_csg_frame_gen_gui.py`（**71 项** offscreen GUI 端到端）；`test/test_csg_link_frame_gen.py`（176）/ `test/test_collapsible_section.py`（51）登记进 `release_check.py`；`test/test_protocol_registry.py` 的组帧协议集合更新为 `{0,6,7,8,9,12}`。`release_check.py --with-gui` → **PASS=114 FAIL=0**
 
 ### 1.23.62 — 2026-09-29
 
@@ -1479,3 +1776,107 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 - [ ] 根据**要修改的协议**，按 §5 找到对应 parser 和参考文档
 - [ ] 修改前查 §8 陷阱，修改后按 §9 原则自检
 - [ ] 完成后同步更新 `main_gui.py:CHANGELOG` 与 `README.md`
+
+<!-- aoci:begin -->
+## AOCI 仓库认知
+
+AOCI 为本仓库维护一个稳定、可版本化、可增量更新的仓库级认知层，供模型跨任务复用对系统的理解。
+
+`aoci.txt` 是面向模型的结构化认知索引。它以每个受管理文件、数据库表或其他受管理对象一条独立 Entry 的方式，用符号标签与 F/R/A/S 语义表达对象的核心职责、重要关系、对外契约，以及理解或修改系统时必须知道的非显然约束和设计决策。
+
+Header、目录段和全部 Entry 共同组成完整仓库索引，可以覆盖前端、后端、配置、数据库结构及其他受管理内容。受管理内容发生变化时，通常只需维护受影响的认知条目，不需要重新生成整个索引。
+
+AOCI 提供系统架构、对象职责、重要关系、对外契约和关键约束的高密度视图。
+
+### 工作原理
+
+AOCI 采用“模型生成、模型读取”的认知闭环。
+
+Header、Entry 和 Curation 语义的创作只按当前机器签发的 Plan 与实时 Guide 执行；由 Host 模型基于当前绑定证据独立完成。
+
+Entry 的语义必须来自模型对真实证据的理解。不得仅依据路径、文件名、扩展名、AST、符号列表、依赖扫描、正则、固定模板或规则引擎推导、预填、拼接或改写索引语义。
+
+对 Fresh Bootstrap，只按当前机器签发的 Plan 和实时 Guide 执行。当它们要求创作时，Host 模型创作 Root、Meta、Tag 和 F/R/A/S，提供 authoring-run 声明，并把它绑定到 Plan、Evidence 与完整 Candidate。不得要求 AOCI 填写 `origin=host_model`、制造 Receipt 或把程序生成的 Framework 当作语义。本文件不自行重建 Onboarding 流程。内部批次不是用户决策；只有遇到既有批准边界或真实的安全、漂移、CAS、Recovery 条件才停止。
+
+### 最小使用入口
+
+- `aoci_rules`：取得当前AOCI版本的会话运行合同。
+- `aoci_overview`：建立或恢复本仓库的完整认知。
+- `aoci_maintain`：受管理对象达到最终稳定状态后检查认知是否需要维护。
+- `aoci_update_entry`：提交与当前证据和源码摘要绑定的完整语义更新批次。
+- `aoci_report`：仅当当前布局和工具状态支持时，在证据不足、无法可靠生成语义时登记待办，不猜写。
+
+其他MCP工具、CLI命令、参数和专项流程，以当前工具说明、Guide和 `--help` 返回内容为准，不在本文件中重复完整手册。
+
+本区块只规定仓库接入、认知使用和收尾原则。`aoci_rules` 承载当前会话合同，Guide实时输出承载当前Plan的执行顺序与停点，工具Schema、Spec和Validator承载机器结构与判据；Prompt、Description、README和静态文档不能覆盖这些机器事实。
+
+### 建立、生成和恢复认知
+
+1. 每个新的 Agent Run 开始时，应先判断：
+
+   - 本仓库是否已经存在可用的完整AOCI索引；
+   - 当前上下文中是否已有与本仓库根、当前索引版本和当前AOCI服务相匹配，并且模型仍可可靠使用的完整仓库认知。
+
+2. 仓库已经存在可用的完整索引，但当前Run没有可靠完整认知时，先调用 `aoci_rules`，再调用 `aoci_overview`。
+
+   完整认知仍可靠时直接复用。局部不确定本身不要求机械重读系统全貌。
+
+   本Run从已知Host上下文压缩恢复时（包括宿主注入的压缩摘要），必须把此前模型认知视为不可靠。压缩handoff不得保留或摘要正式Whole-Index，也不得保留或摘要任何Overview Header、Entry、Chunk、Challenge或Attestation正文；只能保留安全续接所需的receipt身份、未完成write或Recovery状态，以及立即重载指令。复制进handoff的Whole-Index语义或receipt不能证明恢复后模型的当前认知可靠。若当前上下文已无法可靠保留运行合同，先调用 `aoci_rules`。继续业务任务前，使用 `refresh_reasons=["context_compaction"]` 和新的 `refresh_event_id` 调用普通完整Whole-Index `aoci_overview`（不设置 `check_only` 或设为false）；不得使用 `check_only` 或认知probe。原样跟随每个 `next_cursor` 直到 `completed=true`，确认交付，并且只基于新交付正文提交一次Attestation。完成这次新的完整传输后，即使Attestation为partial或fail也消费该generation，并按既有合同继续source-bound任务，不再自动调用第二次Overview。
+
+   AOCI可以针对 `context_compaction`、项目 `cognition_refresh_threshold` 下的机器 `semantic_threshold` 或主要 `phase_transition` 提供checkpoint与认知状态事实。只需要这些紧凑事实时使用 `check_only=true`；这些事实只向Agent提供建议，不替模型决定是否需要系统全貌。
+
+   Agent显式调用普通 `aoci_overview`（未设置 `check_only` 或为false）时，只要能形成一致的CognitionSet，AOCI必须完整交付请求scope。不得因为已有receipt、阈值未达到或没有待处理刷新原因而抑制正文。正式认知Dirty或Stale时仍交付正文，但必须标记不可靠。存在未决恢复或无法形成一致snapshot时失败关闭，不返回混合正文。
+
+   普通Overview返回 `continuation_required=true` 时，必须原样提交 `next_cursor` 并自动继续到 `completed=true`。不得询问用户、开始业务任务或给出阶段性系统结论。Host截断、缺块、重复、乱序、cursor失败、Index变化或`chunk_tokens`变化时停止本次认知链。Attestation完成前不得用Memory、源码、Spec、`aoci.txt`、历史会话、scope、search或Entry读取修补或补充Whole-Index认知。Challenge ordinal是正式Entry序列中的1-based位置；Header内容、注释、空行、Section/Overview/Chunk Marker、Receipt与Metadata均不计数，Chunk Receipt ordinal使用同一序列。Attestation必须原样回绑本次Challenge发布的当前`index_sha256`、`entry_sequence_sha256`与`entry_count`；旧Index、旧Entry序列、旧数量或旧Attestation均无效。完整链结束后只正式提交一次既有模型认知Attestation；同一响应只允许一次不改变语义答案的JSON Schema或字段格式修正。对象、Tag或F不匹配即失败且认知吸收不确定，不得语义重试或旁路补答。首次认知失败时还不得执行Root/Meta、Migration、全局布局或其他未重新绑定的系统级决策。上下文压缩刷新若传输完整、认知身份不变、治理对齐且没有Recovery或第三方冲突，即使Attestation为partial或fail也消耗该refresh generation，并继续原任务，不再自动重读Overview。`system_mastery_percent`只自评系统框架——架构、职责、强关系、稳定外部契约以及高熵安全和维护约束——不表示完整实现或运行实况知识；机器索引覆盖率必须分开。默认只向用户输出由本次真实覆盖率、Challenge、块数、Token和掌握度生成的规定成功或失败一句话。Host截断时提示用户把 `overview_delivery.chunk_tokens` 设置为更小的合法值后重新开始，不得自动修改。
+
+   加法认知等级必须与严格证明字段分开解释。`delivery_verified`表示已加载Index且Host交付已确认，但完整认知验证仍未完成；应表达为“已加载且交付已验证”，不得描述为“没有认知”或“没有理解系统”。`cognition_verified`要求Attestation通过（Challenge至少80%的ordinal完全正确且对象身份至多失手一处），`cognition_governed`还要求治理对齐。通用完整读取失败句只用于真实交付故障。
+
+   当Overview响应包含可选`cognition-state/v2`投影时，必须分别解释各维度。其Level止于`model_cognition_usable`；`strict_attestation_verified`、`governance_aligned`与`current_system_cognition_reliable`都是独立状态，绝不参与该Level。ordinal、对象身份、Tag或核心F不匹配可以导致严格Attestation失败，而模型认知仍然可用；不得仅凭这种不匹配就宣称模型没有理解系统。只有`current_system_cognition_reliable=true`允许无保留地声称当前完整系统认知可靠。投影缺失时继续使用上述Legacy解释。
+
+   普通的只读审计、分析、检查、不修改代码或不提交、不push，不自动等于严格零写入，也不改变上述认知有效性判断。Codex Memory和历史Skill只能辅助恢复经验、用户偏好与调查方向，不能替代与当前仓库根、索引摘要、AOCI服务身份和认知范围匹配的当前认知收据；项目AGENTS和当前AOCI身份在AOCI状态上优先于历史Memory。
+
+   只有用户明确禁止Ledger、元数据、`.aoci`运行资产及任何文件写入时，才按严格零写入处理。若必要的认知建立与该边界冲突，必须报告冲突并请求用户裁决或建议使用隔离副本，不得静默以Memory替代当前仓库认知。
+
+3. 仓库没有可用的完整索引，或当前只有最小骨架、Header不完整、Entries未完成、必要Curation尚未裁决时，如果需要建立正式完整AOCI索引，先取得 `aoci_rules`，然后进入当前AOCI Guide。由Guide依据仓库真实状态决定下一阶段并完成必要安全步骤。
+
+   `aoci_maintain` 不替代索引建立流程。
+
+   不在本文件中自行重建或硬编码完整索引生成状态机。
+
+4. 在长程任务中，模型负责保留当前认知收据并正确使用刷新门禁：
+
+   - Host报告上下文压缩或模型已知系统全貌丢失时，执行上述强制 `context_compaction` 重载规则；AOCI不能自行推断Host事件；
+   - 进入真正的主要阶段时声明 `phase_transition`，不得把函数、测试运行或小步骤当作阶段；
+   - 在有用的稳定检查点通过 `check_only=true` 取得机器语义计数；
+   - 除已知压缩的强制重载外，由Agent判断当前任务是否需要再次显式获取指定scope或完整Overview；
+   - 在维护和对齐完成前，保留AOCI报告的Dirty或Stale可靠性状态。
+
+### 任务收尾与认知维护
+
+5. 纯只读问答、分析、版本核验，或没有产生受AOCI管理对象变化的任务，不需要调用维护工具。当前AOCI版本是任意`aoci_overview` check_only或`aoci_maintain`响应里的`cognition_receipt.mcp_service_version`；二进制路径是项目`.mcp.json`里的`command`，CLI不必在PATH上。
+
+6. 发生受AOCI管理对象变化时，待其达到本次任务的最终稳定状态后，只调用一次 `aoci_maintain`。不要在每次中间修改后逐文件维护。
+
+7. 若维护结果返回真实语义候选，Host 模型必须基于每个候选绑定的对象和必要证据，独立创作完整标签与F/R/A/S更新。通过 `aoci_update_entry` 一次提交当前机器签发批次的完整候选集合，同时原样保留每项 `source_sha256`、`candidate_id` 与对应domain批次身份。`max_entries`只限制单次请求和原子事务，不限制logical plan、Whole-Index或Managed Scope。`remaining`非零时，在当前批次成功Apply后重新调用Maintain并从新preimage继续；绝不能为满足transport上限缩减Index覆盖或自行截取返回批次。
+
+   没有足够证据且当前布局支持 `aoci_report` 时，使用它而不猜测、套用模板或为消除待办而生成缺乏证据的认知。
+
+8. 必须遵守工具返回的结构化状态和安全边界：
+
+   - `repair_required`：只修复明确命中的候选，再重新提交当前机器签发的完整批次；
+   - `stopped`：结束当前写入尝试并检查 `failed_step`、错误、正式写入证据与Recovery。auto模式下，已证明零写入则记录closure并重新Plan；完整Intent和可证明postimage则Resume；策略要求Rollback且preimage可证明则精确恢复后重新Plan。只有证据不足、第三方正式字节冲突、需要审批或外部动作，或命中其他真实安全边界时，才停止整个用户任务；
+   - 冲突、审批、人工裁决、权限和安全信号不得忽略；
+   - 已经对齐后不得重复维护或重复写入；`refresh_ready_for_overview` 是checkpoint事实，由Agent决定是否为下一阶段请求普通完整Overview。
+
+   维护完成后如果又修改了任何受管理对象，之前的维护结果失效，应在新的最终稳定状态重新完成收尾。
+
+9. 用户只限制业务文件范围，但没有明确禁止仓库托管资产时，AOCI托管资产可以在收尾阶段为保持认知一致而更新，并应在审计和提交中与业务文件区分。
+
+   用户明确禁止修改 `aoci.txt`、`.aoci`、元数据或任何额外文件时，以用户限制为准，不得写入，并如实报告剩余不一致。
+
+### 专项流程
+
+初始化、完整索引生成、Header生成、Entries生成、数据库结构索引、Curation、人工评审和故障恢复，只按当前AOCI Guide或工具在对应阶段返回的指令、命令和安全停点执行。
+
+不预加载、不猜测，也不自行重建这些专项流程。平台调用方式、请求格式、批次上限、审批规则、索引格式细节和恢复步骤由对应Guide、工具说明、模型Prompt和CLI帮助按需提供。
+<!-- aoci:end -->

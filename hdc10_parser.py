@@ -153,6 +153,13 @@ APP_PORTS = {
 # 达阈值才判该 PB 省略了 PBH，否则维持原判（防末尾 PB 被误判）。
 _PB_PROBE_MIN_SCORE = 4
 
+# FCCS **留空**（全 0）时的结构判定阈值（见 HDC10Parser._looks_like_fc_payload）。
+# 台体/模拟器把报文内容组好直接落日志，FCCS/PBCS/ICV 由硬件发射机在发射时
+# 填校验，日志里留空为全 0；此时不能再拿「校验不过」当「不是完整 MPDU」。
+# 复用 _probe_pb_form 的打分（同一把尺子），要求「MSDU 长度/类型合理」之外
+# 至少再有一条强证据（应用层端口/报文ID 命中 或 ICV 自校验通过）。
+_FC_BLANK_FCCS_MIN_SCORE = _PB_PROBE_MIN_SCORE
+
 # 安全模式（报文ID高4位）
 SECURITY_MODES = {
     0: "明文传输",
@@ -333,6 +340,78 @@ def _bits_lsb(data: bytes, byte_off: int, bit_off: int, nbits: int) -> int:
     return value
 
 
+def _bit_slice(byte_val: int, hi: int, lo: int) -> int:
+    """取**单字节内**的位段（闭区间位号，bit0 为最低位；口径同 ``_bits_lsb``）。
+
+    规范各表把字段写成「字节N 比特a-b」，表格上只给十进制值看不出落在哪几位、
+    也看不出跨字节字段是怎么拼的，故用它把取值摆到说明列。
+    """
+    return (byte_val >> lo) & ((1 << (hi - lo + 1)) - 1)
+
+
+def _bit_span_note(*spans: Tuple[int, int, int, int]) -> str:
+    """拼「位域归属」片段，追加到说明列（把 bit 占用摆到台面上）。
+
+    Args:
+        spans: 依次给 ``(报文头内字节号, 高比特位, 低比特位, 该字节原值)``，
+            **按该字段在规范表里的书写顺序**（通常字节号升序）。跨字节位域的
+            打包口径本协议只有一种：「**字节号小的段是低位段**」（口径同
+            ``_bits_lsb``；12bit「转发数据长度/配置值」、6bit「报文头长度」皆如此），
+            故多段时末尾直接给出移位拼装式，方向不用读者自己猜。
+    """
+    parts = []
+    widths = []
+    values = []
+    for byte_no, hi, lo, byte_val in spans:
+        width = hi - lo + 1
+        value = _bit_slice(byte_val, hi, lo)
+        widths.append(width)
+        values.append(value)
+        parts.append(
+            f"报文头字节{byte_no}[bit{hi}-{lo}]={width}bit=0b{value:0{width}b}"
+        )
+    note = "；位域归属: " + " + ".join(parts)
+    if len(spans) > 1:
+        shifts = []
+        acc = 0
+        for width in widths:
+            shifts.append(acc)
+            acc += width
+        expr = " | ".join(
+            f"0b{v:0{w}b}" + (f"<<{s}" if s else "")
+            for v, w, s in zip(values, widths, shifts)
+        )
+        total = sum(v << s for v, s in zip(values, shifts))
+        note += f"（低位段在前）→ {expr} = {total}"
+    return note
+
+
+# 应用报文头前两字节的位布局（表2/表32/表3/表26/表37 等各应用报文头一致）：
+#   字节0: 协议版本号(bit0-5, 6bit) | 报文头长度低2位(bit6-7)
+#   字节1: 报文头长度高4位(bit0-3) | 该报文自有语义(bit4-7)
+# 口径：字节号小的段是低位段（同 _bits_lsb，也与 12bit「转发数据长度/配置值」一致）。
+
+
+def _hdr_len_cells(b0: int, b1: int, hdr_len: int) -> Tuple[str, str]:
+    """「报文头长度」行的 (原始值, 说明) 两列。
+
+    ``报文头长度`` 是**跨字节位域**：字节0 的 bit7-6 是**低 2 位**、字节1 的 bit3-0
+    是**高 4 位**，拼出的 6bit 数值就是**报文头的字节数**（不是 4 字节字）。表格若
+    只给「4 字节」，就看不出这个 4 是从哪两个字节的哪几位拼出来的，故：
+
+      - 原始值列给两个位段的二进制（``0b0001+0b10``，``+`` = 按位拼接，直接可读为数值）；
+      - 说明列给字节/比特归属与移位拼装式 + 单位口径（报文头字节数）。
+    """
+    low2 = _bit_slice(b0, 7, 6)
+    high4 = _bit_slice(b1, 3, 0)
+    return (
+        f"0b{high4:04b}+0b{low2:02b}",
+        "位域6bit（字节号小的段是低位段）"
+        + _bit_span_note((0, 7, 6, b0), (1, 3, 0, b1))
+        + f"；单位 字节，报文头长度 = {hdr_len} 字节",
+    )
+
+
 # ── 帧类型/协议归属的**证据判定**（自动识别用，纯函数）────────────────
 
 # detect_hdc_frame_kind 复用解析器做 MAC 头长度判定（无状态，仅调用纯解析方法）
@@ -482,6 +561,26 @@ class HDC10Parser:
 
         # auto / fc_pb / fc_mac: 检测是否有 FC
         has_fc = self._detect_fc(frame_bytes)
+        # 用户显式声明「完整 MPDU」（fc_pb / fc_mac）时尊重声明：级别名即契约，
+        # 不因 FCCS 校验不过就偷偷改走 MAC 帧路径（那会吐一屏错位臆造）。
+        # 只对 **SOF 帧** 放开：信标/SACK/网间协调帧的 FC 之后不是「PBH+MAC」布局，
+        # 而开头为 PBH 的物理块帧（0x40/0xC0）其 byte0 低 3 位同样是 0，
+        # 按 DT 全放开会把 PB 级输入劫持进 FC 路径（回归实测：夹具帧结果全变）。
+        # 末条是规范硬条件（表37）：完整 MPDU 的偏移 16 必是**置了帧起始位**的首块
+        # PBH——首块不带帧起始标志即自相矛盾。裸 PB 输入的 frame_bytes[16] 落在
+        # MAC 头/MSDU 体内（实测 60 条夹具里唯一低 3 位为 1 的 0xC1 帧，其
+        # frame_bytes[16]=0x06 无帧起始位），据此把 PB 级输入挡在外面。
+        forced_fc = False
+        if (
+            not has_fc
+            and parse_level in ("fc_pb", "fc_mac")
+            and flen >= 26
+            and (frame_bytes[0] & 0x07) == 1
+            and ((frame_bytes[12] >> 4) & 0x0F) == 0
+            and ((frame_bytes[16] >> 6) & 0x01) == 1
+        ):
+            has_fc = True
+            forced_fc = True
 
         if not has_fc:
             # 无 FC，尝试按 MAC 帧解析
@@ -511,6 +610,24 @@ class HDC10Parser:
         # 有 FC
         fc_table = self._parse_fc(frame_bytes, 0)
         table.extend(fc_table)
+
+        # FCCS 未通过仍按 FC 解析时，把依据写明——台体/模拟器日志把校验位留空为
+        # 全 0（发射时由硬件填充）是现场常态，不能让用户以为解析器在瞎猜。
+        _fccs_stored = int.from_bytes(frame_bytes[13:16], 'little')
+        if _crc24(frame_bytes[:13]) != _fccs_stored:
+            if _fccs_stored == 0:
+                _why = ("FCCS 留空(全 0)：校验位由硬件发射机在发射时填充，"
+                        "台体/模拟器输出的日志帧常见")
+            else:
+                _why = (f"FCCS 有值但校验不过(计算值=0x{_crc24(frame_bytes[:13]):06X})")
+            table.append((
+                "⚠ FCCS 未通过",
+                ' '.join(f'{b:02X}' for b in frame_bytes[13:16]),
+                f"0x{_fccs_stored:06X}",
+                _why + ("；按指定的「完整MPDU」级别继续解析" if forced_fc
+                        else "；帧体结构自洽，按完整 MPDU 继续解析"),
+                None, None,
+            ))
 
         if parse_level == "fc_only":
             return table
@@ -556,13 +673,19 @@ class HDC10Parser:
     # ─── 检测函数 ──────────────────────────────────────────────
 
     def _detect_fc(self, data: bytes) -> bool:
-        """检测是否为完整MPDU帧（含16字节FC头）"""
+        """检测是否为完整MPDU帧（含16字节FC头）
+
+        判据：
+          1. 定界符 0~3、标准版本号 0（HDC 1.0）；
+          2. FCCS 校验通过 → 确定性完整 MPDU；
+          3. FCCS **留空（全 0）** → 改判帧体结构，见 ``_looks_like_fc_payload``；
+          4. FCCS 有值但校验不过 → 不是 MPDU（保持严格，防误判）。
+        """
         if len(data) < 16:
             return False
         dt = data[0] & 0x07
         if dt > 3:
             return False
-        net_type = (data[0] >> 3) & 0x1F
         # 标准版本号应为0（HDC 1.0）
         std_ver = (data[12] >> 4) & 0x0F
         if std_ver != 0:
@@ -571,7 +694,44 @@ class HDC10Parser:
         fc_body = data[:13]
         fccs = int.from_bytes(data[13:16], 'little')
         calc = _crc24(fc_body)
-        return calc == fccs
+        if calc == fccs:
+            return True
+        if fccs != 0:
+            return False
+        # FCCS 留空（全 0）：台体/模拟器日志里校验位由硬件发射机填充 →
+        # 不能拿「校验不过」当「不是 MPDU」，改判帧体结构。
+        return self._looks_like_fc_payload(data)
+
+    def _looks_like_fc_payload(self, data: bytes) -> bool:
+        """FCCS 留空（全 0）时，改用帧体结构判定「FC(16B) + 物理块」是否成立。
+
+        背景：台体/模拟器把报文内容组好直接落日志，FCCS/PBCS/ICV 由硬件发射机
+        在发射时填充，日志里留空为全 0。此时若仍以 FCCS 为唯一判据，整帧会掉进
+        「无 FC → 按裸 MAC 帧解析」分支，吐一屏错位臆造（版本=1 单跳帧协议、
+        MSDU长度=0、ICV 取值错位且校验失败）。
+
+        只对 **SOF 帧（DT=1）** 生效，不做泛化：信标帧 FC 之后是信标载荷而非
+        PBH，而开头为 PBH（0x40/0xC0）的物理块帧其 byte0 低 3 位同样是 0，
+        按 DT=0 统一放开会把 PB 级输入误判成信标帧。
+
+        判据（全部满足）：
+          S1 ``data[16]`` 是合法 PBH 且置了**帧起始**位（首块不带帧起始标志即自相矛盾）；
+          S2 ``data[17:]``（PBH 之后即 MAC 帧头）按 ``_probe_pb_form`` 打分
+             ≥ ``_FC_BLANK_FCCS_MIN_SCORE``，即「MSDU 长度/类型合理」之外还必须
+             至少再有一条强证据（应用层端口/报文ID 命中 或 ICV 自校验通过）。
+
+        防误判标定（实测依据）：真实单 PB 现场帧 44 条（``test/hdc10_real_frames.pkl``）
+        若被误当「FC 在偏移 0」来解，``data[17:]`` 打分分布为 {0: 28, 1: 16}
+        （最高 1）；而真实 FC 帧（台体 152 字节日志帧）打分 6 → 阈值 4 余量充足。
+        """
+        if len(data) < 26:
+            return False
+        if (data[0] & 0x07) != 1:
+            return False
+        if not (data[16] >> 6) & 0x01:
+            return False
+        _pbh_len, score = self._probe_pb_form(data[17:])
+        return score >= _FC_BLANK_FCCS_MIN_SCORE
 
     def _detect_mac_header(self, data: bytes) -> bool:
         """检测是否为MAC帧起始（裸MAC 或 PBH+MAC）"""
@@ -644,7 +804,14 @@ class HDC10Parser:
         # FCCS
         fccs = int.from_bytes(data[offset + 13:offset + 16], 'little')
         calc_fccs = _crc24(data[offset:offset + 13])
-        status = "✓ 校验正确" if calc_fccs == fccs else f"✗ 校验错误(计算值=0x{calc_fccs:06X})"
+        if calc_fccs == fccs:
+            status = "✓ 校验正确"
+        elif fccs == 0:
+            # 台体/模拟器把报文内容组好直接落日志，校验位由硬件发射机填充
+            status = ("⚠ 未填充(全 0)：台体/模拟器日志由硬件发射机在发射时填校验，"
+                      f"此处计算值应为 0x{calc_fccs:06X}")
+        else:
+            status = f"✗ 校验错误(计算值=0x{calc_fccs:06X})"
         table.append((
             "帧控制校验序列(FCCS)",
             ' '.join(f'{b:02X}' for b in data[offset + 13:offset + 16]),
@@ -1201,6 +1368,15 @@ class HDC10Parser:
                         ' '.join(f'{b:02X}' for b in data[-3:]),
                         f"0x{tail3:06X}",
                         "✓ 校验正确",
+                        base_offset + len(data) - 3, base_offset + len(data) - 1,
+                    ))
+                elif tail3 == 0:
+                    table.append((
+                        "  ⚠ PBCS未填充",
+                        ' '.join(f'{b:02X}' for b in data[-3:]),
+                        "全 0",
+                        "尾部3字节为全 0 → PBCS 未填充（台体/模拟器日志由硬件发射机"
+                        "在发射时填校验），已并入MAC帧解析",
                         base_offset + len(data) - 3, base_offset + len(data) - 1,
                     ))
                 else:
@@ -2611,21 +2787,20 @@ class HDC10Parser:
         b2 = data[2]
         b3 = data[3]
 
-        # 报文头长度: byte0[6:7](高2b)+byte1[0:3](低4b)=6bit, 单位4字节字(类IPv4 IHL)
-        hdr_len = (((b0 >> 6) & 0x03) << 4) | (b1 & 0x0F)
+        # 报文头长度: byte0[6:7](低2b)+byte1[0:3](高4b)=6bit, 值 = 报文头字节数
+        hdr_len = ((b1 & 0x0F) << 2) | ((b0 >> 6) & 0x03)
         # 协议版本号: byte0[0:5] = 6bit（文档第4-3部分 §5.3.1.2：本版本取值固定为 1）。
         # 原实现漏了本行赋值，却在下方三处引用 proto_ver → app 级别解析抄表报文
         # （0x001/0x002/0x003）时抛 NameError（现场弹「解析失败」）。
         # 写法与同文件 _parse_confirm / _parse_timesync 等 6 处保持一致。
         proto_ver = b0 & 0x3F
-        hdr_bytes = hdr_len * 4
 
         table.append((
             f"  {name}报文头",
             "",
-            f"{hdr_bytes}字节",
-            f"头长: {hdr_len}×4B = {hdr_bytes}B",
-            offset, offset + hdr_bytes - 1,
+            f"{hdr_len}字节",
+            f"头长: {hdr_len}字节",
+            offset, offset + hdr_len - 1,
         ))
         table.append((
             "    协议版本号",
@@ -2634,11 +2809,12 @@ class HDC10Parser:
             f"协议版本: {proto_ver}",
             offset, offset,
         ))
+        hdr_raw, hdr_note = _hdr_len_cells(b0, b1, hdr_len)
         table.append((
             "    报文头长度",
-            f"0x{hdr_len:02X}",
-            f"{hdr_len}×4B={hdr_bytes}B",
-            f"报文头长度: {hdr_len}个4字节块",
+            hdr_raw,
+            f"{hdr_len}字节",
+            hdr_note,
             offset, offset + 1,
         ))
 
@@ -2744,14 +2920,14 @@ class HDC10Parser:
             ))
 
         # DATA 域
-        if hdr_bytes < len(data):
-            payload = data[hdr_bytes:hdr_bytes + data_len] if hdr_bytes + data_len <= len(data) else data[hdr_bytes:]
+        if hdr_len < len(data):
+            payload = data[hdr_len:hdr_len + data_len] if hdr_len + data_len <= len(data) else data[hdr_len:]
             table.append((
                 "    数据(DATA)",
                 ' '.join(f'{b:02X}' for b in payload[:16]) + ("..." if len(payload) > 16 else ""),
                 f"{len(payload)}字节",
                 "抄表应用报文数据",
-                offset + hdr_bytes, offset + hdr_bytes + len(payload) - 1,
+                offset + hdr_len, offset + hdr_len + len(payload) - 1,
             ))
 
         return table
@@ -2766,8 +2942,7 @@ class HDC10Parser:
         b1 = data[1]
 
         proto_ver = b0 & 0x3F
-        hdr_len = (((b0 >> 6) & 0x03) << 4) | (b1 & 0x0F)  # 6bit, ×4字节
-        hdr_bytes = hdr_len * 4
+        hdr_len = ((b1 & 0x0F) << 2) | ((b0 >> 6) & 0x03)  # 6bit, 报文头字节数
 
         direction = (b1 >> 4) & 0x01
         ack_bit = (b1 >> 5) & 0x01
@@ -2776,9 +2951,9 @@ class HDC10Parser:
         table.append((
             "  确认/否认报文",
             "",
-            f"{hdr_bytes}字节头",
+            f"{hdr_len}字节头",
             "确认/否认应答报文",
-            offset, offset + min(len(data), hdr_bytes) - 1,
+            offset, offset + min(len(data), hdr_len) - 1,
         ))
         table.append(("    方向位", f"0b{direction}", str(direction), "上行" if direction else "下行", offset + 1, offset + 1))
         table.append(("    确认位", f"0b{ack_bit}", str(ack_bit), "确认" if ack_bit else "否认", offset + 1, offset + 1))
@@ -2797,8 +2972,7 @@ class HDC10Parser:
         b3 = data[3]
 
         proto_ver = b0 & 0x3F
-        hdr_len = (((b0 >> 6) & 0x03) << 4) | (b1 & 0x0F)  # 6bit, ×4字节
-        hdr_bytes = hdr_len * 4
+        hdr_len = ((b1 & 0x0F) << 2) | ((b0 >> 6) & 0x03)  # 6bit, 报文头字节数
 
         # 转发数据长度: byte2[4:7] + byte3[0:7] = 12bit
         data_len = ((b2 >> 4) & 0x0F) | (b3 << 4)
@@ -2806,19 +2980,19 @@ class HDC10Parser:
         table.append((
             "  校时报文",
             "",
-            f"{hdr_bytes}字节头",
+            f"{hdr_len}字节头",
             "校时命令",
-            offset, offset + min(len(data), hdr_bytes) - 1,
+            offset, offset + min(len(data), hdr_len) - 1,
         ))
         table.append(("    转发数据长度", f"0x{data_len:03X}", f"{data_len}字节",
                       f"校时报文数据长度: {data_len}字节", offset + 2, offset + 3))
 
-        if len(data) > hdr_bytes:
-            payload = data[hdr_bytes:hdr_bytes + data_len] if hdr_bytes + data_len <= len(data) else data[hdr_bytes:]
+        if len(data) > hdr_len:
+            payload = data[hdr_len:hdr_len + data_len] if hdr_len + data_len <= len(data) else data[hdr_len:]
             table.append(("    数据(DATA)",
                           ' '.join(f'{b:02X}' for b in payload[:16]) + ("..." if len(payload) > 16 else ""),
                           f"{len(payload)}字节", "校时应用报文数据",
-                          offset + hdr_bytes, offset + hdr_bytes + len(payload) - 1))
+                          offset + hdr_len, offset + hdr_len + len(payload) - 1))
         return table
 
     def _parse_event(self, data: bytes, offset: int) -> List[Tuple]:
@@ -2831,8 +3005,7 @@ class HDC10Parser:
         b1 = data[1]
 
         proto_ver = b0 & 0x3F
-        hdr_len = (((b0 >> 6) & 0x03) << 4) | (b1 & 0x0F)  # 6bit, ×4字节
-        hdr_bytes = hdr_len * 4
+        hdr_len = ((b1 & 0x0F) << 2) | ((b0 >> 6) & 0x03)  # 6bit, 报文头字节数
 
         dir_bit = (b1 >> 4) & 0x01
         start_bit = (b1 >> 5) & 0x01
@@ -2848,9 +3021,9 @@ class HDC10Parser:
         table.append((
             "  事件上报报文",
             "",
-            f"{hdr_bytes}字节头",
+            f"{hdr_len}字节头",
             "事件主动上报",
-            offset, offset + hdr_bytes - 1,
+            offset, offset + hdr_len - 1,
         ))
         table.append(("    方向位", f"0b{dir_bit}", str(dir_bit), "上行" if dir_bit else "下行", offset + 1, offset + 1))
         table.append(("    启动位", f"0b{start_bit}", str(start_bit), "启动站" if start_bit else "从动站", offset + 1, offset + 1))
@@ -2863,7 +3036,7 @@ class HDC10Parser:
                       offset + 6, offset + 11))
 
         # 数据（DATA）域：字节12 起（表30/表31/附件3 的字节号以报文头为基准）
-        data_off = hdr_bytes if 12 <= hdr_bytes <= len(data) else 12
+        data_off = hdr_len if 12 <= hdr_len <= len(data) else 12
         if len(data) > data_off:
             table.extend(self._parse_event_data(data, data_off, offset))
         return table
@@ -3041,7 +3214,7 @@ class HDC10Parser:
 
         域布局（字节号 / 比特位）：
           字节0 bit0-5        协议版本号（本版本固定为1）
-          字节0 bit6-7（高2位）+ 字节1 bit0-3（低4位）  报文头长度（6bit，单位4字节字）
+          字节0 bit6-7（低2位）+ 字节1 bit0-3（高4位）  报文头长度（6bit，值 = 报文头字节数）
           字节1 bit4-7        保留 / 测试模式·配置操作
           字节2 bit0-3        转发数据的规约类型
           字节2 bit4-7 + 字节3 bit0-7   12bit 转发数据长度 / 模式持续时间 / 配置值
@@ -3061,10 +3234,10 @@ class HDC10Parser:
         b0 = data[0]
         b1 = data[1]
         ver = b0 & 0x3F
-        # 报文头长度: byte0[6:7](高2b)+byte1[0:3](低4b)=6bit, 单位4字节字(类IPv4 IHL)
-        # 与本文件其余报文一致（原先此处拼成了「低位在字节0」，与规范相反：
-        # 实测 01 61 30 00 应为 1→4字节，原写法得 4→16字节）
-        hdr_len = (((b0 >> 6) & 0x03) << 4) | (b1 & 0x0F)
+        # 报文头长度: byte0[6:7](低2b)+byte1[0:3](高4b)=6bit, 值 = 报文头字节数
+        # （协议10 同字段同口径：gw_new_gen_cmd_payloads 也是 (b1&0xF)<<2 | b0>>6；
+        #  旧写法按「字节0 存高 2 位」拼，遇上 b0 bit7-6≠0 的帧会给出荒谬值）
+        hdr_len = ((b1 & 0x0F) << 2) | ((b0 >> 6) & 0x03)
         test_mode = (b1 >> 4) & 0x0F
         b2 = data[2]
         b3 = data[3]
@@ -3074,10 +3247,14 @@ class HDC10Parser:
         table.append(("  通信测试报文", "", "", "通信测试命令",
                       offset, offset + len(data) - 1))
         table.append(("    协议版本号", f"0x{ver:02X}", str(ver),
-                      "本版本固定为1", offset, offset))
-        table.append(("    报文头长度", str(hdr_len),
-                      f"{hdr_len}×4B={hdr_len * 4}B",
-                      "报文头(除数据域外)的长度", offset, offset + 1))
+                      "本版本固定为1（同字节高2位归报文头长度）"
+                      + _bit_span_note((0, 5, 0, b0)),
+                      offset, offset))
+        hdr_raw, hdr_note = _hdr_len_cells(b0, b1, hdr_len)
+        table.append(("    报文头长度", hdr_raw,
+                      f"{hdr_len}字节",
+                      "报文头(除数据域外)的长度；" + hdr_note,
+                      offset, offset + 1))
 
         if test_mode == 0:
             table.extend(self._parse_comm_test_plain(data, offset, proto_type, config_val))
@@ -3094,12 +3271,16 @@ class HDC10Parser:
         纯元数据行的解析值**留空**——摘要按「解析值非空」过滤，留空即不留噪声。
         """
         table = [
-            ("    保留", "0", "", "保留(=0 为普通通信测试)", offset + 1, offset + 1),
+            ("    保留", "0", "", "保留(=0 为普通通信测试)"
+             + _bit_span_note((1, 7, 4, data[1])),
+             offset + 1, offset + 1),
             ("    转发数据规约类型", f"0x{proto_type:01X}", str(proto_type),
              PROTOCOL_TYPES.get(proto_type, f"保留({proto_type})"),
              offset + 2, offset + 2),
             ("    转发数据长度", f"0x{data_len:03X}", f"{data_len}字节",
-             f"实际数据(DATA)域长度: {data_len}字节", offset + 2, offset + 3),
+             f"实际数据(DATA)域长度: {data_len}字节"
+             + _bit_span_note((2, 7, 4, data[2]), (3, 7, 0, data[3])),
+             offset + 2, offset + 3),
         ]
         if len(data) > 4:
             payload = data[4:4 + data_len] if 4 + data_len <= len(data) else data[4:]
@@ -3121,9 +3302,17 @@ class HDC10Parser:
         放名称、原始值槽放数值，摘要才不会退化成「测试模式:6 (频段切换操作)」。
         """
         mode_name = EXT_TEST_MODES.get(test_mode, f"保留({test_mode})")
+        b1 = data[1] if len(data) > 1 else 0
+        # 说明列补「位域归属」，把跨字节字段的 bit 占用摆到台面上：
+        #   byte1[bit7-4] = 测试模式/配置操作；byte2[bit7-4]+byte3 = 12bit 值
+        #   （12bit 与 6bit 报文头长度都是「字节号小的端为低位」，口径同 _bits_lsb）；
+        #   byte2[bit3-0] = 转发数据规约类型（该行说明被测试逐字断言，故不加尾注）。
+        span12 = _bit_span_note((2, 7, 4, b2), (3, 7, 0, b3))
+        span_sec = _bit_span_note((4, 3, 0, data[4] if len(data) > 4 else 0))
         table = [
             ("    测试模式/配置操作", str(test_mode), mode_name,
-             "检测扩展命令: 测试模式/配置操作(A-HS-11-03 表2)",
+             "检测扩展命令: 测试模式/配置操作(A-HS-11-03 表2)"
+             + _bit_span_note((1, 7, 4, b1)),
              offset + 1, offset + 1),
             ("    转发数据规约类型", f"0x{proto_type:01X}", str(proto_type),
              PROTOCOL_TYPES.get(proto_type, f"保留({proto_type})"),
@@ -3135,32 +3324,33 @@ class HDC10Parser:
         if test_mode == 6:
             table.append(("    频段值(目标频段)", str(config_val),
                           EXT_BAND_RANGES.get(config_val, f"保留({config_val})"),
-                          "频段切换操作的目标频段（表2 第6条）",
+                          "频段切换操作的目标频段（表2 第6条）" + span12,
                           offset + 2, offset + 3))
         elif test_mode == 7:
             table.append(("    ToneMask值(目标ToneMask)", str(config_val),
                           f"目标ToneMask: {config_val}",
-                          "ToneMask配置操作的目标值（表2 第7条）",
+                          "ToneMask配置操作的目标值（表2 第7条）" + span12,
                           offset + 2, offset + 3))
         elif test_mode == 8:
             table.append(("    无线信道号", str(config_val),
                           f"目标无线信道号: {config_val}",
-                          "无线信道切换操作的目标信道（表2 第8条）",
+                          "无线信道切换操作的目标信道（表2 第8条）" + span12,
                           offset + 2, offset + 3))
         elif test_mode == 12:
             table.append(("    MCS值", str(config_val), f"MCS值: {config_val}",
-                          "PLC到RF物理层回传测试模式的MCS（表2）",
+                          "PLC到RF物理层回传测试模式的MCS（表2）" + span12,
                           offset + 2, offset + 3))
         elif test_mode in (1, 2):
             table.append(("    模式持续时间/配置值", str(config_val), "填0即可",
-                          "该模式转发完成首帧后即退出（表2 第1/2条）",
+                          "该模式转发完成首帧后即退出（表2 第1/2条）" + span12,
                           offset + 2, offset + 3))
         else:
             parsed = f"{config_val}分钟"
             if config_val > EXT_MAX_DURATION_MIN:
                 parsed += f"(超限,限定{EXT_MAX_DURATION_MIN}分钟)"
             table.append(("    模式持续时间/配置值", str(config_val), parsed,
-                          f"测试模式持续时间(单位:分钟,最大{EXT_MAX_DURATION_MIN})",
+                          f"测试模式持续时间(单位:分钟,最大{EXT_MAX_DURATION_MIN})"
+                          + span12,
                           offset + 2, offset + 3))
 
         # 字节4：安全测试模式(bit0-3) + 保留/PHR_MCS(bit4-7)
@@ -3170,16 +3360,18 @@ class HDC10Parser:
         if test_mode == 13:
             table.append(("    安全测试模式", str(sec_mode),
                           EXT_SEC_MODES.get(sec_mode, f"保留({sec_mode})"),
-                          "标识不同的安全测试模式（表2 第13条）",
+                          "标识不同的安全测试模式（表2 第13条）" + span_sec,
                           offset + 4, offset + 4))
         elif test_mode == 12:
             table.append(("    PHR_MCS", str(hi4), f"MCS {hi4}",
-                          "仅模式12生效", offset + 4, offset + 4))
+                          "仅模式12生效" + _bit_span_note((4, 7, 4, b4)),
+                          offset + 4, offset + 4))
         else:
             # 字段名带「字段」后缀：非 13 时该域是保留位，不应被摘要的
             # 「安全测试模式」哨兵当成子模式渲染（与协议10 同名同义）。
             table.append(("    安全测试模式字段", str(sec_mode), "应为0",
-                          "测试模式≠13时该字段应为0（表2 注意事项第9条）",
+                          "测试模式≠13时该字段应为0（表2 注意事项第9条）"
+                          + span_sec,
                           offset + 4, offset + 4))
 
         # 字节5：模式12 时为 PSDU_MCS(bit0-3) + PbSIZE(bit4-7)
@@ -3188,9 +3380,11 @@ class HDC10Parser:
             psdu = b5 & 0x0F
             pbsize = (b5 >> 4) & 0x0F
             table.append(("    PSDU_MCS", str(psdu), f"MCS {psdu}",
-                          "仅模式12生效", offset + 5, offset + 5))
+                          "仅模式12生效" + _bit_span_note((5, 3, 0, b5)),
+                          offset + 5, offset + 5))
             table.append(("    PbSIZE", str(pbsize), f"PbSIZE {pbsize}",
-                          "仅模式12生效", offset + 5, offset + 5))
+                          "仅模式12生效" + _bit_span_note((5, 7, 4, b5)),
+                          offset + 5, offset + 5))
         return table
 
     def _parse_registration(self, data: bytes, offset: int, msg_id: int) -> List[Tuple]:
@@ -3206,8 +3400,7 @@ class HDC10Parser:
         b1 = data[1]
 
         proto_ver = b0 & 0x3F
-        hdr_len = (((b0 >> 6) & 0x03) << 4) | (b1 & 0x0F)  # 6bit, ×4字节
-        hdr_bytes = hdr_len * 4
+        hdr_len = ((b1 & 0x0F) << 2) | ((b0 >> 6) & 0x03)  # 6bit, 报文头字节数
 
         force_ack = (b1 >> 4) & 0x01
         reg_param = (b1 >> 5) & 0x07
@@ -3218,9 +3411,9 @@ class HDC10Parser:
         table.append((
             f"  {name}",
             "",
-            f"{hdr_bytes}字节头",
+            f"{hdr_len}字节头",
             f"从节点注册: {name}",
-            offset, offset + min(len(data), hdr_bytes) - 1,
+            offset, offset + min(len(data), hdr_len) - 1,
         ))
         table.append(("    强制应答标志", f"0b{force_ack}", str(force_ack),
                       "强制应答" if force_ack else "不需强制应答", offset + 1, offset + 1))
@@ -3282,7 +3475,7 @@ class HDC10Parser:
             # 查询站点升级状态: 下行(表40, 12字节) / 上行(表45, 12字节+接收位图)
             b0, b1 = data[0], data[1]
             version = b0 & 0x3F
-            hdr_len = (((b0 >> 6) & 0x03) << 4) | (b1 & 0x0F)  # 6bit, ×4字节
+            hdr_len = ((b1 & 0x0F) << 2) | ((b0 >> 6) & 0x03)  # 6bit, 报文头字节数
             status_nib = (b1 >> 4) & 0x0F
             blk_count = int.from_bytes(data[2:4], 'little')
             start_blk = int.from_bytes(data[4:8], 'little')
@@ -3292,9 +3485,14 @@ class HDC10Parser:
             is_uplink = len(data) > 12 or status_nib in (1, 2, 3, 4)
 
             table.append(("    协议版本号", f"0x{version:02X}", str(version),
-                          "固定为1", offset, offset))
-            table.append(("    报文头长度", str(hdr_len), str(hdr_len),
-                          "报文头(除数据域外)长度", offset, offset + 1))
+                          "固定为1（同字节高2位归报文头长度）"
+                          + _bit_span_note((0, 5, 0, b0)),
+                          offset, offset))
+            hdr_raw, hdr_note = _hdr_len_cells(b0, b1, hdr_len)
+            table.append(("    报文头长度", hdr_raw,
+                          f"{hdr_len}字节",
+                          "报文头(除数据域外)长度；" + hdr_note,
+                          offset, offset + 1))
 
             if is_uplink:
                 status_names = {0: "空闲态", 1: "接收进行态", 2: "接收完成态",
@@ -3377,8 +3575,7 @@ class HDC10Parser:
         b1 = data[1]
 
         proto_ver = b0 & 0x3F
-        hdr_len = (((b0 >> 6) & 0x03) << 4) | (b1 & 0x0F)  # 6bit, ×4字节
-        hdr_bytes = hdr_len * 4
+        hdr_len = ((b1 & 0x0F) << 2) | ((b0 >> 6) & 0x03)  # 6bit, 报文头字节数
 
         dir_bit = (b1 >> 4) & 0x01
         start_bit = (b1 >> 5) & 0x01
@@ -3394,9 +3591,9 @@ class HDC10Parser:
         table.append((
             "  台区户变关系识别报文",
             "",
-            f"{hdr_bytes}字节头",
+            f"{hdr_len}字节头",
             "台区户变关系识别",
-            offset, offset + hdr_bytes - 1,
+            offset, offset + hdr_len - 1,
         ))
         table.append(("    方向位", f"0b{dir_bit}", str(dir_bit), "上行" if dir_bit else "下行", offset + 1, offset + 1))
         table.append(("    启动位", f"0b{start_bit}", str(start_bit), "启动站" if start_bit else "从动站", offset + 1, offset + 1))
@@ -3413,14 +3610,14 @@ class HDC10Parser:
         table.append(("    采集类型", f"0x{coll_type:02X}", str(coll_type),
                       f"采集类型: {coll_type}", offset + 11, offset + 11))
 
-        if len(data) > hdr_bytes:
-            payload = data[hdr_bytes:]
+        if len(data) > hdr_len:
+            payload = data[hdr_len:]
             table.append(("    数据(DATA)",
                           ' '.join(f'{b:02X}' for b in payload[:16]) + ("..." if len(payload) > 16 else ""),
                           f"{len(payload)}字节", "特征采集数据",
-                          offset + hdr_bytes, offset + hdr_bytes + len(payload) - 1))
+                          offset + hdr_len, offset + hdr_len + len(payload) - 1))
             table.extend(self._parse_phase_ident_data(
-                payload, offset + hdr_bytes, feat_type, coll_type))
+                payload, offset + hdr_len, feat_type, coll_type))
 
         return table
 
@@ -3779,8 +3976,17 @@ class HDC10Parser:
         # 先取第一个PB
         if len(data) < 2:
             return table
-        # 先探测该 PB 是否省略了 PBH（与 _parse_pb_block 同一判据，防两处漂移）
-        pbh_len, probe_score = self._probe_pb_form(data)
+        # SOF 帧首块已置**帧起始位**时，规范（表37）保证 data[0] 就是 PBH，直接采信；
+        # 只有「首字节无帧起始位」的物理块才需要探测是否省略了 PBH。
+        # 该门控与 _parse_pb_block 的分支条件一致（它在 sof 置位时也无条件把
+        # data[0] 当 PBH 读），否则两条路径对同一帧会给出不同结论。
+        # 不加门控的实测后果：帧尾 0 填充使 _probe_pb_form 的「ICV 全 0」强证据
+        # 误命中，合法 PBH 被当 MAC 头解析（用户报障留空帧：PB头=无、MSDU类型=0）。
+        if dt == 1 and (data[0] >> 6) & 0x01:
+            pbh_len, probe_score = 1, 0
+        else:
+            # 探测该 PB 是否省略了 PBH（与 _parse_pb_block 同一判据，防两处漂移）
+            pbh_len, probe_score = self._probe_pb_form(data)
         if pbh_len == 0:
             table.append((
                 "PB头",

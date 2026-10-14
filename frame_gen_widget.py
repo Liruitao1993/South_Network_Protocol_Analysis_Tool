@@ -11,7 +11,8 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QComboBox, QGroupBox, QScrollArea, QCheckBox, QMessageBox, QTextEdit,
-    QTableWidget, QTableWidgetItem, QHeaderView, QSplitter, QDialog
+    QTableWidget, QTableWidgetItem, QHeaderView, QSplitter, QDialog,
+    QStackedWidget
 )
 from PySide6.QtCore import Qt, QTimer, Signal, QRegularExpression
 from PySide6.QtGui import QFont, QKeyEvent, QIntValidator, QRegularExpressionValidator
@@ -48,6 +49,15 @@ from modular_iface_frame_gen import (
     templates as modular_templates,
 )
 from modular_iface_parser import ModularIfaceParser
+from csg_new_gen_frame_gen import FrameBuildError as CsgFrameBuildError
+from csg_test_frame_gen_widget import CsgTestFrameGenWidget
+from yw645_frame_gen import YW645BuildError, describe_frame as yw645_describe_frame
+from yw645_frame_gen_widget import YW645FrameGenWidget
+from yw645_parser import YW645Parser
+
+# 协议14（南网上行通信规约）的解析器/组帧/子控件**全部惰性 import**（与 csg_test_frame_gen_widget
+# 同策略）：把 Qt 子控件类与纯逻辑模块拖到模块导入期会改变 Qt 对象析构顺序，在 offscreen
+# 冒烟（test_modular_iface）下加剧 0xC0000409 析构崩溃的偶发率。
 
 
 # =============================================================================
@@ -634,14 +644,51 @@ class FrameGenWidget(QWidget):
         # ---- EB 数据标识 645/698 帧生成器（仅协议7 国网显示） ----
         self._build_eb_gen_group(left_layout)
 
-        # ---- 动态表单区 ----
+        # ---- 动态表单区（协议9 组帧页与之互斥，用栈切换） ----
         form_scroll = QScrollArea()
         form_scroll.setWidgetResizable(True)
         self._form_container = QWidget()
         self._form_layout = QVBoxLayout(self._form_container)
         self._form_layout.setAlignment(Qt.AlignTop)
         form_scroll.setWidget(self._form_container)
-        left_layout.addWidget(form_scroll, 1)
+
+        # 协议9（南网新一代载波）链路层组帧页：FC / PBH / MAC 头 / MSDU / ED 五层折叠表单。
+        # 与动态表单区同置于 QStackedWidget：_rebuild_form 会走 _clear_layout 递归销毁
+        # 子 widget，直接把组帧页塞进 _form_layout 会在模式切换时被销毁。
+        # link_layer_default=True：进页面即按 ①②③ 组装完整 MPDU（SOF 帧为默认帧类型），
+        # 否则五层折叠区默认全隐藏、用户看不到本次新增的链路层组帧能力。
+        self.csg_gen = CsgTestFrameGenWidget(link_layer_default=True)
+        csg_scroll = QScrollArea()
+        csg_scroll.setWidgetResizable(True)
+        csg_scroll.setWidget(self.csg_gen)
+        self._csg_container = csg_scroll
+
+        # 协议13（依瓦定制645）组帧页：地址（高字节在前/广播）+ 模式 + 数据项表格。
+        # 与协议6 的 645 组帧 schema **无关**（地址序/长度域/数据项结构均不同）。
+        self.yw645_gen = YW645FrameGenWidget()
+        yw645_scroll = QScrollArea()
+        yw645_scroll.setWidgetResizable(True)
+        yw645_scroll.setWidget(self.yw645_gen)
+        self._yw645_container = yw645_scroll
+
+        # 协议14（南网上行通信规约）组帧页：地址域 A1/A2/A3 + 控制域 DIR/PRM/CON/PSEQ +
+        # AFN + 信息体表格（DA1/DA2/DI/内容）。与协议0/7 的 1376 系 schema 不同（A1 为 BCD）。
+        # ⚠ 惰性创建：子控件在首次切到协议14 时才构造（见 _ensure_csg_uplink_gen）。
+        # 其构造会改变 Qt 对象析构顺序，在 offscreen 冒烟（test_modular_iface）里加剧
+        # 0xC0000409 析构崩溃的偶发率——不构造即无影响。
+        self.csg_uplink_gen = None
+        self._csg_uplink_container = QScrollArea()
+        self._csg_uplink_container.setWidgetResizable(True)
+        self._csg_uplink_container.setWidget(QWidget())
+
+        self.left_stack = QStackedWidget()
+        self.left_stack.addWidget(form_scroll)              # 0：常规动态表单
+        self.left_stack.addWidget(csg_scroll)               # 1：协议9 组帧
+        self.left_stack.addWidget(yw645_scroll)             # 2：协议13 组帧
+        self.left_stack.addWidget(self._csg_uplink_container)  # 3：协议14 组帧（惰性）
+        left_layout.addWidget(self.left_stack, 1)
+        self.csg_gen.changed.connect(self._schedule_realtime_update)
+        self.yw645_gen.changed.connect(self._schedule_realtime_update)
 
         # ---- 生成按钮 ----
         btn_layout = QHBoxLayout()
@@ -716,6 +763,21 @@ class FrameGenWidget(QWidget):
         right_layout = QVBoxLayout(right_widget)
         right_layout.setSpacing(4)
 
+        # 「显示响应解析」开关：响应帧解析对**纯组帧**（协议9）基本用不上，默认收起，
+        # 把高度让给实时解析预览；需要时随时勾回来。各协议的默认可见性由
+        # _apply_resp_visibility() 决定（协议9 收起、其余保持现状）。
+        resp_switch = QHBoxLayout()
+        resp_switch.setSpacing(6)
+        self.show_resp_check = QCheckBox("显示响应解析")
+        self.show_resp_check.setToolTip(
+            "响应帧解析用于查看串口回帧；纯组帧场景（协议9）默认收起，腾出空间给实时解析预览")
+        self.show_resp_check.setChecked(True)
+        self._resp_pref = True
+        self.show_resp_check.toggled.connect(self._on_resp_switch_toggled)
+        resp_switch.addWidget(self.show_resp_check)
+        resp_switch.addStretch()
+        right_layout.addLayout(resp_switch)
+
         preview_group = QGroupBox("实时解析预览")
         preview_layout = QVBoxLayout(preview_group)
         preview_layout.setContentsMargins(6, 4, 6, 4)
@@ -778,6 +840,7 @@ class FrameGenWidget(QWidget):
         resp_btn_layout.addStretch()
         resp_layout.addLayout(resp_btn_layout)
 
+        self.resp_group = resp_group
         right_layout.addWidget(resp_group, 1)
 
         splitter.addWidget(right_widget)
@@ -3547,10 +3610,117 @@ class FrameGenWidget(QWidget):
                 self._do_realtime_update_dlt645()
             elif self.protocol_mode == "modular":
                 self._do_realtime_update_modular()
+            elif self.protocol_mode == "csg":
+                self._do_realtime_update_csg()
+            elif self.protocol_mode == "yw645":
+                self._do_realtime_update_yw645()
+            elif self.protocol_mode == "csg_uplink":
+                self._do_realtime_update_csg_uplink()
             else:
                 self._do_realtime_update_gdw()
         except Exception:
             pass
+
+    def _do_realtime_update_csg(self):
+        """协议9（南网新一代载波）链路层实时组帧与解析
+
+        组帧契约：CsgTestFrameGenWidget.build() 返回含链路层（MPDU）的结果，
+        这里只负责把 hex 与解析行送到共享的 result_hex / preview_table。
+        """
+        try:
+            result = self.csg_gen.build()
+        except CsgFrameBuildError:
+            self.preview_table.setRowCount(0)
+            return
+        except Exception:
+            self.preview_table.setRowCount(0)
+            return
+        if result is None:
+            self.preview_table.setRowCount(0)
+            return
+        out = self.csg_gen.output_bytes(result)
+        if out:
+            hex_str = out.hex().upper()
+            self.result_hex.setText(
+                " ".join(hex_str[i:i + 2] for i in range(0, len(hex_str), 2)))
+        try:
+            rows = self.csg_gen.parse_rows(result)
+        except Exception:
+            self.preview_table.setRowCount(0)
+            return
+        table_rows = []
+        for item in rows:
+            it = tuple(item)
+            table_rows.append(it + ("",) * max(0, 4 - len(it)))
+        self._populate_preview_table(table_rows)
+
+    def _do_realtime_update_yw645(self):
+        """协议13（依瓦定制645）实时组帧与解析。
+
+        组帧契约：``YW645FrameGenWidget.build()`` 返回整帧 bytes（编码全走 ``yw645_wire``）；
+        这里只负责把 hex 与解析行送到共享的 result_hex / preview_table。
+        """
+        try:
+            frame = self.yw645_gen.build()
+        except YW645BuildError:
+            self.preview_table.setRowCount(0)
+            return
+        except Exception:
+            self.preview_table.setRowCount(0)
+            return
+        hex_str = frame.hex().upper()
+        self.result_hex.setText(
+            " ".join(hex_str[i:i + 2] for i in range(0, len(hex_str), 2)))
+        try:
+            rows = YW645Parser().parse_to_table(frame)
+        except Exception:
+            self.preview_table.setRowCount(0)
+            return
+        table_rows = []
+        for item in rows:
+            it = tuple(item)
+            table_rows.append(it + ("",) * max(0, 4 - len(it)))
+        self._populate_preview_table(table_rows)
+
+    def _ensure_csg_uplink_gen(self):
+        """首次需要时构造协议14 组帧子控件（惰性，见 __init__ 说明）。"""
+        if getattr(self, "csg_uplink_gen", None) is None:
+            from csg_uplink_frame_gen_widget import CSGUplinkFrameGenWidget
+
+            self.csg_uplink_gen = CSGUplinkFrameGenWidget()
+            self._csg_uplink_container.setWidget(self.csg_uplink_gen)
+            self.csg_uplink_gen.changed.connect(self._schedule_realtime_update)
+        return self.csg_uplink_gen
+
+    def _do_realtime_update_csg_uplink(self):
+        """协议14（南网上行通信规约）实时组帧与解析。
+
+        组帧契约：``CSGUplinkFrameGenWidget.build()`` 返回大写十六进制串（编码全走
+        ``csg_uplink_wire``）；解析走 ``CSGUplinkParser``。
+        """
+        from csg_uplink_frame_gen import BuildError as _BuildError
+        from csg_uplink_parser import CSGUplinkParser
+
+        try:
+            hex_str = self._ensure_csg_uplink_gen().build().replace(" ", "")
+        except _BuildError:
+            self.preview_table.setRowCount(0)
+            return
+        except Exception:
+            self.preview_table.setRowCount(0)
+            return
+        self.result_hex.setText(
+            " ".join(hex_str[i:i + 2] for i in range(0, len(hex_str), 2)))
+        try:
+            rows = CSGUplinkParser().parse_to_table(bytes.fromhex(hex_str))
+        except Exception:
+            self.preview_table.setRowCount(0)
+            return
+        table_rows = []
+        for item in rows:
+            it = tuple(item)
+            table_rows.append(it + ("",) * max(0, 4 - len(it)))
+        self._populate_preview_table(table_rows)
 
     def _build_modular_frame(self) -> bytes:
         """由当前配置生成完整 68…16 帧"""
@@ -3907,10 +4077,91 @@ class FrameGenWidget(QWidget):
                 self._generate_dlt645_frame()
             elif self.protocol_mode == "modular":
                 self._generate_modular_frame()
+            elif self.protocol_mode == "csg":
+                self._generate_csg_frame()
+            elif self.protocol_mode == "yw645":
+                self._generate_yw645_frame()
+            elif self.protocol_mode == "csg_uplink":
+                self._generate_csg_uplink_frame()
             else:
                 self._generate_gdw_frame()
         except Exception as e:
             QMessageBox.critical(self, "错误", f"组帧失败：{str(e)}")
+
+    def _generate_csg_uplink_frame(self):
+        """协议14（南网上行通信规约）组帧：68 L L 68 C A AFN SEQ 信息体 CS 16。"""
+        from csg_uplink_frame_gen import BuildError as _BuildError
+        from csg_uplink_parser import CSGUplinkParser
+
+        try:
+            hex_str = self._ensure_csg_uplink_gen().build().replace(" ", "")
+        except _BuildError as e:
+            QMessageBox.warning(self, "组帧失败", str(e))
+            return
+        frame = bytes.fromhex(hex_str)
+        self.result_hex.setText(
+            " ".join(hex_str[i:i + 2] for i in range(0, len(hex_str), 2)))
+        try:
+            rows = CSGUplinkParser().parse_to_table(frame)
+        except Exception:
+            rows = []
+        table_rows = []
+        for item in rows:
+            it = tuple(item)
+            table_rows.append(it + ("",) * max(0, 4 - len(it)))
+        self._populate_preview_table(table_rows)
+        self._on_serial_log(f"[协议14 组帧] {len(frame)} 字节")
+
+    def _generate_csg_frame(self):
+        """协议9（南网新一代载波）链路层组帧：MPDU = FC(16B) + PB×N"""
+        try:
+            result = self.csg_gen.build()
+        except CsgFrameBuildError as e:
+            QMessageBox.warning(self, "组帧失败", str(e))
+            return
+        if result is None:
+            QMessageBox.warning(self, "警告", "请先选择测试模式并填写参数")
+            return
+        out = self.csg_gen.output_bytes(result)
+        if not out:
+            QMessageBox.warning(self, "警告", "当前输出层次为空，请检查输出层次选择")
+            return
+        hex_str = out.hex().upper()
+        self.result_hex.setText(
+            " ".join(hex_str[i:i + 2] for i in range(0, len(hex_str), 2)))
+        rows = []
+        try:
+            rows = self.csg_gen.parse_rows(result)
+        except Exception:
+            rows = []
+        table_rows = []
+        for item in rows:
+            it = tuple(item)
+            table_rows.append(it + ("",) * max(0, 4 - len(it)))
+        self._populate_preview_table(table_rows)
+        self._on_serial_log(
+            f"[协议9 组帧] {self.csg_gen.output_layer()} / {len(out)} 字节")
+
+    def _generate_yw645_frame(self):
+        """协议13（依瓦定制645）组帧：高字节在前的地址 + 12bit 长度 + 数据域 +0x33。"""
+        try:
+            frame = self.yw645_gen.build()
+        except YW645BuildError as e:
+            QMessageBox.warning(self, "组帧失败", str(e))
+            return
+        hex_str = frame.hex().upper()
+        self.result_hex.setText(
+            " ".join(hex_str[i:i + 2] for i in range(0, len(hex_str), 2)))
+        try:
+            rows = YW645Parser().parse_to_table(frame)
+        except Exception:
+            rows = []
+        table_rows = []
+        for item in rows:
+            it = tuple(item)
+            table_rows.append(it + ("",) * max(0, 4 - len(it)))
+        self._populate_preview_table(table_rows)
+        self._on_serial_log(f"[协议13 组帧] {yw645_describe_frame(frame)}")
 
     def _generate_modular_frame(self):
         """生成模组化终端功能模块接口帧"""
@@ -4171,6 +4422,11 @@ class FrameGenWidget(QWidget):
 
     def _on_add_to_preset_clicked(self):
         """将当前生成的帧添加到预设按钮"""
+        if self.protocol_mode == "csg":
+            # 协议9 无预设命令库；preset_buttons 对未知协议会兜底写 GW_command.json
+            QMessageBox.information(
+                self, "暂不支持", "协议9（南网新一代载波）暂无预设命令库，暂不支持添加到预设。")
+            return
         frame_hex = self.result_hex.toPlainText().strip()
         if not frame_hex:
             QMessageBox.warning(self, "警告", "当前没有可添加的帧，请先生成帧")
@@ -4280,6 +4536,19 @@ class FrameGenWidget(QWidget):
                 "data": self.modular_data.text(),
             }
 
+        if self.protocol_mode == "csg":
+            # 协议9 链路层组帧：五层折叠区的展开/收起状态（collapsible collect_state）
+            snapshot["csg"] = {"link_state": self.csg_gen.link_state()}
+
+        if self.protocol_mode == "yw645":
+            # 协议13 组帧：地址/广播/模式/数据项/透传数据域/写模式命令码
+            snapshot["yw645"] = self.yw645_gen.get_state()
+
+        if self.protocol_mode == "csg_uplink":
+            # 协议14 组帧：地址域/控制域/AFN/信息体表格
+            self._ensure_csg_uplink_gen()
+            snapshot["csg_uplink"] = self.csg_uplink_gen.get_state()
+
         # 收集字段值
         try:
             snapshot["field_values"] = self._collect_values()
@@ -4340,6 +4609,32 @@ class FrameGenWidget(QWidget):
                     if self.modular_combo.itemData(i) == tpl_key:
                         self.modular_combo.setCurrentIndex(i)
                         break
+
+        # 恢复协议9 链路层组帧的折叠状态
+        csg = config.get("csg")
+        if csg and hasattr(self, "csg_gen"):
+            link_state = csg.get("link_state")
+            if link_state:
+                try:
+                    self.csg_gen.apply_link_state(link_state)
+                except Exception:
+                    pass
+
+        # 恢复协议13（依瓦定制645）组帧状态
+        yw = config.get("yw645")
+        if yw and hasattr(self, "yw645_gen"):
+            try:
+                self.yw645_gen.apply_state(yw)
+            except Exception:
+                pass
+
+        # 恢复协议14（南网上行通信规约）组帧状态
+        cu = config.get("csg_uplink")
+        if cu and getattr(self, "csg_uplink_gen", None) is not None:
+            try:
+                self.csg_uplink_gen.apply_state(cu)
+            except Exception:
+                pass
 
         # 恢复南网配置
         south = config.get("south", {})
@@ -4549,6 +4844,11 @@ class FrameGenWidget(QWidget):
             elif self.protocol_mode == "modular":
                 table_data = ModularIfaceParser().parse_to_table(frame)
                 key_fields = ("  控制码", "  帧序号(FID)", "  传输方向(DIR)", "控制域")
+            elif self.protocol_mode == "csg_uplink":
+                from csg_uplink_parser import CSGUplinkParser
+
+                table_data = CSGUplinkParser().parse_to_table(frame)
+                key_fields = ("应用功能码AFN", "控制域C", "长度L")
             else:
                 table_data = self.gdw_parser.parse_to_table(frame)
                 key_fields = ("应用功能码(AFN)", "数据单元标识(DT)", "传输方向")
@@ -4605,9 +4905,26 @@ class FrameGenWidget(QWidget):
     # ------------------------------------------------------------------
     # 协议模式切换
     # ------------------------------------------------------------------
+    def _on_resp_switch_toggled(self, checked: bool):
+        """用户手动切换：记住偏好（切走再切回来会恢复这个偏好）。"""
+        self._resp_pref = bool(checked)
+        self.resp_group.setVisible(bool(checked))
+
+    def _apply_resp_visibility(self, force_hidden: bool):
+        """协议9（纯组帧）默认收起「响应帧解析」，把高度让给实时解析预览。
+
+        ``force_hidden`` 只覆盖显示状态，**不改用户偏好** —— 所以在协议9 里勾开、
+        再切到别的协议、再切回协议9，仍按用户偏好显示。
+        """
+        show = False if force_hidden else bool(getattr(self, "_resp_pref", True))
+        self.show_resp_check.blockSignals(True)
+        self.show_resp_check.setChecked(show)
+        self.show_resp_check.blockSignals(False)
+        self.resp_group.setVisible(show)
+
     def set_protocol_mode(self, mode: str):
-        """切换协议模式: 'south'/'gdw'/'dlt698'/'dlt645'/'modular'"""
-        if mode not in ("south", "gdw", "dlt698", "dlt645", "modular"):
+        """切换协议模式: 'south'/'gdw'/'dlt698'/'dlt645'/'modular'/'csg'/'yw645'"""
+        if mode not in ("south", "gdw", "dlt698", "dlt645", "modular", "csg", "yw645", "csg_uplink"):
             return
         self.protocol_mode = mode
 
@@ -4650,6 +4967,25 @@ class FrameGenWidget(QWidget):
             self.mode_group.setVisible(False)
             self._custom_mode = False
             self._axdr_mode = False
+        elif mode == "csg":
+            # 协议9：命令选择区/字段模式区/EB 区全部隐藏，只留链路层组帧页
+            # （五层折叠：FC / PBH / MAC 头 / MSDU / ED）。
+            self.cmd_select_group.setVisible(False)
+            self.mode_custom_rb.setVisible(False)
+            self._custom_mode = False
+            self._axdr_mode = False
+        elif mode == "yw645":
+            # 协议13（依瓦定制645）：同样只留专属组帧页（协议6 的 645 schema 不适用）
+            self.cmd_select_group.setVisible(False)
+            self.mode_custom_rb.setVisible(False)
+            self._custom_mode = False
+            self._axdr_mode = False
+        elif mode == "csg_uplink":
+            # 协议14（南网上行通信规约）：只留专属组帧页（1376 系 AFN schema 不适用）
+            self.cmd_select_group.setVisible(False)
+            self.mode_custom_rb.setVisible(False)
+            self._custom_mode = False
+            self._axdr_mode = False
         else:  # gdw
             self.cmd_select_group.setTitle("AFN+Fn 选择")
             self.afn_fn_combo.setVisible(True)
@@ -4675,6 +5011,40 @@ class FrameGenWidget(QWidget):
         self._rebuild_form(None)
         self.result_hex.clear()
         self.preview_table.setRowCount(0)
+
+        # 协议9：切到链路层组帧页；_rebuild_form(None) 刚把 mode_group 设成可见，
+        # 所以必须在这之后重新隐藏。preset 按钮一并隐藏：协议9 无预设库，
+        # preset_buttons._get_path("csg") 会走兜底分支误写 GW_command.json。
+        if mode == "csg":
+            self.mode_group.setVisible(False)
+            self.eb_gen_group.setVisible(False)
+            self.left_stack.setCurrentIndex(1)
+            self.add_preset_btn.setVisible(False)
+            self.add_preset_btn.setToolTip("协议9 暂无预设命令库，暂不支持添加到预设")
+            self._schedule_realtime_update()
+        elif mode == "yw645":
+            # 协议13：切到专属组帧页；有独立预设库（YW645_command.json），保留「添加到预设」
+            self.mode_group.setVisible(False)
+            self.eb_gen_group.setVisible(False)
+            self.left_stack.setCurrentIndex(2)
+            self.add_preset_btn.setVisible(True)
+            self.add_preset_btn.setToolTip("")
+            self._schedule_realtime_update()
+        elif mode == "csg_uplink":
+            # 协议14：切到专属组帧页（索引 3，惰性构造）
+            self.mode_group.setVisible(False)
+            self.eb_gen_group.setVisible(False)
+            self._ensure_csg_uplink_gen()
+            self.left_stack.setCurrentIndex(3)
+            self.add_preset_btn.setVisible(True)
+            self.add_preset_btn.setToolTip("")
+            self._schedule_realtime_update()
+        else:
+            self.left_stack.setCurrentIndex(0)
+            self.add_preset_btn.setVisible(True)
+            self.add_preset_btn.setToolTip("")
+        # 协议9 是纯组帧场景：默认收起「响应帧解析」，把高度让给实时解析预览
+        self._apply_resp_visibility(mode == "csg")
 
         # dlt645 的命令选择必须在上面「清空当前选择」之后重建：
         # 否则 _current_dlt645_key 会被同步清空，生成时误报「请先选择命令」。
@@ -4740,6 +5110,10 @@ class FrameGenWidget(QWidget):
             self.modular_dta2.setText("0")
             self.modular_dtb.setText("00")
             self.modular_data.clear()
+        if hasattr(self, "yw645_gen"):
+            self.yw645_gen.reset()
+        if getattr(self, "csg_uplink_gen", None) is not None:
+            self.csg_uplink_gen.reset()
         self.result_hex.clear()
         if hasattr(self, 'preview_table'):
             self.preview_table.setRowCount(0)
@@ -4751,3 +5125,20 @@ class FrameGenWidget(QWidget):
         self.mode_custom_rb.setChecked(False)
         self._rebuild_form(None)
         self.reset_eb_generator()
+        # reset 不改协议模式，但 _rebuild_form(None) 会把「字段模式」组设为可见，
+        # 而 mode_group 是 left_layout 的兄弟节点（不在栈里），协议9 下必须重新隐藏，
+        # 否则组帧页旁边会多出一个无用的字段模式组。
+        if hasattr(self, "left_stack"):
+            if self.protocol_mode == "csg":
+                self.mode_group.setVisible(False)
+                self.left_stack.setCurrentIndex(1)
+            elif self.protocol_mode == "yw645":
+                self.mode_group.setVisible(False)
+                self.left_stack.setCurrentIndex(2)
+            elif self.protocol_mode == "csg_uplink":
+                self.mode_group.setVisible(False)
+                self.left_stack.setCurrentIndex(3)
+            else:
+                self.left_stack.setCurrentIndex(0)
+        if hasattr(self, "_apply_resp_visibility"):
+            self._apply_resp_visibility(self.protocol_mode == "csg")
