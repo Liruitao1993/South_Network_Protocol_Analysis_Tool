@@ -103,8 +103,12 @@ testfile.txt
 /dlt645_addr_history.json
 # 串口工具运行时命令/参数（自动落盘，随使用变化，不入库）
 /serial_tool_config.json
+# 蓝牙工具运行时参数（自定义报文按钮/特征码/日志设置，自动落盘，不入库）
+/bluetooth_tool_config.json
 # 串口工具「导出命令」的默认文件名（用户手动导出物，不入库）
 /commands.json
+# 协议9 组帧「仿照模板」（本地参数集 + 参考报文，运行时生成、用户私有，不跟踪）
+/csg_frame_templates.json
 # Git worktree 本地隔离区（不入库）
 .worktrees/
 
@@ -123,3 +127,23 @@ _internal/
 *.rar
 dist*.zip
 build*.zip
+
+# ── 参考/学习用外部项目（非本项目源码，体积大：蓝牙转串口工具02 ≈ 1.3GB）──────
+# 用户口径：这类目录只是参考学习内容，不随本项目推送
+/蓝牙转串口工具02/
+
+# ── 运行时敏感/本地数据（含密钥、口令、用户数据，绝不入库）─────────────────
+/llm_preprocess_config.json
+/admin_config.json
+/reflex_web/reflex_web/data/
+/reflex_web/reflex_web/data
+/dlt645_sim_data.json
+
+# ── 本地产物（工具/备份/临时脚本）────────────────────────────────────────
+/AGENTS.md.backup.*
+/_tmp_*.py
+/.aoci/
+/aoci.txt
+/aoci.code.txt
+/aoci.meta.txt
+/.acl-recovery/
