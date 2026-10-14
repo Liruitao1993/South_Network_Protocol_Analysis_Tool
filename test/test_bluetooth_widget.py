@@ -19,6 +19,9 @@
   [13] 自定义按钮的「协议 + 地址」：下拉联动、动态字段、预览、发送时替换+重算、失败不发
   [14] 自定义报文区空间治理：滚动封顶、日志不被挤没、收起/展开、分栏尺寸记忆
   [15] 反例自检
+  [16] 批量替换地址（按协议类别）：默认作用域=已绑定本协议、快捷全选/只选本协议、
+      逐按钮用自己的帧预检（失败标原因且默认不勾）、强行勾选二次确认后跳过、
+      清除绑定模式、端到端写回/tooltip/日志/落盘/发送用新地址、工具栏 6 按钮不裁字
 
 运行: python test/test_bluetooth_widget.py
 """
@@ -1459,6 +1462,317 @@ def test_custom_area_space():
     tab2.cleanup()
 
 
+# ── [16] 批量替换地址（按协议类别，1.23.83）─────────────────────────────────
+
+SOUTH_FRAME = ("68 28 00 20 00 00 00 00 00 00 22 00 00 00 00 00 02 00 01 02 02 "
+               "E8 00 00 00 1E 00 09 00 01 02 03 04 05 06 07 08 09 85 16")
+
+
+def _batch_fixture():
+    """4 个按钮：南网（已绑定）/ 坏 HEX（未绑定）/ 645（已绑定）/ 未绑定（南网帧）。"""
+    return [
+        {"name": "南网A", "data": SOUTH_FRAME, "isHex": True, "protocol": 0,
+         "addr": {"src": "000000000000", "dst": "220000000000"}},
+        {"name": "坏HEX", "data": "68 12 0G", "isHex": True},
+        {"name": "645读", "data": DLT645_FRAME, "isHex": True, "protocol": 6,
+         "addr": {"addr": "000000000033"}},
+        {"name": "未绑定", "data": SOUTH_FRAME, "isHex": True},
+    ]
+
+
+def _names(dialog, indices):
+    return [dialog._buttons[i]["name"] for i in indices]
+
+
+def test_batch_address_dialog():
+    section("[16] 批量替换地址对话框：默认作用域 / 逐按钮预检 / 跳过确认 / 清除模式")
+
+    buttons = _batch_fixture()
+
+    # ── 默认作用域 ──
+    dialog = btw.BatchAddressDialog(None, buttons, current_protocol=0)
+    try:
+        check("协议下拉 =「（清除协议与地址）」+ 6 个支持协议",
+              dialog.combo_protocol.count() == 1 + len(fix.SUPPORTED_PROTOCOLS),
+              dialog.combo_protocol.count())
+        check("初值 = 传入的当前协议", dialog.protocol_index() == 0, dialog.protocol_index())
+        check("默认只勾选「已绑定该协议」的按钮",
+              _names(dialog, dialog._checked_indices()) == ["南网A"],
+              _names(dialog, dialog._checked_indices()))
+        check("未填地址 → 预览要求先填",
+              "请先填写" in dialog.lbl_preview.text(), dialog.lbl_preview.text())
+        check("作用域摘要给出各按钮现状",
+              "南网协议" in dialog._rows[0].text() and "未绑定" in dialog._rows[1].text(),
+              [item.text() for item in dialog._rows])
+
+        # 快捷操作
+        dialog._set_all(True)
+        check("全选 → 4 个", len(dialog._checked_indices()) == 4, len(dialog._checked_indices()))
+        dialog._set_all(False)
+        check("全不选 → 0 个", dialog._checked_indices() == [])
+        dialog._set_all(True)
+        dialog._select_scope()
+        check("只选本协议 → 回到「南网A」",
+              _names(dialog, dialog._checked_indices()) == ["南网A"],
+              _names(dialog, dialog._checked_indices()))
+
+        # ── 填地址 → 逐按钮预检（只标勾选行）──
+        dialog._addr_edits["src"].setText("010203040506")
+        dialog._addr_edits["dst"].setText("000000000001")
+        QApplication.processEvents()
+        check("可应用的行不带 ⚠", "⚠" not in dialog._rows[0].text(), dialog._rows[0].text())
+        check("未勾选的行不产生噪声（645 / 未绑定行无 ⚠）",
+              all("⚠" not in dialog._rows[i].text() for i in (1, 2, 3)),
+              [dialog._rows[i].text() for i in (1, 2, 3)])
+        check("预览给出「将写入 N 个按钮」+ 地址摘要",
+              "将写入 1 个按钮" in dialog.lbl_preview.text()
+              and "src=010203040506" in dialog.lbl_preview.text(), dialog.lbl_preview.text())
+        check("地址提示给出在线字节与替换预览",
+              "06 05 04 03 02 01" in dialog.lbl_addr_hint.text()
+              and "预览" in dialog.lbl_addr_hint.text(), dialog.lbl_addr_hint.text()[:200])
+        patches = dialog.result_patches()
+        check("补丁形状：{下标: {protocol, addr}}",
+              list(patches) == [0] and patches[0]["protocol"] == 0
+              and patches[0]["addr"] == {"src": "010203040506", "dst": "000000000001"},
+              patches)
+
+        # 勾上坏 HEX → 立刻标出原因
+        dialog._rows[1].setCheckState(Qt.CheckState.Checked)
+        QApplication.processEvents()
+        check("勾上坏 HEX → 该行给出可读原因",
+              "报文本身无效" in dialog._rows[1].text(), dialog._rows[1].text())
+        check("预览写明将被跳过的个数",
+              "1 个预检失败将被跳过" in dialog.lbl_preview.text(), dialog.lbl_preview.text())
+        dialog._rows[1].setCheckState(Qt.CheckState.Unchecked)
+        QApplication.processEvents()
+
+        # ── 切协议 → 默认勾选与地址框随之切换 ──
+        dialog.combo_protocol.setCurrentIndex(dialog.combo_protocol.findData(6))
+        QApplication.processEvents()
+        check("切到 645 → 默认勾选变「645读」",
+              _names(dialog, dialog._checked_indices()) == ["645读"],
+              _names(dialog, dialog._checked_indices()))
+        check("切协议 → 地址框重建为「表地址」", list(dialog._addr_edits) == ["addr"],
+              list(dialog._addr_edits))
+        check("切协议后不误用上一个协议的输入（表地址为空）",
+              dialog._addr_edits["addr"].text() == "", dialog._addr_edits["addr"].text())
+
+        # ── 清除模式 ──
+        dialog.combo_protocol.setCurrentIndex(0)
+        QApplication.processEvents()
+        check("清除模式：地址区隐藏", dialog.addr_group.isVisible() is False)
+        check("清除模式：默认勾选「已绑定任意协议」的按钮",
+              _names(dialog, dialog._checked_indices()) == ["南网A", "645读"],
+              _names(dialog, dialog._checked_indices()))
+        check("清除模式：不做字段预检", dialog._errors == {}, dialog._errors)
+        check("清除模式：预览说明清除个数",
+              "清除这 2 个按钮" in dialog.lbl_preview.text(), dialog.lbl_preview.text())
+        clears = dialog.result_patches()
+        check("清除模式补丁 = protocol None + 空 addr",
+              sorted(clears) == [0, 2]
+              and all(v == {"protocol": None, "addr": {}} for v in clears.values()), clears)
+    finally:
+        dialog.deleteLater()
+
+    # ── 未勾选 / 未填地址 → 拦下 ──
+    dialog = btw.BatchAddressDialog(None, buttons, current_protocol=0)
+    try:
+        accepted = {"v": False}
+        with patch.object(btw.QDialog, "accept", lambda self: accepted.update(v=True)):
+            dialog._set_all(False)
+            dialog._on_accept()
+            check("未勾选任何按钮 → 不 accept", accepted["v"] is False, accepted)
+            dialog._select_scope()
+            dialog._on_accept()
+            check("选了协议但没填地址 → 不 accept", accepted["v"] is False, accepted)
+    finally:
+        dialog.deleteLater()
+
+    # ── 强行勾上失败项：确认 / 拒绝两条路径 ──
+    dialog = btw.BatchAddressDialog(None, buttons, current_protocol=0)
+    try:
+        dialog._addr_edits["src"].setText("010203040506")
+        dialog._addr_edits["dst"].setText("000000000001")
+        dialog._rows[1].setCheckState(Qt.CheckState.Checked)
+        QApplication.processEvents()
+        asked = []
+
+        def _answer_no(*args, **kwargs):
+            asked.append(args[1] if len(args) > 1 else "")
+            return QMessageBox.StandardButton.No
+
+        accepted = {"v": False}
+        with patch.object(btw.QMessageBox, "question", _answer_no):
+            with patch.object(btw.QDialog, "accept", lambda self: accepted.update(v=True)):
+                dialog._on_accept()
+        check("二次确认选「否」→ 一个按钮都不改（不 accept）",
+              accepted["v"] is False and asked == ["部分按钮无法应用"], (accepted, asked))
+        check("拒绝后不残留跳过记录", dialog.result_skipped() == [], dialog.result_skipped())
+
+        with patch.object(btw.QMessageBox, "question",
+                          lambda *a, **k: QMessageBox.StandardButton.Yes):
+            dialog._on_accept()
+        check("二次确认选「是」→ 只保留可应用的按钮",
+              sorted(dialog.result_patches()) == [0], dialog.result_patches())
+        check("跳过项带原因（供调用方写日志）",
+              [i for i, _r in dialog.result_skipped()] == [1]
+              and "报文本身无效" in dialog.result_skipped()[0][1], dialog.result_skipped())
+    finally:
+        dialog.deleteLater()
+
+    # ── 勾选项全部失败 → 不改动 ──
+    dialog = btw.BatchAddressDialog(None, [
+        {"name": "坏1", "data": "68 12 0G", "isHex": True, "protocol": 0,
+         "addr": {"src": "000000000001"}},
+        {"name": "坏2", "data": "68 12 0G", "isHex": True, "protocol": 0,
+         "addr": {"src": "000000000001"}},
+    ], current_protocol=0)
+    try:
+        dialog._addr_edits["src"].setText("010203040506")
+        QApplication.processEvents()
+        accepted = {"v": False}
+        with patch.object(btw.QDialog, "accept", lambda self: accepted.update(v=True)):
+            dialog._on_accept()
+        check("全部预检失败 → 不 accept，且补丁为空（状态自洽）",
+              accepted["v"] is False and dialog.result_patches() == {},
+              (accepted, dialog.result_patches()))
+        check("全部失败时跳过项仍被记录（原因可读）",
+              [i for i, _r in dialog.result_skipped()] == [0, 1],
+              dialog.result_skipped())
+    finally:
+        dialog.deleteLater()
+
+
+def _fake_batch_address_dialog(patches, protocol, summary, skipped=None, sink=None):
+    """打桩的批量地址对话框（记录收到的当前协议，便于断言默认作用域来源）。"""
+
+    class _Fake:
+        def __init__(self, parent=None, buttons=None, current_protocol=None):
+            self.current_protocol = current_protocol
+            if sink is not None:
+                sink.append(self)
+
+        def exec(self):
+            return QDialog.DialogCode.Accepted
+
+        def result_patches(self):
+            return dict(patches)
+
+        def protocol_index(self):
+            return protocol
+
+        def result_summary(self):
+            return summary
+
+        def result_skipped(self):
+            return list(skipped or [])
+
+    return _Fake
+
+
+def test_batch_address_tab():
+    section("[16b] 批量替换地址：端到端（写回 / tooltip / 日志 / 落盘 / 发送用新地址）")
+
+    worker = FakeBluetoothWorker()
+    tab = make_tab(worker)
+    worker.become_connected()
+    tab.set_protocol_provider(lambda: 0)
+    tab._set_buttons(_batch_fixture())
+    QApplication.processEvents()
+
+    created = []
+    fake = _fake_batch_address_dialog(
+        {0: {"protocol": 0, "addr": {"src": "010203040506", "dst": "000000000001"}}},
+        0, "南网协议 · src=010203040506，dst=000000000001",
+        skipped=[(3, "报文本身无效：HEX 位数不成对（68 12 0）")], sink=created,
+    )
+    check("工具栏出现「批量地址…」",
+          tab.btn_custom_batch_addr.text() == "批量地址…"
+          and "批量" in tab.btn_custom_batch_addr.toolTip(),
+          (tab.btn_custom_batch_addr.text(), tab.btn_custom_batch_addr.toolTip()))
+    with patch.object(btw, "BatchAddressDialog", fake):
+        tab.btn_custom_batch_addr.click()
+        QApplication.processEvents()
+    check("对话框收到「主窗口当前协议」（默认作用域来源）",
+          bool(created) and created[0].current_protocol == 0,
+          created[0].current_protocol if created else None)
+    check("端到端：目标按钮写入 protocol + addr",
+          tab._buttons[0].get("protocol") == 0
+          and tab._buttons[0].get("addr") == {"src": "010203040506", "dst": "000000000001"},
+          tab._buttons[0])
+    check("端到端：其余按钮未被牵连",
+          "protocol" not in tab._buttons[1]
+          and tab._buttons[2].get("addr") == {"addr": "000000000033"}
+          and "protocol" not in tab._buttons[3], tab._buttons)
+    check("端到端：tooltip 反映新地址",
+          "源地址=010203040506" in tab._custom_buttons[0].toolTip(),
+          tab._custom_buttons[0].toolTip())
+    check("端到端：日志给出汇总（个数 + 地址摘要）",
+          "批量替换" in log_text(tab) and "共 1 个按钮" in log_text(tab), log_text(tab)[-220:])
+    check("端到端：被跳过的按钮写进日志",
+          "已跳过「未绑定」" in log_text(tab), log_text(tab)[-220:])
+
+    worker.sent.clear()
+    tab._on_custom_clicked(0)
+    QApplication.processEvents()
+    expect = fix.apply(bytes.fromhex(SOUTH_FRAME.replace(" ", "")), 0,
+                       {"src": "010203040506", "dst": "000000000001"})
+    check("端到端：点按钮发出的就是批量设置的新地址（校验已重算）",
+          expect.ok and worker.sent == [expect.frame], (worker.sent, expect.error))
+
+    tab._save_persisted()
+    tab2 = make_tab()
+    check("端到端：落盘（新页面读回批量设置结果）",
+          tab2._buttons[0].get("addr") == {"src": "010203040506", "dst": "000000000001"},
+          tab2._buttons[0])
+    tab2.cleanup()
+
+    # ── 清除绑定路径 ──
+    fake_clear = _fake_batch_address_dialog(
+        {0: {"protocol": None, "addr": {}}, 2: {"protocol": None, "addr": {}}},
+        None, "清除协议与地址",
+    )
+    with patch.object(btw, "BatchAddressDialog", fake_clear):
+        tab.btn_custom_batch_addr.click()
+        QApplication.processEvents()
+    check("清除端到端：protocol / addr 两键都被移除",
+          "protocol" not in tab._buttons[0] and "addr" not in tab._buttons[0]
+          and "protocol" not in tab._buttons[2] and "addr" not in tab._buttons[2], tab._buttons)
+    check("清除端到端：日志写明批量清除", "批量清除" in log_text(tab), log_text(tab)[-220:])
+    check("清除端到端：tooltip 不再提地址替换",
+          "地址替换" not in tab._custom_buttons[0].toolTip(), tab._custom_buttons[0].toolTip())
+    worker.sent.clear()
+    tab._on_custom_clicked(0)
+    QApplication.processEvents()
+    check("清除端到端：发送恢复逐字节原样",
+          worker.sent == [bytes.fromhex(SOUTH_FRAME.replace(" ", ""))], worker.sent)
+    tab.cleanup()
+
+    # ── 无按钮时只提示、不开对话框 ──
+    tab3 = make_tab()
+    tab3._set_buttons([])                      # 沙箱配置里可能有上一个用例留下的按钮
+    created3 = []
+    with patch.object(btw, "BatchAddressDialog",
+                      _fake_batch_address_dialog({}, 0, "", sink=created3)):
+        tab3.btn_custom_batch_addr.click()
+        QApplication.processEvents()
+    check("无按钮 → 不开对话框（只提示）", created3 == [], created3)
+    tab3.cleanup()
+
+    # ── 工具栏宽度（陷阱 63：show() 之后再量）──
+    tab4 = make_tab()
+    tab4.show()
+    settle()
+    btns = [tab4.btn_custom_add, tab4.btn_custom_batch, tab4.btn_custom_batch_addr,
+            tab4.btn_custom_export, tab4.btn_custom_import, tab4.btn_custom_clear]
+    cut = [button.text() for button in btns if button.width() < button.sizeHint().width()]
+    check("工具栏 6 个按钮都不裁字（width ≥ sizeHint）", cut == [], cut)
+    check("新按钮未写死宽度（maximumWidth 未被收窄）",
+          tab4.btn_custom_batch_addr.maximumWidth() >= 16777215,
+          tab4.btn_custom_batch_addr.maximumWidth())
+    tab4.cleanup()
+
+
 def test_negatives():
     section("[15] 反例自检（判据有效）")
 
@@ -1474,6 +1788,15 @@ def test_negatives():
     check("parse_button_lines 对空文本返回空",
           btw.parse_button_lines("")[0] == [])
     tab.cleanup()
+
+    # 批量替换地址：断言不是恒真 —— 未跑批量前，未绑定按钮确实没有 protocol/addr
+    tab5 = make_tab()
+    tab5._set_buttons(_batch_fixture())
+    check("反例：未跑批量前「未绑定」按钮确实没有 protocol（[16b] 的断言非恒真）",
+          "protocol" not in tab5._buttons[3] and "addr" not in tab5._buttons[3],
+          tab5._buttons[3])
+    check("反例：坏 HEX 按钮也没有 protocol", "protocol" not in tab5._buttons[1], tab5._buttons[1])
+    tab5.cleanup()
 
 
 def main():
@@ -1497,6 +1820,8 @@ def main():
     test_mtu_live_limits()
     test_button_address()
     test_custom_area_space()
+    test_batch_address_dialog()
+    test_batch_address_tab()
     test_negatives()
 
     print()

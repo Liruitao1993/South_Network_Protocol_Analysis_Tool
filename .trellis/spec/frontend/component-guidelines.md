@@ -452,6 +452,38 @@ engine = self._engine_factory()            # 否则才是发给本虚拟表的�
   因此选「645」处理依瓦帧也会成功（地址按 645 字节序写）—— 用户需选对协议；
   `frame_addr_fix` v1 只支持 0/6/7/8/13/14，9/10/11/12 给出可读「暂不支持」。
 
+### 7i. 蓝牙自定义按钮的「按协议类别批量替换地址」（1.23.84）
+
+> 源自任务 10-14-bt-batch-address（用户 →「自定义按钮也需要支持批量替换地址的能力，通过按照协议类别统一进行替换」）。
+> 与 §7f（单按钮「发送时替换」）、§7h（串口表内写回）**同一引擎**：地址字段/长度/算法都走 `frame_addr_fix`。
+
+- **入口 / 结构**：底部工具栏「批量地址…」→ `BatchAddressDialog`。对话框**只产出补丁**
+  （`result_patches()` → `{下标: {"protocol": int|None, "addr": dict}}`），写回由页面统一走 `_set_buttons`
+  （重建网格 + 落盘一次）。**不要在对话框里直接改按钮列表**（否则「全或无」与日志无法集中处理）。
+- **默认作用域 = 已绑定所选协议**（清除模式 = 已绑定任意协议），另有 全选 / 全不选 / 只选本协议；
+  协议下拉第 0 项 =「（清除协议与地址）」（此时 `protocol_index() is None`）。
+- **逐按钮用「自己的报文」预检**（不是只按第一个按钮）：`_precheck` → `parse_plain_text` →
+  `frame_addr_fix.check_values(protocol, values, frame)` → `frame_addr_fix.apply(frame, ...)`。
+  理由：698.45 的 SA 长度由**该帧的地址特征字节**决定，不同按钮可以不同。
+- **只对勾选的行算错误**：未勾选的行不许出现 ⚠（给南网按钮换地址时，645 的按钮不该被标「不是南网帧」
+  —— 那是噪声，会把用户带偏）。勾选变化要触发重算（`_on_item_changed` → `_refresh_marks`）。
+- **失败项语义（本任务的核心口径）**：预检失败的行标原因且**默认不勾**（用户不动勾选 ⇒ 天然全或无）；
+  用户强行勾上 → `QMessageBox.question` 二次确认「将跳过这 N 个」→ 确认后只改可应用者、跳过项逐条 warn
+  日志；**拒绝确认则一个按钮都不改**；全部失败时不 `accept()` 且 `result_patches()` 为空（状态自洽）。
+- **清除模式**：返回 `{"protocol": None, "addr": {}}`，页面侧 `pop` 掉两个键（发送时恢复按原样发送）。
+- **共用校验入口（单一来源）**：`frame_addr_fix.addr_lengths_for_frame(frame)`（由帧定 698.45 SA 长度）与
+  `check_values(...) -> (回显项, [(标签, 原因)])` 由单按钮编辑对话框与批量对话框共用（单按钮侧行为/文案
+  逐字符不变）。纯逻辑层**不拼 UI 文案**（`✓`/`⚠` 由界面拼）。
+- **工具栏宽度**：本区工具栏 6 个按钮 + 尾部 stretch，**无行内提示标签**（「右键可编辑 / 删除 / 移位」在按钮
+  tooltip 末行）。**不要**用 `setFixedWidth`（陷阱 63）；新按钮走 `fit_btn_width`（只设下限）。
+- **本页不得 import `main_gui`** ⇒ 工具栏没有 FlowLayout（它住 `main_gui.py`）可用：靠「删掉占宽的提示标签」
+  换宽度，实测 10 / 14 / 16 / 24 号字全不裁字。若将来字号再变导致裁字，再单独立项抽 `flow_layout.py`。
+- **回归**：`test_bluetooth_widget.py` [16]（对话框直测 + 端到端写回 / tooltip / 日志 / 落盘 / 发送用新地址 /
+  清除还原 / 工具栏宽度）；`test_bluetooth_addr_fix.py` [6]（共享入口边界 + 与 `apply()` 对拍同源）。
+- **变异反证（本任务已做，均干净变红后逐字节还原）**：① 默认勾选改成「全勾」→ 9 项红；
+  ② `_select_scope` 改成全选 → 5 项红；③ 跳过失败项时不弹二次确认（静默跳过）→ 2 项红；
+  ④ 清除模式只删 `protocol` 不删 `addr` → 1 项红。
+
 ### 8. Qt 陷阱（本项目实测）
 - **offscreen 无字体**：`QT_QPA_PLATFORM=offscreen` 下 `QFontDatabase: Cannot find font directory ...`，绘制出的文字是豆腐块 → 断言只能查尺寸/颜色/像素多样性；**要目视核对文字排版必须用默认平台**（`QApplication([])` 不设 offscreen + `widget.grab()` / `QImage.save()`，不需要窗口真的可见）。
 - **`bytes(image.constBits())` 必须持有 QImage 引用**：`bytes(canvas.render_image(w, h).constBits())`（临时对象上取 buffer）会 **access violation（0xC0000005）**；先 `img = ...` 再 `bytes(img.constBits())`。

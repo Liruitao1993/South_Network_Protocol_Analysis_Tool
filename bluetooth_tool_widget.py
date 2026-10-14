@@ -763,16 +763,6 @@ class ButtonEditDialog(QDialog):
             return b""
         return hex_str_to_bytes(self.edit_content.toPlainText()) or b""
 
-    @staticmethod
-    def _addr_lengths(frame: bytes) -> Dict[str, int]:
-        """由帧决定的地址长度（目前只有 698.45 的 SA：地址特征字节低 4 位 + 1）。"""
-        if len(frame) < 12 or frame[0] != 0x68 or frame[-1] != 0x16:
-            return {}
-        declared = frame[1] | (frame[2] << 8)
-        if declared != len(frame) - 2:
-            return {}
-        return {"sa": 1 + (frame[4] & 0x0F)}
-
     def _refresh_addr_hint(self):
         """实时回显「地址会写成什么字节」；内容框可解析时给出替换后的校验变化预览。"""
         if not hasattr(self, "combo_protocol"):
@@ -789,19 +779,9 @@ class ButtonEditDialog(QDialog):
             return
 
         frame = self._current_frame_bytes()
-        lengths = self._addr_lengths(frame)
-        good, bad = [], []
-        for spec in fields:
-            text = values.get(spec.key, "")
-            if not text:
-                continue
-            data, err = frame_addr_fix.parse_address(text, spec, lengths.get(spec.key, spec.length))
-            if err and spec.kind == frame_addr_fix.KIND_SA698 and not lengths.get("sa"):
-                good.append(f"· {spec.label}：长度按帧内确定")
-            elif err:
-                bad.append(f"⚠ {spec.label}：{err}")
-            else:
-                good.append(f"✓ {spec.label} → {len(data)} 字节：{data.hex(' ')}")
+        # 逐字段解析与「批量替换地址」对话框共用同一份实现（单一来源：frame_addr_fix.check_values）
+        good, errors = frame_addr_fix.check_values(index, values, frame)
+        bad = [f"⚠ {label}：{reason}" for label, reason in errors]
         if frame:
             preview = frame_addr_fix.apply(frame, index, filled)
             if preview.ok:
@@ -840,16 +820,13 @@ class ButtonEditDialog(QDialog):
         if not any(values.values()):
             QMessageBox.warning(self, "未填地址", "已选择协议，请至少填写一个地址（否则发送时会直接报错）。")
             return False
-        fields = {spec.key: spec for spec in frame_addr_fix.fields_for(index)}
-        lengths = self._addr_lengths(self._current_frame_bytes())
-        for key, value in values.items():
-            spec = fields.get(key)
-            if spec is None or not value:
-                continue
-            _data, err = frame_addr_fix.parse_address(value, spec, lengths.get(key, spec.length))
-            if err:
-                QMessageBox.warning(self, "地址无效", f"{spec.label}：{err}")
-                return False
+        _ok_items, errors = frame_addr_fix.check_values(
+            index, values, self._current_frame_bytes()
+        )
+        if errors:
+            label, reason = errors[0]
+            QMessageBox.warning(self, "地址无效", f"{label}：{reason}")
+            return False
         return True
 
     def value(self) -> dict:
@@ -954,6 +931,411 @@ class BatchButtonDialog(QDialog):
 
     def buttons(self) -> List[dict]:
         return list(self._buttons)
+
+
+class BatchAddressDialog(QDialog):
+    """批量替换地址：按**协议类别**一次写入一批自定义报文按钮的 ``protocol`` + ``addr``。
+
+    口径（见 `.trellis/tasks/10-14-bt-batch-address/design.md`、spec §7h）：
+
+    * 作用域 = 「所选协议 + 勾选的按钮」；**默认勾选「已绑定该协议」的按钮**，
+      另有「全选 / 全不选 / 只选本协议」；
+    * **每个按钮用自己的报文预检**（如 698.45 的 SA 长度由该帧的地址特征字节决定，逐按钮可不同），
+      预检失败的行标注原因且**默认不勾**；
+    * 用户强行勾上失败项 → 二次确认「将跳过这 N 个」后照改其余；拒绝确认则**一个按钮都不改**；
+    * 协议下拉第 0 项 =「（清除协议与地址）」= 批量解绑（隐藏地址输入区）。
+
+    对话框只负责「收集作用域 + 预检 + 给出补丁」，**不直接改按钮列表**：
+    写回由调用方统一走 ``_set_buttons``（重建网格 + 落盘一次）。
+    """
+
+    CLEAR_LABEL = "（清除协议与地址）"
+
+    def __init__(self, parent=None, buttons=None, current_protocol=None):
+        super().__init__(parent)
+        self.setWindowTitle("批量替换地址")
+        self.resize(640, 560)
+        self._buttons: List[dict] = [dict(item or {}) for item in (buttons or [])]
+        self._addr_edits: Dict[str, QLineEdit] = {}
+        self._addr_values: Dict[str, str] = {}
+        self._rows: List[QListWidgetItem] = []
+        self._errors: Dict[int, str] = {}
+        self._skipped: List[int] = []
+        self._updating = False
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(8)
+
+        proto_row = QHBoxLayout()
+        proto_row.addWidget(QLabel("协议："))
+        self.combo_protocol = QComboBox()
+        self.combo_protocol.addItem(self.CLEAR_LABEL, None)
+        for label, index in frame_addr_fix.supported_choices():
+            self.combo_protocol.addItem(label, index)
+        proto_row.addWidget(self.combo_protocol, 1)
+        layout.addLayout(proto_row)
+
+        self.lbl_tip = QLabel("")
+        self.lbl_tip.setWordWrap(True)
+        layout.addWidget(self.lbl_tip)
+
+        layout.addWidget(QLabel("作用范围（勾选要修改的按钮）："))
+        self.list_buttons = QListWidget()
+        self.list_buttons.setWordWrap(True)
+        self.list_buttons.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.list_buttons.itemChanged.connect(self._on_item_changed)
+        layout.addWidget(self.list_buttons, 1)
+
+        quick = QHBoxLayout()
+        quick.setSpacing(6)
+        self.btn_all = QPushButton("全选")
+        self.btn_none = QPushButton("全不选")
+        self.btn_scope = QPushButton("只选本协议")
+        for btn in (self.btn_all, self.btn_none, self.btn_scope):
+            set_btn(btn, "secondary", "sm")
+            quick.addWidget(btn)
+        quick.addStretch()
+        layout.addLayout(quick)
+        self.btn_all.clicked.connect(lambda _c=False: self._set_all(True))
+        self.btn_none.clicked.connect(lambda _c=False: self._set_all(False))
+        self.btn_scope.clicked.connect(lambda _c=False: self._select_scope())
+
+        self.addr_group = QGroupBox("地址参数（按下述地址写入勾选的按钮）")
+        self.addr_form = QFormLayout(self.addr_group)
+        self.addr_form.setSpacing(6)
+        self.lbl_addr_hint = QLabel("")
+        self.lbl_addr_hint.setWordWrap(True)
+        self.addr_form.addRow(self.lbl_addr_hint)
+        layout.addWidget(self.addr_group)
+
+        self.lbl_preview = QLabel("")
+        self.lbl_preview.setWordWrap(True)
+        layout.addWidget(self.lbl_preview)
+
+        box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        box.button(QDialogButtonBox.StandardButton.Ok).setText("确定")
+        box.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+        set_btn(box.button(QDialogButtonBox.StandardButton.Ok), "primary")
+        set_btn(box.button(QDialogButtonBox.StandardButton.Cancel), "secondary")
+        box.accepted.connect(self._on_accept)
+        box.rejected.connect(self.reject)
+        layout.addWidget(box)
+
+        preset = None
+        if current_protocol is not None and frame_addr_fix.is_supported(int(current_protocol)):
+            preset = int(current_protocol)
+        position = self.combo_protocol.findData(preset)
+        self.combo_protocol.setCurrentIndex(position if position > 0 else 0)
+        self.combo_protocol.currentIndexChanged.connect(self._on_protocol_changed)
+        self._on_protocol_changed()
+
+    # ── 作用域 ─────────────────────────────────────────────────────────────
+
+    def protocol_index(self) -> Optional[int]:
+        """当前所选协议索引；``None`` = 清除模式。"""
+        data = self.combo_protocol.currentData()
+        return None if data is None else int(data)
+
+    def _mode_text(self) -> str:
+        index = self.protocol_index()
+        if index is None:
+            return "清除协议与地址"
+        return frame_addr_fix.protocol_label(index) or f"协议{index}"
+
+    @staticmethod
+    def _name_of(button: dict) -> str:
+        return str(button.get("name") or "未命名")
+
+    def _summary_of(self, button: dict) -> str:
+        """按钮当前的「协议 + 地址」摘要（未绑定 → 「未绑定」）。"""
+        protocol = button.get("protocol")
+        if protocol is None:
+            return "未绑定"
+        label = frame_addr_fix.protocol_label(protocol) or f"协议{protocol}"
+        values = core.normalize_addr_map(button.get("addr"))
+        fields = {spec.key: spec for spec in frame_addr_fix.fields_for(protocol)}
+        detail = "，".join(
+            f"{fields[key].label}={text}" for key, text in values.items() if key in fields
+        )
+        return f"{label}（{detail}）" if detail else f"{label}（未填地址）"
+
+    def _row_text(self, index: int) -> str:
+        text = f"{self._name_of(self._buttons[index])}　—　{self._summary_of(self._buttons[index])}"
+        reason = self._errors.get(index)
+        if reason:
+            text += f"\n      ⚠ {reason}（默认不勾选）"
+        return text
+
+    def _default_checked(self, index: int) -> bool:
+        """默认勾选规则：选了协议 → 已绑定该协议的按钮；清除模式 → 已绑定任意协议的按钮。"""
+        protocol = self._buttons[index].get("protocol")
+        now = self.protocol_index()
+        if now is None:
+            return protocol is not None
+        return protocol == now
+
+    def _rebuild_rows(self):
+        self._updating = True
+        try:
+            self.list_buttons.clear()
+            self._rows = []
+            for index, button in enumerate(self._buttons):
+                item = QListWidgetItem(self._row_text(index))
+                item.setData(Qt.ItemDataRole.UserRole, index)
+                item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable)
+                item.setCheckState(
+                    Qt.CheckState.Checked if self._default_checked(index) else Qt.CheckState.Unchecked
+                )
+                item.setToolTip(self._row_text(index))
+                self.list_buttons.addItem(item)
+                self._rows.append(item)
+        finally:
+            self._updating = False
+
+    def _set_check_states(self, wanted) -> None:
+        """按判据函数批量改勾选（不触发 itemChanged 递归）。"""
+        self._updating = True
+        try:
+            for item in self._rows:
+                index = int(item.data(Qt.ItemDataRole.UserRole))
+                item.setCheckState(
+                    Qt.CheckState.Checked if wanted(index) else Qt.CheckState.Unchecked
+                )
+        finally:
+            self._updating = False
+        self._update_preview()
+
+    def _set_all(self, checked: bool):
+        self._set_check_states(lambda _i: checked)
+
+    def _select_scope(self):
+        """只选「本协议」（清除模式下 = 已绑定任意协议）的按钮。"""
+        self._set_check_states(self._default_checked)
+
+    def _checked_indices(self) -> List[int]:
+        return [
+            int(item.data(Qt.ItemDataRole.UserRole))
+            for item in self._rows
+            if item.checkState() == Qt.CheckState.Checked
+        ]
+
+    def _on_item_changed(self, _item):
+        if self._updating:
+            return
+        self._refresh_marks()          # 勾选变化会影响「哪些行需要预检」，一并重算
+
+    # ── 地址输入 ───────────────────────────────────────────────────────────
+
+    def _on_protocol_changed(self):
+        index = self.protocol_index()
+        if index is None:
+            self.lbl_tip.setText(
+                "批量清除：勾选的按钮会移除「协议 + 地址」绑定，发送时恢复按原样发送。"
+            )
+        else:
+            self.lbl_tip.setText(
+                f"默认已勾选「{self._mode_text()}」的按钮；每个按钮按自己的报文预检，"
+                "失败的会标注原因并被默认排除。"
+            )
+        self._rebuild_addr_fields()
+        self._rebuild_rows()
+        self._refresh_marks()
+
+    def _rebuild_addr_fields(self):
+        for _key, edit in list(self._addr_edits.items()):
+            edit.deleteLater()
+        self._addr_edits = {}
+        while self.addr_form.rowCount() > 1:            # 末行是提示，保留
+            self.addr_form.removeRow(0)
+
+        index = self.protocol_index()
+        fields = frame_addr_fix.fields_for(index) if index is not None else ()
+        self.addr_group.setVisible(bool(fields))
+        if not fields:
+            self.lbl_addr_hint.setText("")
+            return
+        for position, spec in enumerate(fields):
+            edit = QLineEdit(self._addr_values.get(spec.key, ""))
+            edit.setPlaceholderText(spec.hint)
+            edit.textChanged.connect(self._on_values_changed)
+            self._addr_edits[spec.key] = edit
+            self.addr_form.insertRow(position, f"{spec.label}：", edit)
+        self._update_addr_hint()
+
+    def _values(self) -> Dict[str, str]:
+        return {key: edit.text().strip() for key, edit in self._addr_edits.items()}
+
+    def _filled_values(self) -> Dict[str, str]:
+        return {key: text for key, text in self._values().items() if text}
+
+    def _on_values_changed(self):
+        for key, edit in self._addr_edits.items():
+            self._addr_values[key] = edit.text()
+        self._refresh_marks()
+
+    def _frame_of(self, index: int) -> Tuple[bytes, str]:
+        """按钮报文 → ``(字节, 错误)``（错误非空 = 该按钮的报文本身不可用）。"""
+        button = self._buttons[index]
+        payload, err = parse_plain_text(
+            str(button.get("data") or ""), "hex" if button.get("isHex", True) else "ascii"
+        )
+        return (payload or b""), err
+
+    def _precheck(self, index: int, protocol: int, values: Dict[str, str]) -> str:
+        """单个按钮的预检；返回可读原因（空串 = 可应用）。判据与发送时同源。"""
+        frame, err = self._frame_of(index)
+        if err:
+            return f"报文本身无效：{err}"
+        _ok_items, errors = frame_addr_fix.check_values(protocol, values, frame)
+        if errors:
+            label, reason = errors[0]
+            return f"{label}：{reason}"
+        result = frame_addr_fix.apply(frame, protocol, values)
+        if not result.ok:
+            return result.error
+        return ""
+
+    def _refresh_marks(self):
+        """按当前协议/地址重算预检结果并标到行上（**不动**勾选状态）。
+
+        只对**勾选的行**做预检：标出来的每条 ⚠ 都恰好是「这次点确定会被跳过的那一个」，
+        没打算改的按钮不产生噪声（例如给南网按钮换地址时，645 的按钮不该被标成「不是南网帧」）。
+        """
+        protocol = self.protocol_index()
+        values = self._filled_values()
+        self._errors = {}
+        if protocol is not None and values:
+            for index in self._checked_indices():
+                reason = self._precheck(index, protocol, values)
+                if reason:
+                    self._errors[index] = reason
+        self._updating = True
+        try:
+            for item in self._rows:
+                index = int(item.data(Qt.ItemDataRole.UserRole))
+                item.setText(self._row_text(index))
+                item.setToolTip(self._row_text(index))
+        finally:
+            self._updating = False
+        self._update_addr_hint()
+        self._update_preview()
+
+    def _update_addr_hint(self):
+        """「将写入的字节」+ 用一个可应用按钮做替换预览（与单按钮编辑对话框同口径）。"""
+        index = self.protocol_index()
+        fields = frame_addr_fix.fields_for(index) if index is not None else ()
+        if not fields:
+            self.lbl_addr_hint.setText("")
+            return
+        values = self._filled_values()
+        if not values:
+            self.lbl_addr_hint.setText(
+                "填写地址后：确定即写入勾选的按钮（按钮报文不变，只改地址域与校验）。"
+            )
+            return
+        sample = None
+        for candidate in self._checked_indices():
+            if candidate not in self._errors:
+                sample = candidate
+                break
+        ok_items, _errors = frame_addr_fix.check_values(
+            index, values, self._frame_of(sample)[0] if sample is not None else b""
+        )
+        lines = list(ok_items)
+        if sample is not None:
+            preview = frame_addr_fix.apply(self._frame_of(sample)[0], index, values)
+            if preview.ok:
+                lines.append(
+                    f"✓ 预览「{self._name_of(self._buttons[sample])}」：" + "；".join(preview.notes)
+                )
+        self.lbl_addr_hint.setText("<br>".join(lines))
+
+    def _update_preview(self):
+        checked = self._checked_indices()
+        if not checked:
+            self.lbl_preview.setText("请至少勾选一个要修改的按钮。")
+            return
+        if self.protocol_index() is None:
+            self.lbl_preview.setText(f"确定后将清除这 {len(checked)} 个按钮的协议与地址绑定。")
+            return
+        if not self._filled_values():
+            self.lbl_preview.setText(f"将写入这 {len(checked)} 个按钮：请先填写上面的地址。")
+            return
+        bad = [index for index in checked if index in self._errors]
+        detail = "，".join(f"{key}={text}" for key, text in self._filled_values().items())
+        text = f"将写入 {len(checked) - len(bad)} 个按钮（{self._mode_text()} · {detail}）"
+        if bad:
+            text += f"；{len(bad)} 个预检失败将被跳过"
+        self.lbl_preview.setText(text)
+
+    # ── 结果 ───────────────────────────────────────────────────────────────
+
+    def _on_accept(self):
+        self._refresh_marks()                      # 以最新输入为准
+        checked = self._checked_indices()
+        if not checked:
+            QMessageBox.warning(self, "未勾选按钮", "请至少勾选一个要修改的按钮。")
+            return
+        self._skipped = []
+        if self.protocol_index() is None:          # 清除模式：无需地址
+            self.accept()
+            return
+        if not self._filled_values():
+            QMessageBox.warning(
+                self, "未填地址", "已选择协议，请至少填写一个地址（否则发送时会直接报错）。"
+            )
+            return
+
+        bad = [index for index in checked if index in self._errors]
+        if bad:
+            lines = [f"· {self._name_of(self._buttons[i])}：{self._errors[i]}" for i in bad[:10]]
+            if len(bad) > 10:
+                lines.append(f"…另有 {len(bad) - 10} 个")
+            answer = QMessageBox.question(
+                self,
+                "部分按钮无法应用",
+                "以下按钮无法替换地址，将被跳过：\n" + "\n".join(lines)
+                + f"\n\n继续修改其余 {len(checked) - len(bad)} 个按钮？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            self._skipped = list(bad)
+        if not [index for index in checked if index not in set(self._skipped)]:
+            QMessageBox.warning(
+                self, "无可应用的按钮", "勾选的按钮全部预检失败，未修改任何按钮。"
+            )
+            self._skipped = list(bad)      # 状态自洽：调用方即使误读补丁也拿不到「要改的按钮」
+            return
+        self.accept()
+
+    def result_patches(self) -> Dict[int, dict]:
+        """``{按钮下标: {"protocol": int|None, "addr": dict}}``（清除模式给 ``protocol=None``）。"""
+        protocol = self.protocol_index()
+        values = core.normalize_addr_map(self._filled_values())
+        patches: Dict[int, dict] = {}
+        for index in self._checked_indices():
+            if index in self._skipped:
+                continue
+            if protocol is None:
+                patches[index] = {"protocol": None, "addr": {}}
+            else:
+                patches[index] = {"protocol": int(protocol), "addr": dict(values)}
+        return patches
+
+    def result_skipped(self) -> List[Tuple[int, str]]:
+        """被跳过的按钮 ``[(下标, 原因)]``（调用方据此写日志）。"""
+        return [(index, self._errors.get(index, "预检失败")) for index in self._skipped]
+
+    def result_summary(self) -> str:
+        """一行摘要（协议 + 地址参数 / 清除），供日志复用。"""
+        if self.protocol_index() is None:
+            return "清除协议与地址"
+        detail = "，".join(f"{key}={text}" for key, text in self._filled_values().items())
+        return f"{self._mode_text()} · {detail}" if detail else self._mode_text()
 
 
 # ── 主页面 ──────────────────────────────────────────────────────────────────
@@ -1560,8 +1942,8 @@ class BluetoothToolWidget(QWidget):
 
         * `CollapsibleSection`（可折叠）里只放**按钮网格**（在滚动区里，上下限见
           `_apply_custom_scroll_limits()`：空间够就全显示、不够才滚动）；
-        * 5 个编辑按钮 + 提示**留在折叠区外面**（用户口径：编辑入口要一直待在底部，
-          不该跟着按钮一起被收起）。
+        * 6 个编辑按钮**留在折叠区外面**（用户口径：编辑入口要一直待在底部，
+          不该跟着按钮一起被收起）；按钮文案不占行内宽度提示（见行末注释，陷阱 63）。
         """
         self.custom_group = CollapsibleSection("自定义报文", key="custom_buttons", expanded=True)
         self.custom_section = self.custom_group          # 语义别名（新代码用这个）
@@ -1603,6 +1985,15 @@ class BluetoothToolWidget(QWidget):
         self.btn_custom_batch.clicked.connect(self._on_custom_batch)
         row.addWidget(self.btn_custom_batch)
 
+        self.btn_custom_batch_addr = QPushButton("批量地址…")
+        set_btn(self.btn_custom_batch_addr, "secondary", "sm")
+        set_btn_icon(self.btn_custom_batch_addr, "apply")
+        self.btn_custom_batch_addr.setToolTip(
+            "按协议类别一次替换一批按钮的地址（可批量清除绑定）"
+        )
+        self.btn_custom_batch_addr.clicked.connect(self._on_custom_batch_address)
+        row.addWidget(self.btn_custom_batch_addr)
+
         self.btn_custom_export = QPushButton("导出…")
         set_btn(self.btn_custom_export, "secondary", "sm")
         set_btn_icon(self.btn_custom_export, "export")
@@ -1623,12 +2014,12 @@ class BluetoothToolWidget(QWidget):
         row.addWidget(self.btn_custom_clear)
         row.addStretch()
 
-        hint = QLabel("提示：报文按钮上点右键可编辑 / 删除 / 移位")
-        row.addWidget(hint)
         outer.addLayout(row)
+        # 提示文案不占行内宽度（「右键可编辑/删除/移位」已在每个按钮的 tooltip 末行，
+        # 见 `_rebuild_custom_buttons`）：本行加大字号时只留按钮，避免文字被裁（陷阱 63）
         fit_btn_width(self.btn_custom_add, self.btn_custom_batch,
-                      self.btn_custom_export, self.btn_custom_import,
-                      self.btn_custom_clear)
+                      self.btn_custom_batch_addr, self.btn_custom_export,
+                      self.btn_custom_import, self.btn_custom_clear)
         return container
 
     def _apply_custom_scroll_limits(self):
@@ -2993,6 +3384,58 @@ class BluetoothToolWidget(QWidget):
                 f"{len(incoming) - added} 条未加入",
                 "warn",
             )
+
+    def _on_custom_batch_address(self):
+        """按协议类别批量替换（或清除）一批按钮的地址参数（1.23.83）。
+
+        作用域选择与逐按钮预检都在 `BatchAddressDialog` 里；本方法只做「写回 + 日志」，
+        写回统一走 `_set_buttons`（重建网格 + 落盘一次）。发送时的地址替换逻辑不变
+        （仍由 `_apply_button_address` 在点按钮时执行）。
+        """
+        if not self._buttons:
+            QMessageBox.information(self, "暂无按钮", "先新增自定义报文按钮，再批量替换地址。")
+            return
+        current = None
+        if self._protocol_provider is not None:
+            try:
+                current = self._protocol_provider()
+            except Exception:  # noqa: BLE001
+                current = None
+        dialog = BatchAddressDialog(self, self._buttons, current_protocol=current)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        patches = dialog.result_patches()
+        if not patches:
+            return
+
+        buttons = list(self._buttons)
+        for index, patch in patches.items():
+            if not 0 <= index < len(buttons):
+                continue
+            button = dict(buttons[index])
+            protocol = patch.get("protocol")
+            if protocol is None:                       # 清除模式
+                button.pop("protocol", None)
+                button.pop("addr", None)
+            else:
+                button["protocol"] = int(protocol)
+                addr = core.normalize_addr_map(patch.get("addr"))
+                if addr:
+                    button["addr"] = addr
+                else:
+                    button.pop("addr", None)
+            buttons[index] = button
+
+        if dialog.protocol_index() is None:
+            announce = f"[地址] 批量清除「协议 + 地址」：共 {len(patches)} 个按钮"
+        else:
+            announce = (
+                f"[地址] 批量替换：{dialog.result_summary()} · 共 {len(patches)} 个按钮"
+            )
+        self._set_buttons(buttons, announce)
+        for index, reason in dialog.result_skipped():
+            name = str((self._buttons[index] or {}).get("name") or f"报文{index + 1}")
+            self._log(f"[地址] 已跳过「{name}」：{reason}", "warn")
 
     def _on_custom_export(self):
         if not self._buttons:

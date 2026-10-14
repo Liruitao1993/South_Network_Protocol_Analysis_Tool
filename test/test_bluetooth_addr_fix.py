@@ -7,6 +7,8 @@
   [3] 各协议**真帧** oracle：地址已变 + **该协议校验器 0 fail** + 帧长不变 + 只有地址/校验字节变
   [4] 错误矩阵：无地址域 / 长度不符 / 结构不符 / 原校验不符 / 协议不支持 / 空输入
   [5] 反例自检：校验器对「改了地址但不重算校验」的帧必须报错（证明 oracle 有效）
+  [6] 共享校验入口（批量替换地址复用）：`addr_lengths_for_frame`（698 SA 来自帧）、
+      `check_values`（空值跳过/长度不符/非法字符/SA 按帧内长度），并与 `apply()` 对拍同源
 
 运行: python test/test_bluetooth_addr_fix.py
 """
@@ -391,6 +393,65 @@ def test_negatives():
           fix.parse_address("00 01 02 03 04 05 06 07", fix.fields_for(0)[0], 6)[0] == b"")
 
 
+# ── [6] 共享校验入口（批量替换地址复用，1.23.83）────────────────────────────
+
+def test_check_helpers():
+    section("[6] 共享校验入口：addr_lengths_for_frame / check_values")
+
+    # ① addr_lengths_for_frame：698.45 的 SA 长度来自「地址特征字节低 4 位 + 1」
+    lengths = fix.addr_lengths_for_frame(T698)
+    check("698：SA 长度 = 地址特征字节低 4 位 + 1",
+          lengths == {"sa": 1 + (T698[4] & 0x0F)}, lengths)
+    check("南网：不给出任何「由帧决定」的长度",
+          fix.addr_lengths_for_frame(SOUTH_ADDR) == {}, fix.addr_lengths_for_frame(SOUTH_ADDR))
+    check("短帧 / 首末字节不符 / 长度域不符 → 空 dict",
+          fix.addr_lengths_for_frame(b"") == {}
+          and fix.addr_lengths_for_frame(b"\x68" * 20) == {}
+          and fix.addr_lengths_for_frame(DLT645) == {},
+          (fix.addr_lengths_for_frame(b"\x68" * 20), fix.addr_lengths_for_frame(DLT645)))
+
+    # ② check_values：空值跳过 / 合法回显 / 非法进错误项
+    check("未填字段既不回显也不报错",
+          fix.check_values(0, {"src": "", "dst": ""}, SOUTH_ADDR) == ([], []))
+    check("不支持的协议 → 空结果",
+          fix.check_values(9, {"src": "01"}, SOUTH_ADDR) == ([], []))
+    ok, bad = fix.check_values(0, {"src": "010203040506", "dst": "000000000001"}, SOUTH_ADDR)
+    check("合法地址：无错误且回显在线字节（书写序 → 上线逆序）",
+          not bad and any(line.startswith("✓ 源地址") and "06 05 04 03 02 01" in line for line in ok),
+          (ok, bad))
+    ok, bad = fix.check_values(0, {"src": "00 01"}, SOUTH_ADDR)
+    check("长度不符 → 错误项 = (字段标签, 原因)、不回显",
+          len(bad) == 1 and bad[0][0] == "源地址" and "6 字节" in bad[0][1], (ok, bad))
+    check("非法字符 → 错误项",
+          fix.check_values(0, {"src": "ZZ"}, SOUTH_ADDR)[1][0][0] == "源地址")
+
+    # ③ 698 SA：没有帧 → 「长度按帧内确定」；给了帧 → 按**该帧**的长度校验
+    ok, bad = fix.check_values(8, {"sa": "3300000000"}, b"")
+    check("698 SA 无帧长度 → 回显「长度按帧内确定」且不算错",
+          not bad and any("长度按帧内确定" in line for line in ok), (ok, bad))
+    check("698 SA 给了帧（帧内 5 字节）→ 通过", fix.check_values(8, {"sa": "3300000000"}, T698)[1] == [])
+    mutated = bytearray(T698)
+    mutated[4] = 0x00                                  # 地址特征字节低 4 位 = 0 → 帧内 SA 只剩 1 字节
+    ok, bad = fix.check_values(8, {"sa": "3300000000"}, bytes(mutated))
+    check("698 SA 按**帧内**长度校验（帧说 1 字节 → 5 字节报错）",
+          len(bad) == 1 and "最多 1 字节" in bad[0][1], (ok, bad))
+
+    # ④ 与 apply() 同源：合法帧上「check_values 无错 ⇔ apply 成功」
+    for values in ({"src": "010203040506", "dst": "000000000001"},
+                   {"src": "00 01"},
+                   {"src": "000000000009", "dst": "000000000000"}):
+        _ok, bad = fix.check_values(0, values, SOUTH_ADDR)
+        res = fix.apply(SOUTH_ADDR, 0, values)
+        check(f"check_values 与 apply 同源（{values}）", (not bad) == res.ok, (bad, res.error))
+
+    # ⑤ 分工明确：字段级只归 check_values，帧级自证归 apply
+    broken = bytearray(SOUTH_ADDR)
+    broken[-2] ^= 0xFF                                 # 破坏原帧校验
+    _ok, bad = fix.check_values(0, {"src": "010203040506"}, bytes(broken))
+    check("坏校验帧：字段无错但 apply 报错（不静默改帧）",
+          not bad and not fix.apply(bytes(broken), 0, {"src": "010203040506"}).ok, (bad,))
+
+
 def main():
     print("=" * 64)
     print("frame_addr_fix（按协议替换地址 + 重算校验）回归")
@@ -406,6 +467,7 @@ def main():
     test_csg_uplink()
     test_errors()
     test_negatives()
+    test_check_helpers()
 
     print()
     print("=" * 64)

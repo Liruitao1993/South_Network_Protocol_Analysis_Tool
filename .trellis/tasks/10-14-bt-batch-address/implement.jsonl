@@ -1,0 +1,3 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "蓝牙页 UI 契约：§7f 单个按钮地址替换（本次抽取共享函数的对象）、§7g 空间治理（工具栏常驻 + 按钮随空间自动，本任务不得回退）、Qt 陷阱（按钮宽度判据、对话框/测试卫生）"}
+{"file": "AGENTS.md", "reason": "§8 陷阱 69 蓝牙契约（三层拆分/失败不静默/落盘约定）、陷阱 63（按钮不得写死宽度 + show() 后量 sizeHint）、陷阱 62（从 cmd 侧跑测试要套 pwsh）"}

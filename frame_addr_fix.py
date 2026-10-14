@@ -198,6 +198,52 @@ def parse_address(text: str, addr_field: AddrField, on_wire_length: int = 0) -> 
     return data.rjust(length, b"\x00")[::-1], ""              # 书写序 → 逆序（南网/国网/645）
 
 
+def addr_lengths_for_frame(frame: bytes) -> Dict[str, int]:
+    """**由帧内容**决定的地址长度（目前只有 698.45 的 SA：地址特征字节低 4 位 + 1）。
+
+    帧不满足「`68H` + 长度域自洽 + `16H`」自证 → `{}`（调用方回落到字段声明长度）。
+    单一来源：单按钮编辑对话框与批量替换对话框共用（见 `.trellis/spec/frontend/component-guidelines.md` §7f/§7h）。
+    """
+    if len(frame) < 12 or frame[0] != 0x68 or frame[-1] != 0x16:
+        return {}
+    declared = frame[1] | (frame[2] << 8)
+    if declared != len(frame) - 2:                            # 698.45：L = 不含首尾定界符的数据长度
+        return {}
+    return {"sa": 1 + (frame[4] & 0x0F)}
+
+
+def check_values(
+    protocol_index: int, values: Mapping[str, str], frame: bytes = b""
+) -> Tuple[List[str], List[Tuple[str, str]]]:
+    """逐字段解析地址文本 → `(可读回显项, [(字段标签, 错误原因)])`。
+
+    * 未填写的字段跳过（既不回显也不报错）；
+    * 698.45 的 SA 在「帧里拿不到长度」时不算错（回显「长度按帧内确定」）——既有界面口径；
+      给了帧就按**帧内长度**校验（与发送时 `apply()` 同源，避免「编辑时能过、发送时失败」）；
+    * 其余非法（长度不符 / 字符非法 / 越界）进错误项。
+
+    界面只负责把回显项原样显示、把错误项拼成可读提示（不要在这里拼 `⚠` 之类 UI 文案）。
+    """
+    fields = fields_for(protocol_index)
+    if not fields:
+        return [], []
+    lengths = addr_lengths_for_frame(frame)
+    ok: List[str] = []
+    bad: List[Tuple[str, str]] = []
+    for spec in fields:
+        text = str(values.get(spec.key, "") or "").strip()
+        if not text:
+            continue
+        data, err = parse_address(text, spec, lengths.get(spec.key, spec.length))
+        if err and spec.kind == KIND_SA698 and not lengths.get("sa"):
+            ok.append(f"· {spec.label}：长度按帧内确定")
+        elif err:
+            bad.append((spec.label, err))
+        else:
+            ok.append(f"✓ {spec.label} → {len(data)} 字节：{data.hex(' ')}")
+    return ok, bad
+
+
 # ── 自证（结构 + 原校验）────────────────────────────────────────────────────
 
 def _check_sum8(frame: bytes, end: int, label: str) -> str:
