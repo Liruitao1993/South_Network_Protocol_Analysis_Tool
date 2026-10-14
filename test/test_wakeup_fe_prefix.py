@@ -459,6 +459,9 @@ def test_negative_controls_and_single_source():
         "dlt645_validator.py",
         # 串口工具分帧层（1.23.78）：68 家族分帧同样认前导 FEH（`_wakeup_base`），
         # 刻意**复用**同一实现而不是另写扫描 —— 长度返回值含前导，见 AGENTS §8 陷阱 59/75。
+        # 分帧族已抽到 `frame_deframe`（单一来源），`serial_tool_widget` 仅 re-export；
+        # 两者都保留在白名单：`serial_tool_widget.fix_frame_text` 仍顶层 import wakeup_prefix。
+        "frame_deframe.py",
         "serial_tool_widget.py",
     }
     import_re = re.compile(r"^\s*(?:from\s+wakeup_prefix\s+import|import\s+wakeup_prefix\b)", re.M)
