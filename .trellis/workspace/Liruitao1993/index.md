@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 40
+- **Total Sessions**: 41
 - **Last Active**: 2026-10-15
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1349 | Active |
+| `journal-1.md` | ~1390 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 41 | 2026-10-15 | 光伏升级：发送通道（串口/蓝牙）+ 按 ATT 上限自动算每包最大字节数 | `eeb046c` | `main` |
 | 40 | 2026-10-15 | 光伏升级：不勾自动执行也读升级后版本 + 读前等设备复位（默认 10 秒可设） | `81df6bc` | `main` |
 | 39 | 2026-10-15 | 光伏升级：读版本信息展示改版（帧下明细 + 两栏展示区）+ 版本逐字段解析 | `787d155` | `main` |
 | 38 | 2026-10-15 | 光伏升级：tab 改名 + 可选读版本信息（通用 43000300 / 厂家扩展内部版本 FF100400） | `26abef2` | `main` |

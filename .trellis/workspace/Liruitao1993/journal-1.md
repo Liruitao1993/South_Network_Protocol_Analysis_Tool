@@ -1347,3 +1347,44 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Next Steps
 
 - 发版批次：main_gui.py（APP_VERSION/CHANGELOG）、AGENTS.md、README.md、两个 .iss 一起提交；bump 后跑 python release_check.py --sync-iss
+
+
+## Session 41: 光伏升级：发送通道（串口/蓝牙）+ 按 ATT 上限自动算每包最大字节数
+
+**Date**: 2026-10-15
+**Task**: 光伏升级：发送通道（串口/蓝牙）+ 按 ATT 上限自动算每包最大字节数
+**Branch**: `main`
+
+### Summary
+
+用户需求：新增发送通道（串口默认/蓝牙），蓝牙复用蓝牙工具页的连接，并把 ATT 限制截过来当每包数据上限（要计算：ATT 512 ⇒ 每包不能超 480），勾蓝牙时自动算好最大输入上限。已实现：single_write_limit（特征码写上限或 MTU−3，不叠蓝牙页 200 上限）+ 用真实 698 组帧二分反推块长（MTU 512 ⇒ 509 ⇒ 475）+ 整帧一次 ATT 写（超限拒发）+ 未连接/未协商不设假上限。
+
+### Main Changes
+
+- dl_t698_45_upgrade.py：max_block_bytes_for_frame_limit(limit, sa, ca) —— 真实组帧二分，开销自动算（BER 长度域/地址域都算进去）
+- bluetooth_worker.py：_limit_plan（一次 ATT 写物理上限单一实现）+ single_write_limit()（不叠 _max_chunk）+ send_data(..., single_write=True)（整帧一次写，超限拒发不静默分包）
+- dlt698_upgrade_widget.py：combo_channel（落盘/传输中冻结）+ set_bluetooth_provider 取值回调 + _BleSendPort + RX 走 notification_received + _apply_block_limit（算 cap→setMaximum+夹值+标签写明过程；算不出不设假上限并禁用开始）+ _bt_cap 缓存进 _worker() 判据 + 重算时机（通道/连接/mtu_updated/SA）
+- main_gui.py：_upgrade_bluetooth_source() 取值回调（取蓝牙工具页的 worker；只提交这一处 hunk，CHANGELOG/APP_VERSION 留工作区）
+- 复核修掉的 3 处真实缺陷：① 蓝牙信号误拨串口通道按钮/标签 + 蓝牙页报错抄进本页日志；② 蓝牙页后建 worker 时本页不回钩（永远未连接）⇒ showEvent 幂等重对齐；③ RX 跨通道混源（双向）⇒ 两个入口都判通道
+- 文档：spec §7j 新增「发送通道」契约条，AGENTS §5.6/§10、README（功能节 + 更新记录）、main_gui CHANGELOG 同步（后三者留工作区）
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `eeb046c` | (see git log) |
+
+### Testing
+
+- [OK] test_dl698_upgrade.py 286（A13 上限反推：509⇒475/512⇒478、紧致性、非法输入）；test_dl698_upgrade_gui.py 375（[23] 蓝牙通道 + [24] 通道隔离）；test_bluetooth_worker.py 126（[8] 整帧一次写）；test_dl698_upgrade_tab_wiring.py 37 —— 全绿，ruff 干净
+- [OK] release_check.py --with-gui：PASS=138 FAIL=0 WARN=0
+- [OK] 真实平台渲染冒烟（非 offscreen）：通道行不截断、切蓝牙后上限 475 且标签给出计算过程、串口投帧不推进蓝牙流程
+- [OK] 独立复核（trellis-check 32m）：10 条变异反证全部干净变红后逐字节还原；MTU 各档×4 种 SA 全表「帧(cap) ≤ limit < 帧(cap+1)」紧致；块序号/PIID 变化帧长恒 509；MTU 竞态（23→512→200）行为正确
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 发版批次：main_gui.py（APP_VERSION/CHANGELOG）、AGENTS.md、README.md、两个 .iss 一起提交；bump 后跑 python release_check.py --sync-iss
