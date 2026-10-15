@@ -37,6 +37,8 @@
 ## Notes
 
 - 落点：`dlt698_upgrade_widget.py`（`HEX_LOG_LIMIT` + `fmt_hex`）；回归 `test/test_dl698_upgrade_gui.py`。
+- 顺带（同一提交批次）：`.gitignore` 补 `/dlt698_upgrade_config.json`（本页运行时参数，用户跑过升级页后一直在 `git status` 里冒充未跟踪文件）
+  与同类漏配的 `/tcp_monitor_config.json`。
 - 契约沉淀：`.trellis/spec/frontend/component-guidelines.md::7j`、`AGENTS.md §5.6`、`main_gui.py:CHANGELOG`。
 - 日志控件是 `QPlainTextEdit`（NoWrap + 2000 行封顶），200 token/行 ≈ 640 字符，仍远在有界范围内。
 - 本任务是 1.23.85（尚未发版）的收尾修订，故版本号不 bump：CHANGELOG 追加进 1.23.85 条目。
