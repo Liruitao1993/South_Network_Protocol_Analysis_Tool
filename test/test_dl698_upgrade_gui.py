@@ -235,6 +235,21 @@ def make_tab(worker=None, pkg_bytes: bytes = b"", fresh: bool = True):
     return tab, worker, path
 
 
+def _cols(text: str) -> int:
+    """显示列宽（CJK 算 2 列）—— 断言「明细行对齐」用，不依赖产品实现的对齐函数。"""
+    return sum(2 if ord(ch) > 0x2E80 else 1 for ch in text)
+
+
+def panel_pre(tab) -> str:
+    """展示区「升级前」栏文本。"""
+    return tab.txt_version_pre.toPlainText()
+
+
+def panel_post(tab) -> str:
+    """展示区「升级完成后」栏文本。"""
+    return tab.txt_version_post.toPlainText()
+
+
 def log_text(tab) -> str:
     return tab.log_text.toPlainText()
 
@@ -935,6 +950,23 @@ def test_layout_guard():
           hdr.maximumWidth())
     check("拖放区可见", tab.drop_area.isVisible())
     check("进度条可见", tab.progress.isVisible())
+    # 版本信息展示区：位置（参数栏之下、日志之上）+ 并排两栏 + 高度放得下 7 行（不许「要滚动才看得见」）
+    check("展示区在参数栏之下、日志之上",
+          tab.grp_version.isVisible()
+          and tab.sec_params.y() < tab.grp_version.y() < tab.log_text.y(),
+          (tab.sec_params.y(), tab.grp_version.y(), tab.log_text.y()))
+    check("展示区是并排两栏（同一行、等宽）",
+          tab.txt_version_pre.y() == tab.txt_version_post.y()
+          and abs(tab.txt_version_pre.width() - tab.txt_version_post.width()) <= 2,
+          (tab.txt_version_pre.geometry(), tab.txt_version_post.geometry()))
+    need = tab.txt_version_pre.fontMetrics().lineSpacing() * 7
+    check("每栏高度放得下「标题 + 6 个字段」（不裁行）",
+          tab.txt_version_pre.height() >= need and tab.txt_version_post.height() >= need,
+          (tab.txt_version_pre.height(), need))
+    check("两栏初始为空态文案",
+          panel_pre(tab) == "升级前：（未读取）"
+          and panel_post(tab) == "升级完成后：（未读取）",
+          (panel_pre(tab), panel_post(tab)))
     tab.hide()
     settle()
     tab.cleanup()
@@ -1047,7 +1079,24 @@ def is_ver_frame(frame: bytes, oad: bytes = None) -> bool:
 
 #: 厂家扩展「内部版本」的 OAD（页面「读版本内容」下拉第 2 项）
 INT_OAD = bytes.fromhex("FF100400")
-INT_TEXT = "V1.0.3-INT"
+
+#: **现场实帧**：内部版本读命令的响应（带 4 字节 FEH 前导；6 项 visible-string 4/4/6/4/6/8，
+#: 与表191 版本信息同形）—— 用户 2026-10-15 在设备上实测抓的，HCS/FCS 均通过。
+REAL_INT_RESP = bytes.fromhex(
+    "FE FE FE FE 68 47 00 C3 05 03 24 08 04 26 20 00 5A E2 "
+    "85 01 00 FF 10 04 00 01 "
+    "02 06 0A 04 4C 48 49 4E 0A 04 30 30 33 39 0A 06 32 36 30 38 30 33 "
+    "0A 04 30 30 31 41 0A 06 32 35 31 30 31 33 0A 08 47 57 47 53 58 58 58 58 "
+    "00 00 14 CD 16".replace(" ", ""))
+#: 该帧解析出来应有的 6 个字段（名称 → 值；日期已补全为 20YY-MM-DD）
+REAL_INT_FIELDS = [
+    ("厂商代码", "LHIN"),
+    ("软件版本号", "0039"),
+    ("软件版本日期", "2026-08-03"),
+    ("硬件版本号", "001A"),
+    ("硬件版本日期", "2025-10-13"),
+    ("厂商扩展信息", "GWGSXXXX"),
+]
 
 
 def test_version_read_flow():
@@ -1084,11 +1133,36 @@ def test_version_read_flow():
     check("读版本确认后进入启动传输（第 2 帧 OMD=F0010700）",
           w.writes == 2 and omd_of(w.sent[1]) == upg.OMD_START and tab._phase == "start",
           f"{w.writes} / {tab._phase}")
-    log = log_text(tab)
-    check("版本内容写进日志（命名业务字段）", VER_TEXT in log,
-          [l for l in log.splitlines() if "版本信息" in l])
-    check("日志标出「升级前」+「·通用」（默认读版本内容）",
-          "版本信息（升级前·通用）" in log)
+    # 用户反馈的显示改版：解析内容必须写在**帧的下面若干行**，不能贴在帧尾（NoWrap 下要横向拖）
+    lines = log_text(tab).splitlines()
+    rx_idx = next((i for i, l in enumerate(lines)
+                   if l.startswith("[RX]") and "68 " in l), -1)
+    check("找得到读版本的 [RX] 帧行", rx_idx >= 0, lines[-3:])
+    check("帧行本身**不带**解析内容（不再贴在帧尾）",
+          rx_idx >= 0 and "版本信息" not in lines[rx_idx], lines[rx_idx] if rx_idx >= 0 else "")
+    after = lines[rx_idx + 1:rx_idx + 9] if rx_idx >= 0 else []
+    check("下一行是「→ 版本信息（升级前·通用）读取成功（6 项）」",
+          after[:1] == ["  → 版本信息（升级前·通用）读取成功（6 项）"], after[:1])
+    detail = after[1:7]
+    expected = [
+        ("厂商代码", "JCDZ", "0A044A43445A"),
+        ("软件版本号", "V1.5", "0A0456312E35"),
+        ("软件版本日期", "2025-09-01", "0A06323530393031"),
+        ("硬件版本号", "V1.0", "0A0456312E30"),
+        ("硬件版本日期", "2023-06-02", "0A06323330363032"),
+        ("厂商扩展信息", "SHANDONG", "0A085348414E444F4E47"),
+    ]
+    check("再往下是逐字段明细（表191 六个字段 + 日期补全 + 原始字节，共 6 行）",
+          len(detail) == 6 and all(
+              d.strip().startswith(name) and f"= {value}" in d and f"[{raw}]" in d
+              for d, (name, value, raw) in zip(detail, expected)), detail)
+    check("明细行的 '=' 按显示宽度对齐（CJK 算 2 列）",
+          len({_cols(d.split("=")[0]) for d in detail}) == 1 if detail else False, detail)
+    check("版本信息展示区（升级前栏）显示明细（含表头/字段/值）",
+          "升级前 · 通用 ·" in panel_pre(tab) and "厂商代码" in panel_pre(tab)
+          and "JCDZ" in panel_pre(tab), panel_pre(tab))
+    check("展示区此时「升级完成后」栏还是未读取",
+          panel_post(tab) == "升级完成后：（未读取）", panel_post(tab))
 
     run_to_end(tab, w)
     settle()
@@ -1105,10 +1179,35 @@ def test_version_read_flow():
     check("已确认字节 == 文件字节数", tab._confirmed_bytes == len(payload),
           f"{tab._confirmed_bytes} vs {len(payload)}")
     log = log_text(tab)
-    check("日志含「升级完成后」的版本内容",
-          "版本信息（升级完成后·通用）" in log and log.count(VER_TEXT) == 2,
+    check("日志含「升级完成后」的读版本明细（两次都成功）",
+          log.count("→ 版本信息（升级前·通用）读取成功（6 项）") == 1
+          and log.count("→ 版本信息（升级完成后·通用）读取成功（6 项）") == 1
+          and sum(1 for l in log.splitlines() if "厂商代码" in l and "JCDZ" in l) == 2,
           [l for l in log.splitlines() if "版本信息" in l])
     check("执行升级已确认 → 读版本的过渡日志", "继续读版本信息（升级完成后）" in log)
+    check("展示区两栏各自留下结果（升级前 + 升级完成后）",
+          "升级前 · 通用 ·" in panel_pre(tab) and "升级完成后 · 通用 ·" in panel_post(tab)
+          and "厂商代码" in panel_pre(tab) and "厂商代码" in panel_post(tab),
+          panel_pre(tab) + " / " + panel_post(tab))
+
+    # 展示区只放**本轮**结果：`开始升级` 与 `清除` 都必须重置（不留上一轮残留误导现场判读）
+    tab.btn_start.click()                    # 再开一轮（同一文件仍在）→ 复位
+    settle()
+    check("再次「开始升级」→ 两栏立即回到空态",
+          panel_pre(tab) == "升级前：（未读取）"
+          and panel_post(tab) == "升级完成后：（未读取）",
+          (panel_pre(tab), panel_post(tab)))
+    w.deliver(ver_ack_for(w.sent[-1]))       # 新一轮读版本成功 → 又有内容
+    settle()
+    check("新一轮读版本后「升级前」栏重新有内容（证明上面的「空态」不是恒真）",
+          "升级前 · 通用 ·" in panel_pre(tab) and "厂商代码" in panel_pre(tab),
+          panel_pre(tab))
+    tab.btn_clear.click()
+    settle()
+    check("「清除」→ 两栏回到空态",
+          panel_pre(tab) == "升级前：（未读取）"
+          and panel_post(tab) == "升级完成后：（未读取）",
+          (panel_pre(tab), panel_post(tab)))
 
     # 勾选状态持久化（落盘 → 新实例读回）
     check("落盘成功", tab._save_persisted() is True)
@@ -1146,6 +1245,12 @@ def test_version_read_nonblocking():
           w.writes == 3 and omd_of(w.sent[2]) == upg.OMD_START and tab.state == "starting",
           f"{w.writes} / {tab.state} / {[omd_of(f) for f in w.sent]}")
     check("全过程没有失败态弹框路径", tab.state != "failed", tab.state)
+    # 失败也要在展示区**说出来**（PRD：未读到 → `—— 未读到：<原因>`；不是留空让人以为没读）
+    check("读版本失败 → 展示区该栏写明未读到的原因",
+          "升级前 · 通用 ·" in panel_pre(tab) and "未读到：" in panel_pre(tab)
+          and "3000ms" in panel_pre(tab), panel_pre(tab))
+    check("失败的一栏不是空态、也未串到另一栏",
+          panel_post(tab) == "升级完成后：（未读取）", panel_post(tab))
 
     for _ in range(20):                   # 走完 启动 + 2 包 + 执行 + 读版本(超时)
         settle()
@@ -1165,6 +1270,11 @@ def test_version_read_nonblocking():
           "升级流程已结束" in log and "读版本信息未成功" in log, last_log(tab))
     check("成功收尾文案说明读版本未成功",
           "读版本信息未成功，原因见日志" in log, last_log(tab))
+    # 第二次（升级完成后）读版本失败**不得**把第一栏的内容冲掉 —— 两栏各写各的
+    check("升级完成后读版本失败也写进该栏（原因），且没覆盖「升级前」栏",
+          "升级完成后 · 通用 ·" in panel_post(tab) and "未读到：" in panel_post(tab)
+          and "升级前 · 通用 ·" in panel_pre(tab) and "未读到：" in panel_pre(tab),
+          (panel_pre(tab), panel_post(tab)))
     tab.cleanup()
 
 
@@ -1239,13 +1349,27 @@ def test_version_read_target_select():
           w.writes == 1 and tab._phase == "ver_pre", f"{w.writes} / {tab._phase}")
     check("忽略原因写进日志", "OAD 不符" in log_text(tab), last_log(tab))
 
-    # 正确的内部版本响应 → 版本内容（visible-string 形态）进日志，标签带「·内部」
-    w.deliver(ver_ack_for(w.sent[-1], raw_data=visible_string(INT_TEXT)))
+    # 正确的内部版本响应（**现场实帧**，带 4 字节 FE 前导）→ 逐字段明细 + 展示区
+    w.deliver(REAL_INT_RESP)
     settle()
     log = log_text(tab)
-    check("内部版本内容写进日志且标「·内部」",
-          f"版本信息（升级前·内部）：{INT_TEXT}" in log,
-          [l for l in log.splitlines() if "版本信息" in l])
+    lines = log.splitlines()
+    rx_idx = next((i for i, l in enumerate(lines)
+                   if l.startswith("[RX]") and "68 47 00 C3" in l), -1)
+    check("现场帧（带 FE 前导）被当作一帧收下并单独成行", rx_idx >= 0, lines[-4:])
+    check("帧行下一行是内部版本的标签行（明细在帧**下面**，不是帧尾）",
+          rx_idx >= 0 and lines[rx_idx + 1] == "  → 版本信息（升级前·内部）读取成功（6 项）",
+          lines[rx_idx + 1:rx_idx + 2])
+    detail = lines[rx_idx + 2:rx_idx + 8] if rx_idx >= 0 else []
+    check("内部版本 6 项逐字段命名解析（表191 名字 + YYMMDD 补全）",
+          len(detail) == 6 and all(
+              d.strip().startswith(name) and f"= {value}" in d
+              for d, (name, value) in zip(detail, REAL_INT_FIELDS)), detail)
+    check("明细行带原始字节", all("[" in d and "]" in d for d in detail), detail)
+    check("展示区（升级前栏）显示内部版本 6 项",
+          "升级前 · 内部 ·" in panel_pre(tab) and all(
+              name in panel_pre(tab) and value in panel_pre(tab)
+              for name, value in REAL_INT_FIELDS), panel_pre(tab))
     check("推进到启动传输", w.writes == 2 and omd_of(w.sent[1]) == upg.OMD_START, w.writes)
 
     # 传输中「读版本内容」也被冻结
@@ -1256,7 +1380,7 @@ def test_version_read_target_select():
     check("升级后那一帧同样是内部版本读命令",
           is_ver_frame(w.sent[-1], INT_OAD) and w.writes == 5, f"{w.writes}")
     check("升级后版本内容也标「·内部」",
-          "版本信息（升级完成后·内部）" in log_text(tab),
+          "→ 版本信息（升级完成后·内部）读取成功（6 项）" in log_text(tab),
           [l for l in log_text(tab).splitlines() if "版本信息" in l])
     check("结束后下拉恢复可编辑", tab.combo_read_target.isEnabled() is True)
 
@@ -1277,6 +1401,34 @@ def hexs_or_none(w, i):
         return resp_apdu(w.sent[i]).hex(" ").upper()
     except Exception:
         return ""
+
+
+def test_version_read_single_value_fallback():
+    section("[21] 非结构版本的兜底解析（单个 visible-string → 一行「数据」）")
+    w = FakeSerialWorker()
+    tab, _, _ = make_tab(w)
+    tab.spin_block.setValue(100)
+    tab._on_file_selected(write_pkg(bytes(range(100))))
+    tab.combo_read_target.setCurrentIndex(1)                  # 内部版本
+    tab.chk_read_before.setChecked(True)
+    tab.btn_start.click()
+    settle()
+    text = "V1.0.3-INT"
+    w.deliver(ver_ack_for(w.sent[-1], raw_data=visible_string(text)))
+    settle()
+    log = log_text(tab)
+    check("非结构响应 → 标签行「读取成功（1 项）」",
+          "→ 版本信息（升级前·内部）读取成功（1 项）" in log,
+          [l for l in log.splitlines() if "版本信息" in l])
+    check("兜底行名「数据」+ 值 + 原始字节",
+          any(l.strip().startswith("数据") and f"= {text}" in l and "[0A" in l
+              for l in log.splitlines()), log.splitlines()[-4:])
+    check("展示区同样兜底显示（不空、不抛）",
+          "升级前 · 内部 ·" in panel_pre(tab) and text in panel_pre(tab), panel_pre(tab))
+    check("流程照常推进到启动传输",
+          w.writes == 2 and omd_of(w.sent[1]) == upg.OMD_START, w.writes)
+    tab._on_abort()
+    tab.cleanup()
 
 
 def main():
@@ -1310,6 +1462,7 @@ def main():
     test_version_read_nonblocking()
     test_version_read_mismatch_retries()
     test_version_read_target_select()
+    test_version_read_single_value_fallback()
 
     print()
     print("=" * 64)

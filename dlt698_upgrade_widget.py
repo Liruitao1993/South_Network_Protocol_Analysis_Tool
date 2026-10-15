@@ -46,6 +46,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QFrame,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -610,6 +611,26 @@ class Dlt698UpgradeWidget(QWidget):
 
         outer.addWidget(self.sec_params)
 
+        # ── 版本信息展示区（读版本信息的逐字段解析结果；本页唯一的「不滚动就能看清」位置）──
+        # 升级前 / 升级完成后**并排两栏**：现场要的就是「前后对比」，竖排会互相挤到滚动条里
+        self.grp_version = QGroupBox("版本信息")
+        ver_box = QVBoxLayout(self.grp_version)
+        ver_box.setContentsMargins(8, 6, 8, 6)
+        ver_row = QHBoxLayout()
+        self.txt_version_pre = QPlainTextEdit()
+        self.txt_version_post = QPlainTextEdit()
+        for box in (self.txt_version_pre, self.txt_version_post):
+            box.setReadOnly(True)
+            box.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+            box.setFont(QFont("Consolas", 9))
+            box.setMinimumHeight(112)              # ≥7 行（标题 + 6 字段；9pt Consolas 行距 14px）
+            box.setMaximumHeight(170)
+            box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            ver_row.addWidget(box, 1)
+        ver_box.addLayout(ver_row)
+        outer.addWidget(self.grp_version)
+        self._reset_version_info()
+
         # ── ③ 工具栏 + 进度 ──
         bar = QHBoxLayout()
         self.btn_start = QPushButton("开始升级")
@@ -691,6 +712,10 @@ class Dlt698UpgradeWidget(QWidget):
         self.log_text.setStyleSheet(
             f"QPlainTextEdit {{ background-color: {p['bg']}; color: {p['fg']};"
             f" border: 1px solid {p['border']}; }}")
+        for box in (self.txt_version_pre, self.txt_version_post):
+            box.setStyleSheet(
+                f"QPlainTextEdit {{ background-color: {p['bg']}; color: {p['fg']};"
+                f" border: 1px solid {p['border']}; }}")
         self.drop_area.setStyleSheet(
             f"QFrame#UpgradeDropArea {{ background-color: {p['bg']};"
             f" border: 1px dashed {p['border']}; border-radius: 4px; }}")
@@ -874,7 +899,10 @@ class Dlt698UpgradeWidget(QWidget):
         reason = str(res.get("reason") or "未知原因")
         if res.get("ok"):
             if self._phase in VER_PHASES:
-                self._log(f"[RX] {fmt_hex(frame)}  → {self._version_line(res)}", "rx")
+                # 帧一行，解析明细写在**帧的下面**（用户反馈：贴在帧尾要横向拖到最后才看得见）
+                self._log(f"[RX] {fmt_hex(frame)}", "rx")
+                self._record_version_info(self._phase, res)
+                self._log_version_detail(res)
             else:
                 # DAR 可能因 PIID-ACD 位（bit7）带上标志位，判据只在协议层，这里照实显示
                 self._log(f"[RX] {fmt_hex(frame)}  → DAR={self._dar_value(dar)} 成功", "rx")
@@ -896,11 +924,84 @@ class Dlt698UpgradeWidget(QWidget):
             return dar & 0x7F
         return dar
 
+    # ======================================================================
+    # 版本信息展示区（逐字段明细；日志只放「帧一行 + 明细若干行」）
+    # ======================================================================
+
+    @staticmethod
+    def _pad_cjk(text: str, width: int) -> str:
+        """按**显示列宽**补空格（CJK 算 2 列）—— 纯 ``str.ljust`` 对中文名会错位。"""
+        cols = sum(2 if ord(ch) > 0x2E80 else 1 for ch in text)
+        return text + " " * max(0, width - cols)
+
+    @classmethod
+    def _version_detail_lines(cls, rows: List[dict], indent: str = "  ") -> List[str]:
+        """版本明细行：`名称 = 值   [原始字节]`（名称按显示宽度对齐）。"""
+        if not rows:
+            return []
+        width = max(sum(2 if ord(ch) > 0x2E80 else 1 for ch in str(r.get("名称", "")))
+                    for r in rows)
+        lines = []
+        for row in rows:
+            name = cls._pad_cjk(str(row.get("名称", "")), width)
+            raw = str(row.get("原始", "") or "")
+            tail = f"   [{raw}]" if raw else ""
+            lines.append(f"{indent}{name} = {row.get('值', '')}{tail}")
+        return lines
+
+    def _reset_version_info(self) -> None:
+        """清空两个读版本结果（每次「开始升级」/「清除」都重置，避免上一轮的残留误导）。"""
+        self._ver_info = {"pre": None, "post": None}
+        self._render_version_panel()
+
+    def _record_version_info(self, phase: str, res: Optional[dict] = None,
+                            reason: str = "") -> None:
+        """记下本步读版本结果（成功给逐字段明细；失败给原因）并刷新展示区。"""
+        where = "pre" if phase == PHASE_VER_PRE else "post"
+        self._ver_info[where] = {
+            "target": self._read_target_short(),
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "rows": list((res or {}).get("rows") or []),
+            "note": str((res or {}).get("version") or ""),
+            "reason": str(reason or ""),
+        }
+        self._render_version_panel()
+
+    def _render_version_panel(self) -> None:
+        """按本轮结果重画展示区（升级前 / 升级完成后 各一栏，便于前后对比）。"""
+        for key, title, box in (("pre", "升级前", self.txt_version_pre),
+                                ("post", "升级完成后", self.txt_version_post)):
+            info = self._ver_info.get(key)
+            if not info:
+                box.setPlainText(f"{title}：（未读取）")
+                continue
+            head = f"{title} · {info['target']} · {info['time']}"
+            if info["reason"]:
+                box.setPlainText(f"{head} —— 未读到：{info['reason']}")
+                continue
+            lines = [head] + self._version_detail_lines(info["rows"])
+            if len(lines) == 1:
+                lines.append(f"（无明细）{info['note']}")
+            box.setPlainText("\n".join(lines))
+
+    def _log_version_detail(self, res: dict) -> None:
+        """把读版本的解析结果**写在帧行的下面若干行**（而不是同一行尾部）。
+
+        用户反馈：贴在帧尾时一行太长、日志是 NoWrap，要横向拖到最后才看得见内容。
+        """
+        rows = list(res.get("rows") or [])
+        self._log(f"  → {self._version_line(res)}"
+                  + (f"（{len(rows)} 项）" if rows else ""), "rx")
+        for line in self._version_detail_lines(rows, indent="    "):
+            self._log(line, "rx")
+
     def _version_line(self, res: dict) -> str:
-        """读版本成功的日志正文：`版本信息（升级前·通用）：<内容>`（无内容时说明原因）。"""
+        """读版本结果的**标签行**：`版本信息（升级前·内部）读取成功`（逐字段明细在下面几行）。"""
         where = "升级前" if self._phase == PHASE_VER_PRE else "升级完成后"
-        text = str(res.get("version") or "").strip()
         head = f"版本信息（{where}·{self._read_target_short()}）"
+        if res.get("rows"):
+            return f"{head}读取成功"
+        text = str(res.get("version") or "").strip()
         return f"{head}：{text}" if text else f"{head}：{res.get('reason') or '响应未带数据'}"
 
     # ======================================================================
@@ -1098,11 +1199,13 @@ class Dlt698UpgradeWidget(QWidget):
         直接按成功收尾（文案里说明读版本未成功，明细在日志）。
         """
         if self._phase == PHASE_VER_PRE:
+            self._record_version_info(PHASE_VER_PRE, reason=why)
             self._log(f"[信息] 读版本信息未成功（{why}），继续升级流程", "warn")
             self._phase = PHASE_START
             self._attempt = 0
             self._send_current_step()
             return
+        self._record_version_info(PHASE_VER_POST, reason=why)
         self._log(f"[信息] 读版本信息未成功（{why}），升级流程已结束", "warn")
         self._succeed("升级流程完成（读版本信息未成功，原因见日志）")
 
@@ -1316,6 +1419,7 @@ class Dlt698UpgradeWidget(QWidget):
         self._attempt = 0
         self._sent_frames = 0
         self._rx_buf.clear()
+        self._reset_version_info()          # 展示区按本轮结果重画（不留上一轮的版本）
         self.progress.setValue(0)
         self.lbl_progress.setText("准备中")
         self._state = STATE_STARTING
@@ -1392,6 +1496,7 @@ class Dlt698UpgradeWidget(QWidget):
         self._wait_timer.stop()
         self._rx_buf.clear()
         self.log_text.clear()
+        self._reset_version_info()
         self.progress.setValue(0)
         self._confirmed_bytes = 0
         self._sent_frames = 0

@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "检查项：§7j 日志「帧一行 + 明细在下」、展示区两栏不裁行、按钮无宽度上限"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "检查项：版本字段名/日期规则必须单一来源（decode 模块），不得在页面或解析器里再抄一份"}

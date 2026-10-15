@@ -18,6 +18,16 @@ from typing import Any, Dict, Optional, Tuple
 # class_id 来自 OILookup.OI_TO_CLASS_ID，attr_id 为属性编号（OAD 字节2 低5位）
 # ═══════════════════════════════════════════════════════════════
 
+#: 表191 属性3「版本信息」的 6 个字段名 —— **单一来源**：标准对象（OI 0x4300 属性3）与
+#: 厂家扩展的同类对象（如「内部版本」OAD `FF 10 04 00`，实机回同样 6 项同长度结构）共用；
+#: 不要在别处再抄一份字段名/顺序。
+VERSION_FIELDS: Tuple[str, ...] = (
+    "厂商代码", "软件版本号", "软件版本日期", "硬件版本号", "硬件版本日期", "厂商扩展信息",
+)
+
+#: 表191 为上述 6 个字段声明的**字节长度**（结构自证用：实发长度逐项一致才算「确是本结构」）。
+VERSION_FIELD_BYTES: Tuple[int, ...] = (4, 4, 6, 4, 6, 8)
+
 CLASS_ATTR_TEMPLATES: Dict[Tuple[int, int], Dict[str, Any]] = {
     # ---- 电能量类 (class_id=1) ----
     (1, 2): {"type": "energy_array", "name": "总及费率电能量数组"},
@@ -40,7 +50,7 @@ CLASS_ATTR_TEMPLATES: Dict[Tuple[int, int], Dict[str, Any]] = {
     # ---- 设备管理类 (class_id=19，表191) ----
     (19, 2): {"type": "visible_string", "name": "设备描述符"},
     (19, 3): {"type": "version_structure", "name": "版本信息",
-              "fields": ["厂商代码", "软件版本号", "软件版本日期", "硬件版本号", "硬件版本日期", "厂商扩展信息"]},
+              "fields": list(VERSION_FIELDS)},
     (19, 4): {"type": "date_time_s", "name": "生产日期"},
 }
 
@@ -99,6 +109,36 @@ ANHUI_ATTR_TEMPLATES: Dict[int, Dict[str, Any]] = {
                             "spec": "dispatch_plan_unit"}}},
 }
 
+def version_like_members(data_dict: Any) -> Optional[list]:
+    """若 ``data_dict`` 是「版本信息形状」的 structure ⇒ 返回其 6 个成员，否则 ``None``。
+
+    形状判据（宽松档）：`structure` + **恰好 6 个**成员 + 每个成员都是 `visible-string`。
+    更严的「长度是否与表191 声明一致」由 :func:`version_lengths_match` 单独回答 ——
+    命名可以照给（值/原始字节一起展示），但长度不符时调用方**必须**把这一点说出来。
+    """
+    if not isinstance(data_dict, dict):
+        return None
+    if data_dict.get("tag_name") != "structure" and data_dict.get("类型") != "structure":
+        return None
+    items = data_dict.get("解析值")
+    if not isinstance(items, list) or len(items) != len(VERSION_FIELDS):
+        return None
+    for item in items:
+        if not isinstance(item, dict):
+            return None
+        if item.get("tag_name") != "visible-string" and item.get("类型") != "visible-string":
+            return None
+    return items
+
+
+def version_lengths_match(members: list) -> bool:
+    """6 个成员的**字节长度**是否逐项等于表191 声明（4/4/6/4/6/8）—— 结构自证的强判据。"""
+    try:
+        return tuple(len(str(m.get("原始值", ""))) // 2 for m in members) == VERSION_FIELD_BYTES
+    except Exception:                                   # 缺字段/非预期形状 ⇒ 视为不自证
+        return False
+
+
 def _decode_visible_string_field(data_dict: Dict[str, Any], name: str = "设备描述符") -> Dict[str, str]:
     """单 visible-string 解码（如 设备描述符）"""
     val = data_dict.get("解析值") if isinstance(data_dict, dict) else None
@@ -107,12 +147,14 @@ def _decode_visible_string_field(data_dict: Dict[str, Any], name: str = "设备�
     return {}
 
 def _decode_version_structure(data_dict: Dict[str, Any],
-                              field_names: list) -> Dict[str, str]:
+                              field_names: list = None) -> Dict[str, str]:
     """版本信息结构解码（表191 属性3）：structure of 6×visible-string
 
     厂商代码/软件版本号/软件版本日期/硬件版本号/硬件版本日期/厂商扩展信息
-    软件版本日期、硬件版本日期为 YYMMDD → 补全年份显示
+    软件版本日期、硬件版本日期为 YYMMDD → 补全年份显示。`field_names` 缺省取
+    :data:`VERSION_FIELDS`（单一来源）。
     """
+    field_names = list(field_names) if field_names else list(VERSION_FIELDS)
     result: Dict[str, str] = {}
     items = data_dict.get("解析值") if isinstance(data_dict, dict) else None
     if not isinstance(items, list):
@@ -125,13 +167,24 @@ def _decode_version_structure(data_dict: Dict[str, Any],
         if "日期" in name and len(val) == 6 and val.isdigit():
             # YYMMDD → 20YY-MM-DD
             try:
-                yy, mm, dd = int(val[0:2]), int(val[2:4]), int(val[4:6])
+                mm, dd = int(val[2:4]), int(val[4:6])
                 if 1 <= mm <= 12 and 1 <= dd <= 31:
                     val = f"20{val[0:2]}-{val[2:4]}-{val[4:6]}"
             except ValueError:
                 pass
         result[name] = val
     return result
+
+
+def decode_version_info(data_dict: Dict[str, Any]) -> Optional[Dict[str, str]]:
+    """按表191「版本信息」解码任意**同形**结构（标准 OI 0x4300 属性3 / 厂家扩展内部版本同用）。
+
+    形状不符（不是 6×visible-string 的 structure）⇒ ``None``（调用方自行决定如何标注）。
+    """
+    if version_like_members(data_dict) is None:
+        return None
+    decoded = _decode_version_structure(data_dict)
+    return decoded or None
 
 def _decode_date_time_s_value(data_dict: Dict[str, Any], name: str = "生产日期") -> Dict[str, str]:
     """date_time_s 单值可读化（表191 属性4）"""

@@ -27,6 +27,13 @@ from typing import List, Optional
 from dl_t698_45_frame_gen import DLT69845FrameGenerator
 from dl_t698_45_axdr import AXDRCoder
 from dl_t698_45_parser import DLT69845Parser
+from dl_t698_45_data_decode import (
+    VERSION_FIELDS,
+    VERSION_FIELD_BYTES,
+    decode_version_info,
+    version_lengths_match,
+    version_like_members,
+)
 
 # ─── 协议常量 ───────────────────────────────────────────────────────────────
 OMD_START = bytes.fromhex("F0010700")   # 方法7 启动传输（进入接收升级包状态）
@@ -437,6 +444,51 @@ def _version_text(apdu: dict) -> str:
     return ""
 
 
+def version_rows(apdu: dict) -> List[dict]:
+    """GET-Response 的**逐字段明细**：`[{"名称", "值", "原始", "长度"}]`（详细解析用）。
+
+    - 标准/厂家扩展的「版本信息形状」结构（6×visible-string）⇒ 按表191 逐项命名
+      （`厂商代码/软件版本号/软件版本日期/硬件版本号/硬件版本日期/厂商扩展信息`，日期补全为
+      `20YY-MM-DD`）；**长度与表191 声明不一致时追加一行 ⚠ 说明**（命名照给 —— 值与原文字节
+      一起展示，是否采信由现场判断）；
+    - 其他（单个 visible-string / octet-string / 数组…）⇒ 一条 `数据` 行（值 = 解析值，原始 = 编码字节）。
+    命名与日期规则一律来自 :mod:`dl_t698_45_data_decode`（**不在此处再写一份字段名**）。
+    """
+    rows: List[dict] = []
+    data = apdu.get("数据") if isinstance(apdu, dict) else None
+    members = version_like_members(data)
+    if members is not None:
+        named = decode_version_info(data) or {}
+        for i, member in enumerate(members):
+            name = VERSION_FIELDS[i] if i < len(VERSION_FIELDS) else f"字段{i + 1}"
+            rows.append({
+                "名称": name,
+                "值": str(named.get(name, member.get("解析值", ""))),
+                "原始": str(member.get("原始编码", "")).upper(),
+                "长度": len(str(member.get("原始值", ""))) // 2,
+            })
+        if not version_lengths_match(members):
+            actual = tuple(r["长度"] for r in rows)
+            rows.append({
+                "名称": "⚠ 长度未自证",
+                "值": f"表191 声明 {VERSION_FIELD_BYTES}，本次实发 {actual}",
+                "原始": "", "长度": 0,
+            })
+        return rows
+
+    if isinstance(data, dict):
+        value = data.get("解析值", data.get("原始值", ""))
+        if isinstance(value, (list, dict)):
+            value = data.get("原始值", "")
+        rows.append({
+            "名称": "数据",
+            "值": str(value),
+            "原始": str(data.get("原始编码", "")).upper(),
+            "长度": len(str(data.get("原始值", ""))) // 2,
+        })
+    return rows
+
+
 def check_get_response(frame: bytes, expect_oad: bytes = OAD_VERSION) -> dict:
     """判定一帧接收报文是否为「读版本信息」的 GET-Response Normal 成功响应。
 
@@ -450,7 +502,7 @@ def check_get_response(frame: bytes, expect_oad: bytes = OAD_VERSION) -> dict:
     Returns: {"ok", "reason", "dar", "oad", "apdu_type", "version", "data_business"}
     """
     out = {"ok": False, "reason": "", "dar": None, "oad": "", "apdu_type": "",
-           "version": "", "data_business": {}}
+           "version": "", "data_business": {}, "rows": []}
     try:
         result = DLT69845Parser().parse(bytes(frame or b""))
         if result.get("解析状态") != "成功":
@@ -507,6 +559,7 @@ def check_get_response(frame: bytes, expect_oad: bytes = OAD_VERSION) -> dict:
         biz = apdu.get("数据业务")
         out["data_business"] = dict(biz) if isinstance(biz, dict) else {}
         out["version"] = _version_text(apdu)
+        out["rows"] = version_rows(apdu)          # 逐字段明细（详细解析）
         return out
     except Exception as exc:                     # 坏帧不得抛异常（调用方在串口回调线程）
         out["reason"] = f"帧解析失败：{exc}"
@@ -519,5 +572,5 @@ __all__ = [
     "build_sa", "split_blocks", "block_count", "UpgradePlan",
     "build_file_info", "build_start_transfer", "build_write_block",
     "build_exec_upgrade", "build_read_version", "calc_checksum_value",
-    "check_action_response", "check_get_response",
+    "check_action_response", "check_get_response", "version_rows",
 ]

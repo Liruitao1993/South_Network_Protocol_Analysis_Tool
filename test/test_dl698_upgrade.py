@@ -21,6 +21,7 @@ import hashlib
 import _path_setup  # noqa: E402,F401 —— F401 必须一并抑制，否则 ruff --fix 会删掉它
 
 import dl_t698_45_upgrade as up  # noqa: E402
+import dl_t698_45_data_decode as decode_mod  # noqa: E402
 from dl_t698_45_frame_gen import DLT69845FrameGenerator  # noqa: E402
 from dl_t698_45_parser import DLT69845Parser  # noqa: E402
 from validator.dl_t698_45_validator import DLT69845Validator  # noqa: E402
@@ -561,6 +562,98 @@ def test_a11_internal_version_read():
           and up.OAD_INTERNAL_VERSION == spaced("FF 10 04 00"))
 
 
+# ─── 版本明细（逐字段解析；用户要求「详细解析」） ───────────────────────────
+#: 现场实帧：内部版本读命令的响应（带 4 字节 FEH 前导；6 项 visible-string，长度 4/4/6/4/6/8）
+REAL_INT_RESP = spaced("""
+    FE FE FE FE 68 47 00 C3 05 03 24 08 04 26 20 00 5A E2
+    85 01 00 FF 10 04 00 01
+    02 06 0A 04 4C 48 49 4E 0A 04 30 30 33 39 0A 06 32 36 30 38 30 33
+    0A 04 30 30 31 41 0A 06 32 35 31 30 31 33 0A 08 47 57 47 53 58 58 58 58
+    00 00 14 CD 16
+""")
+#: 期望的 6 项（名称 → 值；日期按表191 规则补全为 20YY-MM-DD）
+REAL_INT_FIELDS = (
+    ("厂商代码", "LHIN", "0A044C48494E", 4),
+    ("软件版本号", "0039", "0A0430303339", 4),
+    ("软件版本日期", "2026-08-03", "0A06323630383033", 6),
+    ("硬件版本号", "001A", "0A0430303141", 4),
+    ("硬件版本日期", "2025-10-13", "0A06323531303133", 6),
+    ("厂商扩展信息", "GWGSXXXX", "0A084757475358585858", 8),
+)
+
+
+def _resp_with(data: bytes, oad: bytes, tag: bytes = b"\x01") -> bytes:
+    """搭一帧 GET-Response（tag 01=数据 / 00=错误信息 DAR），OAD 由调用方给。"""
+    apdu = bytes([0x85, 0x01, 0x01]) + bytes(oad) + bytes(tag) + bytes(data)
+    return DLT69845FrameGenerator()._assemble_frame(up.WILDCARD_SA, 0, 0xC3, apdu)
+
+
+def test_a12_version_detail_rows():
+    section("[A12] 版本明细：逐字段解析（表191 命名 + 日期补全 + ⚠ 未自证）")
+
+    # ① 现场实帧 → 6 项逐字段（名称/值/原始字节/长度）
+    res = up.check_get_response(REAL_INT_RESP, up.OAD_INTERNAL_VERSION)
+    check("① 现场帧判 ok 且带 6 行明细", res["ok"] is True and len(res["rows"]) == 6, res["rows"])
+    rows = res["rows"]
+    check("① 名称/值逐项正确（含日期补全）",
+          [(r["名称"], r["值"]) for r in rows] == [(n, v) for n, v, _h, _l in REAL_INT_FIELDS],
+          [(r["名称"], r["值"]) for r in rows])
+    check("① 原始字节与声明长度逐项一致",
+          [(r["原始"], r["长度"]) for r in rows] == [(h, l) for _n, _v, h, l in REAL_INT_FIELDS],
+          [(r["原始"], r["长度"]) for r in rows])
+    check("① 结构长度自证通过（4/4/6/4/6/8）",
+          decode_mod.version_lengths_match(
+              decode_mod.version_like_members(
+                  DLT69845Parser().parse(REAL_INT_RESP)["链路用户数据"]["APDU"]["数据"])) is True)
+
+    # ② 标准「通用版本信息」（同一形状）走同一条命名路径
+    common = _resp_with(bytes([0x02, 6]) + b"".join(
+        bytes([0x0A, len(v)]) + v for v in
+        (b"JCDZ", b"V1.5", b"250901", b"V1.0", b"230602", b"SHANDONG")), up.OAD_VERSION)
+    r2 = up.check_get_response(common, up.OAD_VERSION)
+    check("② 通用版本信息同样逐字段命名",
+          [(r["名称"], r["值"]) for r in r2["rows"]][:3]
+          == [("厂商代码", "JCDZ"), ("软件版本号", "V1.5"), ("软件版本日期", "2025-09-01")],
+          r2["rows"])
+
+    # ③ 长度与表191 声明不符 ⇒ 命名照给 + 显式 ⚠ 行（不静默、也不假装自证）
+    odd = _resp_with(bytes([0x02, 6]) + b"".join(
+        bytes([0x0A, len(v)]) + v for v in
+        (b"AB", b"V1.5", b"250901", b"V1.0", b"230602", b"SHANDONG")), up.OAD_INTERNAL_VERSION)
+    r3 = up.check_get_response(odd, up.OAD_INTERNAL_VERSION)
+    check("③ 6 项仍在 + 多一行「⚠ 长度未自证」",
+          len(r3["rows"]) == 7 and r3["rows"][-1]["名称"] == "⚠ 长度未自证", r3["rows"][-1])
+    check("③ ⚠ 行写明声明值与实发值",
+          "表191 声明 (4, 4, 6, 4, 6, 8)" in r3["rows"][-1]["值"]
+          and "(2, 4, 6, 4, 6, 8)" in r3["rows"][-1]["值"], r3["rows"][-1]["值"])
+
+    # ④ 非结构数据 ⇒ 单行「数据」（兜底，别空着）
+    single = _resp_with(bytes([0x0A, 0x0A]) + b"V1.0.3-INT", up.OAD_INTERNAL_VERSION)
+    r4 = up.check_get_response(single, up.OAD_INTERNAL_VERSION)
+    check("④ 单个 visible-string ⇒ 一行「数据」",
+          [(r["名称"], r["值"]) for r in r4["rows"]] == [("数据", "V1.0.3-INT")], r4["rows"])
+    check("④ 兜底行也带原始字节", r4["rows"][0]["原始"] == "0A0A56312E302E332D494E54",
+          r4["rows"][0])
+
+    # ⑤ 单一来源：字段名只在 decode 模块一份（模板与常量同源）
+    check("⑤ CLASS_ATTR_TEMPLATES[(19,3)] 的 fields 就是 VERSION_FIELDS（无第二份清单）",
+          decode_mod.CLASS_ATTR_TEMPLATES[(19, 3)]["fields"] == list(decode_mod.VERSION_FIELDS))
+    check("⑤ 表191 声明长度 = 4/4/6/4/6/8",
+          decode_mod.VERSION_FIELD_BYTES == (4, 4, 6, 4, 6, 8))
+    check("⑤ 非 6 项结构不算版本信息（不猜命名）",
+          decode_mod.decode_version_info({"tag_name": "structure", "解析值": [
+              {"tag_name": "visible-string", "解析值": "A"}]}) is None)
+
+    # ⑥ 变异反证：字段名顺序对调 ⇒ 我们的断言必须对不上（证明名字不是白给的）
+    swapped = [dict(r) for r in rows]
+    swapped[2]["名称"], swapped[4]["名称"] = swapped[4]["名称"], swapped[2]["名称"]
+    check("⑥ 字段名顺序被对调 ⇒ 与现场帧的期望逐项不符（断言有判别力）",
+          [(r["名称"], r["值"]) for r in swapped]
+          != [(n, v) for n, v, _h, _l in REAL_INT_FIELDS])
+    check("⑥ 日期字段被错配时能看出来（软件版本日期 ≠ 2026-08-03）",
+          dict((r["名称"], r["值"]) for r in swapped)["软件版本日期"] != "2026-08-03")
+
+
 def main():
     print("=" * 66)
     print("协议8 698.45 文件传输升级 —— 纯逻辑层（dl_t698_45_upgrade）")
@@ -576,6 +669,7 @@ def main():
     test_a9_mutation_counterproof()
     test_a10_read_version()
     test_a11_internal_version_read()
+    test_a12_version_detail_rows()
     print(f"\nPASS={PASS} FAIL={FAIL}")
     sys.exit(0 if FAIL == 0 else 1)
 
