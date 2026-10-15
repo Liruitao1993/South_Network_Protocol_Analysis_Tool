@@ -1268,3 +1268,43 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Next Steps
 
 - 发版批次：把 main_gui.py（APP_VERSION/CHANGELOG）、AGENTS.md、README.md、两个 .iss 一起提交；bump 后跑 python release_check.py --sync-iss
+
+
+## Session 39: 光伏升级：读版本信息展示改版（帧下明细 + 两栏展示区）+ 版本逐字段解析
+
+**Date**: 2026-10-15
+**Task**: 光伏升级：读版本信息展示改版（帧下明细 + 两栏展示区）+ 版本逐字段解析
+**Branch**: `main`
+
+### Summary
+
+现场反馈两问：①解析结果贴在帧尾、日志 NoWrap ⇒ 要横向拖到底才看得见；②内部版本只给一串值、看不出字段含义。改为「帧一行 + 明细在下」+ 参数栏下新增「版本信息」展示区（升级前/升级完成后并排两栏）+ 按表191 逐字段命名与日期补全（收口到 dl_t698_45_data_decode.VERSION_FIELDS 单一来源）。
+
+### Main Changes
+
+- dl_t698_45_data_decode.py：VERSION_FIELDS/VERSION_FIELD_BYTES + version_like_members/version_lengths_match/decode_version_info；CLASS_ATTR_TEMPLATES[(19,3)] 改引用 VERSION_FIELDS（表191 字段名全仓仅一份）
+- dl_t698_45_upgrade.py：version_rows(apdu) 给名称/值/原始/长度；长度与表191 声明不符 ⇒ 命名照给 + 追加「⚠ 长度未自证」行；非结构 ⇒ 一行「数据」兜底；check_get_response 新增 rows 键
+- dlt698_upgrade_widget.py：日志改「[RX] 整帧」一行 + 「→ 版本信息（…）读取成功（N 项）」+ 缩进字段行（不再贴帧尾）；参数栏下新增版本信息区（两栏只读框、每栏≥7 行行距、未读/失败文案、开始升级与清除都重置）
+- 测试：test_dl698_upgrade.py 259→273（A12）、test_dl698_upgrade_gui.py 252→276（[13] 展示区几何护栏 + [17] 帧下行序 + [20] 现场实帧 + [21] 非结构兜底 + 复核补的 7 条断言）
+- 文档：spec §7j 增「展示两条契约 + 逐字段解析单一来源」，AGENTS §5.6/§10 与 README（功能节 + 更新记录）同步，main_gui CHANGELOG 追加（后三者留工作区随发版批次）
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `787d155` | (see git log) |
+
+### Testing
+
+- [OK] test_dl698_upgrade.py PASS=273 FAIL=0；test_dl698_upgrade_gui.py 276 项全绿；tab_wiring 29；698 全家（data_decode/dl_t698_45/fujian/endian/preset）全绿
+- [OK] release_check.py --with-gui：PASS=134 FAIL=4 WARN=0 —— 4 项 FAIL 的尾部均为「全部通过/结果 PASS=430 FAIL=0」，即本机已知的 offscreen 退出期 0xC0000409（modular_iface 单跑 RC=0 PASS=430 复核过），非断言失败
+- [OK] 独立复核（trellis-check 19m）：未发现产品缺陷；7 条变异反证全部变红后逐字节还原（M3 明细改回贴帧尾→10 项红、M4 两栏写成同一栏→10 项红、M5 开始升级不重置→仅复核新补那条红）；补上 2 处缺失断言（PRD 验收项原无覆盖）
+- [OK] 真实平台渲染冒烟（非 offscreen）：两栏中文不裁行（余量 295px、滚动条 0）、明细确在帧行下方（几何 + 截图双证）
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 发版批次：main_gui.py（APP_VERSION/CHANGELOG）、AGENTS.md、README.md、两个 .iss 一起提交；bump 后跑 python release_check.py --sync-iss
