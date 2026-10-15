@@ -1,0 +1,1 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "§7j 协议专属「升级」页契约（本任务新增其中的「TX/RX 日志帧显示口径」条：单一入口 fmt_hex、≤200B 整帧、>200B 头尾各 100B + `...`）"}

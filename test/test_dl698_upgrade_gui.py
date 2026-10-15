@@ -205,6 +205,21 @@ def last_log(tab) -> str:
     return lines[-1] if lines else ""
 
 
+def tx_hex_tokens(line: str) -> list:
+    """``[TX]`` 行里属于 HEX 的 token（丢掉 ``[TX]`` 前缀、步骤名与 ``(共 N 字节)`` 标注）。
+
+    用「恰好 2 个十六进制字符」判定：省略标注与中文步骤名/括号都不会命中。
+    """
+    hexchars = "0123456789ABCDEF"
+    return [t for t in line.split() if len(t) == 2 and all(c in hexchars for c in t)]
+
+
+def tx_line(log: str, label: str) -> str:
+    """取含指定步骤名的 ``[TX]`` 行（找不到返回空串，让断言干净变红而不是抛异常）。"""
+    return next((l for l in log.splitlines()
+                 if l.startswith("[TX]") and label in l), "")
+
+
 def start_transfer(tab, w, payload: bytes, block: int = 100) -> None:
     """设每包字节数 + 装文件 + 点「开始升级」（此时只发出启动传输帧）。"""
     tab.spin_block.setValue(block)
@@ -239,9 +254,25 @@ def run_to_end(tab, w, guard: int = 60) -> None:
 def test_helpers():
     section("[1] 纯助手与源码约束")
     check("fmt_hex 空格大写", upg_ui.fmt_hex(bytes.fromhex("681a00")) == "68 1A 00")
-    long = upg_ui.fmt_hex(b"\x00" * 60, limit=48)
-    check("fmt_hex 超长截断并标注总长",
-          "…(共 60 字节)" in long and long.startswith("00 00"), long)
+    # 用户报障：62B 的启动传输帧被截成 48B（尾部校验值/结束符看不到）→ 现 ≤200B 整帧打印
+    out62 = upg_ui.fmt_hex(bytes(range(62)))
+    check("fmt_hex ≤200B 整帧显示（62B 一个字节不少、无省略标注）",
+          out62.split() == [f"{i:02X}" for i in range(62)] and " ... " not in out62, out62)
+    out200 = upg_ui.fmt_hex(b"\xAA" * 200)
+    check("fmt_hex 恰 200B 仍是整帧（边界）",
+          out200.split() == ["AA"] * 200 and " ... " not in out200)
+    out250 = upg_ui.fmt_hex(bytes(range(250)), limit=200)
+    body, _, cnt = out250.partition("  (共 ")
+    head, sep, tail = body.partition(" ... ")
+    tokens = (head + " " + tail).split()
+    check("fmt_hex >limit：中间 `...` 省略（头 100B + 尾 100B）",
+          bool(sep) and head.split() == [f"{i:02X}" for i in range(100)]
+          and tail.split() == [f"{i:02X}" for i in range(150, 250)], out250)
+    check("fmt_hex >limit：被省略的 100~149 一个都不在输出里",
+          not any(f"{i:02X}" in tokens for i in range(100, 150)))
+    check("fmt_hex >limit：标注总长", cnt == "250 字节)", out250)
+    check("fmt_hex limit=0 = 不限制",
+          len(upg_ui.fmt_hex(b"\xAA" * 500, limit=0).split()) == 500)
     check("parse_hex_text 合法（含空格/下划线）",
           upg_ui.parse_hex_text("7F 7E_D9 D2") == bytes.fromhex("7F7ED9D2"))
     check("parse_hex_text 空串 = b''（可区分「没填」与「填错」）",
@@ -374,6 +405,17 @@ def test_happy_path():
     check("日志含 [TX] 且带步骤名「启动传输」", "[TX]" in log and "(启动传输)" in log)
     check("日志含 [TX] 第 i 包", "(第 1/3 包)" in log and "(第 3/3 包)" in log)
     check("日志含 [TX] 执行升级", "(执行升级)" in log)
+    # 日志格式（用户报障：TX 只显示部分帧内容）：小帧整帧、大帧中间省略
+    s_line = tx_line(log, "(启动传输)")
+    b_line = tx_line(log, "(第 1/3 包)")
+    check("启动传输 TX 行整帧显示（无 `...`，字节数 = 实际帧长）",
+          " ... " not in s_line and len(tx_hex_tokens(s_line)) == len(w.sent[0]),
+          s_line)
+    check("写文件 TX 行（>200B）只显头尾 200B + `...` + 总长",
+          " ... " in b_line and len(tx_hex_tokens(b_line)) == 200
+          and f"(共 {len(w.sent[1])} 字节)" in b_line, b_line)
+    check("写文件 TX 行头段是帧起始 68、尾段是帧尾 16",
+          tx_hex_tokens(b_line)[:1] == ["68"] and tx_hex_tokens(b_line)[-1:] == ["16"])
     check("日志含 [RX] 且写 DAR=0 成功", "[RX]" in log and "DAR=0 成功" in log)
     check("日志含 [信息]", "[信息]" in log)
     check("已确认字节 == 文件字节数", tab._confirmed_bytes == len(payload),

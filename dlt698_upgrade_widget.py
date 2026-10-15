@@ -75,8 +75,10 @@ DEFRAME_STRATEGY = "dlt698_45"
 #: 收帧缓冲上限（超出且**没有半截帧在等**时丢弃，防止噪声/误码把内存吃光）
 RX_BUF_MAX = 262144
 
-#: TX/RX 日志里一帧最多显示的字节数（600B 的写文件帧全打出来会淹掉日志）
-HEX_LOG_LIMIT = 48
+#: TX/RX 日志里一帧最多显示的字节数：**不超过就整帧显示**（启动/执行帧只有几十字节，
+#: 截断反而让现场看不到校验值等尾部字段）；超过则只显示头尾两段、中间用 ``...`` 省略
+#: （600B 起的写文件帧全打出来 ≈1800 字符会淹掉日志）。
+HEX_LOG_LIMIT = 200
 
 # 状态机的状态名（design §4）；对外经 `Dlt698UpgradeWidget.state` 只读暴露
 STATE_IDLE = "idle"
@@ -146,16 +148,25 @@ MISSING_CRCMOD = "协议8 需要 crcmod，请 pip install crcmod"
 
 
 def fmt_hex(data: bytes, limit: int = HEX_LOG_LIMIT) -> str:
-    """字节 → 空格分隔大写 HEX；超过 ``limit`` 字节只显前段并标注总长。
+    """字节 → 空格分隔大写 HEX；超过 ``limit`` 字节时**只显示头尾两段**，中间用 ``...`` 省略。
 
-    600B 的写文件帧按原文打日志 ≈1800 字符，一眼就淹了；截断后仍保留
-    「68 L lo C SA…APDU 头」的形状，够现场定位（design §7 的日志样例同此）。
+    - ``not limit`` 或 ``len(data) <= limit``：**整帧完整显示**（帧不长就没有截断的理由，
+      现场定位首先要看的是完整形状，含尾部校验值/结束符 `16H`）；
+    - 超过：头 ``limit//2`` 字节 + ``...`` + 尾 ``limit-limit//2`` 字节 + ``(共 N 字节)``
+      —— 头段给帧头/APDU 头（含块序号），尾段给帧尾；被省略的正是大文件写块的**数据体本身**。
+
+    例：62 字节的启动传输帧 → 62 字节原样打印；620 字节的写文件帧 →
+    ``68 3C 00 ... 24 16  (共 620 字节)``（头尾各 100 字节）。
     """
     raw = data.hex().upper()
-    if not limit or len(data) <= limit:
+    total = len(data)
+    if not limit or total <= limit:
         return " ".join(raw[i:i + 2] for i in range(0, len(raw), 2))
-    head = raw[:limit * 2]
-    return " ".join(head[i:i + 2] for i in range(0, len(head), 2)) + f" …(共 {len(data)} 字节)"
+    head_len = limit // 2
+    tail_len = limit - head_len
+    head = " ".join(raw[i:i + 2] for i in range(0, head_len * 2, 2))
+    tail = " ".join(raw[i:i + 2] for i in range((total - tail_len) * 2, total * 2, 2))
+    return f"{head} ... {tail}  (共 {total} 字节)"
 
 
 def parse_hex_text(text: str) -> Optional[bytes]:

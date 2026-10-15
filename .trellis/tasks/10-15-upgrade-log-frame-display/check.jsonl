@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "检查项：§7j 日志帧显示口径是否守住（整帧/中间省略、不得退回「只显前段」）、按钮宽度上限、测试断言点"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "检查项：帧显示必须是单一来源（fmt_hex），不得在别处再写第二份 hex 格式化/截断"}
