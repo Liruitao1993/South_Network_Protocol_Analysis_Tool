@@ -36,6 +36,7 @@ import json  # noqa: E402
 import os  # noqa: E402
 import sys  # noqa: E402
 import tempfile  # noqa: E402
+import time  # noqa: E402
 from unittest.mock import patch  # noqa: E402
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -159,10 +160,13 @@ def ack_for(tx_frame: bytes, dar: int = 0) -> bytes:
     return GEN._assemble_frame(sa, ca, 0xC3, resp)
 
 
-def ack_with_omd(tx_frame: bytes, omd: bytes) -> bytes:
-    """把确认帧的 OMD 换成**别的**方法（重算 HCS/FCS ⇒ 帧本身合法、只是不该被认）。"""
+def ack_with_omd(tx_frame: bytes, omd: bytes, dar: int = 0) -> bytes:
+    """把确认帧的 OMD 换成**别的**方法（重算 HCS/FCS ⇒ 帧本身合法、只是不该被认）。
+
+    `dar≠0` 时给「别的方法 + 失败结果」的杂帧（复位期设备可能吐出的错报告）。
+    """
     sa, ca, apdu = tx_parts(tx_frame)
-    resp = bytes([0x87, 0x01, apdu[2]]) + omd + bytes([0, 0, 0, 0])
+    resp = bytes([0x87, 0x01, apdu[2]]) + omd + bytes([dar, 0, 0, 0])
     return GEN._assemble_frame(sa, ca, 0xC3, resp)
 
 
@@ -287,6 +291,9 @@ def run_to_end(tab, w, guard: int = 60) -> None:
 
     - 读版本信息步骤（`ver_pre`/`ver_post`）投 **GET-Response**；
     - 其余步骤投 ACTION-Response；
+    - **「等待设备复位」阶段直接快进**（不等真实 10 秒：调 `_end_reset_wait()` 当即结束倒计时）；
+      快进掩盖不了「定时器根本不 tick」—— [22]⑥ 用**真实事件循环**（delay=2 + 真 time.sleep）
+      验过 1 秒 QTimer 的递减与自动发帧；
     - 执行升级那一步故意**分块交付**（前导 FE + 半帧 + 余下），验证本页自组帧而不是
       靠一次交付正好一帧。
     """
@@ -294,6 +301,9 @@ def run_to_end(tab, w, guard: int = 60) -> None:
         settle()
         if tab.state in ("done", "failed", "aborted") or not w.sent:
             return
+        if tab._phase == upg_ui.PHASE_WAIT_RESET:
+            tab._end_reset_wait()                     # 快进倒计时（不等真 10 秒）
+            continue
         tx = w.sent[-1]
         ack = ver_ack_for(tx) if tab._phase in upg_ui.VER_PHASES else ack_for(tx)
         if tab._phase == "exec":
@@ -1184,7 +1194,8 @@ def test_version_read_flow():
           and log.count("→ 版本信息（升级完成后·通用）读取成功（6 项）") == 1
           and sum(1 for l in log.splitlines() if "厂商代码" in l and "JCDZ" in l) == 2,
           [l for l in log.splitlines() if "版本信息" in l])
-    check("执行升级已确认 → 读版本的过渡日志", "继续读版本信息（升级完成后）" in log)
+    check("执行升级已确认 → 进入「等待设备复位」而不是立刻读",
+          "执行升级已确认，等待设备复位升级" in log, last_log(tab))
     check("展示区两栏各自留下结果（升级前 + 升级完成后）",
           "升级前 · 通用 ·" in panel_pre(tab) and "升级完成后 · 通用 ·" in panel_post(tab)
           and "厂商代码" in panel_pre(tab) and "厂商代码" in panel_post(tab),
@@ -1252,10 +1263,13 @@ def test_version_read_nonblocking():
     check("失败的一栏不是空态、也未串到另一栏",
           panel_post(tab) == "升级完成后：（未读取）", panel_post(tab))
 
-    for _ in range(20):                   # 走完 启动 + 2 包 + 执行 + 读版本(超时)
+    for _ in range(20):                   # 走完 启动 + 2 包 + 执行 + 等待复位 + 读版本(超时)
         settle()
         if tab.state in ("done", "failed", "aborted") or not w.sent:
             break
+        if tab._phase == upg_ui.PHASE_WAIT_RESET:
+            tab._end_reset_wait()         # 快进倒计时（本用例只关心「读失败不阻断」）
+            continue
         if tab._phase in upg_ui.VER_PHASES:
             tab._on_timeout()             # 升级后读版本同样超时 → 仍不阻断
             continue
@@ -1431,6 +1445,312 @@ def test_version_read_single_value_fallback():
     tab.cleanup()
 
 
+def test_reset_wait_before_post_read():
+    section("[22] 「升级完成后读版本」前的等设备复位（默认 10 秒、可设、不勾自动执行也读）")
+    payload = bytes(range(200))                       # 每包 100 → 2 包
+    w = FakeSerialWorker()
+    tab, _, _ = make_tab(w)
+    check("等待秒数 spin 默认 10、范围 0~600",
+          tab.spin_read_after_delay.value() == 10
+          and (tab.spin_read_after_delay.minimum(), tab.spin_read_after_delay.maximum()) == (0, 600),
+          (tab.spin_read_after_delay.value(), tab.spin_read_after_delay.minimum(),
+           tab.spin_read_after_delay.maximum()))
+    tab.spin_block.setValue(100)
+    tab._on_file_selected(write_pkg(payload))
+    tab.chk_auto_exec.setChecked(False)               # 关键：**不发**执行升级命令
+    tab.chk_read_after.setChecked(True)
+    tab.spin_read_after_delay.setValue(10)
+    tab.btn_start.click()
+    settle()
+    check("不勾自动执行 ⇒ 流程是 启动 + 2 包（无执行升级帧）",
+          w.writes == 1 and omd_of(w.sent[0]) == upg.OMD_START, w.writes)
+    w.deliver(ack_for(w.sent[-1]))                    # 启动传输 → 第 1 包
+    settle()
+    w.deliver(ack_for(w.sent[-1]))                    # 第 1 包 → 第 2 包（末包）
+    settle()
+    w.deliver(ack_for(w.sent[-1]))                    # 末包确认 → 进等待
+    settle()
+    check("末包确认后进入「等待设备复位」，且**一帧都没新发**",
+          tab._phase == "wait_reset" and w.writes == 3, f"{tab._phase} / {w.writes}")
+    check("等待定时器在跑、剩余 10 秒",
+          tab._reset_timer.isActive() and tab._reset_left == 10, tab._reset_left)
+    check("状态行显示倒计时",
+          "等待设备复位（剩余 10 秒）" in tab.lbl_status.text(), tab.lbl_status.text())
+    check("日志写明等待（可查是等多久）",
+          "等待设备复位升级：10 秒后再读版本信息" in log_text(tab), last_log(tab))
+    check("未发执行升级 ⇒ 没有执行升级帧", all(omd_of(f) != upg.OMD_EXEC for f in w.sent))
+    check("等待期间「升级后等待(s)」被冻结（传输中改它会让在飞计划不同源）",
+          tab.spin_read_after_delay.isEnabled() is False,
+          tab.spin_read_after_delay.isEnabled())
+
+    tab._on_reset_wait_tick()                          # 模拟 1 秒
+    settle()
+    check("每秒递减 + 状态行跟着走",
+          tab._reset_left == 9 and "剩余 9 秒" in tab.lbl_status.text(),
+          (tab._reset_left, tab.lbl_status.text()))
+    n = w.writes
+    w.deliver(ack_for(w.sent[-1]))                     # 等待期间来的帧 ⇒ 不当确认
+    settle()
+    check("等待期间收到的帧被忽略（不当确认、不推进、零新帧）",
+          "忽略（等待设备复位中）" in log_text(tab) and w.writes == n
+          and tab._phase == "wait_reset", f"{w.writes} / {tab._phase}")
+
+    # 复位期设备可能吐「别的方法 + 失败结果」的杂帧。判别性最强的一例是 **OMD=执行升级 +
+    # DAR≠0**：等待阶段 `_expected_omd` 落到 EXEC，判定若放行就会按「DAR≠0 → 重试」**凭空
+    # 发出一帧执行升级**（本轮用户根本没勾自动执行）。
+    w.deliver(ack_with_omd(w.sent[-1], upg.OMD_EXEC, 5))
+    settle()
+    check("等待期间收到「执行升级 OMD + DAR≠0」杂帧也不发执行升级帧",
+          w.writes == n and tab._phase == "wait_reset" and tab._reset_left == 9,
+          f"{w.writes} / {tab._phase} / {tab._reset_left}")
+
+    # 超时槽（`_wait_timer`）万一在等待期被触发：不许重发（重发的是 EXEC 帧）、不许判失败
+    tab._on_timeout()
+    settle()
+    check("等待期间 _on_timeout() 不重发、不判失败（仍在等）",
+          w.writes == n and tab._phase == "wait_reset" and tab.state == "finishing"
+          and tab._reset_timer.isActive(),
+          f"{w.writes} / {tab._phase} / {tab.state}")
+    check("这类超时被记进日志（现场可查）",
+          "忽略超时/重试判定" in log_text(tab), last_log(tab))
+
+    for _ in range(9):                                 # 走完剩余 9 秒
+        tab._on_reset_wait_tick()
+    settle()
+    check("倒计时归零 ⇒ 自动发出「升级完成后读版本」帧",
+          w.writes == n + 1 and is_ver_frame(w.sent[-1]) and tab._phase == "ver_post",
+          f"{w.writes} / {tab._phase}")
+    check("等待结束有日志", "等待结束，开始读版本信息（升级完成后）" in log_text(tab),
+          last_log(tab))
+    check("定时器已停", tab._reset_timer.isActive() is False)
+
+    n_zero = w.writes
+    for _ in range(5):                                 # 归零后残留的 tick（诈尸）不许复燃
+        tab._on_reset_wait_tick()
+    settle()
+    check("归零后再跳 tick 不会重复发读版本帧",
+          w.writes == n_zero and tab._phase == "ver_post", f"{w.writes} / {n_zero}")
+
+    w.deliver(ver_ack_for(w.sent[-1]))
+    settle()
+    log = log_text(tab)
+    check("读完后正常收尾（done / 100%）",
+          tab.state == "done" and tab.progress.value() == 100, tab.state)
+    check("收尾文案说明「未发执行升级 + 已读升级后版本」",
+          "文件传输完成（未发送执行升级命令，已读升级后版本信息）" in log, last_log(tab))
+    check("展示区「升级完成后」栏有内容",
+          "升级完成后 · 内部 ·" in panel_post(tab) or "升级完成后 · 通用 ·" in panel_post(tab),
+          panel_post(tab))
+    check("结束后「升级后等待(s)」恢复可编辑",
+          tab.spin_read_after_delay.isEnabled() is True)
+    tab.cleanup()
+
+    # ② 等待 = 0 ⇒ 不发定时器、立即读
+    w2 = FakeSerialWorker()
+    tab2, _, _ = make_tab(w2)
+    tab2.spin_block.setValue(100)
+    tab2._on_file_selected(write_pkg(bytes(range(100))))
+    tab2.chk_auto_exec.setChecked(True)
+    tab2.chk_read_after.setChecked(True)
+    tab2.spin_read_after_delay.setValue(0)
+    tab2.btn_start.click()
+    settle()
+    w2.deliver(ack_for(w2.sent[-1]))                   # 启动 → 1 包
+    settle()
+    w2.deliver(ack_for(w2.sent[-1]))                   # 末包 → 执行升级
+    settle()
+    check("勾了自动执行 ⇒ 执行升级帧已发", omd_of(w2.sent[-1]) == upg.OMD_EXEC)
+    w2.deliver(ack_for(w2.sent[-1]))                   # 执行升级确认 → 等待 0 秒
+    settle()
+    check("等待 0 秒 ⇒ 不发定时器、立即发读版本帧",
+          tab2._reset_timer.isActive() is False and is_ver_frame(w2.sent[-1])
+          and tab2._phase == "ver_post", f"{tab2._phase} / {tab2._reset_timer.isActive()}")
+    check("日志写明「等待设为 0 秒」",
+          "等待设为 0 秒 ⇒ 立即读版本信息" in log_text(tab2), last_log(tab2))
+    w2.deliver(ver_ack_for(w2.sent[-1]))
+    settle()
+    check("勾自动执行 + 读后版本 ⇒ 收尾文案是「升级流程完成（已读升级后版本信息）」",
+          tab2.state == "done" and "升级流程完成（已读升级后版本信息）" in log_text(tab2),
+          last_log(tab2))
+    tab2.cleanup()
+
+    # ③ 等待中「中止」⇒ aborted、定时器停、零新帧
+    w3 = FakeSerialWorker()
+    tab3, _, _ = make_tab(w3)
+    tab3.spin_block.setValue(100)
+    tab3._on_file_selected(write_pkg(bytes(range(100))))
+    tab3.chk_auto_exec.setChecked(False)
+    tab3.chk_read_after.setChecked(True)
+    tab3.btn_start.click()
+    settle()
+    w3.deliver(ack_for(w3.sent[-1]))                   # 启动 → 包
+    settle()
+    w3.deliver(ack_for(w3.sent[-1]))                   # 末包 → 等待
+    settle()
+    n3 = w3.writes
+    tab3._on_abort()
+    settle()
+    check("等待中中止 ⇒ aborted + 定时器停 + 零新帧",
+          tab3.state == "aborted" and tab3._reset_timer.isActive() is False
+          and w3.writes == n3, f"{tab3.state} / {w3.writes}")
+    check("中止把剩余秒数一并清零（不留下一轮）", tab3._reset_left == 0, tab3._reset_left)
+    check("中止日志写明停在「等待设备复位」",
+          "等待设备复位（剩余" in log_text(tab3), last_log(tab3))
+    for _ in range(12):                                # 中止后即使定时器残留再跳也不发
+        tab3._on_reset_wait_tick()
+    settle()
+    check("中止后定时器 tick 不复活流程", w3.writes == n3 and tab3.state == "aborted")
+    tab3.cleanup()
+
+    # ④ 等待中「清除」⇒ idle、定时器停、零新帧
+    w4 = FakeSerialWorker()
+    tab4, _, _ = make_tab(w4)
+    tab4.spin_block.setValue(100)
+    tab4._on_file_selected(write_pkg(bytes(range(100))))
+    tab4.chk_auto_exec.setChecked(False)
+    tab4.chk_read_after.setChecked(True)
+    tab4.btn_start.click()
+    settle()
+    w4.deliver(ack_for(w4.sent[-1]))
+    settle()
+    w4.deliver(ack_for(w4.sent[-1]))
+    settle()
+    n4 = w4.writes
+    tab4.btn_clear.click()
+    settle()
+    check("等待中清除 ⇒ idle + 定时器停 + 零新帧",
+          tab4.state == "idle" and tab4._reset_timer.isActive() is False
+          and w4.writes == n4, f"{tab4.state} / {w4.writes}")
+    tab4.cleanup()
+
+    # ⑤ 落盘/读回等待秒数
+    tab5, _, _ = make_tab()
+    tab5.spin_read_after_delay.setValue(37)
+    check("落盘成功", tab5._save_persisted() is True)
+    tab6, _, _ = make_tab(fresh=False)
+    check("新实例读回等待秒数 = 37", tab6.spin_read_after_delay.value() == 37,
+          tab6.spin_read_after_delay.value())
+    tab5.cleanup()
+    tab6.cleanup()
+
+    # ⑥ 真实事件循环（**不手工 tick**）：证明 1 秒 QTimer 真在走、归零自动发帧、且不发第二帧。
+    #    上面各段都靠手工 tick/快进：那样「定时器根本没启动/间隔写错」也能全绿 ⇒ 这里补真实时间。
+    w_r = FakeSerialWorker()
+    tab_r, _, _ = make_tab(w_r)
+    tab_r.spin_block.setValue(100)
+    tab_r._on_file_selected(write_pkg(bytes(range(100))))
+    tab_r.chk_auto_exec.setChecked(False)
+    tab_r.chk_read_after.setChecked(True)
+    tab_r.spin_read_after_delay.setValue(2)             # 2 秒（真等，别用 10 秒拖慢套件）
+    tab_r.btn_start.click()
+    settle()
+    w_r.deliver(ack_for(w_r.sent[-1]))                  # 启动 → 1 包
+    settle()
+    w_r.deliver(ack_for(w_r.sent[-1]))                  # 末包 → 进等待
+    settle()
+    n_r = w_r.writes
+    seen = []
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < 4.0:
+        settle()
+        txt = tab_r.lbl_status.text()
+        if not seen or seen[-1] != txt:
+            seen.append(txt)
+        if w_r.writes > n_r:
+            break
+        time.sleep(0.02)
+    elapsed = time.monotonic() - t0
+    check("真定时器每秒刷新状态行（看到「剩余 1 秒」）",
+          any("剩余 1 秒" in s for s in seen), seen)
+    check("真定时器约 2 秒后自动发出读版本帧（不靠手工 tick；≤3.5s）",
+          w_r.writes == n_r + 1 and is_ver_frame(w_r.sent[-1]) and elapsed <= 3.5,
+          f"{w_r.writes} / {elapsed:.2f}s")
+    check("真定时器归零后已停", tab_r._reset_timer.isActive() is False)
+    n_r2 = w_r.writes
+    t1 = time.monotonic()
+    while time.monotonic() - t1 < 1.4:                  # 再跨一个 tick 周期
+        settle()
+        time.sleep(0.02)
+    check("发帧后再跨一个 tick 周期也不重复发（定时器不复活）",
+          w_r.writes == n_r2 and tab_r._phase == "ver_post", f"{w_r.writes} / {n_r2}")
+    w_r.deliver(ver_ack_for(w_r.sent[-1]))
+    settle()
+    check("真实事件循环这一轮正常收尾（done / 100%）",
+          tab_r.state == "done" and tab_r.progress.value() == 100, tab_r.state)
+    tab_r.cleanup()
+
+    # ⑦ 连续两轮：第一轮「等待中清除」→ 残留 tick 不许影响第二轮（诈尸检查）
+    w_two = FakeSerialWorker()
+    tab_two, _, _ = make_tab(w_two)
+    tab_two.spin_block.setValue(100)
+    tab_two._on_file_selected(write_pkg(bytes(range(100))))
+    tab_two.chk_auto_exec.setChecked(False)
+    tab_two.chk_read_after.setChecked(True)
+    tab_two.spin_read_after_delay.setValue(10)
+    tab_two.btn_start.click()
+    settle()
+    w_two.deliver(ack_for(w_two.sent[-1]))              # 启动 → 1 包
+    settle()
+    w_two.deliver(ack_for(w_two.sent[-1]))              # 末包 → 等待
+    settle()
+    check("第一轮确实停在等待（前置成立，后面的复位断言才有意义）",
+          tab_two._phase == "wait_reset" and tab_two._reset_left == 10,
+          f"{tab_two._phase} / {tab_two._reset_left}")
+    n_two = w_two.writes
+    tab_two.btn_clear.click()                           # 等待中清除 ⇒ 本轮作废
+    settle()
+    check("清除把等待定时器与剩余秒数一并复位",
+          tab_two._reset_timer.isActive() is False and tab_two._reset_left == 0,
+          (tab_two._reset_timer.isActive(), tab_two._reset_left))
+    for _ in range(5):                                  # 清除前已在队列里的残留 tick
+        tab_two._on_reset_wait_tick()
+    settle()
+    check("清除后的残留 tick 一帧都不发、状态不变",
+          w_two.writes == n_two and tab_two.state == "idle", f"{w_two.writes} / {tab_two.state}")
+    tab_two.spin_read_after_delay.setValue(3)
+    tab_two.btn_start.click()                           # 第二轮（同一文件仍在）
+    settle()
+    check("第二轮从头开始（启动传输帧，不是被上一轮尾巴带跑）",
+          tab_two._phase == upg_ui.PHASE_START
+          and omd_of(w_two.sent[-1]) == upg.OMD_START, tab_two._phase)
+    run_to_end(tab_two, w_two)                          # 快进等待（⑥ 已用真实时间验过定时器）
+    settle()
+    check("第二轮跑完且只发了一帧读版本（升级完成后）",
+          tab_two.state == "done"
+          and sum(1 for f in w_two.sent[n_two:] if is_ver_frame(f)) == 1,
+          f"{tab_two.state} / {[is_ver_frame(f) for f in w_two.sent[n_two:]]}")
+    check("第二轮收尾文案正确（未发执行升级 + 已读升级后版本）",
+          "文件传输完成（未发送执行升级命令，已读升级后版本信息）" in log_text(tab_two),
+          last_log(tab_two))
+    tab_two.cleanup()
+
+    # ⑧ 等待中 cleanup()（关窗口）/ 收尾：定时器必须停
+    #    注意**不**断言「残留手工 tick 之后 phase 不变」：`cleanup()` 对**任何**阶段都不动
+    #    `_state/_phase`（普通传输中 cleanup 同样留着 transferring），等待期也不该例外；
+    #    而且真定时器已被停 ⇒ 现实里不会有 tick 到达（手工调 slot 是测试专属路径）。
+    w_cl = FakeSerialWorker()
+    tab_cl, _, _ = make_tab(w_cl)
+    tab_cl.spin_block.setValue(100)
+    tab_cl._on_file_selected(write_pkg(bytes(range(100))))
+    tab_cl.chk_auto_exec.setChecked(False)
+    tab_cl.chk_read_after.setChecked(True)
+    tab_cl.spin_read_after_delay.setValue(10)
+    tab_cl.btn_start.click()
+    settle()
+    w_cl.deliver(ack_for(w_cl.sent[-1]))
+    settle()
+    w_cl.deliver(ack_for(w_cl.sent[-1]))
+    settle()
+    check("⑧ 前置：进了等待且倒计时在跑",
+          tab_cl._phase == "wait_reset" and tab_cl._reset_timer.isActive(),
+          (tab_cl._phase, tab_cl._reset_timer.isActive()))
+    n_cl = w_cl.writes
+    tab_cl.cleanup()
+    check("cleanup() 停掉等待定时器", tab_cl._reset_timer.isActive() is False)
+    settle()
+    check("cleanup() 后不再往串口写（worker 已摘）", w_cl.writes == n_cl, w_cl.writes)
+
+
 def main():
     print("=" * 64)
     print("协议8 升级页 dlt698_upgrade_widget offscreen 回归")
@@ -1463,6 +1783,7 @@ def main():
     test_version_read_mismatch_retries()
     test_version_read_target_select()
     test_version_read_single_value_fallback()
+    test_reset_wait_before_post_read()
 
     print()
     print("=" * 64)

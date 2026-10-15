@@ -104,6 +104,14 @@ PHASE_VER_POST = "ver_post"
 #: 读版本信息的两步（失败**不阻断**升级流程；判定走 `check_get_response`）
 VER_PHASES = (PHASE_VER_PRE, PHASE_VER_POST)
 
+#: 「等设备复位」阶段（读**升级后**版本之前）：部分设备收全升级包会**自动复位升级**，
+#: 复位期间读版本读不到 ⇒ 等 N 秒（默认 10、可设）再读。等待期间状态仍是 `finishing`
+#: （不新增 STATE_*，避免动「传输中」那批守卫），只用 phase 表达。
+PHASE_WAIT_RESET = "wait_reset"
+
+#: 「升级后等待(s)」范围：0 = 不等待（立刻读）
+READ_AFTER_DELAY_MIN, READ_AFTER_DELAY_MAX = 0, 600
+
 #: 「读版本内容」候选：`(下拉文案, 持久化键, 日志短名)`。**OAD 字节不在此处** ——
 #: 一律经 `_read_oad()` 取协议模块的常量（`OAD_VERSION` / `OAD_INTERNAL_VERSION`），
 #: 避免同一份协议事实写两遍（协议模块按需惰性 import，顶层拿不到它）。
@@ -136,6 +144,7 @@ DEFAULTS = {
     "read_before": False,               # 升级前读版本信息（可选诊断步骤，默认不勾）
     "read_after": False,                # 升级完成后读版本信息（同上）
     "read_target": DEFAULT_READ_TARGET,  # 读版本内容：common=通用 43000300 / internal=厂家扩展 FF100400
+    "read_after_delay_s": 10,            # 读「升级后」版本前先等设备复位（秒）；0 = 立即读
     "sa_type": 1,                       # 通配
     "sa_logic": 0,
     "sa_len": 6,
@@ -366,6 +375,12 @@ class Dlt698UpgradeWidget(QWidget):
         self._wait_timer.setSingleShot(True)
         self._wait_timer.timeout.connect(self._on_timeout)
 
+        # 读「升级后」版本前的「等设备复位」倒计时（1 秒重复；只在勾了升级后读版本时启动）
+        self._reset_timer = QTimer(self)
+        self._reset_timer.setInterval(1000)
+        self._reset_timer.timeout.connect(self._on_reset_wait_tick)
+        self._reset_left = 0             # 剩余秒数（`_step_label`/状态行显示）
+
         self._serial_worker = None
         self._upg = None                 # 惰性 import 的 dl_t698_45_upgrade 模块缓存
         self._rx_buf = bytearray()       # 本页自有的 RX 累积缓冲
@@ -382,6 +397,8 @@ class Dlt698UpgradeWidget(QWidget):
         self._piid = 0
         self._attempt = 0                # 当前步骤**已经**重试的次数
         self._sent_frames = 0
+        #: 读了「升级后版本」时的收尾文案（由 `_begin_reset_wait` 按情形给，`_on_ack` 收尾用）
+        self._after_read_done_message = "升级流程完成（已读升级后版本信息）"
 
         self._build_ui()
         self._load_persisted()
@@ -590,8 +607,11 @@ class Dlt698UpgradeWidget(QWidget):
             "读版本失败**不阻断**升级（重试用尽后记日志并继续）。")
         self.chk_read_after = QCheckBox("升级完成后读版本信息")
         self.chk_read_after.setToolTip(
-            "勾选：执行升级被设备确认后再发一帧「读版本信息」，确认新版本已生效。\n"
-            "读版本失败同样不阻断（此时升级本身已完成，只记日志）。")
+            "勾选：收尾时（等设备复位后）再发一帧「读版本信息」，确认新版本已生效。\n"
+            "两种情形**都会读**：① 勾了「传完后自动执行升级」⇒ 执行升级被设备确认后读；\n"
+            "② 没勾 ⇒ 最后一包写文件被确认后读（有的设备收全升级包会**自动复位升级**）。\n"
+            "读之前会按「升级后等待(s)」等一段时间（默认 10 秒），因为复位期间读不到版本。\n"
+            "读版本失败不阻断（此时升级本身已完成，只记日志）。")
         row6.addWidget(self.chk_read_before)
         row6.addSpacing(12)
         row6.addWidget(self.chk_read_after)
@@ -606,6 +626,15 @@ class Dlt698UpgradeWidget(QWidget):
             "两者都是 GET-Request Normal（APDU 形如 05 01 <PIID> <OAD> 00），"
             "只差 OAD；升级前/升级后两步共用这个选择。")
         row6.addWidget(self.combo_read_target)
+        row6.addSpacing(12)
+        row6.addWidget(QLabel("升级后等待(s)"))
+        self.spin_read_after_delay = QSpinBox()
+        self.spin_read_after_delay.setRange(READ_AFTER_DELAY_MIN, READ_AFTER_DELAY_MAX)
+        self.spin_read_after_delay.setToolTip(
+            "读「升级完成后」版本信息之前先等设备复位（秒，默认 10；0 = 不等、立即读）。\n"
+            "有的设备收全升级包就**自动复位升级**（不依赖执行升级命令），复位期间读不到版本 ⇒ 需要等一会儿再读。\n"
+            "勾「升级完成后读版本信息」才用得上这个等待。")
+        row6.addWidget(self.spin_read_after_delay)
         row6.addStretch(1)
         form.addLayout(row6)
 
@@ -690,6 +719,7 @@ class Dlt698UpgradeWidget(QWidget):
         self.chk_read_before.toggled.connect(lambda _c: self._schedule_save())
         self.chk_read_after.toggled.connect(lambda _c: self._schedule_save())
         self.combo_read_target.currentIndexChanged.connect(lambda *_a: self._schedule_save())
+        self.spin_read_after_delay.valueChanged.connect(lambda *_a: self._schedule_save())
         self.combo_exec_mode.currentIndexChanged.connect(lambda *_a: self._on_exec_mode_changed())
         self.combo_sa_type.currentIndexChanged.connect(lambda *_a: self._on_sa_type_changed())
         self.spin_block.valueChanged.connect(lambda _v: self._refresh_summary())
@@ -880,6 +910,10 @@ class Dlt698UpgradeWidget(QWidget):
         """一帧完整 698.45 帧 → 判定是否为**本步**的确认（design §5 判定 + §10）。"""
         if self._state in TERMINAL_STATES:
             return                          # 不在传输中：不打扰（别的页也在看同一口）
+        if self._phase == PHASE_WAIT_RESET:
+            # 等设备复位期间没有在飞的请求 ⇒ 任何帧都不当确认（设备复位时可能吐杂帧/上报）
+            self._log(f"[RX] {fmt_hex(frame)}  → 忽略（等待设备复位中）", "warn")
+            return
         upg = self._upgrade_module()
         if upg is None:
             return
@@ -1042,6 +1076,8 @@ class Dlt698UpgradeWidget(QWidget):
     def _step_label(self) -> str:
         if self._phase == PHASE_VER_PRE:
             return "升级前读版本信息"
+        if self._phase == PHASE_WAIT_RESET:
+            return f"等待设备复位（剩余 {max(0, self._reset_left)} 秒）"
         if self._phase == PHASE_VER_POST:
             return "升级完成后读版本信息"
         if self._phase == PHASE_START:
@@ -1124,21 +1160,67 @@ class Dlt698UpgradeWidget(QWidget):
                 self._state = STATE_FINISHING
                 self._send_current_step()
             else:
-                # 未发执行升级 ⇒ 没有「升级完成」这回事，故不读升级后版本（勾了也要说明）
-                if self.chk_read_after.isChecked():
-                    self._log("[信息] 未勾「传完后自动执行升级」⇒ 不读升级后版本信息", "info")
-                self._succeed("文件传输完成（未发送执行升级命令）")
+                # **不发**执行升级命令：某些设备收全包会**自动复位升级** ⇒ 勾了「升级后读版本」时
+                # 同样要读（先等设备复位），不是「没发执行升级就不读」（用户口径）。
+                self._begin_reset_wait(
+                    "文件传输完成（未发送执行升级命令）",
+                    "文件传输完成（未发送执行升级命令）",
+                    "文件传输完成（未发送执行升级命令，已读升级后版本信息）")
             return
         if self._phase == PHASE_EXEC:
-            if self.chk_read_after.isChecked():
-                self._log("[信息] 执行升级已确认，继续读版本信息（升级完成后）", "info")
-                self._phase = PHASE_VER_POST
-                self._state = STATE_FINISHING
-                self._send_current_step()
-                return
-            self._succeed("执行升级命令已确认，升级流程完成")
+            # 执行升级已确认 ⇒ 同样先等设备复位再读升级后版本
+            self._begin_reset_wait("执行升级已确认",
+                                   "执行升级命令已确认，升级流程完成",
+                                   "升级流程完成（已读升级后版本信息）")
             return
-        self._succeed("升级流程完成（已读升级后版本信息）")
+        self._succeed(self._after_read_done_message)
+
+    def _begin_reset_wait(self, why: str, done_message: str,
+                          posted_message: str) -> None:
+        """收尾步骤：勾了「升级完成后读版本信息」就（**等设备复位后**）读，否则直接收尾。
+
+        - `why`：进入等待的原因文案（日志用）；
+        - `done_message`：**不读**后版本时的收尾文案；
+        - `posted_message`：**读了**后版本时的收尾文案（等读完后由 :meth:`_on_ack` 用）。
+        """
+        if not self.chk_read_after.isChecked():
+            self._succeed(done_message)
+            return
+        self._after_read_done_message = posted_message
+        delay = int(self.spin_read_after_delay.value())
+        self._phase = PHASE_WAIT_RESET
+        self._state = STATE_FINISHING
+        self._wait_timer.stop()
+        if delay <= 0:
+            self._log(f"[信息] {why}，等待设为 0 秒 ⇒ 立即读版本信息（升级完成后）", "info")
+            self._end_reset_wait()
+            return
+        self._reset_left = delay
+        self._reset_timer.start()
+        self._log(f"[信息] {why}，等待设备复位升级：{delay} 秒后再读版本信息"
+                  f"（升级完成后；等待时长可在参数区改）", "info")
+        self._set_status()
+
+    def _on_reset_wait_tick(self) -> None:
+        """倒计时每秒一跳（状态行实时显示剩余秒数）；归零则开始读版本。"""
+        if self._state in TERMINAL_STATES or self._phase != PHASE_WAIT_RESET:
+            self._reset_timer.stop()
+            return
+        self._reset_left -= 1
+        if self._reset_left <= 0:
+            self._end_reset_wait()
+            return
+        self._set_status()
+
+    def _end_reset_wait(self) -> None:
+        """等待结束 ⇒ 发「读版本信息（升级完成后）」帧。"""
+        self._reset_timer.stop()
+        self._reset_left = 0
+        if self._phase == PHASE_WAIT_RESET:
+            self._log("[信息] 等待结束，开始读版本信息（升级完成后）", "info")
+        self._phase = PHASE_VER_POST
+        self._state = STATE_FINISHING
+        self._send_current_step()
 
     def _succeed(self, message: str) -> None:
         self._wait_timer.stop()
@@ -1161,6 +1243,13 @@ class Dlt698UpgradeWidget(QWidget):
         """同一包重发（PIID 自增）；重试用尽则整轮停止并说明还有多少包没发。"""
         self._wait_timer.stop()
         if self._state in (STATE_DONE, STATE_ABORTED, STATE_FAILED):
+            return
+        if self._phase == PHASE_WAIT_RESET:
+            # 等待设备复位期间**没有在飞的请求**（末包/执行升级都已确认）⇒ 超时/重试/失败
+            # 都不成立。放行会**发错帧**：`_expected_omd` 对等待阶段落到 EXEC ⇒ 重发的是
+            # 「执行升级」命令（用户可能根本没勾它），重试用尽还会把等待误判成失败。
+            # `_wait_timer` 进等待时已停，这里只挡「万一」被触发（外部调用/将来改动）。
+            self._log("[信息] 等待设备复位期间无在飞的请求 ⇒ 忽略超时/重试判定", "warn")
             return
         limit = self.spin_retries.value()
         step = self._step_label()
@@ -1420,6 +1509,9 @@ class Dlt698UpgradeWidget(QWidget):
         self._sent_frames = 0
         self._rx_buf.clear()
         self._reset_version_info()          # 展示区按本轮结果重画（不留上一轮的版本）
+        self._reset_timer.stop()
+        self._reset_left = 0
+        self._after_read_done_message = "升级流程完成（已读升级后版本信息）"
         self.progress.setValue(0)
         self.lbl_progress.setText("准备中")
         self._state = STATE_STARTING
@@ -1436,7 +1528,7 @@ class Dlt698UpgradeWidget(QWidget):
         self._send_current_step()
 
     def _freeze_plan_inputs(self, frozen: bool) -> None:
-        """传输进行中冻结会**改变计划**的输入（每包字节数 + 两个读版本开关 + 读版本内容）。
+        """传输进行中冻结会**改变计划**的输入（每包字节数 + 读版本开关/内容/等待时长）。
 
         改这些值会让在飞的帧与后续帧不同源（AGENTS §8 陷阱 77 / spec §7j 的既有契约）；
         按钮门控的复位统一走 :meth:`_finish_buttons`，不要在别处各写一份。
@@ -1445,6 +1537,7 @@ class Dlt698UpgradeWidget(QWidget):
         self.chk_read_before.setEnabled(not frozen)
         self.chk_read_after.setEnabled(not frozen)
         self.combo_read_target.setEnabled(not frozen)
+        self.spin_read_after_delay.setEnabled(not frozen)
 
     def _read_target_key(self) -> str:
         """当前「读版本内容」键（`common` / `internal`）；未知值回落默认。"""
@@ -1585,6 +1678,8 @@ class Dlt698UpgradeWidget(QWidget):
         QMessageBox.warning(self, "协议8 升级", message)
 
     def _finish_buttons(self) -> None:
+        self._reset_timer.stop()            # 等待设备复位的倒计时一并在收尾/中止/失败时停掉
+        self._reset_left = 0
         self.btn_start.setEnabled(self._worker() is not None)
         self.btn_abort.setEnabled(False)
         self._freeze_plan_inputs(False)
@@ -1606,6 +1701,7 @@ class Dlt698UpgradeWidget(QWidget):
             "read_before": self.chk_read_before.isChecked(),
             "read_after": self.chk_read_after.isChecked(),
             "read_target": self._read_target_key(),
+            "read_after_delay_s": self.spin_read_after_delay.value(),
             "sa_type": int(self.combo_sa_type.currentData()),
             "sa_logic": int(self.combo_sa_logic.currentData()),
             "sa_len": int(self.combo_sa_len.currentData()),
@@ -1673,6 +1769,8 @@ class Dlt698UpgradeWidget(QWidget):
             (self.spin_timeout, "timeout_ms", DEFAULTS["timeout_ms"], TIMEOUT_MIN, TIMEOUT_MAX),
             (self.spin_retries, "retries", DEFAULTS["retries"], RETRY_MIN, RETRY_MAX),
             (self.spin_ca, "ca", 0, 0, 255),
+            (self.spin_read_after_delay, "read_after_delay_s", DEFAULTS["read_after_delay_s"],
+             READ_AFTER_DELAY_MIN, READ_AFTER_DELAY_MAX),
         ):
             spin.blockSignals(True)
             spin.setValue(_bounded_int(s[key], default, lo, hi))
@@ -1722,7 +1820,7 @@ class Dlt698UpgradeWidget(QWidget):
 
     def cleanup(self) -> None:
         """停表、断开串口信号、落盘配置（幂等）。**不关闭串口**：端口归主窗口。"""
-        for timer in (self._wait_timer, self._save_timer):
+        for timer in (self._wait_timer, self._save_timer, self._reset_timer):
             try:
                 timer.stop()
             except RuntimeError:
