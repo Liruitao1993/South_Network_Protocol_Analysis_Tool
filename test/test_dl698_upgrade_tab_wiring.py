@@ -169,6 +169,38 @@ def test_injection(win, tab):
     else:
         check("已连接 → 开始按钮可用", tab.btn_start.isEnabled() is True)
 
+    # 发送通道：蓝牙通道的取值回调也注入了 —— 取到的就是**蓝牙页那个** worker（本页不自己建连接）
+    check("注入了蓝牙取值回调", callable(tab._bt_provider))
+    bt_tab = win._ensure_bluetooth_tool_tab()
+    pump()
+    check("回调取到蓝牙页的 worker（同源，不是本页自建）",
+          tab._bt_provider() is bt_tab.bluetooth_worker(),
+          (tab._bt_provider(), bt_tab.bluetooth_worker()))
+
+
+def test_bluetooth_channel_wiring(win, tab):
+    section("[5b] 发送通道接线：蓝牙（真 MainWindow + 真蓝牙页 worker）")
+
+    check("通道下拉有两项（串口/蓝牙）",
+          [tab.combo_channel.itemData(i) for i in range(tab.combo_channel.count())]
+          == ["serial", "bluetooth"],
+          [tab.combo_channel.itemData(i) for i in range(tab.combo_channel.count())])
+    check("默认串口", tab._channel() == "serial", tab._channel())
+    tab.combo_channel.setCurrentIndex(1)                 # 切蓝牙（真蓝牙页未连接）
+    pump()
+    check("真蓝牙页未连接 ⇒ 不设人为上限（8192）", tab.spin_block.maximum() == 8192,
+          tab.spin_block.maximum())
+    check("真蓝牙页未连接 ⇒ 开始禁用 + 提示走蓝牙页",
+          tab.btn_start.isEnabled() is False and "蓝牙工具" in tab.btn_start.toolTip(),
+          tab.btn_start.toolTip())
+    check("状态标签指向蓝牙工具页",
+          "蓝牙通道" in tab.lbl_channel_state.text() and "蓝牙工具" in tab.lbl_channel_state.text(),
+          tab.lbl_channel_state.text())
+    tab.combo_channel.setCurrentIndex(0)                 # 切回串口（不影响后续用例）
+    pump()
+    check("切回串口 ⇒ 上限恢复 8192", tab.spin_block.maximum() == 8192,
+          tab.spin_block.maximum())
+
 
 # ── [6][7] 收尾幂等 + 换肤 ───────────────────────────────────────────────────
 
@@ -258,6 +290,7 @@ def main():
         test_placeholder(win)
         tab = test_visibility_roundtrip(win)
         test_injection(win, tab)
+        test_bluetooth_channel_wiring(win, tab)
         test_cleanup_and_theme(win, tab)
         test_negative(win)
     finally:

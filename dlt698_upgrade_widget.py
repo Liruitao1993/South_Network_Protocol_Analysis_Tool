@@ -25,6 +25,15 @@
 - **``crcmod`` 是可选依赖**：``dl_t698_45_upgrade`` 顶层 import 了 frame_gen/axdr/parser，
   故本页对**它**一律**函数内惰性 import**（AGENTS 模块级导入铁律），失败时给可读提示，
   绝不连带打不开蓝牙/串口页。:mod:`frame_deframe` 只依赖 stdlib + wakeup_prefix ⇒ 可顶层 import。
+- **收发都按「当前通道」二选一（串口 / 蓝牙）**：蓝牙通道复用「蓝牙工具」页那条连接
+  （`set_bluetooth_provider` 取值回调，本页不建/不断连接），但两个通道的字节**绝不能混**
+  —— 串口是主窗口全局共享的、蓝牙页的 worker 在串口通道下照样在跑，故：串口的
+  ``raw_data_received`` / 蓝牙的 ``notification_received`` 各自**先判通道**再喂 `_on_raw_data`；
+  连接状态信号同理（否则蓝牙页的连接会去拨本页**串口通道**的按钮与标签）。
+  蓝牙通道要「一整帧 698 报文**一次 ATT 写**」⇒ 每包字节数由 `worker.single_write_limit()`
+  经 `max_block_bytes_for_frame_limit` 反推（`_apply_block_limit`）；算不出（未连接 / MTU
+  未协商 / 帧头放不下）就**不设假上限**、禁用「开始升级」并写明原因。
+  蓝牙 worker 是蓝牙页**惰性创建**的 ⇒ `showEvent` 每次切回本页都重新对齐一次（幂等）。
 - 状态机不用 QThread：单发 :class:`QTimer` + 标志位（照 ``test_plan_widget`` 的既有范式，
   无需 ``thread_registry`` 回收）。
 - 按钮宽度只走 :func:`gui_utils.fit_btn_width` / :func:`gui_utils.fit_btn_width_for_texts`
@@ -61,6 +70,7 @@ from PySide6.QtWidgets import (
 )
 
 import app_paths
+import bluetooth_core as core_bluetooth
 import frame_deframe
 import gui_utils
 from collapsible_section import CollapsibleSection
@@ -112,6 +122,10 @@ PHASE_WAIT_RESET = "wait_reset"
 #: 「升级后等待(s)」范围：0 = 不等待（立刻读）
 READ_AFTER_DELAY_MIN, READ_AFTER_DELAY_MAX = 0, 600
 
+#: 发送通道：串口（默认，走顶部「串口配置」的连接）/ 蓝牙（复用「蓝牙工具」页已建立的连接）
+CHANNELS = (("串口", "serial"), ("蓝牙", "bluetooth"))
+DEFAULT_CHANNEL = "serial"
+
 #: 「读版本内容」候选：`(下拉文案, 持久化键, 日志短名)`。**OAD 字节不在此处** ——
 #: 一律经 `_read_oad()` 取协议模块的常量（`OAD_VERSION` / `OAD_INTERNAL_VERSION`），
 #: 避免同一份协议事实写两遍（协议模块按需惰性 import，顶层拿不到它）。
@@ -145,6 +159,7 @@ DEFAULTS = {
     "read_after": False,                # 升级完成后读版本信息（同上）
     "read_target": DEFAULT_READ_TARGET,  # 读版本内容：common=通用 43000300 / internal=厂家扩展 FF100400
     "read_after_delay_s": 10,            # 读「升级后」版本前先等设备复位（秒）；0 = 立即读
+    "channel": DEFAULT_CHANNEL,          # 发送通道：serial / bluetooth
     "sa_type": 1,                       # 通配
     "sa_logic": 0,
     "sa_len": 6,
@@ -344,6 +359,27 @@ class _DropArea(QFrame):
 # ── 页面 ─────────────────────────────────────────────────────────────────
 
 
+class _BleSendPort:
+    """把 `BluetoothWorker` 适配成与 `SerialWorker` 同构的**发送口**（只用 `is_open`/`write_raw`）。
+
+    - `write_raw(frame)` → `worker.send_data(frame, single_write=True)`：**一整帧一次 ATT 写**
+      （升级页已按一次写上限把块长算好；超过会被 worker 拒绝并报错，不会静默分包）；
+    - `is_open()` → `worker.is_connected()`。
+
+    **接收不走这里**：本页直接订阅 worker 的 `notification_received` 喂 `_on_raw_data`
+    （698 分帧归本页，不依赖蓝牙页的「静默超时切帧」）。
+    """
+
+    def __init__(self, worker):
+        self._worker = worker
+
+    def is_open(self) -> bool:
+        return bool(self._worker is not None and self._worker.is_connected())
+
+    def write_raw(self, data: bytes) -> bool:
+        return bool(self._worker.send_data(bytes(data), single_write=True))
+
+
 class Dlt698UpgradeWidget(QWidget):
     """协议8 文件传输升级页。
 
@@ -351,7 +387,9 @@ class Dlt698UpgradeWidget(QWidget):
 
     - :meth:`set_serial_worker` —— 注入主窗口共享的 ``SerialWorker``；**只订阅信号**，
       绝不开/关端口。
-    - :meth:`cleanup` —— 停表 / 断信号 / 落盘配置；**不关闭串口**。
+    - :meth:`set_bluetooth_provider` —— 注入「取蓝牙通信线程」的取值回调（主窗口接线到
+      「蓝牙工具」页）；蓝牙连接的生命周期**完全**归那页，本页不建/不断。
+    - :meth:`cleanup` —— 停表 / 断信号 / 落盘配置；**不关闭串口**（也不断蓝牙连接）。
     - :meth:`restyle_for_theme` —— 主题切换后刷新本页动态配色。
     """
 
@@ -382,6 +420,9 @@ class Dlt698UpgradeWidget(QWidget):
         self._reset_left = 0             # 剩余秒数（`_step_label`/状态行显示）
 
         self._serial_worker = None
+        self._bt_provider = None         # 取蓝牙 worker 的回调（主窗口注入；蓝牙通道用）
+        self._bt_worker = None           # 当前绑定的蓝牙 worker（**只由 _bind_ 赋值**：连/断信号与重算同处）
+        self._bt_cap = None              # 蓝牙通道下算出的每包上限（None = 不可用）
         self._upg = None                 # 惰性 import 的 dl_t698_45_upgrade 模块缓存
         self._rx_buf = bytearray()       # 本页自有的 RX 累积缓冲
 
@@ -406,6 +447,7 @@ class Dlt698UpgradeWidget(QWidget):
         self._on_sa_type_changed()
         self._on_exec_mode_changed()
         self._refresh_summary()
+        self._apply_block_limit()        # 通道状态 + 每包上限（蓝牙=按一次 ATT 写上限反推）
         self._log("[信息] 升级页就绪：拖入升级包 → 开始升级"
                   "（只借用顶部「串口配置」的串口，本页不自开端口）")
 
@@ -471,6 +513,28 @@ class Dlt698UpgradeWidget(QWidget):
         row1.addWidget(self.spin_retries)
         row1.addStretch(1)
         form.addLayout(row1)
+
+        # 发送通道（串口 / 蓝牙；蓝牙复用「蓝牙工具」页的连接，并按其 ATT 上限自动算每包上限）
+        row_ch = QHBoxLayout()
+        row_ch.addWidget(QLabel("发送通道"))
+        self.combo_channel = QComboBox()
+        for label, key in CHANNELS:
+            self.combo_channel.addItem(label, key)
+        self.combo_channel.setToolTip(
+            "串口：走顶部「串口配置」的连接（本页只借用，不开端口）。\n"
+            "蓝牙：**复用「蓝牙工具」页已建立的连接**（先在那页扫描/连接/选特征码）。\n"
+            "选蓝牙时，每包字节数会按「一次 ATT 写能承载的字节数 − 698 帧开销」自动算出上限\n"
+            "（例：协商 MTU 512 ⇒ 一次写 509 字节 ⇒ 每包最大 475 字节），超出即自动收敛。")
+        row_ch.addWidget(self.combo_channel)
+        row_ch.addSpacing(12)
+        self.lbl_channel_state = QLabel("")
+        self.lbl_channel_state.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse)
+        # 允许换行 + 吃剩余宽度：蓝牙那行文字很长（名称/MTU/上限/每包最大），
+        # 窄窗口下若按 sizeHint 硬排会被裁掉尾巴（本项目教训：宁可换行不可截断）
+        self.lbl_channel_state.setWordWrap(True)
+        row_ch.addWidget(self.lbl_channel_state, 1)
+        form.addLayout(row_ch)
 
         # SA / CA
         row2 = QHBoxLayout()
@@ -719,6 +783,11 @@ class Dlt698UpgradeWidget(QWidget):
         self.chk_read_before.toggled.connect(lambda _c: self._schedule_save())
         self.chk_read_after.toggled.connect(lambda _c: self._schedule_save())
         self.combo_read_target.currentIndexChanged.connect(lambda *_a: self._schedule_save())
+        self.combo_channel.currentIndexChanged.connect(lambda *_a: self._on_channel_changed())
+        # SA/CA 变了 ⇒ 蓝牙通道下的每包上限要重算（698 帧开销随地址域长度变）
+        for _w in (self.combo_sa_type, self.combo_sa_logic, self.combo_sa_len):
+            _w.currentIndexChanged.connect(lambda *_a: self._apply_block_limit())
+        self.edit_sa.textChanged.connect(lambda *_a: self._apply_block_limit())
         self.spin_read_after_delay.valueChanged.connect(lambda *_a: self._schedule_save())
         self.combo_exec_mode.currentIndexChanged.connect(lambda *_a: self._on_exec_mode_changed())
         self.combo_sa_type.currentIndexChanged.connect(lambda *_a: self._on_sa_type_changed())
@@ -752,6 +821,191 @@ class Dlt698UpgradeWidget(QWidget):
         self.lbl_drop_hint.setStyleSheet(f"color: {p['hint']};")
 
     # ======================================================================
+    # 发送通道（串口 / 蓝牙）——蓝牙复用蓝牙工具页的连接，并按 ATT 上限自动限包
+    # ======================================================================
+
+    def set_bluetooth_provider(self, provider) -> None:
+        """注入「取蓝牙通信线程」的回调（主窗口接线：返回蓝牙工具页当前的 worker 或 None）。
+
+        与串口侧的 `set_serial_worker` 同一约定：能力走注入，本页不 import `main_gui`、
+        也不自己建连接（蓝牙连接归「蓝牙工具」页）。
+        """
+        self._bt_provider = provider
+        self._bind_bluetooth_worker(self._bt_worker_ref())
+
+    def _bt_worker_ref(self):
+        """当前蓝牙 worker（经 provider 取；provider 缺失/异常 ⇒ None）。"""
+        fn = getattr(self, "_bt_provider", None)
+        if fn is None:
+            return None
+        try:
+            return fn()
+        except Exception:
+            return None
+
+    def _bt_slots(self, worker) -> tuple:
+        """本页对蓝牙 worker 的四条订阅（绑定 / 解绑**共用一份**，防止两边写歪）。"""
+        return ((worker.notification_received, self._on_bt_notification),
+                (worker.connection_changed, self._on_bt_connection_changed),
+                (worker.mtu_updated, self._on_bt_mtu_updated),
+                (worker.error_occurred, self._on_bt_error))
+
+    def _bind_bluetooth_worker(self, worker) -> None:
+        """换 worker 时**先断旧信号**再连新信号（避免旧连接的信号继续投到本页）。"""
+        old = self._bt_worker
+        if old is worker:
+            self._apply_block_limit()
+            return
+        if old is not None:
+            for sig, slot in self._bt_slots(old):
+                try:
+                    sig.disconnect(slot)
+                except (TypeError, RuntimeError):
+                    pass
+        self._bt_worker = worker
+        if worker is not None:
+            for sig, slot in self._bt_slots(worker):
+                sig.connect(slot)
+        self._apply_block_limit()
+
+    def _on_bt_notification(self, uuid: str, data: bytes) -> None:
+        """蓝牙收到一个通知分包 → 并入本页的 698 收帧缓冲（分帧归本页）。
+
+        **只在蓝牙通道下吃**：蓝牙页那条连接在本页选串口时照样在跑（两页同时看一个 worker），
+        若不分通道，串口传输会把蓝牙设备（可能是**另一台**设备）的回包当成本步确认。
+        """
+        if self._channel() != "bluetooth":
+            return
+        if self._state in TERMINAL_STATES:
+            return                          # 没在跑就不吃设备的主动通知（免得刷日志）
+        self._on_raw_data(bytes(data))
+
+    def _on_bt_mtu_updated(self, mtu: int, characteristics) -> None:
+        """协商 MTU / 特征码写上限变化 ⇒ 重算每包上限（只在蓝牙通道下有意义）。"""
+        if self._channel() != "bluetooth":
+            return
+        self._apply_block_limit()
+
+    def _on_bt_connection_changed(self, connected: bool) -> None:
+        """蓝牙连接状态变化（**只认蓝牙通道**）⇒ 按实时状态重算上限与按钮。
+
+        与串口槽分开是必须的：蓝牙页自建的连接在串口通道下也会发
+        `connection_changed`，混用会去拨本页串口通道的按钮与标签（实测过）。
+        """
+        if self._channel() != "bluetooth":
+            return
+        self._apply_block_limit()
+
+    def _on_bt_error(self, message: str) -> None:
+        """蓝牙页自己操作的报错也会走这里 ⇒ 只在蓝牙通道下抄进本页日志。"""
+        if self._channel() != "bluetooth":
+            return
+        self._log(f"[失败] 蓝牙：{message}", "fail")
+
+    def _channel(self) -> str:
+        key = self.combo_channel.currentData()
+        return key if key in ("serial", "bluetooth") else DEFAULT_CHANNEL
+
+    def _bt_send_port(self):
+        """蓝牙通道的发送口（未连接/不可用 ⇒ None）。"""
+        worker = self._bt_worker_ref()
+        if worker is None or not worker.is_connected():
+            return None
+        return _BleSendPort(worker)
+
+    def _refresh_channel_state(self, cap=None, why: str = "") -> None:
+        """刷新通道状态标签 + 「开始升级」可用性（通道切换/连接变化/MTU 变化都走它）。"""
+        if self._channel() == "bluetooth":
+            worker = self._bt_worker_ref()
+            if worker is not self._bt_worker:
+                # 取值回调换了线程（蓝牙页重建/注入测试替身）⇒ **走绑定**而不是直接赋值：
+                # 直接赋值会让旧线程的信号还连着本页（RX 混源 + cleanup 断不干净）。
+                self._bind_bluetooth_worker(worker)
+                return                       # `_bind_` 尾部已重算过一次状态
+            if worker is None or not worker.is_connected():
+                text = "蓝牙通道：未连接（请先在「蓝牙工具」页扫描并连接设备）"
+            else:
+                limit = int(worker.single_write_limit())
+                name = worker.device_name() or worker.device_address() or "已连接设备"
+                mtu = int(worker.mtu_size())
+                if cap:
+                    text = (f"蓝牙通道：{name}（MTU {mtu}，一次 ATT 写上限 {limit} 字节）"
+                            f"⇒ 每包最大 {cap} 字节（已自动收敛）")
+                else:
+                    text = (f"蓝牙通道：{name}（MTU {mtu}，一次 ATT 写上限 {limit} 字节）"
+                            f"—— {why or '暂不可用'}")
+        else:
+            w = self._serial_worker
+            state = "已连接" if (w is not None and w.is_open()) else "未连接"
+            text = f"串口通道：{state}（端口/波特率在顶部「串口配置」设置）"
+        self.lbl_channel_state.setText(text)
+        if hasattr(self, "btn_start"):
+            self._refresh_start_enabled()
+
+    def _apply_block_limit(self) -> None:
+        """按当前通道设定「每包字节数」的上限：串口=原上限；蓝牙=一次 ATT 写上限反推。
+
+        蓝牙上限算不准（未连接 / MTU 未协商 / 协议层不可用）时**不设人为上限**，
+        而是让「开始升级」不可用并在状态标签说明原因 —— 不用一个假上限去误导现场。
+        """
+        cap, why = None, ""
+        if self._channel() == "bluetooth":
+            cap, why = self._bt_block_cap()
+        self._bt_cap = cap
+        if cap is None:
+            self.spin_block.setMaximum(BLOCK_SIZE_MAX)
+        else:
+            self.spin_block.setMaximum(max(BLOCK_SIZE_MIN, int(cap)))
+            if self.spin_block.value() > cap:
+                self.spin_block.setValue(int(cap))
+        self._refresh_channel_state(cap, why)
+
+    def _bt_block_cap(self):
+        """蓝牙通道下每包字节数上限 → `(cap, 说明)`；算不出 ⇒ `(None, 原因)`。"""
+        worker = self._bt_worker_ref()
+        if worker is None or not worker.is_connected():
+            return None, "蓝牙未连接（请先在「蓝牙工具」页连接设备）"
+        limit = int(worker.single_write_limit())
+        if core_bluetooth.mtu_is_unnegotiated(worker.mtu_size()):
+            # ATT 默认值 23（或 0/未知）⇒ 上限不可信：worker 会轮询等协商结果并发 mtu_updated，
+            # 这里先不设人为上限，只把「为什么还不能开始」说清楚（别拿假上限误导现场）。
+            return None, ("蓝牙 MTU 未协商完成（当前仍是 ATT 默认值 23）—— 请稍候或重连；"
+                          "该值下一次写入前会自动重算")
+        sa, ca, err = self._sa_ca()
+        if err:
+            return None, err
+        upg = self._upgrade_module()
+        if upg is None:
+            return None, MISSING_CRCMOD
+        cap = int(upg.max_block_bytes_for_frame_limit(limit, sa, ca))
+        if cap <= 0:
+            return None, f"一次 ATT 写上限 {limit} 字节放不下 698 帧头（请重连让 MTU 变大）"
+        return cap, ""
+
+    def _on_channel_changed(self) -> None:
+        self._bind_bluetooth_worker(self._bt_worker_ref())
+        self._apply_block_limit()
+        self._schedule_save()
+
+    def showEvent(self, event) -> None:
+        """每次被切回本页都重新对齐一次蓝牙状态（幂等）。
+
+        蓝牙 worker 由「蓝牙工具」页**惰性创建**：本页可能先建好（并已落盘「蓝牙通道」），
+        那时取值回调还取不到 worker；用户随后的流程恰恰是「切到蓝牙页连接 → 切回本页」。
+        没有这一钩子，本页不会知道连接已经建立（信号是那时才有的），只能一直显示未连接
+        —— 实测过：`_bt_cap` 恒为 None、按钮恒禁用，非要在下拉里来回切一次通道才恢复。
+        """
+        super().showEvent(event)
+        if self._channel() == "bluetooth":
+            self._bind_bluetooth_worker(self._bt_worker_ref())
+
+    def _refresh_start_enabled(self) -> None:
+        """「开始升级」可用性按**当前通道**判（串口未连 / 蓝牙未连都禁用并给提示）。"""
+        ready = self._worker() is not None
+        self.btn_start.setEnabled(ready)
+        self.btn_start.setToolTip("" if ready else self._not_ready_tip())
+
+    # ======================================================================
     # 串口订阅（只订阅，绝不开/关端口）
     # ======================================================================
 
@@ -771,7 +1025,7 @@ class Dlt698UpgradeWidget(QWidget):
         if worker is None:
             self._on_connection_changed(False)
             return
-        worker.raw_data_received.connect(self._on_raw_data)
+        worker.raw_data_received.connect(self._on_serial_raw_data)
         worker.connection_changed.connect(self._on_connection_changed)
         worker.error_occurred.connect(self._on_serial_error)
         self._on_connection_changed(bool(worker.is_open()))
@@ -779,7 +1033,7 @@ class Dlt698UpgradeWidget(QWidget):
     def _detach(self, worker) -> None:
         """断掉本页对 worker 的三条订阅（换 worker / cleanup 用；失败宽容）。"""
         for signal, slot in (
-            (worker.raw_data_received, self._on_raw_data),
+            (worker.raw_data_received, self._on_serial_raw_data),
             (worker.connection_changed, self._on_connection_changed),
             (worker.error_occurred, self._on_serial_error),
         ):
@@ -788,20 +1042,50 @@ class Dlt698UpgradeWidget(QWidget):
             except (TypeError, RuntimeError):
                 pass
 
+    def _not_ready_tip(self) -> str:
+        """「当前通道还没就绪」的提示（串口/蓝牙各一句，用于按钮 tooltip 与点击提示）。"""
+        if self._channel() == "bluetooth":
+            return "蓝牙通道未就绪：请先在「蓝牙工具」页连接设备（本页复用那条连接）"
+        return TIP_NOT_CONNECTED
+
+    def _on_serial_raw_data(self, data: bytes) -> None:
+        """串口交付的原始字节：**只在串口通道下吃**。
+
+        串口是主窗口全局共享的（本页只是借用），蓝牙通道下它照样可能开着（另一台设备/线噪），
+        两个通道的字节混进同一个组帧缓冲会出现「噪声/别人家的回包被当成本步确认」（实测过）。
+        """
+        if self._channel() != "serial":
+            return
+        self._on_raw_data(data)
+
     def _on_connection_changed(self, connected: bool) -> None:
-        """连接状态驱动「开始升级」可用性（design §10 第 1 行：未连接零字节发送）。"""
-        if connected:
-            self.btn_start.setEnabled(True)
-            self.btn_start.setToolTip("")
-        else:
-            self.btn_start.setEnabled(False)
-            self.btn_start.setToolTip(TIP_NOT_CONNECTED)
+        """串口连接状态变化（**串口槽**）。
+
+        直接采信信号（`connection_changed(False)` ⇒ 立即禁用，与改前逐字一致）；
+        蓝牙通道下不理会 —— 该通道的按钮/标签由 `_apply_block_limit` 按蓝牙实时状态重算
+        （否则蓝牙页自己的连接状态会去拨本页串口通道的按钮，实测过）。
+        """
+        if self._channel() != "serial":
+            return
+        self.btn_start.setEnabled(bool(connected))
+        self.btn_start.setToolTip("" if connected else TIP_NOT_CONNECTED)
+        state = "已连接" if connected else "未连接"
+        self.lbl_channel_state.setText(
+            f"串口通道：{state}（端口/波特率在顶部「串口配置」设置）")
 
     def _on_serial_error(self, message: str) -> None:
         self._log(f"[失败] 串口错误：{message}", "fail")
 
     def _worker(self):
-        """可用的 worker（未注入或未开串口 ⇒ ``None``）；发送前的唯一判据。"""
+        """当前通道可用的发送口（未注入/未连接/蓝牙上限不可用 ⇒ ``None``）；发送前的唯一判据。
+
+        蓝牙通道额外要求「每包上限算得出来」（见 `_apply_block_limit` 缓存的 `_bt_cap`）：
+        上限算不出还放行，就会出现「块长超一次 ATT 写 → 写入被拒」的半途失败。
+        """
+        if self._channel() == "bluetooth":
+            if self._bt_cap is None:
+                return None
+            return self._bt_send_port()
         w = self._serial_worker
         if w is None or not w.is_open():
             return None
@@ -1488,7 +1772,7 @@ class Dlt698UpgradeWidget(QWidget):
         if self._state in (STATE_STARTING, STATE_TRANSFERRING, STATE_FINISHING):
             return
         if self._worker() is None:
-            self._fail_soft(TIP_NOT_CONNECTED)
+            self._fail_soft(self._not_ready_tip())
             return
         err = self._validate_inputs()
         if err:
@@ -1528,7 +1812,7 @@ class Dlt698UpgradeWidget(QWidget):
         self._send_current_step()
 
     def _freeze_plan_inputs(self, frozen: bool) -> None:
-        """传输进行中冻结会**改变计划**的输入（每包字节数 + 读版本开关/内容/等待时长）。
+        """传输进行中冻结会**改变计划**的输入（发送通道 + 每包字节数 + 读版本开关/内容/等待时长）。
 
         改这些值会让在飞的帧与后续帧不同源（AGENTS §8 陷阱 77 / spec §7j 的既有契约）；
         按钮门控的复位统一走 :meth:`_finish_buttons`，不要在别处各写一份。
@@ -1538,6 +1822,7 @@ class Dlt698UpgradeWidget(QWidget):
         self.chk_read_after.setEnabled(not frozen)
         self.combo_read_target.setEnabled(not frozen)
         self.spin_read_after_delay.setEnabled(not frozen)
+        self.combo_channel.setEnabled(not frozen)
 
     def _read_target_key(self) -> str:
         """当前「读版本内容」键（`common` / `internal`）；未知值回落默认。"""
@@ -1702,6 +1987,7 @@ class Dlt698UpgradeWidget(QWidget):
             "read_after": self.chk_read_after.isChecked(),
             "read_target": self._read_target_key(),
             "read_after_delay_s": self.spin_read_after_delay.value(),
+            "channel": self._channel(),
             "sa_type": int(self.combo_sa_type.currentData()),
             "sa_logic": int(self.combo_sa_logic.currentData()),
             "sa_len": int(self.combo_sa_len.currentData()),
@@ -1808,6 +2094,9 @@ class Dlt698UpgradeWidget(QWidget):
         target = s["read_target"] if s["read_target"] in \
             [k for _l, k, _s in READ_TARGETS] else DEFAULT_READ_TARGET
         _set_combo(self.combo_read_target, target)
+        _set_combo(self.combo_channel,
+                   s["channel"] if s["channel"] in [k for _l, k in CHANNELS]
+                   else DEFAULT_CHANNEL)
         # 折叠状态直接读原始 JSON（缺 key 时保持 UI 默认展开）
         expanded = raw.get("params_expanded", True)
         self.sec_params.set_expanded(bool(expanded) if isinstance(expanded, bool) else True)
@@ -1819,7 +2108,7 @@ class Dlt698UpgradeWidget(QWidget):
     # ======================================================================
 
     def cleanup(self) -> None:
-        """停表、断开串口信号、落盘配置（幂等）。**不关闭串口**：端口归主窗口。"""
+        """停表、断开串口/蓝牙信号、落盘配置（幂等）。**不关闭串口、也不断蓝牙连接**：都归各自页面。"""
         for timer in (self._wait_timer, self._save_timer, self._reset_timer):
             try:
                 timer.stop()
@@ -1829,6 +2118,14 @@ class Dlt698UpgradeWidget(QWidget):
         if worker is not None:
             self._detach(worker)
         self._serial_worker = None
+        bt = self._bt_worker
+        if bt is not None:
+            for sig, slot in self._bt_slots(bt):
+                try:
+                    sig.disconnect(slot)
+                except (TypeError, RuntimeError):
+                    pass
+        self._bt_worker = None
         self._rx_buf.clear()
         self._save_persisted()
 

@@ -26,6 +26,9 @@
   [14] restyle_for_theme 不抛、配色随主题切换
   [15] 反例自检（判据不是恒真）
   [16] 传输中途的控制：换文件被拒（旧计划照旧推进）、点「清除」后按钮门控复位并可原地重跑
+  [23] 发送通道：蓝牙（复用蓝牙页连接 + 按一次 ATT 写上限自动算每包上限）
+  [24] 通道隔离：收发只认当前通道（蓝牙信号不拨串口通道、RX 不混源）、
+       蓝牙页后建 worker / 换线程 / cleanup 只断自己的槽
 
 运行: python test/test_dl698_upgrade_gui.py   （QT_QPA_PLATFORM=offscreen）
 """
@@ -131,6 +134,66 @@ class FakeSerialWorker(QObject):
     def deliver(self, data: bytes) -> None:
         """注入一次「原始串口交付」（可只给半帧，测自组帧）。"""
         self.raw_data_received.emit(bytes(data))
+
+
+class FakeBleWorker(QObject):
+    """假蓝牙 worker（只有升级页用到的接口/信号）—— 与 `FakeSerialWorker` 同形：`.sent`/`.deliver`。
+
+    `send_data` 复刻真 worker 的「整帧一次写」语义：`single_write=True` 且超上限 ⇒ **拒发**并报错。
+    """
+
+    notification_received = Signal(str, bytes)
+    connection_changed = Signal(bool)
+    mtu_updated = Signal(int, list)
+    error_occurred = Signal(str)
+
+    def __init__(self, mtu: int = 512, connected: bool = True, name: str = "STA-模块"):
+        super().__init__()
+        self._mtu = int(mtu)
+        self._connected = bool(connected)
+        self._name = name
+        self.sent = []               # List[bytes]（与假串口 worker 同形，run_to_end 可直接复用）
+        self.single_flags = []       # 每帧是否走了「整帧一次写」
+        self.rejected = 0
+
+    def is_connected(self) -> bool:
+        return self._connected
+
+    def mtu_size(self) -> int:
+        return self._mtu
+
+    def single_write_limit(self) -> int:
+        return max(20, self._mtu - 3)
+
+    def device_name(self) -> str:
+        return self._name
+
+    def device_address(self) -> str:
+        return "AA:BB:CC:DD:EE:FF"
+
+    def send_data(self, data: bytes, single_write: bool = False) -> bool:
+        if not self._connected:
+            self.error_occurred.emit("蓝牙未连接，无法发送")
+            return False
+        if single_write and len(bytes(data)) > self.single_write_limit():
+            self.rejected += 1
+            self.error_occurred.emit(
+                f"整帧 {len(bytes(data))} 字节超过一次 ATT 写上限 {self.single_write_limit()} 字节")
+            return False
+        self.sent.append(bytes(data))
+        self.single_flags.append(bool(single_write))
+        return True
+
+    def deliver(self, data: bytes) -> None:
+        self.notification_received.emit("ffe1", bytes(data))
+
+    def set_mtu(self, mtu: int) -> None:
+        self._mtu = int(mtu)
+        self.mtu_updated.emit(int(mtu), [])
+
+    def set_connected(self, ok: bool) -> None:
+        self._connected = bool(ok)
+        self.connection_changed.emit(bool(ok))
 
 
 # ── 帧工具（按协议形状造确认帧，不用字符串比对）───────────────────────
@@ -977,6 +1040,13 @@ def test_layout_guard():
           panel_pre(tab) == "升级前：（未读取）"
           and panel_post(tab) == "升级完成后：（未读取）",
           (panel_pre(tab), panel_post(tab)))
+    # 通道状态标签：可见、有内容、确实被绘制（visibleRegion 抓「控件在但没画出来」）
+    check("通道状态标签可见且有内容（未裁成空白）",
+          tab.lbl_channel_state.isVisible() and bool(tab.lbl_channel_state.text())
+          and not tab.lbl_channel_state.visibleRegion().isEmpty(),
+          (tab.lbl_channel_state.text(), tab.lbl_channel_state.visibleRegion()))
+    check("通道状态标签允许换行（窄窗口不截断）",
+          tab.lbl_channel_state.wordWrap() is True)
     tab.hide()
     settle()
     tab.cleanup()
@@ -1751,6 +1821,272 @@ def test_reset_wait_before_post_read():
     check("cleanup() 后不再往串口写（worker 已摘）", w_cl.writes == n_cl, w_cl.writes)
 
 
+def check_cap_tight(tab, ble) -> tuple:
+    """蓝牙上限的**性质**断言：`spin` 上限组出的整帧 ≤ 一次写上限，且再大 1 字节就超。
+
+    不拿产品自己的计算结果当期望（那会变恒真）——直接量真实组帧长度。
+    """
+    cap = tab.spin_block.maximum()
+    sa, ca, _err = tab._sa_ca()
+    limit = ble.single_write_limit()
+    ok = (len(upg.build_write_block(sa, ca, 0, 0, bytes(cap))) <= limit
+          and len(upg.build_write_block(sa, ca, 0, 0, bytes(cap + 1))) > limit)
+    return ok, (cap, limit)
+
+
+def test_bluetooth_channel():
+    section("[23] 发送通道：蓝牙（复用蓝牙页连接 + 按一次 ATT 写上限自动算每包上限）")
+
+    # ① 默认串口：不碰蓝牙、上限仍是 8192
+    tab, sw, _ = make_tab(FakeSerialWorker())
+    check("默认通道 = 串口", tab._channel() == "serial" and tab.combo_channel.currentIndex() == 0,
+          tab.combo_channel.currentText())
+    check("串口通道下每包上限仍是 8192（蓝牙逻辑不介入）", tab.spin_block.maximum() == 8192,
+          tab.spin_block.maximum())
+    check("状态标签说明串口来源", "串口通道" in tab.lbl_channel_state.text()
+          and "串口配置" in tab.lbl_channel_state.text(), tab.lbl_channel_state.text())
+    tab.cleanup()
+
+    # ② 蓝牙未连接：不设假上限 + 开始禁用 + 零发送
+    ble = FakeBleWorker(connected=False)
+    tab, _, _ = make_tab(FakeSerialWorker())
+    tab.set_bluetooth_provider(lambda: ble)
+    tab.combo_channel.setCurrentIndex(1)
+    settle()
+    check("未连接 ⇒ 不设人为上限（仍是 8192，不用假上限误导）",
+          tab.spin_block.maximum() == 8192, tab.spin_block.maximum())
+    check("状态标签指向蓝牙工具页", "未连接" in tab.lbl_channel_state.text()
+          and "蓝牙工具" in tab.lbl_channel_state.text(), tab.lbl_channel_state.text())
+    check("开始升级禁用且提示走蓝牙页",
+          tab.btn_start.isEnabled() is False and "蓝牙工具" in tab.btn_start.toolTip(),
+          tab.btn_start.toolTip())
+    tab._on_start()                                          # 走处理函数级守卫（按钮已禁用，click 不触发）
+    settle()
+    check("未连接点开始 ⇒ 零字节发送 + 日志提示走蓝牙页",
+          ble.sent == [] and "蓝牙通道未就绪" in log_text(tab), last_log(tab))
+
+    # ③ MTU 未协商（ATT 默认 23）：仍不设上限 + 明确原因
+    ble.set_connected(True)
+    ble.set_mtu(23)
+    settle()
+    check("MTU 23 ⇒ 不设上限 + 原因写进标签",
+          tab.spin_block.maximum() == 8192 and "未协商" in tab.lbl_channel_state.text(),
+          (tab.spin_block.maximum(), tab.lbl_channel_state.text()))
+    check("MTU 未协商时开始仍禁用", tab.btn_start.isEnabled() is False)
+    n_sent = len(ble.sent)                       # 未协商时点开始：拦在**发帧之前**（零字节）
+    tab._on_start()
+    settle()
+    check("MTU 未协商点开始 ⇒ 零字节发送", len(ble.sent) == n_sent == 0, len(ble.sent))
+
+    # ④ MTU 协商到 512：上限自动收敛 + 值被夹 + 标签给出计算过程
+    tab.spin_block.setValue(600)
+    ble.set_mtu(512)
+    settle()
+    ok, detail = check_cap_tight(tab, ble)
+    check("MTU 512 ⇒ 每包上限自动算好且「整帧 ≤ 一次写上限」紧致成立", ok, detail)
+    check("原值 600 被自动收敛到上限", tab.spin_block.value() == tab.spin_block.maximum(),
+          (tab.spin_block.value(), tab.spin_block.maximum()))
+    label = tab.lbl_channel_state.text()
+    check("标签写明 MTU / 一次写上限 / 每包最大",
+          "MTU 512" in label and "509" in label and str(tab.spin_block.maximum()) in label, label)
+    check("开始升级恢复可用", tab.btn_start.isEnabled() is True)
+
+    # ⑤ 真跑一轮：TX 走「整帧一次写」，RX 走蓝牙通知信号
+    tab.chk_auto_exec.setChecked(False)
+    tab.chk_read_after.setChecked(True)
+    tab.spin_read_after_delay.setValue(0)
+    tab._on_file_selected(write_pkg(bytes(range(200))))     # 1 包
+    tab.btn_start.click()
+    settle()
+    check("第一帧走蓝牙发出（启动传输）",
+          len(ble.sent) == 1 and omd_of(ble.sent[0]) == upg.OMD_START, len(ble.sent))
+    check("每一帧都是「整帧一次写」（single_write=True）",
+          all(ble.single_flags) and ble.rejected == 0, ble.single_flags)
+    check("写文件帧不超过一次写上限",
+          len(ble.sent[-1]) <= ble.single_write_limit(), len(ble.sent[-1]))
+    check("传输中通道下拉被冻结", tab.combo_channel.isEnabled() is False)
+    run_to_end(tab, ble)                                    # 同形接口 ⇒ 直接复用
+    settle()
+    check("蓝牙通道整轮跑通（done / 100%）",
+          tab.state == "done" and tab.progress.value() == 100, tab.state)
+    check("收到蓝牙通知后能推进状态机（RX 走 notification_received）",
+          len(ble.sent) >= 3 and tab._confirmed_bytes == 200,
+          (len(ble.sent), tab._confirmed_bytes))
+    check("结束后通道下拉恢复可编辑", tab.combo_channel.isEnabled() is True)
+    check("单帧写被拒次数为 0（上限算准了，没有半途失败）", ble.rejected == 0)
+    check("整轮每一帧都 ≤ 一次写上限（含写文件帧，不只是启动传输）",
+          all(len(f) <= ble.single_write_limit() for f in ble.sent),
+          ([len(f) for f in ble.sent], ble.single_write_limit()))
+
+    # ⑥ 中途掉线 ⇒ 开始禁用；重连后又能开始
+    ble.set_connected(False)
+    settle()
+    check("掉线 ⇒ 开始禁用 + 标签提示未连接",
+          tab.btn_start.isEnabled() is False and "未连接" in tab.lbl_channel_state.text(),
+          tab.lbl_channel_state.text())
+    ble.set_connected(True)
+    settle()
+    check("重连 ⇒ 开始恢复可用（上限重算）", tab.btn_start.isEnabled() is True)
+    ok2, detail2 = check_cap_tight(tab, ble)
+    check("重连后上限仍然紧致（重算过）", ok2, detail2)
+
+    # ⑦ MTU 变小 ⇒ 上限跟着变小、值再夹一次
+    tab.spin_block.setValue(tab.spin_block.maximum())
+    ble.set_mtu(200)
+    settle()
+    ok3, detail3 = check_cap_tight(tab, ble)
+    check("MTU 200 ⇒ 上限下调且仍紧致", ok3 and tab.spin_block.maximum() < 475, detail3)
+    check("值再次被夹到新上限", tab.spin_block.value() <= tab.spin_block.maximum())
+
+    # ⑧ 通道选择持久化 + 切回串口恢复原上限
+    check("落盘成功", tab._save_persisted() is True)
+    tab2, _, _ = make_tab(fresh=False)
+    check("新实例读回「蓝牙」通道",
+          tab2._channel() == "bluetooth" and tab2.combo_channel.currentIndex() == 1,
+          tab2.combo_channel.currentText())
+    tab.combo_channel.setCurrentIndex(0)                    # 切回串口
+    settle()
+    check("切回串口 ⇒ 每包上限恢复 8192", tab.spin_block.maximum() == 8192,
+          tab.spin_block.maximum())
+    check("切回串口 ⇒ 状态标签切回串口来源",
+          "串口通道" in tab.lbl_channel_state.text())
+    n_ble = len(ble.sent)
+    sw = tab._serial_worker
+    tab.btn_start.click()
+    settle()
+    check("切回串口后发送走串口 worker（蓝牙不再收帧）",
+          len(ble.sent) == n_ble and len(sw.sent) > 0, (len(ble.sent), len(sw.sent)))
+    tab._on_abort()
+    tab.cleanup()
+    tab2.cleanup()
+
+
+def test_bluetooth_channel_isolation():
+    section("[24] 通道隔离：收发只认当前通道 + 蓝牙页后建/换线程也对得上")
+
+    # ① 串口通道下：蓝牙页的连接状态与报错**不许**拨动本页按钮/标签/日志
+    tab, sw, _ = make_tab(FakeSerialWorker(opened=False))
+    ble = FakeBleWorker(mtu=512, connected=False)
+    tab.set_bluetooth_provider(lambda: ble)
+    ble.set_connected(True)                    # 蓝牙页自己连上了（与串口无关）
+    settle()
+    check("串口通道：蓝牙连上不启用「开始升级」（串口仍未开）",
+          tab.btn_start.isEnabled() is False, tab.btn_start.isEnabled())
+    check("串口通道：标签仍说串口未连接",
+          "串口通道" in tab.lbl_channel_state.text()
+          and "未连接" in tab.lbl_channel_state.text(), tab.lbl_channel_state.text())
+    sw._open = True
+    sw.connection_changed.emit(True)
+    settle()
+    check("串口通道：串口连接信号照旧驱动按钮", tab.btn_start.isEnabled() is True)
+    ble.set_connected(False)                   # 蓝牙掉线（串口还开着）
+    settle()
+    check("串口通道：蓝牙掉线不误禁用按钮", tab.btn_start.isEnabled() is True)
+    n_log = len(log_text(tab).splitlines())
+    ble.error_occurred.emit("（蓝牙页自己的）写入失败")
+    settle()
+    check("串口通道：蓝牙页自己的报错不抄进本页日志",
+          len(log_text(tab).splitlines()) == n_log, log_text(tab).splitlines()[n_log:])
+
+    # ② RX 不跨通道（串口通道跑着 → 蓝牙通知里的确认一律不吃）
+    tab.chk_auto_exec.setChecked(False)
+    tab.chk_read_after.setChecked(False)
+    start_transfer(tab, sw, bytes(range(120)), block=100)
+    tx = sw.sent[-1]
+    ble.deliver(ack_for(tx))                   # 本步确认**只**从蓝牙来
+    settle()
+    check("串口通道不吃蓝牙通知（没推进：仍 1 帧 / starting）",
+          len(sw.sent) == 1 and tab.state == "starting", (len(sw.sent), tab.state))
+    sw.deliver(ack_for(tx))                    # 真来源照旧有效
+    settle()
+    check("串口的确认照旧推进（2 帧 / transferring）",
+          len(sw.sent) == 2 and tab.state == "transferring", (len(sw.sent), tab.state))
+    tab._on_abort()
+    tab.cleanup()
+
+    # ③ RX 不跨通道（蓝牙通道跑着 → 串口数据不被当确认）
+    tab2, sw2, _ = make_tab(FakeSerialWorker())
+    ble2 = FakeBleWorker(mtu=512, connected=True)
+    tab2.set_bluetooth_provider(lambda: ble2)
+    tab2.combo_channel.setCurrentIndex(1)
+    settle()
+    tab2.chk_auto_exec.setChecked(False)
+    tab2.chk_read_after.setChecked(False)
+    tab2._on_file_selected(write_pkg(bytes(range(120))))
+    tab2.btn_start.click()
+    settle()
+    n_ble = len(ble2.sent)
+    sw2.deliver(ack_for(ble2.sent[-1]))        # 本步确认**只**从串口来
+    settle()
+    check("蓝牙通道不吃串口数据（没推进）",
+          len(ble2.sent) == n_ble and tab2.state == "starting", (len(ble2.sent), tab2.state))
+    ble2.deliver(ack_for(ble2.sent[-1]))
+    settle()
+    check("蓝牙的确认照旧推进", len(ble2.sent) == n_ble + 1 and tab2.state == "transferring",
+          (len(ble2.sent), tab2.state))
+    tab2._on_abort()
+    tab2.cleanup()
+
+    # ④ 蓝牙页后建：本页先落盘「蓝牙」，worker 之后才出现 → 切回本页（show）自动对上
+    holder = {"w": None}
+    tab3, _, _ = make_tab(None)
+    tab3.set_bluetooth_provider(lambda: holder["w"])
+    tab3.combo_channel.setCurrentIndex(1)
+    settle()
+    check("蓝牙页还没建 worker ⇒ 不设假上限 + 开始禁用",
+          tab3.spin_block.maximum() == 8192 and tab3.btn_start.isEnabled() is False,
+          (tab3.spin_block.maximum(), tab3.btn_start.isEnabled()))
+    holder["w"] = FakeBleWorker(mtu=512, connected=True)
+    tab3.show()                                # 用户从蓝牙页切回本页
+    settle()
+    ok, detail = check_cap_tight(tab3, holder["w"])
+    check("切回本页即自动对上（上限算好 + 开始可用）",
+          ok and tab3.btn_start.isEnabled() is True, detail)
+    holder["w"].set_mtu(247)
+    settle()
+    check("对上之后 MTU 变化能实时重算（247 ⇒ 211）",
+          tab3.spin_block.maximum() == 211, tab3.spin_block.maximum())
+    tab3.hide()
+    tab3.cleanup()
+
+    # ⑤ 蓝牙页换线程（`set_bluetooth_worker`）：旧线程**不再**投到本页；cleanup 只断自己的槽
+    wa, wb = FakeBleWorker(mtu=512, name="A"), FakeBleWorker(mtu=247, name="B")
+    cur = {"w": wa}
+    tab4, _, _ = make_tab(None)
+    tab4.set_bluetooth_provider(lambda: cur["w"])
+    tab4.combo_channel.setCurrentIndex(1)
+    settle()
+    check("绑定 A：标签写着 A 的 MTU", "A（MTU 512" in tab4.lbl_channel_state.text(),
+          tab4.lbl_channel_state.text())
+    cur["w"] = wb                              # 蓝牙页换了线程
+    tab4._apply_block_limit()                  # 任一重算入口（SA 变 / 切回本页 / MTU 更新）
+    settle()
+    check("换线程后跟着换（标签换成 B）且旧线程已解绑",
+          "B（MTU 247" in tab4.lbl_channel_state.text()
+          and tab4._bt_worker is wb, tab4.lbl_channel_state.text())
+    n4 = len(log_text(tab4).splitlines())
+    wa.error_occurred.emit("旧线程的报错")
+    settle()
+    check("旧线程的报错不再投到本页（信号断干净）",
+          len(log_text(tab4).splitlines()) == n4, log_text(tab4).splitlines()[n4:])
+    wb.error_occurred.emit("新线程的报错")
+    settle()
+    check("新线程的报错进得来", "新线程的报错" in log_text(tab4))
+    seen = []
+    wb.notification_received.connect(lambda u, d: seen.append((u, d)))
+    tab4.cleanup()
+    n5 = len(log_text(tab4).splitlines())
+    wb.error_occurred.emit("cleanup 之后")
+    wb.deliver(b"\x68")
+    settle()
+    check("cleanup 后本页不再吃该线程（日志/缓冲都不动）",
+          len(log_text(tab4).splitlines()) == n5 and len(tab4._rx_buf) == 0,
+          log_text(tab4).splitlines()[n5:])
+    check("cleanup 只断自己的槽：蓝牙页自己的槽照旧收到通知",
+          len(seen) == 1, seen)
+    tab4.hide()
+
+
 def main():
     print("=" * 64)
     print("协议8 升级页 dlt698_upgrade_widget offscreen 回归")
@@ -1784,6 +2120,8 @@ def main():
     test_version_read_target_select()
     test_version_read_single_value_fallback()
     test_reset_wait_before_post_read()
+    test_bluetooth_channel()
+    test_bluetooth_channel_isolation()
 
     print()
     print("=" * 64)

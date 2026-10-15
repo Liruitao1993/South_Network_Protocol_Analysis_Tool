@@ -654,6 +654,54 @@ def test_a12_version_detail_rows():
           dict((r["名称"], r["值"]) for r in swapped)["软件版本日期"] != "2026-08-03")
 
 
+def test_a13_bt_block_cap_from_write_limit():
+    section("[A13] 蓝牙通道：按「一次 ATT 写上限」反推每包最大块长")
+
+    def frame_len(limit, sa, cap):
+        return len(up.build_write_block(bytes(sa), 0, 0, 0, bytes(cap)))
+
+    # ① 用户给的例子：ATT/写上限 512 ⇒ 每包 ≤ 480（实测 478 ≤ 480）
+    cap512 = up.max_block_bytes_for_frame_limit(512, up.WILDCARD_SA)
+    check("① 写上限 512 ⇒ 块长 478（≤ 480，用户口径的上界成立）", cap512 == 478, cap512)
+    check("① 该块长组出的整帧恰好 512（不多不少）",
+          frame_len(512, up.WILDCARD_SA, cap512) == 512,
+          frame_len(512, up.WILDCARD_SA, cap512))
+    check("① 再大 1 字节就超了（判据紧）",
+          frame_len(512, up.WILDCARD_SA, cap512 + 1) == 513)
+
+    # ② 协商 MTU 512 ⇒ 一次写 509（ATT 头 3 字节）⇒ 块长 475
+    cap509 = up.max_block_bytes_for_frame_limit(509, up.WILDCARD_SA)
+    check("② 写上限 509（MTU 512 − 3）⇒ 块长 475", cap509 == 475, cap509)
+    check("② 整帧恰好 509", frame_len(509, up.WILDCARD_SA, cap509) == 509)
+    check("② 与 512 档不同（开销是按真实组帧算的，不是固定减 32）",
+          cap512 - cap509 == 3, (cap512, cap509))
+
+    # ③ 开销随地址域长度变（不是写死的常量）
+    sa1 = bytes([0xAA])                                    # 广播：SA 只 1 字节
+    check("③ 广播 SA(1B) 能多塞 6 字节（开销少 6）",
+          up.max_block_bytes_for_frame_limit(509, sa1) == cap509 + 6,
+          up.max_block_bytes_for_frame_limit(509, sa1))
+
+    # ④ 小上限 / 非法输入
+    check("④ 上限 33 ⇒ 块长 1（帧头吃掉 32）", up.max_block_bytes_for_frame_limit(33, up.WILDCARD_SA) == 1)
+    check("④ 上限 32 ⇒ 0（放不下任何块数据）", up.max_block_bytes_for_frame_limit(32, up.WILDCARD_SA) == 0)
+    check("④ 上限 20（ATT 默认负载）⇒ 0", up.max_block_bytes_for_frame_limit(20, up.WILDCARD_SA) == 0)
+    check("④ 非法输入一律 0",
+          up.max_block_bytes_for_frame_limit(0, up.WILDCARD_SA) == 0
+          and up.max_block_bytes_for_frame_limit(-5, up.WILDCARD_SA) == 0
+          and up.max_block_bytes_for_frame_limit(None, up.WILDCARD_SA) == 0
+          and up.max_block_bytes_for_frame_limit(509, b"") == 0)
+
+    # ⑤ 单调性 + 与真实组帧一致（不用产品自己的结果当期望）
+    caps = [up.max_block_bytes_for_frame_limit(n, up.WILDCARD_SA) for n in (40, 100, 200, 509, 1000)]
+    check("⑤ 上限越大块长不减", caps == sorted(caps), caps)
+    check("⑤ 每个档位都满足「整帧 ≤ 上限」且「再大 1 字节就超」",
+          all(frame_len(n, up.WILDCARD_SA, c) <= n
+              and frame_len(n, up.WILDCARD_SA, c + 1) > n
+              for n, c in zip((40, 100, 200, 509, 1000), caps)),
+          [(n, c) for n, c in zip((40, 100, 200, 509, 1000), caps)])
+
+
 def main():
     print("=" * 66)
     print("协议8 698.45 文件传输升级 —— 纯逻辑层（dl_t698_45_upgrade）")
@@ -670,6 +718,7 @@ def main():
     test_a10_read_version()
     test_a11_internal_version_read()
     test_a12_version_detail_rows()
+    test_a13_bt_block_cap_from_write_limit()
     print(f"\nPASS={PASS} FAIL={FAIL}")
     sys.exit(0 if FAIL == 0 else 1)
 

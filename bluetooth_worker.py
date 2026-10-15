@@ -58,6 +58,10 @@ except Exception:  # pragma: no cover - 依赖缺失路径
 # bleak 未安装时的统一提示
 BLEAK_MISSING_HINT = "未安装 bleak 库：请执行 pip install bleak（Windows 建议同时装 winrt）"
 
+#: `chunk_size_for_mtu` 的「不设人为上限」哨兵：只按 `MTU − 3`（ATT 头）取物理上限。
+#: 升级页要求「一整帧 698 报文一次 ATT 写」，不能叠蓝牙页那个 200 字节的保护性上限。
+_NO_CHUNK_CAP = 1 << 20
+
 
 class BluetoothWorker(QObject):
     """BLE 通信工作对象（信号/方法口径对齐 `serial_worker.SerialWorker`）。"""
@@ -586,8 +590,13 @@ class BluetoothWorker(QObject):
 
     # ── 写入 ──────────────────────────────────────────────────────────────
 
-    def send_data(self, data: bytes) -> bool:
-        """向已选发送特征码写入数据（按 MTU 分包 + 包间延迟）。"""
+    def send_data(self, data: bytes, single_write: bool = False) -> bool:
+        """向已选发送特征码写入数据（默认按 MTU 分包 + 包间延迟）。
+
+        ``single_write=True``（升级页用）：**整段数据必须一次 ATT 写发出**，超过
+        :meth:`single_write_limit` 就**拒绝发送并报错**（不静默分包 —— 分包会让设备收到
+        被切断的 698 帧）。
+        """
         payload = bytes(data or b"")
         if not payload:
             self.error_occurred.emit("发送内容为空")
@@ -595,37 +604,65 @@ class BluetoothWorker(QObject):
         if not self._connected or self._client is None:
             self.error_occurred.emit("蓝牙未连接，无法发送")
             return False
-        targets = self._send_uuids or self._recv_uuids[:1]
+        targets = self._write_targets()
         if not targets:
             self.error_occurred.emit("未选择发送特征码（先点「特征码…」选择）")
             return False
-        return self._submit(self._write_coro(list(targets), payload))
+        if single_write:
+            limit = self.single_write_limit(targets)
+            if len(payload) > limit:
+                self.error_occurred.emit(
+                    f"整帧 {len(payload)} 字节超过一次 ATT 写上限 {limit} 字节："
+                    "请调小「每包字节数」（或重连让 MTU 重新协商）")
+                return False
+        return self._submit(self._write_coro(list(targets), payload, single_write))
 
-    def _chunk_plan(self, targets: List[str]) -> tuple:
-        """单包写入尺寸 + **尺寸来源说明**（R6：说明必须与尺寸同一来源，界面不另算一份）。
+    def _limit_plan(self, targets: List[str]) -> tuple:
+        """一次 ATT 写的**物理**上限 + 来源说明（**不叠** `_max_chunk`）。
 
-        Returns: ``(chunk_size, source_text)``
+        Returns: ``(limit, source_text)``；特征码给了免响应写上限就用它，否则用 `MTU − 3`。
+        这是本 worker 里「一次 ATT 写能承载多少字节」的**唯一实现**：蓝牙页的分包上限
+        （`_chunk_plan` = 本上限再夹 `_max_chunk`）与升级页的「整帧一次写出」共用它。
         """
         best = 0
         for char in self._characteristics:
             if char.get("uuid") in targets:
                 best = max(best, int(char.get("max_write") or 0))
         if best > 0:
-            size = max(MIN_CHUNK, min(self._max_chunk, best))
-            return size, f"特征码免响应写上限 {best} 字节"
+            return max(MIN_CHUNK, best), f"特征码免响应写上限 {best} 字节"
         mtu = int(self._mtu or 0)
-        size = chunk_size_for_mtu(mtu, self._max_chunk)
         if mtu > 3:
-            source = f"协商 MTU {mtu} − 3（ATT 头）"
-        else:
-            source = "MTU 未知，回落 ATT 最小可用值 23 − 3"
-        return size, source
+            return chunk_size_for_mtu(mtu, _NO_CHUNK_CAP), f"协商 MTU {mtu} − 3（ATT 头）"
+        return chunk_size_for_mtu(0, _NO_CHUNK_CAP), "MTU 未知，回落 ATT 最小可用值 23 − 3"
+
+    def single_write_limit(self, targets: Optional[List[str]] = None) -> int:
+        """**一次 ATT 写**能承载的最大负载字节数（升级页按它反推每包块长）。
+
+        与蓝牙页「单包上限」的区别：这里不夹 `_max_chunk`（那是蓝牙页对连续写的保护值），
+        因为升级页要求**一整帧 698 报文一次写出**（否则设备得自己重组 ATT 分包）。
+        """
+        return self._limit_plan(self._write_targets(targets))[0]
+
+    def _write_targets(self, targets: Optional[List[str]] = None) -> List[str]:
+        """实际写入目标：显式给的 > 已选发送特征码 > 第一个接收特征码。"""
+        if targets:
+            return [str(u) for u in targets]
+        return list(self._send_uuids or self._recv_uuids[:1])
+
+    def _chunk_plan(self, targets: List[str]) -> tuple:
+        """单包写入尺寸 + **尺寸来源说明**（R6：说明必须与尺寸同一来源，界面不另算一份）。
+
+        Returns: ``(chunk_size, source_text)``
+        """
+        limit, source = self._limit_plan(targets)
+        return max(MIN_CHUNK, min(self._max_chunk, limit)), source
 
     def _chunk_size_for(self, targets: List[str]) -> int:
         """按「目标特征码免响应写上限 / 协商 MTU」取单包尺寸（夹到上限）。"""
         return self._chunk_plan(targets)[0]
 
-    async def _write_coro(self, targets: List[str], payload: bytes) -> None:
+    async def _write_coro(self, targets: List[str], payload: bytes,
+                          single_write: bool = False) -> None:
         client = self._client
         if client is None:
             self.error_occurred.emit("蓝牙未连接，无法发送")
@@ -633,8 +670,16 @@ class BluetoothWorker(QObject):
         # 发送前重读实时上限（1.23.80）：MTU 可能刚协商完 —— 分包必须按**此刻**的真实值，
         # 否则重连前读到的 20（ATT 默认）会让每一次发送都白拆包
         self._refresh_live_limits()
-        chunk_size, chunk_source = self._chunk_plan(targets)
-        chunks = split_chunks(payload, chunk_size)
+        if single_write:
+            limit = self.single_write_limit(targets)
+            if len(payload) > limit:      # 与 `send_data` 同一判据（这里挡「投递后 MTU 又变小」）
+                self.error_occurred.emit(
+                    f"整帧 {len(payload)} 字节超过一次 ATT 写上限 {limit} 字节，已取消发送")
+                return
+            chunks, chunk_size, chunk_source = [payload], limit, "整帧一次写出（升级通道）"
+        else:
+            chunk_size, chunk_source = self._chunk_plan(targets)
+            chunks = split_chunks(payload, chunk_size)
         # 分包不可消除（ATT 层物理上限）：把「为什么分包 / 单包上限是多少」写在日志里，
         # 免去用户「25 字节为什么发两包」的困惑（R6.1）。
         if len(chunks) > 1:

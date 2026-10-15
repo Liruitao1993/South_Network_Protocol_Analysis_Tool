@@ -315,6 +315,36 @@ def build_read_version(sa: bytes, ca: int, piid: int,
         sa, int(ca), int(piid), oad, time_tag_none=True)
 
 
+# ─── 蓝牙通道：按「一次 ATT 写」的上限反推每包最大块长 ──────────────────────
+def max_block_bytes_for_frame_limit(limit: int, sa: bytes, ca: int = 0) -> int:
+    """「整帧 ≤ ``limit`` 字节」时，写文件帧里**块数据**最多能放多少字节（0 = 一个都放不下）。
+
+    用途：蓝牙通道下 ATT 一次写能承载的负载 `limit` 是**物理上限**，而 698 帧除块数据外还有
+    帧起始符/长度域/控制域/地址域/HCS/APDU 头/OMD/BER 长度域/FCS/结束符等开销 —— 这些开销用
+    **真实组帧路径**（:func:`build_write_block`）二分求出来，所以不写死「开销 32 字节」这类常量
+    （BER 长度域还会随块长跳变：块长 128 ⇒ 比短形式多 1 字节、256 ⇒ 多 2 字节）。
+    块长↑ ⇒ 帧长↑（严格单调）⇒ 二分成立。
+
+    例：`limit=509`（协商 MTU 512 − ATT 头 3）、SA=通配 7 字节 ⇒ **475**（整帧恰好 509）；
+    `limit=512` ⇒ 478。
+    """
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        return 0
+    if limit <= 0 or not sa:
+        return 0
+    lo, hi, best = 1, limit, 0
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        frame_len = len(build_write_block(bytes(sa), int(ca), 0, 0, bytes(mid)))
+        if frame_len <= limit:
+            best, lo = mid, mid + 1
+        else:
+            hi = mid - 1
+    return best
+
+
 # ─── 校验值 ─────────────────────────────────────────────────────────────────
 def calc_checksum_value(data: bytes, kind: str = "crc", endian: str = "big") -> bytes:
     """计算「启动传输」参数里的校验值字节（文件内容摘要，供从站校验整包）。
@@ -573,4 +603,5 @@ __all__ = [
     "build_file_info", "build_start_transfer", "build_write_block",
     "build_exec_upgrade", "build_read_version", "calc_checksum_value",
     "check_action_response", "check_get_response", "version_rows",
+    "max_block_bytes_for_frame_limit",
 ]

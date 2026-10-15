@@ -559,6 +559,21 @@ engine = self._engine_factory()            # 否则才是发给本虚拟表的�
   `[{"名称","值","原始","长度"}]`：**长度与表191 声明不符时命名照给但必须追加 `⚠ 长度未自证` 行**（写明声明值/实发值，
   不静默也不假装自证）；非结构数据 ⇒ 一行 `数据`（值 + 原始字节）兜底。厂家扩展对象（内部版本 OAD `FF 10 04 00`，
   实机回同形 6 项）与标准对象（`43 00 03 00`）**共用**这条路径 —— 不要在页面或解析器里再写一份字段名/日期规则。
+- **发送通道：串口（默认）/ 蓝牙（1.23.85 追加，用户需求）**：蓝牙通道**复用「蓝牙工具」页已建立的连接**
+  —— 升级页不建/不断连接，只经 `main_gui._upgrade_bluetooth_source()` 注入的**取值回调**拿 worker
+  （蓝牙 worker 是蓝牙页惰性创建的，注入时可能还不存在；不要在升级页缓存连接状态、更不要自建 `BluetoothWorker`）。
+  发送走 `_BleSendPort`（把 worker 适配成 `is_open`/`write_raw`，`write_raw` ⇒ `send_data(frame, single_write=True)`
+  = **一整帧一次 ATT 写**，超上限由 worker 拒发并报错，绝不静默分包）；**接收走 `notification_received`
+  → 本页 `_on_raw_data`**（698 分帧归本页，不依赖蓝牙页的静默切帧），且只在传输中吃通知。
+  **每包上限自动算**：`worker.single_write_limit()`（= 特征码免响应写上限 或 `MTU−3`，**不叠**蓝牙页那个 200 字节
+  `_max_chunk`；单一实现 `_limit_plan`，蓝牙页 `_chunk_plan` 也用它）→ `dl_t698_45_upgrade.max_block_bytes_for_frame_limit()`
+  用**真实组帧**二分反推块长（例：MTU 512 ⇒ 一次写 509 ⇒ 每包 **475**；用户口径「≤480」成立），随后
+  `spin_block.setMaximum(cap)` + 夹当前值 + 状态标签写明计算过程（标签 `wordWrap`，窄窗不截断）。
+  **幂等重算时机**：通道切换 / 连接变化 / `mtu_updated` / SA 配置变化 —— 上限缓存进 `_bt_cap`，
+  `_worker()` 在蓝牙通道下**要求该缓存非 None**（算不出上限就别放行，免得块长超限半途失败）。
+  上限算不出（未连接 / `mtu_is_unnegotiated` / 放不下 698 帧头）时**不设人为上限**，禁用「开始升级」并把原因写进标签。
+  回归段：`test_dl698_upgrade_gui.py` [23]、`test_bluetooth_worker.py` [8]、`test_dl698_upgrade.py` A13、
+  `test_dl698_upgrade_tab_wiring.py` [5]/[5b]。
 - **该 tab 标题是「光伏升级」**（1.23.85 改名，索引仍是 `_upgrade_tab_index`、能力仍是 `spec.has_upgrade`）；
   改名后必须同步 `test_dl698_upgrade_tab_wiring.py` 的标题断言与 `test_yw645_gui.py` 的可见性矩阵文案。
 - **按钮宽度一律 `gui_utils.fit_btn_width`**（只设下限、不 `setFixedWidth`，陷阱 63）。

@@ -4600,11 +4600,28 @@ class MainWindow(QMainWindow):
         # 复用主窗口共享的串口线程（与组帧页/串口工具页同一约定）：端口/波特率只在
         # 顶部「串口配置」设置，本页只订阅 raw_data_received、经 write_raw 发送，不自建句柄。
         tab.set_serial_worker(self.serial_worker)
+        # 蓝牙通道：复用「蓝牙工具」页那条连接（本页不自己建/断连接）——注入取值回调，
+        # 因为蓝牙 worker 是蓝牙页**惰性创建**的，注入时可能还不存在。
+        tab.set_bluetooth_provider(self._upgrade_bluetooth_source)
         self._replace_lazy_tab(
             self._upgrade_placeholder, self._upgrade_tab_index, tab
         )
         apply_chinese_context_menus(tab)
         return tab
+
+    def _upgrade_bluetooth_source(self):
+        """「光伏升级」页取蓝牙通信线程的唯一入口：蓝牙工具页当前的 worker（没有则 None）。
+
+        蓝牙 worker 由蓝牙页**惰性创建**（用户在那页点扫描/连接时才有），所以这里只能按需取；
+        升级页不缓存、不创建、不销毁它 —— 连接生命周期完全归蓝牙页。
+        """
+        tab = getattr(self, "bluetooth_tool_tab", None)
+        if tab is None:
+            return None
+        try:
+            return tab.bluetooth_worker()
+        except Exception:
+            return None
 
     def _replace_lazy_tab(self, old_widget, index, new_widget):
         title = self.tab_widget.tabText(index)

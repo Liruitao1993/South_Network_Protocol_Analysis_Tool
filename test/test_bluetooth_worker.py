@@ -676,6 +676,84 @@ def test_mtu_poll():
         bw.MTU_POLL_INTERVAL, bw.MTU_POLL_TIMEOUT = interval, timeout
 
 
+def test_single_write():
+    section("[8] 整帧一次写（升级页通道）：single_write_limit + send_data(single_write=True)")
+
+    reset_fakes()
+    worker = bw.BluetoothWorker()
+    rec = Recorder(worker)
+    try:
+        rec.logs.clear()
+        worker.set_characteristics([RECV_UUID], [SEND_UUID])
+        check("连接受理", worker.connect_device("AA:09", "UPG") is True)
+        check("等连接完成", wait_for(lambda: bool(rec.connections) and rec.connections[-1] is True),
+              rec.errors)
+        check("协商到 MTU 247", worker.mtu_size() == 247, worker.mtu_size())
+
+        # ① 物理上限：MTU − 3，**不叠**蓝牙页那个 200 字节保护上限
+        check("single_write_limit = MTU − 3 = 244（不受 _max_chunk 200 影响）",
+              worker.single_write_limit() == 244, worker.single_write_limit())
+        check("蓝牙页的单包上限仍是 200（两种语义并存、互不干扰）",
+              worker._chunk_size_for([SEND_UUID]) == 200, worker._chunk_size_for([SEND_UUID]))
+
+        # ② 超限：拒发 + 报错 + 一个字节都不写
+        FakeClient.instances[-1].writes.clear()
+        rec.errors.clear()
+        over = bytes(worker.single_write_limit() + 1)
+        check("超限整帧被拒（返回 False）", worker.send_data(over, single_write=True) is False)
+        check("超限时给出可读错误（提示调小每包字节数）",
+              any("超过一次 ATT 写上限" in e and "每包字节数" in e for e in rec.errors),
+              rec.errors)
+        check("超限时一个字节都没写", FakeClient.instances[-1].writes == [])
+
+        # ③ 恰好等于上限：一次写、不再分包
+        FakeClient.instances[-1].writes.clear()
+        rec.sent.clear()
+        rec.progress.clear()
+        exact = bytes(worker.single_write_limit())
+        check("恰好等于上限受理", worker.send_data(exact, single_write=True) is True)
+        check("等发送完成", wait_for(lambda: bool(rec.sent)), rec.errors)
+        sizes = [len(d) for _u, d, _r in FakeClient.instances[-1].writes]
+        check("整帧**一次** ATT 写（不分包）", sizes == [244], sizes)
+        check("不发 send_progress（单包）", rec.progress == [], rec.progress)
+        check("内容逐字节一致", rec.sent[-1] == exact)
+
+        # ④ 特征码自带写上限时，物理上限跟着它走（升级页据此算块长）
+        worker.set_characteristics([RECV_UUID], [LOW_MTU_SEND_UUID])
+        check("等换通道订阅", wait_for(lambda: worker.send_uuids() == [LOW_MTU_SEND_UUID]))
+        check("特征码 max_write=24 ⇒ 物理上限 24（MTU 244 让位给更小的特征码上限）",
+              worker.single_write_limit() == 24, worker.single_write_limit())
+
+        # ⑤ 普通发送（蓝牙页路径）不受影响：仍按 _max_chunk 分包
+        FakeClient.instances[-1].writes.clear()
+        rec.sent.clear()
+        worker.send_data(bytes(range(60)))
+        check("普通路径仍按 24 分包", wait_for(lambda: len(rec.sent) == 1))
+        check("普通路径包数不变（24/24/12）",
+              [len(d) for _u, d, _r in FakeClient.instances[-1].writes] == [24, 24, 12],
+              [len(d) for _u, d, _r in FakeClient.instances[-1].writes])
+
+        # ⑥ 投递之后上限变小（特征码 live 上限 24 → 10）⇒ 取消发送、一个字节都不写。
+        #    预检（send_data）与重检（_write_coro 里的 _refresh_live_limits 之后）必须同一判据：
+        #    少了重检，MTU/特征码在投递与执行之间变小就会写出超限帧（要求「一次写」时会失败）。
+        client = FakeClient.instances[-1]
+        client.writes.clear()
+        rec.errors.clear()
+        rec.sent.clear()
+        old_limit = worker.single_write_limit()
+        for obj in worker._char_objects.values():
+            if str(getattr(obj, "uuid", "")) == LOW_MTU_SEND_UUID:
+                obj.max_write_without_response_size = 10
+        check("投递时按旧上限受理（24 字节）",
+              worker.send_data(bytes(old_limit), single_write=True) is True)
+        check("投递后重检发现超限 ⇒ 取消发送（不静默分包）",
+              wait_for(lambda: any("已取消发送" in e for e in rec.errors)), rec.errors)
+        check("取消时一个字节都没写", client.writes == [] and rec.sent == [],
+              (client.writes, rec.sent))
+    finally:
+        worker.shutdown()
+
+
 def test_negatives():
     section("[6] 反例自检（判据有效）")
 
@@ -715,6 +793,7 @@ def main():
     test_drop_and_missing_bleak()
     test_subscribe_finished()
     test_mtu_poll()
+    test_single_write()
     test_negatives()
 
     print()

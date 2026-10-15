@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "检查项：§7j 蓝牙通道契约（复用连接/整帧一次写/上限自动算/不设假上限）"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "检查项：一次 ATT 写上限与块长反推必须单一来源，不得在页面另算一份"}
