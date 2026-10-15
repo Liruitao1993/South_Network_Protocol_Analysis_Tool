@@ -109,6 +109,10 @@ testfile.txt
 /commands.json
 # 协议9 组帧「仿照模板」（本地参数集 + 参考报文，运行时生成、用户私有，不跟踪）
 /csg_frame_templates.json
+# 协议8 升级页运行时参数（SA/每包字节数/超时/文件信息等，随使用变化，不入库）
+/dlt698_upgrade_config.json
+# TCP 监控运行时参数（记录目录等，随使用变化，不入库）
+/tcp_monitor_config.json
 # Git worktree 本地隔离区（不入库）
 .worktrees/
 
