@@ -1228,3 +1228,43 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Next Steps
 
 - 发版批次：把 main_gui.py(APP_VERSION/CHANGELOG)、AGENTS.md、README.md、两个 .iss 一起提交；bump 后跑 python release_check.py --sync-iss
+
+
+## Session 38: 光伏升级：tab 改名 + 可选读版本信息（通用 43000300 / 厂家扩展内部版本 FF100400）
+
+**Date**: 2026-10-15
+**Task**: 光伏升级：tab 改名 + 可选读版本信息（通用 43000300 / 厂家扩展内部版本 FF100400）
+**Branch**: `main`
+
+### Summary
+
+用户需求两批：①「升级」tab 改名「光伏升级」；②页面增加可选的升级前/升级完成后读版本信息（默认通配 AAAAAA，命令 = 通用 698.45 读取 43000300）；③追加：内部版本（厂家扩展 FF100400）也要能选。两条现场实帧都被 build_read_version 逐字节复现，响应判定按所选 OAD 互斥；读版本失败刻意不阻断升级。
+
+### Main Changes
+
+- dl_t698_45_frame_gen.py：generate_get_request_normal 新增可选 time_tag_none（默认 False ⇒ 既有调用方逐字节不变，复核 180 组参数对拍 HEAD）
+- dl_t698_45_upgrade.py：OAD_VERSION/OAD_INTERNAL_VERSION + build_read_version + check_get_response（HCS/FCS+0x85+GetResponseNormal+OAD 回显+Get-Result CHOICE 00=DAR/01=数据）
+- dlt698_upgrade_widget.py：两个勾选项（默认不勾/落盘/传输中冻结）+「读版本内容」下拉（键 common/internal，OAD 字节只在协议模块一份）+ 状态机 ver_pre/ver_post + 非阻断失败 + 版本内容进日志
+- main_gui.py：tab 文案「升级」→「光伏升级」（**只提交这一处 hunk**；APP_VERSION/CHANGELOG 属版本批次留工作区，剩 2 个 hunk）
+- 测试：test_dl698_upgrade.py 225→259（A10/A11）、test_dl698_upgrade_gui.py 194→252（[17]~[20]）、tab_wiring 标题断言 + yw645 可见性矩阵文案
+- 文档：spec §7j 新增「读版本信息 / 两条命令 / tab 改名」契约条，AGENTS §1/§3/§5.6/§6/§10 与 README（功能节 + 更新记录）同步 —— 后两者按惯例留工作区随发版批次
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `26abef2` | (see git log) |
+
+### Testing
+
+- [OK] test_dl698_upgrade.py PASS=259 FAIL=0；test_dl698_upgrade_gui.py 252 项全绿；test_dl698_upgrade_tab_wiring.py PASS=29；698 全家（dl_t698_45*/endian/data_decode/extract/preset/fujian）+ test_web_frame_gen_utils.py(74) 全绿
+- [OK] release_check.py --with-gui：PASS=138 FAIL=0 WARN=0（含 test_dl698_upgrade_gui.py PASS）
+- [OK] 独立复核（trellis-check）11m43s：6 条变异反证全部变红后逐字节还原（OAD 对调/内部版本不生效/非阻断失效/丢 TimeTag/下拉映射对调/文案互换）；状态机边界 71 项探针全绿（中止/清除/掉线/超时用尽/迟到响应/只勾后读且关自动执行）；既有行为 46 项与 HEAD 逐字节对拍一致；修掉 1 条恒真断言（下拉两项文案与自己比较）
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 发版批次：把 main_gui.py（APP_VERSION/CHANGELOG）、AGENTS.md、README.md、两个 .iss 一起提交；bump 后跑 python release_check.py --sync-iss
