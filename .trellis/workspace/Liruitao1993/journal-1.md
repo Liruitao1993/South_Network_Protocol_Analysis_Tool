@@ -1187,3 +1187,44 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Status
 
 [OK] **Completed**
+
+
+## Session 37: 协议8升级页：TX/RX 日志帧显示口径（小帧整帧 / 大帧中间省略）
+
+**Date**: 2026-10-15
+**Task**: 协议8升级页：TX/RX 日志帧显示口径（小帧整帧 / 大帧中间省略）
+**Branch**: `main`
+
+### Summary
+
+用户报障「TX 日志只显示了部分，应该显示全部的帧内容」：启动传输那条 62 字节的帧原被截到 48 字节（尾部校验值/结束符看不到）。改为 ≤200B 整帧打印、>200B 头尾各 100B + 中间 ... + (共 N 字节)。顺带补 .gitignore 的 dlt698_upgrade_config.json / tcp_monitor_config.json。任务是 1.23.85（未发版）的收尾修订，不 bump 版本号。
+
+### Main Changes
+
+- dlt698_upgrade_widget.py：HEX_LOG_LIMIT 48→200；fmt_hex 由「只显前段」改为「≤limit 整帧 / >limit 头尾各半 + ' ... ' + (共 N 字节)」
+- test/test_dl698_upgrade_gui.py：194→202 项（fmt_hex 边界矩阵 + 真实日志行断言 + tx_hex_tokens/tx_line 两个测试助手）
+- .trellis/spec/frontend/component-guidelines.md §7j 增「TX/RX 日志帧显示口径」契约条
+- .gitignore：补 /dlt698_upgrade_config.json、/tcp_monitor_config.json（运行时用户本地配置，同类漏配）
+- main_gui.py CHANGELOG（1.23.85 条目追加 + 测试数 194→202）与 AGENTS.md §5.6 同款说明，按本仓惯例**留工作区**随发版批次提交
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0af3f87` | (see git log) |
+| `eb0cc41` | (see git log) |
+
+### Testing
+
+- [OK] test/test_dl698_upgrade_gui.py 202 项全绿（RC=0）；test/test_dl698_upgrade.py 225 项、test/test_dl698_upgrade_tab_wiring.py 29 项 PASS=… FAIL=0
+- [OK] 变异反证 2 条：HEX_LOG_LIMIT 改回 48 → 4 项变红；去掉尾段（退回只显前段）→ 3 项变红；还原后 md5 逐字节一致
+- [OK] 真实输出取证（新进程）：600B 块 → 634 字节写文件帧头部含 68/APDU 07 01/OMD F0 01 08 00/块序号 00 29，尾部 00 39 86 16，显示 token 恰 200
+- [OK] release_check.py --with-gui：PASS=135 FAIL=3 WARN=0；3 项 FAIL 是 test_quick_parse_panel / test_app_icon_path / test_button_icons 的退出期 RC=0xC0000409（断言全绿，AGENTS 陷阱 62 已知本机 Qt offscreen 退出期 fastfail），与本改动无关
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 发版批次：把 main_gui.py(APP_VERSION/CHANGELOG)、AGENTS.md、README.md、两个 .iss 一起提交；bump 后跑 python release_check.py --sync-iss
