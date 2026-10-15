@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 39
+- **Total Sessions**: 40
 - **Last Active**: 2026-10-15
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1310 | Active |
+| `journal-1.md` | ~1349 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 40 | 2026-10-15 | 光伏升级：不勾自动执行也读升级后版本 + 读前等设备复位（默认 10 秒可设） | `81df6bc` | `main` |
 | 39 | 2026-10-15 | 光伏升级：读版本信息展示改版（帧下明细 + 两栏展示区）+ 版本逐字段解析 | `787d155` | `main` |
 | 38 | 2026-10-15 | 光伏升级：tab 改名 + 可选读版本信息（通用 43000300 / 厂家扩展内部版本 FF100400） | `26abef2` | `main` |
 | 37 | 2026-10-15 | 协议8升级页：TX/RX 日志帧显示口径（小帧整帧 / 大帧中间省略） | `0af3f87`, `eb0cc41` | `main` |

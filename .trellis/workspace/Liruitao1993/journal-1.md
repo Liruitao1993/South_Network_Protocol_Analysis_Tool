@@ -1308,3 +1308,42 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Next Steps
 
 - 发版批次：main_gui.py（APP_VERSION/CHANGELOG）、AGENTS.md、README.md、两个 .iss 一起提交；bump 后跑 python release_check.py --sync-iss
+
+
+## Session 40: 光伏升级：不勾自动执行也读升级后版本 + 读前等设备复位（默认 10 秒可设）
+
+**Date**: 2026-10-15
+**Task**: 光伏升级：不勾自动执行也读升级后版本 + 读前等设备复位（默认 10 秒可设）
+**Branch**: `main`
+
+### Summary
+
+用户纠错：有的设备收全升级包自动复位升级，所以没勾「传完后自动执行升级」同样要读升级后版本；复位期间读不到，需等一会儿再读（默认 10 秒，可手设）。已把读后版本与是否发执行升级解耦，并新增 PHASE_WAIT_RESET 倒计时阶段。
+
+### Main Changes
+
+- dlt698_upgrade_widget.py：新增 PHASE_WAIT_RESET + spin_read_after_delay（默认 10、0~600、落盘、传输中冻结）+ 1 秒重复 QTimer 倒计时（状态行显示剩余秒数）+ _begin_reset_wait/_on_reset_wait_tick/_end_reset_wait；不勾自动执行时末包确认后同样（等复位）读后版本；等待期 _on_frame 忽略、_finish_buttons/_on_start/cleanup 停表
+- 复核抓出并修掉的真实缺陷：等待期被误触发超时槽时 _retry_or_fail 会按 _expected_omd() 落到 OMD_EXEC ⇒ 凭空补发「执行升级」帧/把等待判死；现加等待期守卫（记 warn 忽略）
+- test/test_dl698_upgrade_gui.py 276→322：[22] 默认10秒/可设/0秒立即读/不勾自动执行也读/等待期忽略杂帧/中止与清除打断/连续两轮不残留/cleanup 停表/真实事件循环倒计时（不被手工 tick 快进掩盖）
+- 文档：spec §7j 新增「解耦 + 等复位 + _retry_or_fail 等待期守卫」契约条，AGENTS §5.6/§10 与 README（功能节 + 更新记录）+ main_gui CHANGELOG 同步（后三者留工作区随发版批次）
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `81df6bc` | (see git log) |
+
+### Testing
+
+- [OK] test_dl698_upgrade_gui.py 322 项全绿；test_dl698_upgrade.py PASS=273；tab_wiring PASS=29；test_yw645_gui.py 77（tab 文案联动）；ruff 干净
+- [OK] release_check.py --with-gui：PASS=138 FAIL=0 WARN=0
+- [OK] 真实事件循环冒烟（非 offscreen，delay=2 真 sleep）：剩余 2→1→0 后自动发出读版本帧（05 01 02 43 00 03 00 00）、最终 done、全程 3 帧
+- [OK] 独立复核（trellis-check 20m）：9 条变异反证全部干净变红后逐字节还原（md5 一致）；不勾读后版本时 4 种组合的帧序列与**每一行日志**都与 HEAD 逐字节相同
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 发版批次：main_gui.py（APP_VERSION/CHANGELOG）、AGENTS.md、README.md、两个 .iss 一起提交；bump 后跑 python release_check.py --sync-iss
