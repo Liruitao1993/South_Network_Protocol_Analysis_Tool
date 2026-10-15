@@ -484,7 +484,7 @@ engine = self._engine_factory()            # 否则才是发给本虚拟表的�
   ② `_select_scope` 改成全选 → 5 项红；③ 跳过失败项时不弹二次确认（静默跳过）→ 2 项红；
   ④ 清除模式只删 `protocol` 不删 `addr` → 1 项红。
 
-### 7j. 协议专属「升级」页 / 长流程串口传输页（698.45 文件传输升级）
+### 7j. 协议专属「光伏升级」页 / 长流程串口传输页（698.45 文件传输升级）
 
 > 源自任务 10-14-dlt698-file-transfer-upgrade（协议8 分布式产品升级：启动传输 → 写文件×N → 执行升级）。
 > 适用面：**任何协议专属、走共享串口、需要逐帧确认的长流程页面**（下一候选：批量写参数 / 任务下发）。
@@ -516,6 +516,24 @@ engine = self._engine_factory()            # 否则才是发给本虚拟表的�
   超过则**头尾各 100 字节 + 中间 `...` + `(共 N 字节)`**（头段给帧头/APDU 头/块序号，尾段给帧尾，省略掉的正是升级包数据体本身）。
   **不要退回「只显前 N 字节」**：那既丢帧尾、又让小帧被无谓截断。回归：`test_dl698_upgrade_gui.py` 的 `test_helpers`（`fmt_hex` 边界矩阵）
   与 `test_happy_path`（真实日志行：启动帧无 `...`、写文件行 200 token + `共 N 字节`）；变异反证 = 把上限改回 48、或把尾段去掉，两者都必须变红。
+- **可选「读版本信息」两步（1.23.85 追加，用户需求）**：`升级前读版本信息` / `升级完成后读版本信息` 两个勾选项
+  （**默认都不勾**、落盘；传输中与「每包字节数」一起冻结 + `_finish_buttons` 统一解冻），状态机新增
+  `ver_pre` / `ver_post` 两阶段。帧 = `build_read_version(sa, ca, piid, oad=…)`（GET-Request Normal +
+  **TimeTag `00`**，SA/CA 取页面同一份配置）；判定 = `check_get_response(frame, oad)`（HCS/FCS +
+  服务码 `0x85` + `GetResponseNormal` + OAD 回显 + Get-Result CHOICE：`00`=错误信息 DAR / `01`=数据）。
+  **失败一律不阻断升级**（重试用尽 → 记日志继续，用户裁决）；版本内容进日志（命名业务字段优先，
+  厂家扩展对象退化为数据值串）。`generate_get_request_normal` 的 TimeTag 走**新增可选参数**
+  （默认不补 ⇒ `frame_gen_widget` 等既有调用方逐字节不变）。
+- **「读版本内容」下拉的两条命令（同批追加）**：通用版本 `OAD 43 00 03 00` 与**厂家扩展内部版本**
+  `OAD FF 10 04 00`（OI `0xFF00` 起为厂商自定义区间，解析器标「未知对象(0xFF10)」）。下拉只存
+  `common`/`internal` 键，**OAD 字节只在 `dl_t698_45_upgrade` 一份**（`OAD_VERSION` / `OAD_INTERNAL_VERSION`，
+  经 `_read_oad(upg)` 取 —— 页面顶层不能 import 该模块，它顶层 import 可选依赖 crcmod）。组帧与判定
+  **都**按所选 OAD ⇒ 两条命令的响应**互斥**（OAD 不符即忽略）。两条现场实帧都被逐字节复现：
+  通用 `<PII=1, SA=单址+AA×6>` = `68 17 00 43 05 AA×6 00 AA 2A 05 01 01 43 00 03 00 00 6D 5C 16`、
+  内部 `<PIID=0x2C, SA=单址+032408042620>` = `68 17 00 43 05 03 24 08 04 26 20 00 CD 9A 05 01 2C FF 10 04 00 00 C2 8A 16`；
+  回归 `test_dl698_upgrade.py`（A10/A11）+ `test_dl698_upgrade_gui.py`（[17]~[20]，含 OAD 互斥与「非阻断」反例）。
+- **该 tab 标题是「光伏升级」**（1.23.85 改名，索引仍是 `_upgrade_tab_index`、能力仍是 `spec.has_upgrade`）；
+  改名后必须同步 `test_dl698_upgrade_tab_wiring.py` 的标题断言与 `test_yw645_gui.py` 的可见性矩阵文案。
 - **按钮宽度一律 `gui_utils.fit_btn_width`**（只设下限、不 `setFixedWidth`，陷阱 63）。
 - **大文件分包参数必须可配且持久化**：每包字节数 / 超时(ms) / 重试次数（连同 SA、CA、文件信息、校验类型与值）全可编辑，
   落 `app_paths.data_path("dlt698_upgrade_config.json")`（原子写 + 坏文件宽容；**按属性访问** `app_paths.data_path`，

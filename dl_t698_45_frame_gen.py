@@ -66,10 +66,16 @@ class DLT69845FrameGenerator:
         return self._assemble_frame(sa, ca, control, apdu)
 
     def generate_get_request_normal(self, sa: bytes, ca: int, piid: int,
-                                    oad: bytes) -> bytes:
-        """生成 GET-Request Normal 帧"""
-        # APDU: 05 01 [PIID] [OAD]
-        apdu = bytes([0x05, 0x01, piid]) + oad
+                                    oad: bytes, time_tag_none: bool = False) -> bytes:
+        """生成 GET-Request Normal 帧
+
+        ``time_tag_none=True`` ⇒ APDU 末尾补 `00`（TimeTag = 无时间标签）：规范里
+        Get-Request-Normal 的 TimeTag 是 OPTIONAL，而现网设备/工具一律带这个字节
+        （依据：读版本信息实帧 `68 17 00 43 … 05 01 01 43 00 03 00 00 6D 5C 16`，
+        实测可用本方法**逐字节复现**）。**默认 False 保持既有调用方行为不变**。
+        """
+        # APDU: 05 01 [PIID] [OAD] [00=无时间标签]
+        apdu = bytes([0x05, 0x01, piid]) + oad + (b'\x00' if time_tag_none else b'')
         # DIR=0, PRM=1, SC=0, func=3 (用户数据)
         control = 0x43  # 0100 0011
         return self._assemble_frame(sa, ca, control, apdu)

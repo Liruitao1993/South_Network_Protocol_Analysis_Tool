@@ -3157,11 +3157,12 @@ class MainWindow(QMainWindow):
             self._bluetooth_tool_placeholder, app_icons.load_icon("bluetooth"), "蓝牙工具"
         )
 
-        # 协议8 698.45 文件传输升级页（懒加载，仅协议8 可见；创建即隐藏，构造期
-        # _on_protocol_changed 可能一次都不触发，协议专属 tab 必须在创建处设隐藏）
+        # 协议8 光伏升级页（698.45 文件传输升级；注册表 has_upgrade，仅协议8 可见；懒加载，
+        # 创建即隐藏 —— 构造期 _on_protocol_changed 可能一次都不触发，协议专属 tab
+        # 必须在创建处设隐藏）
         self._upgrade_placeholder = QWidget()
         self._upgrade_tab_index = self.tab_widget.addTab(
-            self._upgrade_placeholder, app_icons.load_icon("hard-drive-upload"), "升级"
+            self._upgrade_placeholder, app_icons.load_icon("hard-drive-upload"), "光伏升级"
         )
         self.tab_widget.setTabVisible(self._upgrade_tab_index, False)
 

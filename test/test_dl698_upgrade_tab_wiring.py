@@ -102,7 +102,7 @@ def test_placeholder(win):
     check("存在升级页索引", hasattr(win, "_upgrade_tab_index"),
           getattr(win, "_upgrade_tab_index", None))
     idx = win._upgrade_tab_index
-    check("标题为「升级」", win.tab_widget.tabText(idx) == "升级",
+    check("标题为「光伏升级」", win.tab_widget.tabText(idx) == "光伏升级",
           win.tab_widget.tabText(idx))
     check("启动默认（协议0）下不可见",
           win.tab_widget.isTabVisible(idx) is False)

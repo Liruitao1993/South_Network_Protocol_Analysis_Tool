@@ -166,6 +166,45 @@ def ack_with_omd(tx_frame: bytes, omd: bytes) -> bytes:
     return GEN._assemble_frame(sa, ca, 0xC3, resp)
 
 
+#: 版本信息（表191）六个字段的样本值
+VER_FIELDS = ("JCDZ", "V1.5", "250901", "V1.0", "230602", "SHANDONG")
+VER_TEXT = ("厂商代码=JCDZ，软件版本号=V1.5，软件版本日期=2025-09-01，"
+            "硬件版本号=V1.0，硬件版本日期=2023-06-02，厂商扩展信息=SHANDONG")
+
+
+def version_data(*fields: str) -> bytes:
+    """版本信息（表191）= `structure{厂商代码,软件版本号,软件版本日期,硬件版本号,硬件版本日期,厂商扩展信息}`。"""
+    out = bytes([0x02, len(fields)])
+    for f in fields:
+        raw = f.encode("ascii")
+        out += bytes([0x0A, len(raw)]) + raw
+    return out
+
+
+def ver_ack_for(tx_frame: bytes, fields=VER_FIELDS, dar: int = 0,
+                tag: bytes = b"\x01", oad: bytes = None,
+                raw_data: bytes = None) -> bytes:
+    """读版本帧的响应：`85 01 | PIID | OAD(4B) | Get-Result | 数据`（tag 01=数据 / 00=错误信息 DAR）。
+
+    OAD/PIID 从**被确认的那一帧**里取（回显口径），SA/CA 同源 ⇒ 帧内 HCS/FCS 自动正确；
+    `raw_data` 给「不是六个命名字段」的载荷（如厂家扩展内部版本就是个 visible-string）。
+    """
+    sa, ca, apdu = tx_parts(tx_frame)                 # apdu = 05 01 PIID OAD 00
+    oad = bytes(oad or apdu[3:7])
+    if raw_data is not None:
+        body = bytes(raw_data)
+    else:
+        body = version_data(*fields) if tag == b"\x01" else bytes([dar])
+    resp = bytes([0x85, 0x01, apdu[2]]) + oad + bytes(tag) + body
+    return GEN._assemble_frame(sa, ca, 0xC3, resp)
+
+
+def visible_string(text: str) -> bytes:
+    """A-XDR visible-string（`0A <长度> <ASCII>`）—— 内部版本这类非结构载荷用。"""
+    raw = text.encode("ascii")
+    return bytes([0x0A, len(raw)]) + raw
+
+
 def omd_of(tx_frame: bytes) -> bytes:
     return resp_apdu(tx_frame)[3:7]
 
@@ -229,17 +268,19 @@ def start_transfer(tab, w, payload: bytes, block: int = 100) -> None:
 
 
 def run_to_end(tab, w, guard: int = 60) -> None:
-    """把状态机推到终态：每轮为「最后发出的那帧」投一张 DAR=0 确认。
+    """把状态机推到终态：每轮为「最后发出的那帧」投一张匹配的响应。
 
-    执行升级那一步故意**分块交付**（前导 FE + 半帧 + 余下），验证本页自组帧而不是
-    靠一次交付正好一帧。
+    - 读版本信息步骤（`ver_pre`/`ver_post`）投 **GET-Response**；
+    - 其余步骤投 ACTION-Response；
+    - 执行升级那一步故意**分块交付**（前导 FE + 半帧 + 余下），验证本页自组帧而不是
+      靠一次交付正好一帧。
     """
     for _ in range(guard):
         settle()
         if tab.state in ("done", "failed", "aborted") or not w.sent:
             return
         tx = w.sent[-1]
-        ack = ack_for(tx)
+        ack = ver_ack_for(tx) if tab._phase in upg_ui.VER_PHASES else ack_for(tx)
         if tab._phase == "exec":
             w.deliver(bytes.fromhex("FEFEFE") + ack[:12])
             settle()
@@ -416,6 +457,12 @@ def test_happy_path():
           and f"(共 {len(w.sent[1])} 字节)" in b_line, b_line)
     check("写文件 TX 行头段是帧起始 68、尾段是帧尾 16",
           tx_hex_tokens(b_line)[:1] == ["68"] and tx_hex_tokens(b_line)[-1:] == ["16"])
+    # 两个读版本开关默认不勾 ⇒ 帧数与日志都不该出现读版本步骤
+    check("默认不勾读版本 ⇒ 多一帧都没有、日志无读版本步骤",
+          w.writes == 5 and "(升级前读版本信息)" not in log
+          and "(升级完成后读版本信息)" not in log
+          and "版本信息（升级前" not in log and "版本信息（升级完成后" not in log,
+          f"{w.writes} / {[l for l in log.splitlines() if '版本信息（' in l]}")
     check("日志含 [RX] 且写 DAR=0 成功", "[RX]" in log and "DAR=0 成功" in log)
     check("日志含 [信息]", "[信息]" in log)
     check("已确认字节 == 文件字节数", tab._confirmed_bytes == len(payload),
@@ -990,6 +1037,248 @@ def test_mid_transfer_controls():
     tab2.cleanup()
 
 
+#: 读版本帧的 APDU 形状：`05 01 <PIID> <OAD> 00`（GET-Request Normal + TimeTag 无）
+def is_ver_frame(frame: bytes, oad: bytes = None) -> bool:
+    """`oad=None` 时断言为「通用版本」`43000300`（默认选择）；传 `INT_OAD` 断言内部版本。"""
+    apdu = resp_apdu(frame)
+    return (len(apdu) == 8 and apdu[0] == 0x05 and apdu[1] == 0x01
+            and apdu[3:7] == bytes(oad or upg.OAD_VERSION) and apdu[7] == 0x00)
+
+
+#: 厂家扩展「内部版本」的 OAD（页面「读版本内容」下拉第 2 项）
+INT_OAD = bytes.fromhex("FF100400")
+INT_TEXT = "V1.0.3-INT"
+
+
+def test_version_read_flow():
+    section("[17] 可选「升级前/升级完成后读版本信息」")
+    payload = bytes(range(200)) + b"\xA5" * 100          # 300 B / 每包 100 → 3 包
+    w = FakeSerialWorker()
+    tab, _, _ = make_tab(w)
+    check("两个勾选框存在且默认不勾",
+          tab.chk_read_before.isChecked() is False and tab.chk_read_after.isChecked() is False)
+    tab.spin_block.setValue(100)
+    tab._on_file_selected(write_pkg(payload))
+    tab.chk_read_before.setChecked(True)
+    tab.chk_read_after.setChecked(True)
+    tab.btn_start.click()
+    settle()
+    check("勾选后先发读版本帧（不是启动传输）",
+          w.writes == 1 and is_ver_frame(w.sent[0]) and tab._phase == "ver_pre",
+          f"{w.writes} / {tab._phase}")
+    check("读版本帧用页面 SA（默认通配 0x45 + AA×6）",
+          tx_parts(w.sent[0])[0] == upg.WILDCARD_SA, tx_parts(w.sent[0])[0].hex().upper())
+    check("TX 日志标出步骤名「升级前读版本信息」且帧整帧显示（25 字节无省略）",
+          "(升级前读版本信息)" in tx_line(log_text(tab), "(升级前读版本信息)")
+          and len(tx_hex_tokens(tx_line(log_text(tab), "(升级前读版本信息)"))) == len(w.sent[0]),
+          tx_line(log_text(tab), "(升级前读版本信息)"))
+    check("开始日志写明两个开关状态", "升级前读版本=是" in log_text(tab)
+          and "升级后读版本=是" in log_text(tab))
+    check("传输中两个勾选框被冻结（与每包字节数同口径）",
+          tab.chk_read_before.isEnabled() is False
+          and tab.chk_read_after.isEnabled() is False
+          and tab.spin_block.isEnabled() is False)
+
+    w.deliver(ver_ack_for(w.sent[-1]))
+    settle()
+    check("读版本确认后进入启动传输（第 2 帧 OMD=F0010700）",
+          w.writes == 2 and omd_of(w.sent[1]) == upg.OMD_START and tab._phase == "start",
+          f"{w.writes} / {tab._phase}")
+    log = log_text(tab)
+    check("版本内容写进日志（命名业务字段）", VER_TEXT in log,
+          [l for l in log.splitlines() if "版本信息" in l])
+    check("日志标出「升级前」+「·通用」（默认读版本内容）",
+          "版本信息（升级前·通用）" in log)
+
+    run_to_end(tab, w)
+    settle()
+    check("状态 done", tab.state == "done", tab.state)
+    check("进度 100%", tab.progress.value() == 100 and "100%" in tab.lbl_progress.text())
+    check("帧序 = 读版本 + 启动 + 3 包 + 执行 + 读版本 = 7",
+          w.writes == 7 and [omd_of(f) for f in w.sent[1:2]] == [upg.OMD_START], w.writes)
+    check("PIID 每帧自增（0..6）",
+          [resp_apdu(f)[2] for f in w.sent] == [0, 1, 2, 3, 4, 5, 6],
+          [resp_apdu(f)[2] for f in w.sent])
+    check("末帧是读版本帧（升级完成后）", is_ver_frame(w.sent[-1]))
+    check("结束后勾选框恢复可编辑",
+          tab.chk_read_before.isEnabled() is True and tab.chk_read_after.isEnabled() is True)
+    check("已确认字节 == 文件字节数", tab._confirmed_bytes == len(payload),
+          f"{tab._confirmed_bytes} vs {len(payload)}")
+    log = log_text(tab)
+    check("日志含「升级完成后」的版本内容",
+          "版本信息（升级完成后·通用）" in log and log.count(VER_TEXT) == 2,
+          [l for l in log.splitlines() if "版本信息" in l])
+    check("执行升级已确认 → 读版本的过渡日志", "继续读版本信息（升级完成后）" in log)
+
+    # 勾选状态持久化（落盘 → 新实例读回）
+    check("落盘成功", tab._save_persisted() is True)
+    tab2, _, _ = make_tab(fresh=False)
+    check("新实例读回两个开关 = 勾选",
+          tab2.chk_read_before.isChecked() is True and tab2.chk_read_after.isChecked() is True)
+    tab.cleanup()
+    tab2.cleanup()
+
+
+def test_version_read_nonblocking():
+    section("[18] 读版本失败**不阻断**升级（超时用尽 → 记日志继续）")
+    payload = bytes(range(200))
+    w = FakeSerialWorker()
+    tab, _, _ = make_tab(w)
+    tab.spin_block.setValue(100)
+    tab.spin_retries.setValue(1)
+    tab._on_file_selected(write_pkg(payload))
+    tab.chk_read_before.setChecked(True)
+    tab.chk_read_after.setChecked(True)
+    tab.btn_start.click()
+    settle()
+    check("先发读版本帧", w.writes == 1 and is_ver_frame(w.sent[0]), w.writes)
+
+    tab._on_timeout()                     # 第 1 次超时 → 重发（retries=1）
+    settle()
+    check("超时按既有口径重发（帧数 +1、PIID 自增）",
+          w.writes == 2 and resp_apdu(w.sent[1])[2] == 1, w.writes)
+    tab._on_timeout()                     # 用尽 → 不阻断
+    settle()
+    log = log_text(tab)
+    check("日志写明读版本未成功 + 继续升级", "读版本信息未成功" in log
+          and "继续升级流程" in log, last_log(tab))
+    check("升级继续：第 3 帧是启动传输（不是失败停住）",
+          w.writes == 3 and omd_of(w.sent[2]) == upg.OMD_START and tab.state == "starting",
+          f"{w.writes} / {tab.state} / {[omd_of(f) for f in w.sent]}")
+    check("全过程没有失败态弹框路径", tab.state != "failed", tab.state)
+
+    for _ in range(20):                   # 走完 启动 + 2 包 + 执行 + 读版本(超时)
+        settle()
+        if tab.state in ("done", "failed", "aborted") or not w.sent:
+            break
+        if tab._phase in upg_ui.VER_PHASES:
+            tab._on_timeout()             # 升级后读版本同样超时 → 仍不阻断
+            continue
+        w.deliver(ack_for(w.sent[-1]))
+    settle()
+    check("升级本身照常完成（done，进度 100%）",
+          tab.state == "done" and tab.progress.value() == 100, tab.state)
+    check("已确认字节 == 文件字节数（读版本失败不影响写文件）",
+          tab._confirmed_bytes == len(payload), tab._confirmed_bytes)
+    log = log_text(tab)
+    check("升级后读版本失败也记日志并正常收尾",
+          "升级流程已结束" in log and "读版本信息未成功" in log, last_log(tab))
+    check("成功收尾文案说明读版本未成功",
+          "读版本信息未成功，原因见日志" in log, last_log(tab))
+    tab.cleanup()
+
+
+def test_version_read_mismatch_retries():
+    section("[19] 读版本响应不对（DAR≠0 / OAD 不符）按重试处理")
+    w = FakeSerialWorker()
+    tab, _, _ = make_tab(w)
+    tab.spin_block.setValue(100)
+    tab.spin_retries.setValue(2)
+    tab._on_file_selected(write_pkg(bytes(range(100))))
+    tab.chk_read_before.setChecked(True)
+    tab.btn_start.click()
+    settle()
+
+    w.deliver(ver_ack_for(w.sent[-1], dar=3, tag=b"\x00"))     # 设备回「拒绝读写」
+    settle()
+    log = log_text(tab)
+    check("DAR=3 → 日志给 DAR 说明并按重试重发",
+          "DAR=3" in log and "拒绝读写" in log and w.writes == 2, last_log(tab))
+    check("重发的仍是读版本帧", is_ver_frame(w.sent[-1]))
+
+    w.deliver(ver_ack_for(w.sent[-1], oad=bytes.fromhex("43000400")))   # OAD 不符
+    settle()
+    check("OAD 不符 → 忽略并继续等（不计确认、不再重发）",
+          "忽略" in log_text(tab) and w.writes == 2, last_log(tab))
+
+    w.deliver(ver_ack_for(w.sent[-1]))                        # 正确响应
+    settle()
+    check("正确响应到达 → 推进到启动传输",
+          w.writes == 3 and omd_of(w.sent[-1]) == upg.OMD_START and tab._phase == "start",
+          f"{w.writes} / {tab._phase}")
+    tab._on_abort()
+    tab.cleanup()
+
+
+def test_version_read_target_select():
+    section("[20] 「读版本内容」可选：通用 43000300 / 厂家扩展内部版本 FF100400")
+    w = FakeSerialWorker()
+    tab, _, _ = make_tab(w)
+    check("下拉存在且默认「通用版本信息」",
+          tab.combo_read_target.count() == 2 and tab._read_target_key() == "common"
+          and "43000300" in tab.combo_read_target.currentText(),
+          tab.combo_read_target.currentText())
+    items = [(tab.combo_read_target.itemData(i), tab.combo_read_target.itemText(i))
+             for i in range(2)]
+    check("两项的键与 OAD 文案分别对应 43000300 / FF100400",
+          [k for k, _t in items] == ["common", "internal"]
+          and "43000300" in items[0][1] and "FF100400" in items[1][1],
+          items)
+    upg_mod = tab._upgrade_module()
+    check("页面把「通用/内部」映射到协议模块的两个 OAD 常量（唯一来源）",
+          tab._read_oad(upg_mod) == upg_mod.OAD_VERSION
+          and upg_mod.OAD_INTERNAL_VERSION == INT_OAD)
+
+    # 切到内部版本 + 勾选前后读版本
+    tab.spin_block.setValue(100)
+    tab._on_file_selected(write_pkg(bytes(range(100))))          # 1 包
+    tab.combo_read_target.setCurrentIndex(1)
+    tab.chk_read_before.setChecked(True)
+    tab.chk_read_after.setChecked(True)
+    tab.btn_start.click()
+    settle()
+    check("第一帧就是内部版本读命令（APDU OAD=FF100400）",
+          w.writes == 1 and is_ver_frame(w.sent[0], INT_OAD), hexs_or_none(w, 0))
+    check("开始日志写明读版本内容 = 内部版本",
+          "读版本内容=内部版本" in log_text(tab), last_log(tab))
+
+    # 互斥：设备若回的是**通用版本**的响应，必须不认（否则「选择」形同虚设）
+    w.deliver(ver_ack_for(w.sent[-1], oad=upg_mod.OAD_VERSION))
+    settle()
+    check("通用版本响应喂给内部版本读取 ⇒ 忽略（OAD 不符）、不推进",
+          w.writes == 1 and tab._phase == "ver_pre", f"{w.writes} / {tab._phase}")
+    check("忽略原因写进日志", "OAD 不符" in log_text(tab), last_log(tab))
+
+    # 正确的内部版本响应 → 版本内容（visible-string 形态）进日志，标签带「·内部」
+    w.deliver(ver_ack_for(w.sent[-1], raw_data=visible_string(INT_TEXT)))
+    settle()
+    log = log_text(tab)
+    check("内部版本内容写进日志且标「·内部」",
+          f"版本信息（升级前·内部）：{INT_TEXT}" in log,
+          [l for l in log.splitlines() if "版本信息" in l])
+    check("推进到启动传输", w.writes == 2 and omd_of(w.sent[1]) == upg.OMD_START, w.writes)
+
+    # 传输中「读版本内容」也被冻结
+    check("传输中「读版本内容」下拉被冻结", tab.combo_read_target.isEnabled() is False)
+    run_to_end(tab, w)
+    settle()
+    check("全过程完成（done）", tab.state == "done" and tab.progress.value() == 100, tab.state)
+    check("升级后那一帧同样是内部版本读命令",
+          is_ver_frame(w.sent[-1], INT_OAD) and w.writes == 5, f"{w.writes}")
+    check("升级后版本内容也标「·内部」",
+          "版本信息（升级完成后·内部）" in log_text(tab),
+          [l for l in log_text(tab).splitlines() if "版本信息" in l])
+    check("结束后下拉恢复可编辑", tab.combo_read_target.isEnabled() is True)
+
+    # 选择持久化
+    check("落盘成功", tab._save_persisted() is True)
+    tab2, _, _ = make_tab(fresh=False)
+    check("新实例读回「内部版本」选择",
+          tab2._read_target_key() == "internal"
+          and tab2.combo_read_target.currentIndex() == 1,
+          tab2.combo_read_target.currentText())
+    tab.cleanup()
+    tab2.cleanup()
+
+
+def hexs_or_none(w, i):
+    """调试细节：第 i 帧的 APDU hex（越界给空串，避免断言失败时先抛异常）。"""
+    try:
+        return resp_apdu(w.sent[i]).hex(" ").upper()
+    except Exception:
+        return ""
+
+
 def main():
     print("=" * 64)
     print("协议8 升级页 dlt698_upgrade_widget offscreen 回归")
@@ -1017,6 +1306,10 @@ def main():
     test_theme()
     test_negatives()
     test_mid_transfer_controls()
+    test_version_read_flow()
+    test_version_read_nonblocking()
+    test_version_read_mismatch_retries()
+    test_version_read_target_select()
 
     print()
     print("=" * 64)

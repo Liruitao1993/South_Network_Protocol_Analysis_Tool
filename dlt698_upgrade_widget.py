@@ -96,6 +96,21 @@ TERMINAL_STATES = (STATE_IDLE, STATE_DONE, STATE_FAILED, STATE_ABORTED)
 PHASE_START = "start"
 PHASE_BLOCKS = "blocks"
 PHASE_EXEC = "exec"
+#: 两个**可选**的诊断步骤（用户需求：升级前/升级完成后读版本信息；默认不勾）
+PHASE_VER_PRE = "ver_pre"
+PHASE_VER_POST = "ver_post"
+
+#: 读版本信息的两步（失败**不阻断**升级流程；判定走 `check_get_response`）
+VER_PHASES = (PHASE_VER_PRE, PHASE_VER_POST)
+
+#: 「读版本内容」候选：`(下拉文案, 持久化键, 日志短名)`。**OAD 字节不在此处** ——
+#: 一律经 `_read_oad()` 取协议模块的常量（`OAD_VERSION` / `OAD_INTERNAL_VERSION`），
+#: 避免同一份协议事实写两遍（协议模块按需惰性 import，顶层拿不到它）。
+READ_TARGETS = (
+    ("通用版本信息（OAD 43000300）", "common", "通用"),
+    ("内部版本（厂家扩展，OAD FF100400）", "internal", "内部"),
+)
+DEFAULT_READ_TARGET = "common"
 
 #: 每包字节数上限：与串口页 `_sane_frame_len` 同族判据（design §13-5）
 BLOCK_SIZE_MIN, BLOCK_SIZE_MAX = 1, 8192
@@ -117,6 +132,9 @@ DEFAULTS = {
     "timeout_ms": 3000,
     "retries": 3,
     "auto_exec": True,
+    "read_before": False,               # 升级前读版本信息（可选诊断步骤，默认不勾）
+    "read_after": False,                # 升级完成后读版本信息（同上）
+    "read_target": DEFAULT_READ_TARGET,  # 读版本内容：common=通用 43000300 / internal=厂家扩展 FF100400
     "sa_type": 1,                       # 通配
     "sa_logic": 0,
     "sa_len": 6,
@@ -561,6 +579,35 @@ class Dlt698UpgradeWidget(QWidget):
         row5.addStretch(1)
         form.addLayout(row5)
 
+        # 读版本信息（可选诊断步骤；默认不勾，勾选状态落盘）
+        row6 = QHBoxLayout()
+        self.chk_read_before = QCheckBox("升级前读版本信息")
+        self.chk_read_before.setToolTip(
+            "勾选：开始升级前先发一帧「读版本信息」（GET-Request Normal，OAD 43 00 03 00 ="
+            "电气设备(设备管理类) 属性3 版本信息），把设备回的版本内容写进日志，便于升级前后比对。\n"
+            "SA/CA 取本页上方配置（默认通配地址 AA AA AA AA AA AA）；"
+            "读版本失败**不阻断**升级（重试用尽后记日志并继续）。")
+        self.chk_read_after = QCheckBox("升级完成后读版本信息")
+        self.chk_read_after.setToolTip(
+            "勾选：执行升级被设备确认后再发一帧「读版本信息」，确认新版本已生效。\n"
+            "读版本失败同样不阻断（此时升级本身已完成，只记日志）。")
+        row6.addWidget(self.chk_read_before)
+        row6.addSpacing(12)
+        row6.addWidget(self.chk_read_after)
+        row6.addSpacing(12)
+        row6.addWidget(QLabel("读版本内容"))
+        self.combo_read_target = QComboBox()
+        for label, key, _short in READ_TARGETS:
+            self.combo_read_target.addItem(label, key)
+        self.combo_read_target.setToolTip(
+            "「通用版本信息」= 标准 OAD 43 00 03 00（电气设备类 属性3）。\n"
+            "「内部版本」= 厂家扩展 OAD FF 10 04 00（厂商自定义对象，内部/内部版本信息）。\n"
+            "两者都是 GET-Request Normal（APDU 形如 05 01 <PIID> <OAD> 00），"
+            "只差 OAD；升级前/升级后两步共用这个选择。")
+        row6.addWidget(self.combo_read_target)
+        row6.addStretch(1)
+        form.addLayout(row6)
+
         outer.addWidget(self.sec_params)
 
         # ── ③ 工具栏 + 进度 ──
@@ -619,6 +666,9 @@ class Dlt698UpgradeWidget(QWidget):
                   self.combo_exec_mode):
             c.currentIndexChanged.connect(lambda *_a: self._schedule_save())
         self.chk_auto_exec.toggled.connect(lambda _c: self._schedule_save())
+        self.chk_read_before.toggled.connect(lambda _c: self._schedule_save())
+        self.chk_read_after.toggled.connect(lambda _c: self._schedule_save())
+        self.combo_read_target.currentIndexChanged.connect(lambda *_a: self._schedule_save())
         self.combo_exec_mode.currentIndexChanged.connect(lambda *_a: self._on_exec_mode_changed())
         self.combo_sa_type.currentIndexChanged.connect(lambda *_a: self._on_sa_type_changed())
         self.spin_block.valueChanged.connect(lambda _v: self._refresh_summary())
@@ -809,7 +859,10 @@ class Dlt698UpgradeWidget(QWidget):
         if upg is None:
             return
         try:
-            res = upg.check_action_response(frame, self._expected_omd(upg))
+            if self._phase in VER_PHASES:
+                res = upg.check_get_response(frame, self._read_oad(upg))
+            else:
+                res = upg.check_action_response(frame, self._expected_omd(upg))
         except Exception as exc:
             self._log(f"[RX] {fmt_hex(frame)}  → 确认判定异常："
                       f"{type(exc).__name__}: {exc}", "warn")
@@ -820,8 +873,11 @@ class Dlt698UpgradeWidget(QWidget):
         dar = res.get("dar")
         reason = str(res.get("reason") or "未知原因")
         if res.get("ok"):
-            # DAR 可能因 PIID-ACD 位（bit7）带上标志位，判据只在协议层，这里照实显示
-            self._log(f"[RX] {fmt_hex(frame)}  → DAR={self._dar_value(dar)} 成功", "rx")
+            if self._phase in VER_PHASES:
+                self._log(f"[RX] {fmt_hex(frame)}  → {self._version_line(res)}", "rx")
+            else:
+                # DAR 可能因 PIID-ACD 位（bit7）带上标志位，判据只在协议层，这里照实显示
+                self._log(f"[RX] {fmt_hex(frame)}  → DAR={self._dar_value(dar)} 成功", "rx")
             self._on_ack()
             return
         if isinstance(dar, int) and (dar & 0x7F) != 0:
@@ -839,6 +895,13 @@ class Dlt698UpgradeWidget(QWidget):
         if isinstance(dar, int):
             return dar & 0x7F
         return dar
+
+    def _version_line(self, res: dict) -> str:
+        """读版本成功的日志正文：`版本信息（升级前·通用）：<内容>`（无内容时说明原因）。"""
+        where = "升级前" if self._phase == PHASE_VER_PRE else "升级完成后"
+        text = str(res.get("version") or "").strip()
+        head = f"版本信息（{where}·{self._read_target_short()}）"
+        return f"{head}：{text}" if text else f"{head}：{res.get('reason') or '响应未带数据'}"
 
     # ======================================================================
     # 协议层惰性 import（design §4 硬要求 3）
@@ -876,6 +939,10 @@ class Dlt698UpgradeWidget(QWidget):
         return self._plan.total_bytes if self._plan is not None else len(self._data)
 
     def _step_label(self) -> str:
+        if self._phase == PHASE_VER_PRE:
+            return "升级前读版本信息"
+        if self._phase == PHASE_VER_POST:
+            return "升级完成后读版本信息"
         if self._phase == PHASE_START:
             return "启动传输"
         if self._phase == PHASE_BLOCKS:
@@ -898,7 +965,11 @@ class Dlt698UpgradeWidget(QWidget):
         piid = self._piid
         self._piid = (self._piid + 1) & 0x7F
         try:
-            if self._phase == PHASE_START:
+            if self._phase in VER_PHASES:
+                # 读版本信息：SA/CA 取页面配置（默认通配 AAAAAA，与升级传输同一份）；
+                # OAD 取「读版本内容」下拉（通用 43000300 / 厂家扩展内部版本 FF100400）
+                frame = upg.build_read_version(sa, ca, piid, oad=self._read_oad(upg))
+            elif self._phase == PHASE_START:
                 frame = upg.build_start_transfer(
                     sa, ca, piid, self._file_info(upg), self.spin_block.value(),
                     self._check_type(), self._check_value(upg))
@@ -925,6 +996,11 @@ class Dlt698UpgradeWidget(QWidget):
         """收到本步确认：停表 → 只把**已确认**的包计入进度 → 推进下一步。"""
         self._wait_timer.stop()
         self._attempt = 0
+        if self._phase == PHASE_VER_PRE:
+            # 可选诊断步骤已确认 ⇒ 照常进入启动传输
+            self._phase = PHASE_START
+            self._send_current_step()
+            return
         if self._phase == PHASE_START:
             self._phase = PHASE_BLOCKS
             self._block_idx = 0
@@ -947,9 +1023,21 @@ class Dlt698UpgradeWidget(QWidget):
                 self._state = STATE_FINISHING
                 self._send_current_step()
             else:
+                # 未发执行升级 ⇒ 没有「升级完成」这回事，故不读升级后版本（勾了也要说明）
+                if self.chk_read_after.isChecked():
+                    self._log("[信息] 未勾「传完后自动执行升级」⇒ 不读升级后版本信息", "info")
                 self._succeed("文件传输完成（未发送执行升级命令）")
             return
-        self._succeed("执行升级命令已确认，升级流程完成")
+        if self._phase == PHASE_EXEC:
+            if self.chk_read_after.isChecked():
+                self._log("[信息] 执行升级已确认，继续读版本信息（升级完成后）", "info")
+                self._phase = PHASE_VER_POST
+                self._state = STATE_FINISHING
+                self._send_current_step()
+                return
+            self._succeed("执行升级命令已确认，升级流程完成")
+            return
+        self._succeed("升级流程完成（已读升级后版本信息）")
 
     def _succeed(self, message: str) -> None:
         self._wait_timer.stop()
@@ -981,6 +1069,10 @@ class Dlt698UpgradeWidget(QWidget):
             self._log(f"{prefix} {step} {why}，已重试 {self._attempt}/{limit}，重发", "warn")
             self._send_current_step()
             return
+        if self._phase in VER_PHASES:
+            # 读版本是**可选诊断步骤**：用尽重试也**不阻断**升级流程（用户需求）
+            self._continue_after_version_failure(why)
+            return
         remaining = self._pending_blocks()
         if self._phase == PHASE_BLOCKS:
             detail = (f"第 {self._block_idx + 1} 包失败，已停止，"
@@ -998,6 +1090,21 @@ class Dlt698UpgradeWidget(QWidget):
         if self._phase != PHASE_BLOCKS:
             return 0
         return max(0, self._num_blocks() - (self._block_idx + 1))
+
+    def _continue_after_version_failure(self, why: str) -> None:
+        """读版本信息用尽重试：**记日志后继续**（升级流程不因诊断步骤停下）。
+
+        `ver_pre` → 照常发启动传输（状态机停在 starting）；`ver_post` → 升级本身已完成，
+        直接按成功收尾（文案里说明读版本未成功，明细在日志）。
+        """
+        if self._phase == PHASE_VER_PRE:
+            self._log(f"[信息] 读版本信息未成功（{why}），继续升级流程", "warn")
+            self._phase = PHASE_START
+            self._attempt = 0
+            self._send_current_step()
+            return
+        self._log(f"[信息] 读版本信息未成功（{why}），升级流程已结束", "warn")
+        self._succeed("升级流程完成（读版本信息未成功，原因见日志）")
 
     def _abort_with(self, reason: str) -> None:
         self._wait_timer.stop()
@@ -1202,7 +1309,7 @@ class Dlt698UpgradeWidget(QWidget):
         if not self._blocks:
             self._fail_soft("分包结果为空（请检查文件内容与每包字节数）")
             return
-        self._phase = PHASE_START
+        self._phase = PHASE_VER_PRE if self.chk_read_before.isChecked() else PHASE_START
         self._block_idx = 0
         self._confirmed_bytes = 0
         self._piid = 0                      # doc：启动传输 PIID=0、首块 PIID=1
@@ -1214,12 +1321,54 @@ class Dlt698UpgradeWidget(QWidget):
         self._state = STATE_STARTING
         self.btn_start.setEnabled(False)
         self.btn_abort.setEnabled(True)
-        self.spin_block.setEnabled(False)
+        self._freeze_plan_inputs(True)
         self._log(f"[信息] 开始升级：{os.path.basename(self._path)}"
                   f"（{self._total_bytes():,} B → {self._num_blocks()} 包，"
                   f"每包超时 {self.spin_timeout.value()}ms，"
-                  f"重试用尽 {self.spin_retries.value()} 次）", "info")
+                  f"重试用尽 {self.spin_retries.value()} 次；"
+                  f"升级前读版本={'是' if self.chk_read_before.isChecked() else '否'}，"
+                  f"升级后读版本={'是' if self.chk_read_after.isChecked() else '否'}；"
+                  f"读版本内容={self._read_target_label()}）", "info")
         self._send_current_step()
+
+    def _freeze_plan_inputs(self, frozen: bool) -> None:
+        """传输进行中冻结会**改变计划**的输入（每包字节数 + 两个读版本开关 + 读版本内容）。
+
+        改这些值会让在飞的帧与后续帧不同源（AGENTS §8 陷阱 77 / spec §7j 的既有契约）；
+        按钮门控的复位统一走 :meth:`_finish_buttons`，不要在别处各写一份。
+        """
+        self.spin_block.setEnabled(not frozen)
+        self.chk_read_before.setEnabled(not frozen)
+        self.chk_read_after.setEnabled(not frozen)
+        self.combo_read_target.setEnabled(not frozen)
+
+    def _read_target_key(self) -> str:
+        """当前「读版本内容」键（`common` / `internal`）；未知值回落默认。"""
+        key = self.combo_read_target.currentData()
+        for _label, k, _short in READ_TARGETS:
+            if k == key:
+                return k
+        return DEFAULT_READ_TARGET
+
+    def _read_oad(self, upg) -> bytes:
+        """当前「读版本内容」对应的 OAD —— **协议常量只在 :mod:`dl_t698_45_upgrade` 一份**。"""
+        if self._read_target_key() == "internal":
+            return upg.OAD_INTERNAL_VERSION
+        return upg.OAD_VERSION
+
+    def _read_target_label(self) -> str:
+        """下拉文案（开始日志用）。"""
+        for label, key, _short in READ_TARGETS:
+            if key == self._read_target_key():
+                return label
+        return READ_TARGETS[0][0]
+
+    def _read_target_short(self) -> str:
+        """日志短名（`通用` / `内部`）。"""
+        for _label, key, short in READ_TARGETS:
+            if key == self._read_target_key():
+                return short
+        return READ_TARGETS[0][2]
 
     def _on_abort(self) -> None:
         """中止：停表、置 aborted、不再发送（design §4）。"""
@@ -1333,7 +1482,7 @@ class Dlt698UpgradeWidget(QWidget):
     def _finish_buttons(self) -> None:
         self.btn_start.setEnabled(self._worker() is not None)
         self.btn_abort.setEnabled(False)
-        self.spin_block.setEnabled(True)
+        self._freeze_plan_inputs(False)
 
     # ======================================================================
     # 配置持久化（原子写 + 坏文件宽容）
@@ -1349,6 +1498,9 @@ class Dlt698UpgradeWidget(QWidget):
             "timeout_ms": self.spin_timeout.value(),
             "retries": self.spin_retries.value(),
             "auto_exec": self.chk_auto_exec.isChecked(),
+            "read_before": self.chk_read_before.isChecked(),
+            "read_after": self.chk_read_after.isChecked(),
+            "read_target": self._read_target_key(),
             "sa_type": int(self.combo_sa_type.currentData()),
             "sa_logic": int(self.combo_sa_logic.currentData()),
             "sa_len": int(self.combo_sa_len.currentData()),
@@ -1445,6 +1597,14 @@ class Dlt698UpgradeWidget(QWidget):
         self.chk_auto_exec.blockSignals(True)
         self.chk_auto_exec.setChecked(bool(s["auto_exec"]))
         self.chk_auto_exec.blockSignals(False)
+        for chk, key in ((self.chk_read_before, "read_before"),
+                         (self.chk_read_after, "read_after")):
+            chk.blockSignals(True)
+            chk.setChecked(bool(s[key]))
+            chk.blockSignals(False)
+        target = s["read_target"] if s["read_target"] in \
+            [k for _l, k, _s in READ_TARGETS] else DEFAULT_READ_TARGET
+        _set_combo(self.combo_read_target, target)
         # 折叠状态直接读原始 JSON（缺 key 时保持 UI 默认展开）
         expanded = raw.get("params_expanded", True)
         self.sec_params.set_expanded(bool(expanded) if isinstance(expanded, bool) else True)

@@ -33,6 +33,15 @@ OMD_START = bytes.fromhex("F0010700")   # 方法7 启动传输（进入接收升
 OMD_WRITE = bytes.fromhex("F0010800")   # 方法8 写文件（传输一个数据块）
 OMD_EXEC = bytes.fromhex("F0010D00")    # 方法13 执行升级
 
+#: 读版本信息的 OAD：`OI=0x4300`（电气设备/设备管理类）、属性 3 = 版本信息、索引 0 = 全部内容。
+#: 解析器对该 OAD 的语义说明即为「电气设备 (设备管理类) - 版本信息 (全部内容)」。
+OAD_VERSION = bytes.fromhex("43000300")
+
+#: **厂家扩展**的内部版本 OAD：`OI=0xFF10`（0xFF00 起为厂商自定义区间，解析器标「未知对象」）、
+#: 属性 4、索引 0。实帧 golden（用户提供，HCS/FCS 实测通过、本模块可逐字节复现）：
+#: `68 17 00 43 05 03 24 08 04 26 20 00 CD 9A 05 01 2C FF 10 04 00 00 C2 8A 16`。
+OAD_INTERNAL_VERSION = bytes.fromhex("FF100400")
+
 DEFAULT_BLOCK_SIZE = 600               # 默认每包字节数（串口缓冲与 698 帧长经验值）
 IMMEDIATE_EXEC_TIME = b"\xFF" * 7      # 执行升级时间 = date_time_s 全 FF ⇒ 立即执行
 WILDCARD_SA = bytes.fromhex("45AAAAAAAAAAAA")  # 通配地址：特征0x45 + AA×6
@@ -281,6 +290,24 @@ def build_exec_upgrade(sa: bytes, ca: int, piid: int, exec_time: Optional[bytes]
         sa, int(ca), int(piid), OMD_EXEC, param)
 
 
+# ─── 读版本信息（GET-Request Normal） ──────────────────────────────────────
+def build_read_version(sa: bytes, ca: int, piid: int,
+                       oad: bytes = OAD_VERSION) -> bytes:
+    """组「读版本信息」整帧（GET-Request Normal，OAD 默认 `43 00 03 00`）。
+
+    APDU = `05 01 <PIID> <OAD> 00`（末尾 `00` = TimeTag 无时间标签）；SA/CA 由调用方
+    给（本页取与升级传输**同一份** SA/CA 配置）。实帧口径已自证：SA=单地址 + `AA×6`、
+    CA=0、PIID=1 时**逐字节等于**现场实帧
+    `68 17 00 43 05 AA AA AA AA AA AA 00 AA 2A 05 01 01 43 00 03 00 00 6D 5C 16`
+    （含 HCS/FCS）。
+    """
+    oad = bytes(oad)
+    if len(oad) != 4:
+        raise ValueError(f"OAD 必须是 4 字节（例 43000300），收到 {len(oad)} 字节")
+    return DLT69845FrameGenerator().generate_get_request_normal(
+        sa, int(ca), int(piid), oad, time_tag_none=True)
+
+
 # ─── 校验值 ─────────────────────────────────────────────────────────────────
 def calc_checksum_value(data: bytes, kind: str = "crc", endian: str = "big") -> bytes:
     """计算「启动传输」参数里的校验值字节（文件内容摘要，供从站校验整包）。
@@ -370,10 +397,127 @@ def check_action_response(frame: bytes, expect_omd: bytes) -> dict:
         return out
 
 
+#: 「数据业务」/「数据」子树里最多取多少个字段与多少字符进日志（防一屏全是版本内容）
+_VERSION_TEXT_MAX_FIELDS = 8
+_VERSION_TEXT_MAX_CHARS = 160
+
+
+def _version_text(apdu: dict) -> str:
+    """从 GET-Response 的解析结果取**可读版本内容**（尽量给命名字段，否则给数据值串）。
+
+    优先级：① 解析器已按 OAD 业务解码出的「数据业务」（如 厂商代码/软件版本号/…）；
+    ② 「数据」子树里各成员的 解析值；③ 都没有则空串（调用方按「响应未带数据」处理）。
+    长度上界 `_VERSION_TEXT_MAX_CHARS` 字符（超长截断并加省略号），避免刷屏日志。
+    """
+    def _clip(text: str) -> str:
+        return text if len(text) <= _VERSION_TEXT_MAX_CHARS else \
+            text[:_VERSION_TEXT_MAX_CHARS] + "…"
+
+    biz = apdu.get("数据业务")
+    if isinstance(biz, dict) and biz:
+        items = [f"{k}={v}" for k, v in list(biz.items())[:_VERSION_TEXT_MAX_FIELDS]]
+        if len(biz) > _VERSION_TEXT_MAX_FIELDS:
+            items.append(f"…（共 {len(biz)} 项）")
+        return _clip("，".join(items))
+
+    data = apdu.get("数据")
+    values = data.get("解析值") if isinstance(data, dict) else None
+    if isinstance(values, list):
+        cells = []
+        for item in values[:_VERSION_TEXT_MAX_FIELDS]:
+            if isinstance(item, dict):
+                cells.append(str(item.get("解析值", item.get("原始值", ""))))
+            else:
+                cells.append(str(item))
+        if len(values) > _VERSION_TEXT_MAX_FIELDS:
+            cells.append(f"…（共 {len(values)} 项）")
+        return _clip(" ".join(c for c in cells if c))
+    if isinstance(data, dict):
+        return _clip(str(data.get("解析值", data.get("原始值", ""))))
+    return ""
+
+
+def check_get_response(frame: bytes, expect_oad: bytes = OAD_VERSION) -> dict:
+    """判定一帧接收报文是否为「读版本信息」的 GET-Response Normal 成功响应。
+
+    判据同样一律走 `DLT69845Parser`（不做字符串/字节比对）：解析状态=="成功" ∧ HCS/FCS
+    均"通过" ∧ 服务码 0x85 ∧ 子类型=="GetResponseNormal" ∧ OAD 原始值==`expect_oad`；
+    然后按 Get-Result 的 CHOICE（表54：`错误信息[0] DAR` / `数据[1] Data`）分流：
+    - 解析结果里有 `数据访问结果` ⇒ 是错误信息：DAR≠0 → ok=False（reason 带 DAR 说明，调用方按重试处理）；
+      DAR==0 → ok=True 但 `version` 为空（响应未带数据）；
+    - 有 `数据` ⇒ ok=True，`version` 取 `_version_text()`（命名业务字段优先）。
+    任何坏帧/异常都被吞掉 ⇒ **永不抛异常**。
+    Returns: {"ok", "reason", "dar", "oad", "apdu_type", "version", "data_business"}
+    """
+    out = {"ok": False, "reason": "", "dar": None, "oad": "", "apdu_type": "",
+           "version": "", "data_business": {}}
+    try:
+        result = DLT69845Parser().parse(bytes(frame or b""))
+        if result.get("解析状态") != "成功":
+            out["reason"] = f"帧解析失败：{result.get('错误信息', '未知原因')}"
+            return out
+
+        bad = [name for name, key in (("HCS", "帧头校验HCS"), ("FCS", "帧校验FCS"))
+               if (result.get(key) or {}).get("校验结果") != "通过"]
+        if bad:
+            out["reason"] = "帧解析失败：" + "/".join(bad) + " 校验不通过"
+            return out
+
+        link = result.get("链路用户数据") or {}
+        apdu = link.get("APDU")
+        if not isinstance(apdu, dict):
+            out["reason"] = "帧解析失败：无 APDU 内容" + (
+                f"（{link.get('APDU解析错误')}）" if link.get("APDU解析错误") else "")
+            return out
+
+        out["apdu_type"] = str(apdu.get("APDU类型", ""))
+        if apdu.get("解析状态") != "成功" or str(apdu.get("服务码", "")) != "0x85":
+            out["reason"] = f"不是 GET-Response（APDU 类型={out['apdu_type'] or '未知'}）"
+            return out
+        if apdu.get("子类型") != "GetResponseNormal":
+            out["reason"] = f"不是 GET-Response Normal（子类型={apdu.get('子类型', '-')}）"
+            return out
+
+        oad = (apdu.get("OAD") or {}).get("原始值", "")
+        out["oad"] = str(oad)
+        expect = bytes(expect_oad).hex().upper()
+        if str(oad).upper() != expect:
+            out["reason"] = f"OAD 不符：收到 {oad or '-'}，期望 {expect}"
+            return out
+
+        if "数据访问结果" in apdu:                 # Get-Result = 错误信息[0] DAR
+            dar = (apdu.get("数据访问结果") or {}).get("解析值", None)
+            out["dar"] = dar if isinstance(dar, int) else None
+            if not isinstance(dar, int):
+                out["reason"] = "响应缺少 DAR 结果字节"
+                return out
+            if dar != 0:
+                desc = (apdu.get("数据访问结果") or {}).get("说明", "")
+                out["reason"] = f"DAR={dar} {desc}（需重试）"
+                return out
+            out["ok"] = True
+            out["reason"] = "响应 DAR=0 但未带数据"
+            return out
+
+        if not isinstance(apdu.get("数据"), dict):
+            out["reason"] = "响应里既没有数据也没有数据访问结果"
+            return out
+        out["ok"] = True
+        out["reason"] = "读取成功"
+        biz = apdu.get("数据业务")
+        out["data_business"] = dict(biz) if isinstance(biz, dict) else {}
+        out["version"] = _version_text(apdu)
+        return out
+    except Exception as exc:                     # 坏帧不得抛异常（调用方在串口回调线程）
+        out["reason"] = f"帧解析失败：{exc}"
+        return out
+
+
 __all__ = [
-    "OMD_START", "OMD_WRITE", "OMD_EXEC",
+    "OMD_START", "OMD_WRITE", "OMD_EXEC", "OAD_VERSION", "OAD_INTERNAL_VERSION",
     "DEFAULT_BLOCK_SIZE", "IMMEDIATE_EXEC_TIME", "WILDCARD_SA",
     "build_sa", "split_blocks", "block_count", "UpgradePlan",
     "build_file_info", "build_start_transfer", "build_write_block",
-    "build_exec_upgrade", "calc_checksum_value", "check_action_response",
+    "build_exec_upgrade", "build_read_version", "calc_checksum_value",
+    "check_action_response", "check_get_response",
 ]

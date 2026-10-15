@@ -394,6 +394,173 @@ def test_a9_mutation_counterproof():
           f"{len(f_notag)} vs {len(DOC_START_FRAME)}")
 
 
+# ─── 读版本信息（GET-Request Normal；用户现场实帧 golden） ──────────────────
+VER_READ_FRAME = spaced(
+    "68 17 00 43 05 AA AA AA AA AA AA 00 AA 2A 05 01 01 43 00 03 00 00 6D 5C 16")
+VER_SA_SINGLE_AA = spaced("05 AA AA AA AA AA AA")   # 单地址 + 地址体 AA×6（示例帧的 SA）
+VER_APDU_PIID1 = spaced("05 01 01 43 00 03 00 00")  # GET-Request Normal + TimeTag 无
+LEGACY_APDU_PIID1 = spaced("05 01 01 43 00 03 00")  # 老 generate_get_request_normal（无 TimeTag）
+VER_VERSION_FIELDS = ("JCDZ", "V1.5", "250901", "V1.0", "230602", "SHANDONG")
+VER_VERSION_TEXT = ("厂商代码=JCDZ，软件版本号=V1.5，软件版本日期=2025-09-01，"
+                    "硬件版本号=V1.0，硬件版本日期=2023-06-02，厂商扩展信息=SHANDONG")
+
+
+def _version_data(*values: str) -> bytes:
+    """版本信息（表191）：`structure{厂商代码, 软件版本号, 软件版本日期, 硬件版本号, 硬件版本日期, 厂商扩展信息}`。"""
+    out = bytes([0x02, len(values)])
+    for v in values:
+        raw = v.encode("ascii")
+        out += bytes([0x0A, len(raw)]) + raw
+    return out
+
+
+def _ver_response(data: bytes, piid_acd: int = 1, oad: bytes = up.OAD_VERSION,
+                  tag: bytes = b"\x01") -> bytes:
+    """搭一帧 GET-Response Normal（`tag=01` 数据 / `00` 错误信息 DAR），经组帧器保证 HCS/FCS 正确。"""
+    apdu = bytes([0x85, 0x01, piid_acd]) + bytes(oad) + bytes(tag) + bytes(data)
+    return DLT69845FrameGenerator()._assemble_frame(up.WILDCARD_SA, 0, 0xC3, apdu)
+
+
+def test_a10_read_version():
+    section("[A10] 读版本信息：组帧 golden + 响应判定")
+
+    # ① 组帧逐字节复现用户实帧
+    frame = up.build_read_version(VER_SA_SINGLE_AA, 0, 1)
+    check("① 单地址 AA×6 + PIID=1 ⇒ 逐字节等于现场实帧", frame == VER_READ_FRAME, hexs(frame))
+    check("① APDU = 05 01 01 43 00 03 00 00（GET-Request Normal + TimeTag 无）",
+          apdu_of(frame) == VER_APDU_PIID1, hexs(apdu_of(frame)))
+
+    # ② 页面默认 SA（通配）⇒ 仍是合法帧，APDU/OAD 不变
+    dflt = up.build_read_version(up.WILDCARD_SA, 0, 0)
+    parsed = DLT69845Parser().parse(dflt)
+    check("② 通配 SA 下 HCS/FCS 均通过",
+          parsed["帧头校验HCS"]["校验结果"] == "通过"
+          and parsed["帧校验FCS"]["校验结果"] == "通过")
+    check("② 地址类型=通配地址（特征 0x45）",
+          parsed["地址域"]["地址特征"]["地址类型"] == "通配地址", parsed["地址域"]["地址特征"])
+    check("② APDU 正确（PIID=0）", apdu_of(dflt) == spaced("05 01 00 43 00 03 00 00"),
+          hexs(apdu_of(dflt)))
+    check("② OAD 语义 = 版本信息",
+          "版本信息" in parsed["链路用户数据"]["APDU"]["OAD"]["语义说明"])
+
+    # ③ PIID 自增（校验随之重算）；OAD 非法即报错
+    f7 = up.build_read_version(up.WILDCARD_SA, 0, 7)
+    check("③ PIID=7 ⇒ APDU 位改 07 且 FCS 重算通过",
+          apdu_of(f7) == spaced("05 01 07 43 00 03 00 00")
+          and DLT69845Parser().parse(f7)["帧校验FCS"]["校验结果"] == "通过")
+    try:
+        up.build_read_version(up.WILDCARD_SA, 0, 0, oad=b"\x43\x00\x03")
+        check("③ OAD 非 4 字节 ⇒ 抛 ValueError", False)
+    except ValueError:
+        check("③ OAD 非 4 字节 ⇒ 抛 ValueError", True)
+
+    # ④ 成功响应：ok + 版本文本（命名业务字段）
+    resp = _ver_response(_version_data(*VER_VERSION_FIELDS))
+    res = up.check_get_response(resp)
+    check("④ 成功响应 ok=True", res["ok"] is True, res)
+    check("④ 版本文本取命名字段", res["version"] == VER_VERSION_TEXT, res["version"])
+    check("④ OAD 回显被记录", res["oad"] == "43000300", res["oad"])
+    check("④ 数据业务字段原样带出（6 项）",
+          res["data_business"].get("软件版本号") == "V1.5"
+          and len(res["data_business"]) == 6, res["data_business"])
+
+    # ⑤ Get-Result 的 CHOICE：tag=00 = 错误信息 DAR
+    r5 = up.check_get_response(_ver_response(b"\x03", tag=b"\x00"))
+    check("⑤ DAR=3 ⇒ ok=False 且 dar=3", r5["ok"] is False and r5["dar"] == 3, r5)
+    check("⑤ reason 带 DAR 说明（拒绝读写）", "拒绝读写" in r5["reason"], r5["reason"])
+    r5b = up.check_get_response(_ver_response(b"\x00", tag=b"\x00"))
+    check("⑤ DAR=0 无数据 ⇒ ok=True 但版本为空（调用方按「响应未带数据」显示）",
+          r5b["ok"] is True and r5b["version"] == "", r5b)
+
+    # ⑥ 判据必须能挡住「不是本次要的那一帧」
+    r6 = up.check_get_response(_ver_response(_version_data("A"), oad=spaced("43000400")))
+    check("⑥ OAD 不符 ⇒ ok=False 且 reason 给出期望值",
+          r6["ok"] is False and "OAD 不符" in r6["reason"], r6["reason"])
+    r6b = up.check_get_response(DOC_START_FRAME)
+    check("⑥ ACTION 帧 ⇒ ok=False 且 reason 说明不是 GET-Response",
+          r6b["ok"] is False and "不是 GET-Response" in r6b["reason"], r6b["reason"])
+    broken = bytearray(resp)
+    broken[-3] ^= 0xFF                                   # 破坏 FCS
+    r6c = up.check_get_response(bytes(broken))
+    check("⑥ FCS 被破坏 ⇒ ok=False 且 reason 点名 FCS",
+          r6c["ok"] is False and "FCS" in r6c["reason"], r6c["reason"])
+    check("⑥ 空帧/垃圾帧不抛异常",
+          up.check_get_response(b"")["ok"] is False
+          and up.check_get_response(b"\x00\x01\x02")["ok"] is False)
+
+    # ⑦ 既有 GET-Request 组帧行为逐字节不变（默认不补 TimeTag）
+    legacy = DLT69845FrameGenerator().generate_get_request_normal(
+        up.WILDCARD_SA, 0, 1, up.OAD_VERSION)
+    check("⑦ 老调用方（不传新参数）APDU 仍是 7 字节、无 TimeTag",
+          apdu_of(legacy) == LEGACY_APDU_PIID1, hexs(apdu_of(legacy)))
+
+    # ⑧ 变异反证：golden 确有判别力（改口径就必须对不上）
+    no_tag = DLT69845FrameGenerator().generate_get_request_normal(
+        VER_SA_SINGLE_AA, 0, 1, up.OAD_VERSION)          # 忘记 TimeTag
+    check("⑧ 不补 TimeTag ⇒ 与实帧不等（且少 1 字节）",
+          no_tag != VER_READ_FRAME and len(no_tag) == len(VER_READ_FRAME) - 1,
+          f"{len(no_tag)} vs {len(VER_READ_FRAME)}")
+    wildcard = up.build_read_version(up.WILDCARD_SA, 0, 1)   # SA 特征换成通配
+    check("⑧ SA 换成通配（特征 45）⇒ 与实帧不等（HCS 随之变）",
+          wildcard != VER_READ_FRAME and wildcard[4] == 0x45, hexs(wildcard[:6]))
+
+
+# ─── 内部版本（厂家扩展 OAD FF100400；用户现场实帧 golden） ─────────────────
+INT_READ_FRAME = spaced(
+    "68 17 00 43 05 03 24 08 04 26 20 00 CD 9A 05 01 2C FF 10 04 00 00 C2 8A 16")
+INT_SA = spaced("05 03 24 08 04 26 20")            # 单地址 + 地址体 032408042620（书写序 2026040824 03）
+
+
+def test_a11_internal_version_read():
+    section("[A11] 内部版本（厂家扩展 OAD FF100400）")
+
+    # ① 组帧逐字节复现用户实帧（PIID=0x2C，OAD=FF100400）
+    frame = up.build_read_version(INT_SA, 0, 0x2C, oad=up.OAD_INTERNAL_VERSION)
+    check("① 内部版本帧逐字节等于现场实帧", frame == INT_READ_FRAME, hexs(frame))
+    check("① APDU = 05 01 2C FF 10 04 00 00",
+          apdu_of(frame) == spaced("05 01 2C FF 10 04 00 00"), hexs(apdu_of(frame)))
+    check("① 与「通用版本」帧不同（OAD 不同 ⇒ HCS/FCS 也不同）",
+          frame != up.build_read_version(INT_SA, 0, 0x2C))
+
+    # ② 解析器认定的 OAD/语义（厂商自定义区间 ⇒ 标「未知对象」）
+    parsed = DLT69845Parser().parse(frame)
+    oad = parsed["链路用户数据"]["APDU"]["OAD"]
+    check("② HCS/FCS 均通过",
+          parsed["帧头校验HCS"]["校验结果"] == "通过"
+          and parsed["帧校验FCS"]["校验结果"] == "通过")
+    check("② OAD 原始值 = FF100400 且语义标注厂商扩展/未知对象",
+          oad["原始值"] == "FF100400" and ("未知对象" in oad["语义说明"]
+                                          or "厂商" in oad["语义说明"]), oad["语义说明"])
+    check("② 属性号 = 4（与通用版本的属性 3 不同）",
+          oad["解析值"]["属性编号"] == 4, oad["解析值"])
+
+    # ③ 内部版本的响应判定：厂家扩展对象没有命名业务字段 ⇒ 版本内容取数据值
+    resp = _ver_response(b"\x0A\x06V1.0.3", oad=up.OAD_INTERNAL_VERSION)   # visible-string
+    res = up.check_get_response(resp, up.OAD_INTERNAL_VERSION)
+    check("③ 内部版本响应 ok=True 且取到内容", res["ok"] is True and res["version"] == "V1.0.3", res)
+    check("③ OAD 回显 = FF100400", res["oad"] == "FF100400", res["oad"])
+
+    # ④ 互斥：两条命令各自的响应**不能互相顶替**（否则「选择」等于没生效）
+    common_resp = _ver_response(_version_data(*VER_VERSION_FIELDS))
+    r_common_as_int = up.check_get_response(common_resp, up.OAD_INTERNAL_VERSION)
+    check("④ 通用版本响应喂给「内部版本」读取 ⇒ OAD 不符、不认",
+          r_common_as_int["ok"] is False and "OAD 不符" in r_common_as_int["reason"],
+          r_common_as_int["reason"])
+    r_int_as_common = up.check_get_response(resp, up.OAD_VERSION)
+    check("④ 内部版本响应喂给「通用版本」读取 ⇒ 同样不认",
+          r_int_as_common["ok"] is False and "OAD 不符" in r_int_as_common["reason"],
+          r_int_as_common["reason"])
+
+    # ⑤ 变异反证：内部版本帧不能靠「通用」的默认 OAD 组出来
+    no_oad = up.build_read_version(INT_SA, 0, 0x2C)
+    check("⑤ 不传 OAD（默认通用）⇒ 与内部版本实帧不等",
+          no_oad != INT_READ_FRAME and apdu_of(no_oad)[3:7] == up.OAD_VERSION,
+          hexs(apdu_of(no_oad)))
+    check("⑤ OAD 常量确为两个不同值",
+          up.OAD_VERSION == spaced("43 00 03 00")
+          and up.OAD_INTERNAL_VERSION == spaced("FF 10 04 00"))
+
+
 def main():
     print("=" * 66)
     print("协议8 698.45 文件传输升级 —— 纯逻辑层（dl_t698_45_upgrade）")
@@ -407,6 +574,8 @@ def main():
     test_a7_checksum_values()
     test_a8_doc_frame_parse_regression_guard()
     test_a9_mutation_counterproof()
+    test_a10_read_version()
+    test_a11_internal_version_read()
     print(f"\nPASS={PASS} FAIL={FAIL}")
     sys.exit(0 if FAIL == 0 else 1)
 
