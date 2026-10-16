@@ -1388,3 +1388,42 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Next Steps
 
 - 发版批次：main_gui.py（APP_VERSION/CHANGELOG）、AGENTS.md、README.md、两个 .iss 一起提交；bump 后跑 python release_check.py --sync-iss
+
+
+## Session 42: 桌面粘性入口：托盘菜单内嵌报文输入框 + 任务栏缩略图按钮
+
+**Date**: 2026-10-16
+**Task**: 桌面粘性入口：托盘菜单内嵌报文输入框 + 任务栏缩略图按钮
+**Branch**: `main`
+
+### Summary
+
+用户问能否像汽水音乐那样在 Win11 任务栏放可交互控件。先定边界（SMTC 媒体卡片只有媒体会话能占、Win11 移除 deskband ⇒ 任意控件进不去任务栏那一行），再落两条系统支持的入口：托盘菜单内嵌输入框 + 任务栏缩略图按钮（ITaskbarList4/3）。
+
+### Main Changes
+
+- system_integration/taskbar_buttons.py（新，纯 ctypes）：available/set_buttons/clear + QImage→HICON + WM_COMMAND 拦截；接口按 ITaskbarList4→3→2 试（Win11 只认 4）、HANDLE 调用全部声明 argtypes、PySide6 过滤器返回单个 bool
+- system_integration/sys_tray.py：QWidgetAction 内嵌「输入框 + 解析」→ parse_text_requested(str) + 清空 + 收菜单；set_input_enabled 供禁用
+- main_gui.py：_parse_text_input（判据与 clipboard_monitor.strict_hex 同源，HEX→_parse_and_show_dialog、否则 _parse_text_content、都不是则状态栏+气泡说明）+ 4 个任务栏按钮（解析剪贴板/快捷解析/批量解析/光伏升级）+ showEvent 延迟挂载(句柄变化才重挂) + closeEvent clear
+- test/test_tray_taskbar_entries.py（新 27 项，登记 release_check.py:GUI_TESTS）
+- 文档：spec §7k（粘性入口契约与能力边界）、AGENTS §3/§8 陷阱 78/§10、README（功能表+系统集成节+更新记录）、main_gui CHANGELOG（后三者留工作区随发版批次）；BUILD_DATE 顺手更到今天 2026-10-16（gate 的 WARN 归零）
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6a5afe1` | (see git log) |
+
+### Testing
+
+- [OK] test/test_tray_taskbar_entries.py 27 项全绿；release_check.py --with-gui PASS=135 FAIL=3 WARN=0（3 项为本机已知 offscreen 退出期 fastfail，尾部断言全绿）
+- [OK] 真机冒烟（非 offscreen）：_setup_taskbar_buttons() → True、按钮 id 0x7700..0x7703、PostMessage(WM_COMMAND) 触发 clicked；「光伏升级」按钮 → 协议 8 + tab 文案「光伏升级」；托盘输入框提交 → 解析调用（字节与协议索引正确）
+- [OK] 接口探测：CoCreateInstance(QI) 在 10.0.26300 上 IID_ITaskbarList3 = E_NOINTERFACE 而 ITaskbarList4 = S_OK，ThumbBarAddButtons/SetThumbnailTooltip 均 S_OK
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 若要「任务栏按钮常驻」需把「关到托盘」改成「最小化到托盘」（行为变更，待用户确认）；SMTC 伪媒体卡片（截图那种）未做，需要先探针实测非媒体会话是否显示
