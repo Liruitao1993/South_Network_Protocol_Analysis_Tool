@@ -586,6 +586,39 @@ engine = self._engine_factory()            # 否则才是发给本虚拟表的�
 - **传输进行中必须冻结会改变计划的输入**（同轮发现）：换升级包 / 改 SA·块大小 / 点「清除」三类操作，要么**拒绝并提示先「中止」**，要么**完整复位状态与按钮门控**。否则轻则 `_on_ack` 抛 `IndexError`（在 Qt 槽里被吞掉 → 状态机静默卡死），重则**静默改发另一个文件的数据**（新文件包数够时顺序继续）。回归段：`test_mid_transfer_controls`。
 - 新增的「测试断言」必须自查判别力：**只投「整帧」验证「断信号后不再处理」是恒真的**（整帧会被正常处理掉、缓冲恒为 0），要投一段**半帧**才能区分「断/未断」（1.23.85 实测：把 `_detach` 换 no-op，只投整帧的版本照样绿）。
 
+### 7k. 桌面「粘性入口」：托盘菜单内嵌输入框 / 任务栏缩略图按钮（1.23.85）
+
+> 用户问「能不能像汽水音乐那样在 Win11 任务栏上放可交互控件」。**先记结论**：Win11 的任务栏对第三方是封闭的
+> （Win10 的「任务栏自定义工具栏 / deskband」已移除），**任意控件（尤其输入框）不可能放进任务栏那一行**；
+> 截图里那种「封面 + 标题 + 播放键」是 **SMTC 系统媒体卡片**（只有媒体会话能占）。可做的受支持挂载点是三条：
+> ① 托盘菜单内嵌输入框；② 任务栏**缩略图工具栏按钮**（悬停图标预览里）；③ 屏幕边缘 AppBar 常驻条。
+
+- **托盘菜单内嵌输入框**（`system_integration/sys_tray.py`）：`QWidgetAction` + `setDefaultWidget(输入框 + 「解析」按钮)`；
+  回车/点按钮 → `parse_text_requested(str)` 信号（菜单 `hide()` + 输入清空）；**解析路径由主窗口注入**
+  （`MainWindow._on_tray_parse_text` → `_parse_text_input`），托盘模块**不 import 解析器**。不受理时
+  **状态栏 + 托盘气泡**说明（不静默、不弹模态）。`set_input_enabled(False, tip)` 供解析器不可用时禁用。
+- **任务栏缩略图按钮**（`system_integration/taskbar_buttons.py`，纯 ctypes）：`available()` / `set_buttons(win, [(提示, QIcon)])`
+  / `clear(win)`，点击经 `WM_COMMAND` → `QAbstractNativeEventFilter` → `clicked(int)` 信号。
+  三条**必须照做**（都实测踩过）：
+  1. **取接口先试 `IID_ITaskbarList4`，再 3 / 2**：Win11(10.0.26300) 上 `IID_ITaskbarList3` 直接返回
+     `E_NOINTERFACE(0x80004002)` 而 `ITaskbarList4` 正常（`HrInit`/`ThumbBarAddButtons`/`SetThumbnailTooltip` 均 `S_OK`）；
+     三者的 vtable 槽位对我们要用的方法是**同一个索引**（`HrInit`=3 / `ThumbBarAddButtons`=15 / `ThumbBarUpdateButtons`=16
+     / `ThumbBarSetImageList`=17 / `SetThumbnailTooltip`=19），别按名字乱排。
+  2. **所有涉及 HANDLE 的 Win32 调用必须显式声明 `argtypes`**：64 位下不声明会被当 C int ⇒
+     `DeleteObject(hbm)` 抛 `OverflowError: int too long to convert`（图标转换处实测）。
+  3. **`nativeEventFilter` 在 PySide6 返回单个 `bool`**（True = 吞掉）；返回元组会被当 truthy **把所有 WM_COMMAND 都吞掉**。
+  另注：`QImage.constBits()` 返回 `memoryview`，`ctypes.memmove` 前要 `.tobytes()`；HICON 由
+  32bpp top-down DIB + 全 0 掩码 `CreateIconIndirect` 得到（不引新资源、用 `icons/lucide/*.svg`）。
+- **主窗口接线**（`main_gui`）：`showEvent` 里 `QTimer.singleShot(0, self._setup_taskbar_buttons)`（句柄变化才重挂，
+  避免重复 `ThumbBarAddButtons` 叠加）；4 个按钮 = 解析剪贴板 / 快捷解析 / 批量解析 / 光伏升级（`TASKBAR_BUTTONS`
+  是一份清单，分派在 `_on_taskbar_button`）；`closeEvent` 真实退出路径 `clear()`。
+  **按钮只在窗口有任务栏按钮时可见**（`hide()` 到托盘后没有），所以「关到托盘」的老行为不改时它们只在窗口
+  显示/最小化期间可用 —— 想常驻要另议。
+- 回归：`test/test_tray_taskbar_entries.py`（27 项：托盘提交/清空/禁用、HICON 转换、`set_buttons`/`clear` 降级、
+  合成 `WM_COMMAND` 的命中/不吞别的消息、`_parse_text_input` 两条路径与不受理提示、4 个按钮分派）。
+  真机冒烟（非 offscreen）：`_setup_taskbar_buttons()` → True、按钮 id `0x7700..0x7703`、`PostMessage(WM_COMMAND)`
+  能触发 `clicked`；「光伏升级」按钮 → 协议 8 + tab 文案「光伏升级」。
+
 ### 8. Qt 陷阱（本项目实测）
 - **offscreen 无字体**：`QT_QPA_PLATFORM=offscreen` 下 `QFontDatabase: Cannot find font directory ...`，绘制出的文字是豆腐块 → 断言只能查尺寸/颜色/像素多样性；**要目视核对文字排版必须用默认平台**（`QApplication([])` 不设 offscreen + `widget.grab()` / `QImage.save()`，不需要窗口真的可见）。
 - **`bytes(image.constBits())` 必须持有 QImage 引用**：`bytes(canvas.render_image(w, h).constBits())`（临时对象上取 buffer）会 **access violation（0xC0000005）**；先 `img = ...` 再 `bytes(img.constBits())`。

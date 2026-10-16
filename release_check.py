@@ -169,6 +169,8 @@ GUI_TESTS = [
     # 协议8 文件传输升级页（offscreen 假串口：逐包确认/重试/超时/中止/进度/拖放/不裁字）+ 真实 MainWindow 接线
     "test/test_dl698_upgrade_gui.py",
     "test/test_dl698_upgrade_tab_wiring.py",
+    # 粘性入口：托盘菜单内嵌输入框 + 任务栏缩略图按钮（HICON/降级/WM_COMMAND 路由/按钮分派）
+    "test/test_tray_taskbar_entries.py",
     "test/test_csg_sequence_gui.py",
     "test/test_csg_pb_highlight_gui.py",
     "test/test_csg_pbcs_fill_gui.py",

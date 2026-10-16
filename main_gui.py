@@ -114,6 +114,8 @@ from system_integration.parse_prompt_dialog import ParsePromptDialog
 from system_integration.quick_parse_panel import QuickParsePanel
 from system_integration.single_instance import SingleInstanceServer
 from system_integration.sys_tray import SystemTrayManager
+from system_integration.taskbar_buttons import BASE_BUTTON_ID as TASKBAR_BASE_ID
+from system_integration.taskbar_buttons import TaskbarButtons
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
@@ -8393,6 +8395,8 @@ class MainWindow(QMainWindow):
             tray.show_requested.connect(self._tray_show_window)
             tray.exit_requested.connect(self._tray_exit_app)
             tray.autostart_toggled.connect(self._on_tray_autostart_toggled)
+            # 托盘菜单内嵌输入框：回车/点「解析」→ 走与剪贴板/文件右键同源的解析路径
+            tray.parse_text_requested.connect(self._on_tray_parse_text)
             tray.update_autostart_state()
 
         # 全局热键
@@ -8499,6 +8503,126 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(f"[开机自启设置失败] {e}")
 
+    # ── 粘性入口：托盘菜单内嵌输入框 / 任务栏缩略图按钮 ────────────────────
+
+    #: 任务栏按钮（悬停图标预览里）——文案与图标名（`icons/lucide`）
+    TASKBAR_BUTTONS = (("解析剪贴板", "clipboard"),
+                       ("快捷解析", "zap"),
+                       ("批量解析", "files"),
+                       ("光伏升级", "hard-drive-upload"))
+
+    def _parse_text_input(self, text: str) -> bool:
+        """把一段用户文本当报文解析并弹结果（托盘输入框 / 任务栏按钮共用）。
+
+        判据与剪贴板检测**同源**（`clipboard_monitor.strict_hex`）：
+        - 整串是严格 HEX ⇒ `_parse_and_show_dialog(frame, 协议)`（协议先按特征识别，识别不出用当前下拉）；
+        - 否则退回「按文本提取报文」路径（与文件右键 / `--file` 同一实现）。
+        返回是否受理（False = 既不是 HEX 也提取不到报文，调用方负责提示，不静默）。
+        """
+        raw = (text or "").strip()
+        if not raw:
+            return False
+        from system_integration import clipboard_monitor
+        clean = clipboard_monitor.strict_hex(raw)
+        if clean:
+            try:
+                frame = bytes.fromhex(clean)
+            except ValueError:
+                return False
+            idx = clipboard_monitor.detect_protocol(frame)
+            self._parse_and_show_dialog(frame, idx if idx is not None else self.current_protocol)
+            self._raise_parse_windows()
+            return True
+        if not self._clean_hex_input(raw, keep_newlines=True).strip():
+            return False
+        self._parse_text_content(raw)
+        return True
+
+    def _raise_parse_windows(self):
+        """把刚弹出的解析结果窗口提到最前（托盘/任务栏入口触发时主窗口可能被隐藏）。"""
+        for widget in QApplication.topLevelWidgets():
+            if isinstance(widget, QDialog) and widget.isVisible():
+                widget.raise_()
+                widget.activateWindow()
+
+    def _on_tray_parse_text(self, text: str) -> None:
+        """托盘菜单内嵌输入框提交 → 解析；不受理时气泡 + 状态栏说明（不静默）。"""
+        if self._parse_text_input(text):
+            return
+        msg = "输入内容既不是合法 HEX 报文，也提取不到报文（示例：68 0E 00 … 16）"
+        self.statusBar().showMessage(msg, 6000)
+        if self._tray_manager is not None:
+            self._tray_manager.show_message("无法解析", msg)
+
+    def _taskbar_parse_clipboard(self) -> None:
+        """任务栏按钮「解析剪贴板」：直接取剪贴板文本走同一条解析路径。"""
+        try:
+            text = QApplication.clipboard().text()
+        except Exception:
+            text = ""
+        if not self._parse_text_input(text):
+            self._on_tray_parse_text(text)          # 复用同一套「不受理」提示
+
+    def _goto_tab(self, index: int) -> None:
+        """切到指定标签页并把主窗口显示到前台（任务栏按钮用）。"""
+        if self.isHidden():
+            self.showNormal()
+        self.raise_()
+        self.activateWindow()
+        if index is not None and index >= 0:
+            self.tab_widget.setCurrentIndex(index)
+
+    def _setup_taskbar_buttons(self, force: bool = False) -> bool:
+        """给任务栏图标挂「悬停预览按钮」（Win11 支持；不可用则静默跳过）。
+
+        只在**窗口句柄变化时**重挂（`ThumbBarAddButtons` 重复调用可能叠加按钮）；
+        Qt 重建原生窗口后句柄会变，所以挂在 `showEvent` 里并比对句柄。
+        """
+        if getattr(self, "_taskbar_buttons", None) is None:
+            self._taskbar_buttons = TaskbarButtons(self)
+            self._taskbar_buttons.clicked.connect(self._on_taskbar_button)
+        try:
+            hwnd = int(self.windowHandle().winId()) if self.windowHandle() else 0
+        except Exception:
+            hwnd = 0
+        if not hwnd:
+            return False
+        if not force and hwnd == getattr(self, "_taskbar_hwnd", 0):
+            return bool(getattr(self, "_taskbar_ready", False))
+        icons = []
+        for _label, icon_name in self.TASKBAR_BUTTONS:
+            try:
+                icons.append(app_icons.load_icon(icon_name))
+            except Exception:
+                icons.append(None)
+        ok = self._taskbar_buttons.set_buttons(
+            self, list(zip([label for label, _i in self.TASKBAR_BUTTONS], icons)))
+        self._taskbar_hwnd = hwnd
+        self._taskbar_ready = bool(ok)
+        if not ok and not getattr(self, "_taskbar_warned", False):
+            self._taskbar_warned = True
+            self.statusBar().showMessage(
+                "任务栏快捷按钮不可用（当前系统/窗口状态不支持，其余功能不受影响）", 5000)
+        return bool(ok)
+
+    def _on_taskbar_button(self, btn_id: int) -> None:
+        """任务栏缩略图按钮被点（外壳发 WM_COMMAND，经 `TaskbarButtons.clicked` 转来）。"""
+        idx = int(btn_id) - int(TASKBAR_BASE_ID)
+        labels = [label for label, _icon in self.TASKBAR_BUTTONS]
+        if not 0 <= idx < len(labels):
+            return
+        label = labels[idx]
+        if label == "解析剪贴板":
+            self._taskbar_parse_clipboard()
+        elif label == "快捷解析":
+            self._on_global_hotkey()
+        elif label == "批量解析":
+            self._goto_tab(getattr(self, "_batch_tab_index", -1))
+        else:                                        # 光伏升级：切协议8 + 切到该页
+            if self.current_protocol != 8:
+                self.protocol_combo.setCurrentIndex(8)
+            self._goto_tab(getattr(self, "_upgrade_tab_index", -1))
+
     def _tray_show_window(self):
         """托盘"显示主窗口"：显示并置顶"""
         self.showNormal()
@@ -8530,6 +8654,9 @@ class MainWindow(QMainWindow):
         # Windows 可能在 show 时微调边框/按钮区，resizeEvent 未必触发）
         QTimer.singleShot(0, self._update_window_title)
         QTimer.singleShot(150, self._update_window_title)
+        # 任务栏快捷按钮：挂一次（窗口句柄变化时 `_setup_taskbar_buttons` 自己会重挂）；
+        # 延到事件循环里做，确保 show 之后原生窗口/任务栏按钮已经存在
+        QTimer.singleShot(0, self._setup_taskbar_buttons)
 
     def closeEvent(self, event):
         """关闭窗口：若启用托盘且非主动退出，最小化到托盘"""
@@ -8576,6 +8703,11 @@ class MainWindow(QMainWindow):
         # 清理托盘与热键
         if self._tray_manager is not None:
             self._tray_manager.hide_tray()
+        if getattr(self, "_taskbar_buttons", None) is not None:
+            try:
+                self._taskbar_buttons.clear(self)
+            except Exception:
+                pass
         if self._hotkey_manager is not None:
             self._hotkey_manager.stop()
         event.accept()
