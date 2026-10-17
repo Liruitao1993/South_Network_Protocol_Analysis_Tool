@@ -56,7 +56,7 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 | 13 | 依瓦定制645 | 依瓦定制645协议 V1.0 | 地址域高字节在前 / 数据域逐字节 | 8位位组算术和（数据域 ±0x33） |
 | 14 | 南网上行通信规约 | Q/CSG 11109004-2013 | 小端（长度L/地址域/多字节字段） | 8位位组算术和（控制域+地址域+链路用户数据） |
 
-> 协议覆盖差异：**HDC 1.0（索引 11）在 PySide6 主程序与 Reflex Web 版均支持**（2026-09-15 核实）。Web 版无实时监控器/档案/拓扑；组帧与预设标签页在 Web 存在但协议 9/10/11 均不支持（与桌面一致），协议11 另有「无实时监控器/组帧/预设」的说明见 §8 陷阱 27。**「频谱图」标签页两端都有**（与协议无关，常驻）：桌面 `spectrum_widget.py`（QPainter 自绘），Web `reflex_web/reflex_web/spectrum_web.py`（SVG）——两侧共用同一份纯逻辑层。**Web 另有主题系统**（浅色/深色/跟随系统 + 6 个预设 + 5 个强调色，`reflex_web/reflex_web/theme_web.py`，token 化 CSS）；桌面为 7 套 QSS 主题（`theme_settings.py`，含毛玻璃/云母，Web 无对应）。NiceGUI/TUI 版本已于 2026-08-17 移除。
+> 协议覆盖差异：**HDC 1.0（索引 11）在 PySide6 主程序与 Reflex Web 版均支持**（2026-09-15 核实）。Web 版无实时监控器/档案/拓扑；组帧与预设标签页在 Web 存在但协议 9/10/11 均不支持（与桌面一致），协议11 另有「无实时监控器/组帧/预设」的说明见 §8 陷阱 27。**「频谱图」标签页两端都有**（与协议无关，常驻）：桌面 `spectrum_widget.py`（QPainter 自绘），Web `reflex_web/reflex_web/spectrum_web.py`（SVG）——两侧共用同一份纯逻辑层。**Web 另有主题系统**（浅色/深色/跟随系统 + 6 个预设 + 5 个强调色，`reflex_web/reflex_web/theme_web.py`，token 化 CSS）；桌面为 7 套 QSS 主题（`theme_settings.py`，含毛玻璃/云母，Web 无对应）。NiceGUI/TUI 版本已于 2026-08-17 移除。**协议8/6 另有专用页**：协议8 有「光伏升级」标签页（698.45 文件传输升级：启动传输 → 写文件×N → 执行升级，拖入升级包、逐包等确认、进度条，1.23.85 起；另有**可选**的「升级前/升级完成后读版本信息」两步——通用版本 `OAD 43000300` 或厂家扩展内部版本 `OAD FF100400` 二选一，默认不勾、失败不阻断升级；后端为纯逻辑 `dl_t698_45_upgrade.py`，**Web 无对应**），协议6 有「645虚拟表」（1.23.5 起）。
 
 > **Web 路由（1.23.14 起，改链接前必读）**：`/` = **产品首页**（落地页，介绍桌面客户端：Hero/功能卡/协议表/命令行与系统集成/下载区/页脚，实现在 `reflex_web/reflex_web/landing_web.py`）；`/app` = **在线工具**（原主页的 9 个标签页，函数名 `index()` 已更名 `tool_page()`）；`/share`、`/feedback`、`/feedback-admin` 不变。首页数据全部读 `reflex_web/downloads/`（`version.json` 版本、`*.exe` 体积、`client_screenshot.png` 截图，缺图降级占位卡）。**新增/修改站内链接时必须按语义选目标**（回介绍页 `/`、回工具 `/app`），`landing_web.INTERNAL_LINKS` 是落地页侧的唯一来源，`test/test_web_landing.py` 有死链白名单守卫。
 
@@ -264,6 +264,8 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
 ├── custom_di_store.py        # 南网自定义DI存储单源（纯逻辑无Qt：custom_di.json 读写/校验/upsert/批量删；main_gui·lookup_pages·protocol_parser 共用）
 ├── wakeup_prefix.py          # 68 家族前导 FEH 唤醒字节单源（1.23.76）：判定/剥离/表格前导行/偏移位移；
 │                             #   协议8（§6.3.1 b）与协议6（§5.3.1）的解析器·校验器共用，其余协议禁止引用（见 §8 陷阱 75）
+├── frame_deframe.py          # 串口分帧族单源（1.23.85 抽出，纯逻辑无 Qt）：68 家族 L+2 / 末字节 16H 自证 / 前导 FEH 容忍、
+│                             #   HDLC 7EH 定界、645、DLMS Wrapper 判据 + 策略常量；`serial_tool_widget` 只做同名 re-export（见 §8 陷阱 77）
 ├── 协议解析器（parser）── 每个返回嵌套 dict，字段约定见 §4
 │   ├── protocol_parser.py          # 南网 (ProtocolFrameParser) ~4450行 [最大单文件]
 │   │   └── protocol_tool.py          # ControlField(ctypes) + Frame(dataclass) 组帧
@@ -280,6 +282,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
 │   │       └── dl_t698_45_axdr.py     # A-XDR 编解码 (AXDRCoder, DL/T 790.6-2010)
 │   │           └── dl_t698_45_oi_lookup.py  # OI 对象标识查询 (OILookup)
 │   │           └── dl_t698_45_data_decode.py # APDU 数据内容业务解码 (CLASS_ATTR_TEMPLATES/OI_UNIT_HINT/decode_oad_data)
+│   │   └── dl_t698_45_upgrade.py   # 文件传输升级纯逻辑（OI 0xF001：启动传输/写文件/执行升级组帧、分包、确认判定；1.23.85 起）
 │   ├── csg_new_gen_parser.py       # 新一代载波 (CSGNewGenParser) ~4970行
 │   └── csg_new_gen_cmd_payloads.py # 应用层命令业务数据单元解析
 ├── gw_new_gen_parser.py        # 国网新一代双模 (GWNewGenParser) — 国网新一代双模通信互联互通
@@ -357,6 +360,9 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
 │   ├── enhanced_export.py           # 增强导出功能 (EnhancedBatchResultExporter) - Excel/CSV/TXT/JSON
 │   ├── theme_settings.py            # 主题与字体设置 (ThemeManager + ThemeSettingsDialog) - 7套主题(含Win11云母Mica)/QSS/字体持久化
 │   ├── meter_sim_widget.py         # 虚拟表 tab (VirtualMeterWidget) - 698.45 从站模拟器（离线/串口从站，仅协议8，1.16.0 起）
+│   ├── dlt698_upgrade_widget.py    # 「光伏升级」tab (Dlt698UpgradeWidget) - 协议8 文件传输升级（拖入升级包/分包/逐包确认/进度，
+│   │                               #   可选升级前/后读版本信息：通用 OAD 43000300 / 厂家扩展内部版本 FF100400 二选一，失败不阻断；
+│   │                               #   仅协议8 可见；复用共享串口 write_raw + raw_data_received，惰性 import crcmod 依赖，1.23.85 起）
 │   ├── meter_sim/                  # 虚拟表核心逻辑包（纯逻辑无 Qt，1.16.0 起）
 │   │   ├── archive.py              #   档案 meter_sim_data.json（194 OI，app_paths 持久化）
 │   │   ├── link_layer.py           #   68...16 帧提取（粘包/分片/FE前缀）+ 帧头解析
@@ -386,7 +392,9 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
 │   │                                #   自定义区 = CollapsibleSection + ButtonScrollArea（高度按内容自动 + 工具栏常驻，1.23.82）；
 │   │                                #   工具栏 6 个按钮（含「批量地址…」= 按协议类别批量替换 / 清除地址，1.23.84）
 │   ├── system_integration/          # 系统集成包（Windows）
-│   │   ├── sys_tray.py              #   系统托盘（关闭最小化/显示隐藏/自启/退出）
+│   │   ├── sys_tray.py              #   系统托盘（关闭最小化/显示隐藏/自启/退出 + **菜单内嵌报文输入框**，1.23.85）
+│   │   ├── taskbar_buttons.py       #   任务栏**缩略图工具栏按钮**（悬停图标预览里 3~5 个可点按钮；纯 ctypes 调
+│   │   │                            #   ITaskbarList4/3（Win11 只认 4！）+ QImage→HICON + WM_COMMAND 拦截，1.23.85）
 │   │   ├── global_hotkey.py         #   全局热键（默认 Ctrl+Alt+X，唤出快捷解析小窗）
 │   │   ├── single_instance.py       #   单实例（QLocalServer，转发命令行参数）
 │   │   ├── registry_menu.py         #   注册表：开机自启 + .log/.txt/.hex/.bin 右键菜单
@@ -645,6 +653,20 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
   - **CRC 范围**：文档明确定义 HCS/FCS 各自覆盖的字段，**哪些字段参与 CRC 必须查文档**
   - **A-XDR 编码**：APDU 内部所有数据用 A-XDR，tag 高 3 位 = 010
   - **两层字节序（1.23.63 修正；改任何 `dl_t698_45_*.py` 多字节字段前必读）**：链路层——长度域 `L`(2B)、HCS(2B)、FCS(2B)、地址域反转——按**小端**（协议文档 L347「链路层传输顺序为低位在前…低字节在前，高字节在后」）；APDU 内的 A-XDR 数据域**全部多字节字段按大端**（§7.1：APDU 编码规则遵循 A-XDR，详见 DL/T 790.6—2010）。**两层不可互相套用**；`int.from_bytes`/`struct` 必须显式写端序。判据 oracle（协议文档**附录 H.1.1「登录」**逐字节示例）：`00 B4`=心跳周期 **180s**、`07 E0`=**2016** 年、`00 A4`=**164**ms、`02 5F`=607ms、`02 DA`=730ms（按小端读会全错）。回归：`test/test_dl_t698_45_endian.py`
+- **文件传输升级（OI `0xF001` 文件分块传输管理，1.23.85 新增）**：
+  - **三步命令**（均为 `ACTION-Request Normal` `07 01`，`param` 末尾**必须补 `00`**=TimeTag 无）：① 启动传输 OMD `F0 01 07 00`，param = `structure{文件信息, 传输块大小 CHOICE{[18] u16 短帧 / [6] u32 长帧}, 校验 structure{类型 enum{CRC(0)/md5(1)/SHA1(2)}, 值 octet-string}}`；② 写文件 OMD `F0 01 08 00`，param = `structure{块序号 u16 大端, 块数据 octet-string}`，**每包一帧、逐包等确认**；③ 执行升级 OMD `F0 01 0D 00`，param = `structure{执行升级时间 date_time_s（全 FF=立即执行）, 软件许可 CHOICE{NULL[00], License[09] octet-string}}`
+  - **文件信息**（表188 属性2）= `structure{源文件 visible-string, 目标文件 visible-string, 文件大小 double-long-unsigned, 文件属性 bit-string(SIZE(3)), 文件版本 visible-string, 文件类别 enum{当前设备文件(0)/其他设备文件(1)}}`
+  - **逐字节 golden**（`协议文档/8.698.45协议/代理升级流程.docx`，SA=单地址/6B/书写序 `075506980033`）：启动传输 = `68 3C 00 43 05 33 00 98 06 55 07 00 3C 7F 07 01 00 F0 01 07 00 02 03 02 06 0A 00 0A 00 06 00 04 35 63 04 03 E0 0A 04 76 31 2E 30 16 00 12 07 D0 02 02 16 00 09 04 7F 7E D9 D2 00 54 24 16`（62 字节，字段：文件大小 275811、属性 `E0`、版本 `v1.0`、块大小 2000、校验 CRC `7F7ED9D2`）；响应 `68 1A 00 C3 … 87 01 00 F0 01 07 00 00 00 00 00 AE 11 16`。`test/test_dl698_upgrade.py` A1/A3 断逐字节相等（含 HCS/FCS）
+  - **落点**：`dl_t698_45_upgrade.py`（纯逻辑：分包/组帧/确认判定/校验值/读版本，零 Qt）+ `dlt698_upgrade_widget.py`（「**光伏升级**」页，仅协议8 可见）+ `frame_deframe.py`（698 分帧单一来源，见陷阱 77）；页面只用**共享串口**（`write_raw` 发送、`raw_data_received` 收，见陷阱 77）
+  - **可选「读版本信息」两步（1.23.85 追加）**：`升级前读版本信息`/`升级完成后读版本信息`（默认**不勾**、落盘、传输中冻结）→ 状态机 `ver_pre`/`ver_post` 阶段；帧 = `build_read_version(sa, ca, piid, oad=…)`（GET-Request Normal + TimeTag `00`；SA/CA 取页面配置）；判定 = `check_get_response(frame, oad)`；**失败不阻断升级**（重试用尽则记日志继续）
+  - **「升级完成后读版本」与「是否发执行升级命令」解耦 + 读前先等设备复位（用户纠错追加）**：勾了自动执行 ⇒ 执行升级确认后读；**没勾** ⇒ 最后一包写文件确认后读（有的设备收全包会**自动复位升级**）；两种情形都先走 `PHASE_WAIT_RESET`（「升级后等待(s)」默认 **10 秒**、0~600 可改、落盘，1 秒重复 QTimer 倒计时、状态行显示 `等待设备复位（剩余 N 秒）`，0 秒则立即读）。等待期间状态仍是 `finishing`（不新增 `STATE_*`）、收到的帧记 `忽略（等待设备复位中）`；`中止`/`清除`/`cleanup()`/`_finish_buttons` 都要停这个定时器。**`_retry_or_fail` 必须有等待期守卫**（独立复核 F1 实测）：等待期若被误触发超时槽（`QTimer.stop()` 不撤已投递的 timeout 事件 ⇒ 真实竞态），放行会按 `_expected_omd()` 落到 `OMD_EXEC` **凭空发出「执行升级」帧**（用户可能根本没勾它），重试用尽还会把等待误判成失败 ⇒ 等待期直接忽略超时/重试（记一条 warn）。回归：`test_dl698_upgrade_gui.py` [22]
+  - **「读版本内容」两条命令**：通用 `OAD 43 00 03 00`（OI 0x4300 属性3）与**厂家扩展内部版本** `OAD FF 10 04 00`（OI 0xFF00 起的厂商自定义区间，解析器标「未知对象(0xFF10)」）。OAD 字节**只在协议模块一份**（`OAD_VERSION`/`OAD_INTERNAL_VERSION`，页面经 `_read_oad()` 取）；组帧与判定都按所选 OAD ⇒ **两条命令的响应互斥**。两条现场实帧均逐字节复现：read-version 通用 = `68 17 00 43 05 AA×6 00 AA 2A 05 01 01 43 00 03 00 00 6D 5C 16`、内部 = `68 17 00 43 05 03 24 08 04 26 20 00 CD 9A 05 01 2C FF 10 04 00 00 C2 8A 16`（`generate_get_request_normal` 的 TimeTag 走**新增可选参数** `time_tag_none`，默认不补 ⇒ 既有调用方逐字节不变）
+  - **tab 标题 = 「光伏升级」**（1.23.85 改名；索引仍是 `_upgrade_tab_index`、能力仍是 `spec.has_upgrade`；改名必须同步 `test_dl698_upgrade_tab_wiring.py` 与 `test_yw645_gui.py` 的文案断言）
+  - **发送通道：串口（默认）/ 蓝牙（1.23.85 追加）**：蓝牙通道**复用「蓝牙工具」页的连接**（升级页经 `main_gui._upgrade_bluetooth_source()` 注入的取值回调拿 worker，不建不断连接）；发送走 `_BleSendPort` → `worker.send_data(frame, single_write=True)`（**整帧一次 ATT 写**，超限由 worker 拒发不静默分包），接收订阅 `notification_received` 喂本页 `_on_raw_data`（698 分帧归本页）。**每包上限自动算**：`worker.single_write_limit()`（特征码写上限或 `MTU−3`，**不叠**蓝牙页 200 字节 `_max_chunk`；单一实现 `_limit_plan`）→ `upgrade.max_block_bytes_for_frame_limit()` 用真实组帧二分反推（MTU 512 ⇒ 509 ⇒ 每包 **475**，用户口径 ≤480 成立）→ `spin_block.setMaximum(cap)` + 夹值 + 标签写明过程（`wordWrap` 防截断）。上限算不出（未连接/`mtu_is_unnegotiated`/放不下帧头）⇒ **不设假上限**、禁用开始并写明原因；重算时机=通道切换/连接变化/`mtu_updated`/SA 变化。回归：GUI [23]、`test_bluetooth_worker.py` [8]、`test_dl698_upgrade.py` A13、wiring [5b]
+  - **版本信息的「展示与详细解析」（1.23.85 现场反馈追加）**：① 日志改成「`[RX] <整帧>` 单独一行 + `  → 版本信息（升级前·内部）读取成功（N 项）` + 缩进字段行」—— **不要再贴在帧尾**（日志 NoWrap，70 字节响应帧会把内容顶到屏幕外）；② 参数栏之下新增「版本信息」区，`升级前`/`升级完成后` **并排两栏**只读框（每栏高度 ≥ 7 行行距，防挤掉日志），`开始升级`/`清除` 都重置；③ 逐字段解析走 `dl_t698_45_data_decode` 的**单一来源**（`VERSION_FIELDS`/`VERSION_FIELD_BYTES`/`version_like_members`/`version_lengths_match`/`decode_version_info`，`CLASS_ATTR_TEMPLATES[(19,3)]` 引用它）⇒ `dl_t698_45_upgrade.version_rows` 给 `名称/值/原始/长度`；**长度与表191 声明不符时命名照给但必须带 `⚠ 长度未自证` 行**，非结构数据兜底一行 `数据`。现场实帧（内部版本响应，6 项 4/4/6/4/6/8）解析为 厂商代码=LHIN / 软件版本号=0039 / 软件版本日期=2026-08-03 / 硬件版本号=001A / 硬件版本日期=2025-10-13 / 厂商扩展信息=GWGSXXXX
+  - **TX/RX 日志的帧显示口径**（1.23.85 用户反馈修订；唯一入口 `dlt698_upgrade_widget.fmt_hex`，`HEX_LOG_LIMIT = 200`）：**≤200 字节整帧打印**（启动传输 62 字节帧原被截到 48 字节，尾部校验值/结束符看不到）；**>200 字节**（写文件大帧）只显**头尾各 100 字节 + 中间 `...` + `(共 N 字节)`**，省略的正是升级包数据体。**不要退回「只显前 N 字节」**
+  - **校验值的算法/字节序未经现场证实** ⇒ 默认 `zlib.crc32` 大端且允许手工覆盖；**不要把「与设备一致」当成已验证事实**
+- **A-XDR 三处口径（1.23.85 修正，改 `dl_t698_45_axdr.py` 前必读）**：① **`bit-string` 长度域 = 位数**（`04 03 E0` = 3 位、1 字节；旧实现按字节数读 ⇒ 解析上述 doc 帧必崩 `未知类型(0x76)`，因为 0x76 就是 `"v1.0"` 的 `v`）；② **定长类型不带长度域**（`date_time` tag+10 / `date` tag+5 / `time` tag+3 / `date_time_s` tag+7；规范类型表 tag 25/26/27/28 + §7.3.26/7.3.27 + 示例 `1C 07 E0 01 14 00 00 00` = 2016-01-20，**不是**「tag+长度 07+6 字节」）；③ `_encode_bit_string` 只能表达「N 字节 = 8N 位」，而 `bit-string(SIZE(3))` 这种**声明位宽 ≠ 8×字节数**的形态必须由调用方硬编码 `04 03 <byte>`（`build_file_info` 即如此）。改这三处后 `frame_gen_widget` / `reflex_web/frame_gen_utils` 的「A-XDR 自定义」模式已收口为委托 `AXDRCoder.encode`（此前各自手拼、多写长度域）。详见 §8 陷阱 76
 
 ### 5.7 新一代载波协议 / 通感一体化（索引 9，**1.7.0 新增**）
 
@@ -794,6 +816,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
 - 国网新一代 / HDC 1.0 解析级别+通道：`parse_level_family in ("gw","hdc10")`
 - 实时监控器：`has_monitor` + `monitor_wrapper`（9=plc2/ED..EE，10=hplc/96..16；**11 无**）
 - 通信时序图：`has_sequence_diagram`（9/10/11）
+- 光伏升级（协议8 文件传输升级+可选读版本信息）：`has_upgrade`，仅 698.45(8)；tab 文案 = 「光伏升级」
 - TCP 监控 / 报文对比 / 报文工具 / 测试方案：始终可见
 
 ---
@@ -1244,9 +1267,33 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
     - **不要动的地方**：批量/Web 帧提取（`main_gui._extract_69845_frames` / `batch_core._extract_69845_frames` / `web_utils.extract_69845_frames`）本就从 `68H` 起同步扫描、天然跳过前导 —— **不要**给它们加前导处理。**串口工具的分帧层在 1.23.78 起改为认前导**（见陷阱 59 末条：68 家族先按 `wakeup_prefix` 跳过帧首连续 FE、返回值含前导），蓝牙工具仍按静默超时切帧（`BleReassembler`，未改）；**串口工具的「批量替换通信地址」层（1.23.83）同样剥/恢复前导**，且门控为 `FE_WAKEUP_PROTOCOLS = (6, 8)` —— 其余协议带前导必须报错（见陷阱 58 末条）。
     - **BLE 分包不可消除（顺带说明）**：ATT 层单包上限 = `MTU − 3`（协商 MTU=23 ⇒ 20 字节），**应用层无法一次写出 25 字节**；`bluetooth_worker._chunk_plan` 是尺寸与来源的唯一实现，分包时打一条含「单包上限 / 包数 / MTU 来源」的日志。**不要**为此改「包间延迟」默认值（改默认值需配置迁移，见陷阱 59）。
     - 回归：`test/test_wakeup_fe_prefix.py`（**73 项**，`CORE_TESTS`：报障帧 golden / 局部前缀 / 全 FE 与「FE 后非 68」降级 / 无 FE 零回归锚点（协议6 冻结 13 行基线）/ 协议6 解析 + 表格偏移 + 虚拟表从站 / 两校验器 / 逐协议护栏 / 批量与 Web 提取 / offscreen GUI（单帧页 + 串口·蓝牙共用回调）/ 反例自检 + 单一来源守卫）+ `test_bluetooth_worker.py`（分包日志断言）。
+76. **698.45 A-XDR 三处口径：`bit-string` 长度域是「位数」、定长类型不带长度域、`time` = 3 字节（1.23.85 修正，改 `dl_t698_45_axdr.py` 前必读）**：
+    - **`bit-string` 的长度域 = 位数**：规范里 bit-string 一律写成 `SIZE(8/16/32/64/128/3)`，都是**位**；实帧 `04 03 E0` = 3 位 + 1 字节数据。旧实现按**字节数**读 ⇒ 先吞 3 字节（`E0 0A 04`）再在 `0x76` 抛「未知类型(0x76)」——`0x76` 正是 `"v1.0"` 的 `v`。**后果**：`代理升级流程.docx` 的启动传输实帧在旧实现下 `APDU类型=失败`、整表 19 行全错位；按位读后 32 行全对。解码 `nbytes=(bits+7)//8`、编码 `len(value)*8`，严格互逆。
+    - **通用编码器表达不了「1 字节 + 声明位宽 3」**：位宽是**字段声明**（`bit-string(SIZE(3))`），无法由字节数推导 ⇒ 该形态由调用方**硬编码** `bytes([0x04, 3]) + bytes([attr_byte])`（`dl_t698_45_upgrade.build_file_info` 即如此）。不要把这种形态硬塞进通用编码器（会与其「N 字节 = 8N 位」的互逆性冲突）。
+    - **定长类型不带长度域**：`date_time` = tag + 10B、`date` = tag + 5B、`time` = tag + 3B、`date_time_s` = tag + 7B。依据：规范类型表（tag 25/26/27/28，`面向对象的用电信息数据交换协议(20210910).md`）+ §7.3.26/7.3.27 + **规范自带示例 `1C 07 E0 01 14 00 00 00` = 2016-01-20 00:00:00**（`07 E0` 是**年**，不是长度域；按长度域读得年 = 0xE001 = 57345 且 SIZE(7) 只剩 6 字节）。旧编码器多写一个长度字节 ⇒ 与自己的解码器不自洽。
+    - **`_decode_time` 曾读 4 字节**（规范 `time ::= SEQUENCE{hour, minute, second}` = 3 字节）⇒ 已一并改为 3 字节。
+    - **调用方必须收口**：`frame_gen_widget._encode_axdr_item` 与 `reflex_web/frame_gen_utils._encode_axdr_item` 的「原始字节类」分支原先**自行拼装**（bit-string 按字节数写长度、定长时间类型多写长度域）⇒ 已改为保留各自 `length` pad/truncate 后**委托 `coder.encode(raw, tag)`**。改这三处口径后**必须** grep 这两个调用方，别让它再手拼。
+    - 回归：`test/test_dl698_upgrade.py`（A1/A3 逐字节 golden、A8 doc 实帧零错误行、A9 变异反证）+ 既有 698 套件（`test_dl_t698_45*.py` / `test_dlt698_preset.py` / `test_web_frame_gen_utils.py`）。
+    - **不要按静态告警「清理」本文件的 `from typing import Dict, List, Optional`**：与 HEAD 逐字相同且未使用（F401），属既有状态。
+77. **698.45 长流程串口页：`frame_received` 不可用，必须 `raw_data_received` + `frame_deframe`（1.23.85 起，改升级页/串口分帧前必读）**：
+    - **`SerialWorker.frame_received` 对 698 是错的**：`serial_worker._process_buffer` 只认 DL/T645 双 68H 与 FT1.2（`end_pos = pos + L`），而 698 整帧 = `L + 2` ⇒ `buf[end_pos-1]` 是 FCS[0] 而非 `0x16`，必然落到「找载荷里第一个 `0x16`」的**容错分支**被截断（600 字节载荷含 `0x16` 的概率 ≈ 90%）。⇒ 任何 698 的「逐包等确认」页面必须：订阅 `raw_data_received` → 自有缓冲 → `frame_deframe.frame_length_for("dlt698_45", buf)` 取长度、**末字节必须 `0x16`** 才切帧、`frame_incomplete` 为真则继续等。
+    - **`frame_deframe.py` 是分帧族单一来源**（`L+2` / 末字节自证 / 前导 FEH 容忍 / HDLC 定界 / 645 / Wrapper + `STRATEGY_BY_PROTOCOL` / `END_CHAR_STRATEGIES` / `FE_WAKEUP_STRATEGIES`）；`serial_tool_widget` 只做**同名 re-export**（`frame_length_for` / `declared_frame_len` / `SerialToolWidget._declared_frame_len` / `_wakeup_base`…，既有 500+ 项测试锚点依赖这些名字）。**新增分帧判据只能加在 `frame_deframe`**（教训同陷阱 31/55/61）；`test_wakeup_fe_prefix.py` 的单一来源白名单已含 `frame_deframe.py` + `serial_tool_widget.py`。
+    - **发送用 `write_raw`（静默）**，不要 `send_frame`（逐帧 emit `[发送]` 会刷屏）；但**页面自建 TX/RX 日志行**，且失败/超时/弹框必须外显（弹框与日志并存）。
+    - **等待用「单发 QTimer + 标志位」**（照 `test_plan_widget` 范式），**不要**为逐包确认新建 QThread（也就无需 `thread_registry`）；PIID 每帧自增 `& 0x7F`；确认判定走 `dl_t698_45_upgrade.check_action_response`（APDU 类型 + OMD + DAR + 解析器 HCS/FCS 一起判），**不要**用字符串/字节比对。
+    - **`crcmod` 是可选依赖**：`dl_t698_45_frame_gen` / `dl_t698_45_parser` / `dl_t698_45_upgrade` 顶层 import 它 ⇒ Qt 页必须**函数内惰性 import**，ImportError 给「协议8 需要 crcmod，请 pip install crcmod」提示（同陷阱 69 铁律）。
+    - **分包算术单一来源** = `dl_t698_45_upgrade.UpgradePlan`（`total_bytes` / `block_size` / `num_blocks` / `last_block_bytes`）：页面不要再自己算 `ceil`。
+    - **RX 重同步必须能丢弃「不可能成为帧头」的字节**（1.23.85 复核发现并修）：只跳过「首字节非 `68`/`FE`」不够 —— 一次线噪（如 `FE FE 99 …`、或长度域被噪声污染成「按长度到齐却非 `16H`」）会让缓冲头**永久卡住**，此后所有确认都收不到（一次噪声 = 整轮升级失败，缓冲要涨到 262144B 才清）。正确判据：**只有「当前既无半截帧在等、也切不出整帧」时才允许丢弃**，且丢多少由 `frame_deframe` 的判据决定（**不要**在页面里另写分帧算术）。
+    - **传输进行中必须冻结会改变计划的输入**（同上）：换升级包 / 改 SA·块大小 / 点「清除」都要么拒绝（提示先「中止」）要么完整复位状态与按钮门控；否则轻则 `_on_ack` 里 `IndexError`（Qt 吞掉 → 状态机卡死），重则**静默改发另一个文件的数据**。
+    - 回归：`test/test_dl698_upgrade_gui.py`（194 项，假串口；含重同步边界与传输中控件的反例段）+ `test/test_dl698_upgrade_tab_wiring.py`（29 项，真实 `MainWindow` 接线）+ `test_serial_proto_frame.py` / `test_serial_tool_widget.py` / `test_dl_t698_45_extract.py`（抽取后行为不变）。
+
+78. **Win11 任务栏「缩略图工具栏按钮」的三处硬坑（1.23.85 起，改 `system_integration/taskbar_buttons.py` 前必读）**：
+    - **接口必须按 `ITaskbarList4 → 3 → 2` 的顺序试**：本机 Win11（`10.0.26300`）上 `CoCreateInstance`/`QI` 拿 `IID_ITaskbarList3` 直接返回 `E_NOINTERFACE(0x80004002)`，而 `ITaskbarList4` 正常（`HrInit`／`ThumbBarAddButtons`／`SetThumbnailTooltip` 全 `S_OK`，**按钮真的挂上了**）。只写 3 就会在这台机器上直接判「不可用」。三者对我们要用的方法**槽位相同**（`HrInit`=3、`ThumbBarAddButtons`=15、`ThumbBarUpdateButtons`=16、`ThumbBarSetImageList`=17、`SetThumbnailTooltip`=19），别按名字重排。
+    - **涉及 `HANDLE` 的 Win32 调用必须显式 `argtypes`**：64 位下不声明时 ctypes 按 C int 传 ⇒ `DeleteObject(hbm)` 抛 `OverflowError: int too long to convert`（`qimage_to_hicon` 实测）。同时 `QImage.constBits()` 返回 `memoryview`，`ctypes.memmove` 前要先 `.tobytes()`。
+    - **`QAbstractNativeEventFilter.nativeEventFilter` 在 PySide6 返回单个 `bool`**（True = 吞掉消息）；返回 `(bool, int)` 元组会被当 truthy ⇒ **把所有 WM_COMMAND 都吞掉**（Qt 那一套 tuple 是 PyQt 的约定）。
+    - **能力边界（别向用户承诺过头）**：Win11 的任务栏对第三方封闭（Win10 的 deskband/自定义工具栏已移除），**任意控件（输入框）不可能放进任务栏那一行**；截图里那种「封面+标题+播放键」是 **SMTC 系统媒体卡片**（媒体会话专属）。受支持的挂载点只有：托盘菜单内嵌控件、**缩略图工具栏按钮**（悬停预览里，本陷阱这套）、屏幕边缘 AppBar 常驻条。另外按钮只在窗口**有任务栏按钮**时可见（`hide()` 到托盘后没有）⇒ 依赖它就得先谈「关到托盘」还是「最小化到托盘」。
+    - 回归：`test/test_tray_taskbar_entries.py`（27 项，offscreen：托盘提交/清空/禁用、HICON、降级、合成 `WM_COMMAND` 命中与不误吞、`_parse_text_input` 两条路径、4 个按钮分派）+ 真机冒烟（`_setup_taskbar_buttons()`→True、按钮 id `0x7700..0x7703`、`PostMessage` 触发 `clicked`）。
 
 ## 9. 开发原则
-
 1. **协议定义优先**：遇到不确定的协议字段、字节序、校验范围，**先查 §5 对应文档**，不要凭记忆或猜测。
 2. **PDF 文档用 pdf skill 检索**：645 补遗、IEC 62056-46、DLT645 原始标准都是 PDF，调用 pdf skill 而非人工翻阅。
 3. **新增协议的完整 checklist（1.23.1 起）**：
@@ -1269,6 +1316,26 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 ## 10. 变更日志
 
 > 详细版本变更记录请查看 `main_gui.py:CHANGELOG`（按版本倒序），或运行 `git log --oneline` 查看提交历史。本文档保留近期版本的摘要。
+
+### 1.23.85 — 2026-10-15
+
+- **新增「光伏升级」标签页（初版名为「升级」，同版改名）：协议8（DL/T 698.45）文件传输升级（分布式产品升级）**（用户需求：拖入二进制升级包 → 按可设每包字节数分包 → 经 698.45 文件传输逐包下发并等设备确认 → 全部传完发执行升级命令）。三步命令走 OI `0xF001` 文件分块传输管理：启动传输 `F0 01 07 00` → 写文件 `F0 01 08 00`×N（**每包一帧、逐包等确认**）→ 执行升级 `F0 01 0D 00`（默认「立即执行」= `date_time_s` 全 FF）
+- **逐字节 golden**：`协议文档/8.698.45协议/代理升级流程.docx` 的启动传输实帧（62 字节）由 `dl_t698_45_upgrade.build_start_transfer` **逐字节复现**（含 HCS/FCS）；`test/test_dl698_upgrade.py` 断其相等
+- **新增**：`dl_t698_45_upgrade.py`（纯逻辑：分包/文件信息/三帧组帧/确认判定/校验值，`UpgradePlan` 为分包算术单一来源）、`dlt698_upgrade_widget.py`（Qt 页：拖放、参数折叠区、进度条、日志、中止；**复用共享串口** `write_raw` + `raw_data_received`，单发 QTimer 状态机，无 QThread）、`frame_deframe.py`（**串口分帧族抽出为单一来源**，`serial_tool_widget` 仅同名 re-export）
+- **修复三个既有协议栈缺陷（否则本功能无法自证）**：① `AXDRCoder._decode_bit_string` 把 `bit-string` 长度域当**字节数**（规范是**位数**）⇒ 旧实现解析上述 doc 实帧直接失败（`未知类型(0x76)`，0x76 = `"v1.0"` 的 `v`），按位读后 32 行全对；② `_encode_bit_string` 同错（改按 `len(bytes)*8`）；③ 定长时间类型编码器多写长度域（`date_time`/`date`/`time`/`date_time_s` 改为 tag + 定长字节，`time` 同时从 4 字节修回 3 字节）——依据：规范类型表 + 示例 `1C 07 E0 01 14 00 00 00` = 2016-01-20
+- **调用方收口**：`frame_gen_widget` / `reflex_web/frame_gen_utils` 的「A-XDR 自定义」模式原先自行拼装（bit-string 按字节写长度、定长时间类型多写长度域）⇒ 改为委托 `AXDRCoder.encode`（单一来源）
+- 协议8 SA 默认**通配地址**（特征 `0x45` + `AA×6`），可改单地址/组/广播；每包字节数默认 **600**、超时/重试可配；进度只按**已确认**包累加
+- 测试：`test/test_dl698_upgrade.py`（**225 项**，`CORE_TESTS`）+ `test/test_dl698_upgrade_gui.py`（**194 项**，`GUI_TESTS`）+ `test/test_dl698_upgrade_tab_wiring.py`（29 项，`GUI_TESTS`）；约定沉淀为 §5.6 与 §8 陷阱 76/77
+- **独立复核（trellis-check）发现并修掉 3 处阻塞级缺陷**：① RX 重同步只跳「非 68/FE」，一次线噪即让缓冲头永久卡住 ⇒ 整轮升级失败（改为「无半帧在等且切不出整帧才丢」）；② 传输中换升级包 ⇒ `_on_ack` 里 `IndexError`（Qt 吞掉 → 状态机卡死）或**静默改发另一文件的数据**（改为传输中拒绝换文件/改参数，须先中止）；③ 传输中点「清除」⇒ 状态回 idle 但按钮门控没复位、页面永久不可用（补 `_finish_buttons()`）。同轮还修掉一条**恒真断言**（cleanup 断信号验证只投整帧 ⇒ 在「忘了断信号」时照样绿），并删掉两条不触产品代码的伪变异反证（A9 七条 → 五条）
+- **TX/RX 日志帧显示口径修正**（用户反馈：62 字节的启动传输帧只打到 48 字节，尾部校验值看不到）：`≤200 字节整帧打印`；写文件大帧只显**头尾各 100 字节 + 中间 `...` + `(共 N 字节)`**（`HEX_LOG_LIMIT` 48 → 200）
+- **tab 改名 + 可选「读版本信息」两步**（用户需求）：tab 标题「升级」→「**光伏升级**」；新增「升级前读版本信息」/「升级完成后读版本信息」两个勾选项（**默认不勾**、落盘、传输中冻结），读版本 = GET-Request Normal（`05 01 <PIID> <OAD> 00`），**失败不阻断升级**（重试用尽记日志继续）；「读版本内容」下拉二选一：通用 `OAD 43 00 03 00` / **厂家扩展内部版本** `OAD FF 10 04 00`；两条现场实帧（含内部版本）都由 `build_read_version` **逐字节复现**，响应判定 `check_get_response` 按所选 OAD **互斥**（OAD 不符即忽略）
+- 同批测试：`test/test_dl698_upgrade.py` 225 → **259 项**（新增 A10 读版本组帧/响应判定矩阵 + A11 内部版本与互斥）、`test/test_dl698_upgrade_gui.py` 194 → **252 项**（[17]~[20]：两开关流程/非阻断/响应不符重试/读版本内容选择与持久化）
+- **读版本信息的展示改版 + 逐字段详细解析**（现场反馈：解析内容贴在帧尾要横向拖到底才看得见；内部版本只有一串值看不出字段含义）：日志改为「`[RX] <整帧>` 一行 + `→ 版本信息（…）读取成功（N 项）` + 缩进字段行」；参数栏之下新增「版本信息」区（`升级前`/`升级完成后` 并排两栏，`开始升级`/`清除` 重置）；表191 六个字段名/长度/日期补全规则收口到 `dl_t698_45_data_decode.VERSION_FIELDS`（`CLASS_ATTR_TEMPLATES[(19,3)]` 引用），厂家扩展内部版本与标准对象共用 —— 现场实帧解析出 厂商代码=LHIN / 软件版本号=0039 / 软件版本日期=2026-08-03 / 硬件版本号=001A / 硬件版本日期=2025-10-13 / 厂商扩展信息=GWGSXXXX；**长度与声明不符时命名照给但追加 `⚠ 长度未自证` 行**
+- 同批测试（二次）：`test/test_dl698_upgrade.py` 259 → **273 项**（A12 版本明细）、`test/test_dl698_upgrade_gui.py` 252 → **269 项**（[13] 展示区几何护栏 + [20] 现场帧 + [21] 非结构兜底）
+- **读版本信息显示改版 + 逐字段详细解析 + 等设备复位 + 发送通道（蓝牙）**（连续三轮现场反馈/需求，细节见 §5.6 与 spec §7j）：① 日志「帧一行 + 明细在下」、参数栏下新增「版本信息」两栏展示区（升级前/升级后对比）；② 「升级完成后读版本」与是否发执行升级**解耦**，读前先按「升级后等待(s)」等设备复位（默认 10 秒、0~600，1 秒倒计时显示在状态行；等待期 `_retry_or_fail` 有守卫，防凭空补发执行升级帧）；③ 新增**发送通道**（串口/蓝牙）：蓝牙复用蓝牙工具页的连接，每包上限按「一次 ATT 写上限 − 698 整帧开销」**自动算**（MTU 512 ⇒ 509 ⇒ 每包 475），整帧一次 ATT 写（`send_data(..., single_write=True)`，超限拒发）
+- 同批测试（三次）：`test/test_dl698_upgrade.py` **286**、`test/test_dl698_upgrade_gui.py` **355**、`test_bluetooth_worker.py` **123**、`test_dl698_upgrade_tab_wiring.py` **37**；`release_check.py --with-gui` = PASS=138 FAIL=0 WARN=0（读版本展示轮）/ PASS=134 FAIL=4（4 项为本机已知 offscreen 退出期 fastfail，断言全绿）
+- **桌面「粘性入口」：托盘菜单内嵌报文输入框 + 任务栏缩略图按钮**（用户问「能不能像汽水音乐那样把可交互控件放任务栏上」）。先落结论：**Win11 任务栏对第三方封闭**，任意控件（尤其输入框）进不去那一行；截图里的「封面+标题+播放键」是 **SMTC 媒体卡片**（媒体会话专属）。因此做两条**受支持**的入口：① `sys_tray` 菜单里嵌「输入框 + 解析」(`QWidgetAction`)，回车 → 与剪贴板/文件右键**同源**的解析路径（`clipboard_monitor.strict_hex` 判据），不受理时状态栏+气泡说明；② 新模块 `system_integration/taskbar_buttons.py`（纯 ctypes 调 **ITaskbarList4/3** + `QImage→HICON` + `WM_COMMAND` 拦截）：悬停任务栏图标时预览里出现 4 个可点按钮（解析剪贴板/快捷解析/批量解析/光伏升级）。硬坑见 §8 陷阱 78（Win11 只认 `ITaskbarList4`、HANDLE 必须声明 `argtypes`、PySide6 过滤器返回**单个 bool**）
+- 同批测试（四次）：新增 `test/test_tray_taskbar_entries.py`（**27 项**）；真机冒烟 `_setup_taskbar_buttons()`→True、按钮 id `0x7700..0x7703`、`PostMessage(WM_COMMAND)` 触发 `clicked`，「光伏升级」按钮 → 协议 8 + tab 文案「光伏升级」
 
 ### 1.23.79 — 2026-10-13
 
