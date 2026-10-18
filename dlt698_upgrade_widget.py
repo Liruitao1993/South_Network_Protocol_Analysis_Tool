@@ -36,6 +36,40 @@
   蓝牙 worker 是蓝牙页**惰性创建**的 ⇒ `showEvent` 每次切回本页都重新对齐一次（幂等）。
 - 状态机不用 QThread：单发 :class:`QTimer` + 标志位（照 ``test_plan_widget`` 的既有范式，
   无需 ``thread_registry`` 回收）。
+- **「提升波特率」（可选，仅串口通道）**：升级前先发一条 31 字节 FT1.2 实帧
+  （:data:`BAUD_BOOST_COMMAND`）让**设备**把自己的串口切到 :data:`BAUD_BOOST`，主机侧随后
+  也切（顺序不可换）；文件全部传完、开始等设备复位升级时（:meth:`_begin_reset_wait`）
+  先切回 :data:`BAUD_DEFAULT` —— 设备复位后回到默认速率，**升级完成后读版本信息首选默认
+  速率**。切速走 :meth:`SerialWorker.set_baudrate`（端口开着也安全：先 ``flush()``
+  排空发送缓冲再改 DCB），**绝不重开端口**（会丢设备侧会话，现场表现为掉线）；主机侧
+  切完由 ``baudrate_changed`` 反向通知顶部「串口配置」同步回显。中止/失败/清除/页面关闭
+  一律兜底切回默认速率，不把共享串口留在非默认状态。
+- **「升级完成后读版本信息」要**两种速率各试一遍**（现场口径，1.23.86 追加）：设备升级
+  **成功**会复位、速率回到 :data:`BAUD_DEFAULT`；升级**失败**则可能仍停在
+  :data:`BAUD_BOOST`（本页无从预知）。故该步的重试用尽**不等于**「读不到」——
+  :meth:`_continue_after_version_failure` 会先换另一种速率（:meth:`_switch_post_baud`）再
+  试一遍，**两种速率都读不到才**记失败并收尾。只在本轮真的提升过波特率
+  （``_boost_used``）时才换速率；没提升过就还是单速率（设备一直在默认速率，没有「另一种」
+  可言）。换速率成功即视为「已提升」⇒ 收尾 :meth:`_finish_buttons` 仍会把端口带回默认速率。
+- **「升级前 / 升级完成后读版本信息」的结果自动比对并给结论**（现场口径）：
+  **版本变了 ⇒ 判定升级成功；前后完全一致 ⇒ 判定升级失败**（设备没换新固件）。
+  结论落在「版本信息」组的判定条（:meth:`_render_version_verdict`）+ 收尾状态行
+  （:meth:`_set_status`）+ 日志（:meth:`_log_verdict`）三处，配色随主题。
+  比对口径（:meth:`_compare_version_entries`）：**优先比原始字节**（`值` 是给人看的格式化
+  结果，日期会补全、长值会裁剪，拿它判等会把同一个版本误判成变了），原始都缺才退化为比
+  `值`；只在一边出现的字段算变化；解析器的 ``⚠`` 诊断行（如「长度未自证」）**不参与**比对。
+  **没有证据就不下结论**：缺升级前基线、有一侧没读到、前后读的不是同一项版本内容 ⇒
+  一律 :data:`VERDICT_UNKNOWN`「无法判定」，绝不硬说成功或失败；两侧都没读则
+  :data:`VERDICT_PENDING`「尚未比对」。判定**不改状态机**：流程照常收尾 ``done``
+  （流程跑完 ≠ 固件升级成功），结论只在上面三处外显。
+- **「升级包路径」随配置落盘**（现场口径）：重开程序/重开本页要**直接显示上次的升级包**，
+  **只有换新文件才更新路径**。只存**路径**不存字节（升级包可能几十 MB，塞进 JSON 会拖慢
+  启动，且文件随时可能被替换）。恢复走 :meth:`_restore_package`（在 `_load_persisted` 末尾、
+  参数就位之后调用）：文件没了/变目录/读失败 ⇒ **不恢复**（保持「未选择文件」，`_validate_inputs`
+  会拦住开始），在拖放区写明原因并记一条 `[警告]`，**落盘路径仍保留**（U 盘/网络盘可能回来，
+  不替用户删记录）。恢复**不弹框**（`_upgrade_module(quiet=True)`：开页面弹模态会打断现场，
+  真弹框留给 `_on_start`）、**不冲掉**手工「文件大小」覆盖值（`set_size=False`）、**不写**
+  「分包完成」日志（`announce=False`）。手工选择与恢复共用 :meth:`_apply_package`，防止两条路走偏。
 - 按钮宽度只走 :func:`gui_utils.fit_btn_width` / :func:`gui_utils.fit_btn_width_for_texts`
   设**下限**，绝不 ``setFixedWidth``/``setMaximumWidth``（本项目字号可配置，写死必裁字，
   AGENTS §8 陷阱 63）。
@@ -114,10 +148,30 @@ PHASE_VER_POST = "ver_post"
 #: 读版本信息的两步（失败**不阻断**升级流程；判定走 `check_get_response`）
 VER_PHASES = (PHASE_VER_PRE, PHASE_VER_POST)
 
+#: 版本比对结论（升级前 vs 升级完成后，现场口径）：
+#: **版本变了 ⇒ 升级成功**；**版本完全一致 ⇒ 升级失败**（设备没换新固件）。
+#: `VERDICT_PENDING` 只表示「两侧还没凑齐」，**不是结论** —— 任何展示都不得把它说成失败。
+VERDICT_PENDING = "pending"
+VERDICT_CHANGED = "changed"
+VERDICT_SAME = "same"
+VERDICT_UNKNOWN = "unknown"
+
+#: 参与比对的字段行前缀黑名单：`⚠ …` 是解析器的**诊断提示行**（如「长度未自证」），
+#: 不是版本字段本身；把它算进「变了没变」会让告警行决定升级成败。
+VERDICT_SKIP_ROW_PREFIX = "⚠"
+
+#: 判定条上每项变更值的最大显示长度（值过长会被截断，完整值仍在明细面板/日志里）
+VERDICT_VALUE_MAX = 28
+
 #: 「等设备复位」阶段（读**升级后**版本之前）：部分设备收全升级包会**自动复位升级**，
 #: 复位期间读版本读不到 ⇒ 等 N 秒（默认 10、可设）再读。等待期间状态仍是 `finishing`
 #: （不新增 STATE_*，避免动「传输中」那批守卫），只用 phase 表达。
 PHASE_WAIT_RESET = "wait_reset"
+
+#: 「提升波特率」阶段（**插在整个流程最前面**，仅串口通道 + 勾选时才有）：
+#: 发「提升波特率」命令 → 等设备切完速率 → 主机侧也切到 `BAUD_BOOST` → 才进 `ver_pre`/`start`。
+#: 设备侧只有收到该命令才认这个速率，所以**必须先发命令再切主机**（顺序反过来必失败）。
+PHASE_BAUD_BOOST = "baud_boost"
 
 #: 「升级后等待(s)」范围：0 = 不等待（立刻读）
 READ_AFTER_DELAY_MIN, READ_AFTER_DELAY_MAX = 0, 600
@@ -125,6 +179,37 @@ READ_AFTER_DELAY_MIN, READ_AFTER_DELAY_MAX = 0, 600
 #: 发送通道：串口（默认，走顶部「串口配置」的连接）/ 蓝牙（复用「蓝牙工具」页已建立的连接）
 CHANNELS = (("串口", "serial"), ("蓝牙", "bluetooth"))
 DEFAULT_CHANNEL = "serial"
+
+#: 「提升波特率」（光伏升级现场流程）：升级前先发一条 FT1.2 命令让**设备**把串口切到
+#: `BAUD_BOOST`，主机侧随后同步切换（升级包本来就大，高速率省时间）；文件全部传完、
+#: 开始等设备复位升级时再切回 `BAUD_DEFAULT` —— 设备复位后回到默认速率，
+#: **升级完成后读版本信息首选默认速率**（现场口径）。
+#: 但设备**升级失败**时可能仍停在 `BAUD_BOOST`，故「升级完成后读版本信息」两种速率各试
+#: 一遍、都读不到才算读不到（`POST_READ_BAUDS`）。
+#: 波特率是串口概念，蓝牙通道没有这一说（勾了也只跳过并记日志）。
+BAUD_DEFAULT = 9600
+BAUD_BOOST = 115200
+
+#: 「升级完成后读版本信息」的**尝试顺序**：先默认速率（升级成功、设备已复位的情形——
+#: 也是共享串口的「安全态」，中途中止也停在默认速率），读不到再换提升速率
+#: （升级失败、设备没复位、仍在高速率的情形）。**顺序即优先级**：默认速率命中率更高。
+#: 仅在本轮真的提升过波特率时才用得上第二项（见 `_switch_post_baud`）。
+POST_READ_BAUDS = (BAUD_DEFAULT, BAUD_BOOST)
+
+#: 「提升波特率」命令（现场实帧，31 字节 FT1.2）：
+#: ``68H | 长度域 L(2B 小端 = 1D 00 = 29) | C=43H | 地址(6B) | 数据域 | 校验(2B) | 16H``
+#: —— 整帧 = ``L + 2``（与 :data:`DEFRAME_STRATEGY` 的 698 口径同形，故本页自带的分帧
+#: 也能识别它；但本页**不订阅** ``frame_received``，收到与否都不影响状态机）。
+BAUD_BOOST_COMMAND_HEX = (
+    "68 1D 00 43 05 AA AA AA AA AA AA A0 28 98 07 01 3E FF 10 80 00 5F "
+    "0A 02 08 01 00 00 6B C4 16"
+)
+BAUD_BOOST_COMMAND = bytes.fromhex(BAUD_BOOST_COMMAND_HEX.replace(" ", ""))
+
+#: 「切换等待(ms)」：命令发出到**主机侧切速**之间的静默等待（留给设备改自己的 UART）。
+#: 0 = 不等（发送缓冲排空即切）；设备固件实现不一，现场按实际调。
+BOOST_WAIT_MS_DEFAULT = 300
+BOOST_WAIT_MS_MIN, BOOST_WAIT_MS_MAX = 0, 10000
 
 #: 「读版本内容」候选：`(下拉文案, 持久化键, 日志短名)`。**OAD 字节不在此处** ——
 #: 一律经 `_read_oad()` 取协议模块的常量（`OAD_VERSION` / `OAD_INTERNAL_VERSION`），
@@ -160,6 +245,8 @@ DEFAULTS = {
     "read_target": DEFAULT_READ_TARGET,  # 读版本内容：common=通用 43000300 / internal=厂家扩展 FF100400
     "read_after_delay_s": 10,            # 读「升级后」版本前先等设备复位（秒）；0 = 立即读
     "channel": DEFAULT_CHANNEL,          # 发送通道：serial / bluetooth
+    "boost_baud": False,                 # 升级前先发「提升波特率」命令（仅串口通道；默认不勾）
+    "boost_wait_ms": BOOST_WAIT_MS_DEFAULT,  # 命令发出到主机切速之间的静默等待（ms）
     "sa_type": 1,                       # 通配
     "sa_logic": 0,
     "sa_len": 6,
@@ -178,10 +265,16 @@ DEFAULTS = {
     "exec_time": "",                    # "YYYY-MM-DD HH:MM:SS"
     "license_hex": "",
     "params_expanded": True,
+    #: 上次选中的升级包路径（现场口径：重开程序要**直接显示**上次的文件，只有换新文件才更新）。
+    #: 只存路径不存字节：升级包可能几十 MB，塞进 JSON 会拖慢启动且文件随时可能被替换。
+    "file_path": "",
 }
 
 #: 未连接时的提示（同时用作按钮 tooltip 与点击提示；design §10 第 1 行）
 TIP_NOT_CONNECTED = "未连接串口：请先在主窗口顶部「串口配置」打开串口"
+
+#: 拖放区的常态提示（恢复失败时会被替换成告警文案，重新选到文件后**必须**换回来）
+DROP_HINT_IDLE = "拖入升级包文件（任意二进制）"
 
 #: crcmod 缺失的可读提示（design §4 硬要求 3 原文）
 MISSING_CRCMOD = "协议8 需要 crcmod，请 pip install crcmod"
@@ -419,6 +512,22 @@ class Dlt698UpgradeWidget(QWidget):
         self._reset_timer.timeout.connect(self._on_reset_wait_tick)
         self._reset_left = 0             # 剩余秒数（`_step_label`/状态行显示）
 
+        # 「提升波特率」：命令发出 → 留切换时间 → 切主机速率的单发定时器（毫秒级，非 1 秒表）
+        self._boost_timer = QTimer(self)
+        self._boost_timer.setSingleShot(True)
+        self._boost_timer.timeout.connect(self._on_boost_ready)
+        # `_boosted` = **主机端口此刻被本页设在非默认速率**（收尾要切回；只在切回成功时清）
+        self._boosted = False
+        # `_boost_used` = **本轮真的提升过波特率**（比 `_boosted` 黏：切回后仍为 True）。
+        # 「升级完成后读版本信息」要据此决定「有没有另一种速率可换」——设备升级失败时
+        # 可能仍停在提升速率，必须两种都试过才算读不到（现场口径）。
+        self._boost_used = False
+        # 本轮「升级完成后读版本」的**待试速率表 + 已试下标 + 各速率失败原因**（见 `_switch_post_baud`）
+        self._post_bauds = []
+        self._post_baud_idx = 0
+        self._post_baud_fails = []
+        self._frozen = False             # 传输中冻结计划类输入（`_freeze_plan_inputs` 的唯一写入点）
+
         self._serial_worker = None
         self._bt_provider = None         # 取蓝牙 worker 的回调（主窗口注入；蓝牙通道用）
         self._bt_worker = None           # 当前绑定的蓝牙 worker（**只由 _bind_ 赋值**：连/断信号与重算同处）
@@ -431,6 +540,9 @@ class Dlt698UpgradeWidget(QWidget):
         self._phase = PHASE_START
         self._path = ""
         self._data = b""
+        # 落盘里的升级包路径 + 恢复失败的说明（`_restore_package` 用；见 DEFAULTS["file_path"]）
+        self._persisted_path = ""
+        self._restore_note = ""
         self._blocks: List[bytes] = []
         self._plan = None                 # dl_t698_45_upgrade.UpgradePlan（分包算术单一来源）
         self._block_idx = 0
@@ -464,7 +576,7 @@ class Dlt698UpgradeWidget(QWidget):
         self.drop_area = _DropArea(self)
         drop_row = QHBoxLayout(self.drop_area)
         drop_row.setContentsMargins(10, 8, 10, 8)
-        self.lbl_drop_hint = QLabel("拖入升级包文件（任意二进制）")
+        self.lbl_drop_hint = QLabel(DROP_HINT_IDLE)
         self.lbl_file_name = QLabel("未选择文件")
         self.lbl_file_size = QLabel("大小 —")
         for lbl in (self.lbl_file_name, self.lbl_file_size):
@@ -526,6 +638,31 @@ class Dlt698UpgradeWidget(QWidget):
             "选蓝牙时，每包字节数会按「一次 ATT 写能承载的字节数 − 698 帧开销」自动算出上限\n"
             "（例：协商 MTU 512 ⇒ 一次写 509 字节 ⇒ 每包最大 475 字节），超出即自动收敛。")
         row_ch.addWidget(self.combo_channel)
+        row_ch.addSpacing(12)
+        self.chk_boost_baud = QCheckBox("提升波特率")
+        self.chk_boost_baud.setToolTip(
+            "勾选：开始升级**之前**先发一条「提升波特率」命令"
+            f"（{len(BAUD_BOOST_COMMAND)} 字节 FT1.2 实帧），"
+            f"设备收到后把自己的串口切到 {BAUD_BOOST}，本页随即把主机串口也切到 {BAUD_BOOST}，"
+            "后续启动传输/写文件/执行升级都跑在高速率上。\n"
+            f"文件全部传完、开始等设备复位升级时会**自动切回 {BAUD_DEFAULT}** —— "
+            f"设备升级成功会复位、回到默认速率，「升级完成后读版本信息」先用默认速率读；"
+            f"读不到会自动切到 {BAUD_BOOST} 再试一遍（设备**升级失败**时可能仍停在高速率），"
+            f"两种速率都读不到才算读不到。\n"
+            "中止/失败/清除也一律切回默认速率（本页不把共享串口留在非默认状态）。\n"
+            "仅串口通道可选：波特率是串口概念，蓝牙通道没有这一项。")
+        row_ch.addWidget(self.chk_boost_baud)
+        row_ch.addSpacing(6)
+        row_ch.addWidget(QLabel("切换等待(ms)"))
+        self.spin_boost_wait = QSpinBox()
+        self.spin_boost_wait.setRange(BOOST_WAIT_MS_MIN, BOOST_WAIT_MS_MAX)
+        self.spin_boost_wait.setValue(DEFAULTS["boost_wait_ms"])
+        self.spin_boost_wait.setSingleStep(100)
+        self.spin_boost_wait.setToolTip(
+            "「提升波特率」命令发出后，先静默等这段时间，再切主机侧速率"
+            "（留给设备改自己的 UART；0 = 发送缓冲排空就切）。\n"
+            "勾了「提升波特率」才用得上这个等待；设备固件实现不一，现场按实际调。")
+        row_ch.addWidget(self.spin_boost_wait)
         row_ch.addSpacing(12)
         self.lbl_channel_state = QLabel("")
         self.lbl_channel_state.setTextInteractionFlags(
@@ -709,6 +846,14 @@ class Dlt698UpgradeWidget(QWidget):
         self.grp_version = QGroupBox("版本信息")
         ver_box = QVBoxLayout(self.grp_version)
         ver_box.setContentsMargins(8, 6, 8, 6)
+        # 判定条：升级前 / 升级完成后两个版本一凑齐就给出结论（版本变了=升级成功，
+        # 完全一致=升级失败）。**独立于两栏明细**：现场一眼看结论，明细仍在下面两栏。
+        self.lbl_verdict = QLabel()
+        self.lbl_verdict.setObjectName("UpgradeVerdict")
+        self.lbl_verdict.setTextFormat(Qt.TextFormat.PlainText)
+        self.lbl_verdict.setWordWrap(True)
+        self.lbl_verdict.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        ver_box.addWidget(self.lbl_verdict)
         ver_row = QHBoxLayout()
         self.txt_version_pre = QPlainTextEdit()
         self.txt_version_post = QPlainTextEdit()
@@ -782,6 +927,8 @@ class Dlt698UpgradeWidget(QWidget):
         self.chk_auto_exec.toggled.connect(lambda _c: self._schedule_save())
         self.chk_read_before.toggled.connect(lambda _c: self._schedule_save())
         self.chk_read_after.toggled.connect(lambda _c: self._schedule_save())
+        self.chk_boost_baud.toggled.connect(lambda _c: self._schedule_save())
+        self.spin_boost_wait.valueChanged.connect(lambda *_a: self._schedule_save())
         self.combo_read_target.currentIndexChanged.connect(lambda *_a: self._schedule_save())
         self.combo_channel.currentIndexChanged.connect(lambda *_a: self._on_channel_changed())
         # SA/CA 变了 ⇒ 蓝牙通道下的每包上限要重算（698 帧开销随地址域长度变）
@@ -819,6 +966,7 @@ class Dlt698UpgradeWidget(QWidget):
             f"QFrame#UpgradeDropArea {{ background-color: {p['bg']};"
             f" border: 1px dashed {p['border']}; border-radius: 4px; }}")
         self.lbl_drop_hint.setStyleSheet(f"color: {p['hint']};")
+        self._render_version_verdict()      # 判定条按新主题重新上色
 
     # ======================================================================
     # 发送通道（串口 / 蓝牙）——蓝牙复用蓝牙工具页的连接，并按 ATT 上限自动限包
@@ -939,6 +1087,11 @@ class Dlt698UpgradeWidget(QWidget):
             state = "已连接" if (w is not None and w.is_open()) else "未连接"
             text = f"串口通道：{state}（端口/波特率在顶部「串口配置」设置）"
         self.lbl_channel_state.setText(text)
+        # 「提升波特率」只对串口通道成立：切到蓝牙就置灰，免得勾着却什么也没发生
+        # （真正的判据是 `_boost_enabled()`）；传输中冻结时不许被这里解冻（`_frozen`）。
+        if hasattr(self, "chk_boost_baud"):
+            self.chk_boost_baud.setEnabled(
+                not getattr(self, "_frozen", False) and self._channel() == "serial")
         if hasattr(self, "btn_start"):
             self._refresh_start_enabled()
 
@@ -1198,6 +1351,11 @@ class Dlt698UpgradeWidget(QWidget):
             # 等设备复位期间没有在飞的请求 ⇒ 任何帧都不当确认（设备复位时可能吐杂帧/上报）
             self._log(f"[RX] {fmt_hex(frame)}  → 忽略（等待设备复位中）", "warn")
             return
+        if self._phase == PHASE_BAUD_BOOST:
+            # 发「提升波特率」命令后设备可能回一条 FT1.2 确认（`_expected_omd` 对未知阶段会
+            # 落到 EXEC，放行就会把它当成「执行升级」的确认/失败）。此时没有在飞的 698 请求。
+            self._log(f"[RX] {fmt_hex(frame)}  → 忽略（提升波特率中，切换前后不认回帧）", "info")
+            return
         upg = self._upgrade_module()
         if upg is None:
             return
@@ -1221,6 +1379,7 @@ class Dlt698UpgradeWidget(QWidget):
                 self._log(f"[RX] {fmt_hex(frame)}", "rx")
                 self._record_version_info(self._phase, res)
                 self._log_version_detail(res)
+                self._log_verdict()        # 读完后立刻给「升级成功 / 升级失败 / 无法判定」
             else:
                 # DAR 可能因 PIID-ACD 位（bit7）带上标志位，判据只在协议层，这里照实显示
                 self._log(f"[RX] {fmt_hex(frame)}  → DAR={self._dar_value(dar)} 成功", "rx")
@@ -1267,14 +1426,205 @@ class Dlt698UpgradeWidget(QWidget):
             lines.append(f"{indent}{name} = {row.get('值', '')}{tail}")
         return lines
 
+    # ── 升级前 / 升级完成后 版本比对（现场口径：变了=成功，一致=失败）──────────
+
+    @staticmethod
+    def _version_entries(rows: List[dict]) -> List[tuple]:
+        """把逐字段明细归一出比对用的 `[(名称, 值, 原始)]`。
+
+        **丢掉** ``⚠`` 开头的诊断提示行（如「长度未自证」）：那是解析器对帧形状的告警，
+        不是版本字段，不能由它决定「升级成没成」。
+        """
+        out: List[tuple] = []
+        for row in rows or []:
+            if not isinstance(row, dict):
+                continue
+            name = str(row.get("名称", "")).strip()
+            if name.startswith(VERDICT_SKIP_ROW_PREFIX):
+                continue
+            out.append((name, str(row.get("值", "")).strip(),
+                        str(row.get("原始", "") or "").strip().upper()))
+        return out
+
+    @classmethod
+    def _compare_version_entries(cls, pre: List[tuple], post: List[tuple]) -> List[dict]:
+        """逐字段比对，返回 `[{name, old, new, changed}]`（顺序：先升级前字段，后新增字段）。
+
+        判等口径：**优先比原始字节**（`值` 是给人看的格式化结果，日期会补全、长值会裁剪，
+        拿它判等会把「同一个版本」误判成变了）；两侧原始都缺时退化为比 `值`；
+        只在一边出现的字段（新增 / 消失）一律算**变化**。
+        """
+        def _bucket(items):
+            bucket: dict = {}
+            for name, value, raw in items:
+                bucket.setdefault(name, []).append((value, raw))
+            return bucket
+
+        pre_map, post_map = _bucket(pre), _bucket(post)
+        names: List[str] = []
+        for name, _, _ in (pre + post):
+            if name not in names:
+                names.append(name)
+        diffs: List[dict] = []
+        for name in names:
+            old_items, new_items = pre_map.get(name) or [], post_map.get(name) or []
+            old = " / ".join(v for v, _ in old_items)
+            new = " / ".join(v for v, _ in new_items)
+            old_raw = " ".join(r for _, r in old_items if r)
+            new_raw = " ".join(r for _, r in new_items if r)
+            if not old_items or not new_items:
+                changed = True                       # 新增 / 消失 ⇒ 算变化
+            elif old_raw and new_raw:
+                changed = old_raw.upper() != new_raw.upper()
+            else:
+                changed = old != new
+            diffs.append({"name": name, "old": old, "new": new, "changed": changed})
+        return diffs
+
+    def _recompute_verdict(self) -> None:
+        """按两侧已读结果重算判定（`_reset_version_info` / `_record_version_info` 后调用）。
+
+        结论写进 :attr:`_ver_verdict`：`{level, title, details}`。**只表述读到的证据**：
+        缺一侧就明说「无法判定」，绝不在无证据下宣称成功或失败。
+        """
+        pre = self._ver_info.get("pre") or {}
+        post = self._ver_info.get("post") or {}
+        pre_ok = bool(pre) and not pre.get("reason")
+        post_ok = bool(post) and not post.get("reason")
+
+        if not post:
+            # 升级完成后还没读：升级前有内容就给「等比对」，否则啥都没读
+            if pre_ok:
+                level = VERDICT_PENDING
+                title = "待比对：已记录升级前版本，等升级完成后读版本"
+                details = [self._verdict_preview(pre)]
+            elif pre.get("reason"):
+                level = VERDICT_UNKNOWN
+                title = "无法判定：升级前版本未读到（没有比对基线）"
+                details = [f"升级前未读到：{pre['reason']}"]
+            else:
+                level = VERDICT_PENDING
+                title = "尚未比对：升级前 / 升级完成后都没读到版本信息"
+                details = ["勾选「升级前读版本信息」+「升级完成后读版本信息」才会自动比对"]
+            self._ver_verdict = {"level": level, "title": title, "details": details}
+            return
+
+        if not pre:
+            level, title = VERDICT_UNKNOWN, "无法判定：没有升级前版本（缺少比对基线）"
+            details = ["未勾选「升级前读版本信息」⇒ 升级前没读，前后无法比对"]
+        elif not pre_ok or not post_ok:
+            level, title = VERDICT_UNKNOWN, "无法判定：有一侧版本没读到"
+            details = [x for x in (
+                f"升级前未读到：{pre['reason']}" if pre.get("reason") else "",
+                f"升级完成后未读到：{post['reason']}" if post.get("reason") else "",
+            ) if x]
+        elif pre.get("target") != post.get("target"):
+            level, title = VERDICT_UNKNOWN, "无法判定：前后读的不是同一项版本内容"
+            details = [f"升级前读「{pre.get('target')}」，升级完成后读「{post.get('target')}」",
+                       "两次读的版本内容不同 ⇒ 值不同不代表换了固件"]
+        else:
+            pre_entries = self._version_entries(pre.get("rows"))
+            post_entries = self._version_entries(post.get("rows"))
+            old_text = str(pre.get("note") or "").strip()
+            new_text = str(post.get("note") or "").strip()
+            if not pre_entries and not post_entries and not old_text and not new_text:
+                # 两侧 `DAR=0` 但响应**没带版本内容**（`check_get_response` 明确允许这种成功态）
+                # ⇒ 空 vs 空 不是「版本一致」，是**没有可比对的证据**。判失败会让现场白刷固件。
+                level = VERDICT_UNKNOWN
+                title = "无法判定：两侧响应都没带版本内容"
+                details = ["升级前 / 升级完成后都只回了「成功但无数据」⇒ 没有可比对的版本内容",
+                           "确认「读版本内容」选的 OAD 是否被该设备支持"]
+            else:
+                diffs = self._compare_version_entries(pre_entries, post_entries)
+                if not diffs:
+                    # 两侧都没逐字段明细（兜底只有一段文本）⇒ 退化为比对那段文本
+                    diffs = [{"name": "版本信息", "old": old_text, "new": new_text,
+                              "changed": old_text != new_text}]
+                changed = [d for d in diffs if d["changed"]]
+                if changed:
+                    level = VERDICT_CHANGED
+                    title = f"判定升级成功：版本已变化（{len(changed)}/{len(diffs)} 项）"
+                    details = [f"{d['name']}：{self._verdict_value(d['old'])} → "
+                               f"{self._verdict_value(d['new'])}" for d in changed]
+                else:
+                    level = VERDICT_SAME
+                    title = f"判定升级失败：升级前后版本完全一致（{len(diffs)} 项全部相同）"
+                    details = [f"未变化的字段：{'、'.join(d['name'] for d in diffs)}",
+                               "设备可能没换新固件：确认升级包是否对应本设备、"
+                               "设备是否真的执行了升级"]
+        self._ver_verdict = {"level": level, "title": title, "details": details}
+
+    @classmethod
+    def _verdict_value(cls, text: str) -> str:
+        """判定条上的值显示：空值给 `(空)`，过长截断（完整值见明细面板 / 日志）。"""
+        text = str(text or "").strip()
+        if not text:
+            return "(空)"
+        return text if len(text) <= VERDICT_VALUE_MAX else text[:VERDICT_VALUE_MAX] + "…"
+
+    @classmethod
+    def _verdict_preview(cls, info: dict) -> str:
+        """「等比对」时的升级前版本摘要：`厂商代码=JCDZ、软件版本号=v1.0 …`。"""
+        entries = cls._version_entries(info.get("rows"))
+        if entries:
+            return "升级前：" + "、".join(f"{n}={cls._verdict_value(v)}"
+                                          for n, v, _ in entries[:3])
+        note = str(info.get("note") or "").strip()
+        return f"升级前：{note}" if note else "升级前：已读到（无逐字段明细）"
+
+    def _verdict_color(self, level: str) -> str:
+        """判定条配色（走本页主题色卡；暗色/浅色自动适配）。"""
+        palette = getattr(self, "_palette", None) or LOG_PALETTES[False]
+        return {
+            VERDICT_CHANGED: palette["rx"],       # 绿：升级成功
+            VERDICT_SAME: palette["fail"],        # 红：升级失败
+            VERDICT_UNKNOWN: palette["warn"],     # 橙：无法判定
+        }.get(level, palette["info"])             # 灰：待比对
+
+    def _render_version_verdict(self) -> None:
+        """重画判定条（纯文本 + 主题色；结论一行、依据逐行）。"""
+        verdict = getattr(self, "_ver_verdict", None) or {}
+        level = verdict.get("level", VERDICT_PENDING)
+        title = str(verdict.get("title") or "")
+        details = [str(d) for d in (verdict.get("details") or []) if str(d).strip()]
+        mark = {VERDICT_CHANGED: "✅ ", VERDICT_SAME: "❌ ",
+                VERDICT_UNKNOWN: "⚠ ", VERDICT_PENDING: "⏳ "}.get(level, "")
+        lines = [f"{mark}{title}"] + [f"    {d}" for d in details]
+        self.lbl_verdict.setText("\n".join(lines))
+        self.lbl_verdict.setStyleSheet(f"color: {self._verdict_color(level)};")
+
+    def _log_verdict(self) -> None:
+        """把比对结论写进日志（展示区之外留档；结论不明时只写提示，不倒苦水）。
+
+        ``pending`` **只写结论行、不写明细**：待比对时明细是把升级前字段值复述一遍，
+        会和「帧下一行的读版本明细」重复刷屏（字段值只该在明细里出现一次）。
+        """
+        verdict = getattr(self, "_ver_verdict", None) or {}
+        level = verdict.get("level", VERDICT_PENDING)
+        title = str(verdict.get("title") or "")
+        details = [str(d) for d in (verdict.get("details") or []) if str(d).strip()]
+        if level == VERDICT_CHANGED:
+            self._log(f"[信息] 版本比对：{title}", "rx")
+        elif level == VERDICT_SAME:
+            self._log(f"[失败] 版本比对：{title}", "fail")
+        elif level == VERDICT_UNKNOWN:
+            self._log(f"[信息] 版本比对：{title}", "warn")
+            details = details[:1]          # 原因一行就够（双速率时那行已由调用方写过）
+        else:
+            self._log(f"[信息] 版本比对：{title}", "info")
+            return
+        for line in details:
+            self._log(f"    {line}", "info")
+
     def _reset_version_info(self) -> None:
         """清空两个读版本结果（每次「开始升级」/「清除」都重置，避免上一轮的残留误导）。"""
         self._ver_info = {"pre": None, "post": None}
+        self._recompute_verdict()
         self._render_version_panel()
 
     def _record_version_info(self, phase: str, res: Optional[dict] = None,
                             reason: str = "") -> None:
-        """记下本步读版本结果（成功给逐字段明细；失败给原因）并刷新展示区。"""
+        """记下本步读版本结果（成功给逐字段明细；失败给原因）并刷新展示区 + 判定条。"""
         where = "pre" if phase == PHASE_VER_PRE else "post"
         self._ver_info[where] = {
             "target": self._read_target_short(),
@@ -1283,10 +1633,11 @@ class Dlt698UpgradeWidget(QWidget):
             "note": str((res or {}).get("version") or ""),
             "reason": str(reason or ""),
         }
+        self._recompute_verdict()
         self._render_version_panel()
 
     def _render_version_panel(self) -> None:
-        """按本轮结果重画展示区（升级前 / 升级完成后 各一栏，便于前后对比）。"""
+        """按本轮结果重画展示区（判定条 + 升级前 / 升级完成后 各一栏）。"""
         for key, title, box in (("pre", "升级前", self.txt_version_pre),
                                 ("post", "升级完成后", self.txt_version_post)):
             info = self._ver_info.get(key)
@@ -1301,6 +1652,7 @@ class Dlt698UpgradeWidget(QWidget):
             if len(lines) == 1:
                 lines.append(f"（无明细）{info['note']}")
             box.setPlainText("\n".join(lines))
+        self._render_version_verdict()
 
     def _log_version_detail(self, res: dict) -> None:
         """把读版本的解析结果**写在帧行的下面若干行**（而不是同一行尾部）。
@@ -1326,10 +1678,12 @@ class Dlt698UpgradeWidget(QWidget):
     # 协议层惰性 import（design §4 硬要求 3）
     # ======================================================================
 
-    def _upgrade_module(self):
+    def _upgrade_module(self, quiet: bool = False):
         """**函数内**惰性 import ``dl_t698_45_upgrade``（它顶层 import crcmod 系模块）。
 
         失败时明确提示 ``MISSING_CRCMOD`` 并返回 None（不崩、不静默）。
+        ``quiet=True`` 只写日志、**不弹框**：给「启动时恢复上次升级包」用 —— 打开页面就弹
+        一个模态框会打断现场，而用户此刻并没有做任何操作（真正的弹框留给 `_on_start`）。
         """
         if self._upg is not None:
             return self._upg
@@ -1337,7 +1691,8 @@ class Dlt698UpgradeWidget(QWidget):
             import dl_t698_45_upgrade as upg
         except ImportError as exc:
             self._log(f"[失败] {MISSING_CRCMOD}（原始错误：{exc}）", "fail")
-            QMessageBox.warning(self, "协议8 升级", MISSING_CRCMOD)
+            if not quiet:
+                QMessageBox.warning(self, "协议8 升级", MISSING_CRCMOD)
             return None
         self._upg = upg
         return upg
@@ -1360,6 +1715,8 @@ class Dlt698UpgradeWidget(QWidget):
     def _step_label(self) -> str:
         if self._phase == PHASE_VER_PRE:
             return "升级前读版本信息"
+        if self._phase == PHASE_BAUD_BOOST:
+            return "提升波特率"
         if self._phase == PHASE_WAIT_RESET:
             return f"等待设备复位（剩余 {max(0, self._reset_left)} 秒）"
         if self._phase == PHASE_VER_POST:
@@ -1369,6 +1726,170 @@ class Dlt698UpgradeWidget(QWidget):
         if self._phase == PHASE_BLOCKS:
             return f"第 {self._block_idx + 1}/{self._num_blocks()} 包"
         return "执行升级"
+
+    # ======================================================================
+    # 提升波特率（升级前发命令 → 主机切速 → 收尾切回）
+    # ======================================================================
+
+    def _boost_enabled(self) -> bool:
+        """本次是否要「提升波特率」：勾了**且**在串口通道（蓝牙没有波特率这一说）。"""
+        return bool(self.chk_boost_baud.isChecked()) and self._channel() == "serial"
+
+    def _send_boost_command(self) -> None:
+        """发「提升波特率」命令（FT1.2 定长实帧，**不经 698 组帧、不占 PIID**）。
+
+        只发不等确认：这条命令按现场口径是「单向通知」（设备切完速率后才可能回帧，
+        而那时主机还停在旧速率，等它只会白等一个超时）。发送缓冲的排空由
+        :meth:`SerialWorker.set_baudrate` 保证（切速前 ``flush()``），本页只负责留出
+        「设备改自己 UART」的那段静默时间（「切换等待(ms)」）。
+        """
+        if not self._write(BAUD_BOOST_COMMAND):
+            return                          # `_write` 已按串口层原因停止并说明
+        self._log(f"[TX] {fmt_hex(BAUD_BOOST_COMMAND)}  (提升波特率命令)", "tx")
+        self._set_status()
+        wait = max(0, int(self.spin_boost_wait.value()))
+        self._log(f"[信息] 提升波特率命令已发出，静默 {wait}ms 待设备切完速率后，"
+                  f"主机侧切到 {BAUD_BOOST}", "info")
+        self._boost_timer.start(wait)
+
+    def _on_boost_ready(self) -> None:
+        """「切换等待」到点 ⇒ 把**主机**串口切到 `BAUD_BOOST`，然后才走后续步骤。
+
+        顺序不可换：设备只认「先收命令再切」，主机先切就连命令都发不出去。
+        """
+        if self._state in TERMINAL_STATES or self._phase != PHASE_BAUD_BOOST:
+            self._boost_timer.stop()        # 已中止/清除/失败 ⇒ 不再动共享串口的速率
+            return
+        worker = self._serial_worker
+        if worker is None:
+            self._stop_and_fail("串口线程已解绑，无法切换波特率，已停止")
+            return
+        setter = getattr(worker, "set_baudrate", None)
+        if not callable(setter):
+            self._stop_and_fail(
+                f"串口线程不支持切换波特率（缺 set_baudrate），已停止"
+                f"（{len(BAUD_BOOST_COMMAND)} 字节的提升波特率命令已发出）")
+            return
+        try:
+            ok = bool(setter(BAUD_BOOST))
+        except Exception as exc:                      # 串口层任何异常都必须外显
+            self._stop_and_fail(f"切换波特率异常：{type(exc).__name__}: {exc}")
+            return
+        if not ok:
+            self._stop_and_fail(f"切换波特率到 {BAUD_BOOST} 失败，已停止"
+                               f"（串口层错误见主窗口「串口配置」状态）")
+            return
+        self._boosted = True
+        self._boost_used = True            # 黏性：切回后仍为 True，「升级后读版本」据此换速率再试
+        self._rx_buf.clear()               # 切速前后的半帧/线噪一律不作数
+        self._log(f"[信息] 主机串口已切到 {BAUD_BOOST}，继续升级"
+                  f"（文件传完、开始等设备升级时会先切回 {BAUD_DEFAULT}；"
+                  f"若设备升级失败仍停在 {BAUD_BOOST}，升级后读版本会在两种速率上各试一遍）",
+                  "info")
+        self._phase = PHASE_VER_PRE if self.chk_read_before.isChecked() else PHASE_START
+        self._attempt = 0
+        self._send_current_step()
+
+    def _restore_baud(self, why: str) -> None:
+        """把**主机**串口切回 `BAUD_DEFAULT`（幂等；本轮没提升过、或已经切回成功就是空操作）。
+
+        三处调用，缺一不可：
+        - :meth:`_begin_reset_wait`（文件全传完、开始等设备复位升级）—— 设备复位后回到默认
+          速率，「升级完成后读版本信息」**优先**用默认速率（现场口径，用户明确要求）；
+        - :meth:`_finish_buttons`（终态兜底）—— 中止/失败/清除也要还回去，否则共享串口被留在
+          115200，而顶部「串口配置」与页面都按默认速率说话，现场查不出原因；
+        - :meth:`cleanup`（页面关闭）。
+
+        **只在真切成功时才清 `_boosted`**：切失败就保留标记，后续收尾还会再试一次
+        （否则失败一次就再也没人把端口带回来了）。
+        """
+        if not self._boosted:
+            return
+        worker = self._serial_worker
+        if worker is None:
+            self._log(f"[信息] {why}：串口线程已解绑，跳过切回 {BAUD_DEFAULT} 波特率", "warn")
+            return
+        setter = getattr(worker, "set_baudrate", None)
+        if not callable(setter):
+            self._log(f"[失败] {why}：串口线程不支持切换波特率（缺 set_baudrate），"
+                      f"未切回 {BAUD_DEFAULT}（请到顶部「串口配置」手动核对）", "fail")
+            return
+        try:
+            ok = bool(setter(BAUD_DEFAULT))
+        except Exception as exc:
+            self._log(f"[失败] {why}：切回 {BAUD_DEFAULT} 波特率异常："
+                      f"{type(exc).__name__}: {exc}", "fail")
+            return
+        if ok:
+            self._boosted = False          # 只有真切成功才清（失败保留标记，收尾会再试）
+            self._rx_buf.clear()
+            self._log(f"[信息] {why}：串口波特率已切回 {BAUD_DEFAULT}", "info")
+        else:
+            self._log(f"[失败] {why}：切回 {BAUD_DEFAULT} 波特率失败"
+                      f"（请到顶部「串口配置」手动核对）", "fail")
+
+    def _plan_post_read_bauds(self) -> None:
+        """重置「升级完成后读版本」的**双速率尝试计划**（在进入等待时定下来）。
+
+        本轮没提升过波特率 ⇒ 只有一个速率可试（设备一直跑在默认速率，没有「另一种」可言），
+        行为与旧版**逐字相同**；提升过 ⇒ 默认速率先行、失败再换提升速率。
+        """
+        self._post_bauds = list(POST_READ_BAUDS) if self._boost_used else [BAUD_DEFAULT]
+        self._post_baud_idx = 0
+        self._post_baud_fails = []
+
+    def _switch_post_baud(self, why: str) -> bool:
+        """当前速率读不到 ⇒ 换**下一种**速率重发一次「升级完成后读版本信息」。
+
+        Returns:
+            True = 已切速并把该步重发（调用方**不要再**判失败）；False = 没有下一种速率了
+            （真的读不到；调用方照旧记原因并收尾）。
+
+        现场口径：设备升级成功会复位回 :data:`BAUD_DEFAULT`，**升级失败则可能仍停在
+        :data:`BAUD_BOOST`** —— 本页无从预知，两种速率都得试。切速前把 RX 缓冲清干净：
+        切速那一刻缓冲里攒的是「用另一个速率采样到的垃圾字节」，留着只会误导分帧。
+        """
+        idx = self._post_baud_idx + 1
+        if idx >= len(self._post_bauds):
+            return False
+        target = self._post_bauds[idx]
+        worker = self._serial_worker
+        if worker is None:
+            self._log(f"[失败] {BAUD_DEFAULT}/{BAUD_BOOST} 双速率尝试：串口线程已解绑，"
+                      f"无法切到 {target}（{why}）", "fail")
+            return False
+        setter = getattr(worker, "set_baudrate", None)
+        if not callable(setter):
+            self._log(f"[失败] {BAUD_DEFAULT}/{BAUD_BOOST} 双速率尝试：串口线程不支持"
+                      f"切换波特率（缺 set_baudrate），无法切到 {target}（{why}）", "fail")
+            return False
+        try:
+            ok = bool(setter(target))
+        except Exception as exc:
+            self._log(f"[失败] {BAUD_DEFAULT}/{BAUD_BOOST} 双速率尝试：切到 {target} 异常："
+                      f"{type(exc).__name__}: {exc}", "fail")
+            return False
+        if not ok:
+            self._log(f"[失败] {BAUD_DEFAULT}/{BAUD_BOOST} 双速率尝试：切到 {target} 失败"
+                      f"（{why}；请到顶部「串口配置」手动核对）", "fail")
+            return False
+        self._post_baud_idx = idx
+        # 切到提升速率就等于「端口被本页设在非默认速率」⇒ 收尾仍要走 `_restore_baud` 带回来
+        self._boosted = (target != BAUD_DEFAULT)
+        self._rx_buf.clear()
+        self._attempt = 0
+        self._wait_timer.stop()
+        self._log(f"[信息] {self._post_bauds[idx - 1]} 波特率下读不到升级后版本信息（{why}），"
+                  f"已切到 {target} 再试一次"
+                  f"（设备升级失败时可能仍停在 {target}；两种速率都读不到才算读不到）", "info")
+        self._send_current_step()
+        return True
+
+    def _post_baud_reason(self) -> str:
+        """把各速率下的失败原因合成一句（只试过一个速率时**原样返回**，与旧文案一致）。"""
+        if len(self._post_baud_fails) <= 1:
+            return self._post_baud_fails[0][1] if self._post_baud_fails else ""
+        return "；".join(f"{baud} 波特率下 {why}" for baud, why in self._post_baud_fails)
 
     # ======================================================================
     # 状态机（design §4：单发 QTimer + 标志位）
@@ -1467,6 +1988,12 @@ class Dlt698UpgradeWidget(QWidget):
         - `done_message`：**不读**后版本时的收尾文案；
         - `posted_message`：**读了**后版本时的收尾文案（等读完后由 :meth:`_on_ack` 用）。
         """
+        # 文件全部传完、进入「等设备复位升级」⇒ 此刻把主机串口**切回默认速率**：
+        # 设备升级成功会复位、回到默认速率，升级完成后的读版本信息**优先**用默认速率
+        # （现场口径）。若设备升级失败仍停在提升速率，读完重试用尽会换速率再试一遍
+        # （`_switch_post_baud`，见 `_plan_post_read_bauds`）。
+        self._restore_baud("文件传输完成，等待设备升级")
+        self._plan_post_read_bauds()
         if not self.chk_read_after.isChecked():
             self._succeed(done_message)
             return
@@ -1528,12 +2055,13 @@ class Dlt698UpgradeWidget(QWidget):
         self._wait_timer.stop()
         if self._state in (STATE_DONE, STATE_ABORTED, STATE_FAILED):
             return
-        if self._phase == PHASE_WAIT_RESET:
-            # 等待设备复位期间**没有在飞的请求**（末包/执行升级都已确认）⇒ 超时/重试/失败
-            # 都不成立。放行会**发错帧**：`_expected_omd` 对等待阶段落到 EXEC ⇒ 重发的是
-            # 「执行升级」命令（用户可能根本没勾它），重试用尽还会把等待误判成失败。
-            # `_wait_timer` 进等待时已停，这里只挡「万一」被触发（外部调用/将来改动）。
-            self._log("[信息] 等待设备复位期间无在飞的请求 ⇒ 忽略超时/重试判定", "warn")
+        if self._phase in (PHASE_WAIT_RESET, PHASE_BAUD_BOOST):
+            # 等待设备复位 / 提升波特率期间**没有在飞的请求**（末包/执行升级都已确认、
+            # 提升波特率命令是单向通知）⇒ 超时/重试/失败都不成立。放行会**发错帧**：
+            # `_expected_omd` 对这两类阶段落到 EXEC ⇒ 重发的是「执行升级」命令
+            # （用户可能根本没勾它），重试用尽还会把等待误判成失败。
+            # `_wait_timer` 进这两个阶段时都已停，这里只挡「万一」被触发（外部调用/将来改动）。
+            self._log(f"[信息] {self._step_label()}期间无在飞的请求 ⇒ 忽略超时/重试判定", "warn")
             return
         limit = self.spin_retries.value()
         step = self._step_label()
@@ -1568,8 +2096,10 @@ class Dlt698UpgradeWidget(QWidget):
     def _continue_after_version_failure(self, why: str) -> None:
         """读版本信息用尽重试：**记日志后继续**（升级流程不因诊断步骤停下）。
 
-        `ver_pre` → 照常发启动传输（状态机停在 starting）；`ver_post` → 升级本身已完成，
-        直接按成功收尾（文案里说明读版本未成功，明细在日志）。
+        `ver_pre` → 照常发启动传输（状态机停在 starting）；`ver_post` → 先看**还有没有另一种
+        波特率没试过**（设备升级成功会复位回默认速率，升级失败则可能仍停在提升速率，本页
+        无从预知）—— 有就换速率再试一轮（:meth:`_switch_post_baud`），**两种速率都读不到**
+        才按失败记原因并收尾（升级本身已完成）。
         """
         if self._phase == PHASE_VER_PRE:
             self._record_version_info(PHASE_VER_PRE, reason=why)
@@ -1578,8 +2108,17 @@ class Dlt698UpgradeWidget(QWidget):
             self._attempt = 0
             self._send_current_step()
             return
-        self._record_version_info(PHASE_VER_POST, reason=why)
-        self._log(f"[信息] 读版本信息未成功（{why}），升级流程已结束", "warn")
+        tried = (self._post_bauds[self._post_baud_idx] if self._post_bauds else BAUD_DEFAULT)
+        self._post_baud_fails.append((tried, why))
+        if self._switch_post_baud(why):
+            return                          # 已切速并重发，本步还没结束
+        reason = self._post_baud_reason() or why
+        self._record_version_info(PHASE_VER_POST, reason=reason)
+        if len(self._post_baud_fails) > 1:
+            self._log(f"[信息] {BAUD_DEFAULT} / {BAUD_BOOST} 两种波特率都读不到升级后版本信息，"
+                      f"升级流程已结束（升级本身已完成）", "warn")
+        self._log(f"[信息] 读版本信息未成功（{reason}），升级流程已结束", "warn")
+        self._log_verdict()                # 升级后版本没读到 ⇒ 判定条明说「无法判定」
         self._succeed("升级流程完成（读版本信息未成功，原因见日志）")
 
     def _abort_with(self, reason: str) -> None:
@@ -1700,20 +2239,64 @@ class Dlt698UpgradeWidget(QWidget):
         except OSError as exc:
             self._fail_soft(f"文件读取失败：{path}（{exc}）")
             return
+        self._apply_package(path, data)
+        # 路径**立刻**落盘（不等 400ms 防抖）：现场选完文件就关窗口也不会丢
+        self._schedule_save()
+
+    def _apply_package(self, path: str, data: bytes, *, set_size: bool = True,
+                       announce: bool = True, quiet: bool = False) -> None:
+        """把已读好的升级包**装到页面**（手工选择与启动恢复的唯一实现，防两条路走偏）。
+
+        - ``set_size``：「文件大小」跟着真实字节数走（手工选择时）；**恢复时置 False** ——
+          手工覆盖值 `size_override` 是用户参数，恢复流程不该把它冲掉（它是落盘参数之一）。
+        - ``announce``：是否写「分包完成」日志（启动恢复不写，免得开页面就刷一行）。
+        - ``quiet``：crcmod 缺失时不弹框（恢复路径用，见 `_upgrade_module`）。
+        """
         self._path = path
         self._data = data
-        # 「文件大小」跟着真实字节数走（用户仍可手工覆盖以复现文档实帧）
-        self.spin_size.setValue(min(len(data), self.spin_size.maximum()))
-        self._rebuild_blocks(announce=True)
+        if set_size:
+            self.spin_size.setValue(min(len(data), self.spin_size.maximum()))
+        self._rebuild_blocks(announce=announce, quiet=quiet)
         self._refresh_summary()
+        if self._restore_note:                    # 换到新文件 ⇒ 撤掉「上次的文件不可用」告警
+            self._restore_note = ""
+            self.lbl_drop_hint.setText(DROP_HINT_IDLE)
 
-    def _rebuild_blocks(self, announce: bool = False) -> None:
+    def _restore_package(self) -> None:
+        """按落盘路径恢复上次的升级包（**静默**：启动恢复不弹框、不打断现场）。
+
+        现场口径：重开程序要直接看到上次的文件，**只有换新文件才更新路径**。
+        文件没了/变目录/读失败 ⇒ **不恢复**（保持「未选择文件」，`_validate_inputs` 会拦住
+        开始），在拖放区写明原因并记一条日志；**落盘路径仍保留**（U 盘/网络盘可能一会儿就回来，
+        不该替用户删掉他的记录）。
+        """
+        path = str(self._persisted_path or "")
+        if not path:
+            return
+        err = check_package_file(path)
+        if err:
+            self._restore_note = f"上次的升级包不可用（{err}）"
+            self.lbl_drop_hint.setText(f"⚠ {self._restore_note}")
+            self._log(f"[警告] {self._restore_note}，请重新拖入升级包", "warn")
+            return
+        try:
+            with open(path, "rb") as fh:
+                data = fh.read()
+        except OSError as exc:
+            self._restore_note = f"上次的升级包读取失败（{exc}）"
+            self.lbl_drop_hint.setText(f"⚠ {self._restore_note}")
+            self._log(f"[警告] {self._restore_note}，请重新拖入升级包", "warn")
+            return
+        self._apply_package(path, data, set_size=False, announce=False, quiet=True)
+        self._log(f"[信息] 已恢复上次的升级包：{path}（{len(data):,} B）", "info")
+
+    def _rebuild_blocks(self, announce: bool = False, quiet: bool = False) -> None:
         """按当前「每包字节数」重新分包（design §3.3）。
 
         块列表取 `split_blocks`；**总包数/末包字节数/进度分母一律取 `UpgradePlan`**
         （分包算术的单一来源，本页不再自己算一遍 ceil）。
         """
-        upg = self._upgrade_module()
+        upg = self._upgrade_module(quiet=quiet)
         if upg is None or not self._data:
             self._blocks = []
             self._plan = None
@@ -1732,12 +2315,18 @@ class Dlt698UpgradeWidget(QWidget):
                       f"末包 {self._plan.last_block_bytes} 字节）", "info")
 
     def _refresh_summary(self, *_a) -> None:
-        """拖放区的文件名/大小 + 空闲态的包数摘要。"""
+        """拖放区的文件名/大小 + 空闲态的包数摘要。
+
+        文件名只显示 basename（拖放区一行放不下长路径），**完整路径挂 tooltip** ——
+        现场常有两个同名升级包放在不同目录，光看文件名分不出来。
+        """
         if not self._path:
             self.lbl_file_name.setText("未选择文件")
+            self.lbl_file_name.setToolTip("")
             self.lbl_file_size.setText("大小 —")
         else:
             self.lbl_file_name.setText(os.path.basename(self._path))
+            self.lbl_file_name.setToolTip(self._path)
             self.lbl_file_size.setText(f"大小 {self._total_bytes():,} B")
         if self._state in TERMINAL_STATES:
             if self._state == STATE_DONE and self._confirmed_bytes >= self._total_bytes() > 0:
@@ -1785,7 +2374,17 @@ class Dlt698UpgradeWidget(QWidget):
         if not self._blocks:
             self._fail_soft("分包结果为空（请检查文件内容与每包字节数）")
             return
-        self._phase = PHASE_VER_PRE if self.chk_read_before.isChecked() else PHASE_START
+        boost = self._boost_enabled()
+        if self.chk_boost_baud.isChecked() and not boost:
+            self._log("[信息] 蓝牙通道不支持「提升波特率」（波特率是串口概念），本步已跳过",
+                      "warn")
+        if boost:
+            self._phase = PHASE_BAUD_BOOST
+        else:
+            self._phase = PHASE_VER_PRE if self.chk_read_before.isChecked() else PHASE_START
+        self._boosted = False               # 本轮尚未提升（上一轮的收尾已切回默认速率）
+        self._boost_used = False            # 同上：本轮是否真的提升过，留给「升级后读版本」换速率用
+        self._plan_post_read_bauds()
         self._block_idx = 0
         self._confirmed_bytes = 0
         self._piid = 0                      # doc：启动传输 PIID=0、首块 PIID=1
@@ -1808,21 +2407,29 @@ class Dlt698UpgradeWidget(QWidget):
                   f"重试用尽 {self.spin_retries.value()} 次；"
                   f"升级前读版本={'是' if self.chk_read_before.isChecked() else '否'}，"
                   f"升级后读版本={'是' if self.chk_read_after.isChecked() else '否'}；"
-                  f"读版本内容={self._read_target_label()}）", "info")
-        self._send_current_step()
+                  f"读版本内容={self._read_target_label()}；"
+                  f"提升波特率={'是' if boost else '否'}）", "info")
+        if boost:
+            self._send_boost_command()
+        else:
+            self._send_current_step()
 
     def _freeze_plan_inputs(self, frozen: bool) -> None:
-        """传输进行中冻结会**改变计划**的输入（发送通道 + 每包字节数 + 读版本开关/内容/等待时长）。
+        """传输进行中冻结会**改变计划**的输入（发送通道 + 提升波特率 + 每包字节数 +
+        读版本开关/内容/等待时长）。
 
         改这些值会让在飞的帧与后续帧不同源（AGENTS §8 陷阱 77 / spec §7j 的既有契约）；
         按钮门控的复位统一走 :meth:`_finish_buttons`，不要在别处各写一份。
         """
+        self._frozen = bool(frozen)         # `_refresh_channel_state` 据此不解冻通道相关控件
         self.spin_block.setEnabled(not frozen)
         self.chk_read_before.setEnabled(not frozen)
         self.chk_read_after.setEnabled(not frozen)
         self.combo_read_target.setEnabled(not frozen)
         self.spin_read_after_delay.setEnabled(not frozen)
         self.combo_channel.setEnabled(not frozen)
+        self.chk_boost_baud.setEnabled(not frozen and self._channel() == "serial")
+        self.spin_boost_wait.setEnabled(not frozen)
 
     def _read_target_key(self) -> str:
         """当前「读版本内容」键（`common` / `internal`）；未知值回落默认。"""
@@ -1935,6 +2542,13 @@ class Dlt698UpgradeWidget(QWidget):
         if self._state in (STATE_STARTING, STATE_TRANSFERRING, STATE_FINISHING):
             text += f"｜{self._step_label()}｜重试 {self._attempt}/{self.spin_retries.value()}"
         text += f"｜已发送 {self._sent_frames} 帧"
+        if self._state == STATE_DONE:
+            # 收尾状态行直接给结论（现场最后看的就是这一行；明细在「版本信息」判定条）
+            level = (getattr(self, "_ver_verdict", None) or {}).get("level")
+            if level == VERDICT_CHANGED:
+                text += "｜判定：升级成功（版本已变化）"
+            elif level == VERDICT_SAME:
+                text += "｜判定：升级失败（版本未变化）"
         self.lbl_status.setText(text)
 
     @property
@@ -1963,6 +2577,8 @@ class Dlt698UpgradeWidget(QWidget):
         QMessageBox.warning(self, "协议8 升级", message)
 
     def _finish_buttons(self) -> None:
+        self._boost_timer.stop()            # 还在「等设备切速」就被收尾 ⇒ 不再动共享串口速率
+        self._restore_baud("本轮已结束")    # 终态兜底：中止/失败/清除也要切回默认速率
         self._reset_timer.stop()            # 等待设备复位的倒计时一并在收尾/中止/失败时停掉
         self._reset_left = 0
         self.btn_start.setEnabled(self._worker() is not None)
@@ -1979,6 +2595,8 @@ class Dlt698UpgradeWidget(QWidget):
     def _collect_settings(self) -> dict:
         return {
             "version": CONFIG_VERSION,
+            # 上次选中的升级包路径（现场口径：重开程序要直接显示上次的文件）
+            "file_path": self._path,
             "block_size": self.spin_block.value(),
             "timeout_ms": self.spin_timeout.value(),
             "retries": self.spin_retries.value(),
@@ -1988,6 +2606,8 @@ class Dlt698UpgradeWidget(QWidget):
             "read_target": self._read_target_key(),
             "read_after_delay_s": self.spin_read_after_delay.value(),
             "channel": self._channel(),
+            "boost_baud": self.chk_boost_baud.isChecked(),
+            "boost_wait_ms": self.spin_boost_wait.value(),
             "sa_type": int(self.combo_sa_type.currentData()),
             "sa_logic": int(self.combo_sa_logic.currentData()),
             "sa_len": int(self.combo_sa_len.currentData()),
@@ -2057,6 +2677,8 @@ class Dlt698UpgradeWidget(QWidget):
             (self.spin_ca, "ca", 0, 0, 255),
             (self.spin_read_after_delay, "read_after_delay_s", DEFAULTS["read_after_delay_s"],
              READ_AFTER_DELAY_MIN, READ_AFTER_DELAY_MAX),
+            (self.spin_boost_wait, "boost_wait_ms", DEFAULTS["boost_wait_ms"],
+             BOOST_WAIT_MS_MIN, BOOST_WAIT_MS_MAX),
         ):
             spin.blockSignals(True)
             spin.setValue(_bounded_int(s[key], default, lo, hi))
@@ -2087,7 +2709,8 @@ class Dlt698UpgradeWidget(QWidget):
         self.chk_auto_exec.setChecked(bool(s["auto_exec"]))
         self.chk_auto_exec.blockSignals(False)
         for chk, key in ((self.chk_read_before, "read_before"),
-                         (self.chk_read_after, "read_after")):
+                         (self.chk_read_after, "read_after"),
+                         (self.chk_boost_baud, "boost_baud")):
             chk.blockSignals(True)
             chk.setChecked(bool(s[key]))
             chk.blockSignals(False)
@@ -2103,13 +2726,23 @@ class Dlt698UpgradeWidget(QWidget):
         # 以上 setter 都在 blockSignals 里：载入过程不会反过来触发 `_schedule_save`
         # 把刚读到的配置再写一遍（白 IO）。
 
+        # 最后一步恢复「上次的升级包」：现场口径是**重开程序直接显示上次的文件**，
+        # 只有换新文件才更新路径。放在参数之后 —— 恢复要走分包（`spin_block` 得先就位），
+        # 且 `set_size=False` 不冲掉刚读回的手工「文件大小」覆盖值。
+        self._persisted_path = str(s.get("file_path") or "")
+        self._restore_package()
+
     # ======================================================================
     # 收尾
     # ======================================================================
 
     def cleanup(self) -> None:
         """停表、断开串口/蓝牙信号、落盘配置（幂等）。**不关闭串口、也不断蓝牙连接**：都归各自页面。"""
-        for timer in (self._wait_timer, self._save_timer, self._reset_timer):
+        # 「提升波特率」的兜底：页面被拆掉（切协议/退出）时若还停在高速率，共享串口会被留在
+        # 115200 而顶部「串口配置」按默认速率说话 —— 先切回**再**摘 worker（切速要 worker 在手）。
+        self._restore_baud("升级页关闭")
+        for timer in (self._wait_timer, self._save_timer, self._reset_timer,
+                      self._boost_timer):
             try:
                 timer.stop()
             except RuntimeError:

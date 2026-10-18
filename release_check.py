@@ -124,6 +124,8 @@ CORE_TESTS = [
     "test/test_tcp_monitor_record_dir.py",
     "test/test_btn_width_fit.py",
     "test/test_message_tool_numeric.py",
+    # 报文工具「地址替换」（纯逻辑六协议真帧 oracle + 前导 FE 门控 + offscreen GUI 接线）
+    "test/test_message_tool_addr_fix.py",
     "test/test_dl_t698_45_extract.py",
     "test/test_dl_t698_45_endian.py",
     # 协议8 文件传输升级（纯逻辑）：三帧逐字节 golden（含 doc 实帧）/ 分包矩阵 / SA / 确认判定 / 校验值
@@ -133,6 +135,8 @@ CORE_TESTS = [
     "test/test_serial_tool_widget.py",
     "test/test_serial_proto_frame.py",
     "test/test_serial_worker_write_raw.py",
+    # 串口运行中热切换波特率（纯逻辑假串口：先 flush 再改速、共写锁、不关端口、失败不改 _baudrate）
+    "test/test_serial_worker_set_baudrate.py",
     # 串口工具批量替换通信地址（纯逻辑：六协议真帧 oracle + 前导 FE 门控 + 预期响应口径）
     "test/test_serial_addr_fix.py",
     # 蓝牙工具（core 纯逻辑 / worker 注入假 bleak / widget offscreen 假 worker，均不碰硬件）

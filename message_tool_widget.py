@@ -9,18 +9,23 @@
 - CRC / 校验和
 - HEX <-> bitstring 转换
 - 数值 <-> HEX（按 698.45/A-XDR 基础数据类型编解码，两个方向都同时给出大端/小端）
+- 地址替换（按协议替换地址域并重算校验，复用 `frame_addr_fix`，见 `replace_frame_address`）
 """
 
 import re
 import struct
+from typing import Dict, List, Mapping, Optional, Tuple
+
 import crcmod
 import crcmod.predefined
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTextEdit, QCheckBox, QGridLayout, QMessageBox, QGroupBox, QComboBox,
-    QLineEdit,
+    QFormLayout, QLineEdit,
 )
+
+import frame_addr_fix
+import wakeup_prefix
 
 
 # CRC 算法（与协议解析器一致）
@@ -145,11 +150,78 @@ def decode_numeric_value(text: str, nbytes: int, kind: str) -> tuple[str, str, s
     return str(be_val), str(le_val), norm_hex
 
 
+# --------------------------------------------------------------- 地址替换
+#: 规范里定义了「帧前导 FEH 唤醒字节」的协议（DL/T 645-2007 §5.3.1、
+#: DL/T 698.45-2017 §6.3.1 b)）：替换前先剥离、替换后**原样恢复**。
+#: 其余协议规范里没有前导码，带 FE 的帧本就该报错 —— 剥了等于「救活」错帧（AGENTS §8 陷阱 75）。
+FE_WAKEUP_PROTOCOLS = (6, 8)
+
+
+def _coerce_protocol(protocol_index) -> Optional[int]:
+    """协议索引归一化（None / 非数字 / bool 之外的非法值 → None）。"""
+    if isinstance(protocol_index, bool):
+        return None
+    try:
+        return int(protocol_index)
+    except (TypeError, ValueError):
+        return None
+
+
+def replace_frame_address(frame_text: str, protocol_index,
+                          values: Mapping[str, str]) -> Tuple[str, List[str], str]:
+    """按协议替换地址域并重算校验 → ``(新报文 HEX, notes, error)``；error 非空表示**未改动**。
+
+    职责分工：地址定位、字节序、校验算法全部来自 :mod:`frame_addr_fix`（**禁止在此另写
+    第二份偏移/算法清单**）；本函数只做「报文文本这层」的编排 —— 解析 HEX →（协议 6/8）
+    剥离前导 FEH → 替换 → 回写成空格分隔的 HEX。
+
+    失败一律转成可读 `error`（不抛异常）：「按钮点下去必须有反应」。
+    """
+    try:
+        raw = hex_text_to_bytes(frame_text)
+    except ValueError as exc:
+        return "", [], f"报文不是有效的 HEX：{exc}"
+    body = raw
+    prefix = b""
+    if _coerce_protocol(protocol_index) in FE_WAKEUP_PROTOCOLS:
+        body, skipped = wakeup_prefix.strip_wakeup_prefix(raw)
+        prefix = raw[:skipped]
+    result = frame_addr_fix.apply(body, protocol_index, values)
+    if not result.ok:
+        return "", [], str(result.error or "地址替换失败")
+    new = prefix + bytes(result.frame)
+    return " ".join(f"{b:02X}" for b in new), list(result.notes), ""
+
+
+def addr_field_errors(protocol_index, values: Mapping[str, str]) -> List[str]:
+    """地址文本的**写法级**校验 → 可读错误列表（空 = 通过）。
+
+    只拦「写法非法 / 长度不符 / 越界」这类不用看帧就能判定的问题；698.45 的 SA 长度由帧内
+    地址特征字节决定，此处推导不出 ⇒ 按「待定」放行，交给 :func:`frame_addr_fix.apply` 判定。
+    """
+    fields = {spec.key: spec for spec in frame_addr_fix.fields_for(protocol_index)}
+    errors: List[str] = []
+    for key, spec in fields.items():
+        text = str(values.get(key, "") or "").strip()
+        if not text:
+            continue
+        _data, err = frame_addr_fix.parse_address(text, spec, spec.length)
+        if err and spec.kind == frame_addr_fix.KIND_SA698:
+            continue
+        if err:
+            errors.append(f"{spec.label}：{err}")
+    return errors
+
+
 class MessageToolWidget(QWidget):
     """报文工具标签页 — 对齐截图布局（两行按钮 + 16进制复选框）"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        # 地址替换区：当前协议的地址输入控件（key = frame_addr_fix 的字段 key）与
+        # 「切协议后仍记得用户填过的值」的暂存（按 key 存，回切时回填）
+        self._addr_edits: Dict[str, QLineEdit] = {}
+        self._addr_values: Dict[str, str] = {}
         self._build_ui()
 
     # ------------------------------------------------------------------ UI
@@ -272,6 +344,9 @@ class MessageToolWidget(QWidget):
 
         layout.addWidget(num_group)
 
+        # ---------- 地址替换（按协议替换地址域 + 重算校验） ----------
+        layout.addWidget(self._build_addr_group())
+
         # ---------- 输出区 ----------
         layout.addWidget(QLabel("输出"))
         self.output_text = QTextEdit()
@@ -280,6 +355,198 @@ class MessageToolWidget(QWidget):
         layout.addWidget(self.output_text)
 
         layout.addStretch()
+
+    # ------------------------------------------------- 地址替换区（构建）
+    def _build_addr_group(self) -> QGroupBox:
+        """地址替换组：协议下拉 + 按协议动态生成的地址输入行 + 预览 + 结果。
+
+        界面**不硬编码协议细节**：地址输入行按 `frame_addr_fix.fields_for(协议)` 动态生成，
+        标签与占位提示都来自字段声明（与串口页 `BatchAddrDialog`、蓝牙页按钮编辑对话框同一范式）。
+        """
+        group = QGroupBox("地址替换（按协议替换地址域 + 重算校验）")
+        box = QVBoxLayout(group)
+        box.setSpacing(6)
+
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.addWidget(QLabel("协议"))
+        self.addr_protocol_combo = QComboBox()
+        for label, index in frame_addr_fix.supported_choices():
+            self.addr_protocol_combo.addItem(label, index)
+        self.addr_protocol_combo.setMinimumHeight(24)
+        self.addr_protocol_combo.setToolTip(
+            "按该协议替换地址域并重算校验（地址位置/字节序/校验算法都取自该协议自身实现）；"
+            "暂不支持地址替换的协议不会出现在这里"
+        )
+        self.addr_protocol_combo.currentIndexChanged.connect(self._rebuild_addr_fields)
+        # 弹出列表按最长项放宽（否则「[13] 依瓦645」这类长项在弹出时被截）
+        _widest = max((self.addr_protocol_combo.fontMetrics().horizontalAdvance(
+            self.addr_protocol_combo.itemText(i))
+            for i in range(self.addr_protocol_combo.count())), default=0)
+        if _widest:
+            self.addr_protocol_combo.view().setMinimumWidth(_widest + 40)
+        top.addWidget(self.addr_protocol_combo)
+        top.addStretch()          # 下拉按内容取宽（不整行拉满），弹出列表按最长项放宽
+        box.addLayout(top)
+
+        self.addr_form = QFormLayout()
+        self.addr_form.setSpacing(6)
+        box.addLayout(self.addr_form)
+
+        self.lbl_addr_hint = QLabel("")
+        self.lbl_addr_hint.setWordWrap(True)
+        box.addWidget(self.lbl_addr_hint)
+
+        buttons = QHBoxLayout()
+        buttons.setContentsMargins(0, 0, 0, 0)
+        buttons.addWidget(self._btn("替换地址", self._replace_address))
+        buttons.addWidget(self._btn("复制结果", self._copy_addr_result))
+        buttons.addWidget(self._btn("结果→输入", self._addr_result_to_input))
+        buttons.addStretch()
+        box.addLayout(buttons)
+
+        result_row = QHBoxLayout()
+        result_row.setContentsMargins(0, 0, 0, 0)
+        result_row.addWidget(QLabel("替换后报文"))
+        self.addr_result_edit = QLineEdit()
+        self.addr_result_edit.setReadOnly(True)
+        self.addr_result_edit.setMinimumHeight(24)
+        self.addr_result_edit.setPlaceholderText(
+            "替换成功后在此显示可复制的报文（HEX，空格分隔；失败时保持原值不动）"
+        )
+        result_row.addWidget(self.addr_result_edit, 1)
+        box.addLayout(result_row)
+
+        # 输入框改动即刷新「地址写成什么字节 + 替换预览」（无需先点按钮）
+        self.input_text.textChanged.connect(self._refresh_addr_hint)
+
+        self._rebuild_addr_fields()
+        return group
+
+    # ------------------------------------------------- 地址替换区（逻辑）
+    def addr_protocol_index(self) -> Optional[int]:
+        """当前选中的协议索引（无选中 → None）。"""
+        return _coerce_protocol(self.addr_protocol_combo.currentData())
+
+    def addr_values(self) -> Dict[str, str]:
+        """当前地址输入值（键 = `frame_addr_fix` 的字段 key；未填 = 空串）。"""
+        return {key: edit.text().strip() for key, edit in self._addr_edits.items()}
+
+    def _rebuild_addr_fields(self):
+        """按所选协议重建地址输入行（字段声明来自 `frame_addr_fix`）。
+
+        已填内容按字段 key 暂存 —— 切到别的协议再切回来，用户填过的值还在。
+        """
+        for key, edit in list(self._addr_edits.items()):
+            self._addr_values[key] = edit.text()
+            # 按控件反查行号再移除：`QFormLayout.removeRow` **会连同该行控件一起删除**，
+            # 故不能再补 deleteLater（会先删一次再被 removeRow 删第二次 ⇒ RuntimeError）。
+            row, _role = self.addr_form.getWidgetPosition(edit)
+            if row >= 0:
+                self.addr_form.removeRow(row)
+        self._addr_edits = {}
+
+        index = self.addr_protocol_index()
+        fields = frame_addr_fix.fields_for(index) if index is not None else ()
+        for position, spec in enumerate(fields):
+            edit = QLineEdit(self._addr_values.get(spec.key, ""))
+            edit.setMinimumHeight(24)
+            edit.setPlaceholderText(spec.hint)
+            edit.textChanged.connect(self._refresh_addr_hint)
+            self._addr_edits[spec.key] = edit
+            self.addr_form.insertRow(position, f"{spec.label}：", edit)
+        self._refresh_addr_hint()
+
+    def _refresh_addr_hint(self):
+        """提示行 = 「地址会写成什么字节」+ 当前报文的替换预览（有问题只提示、不改输出）。"""
+        if not hasattr(self, "lbl_addr_hint"):
+            return
+        index = self.addr_protocol_index()
+        fields = frame_addr_fix.fields_for(index) if index is not None else ()
+        values = self.addr_values()
+        lines: List[str] = []
+        for spec in fields:
+            text = values.get(spec.key, "")
+            if not text:
+                continue
+            data, err = frame_addr_fix.parse_address(text, spec, spec.length)
+            if err and spec.kind == frame_addr_fix.KIND_SA698:
+                lines.append(f"· {spec.label}：长度按帧内地址特征确定")
+            elif err:
+                lines.append(f"⚠ {spec.label}：{err}")
+            else:
+                lines.append(f"✓ {spec.label} → {len(data)} 字节：{data.hex(' ').upper()}")
+        filled = any(values.get(spec.key, "") for spec in fields)
+        if filled and not any(line.startswith("⚠") for line in lines):
+            preview = self._addr_preview(index, values)
+            if preview:
+                lines.append(preview)
+        if not lines:
+            lines.append(
+                "填写地址后点「替换地址」：按该协议替换地址域并重算校验（留空的字段不替换）"
+            )
+        self.lbl_addr_hint.setText("\n".join(lines))
+
+    def _addr_preview(self, index: Optional[int], values: Mapping[str, str]) -> str:
+        """在提示行里给出「替换后报文」预览（失败给可读原因，不弹窗、不改输出）。"""
+        raw = self._get_input_text()
+        if not raw:
+            return ""
+        new_hex, _notes, error = replace_frame_address(raw, index, values)
+        if error:
+            return f"预览：⚠ 未替换 —— {error}"
+        return f"预览：{new_hex}"
+
+    def _replace_address(self):
+        """按协议替换地址并重算校验：结果写入「替换后报文」，逐条说明写入输出区。"""
+        index = self.addr_protocol_index()
+        if index is None:
+            QMessageBox.warning(self, "未选择协议", "请选择要替换的协议。")
+            return
+        values = self.addr_values()
+        if not values:
+            QMessageBox.warning(self, "未选择协议", "该协议没有可替换的地址字段。")
+            return
+        if not any(values.values()):
+            QMessageBox.information(
+                self, "提示", "请至少填写一个地址（留空的字段表示保持原值）。"
+            )
+            return
+        errors = addr_field_errors(index, values)
+        if errors:
+            QMessageBox.warning(self, "地址无效", "\n".join(errors))
+            return
+        raw = self._get_input_text()
+        if not raw:
+            QMessageBox.information(self, "提示", "请先输入报文")
+            return
+
+        label = frame_addr_fix.protocol_label(index) or str(index)
+        new_hex, notes, error = replace_frame_address(raw, index, values)
+        if error:
+            # 失败：结果行**保持原值不动**（否则用户会误以为已经替换成功）
+            self._set_output(f"⚠ 地址替换失败（协议：{label}）\n{error}")
+            QMessageBox.warning(self, "替换失败", error)
+            return
+        self.addr_result_edit.setText(new_hex)
+        self._set_output("\n".join([f"替换后报文（协议：{label}）", new_hex, "", "说明："]
+                                   + [f"· {note}" for note in notes]))
+
+    def _copy_addr_result(self):
+        text = self.addr_result_edit.text().strip()
+        if not text:
+            QMessageBox.information(self, "提示", "还没有替换结果可复制")
+            return
+        from PySide6.QtWidgets import QApplication
+        QApplication.clipboard().setText(text)
+
+    def _addr_result_to_input(self):
+        """把替换结果回填到输入框，便于继续改另一个地址（迭代编辑）。"""
+        text = self.addr_result_edit.text().strip()
+        if not text:
+            QMessageBox.information(self, "提示", "还没有替换结果可回填")
+            return
+        self.input_text.setPlainText(text)
 
     # ------------------------------------------------------------- helpers
     def _btn(self, text: str, slot) -> QPushButton:

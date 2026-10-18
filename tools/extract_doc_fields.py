@@ -2,6 +2,9 @@
 Extract precise field definitions from PLUZ markdown tables for all DIs in schema.
 """
 import re
+from pathlib import Path
+
+import _path_setup  # noqa: E402  （项目根入 sys.path，cwd 切到项目根）
 import frame_generator_schema as s
 
 with open('PLUZ计量自动化系统技术规范.md','r',encoding='utf-8') as f:
@@ -46,7 +49,7 @@ def find_di_sections(text):
 
 sections = find_di_sections(all_text)
 
-with open('doc_field_extraction.txt', 'w', encoding='utf-8') as out:
+with open(Path(__file__).resolve().parents[1] / 'archive' / 'exports' / 'doc_field_extraction.txt', 'w', encoding='utf-8') as out:
     for di in sorted(s.DI_FIELD_SCHEMA.keys()):
         di_str = f'{di[0]:02X} {di[1]:02X} {di[2]:02X} {di[3]:02X}'
         name = s.DI_FIELD_SCHEMA[di]['name']

@@ -1,4 +1,13 @@
+from pathlib import Path
+
 import fitz  # PyMuPDF
+
+# 产物落在本脚本同目录（tools/），输入 PDF 落在仓库根目录；
+# 一律用 __file__ 解析，避免从仓库根运行时把中间产物写回根目录。
+TOOLS_DIR = Path(__file__).resolve().parent
+ROOT = TOOLS_DIR.parent
+OUT_TXT = TOOLS_DIR / 'pdf_extract内容.txt'
+
 
 def extract_pdf_text(pdf_path):
     """提取 PDF 文本内容"""
@@ -21,16 +30,16 @@ def extract_pdf_text(pdf_path):
     doc.close()
     
     # 保存提取的文本
-    with open('pdf_extract内容.txt', 'w', encoding='utf-8') as f:
+    with open(OUT_TXT, 'w', encoding='utf-8') as f:
         f.write('\n'.join(all_text))
     
     print(f"已提取 {len(all_text)} 段文本")
-    print("完整内容已保存到：pdf_extract 内容.txt")
+    print(f"完整内容已保存到：{OUT_TXT}")
     
     return '\n'.join(all_text)
 
 if __name__ == "__main__":
-    text = extract_pdf_text("2.pdf")
+    text = extract_pdf_text(ROOT / "2.pdf")
     print("\n" + "="*80)
     print("开始搜索 DI=E8:05:05:05 相关内容...")
     print("="*80)

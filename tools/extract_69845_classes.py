@@ -4,9 +4,14 @@ Output: class_id-based map for dl_t698_45_oi_lookup.py
 """
 import re
 import sys
+from pathlib import Path
 sys.stdout.reconfigure(encoding='utf-8')
 
-with open('面向对象的用电信息数据交换协议(20210910).md', 'r', encoding='utf-8') as f:
+# 输入协议文档在仓库根目录，产物写在本脚本同目录（tools/）
+TOOLS_DIR = Path(__file__).resolve().parent
+ROOT = TOOLS_DIR.parent
+
+with open(ROOT / '面向对象的用电信息数据交换协议(20210910).md', 'r', encoding='utf-8') as f:
     content = f.read()
 
 def extract_table_rows(html_table):
@@ -223,6 +228,6 @@ for cid in sorted(classes.keys()):
 
 # Save to JSON for inspection
 import json
-with open('extracted_classes.json', 'w', encoding='utf-8') as f:
+with open(TOOLS_DIR / 'extracted_classes.json', 'w', encoding='utf-8') as f:
     json.dump(classes, f, ensure_ascii=False, indent=2)
 print("\nSaved to extracted_classes.json")

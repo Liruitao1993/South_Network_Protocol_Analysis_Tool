@@ -619,6 +619,51 @@ engine = self._engine_factory()            # 否则才是发给本虚拟表的�
   真机冒烟（非 offscreen）：`_setup_taskbar_buttons()` → True、按钮 id `0x7700..0x7703`、`PostMessage(WM_COMMAND)`
   能触发 `clicked`；「光伏升级」按钮 → 协议 8 + tab 文案「光伏升级」。
 
+### 7l. 报文工具「地址替换」（复用 `frame_addr_fix`，与 §7f/§7h/§7i 同一引擎）
+
+> 用户 → 「报文工具增加一个地址替换的功能，输入原始报文，然后根据协议类型替换地址，重新计算校验码，
+> 这就包括 645、698、国网 1376.2、南网本地接口协议等……在报文工具里面实现一个更加通用一点」。
+> 与前三处（蓝牙单按钮「发送时替换」/ 串口命令表内写回 / 蓝牙批量）**同一引擎、第 4 次复用**。
+
+- **Scope**：报文工具是「粘贴任意一帧」的自由场景（不绑命令表、不绑发送时机、不跟主窗口当前协议）
+  ⇒ 协议由用户**显式选**，下拉取 `frame_addr_fix.supported_choices()`（v1 = 0/6/7/8/13/14）。
+  **刻意不做协议自动识别**：南网/国网是同一个 `68 L L C …` 外形，靠外形猜协议只会给误导结论；
+  错选由 `frame_addr_fix.apply` 的「结构 + 原帧校验」自证兜住（失败一律可读原因）。
+- **纯逻辑入口（单一职责）**：`replace_frame_address(frame_text, protocol, values) -> (新报文 HEX, notes, error)`
+  只做「报文文本这层」编排 —— 解析 HEX（复用本模块 `hex_text_to_bytes`）→ 协议 6/8 剥离前导 FEH →
+  `frame_addr_fix.apply` → 回写成空格分隔 HEX。**地址定位/字节序/校验算法一律来自 `frame_addr_fix`**
+  （禁止第 4 份偏移或算法清单）。`error` 非空 ⇒ 帧未改动（`new_hex` 为空串，调用方据此不改结果）。
+  `addr_field_errors(protocol, values)` 做**写法级**预检，与串口页 `_on_accept` 同口径：698 SA 的长度
+  由帧内地址特征字节决定（此处推导不出 ⇒ 放行），精确长度与自证交给 `apply`。
+- **前导 FEH**：`FE_WAKEUP_PROTOCOLS = (6, 8)` 剥离并**原样恢复**（依据 DL/T 645 §5.3.1、
+  DL/T 698.45 §6.3.1 b)），剥离走 `wakeup_prefix.strip_wakeup_prefix`（**唯一实现**）；
+  其余协议规范里没有前导码，带 FE 必须报错 —— 剥了等于「救活」错帧（AGENTS §8 陷阱 75）。
+- **界面不硬编码协议细节**：地址输入行按 `frame_addr_fix.fields_for(协议)` 动态重建（标签/占位提示都来自
+  字段声明），**切协议保输入值**（按字段 key 暂存，回切回填）。提示行 = 「✓ 标签 → N 字节：…」+
+  当前报文的**替换预览**（`input_text.textChanged` 即刷，与蓝牙/串口对话框的预览同一范式）；
+  **预览只写提示行，不弹窗、不覆盖输出**（有专门一条断言钉住）。
+- **失败不污染成功结果**：点「替换地址」失败时只写输出区可读原因 + 弹警告，
+  **「替换后报文」结果行保持原值**（否则用户会误以为已替换成功）；成功才 `setText` + 写 notes 明细。
+  结果行是只读 `QLineEdit`（可一条命令复制），另给「结果→输入」用于迭代改另一个地址。
+- **Qt 坑（本次实测，务必照做）**：`QFormLayout.removeRow(row)` **会连同该行控件一起删除** ⇒
+  重建地址行时**按控件反查行号**（`getWidgetPosition`）再 `removeRow`，**不要再补 `deleteLater()`**
+  （先删一次再被 removeRow 删第二次 ⇒ `RuntimeError: Internal C++ object (QLineEdit) already deleted`）。
+  串口页那套是「先 `deleteLater()` 再 `removeRow(0)`」，两者口径不同，**别照抄**。
+- **下拉宽度**：协议下拉按内容取宽（`addStretch()` 兜住，不整行拉满）；弹出列表按最长项
+  `view().setMinimumWidth(...)`，否则「[13] 依瓦645」弹出时被截。**不写死像素**（同主窗口 `_fit_combo_width` 精神、
+  同陷阱 63）。
+- **回归**：`test/test_message_tool_addr_fix.py`（132 项 + 已登记 `release_check.py:CORE_TESTS`）：
+  [1] 口径与字段来源（FE 集合 / 下拉与 `supported_choices()` 同源 / 各协议字段集 / `addr_field_errors` 边界）、
+  [2] 六协议**真帧 oracle**（替换后**该协议校验器 0 fail** + 地址域写入期望字节 + **只有地址与校验字节变化**）、
+  [2b] FE 门控、[2c] 错误矩阵、[2d] 输入写法容错（分隔符 / `0x` / 连续写 / 小写**结果等价**）、
+  [3] 反例自检（改地址不重算校验 ⇒ 校验器必红，证明 oracle 有效）、
+  [4] offscreen GUI（下拉同源与不裁字、切协议重建地址行与保输入值、预览、真实点击、剪贴板、回填输入、
+  失败不覆盖结果行、非法 HEX 弹框）。
+- **变异反证（本次已做，均干净变红后逐字节还原）**：① 去掉前导 FE 门控 → 2 项红；
+  ② 失败也写结果行 → 1 项红；③ 关掉 `addr_field_errors` → 3 项红。
+- **仅桌面**：Web 版「报文工具」是独立实现（`reflex_web/reflex_web/web_utils.py` 的 `tool_*`），
+  本次未接地址替换 ⇒ 属既有的「缺失」类，下次 Web 同步审计时按该项登记（不要在 Web 侧另写一份偏移/算法表）。
+
 ### 8. Qt 陷阱（本项目实测）
 - **offscreen 无字体**：`QT_QPA_PLATFORM=offscreen` 下 `QFontDatabase: Cannot find font directory ...`，绘制出的文字是豆腐块 → 断言只能查尺寸/颜色/像素多样性；**要目视核对文字排版必须用默认平台**（`QApplication([])` 不设 offscreen + `widget.grab()` / `QImage.save()`，不需要窗口真的可见）。
 - **`bytes(image.constBits())` 必须持有 QImage 引用**：`bytes(canvas.render_image(w, h).constBits())`（临时对象上取 buffer）会 **access violation（0xC0000005）**；先 `img = ...` 再 `bytes(img.constBits())`。

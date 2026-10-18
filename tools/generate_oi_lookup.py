@@ -3,12 +3,18 @@ Generate updated dl_t698_45_oi_lookup.py with complete CLASS_ID_MAP and OI_TO_CL
 """
 import sys
 import json
+from pathlib import Path
 sys.stdout.reconfigure(encoding='utf-8')
 
-with open('extracted_classes.json', 'r', encoding='utf-8') as f:
+# extracted_classes.json 由 tools/extract_69845_classes.py 生成，位于本脚本同目录；
+# oi_to_class.json / dl_t698_45_oi_lookup.py 均为仓库根目录下的生产文件。
+TOOLS_DIR = Path(__file__).resolve().parent
+ROOT = TOOLS_DIR.parent
+
+with open(TOOLS_DIR / 'extracted_classes.json', 'r', encoding='utf-8') as f:
     extracted = json.load(f)
 
-with open('oi_to_class.json', 'r', encoding='utf-8') as f:
+with open(ROOT / 'oi_to_class.json', 'r', encoding='utf-8') as f:
     oi_to_class_raw = json.load(f)
 
 # Convert string keys back to int
@@ -266,7 +272,7 @@ output_lines = ['"""DL/T 698.45 OI 查询模块"""', '', 'from typing import Dic
 
 # Write OI_NAME_MAP (existing data)
 # We need to read it from the original file to preserve exactly
-with open('dl_t698_45_oi_lookup.py', 'r', encoding='utf-8') as f:
+with open(ROOT / 'dl_t698_45_oi_lookup.py', 'r', encoding='utf-8') as f:
     original = f.read()
 
 # Extract OI_NAME_MAP from original
@@ -366,7 +372,7 @@ output_lines.extend([
     '        return f"{oi_name} - {method_name}"',
 ])
 
-with open('dl_t698_45_oi_lookup.py', 'w', encoding='utf-8') as f:
+with open(ROOT / 'dl_t698_45_oi_lookup.py', 'w', encoding='utf-8') as f:
     f.write('\n'.join(output_lines) + '\n')
 
 print("\nGenerated dl_t698_45_oi_lookup.py")

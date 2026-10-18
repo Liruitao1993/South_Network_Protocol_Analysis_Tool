@@ -29,6 +29,21 @@
   [23] 发送通道：蓝牙（复用蓝牙页连接 + 按一次 ATT 写上限自动算每包上限）
   [24] 通道隔离：收发只认当前通道（蓝牙信号不拨串口通道、RX 不混源）、
        蓝牙页后建 worker / 换线程 / cleanup 只断自己的槽
+  [25] 提升波特率（仅串口通道）：升级前先发现场实帧命令 → 留切换时间 → 主机切 115200 →
+       才发 698 帧；期间不认任何回帧/超时；文件传完进入「等设备复位」时切回 9600
+       （后版本读得通）；中止/失败/清除/页面关闭一律兜底切回；蓝牙通道置灰跳过
+  [26] 升级后读版本的**双波特率尝试**（设备升级成功会复位回 9600、失败则可能仍停在
+       115200）：9600 读不到 ⇒ 自动切 115200 再试一轮；两种都读不到才算读不到（原因里
+       同时给出两个速率）；只在**提升过**时才换（没提升过单速率、零切速）；
+       升级前读版本**不**换速率；换到 115200 后收尾仍切回 9600；
+       切回失败保留标记（收尾会再试一次）
+  [27] 升级前/后版本**比对判定**（变了=升级成功、完全一致=升级失败）：判等优先比原始字节、
+       ⚠ 诊断行不参与、只在一边出现的字段算变化；缺基线 / 一侧读不到 / 前后读的不是同一项
+       ⇒ 一律「无法判定」（不得硬说成功或失败）；结论进判定条 + 收尾状态行 + 日志，
+       但不改状态机（流程照常 done/100%）；判定条配色随主题；日志不复述字段值
+  [28] 升级包**路径持久化**：重开页面自动恢复上次的文件（字节/分包/摘要都回来），
+       只有换新文件才更新路径；文件没了 ⇒ 不恢复（但保留落盘记录、不弹框）；
+       恢复不冲掉手工「文件大小」覆盖值、不写「分包完成」日志；「清除」保留文件与路径
 
 运行: python test/test_dl698_upgrade_gui.py   （QT_QPA_PLATFORM=offscreen）
 """
@@ -105,6 +120,8 @@ class FakeSerialWorker(QObject):
     - `write_raw(data)` **计数**并记下字节；**不自动回帧** —— 回帧由测试显式
       `deliver()`，否则在 write_raw 里同步 emit 会让状态机重入（真实串口不会这样）
     - `close_port()` 计数，用来断言本页**绝不**关端口
+    - `set_baudrate()` 记账（真 worker 会先 `flush()` 排空发送缓冲再改 DCB）；`fail_baud=True`
+      可模拟「切速失败」，验本页会停下而不是蒙着头继续发帧
     """
 
     raw_data_received = Signal(bytes)
@@ -117,6 +134,9 @@ class FakeSerialWorker(QObject):
         self.sent = []                 # List[bytes]
         self.writes = 0
         self.closed = 0
+        self.baud = 9600               # 当前速率（与真 worker 的 `_baudrate` 同义）
+        self.baud_calls = []           # 每次 `set_baudrate()` 的入参（顺序可断言）
+        self.fail_baud = False         # True ⇒ `set_baudrate()` 返回 False 并发 error
 
     def is_open(self) -> bool:
         return self._open
@@ -126,6 +146,14 @@ class FakeSerialWorker(QObject):
             return False
         self.writes += 1
         self.sent.append(bytes(data))
+        return True
+
+    def set_baudrate(self, baudrate: int) -> bool:
+        self.baud_calls.append(int(baudrate))
+        if self.fail_baud:
+            self.error_occurred.emit("切换波特率失败: 模拟")
+            return False
+        self.baud = int(baudrate)
         return True
 
     def close_port(self) -> None:
@@ -2087,6 +2115,829 @@ def test_bluetooth_channel_isolation():
     tab4.hide()
 
 
+def test_baud_boost():
+    section("[25] 提升波特率：升级前发命令 → 主机切 115200 → 收尾切回 9600")
+    payload = bytes(range(200))                        # 每包 100 → 2 包
+    #: OMD=执行升级 + DAR≠0 的杂帧：判据若放行，会**凭空发一帧执行升级**（最强判别用例）
+    EXEC_BAD = ack_with_omd(upg.build_write_block(upg.WILDCARD_SA, 0, 1, 0, b"AB"),
+                            upg.OMD_EXEC, 5)
+
+    check("源码切速只用 set_baudrate（不重开端口：open_port/configure 一个都不出现）",
+          "set_baudrate" in SRC and ".open_port(" not in SRC and ".configure(" not in SRC)
+
+    # ① 默认值 + 不勾就什么都不做
+    w = FakeSerialWorker()
+    tab, _, _ = make_tab(w)
+    check("「提升波特率」默认不勾", tab.chk_boost_baud.isChecked() is False)
+    check("「切换等待(ms)」默认 300、范围 0~10000",
+          tab.spin_boost_wait.value() == 300
+          and (tab.spin_boost_wait.minimum(), tab.spin_boost_wait.maximum()) == (0, 10000),
+          (tab.spin_boost_wait.value(), tab.spin_boost_wait.minimum(),
+           tab.spin_boost_wait.maximum()))
+    tab.spin_block.setValue(100)
+    tab._on_file_selected(write_pkg(payload))
+    tab.btn_start.click()
+    settle()
+    check("不勾 ⇒ 第 1 帧直接是启动传输、零次切速",
+          w.sent[0] != upg_ui.BAUD_BOOST_COMMAND and omd_of(w.sent[0]) == upg.OMD_START
+          and w.baud_calls == [], (w.baud_calls, w.writes))
+    check("不勾 ⇒ 开始日志写明提升波特率=否", "提升波特率=否" in log_text(tab))
+    tab._on_abort()
+    tab.cleanup()
+
+    # ② 勾选：命令 → （留切换时间）→ 主机切速 → 才发 698 帧
+    w = FakeSerialWorker()
+    tab, _, _ = make_tab(w)
+    tab.spin_block.setValue(100)
+    tab._on_file_selected(write_pkg(payload))
+    tab.chk_boost_baud.setChecked(True)
+    tab.spin_boost_wait.setValue(400)
+    tab.chk_read_after.setChecked(True)
+    tab.spin_read_after_delay.setValue(0)              # 后版本立即读（本用例不空等 10 秒）
+    tab.btn_start.click()
+    settle()
+    check("第 1 帧就是「提升波特率」命令（逐字节等于现场实帧）",
+          w.writes == 1 and w.sent[0] == upg_ui.BAUD_BOOST_COMMAND,
+          w.sent[0].hex(" ").upper())
+    check("命令帧 31 字节、末字节 16H、长度域 = 整帧 − 2",
+          len(upg_ui.BAUD_BOOST_COMMAND) == 31
+          and upg_ui.BAUD_BOOST_COMMAND[-1] == 0x16
+          and int.from_bytes(upg_ui.BAUD_BOOST_COMMAND[1:3], "little")
+          == len(upg_ui.BAUD_BOOST_COMMAND) - 2,
+          (len(upg_ui.BAUD_BOOST_COMMAND),
+           int.from_bytes(upg_ui.BAUD_BOOST_COMMAND[1:3], "little")))
+    check("阶段=baud_boost、状态 starting，且**还没**发任何 698 帧",
+          tab._phase == "baud_boost" and tab.state == "starting", tab._phase)
+    check("等待定时器在跑、主机速率**没动**（等待被真正遵守）",
+          tab._boost_timer.isActive() and w.baud == 9600 and tab._boosted is False,
+          (w.baud, tab._boosted))
+    check("TX 日志标出「提升波特率命令」",
+          "(提升波特率命令)" in tx_line(log_text(tab), "(提升波特率命令)"),
+          tx_line(log_text(tab), "(提升波特率命令)"))
+    check("开始日志写明提升波特率=是", "提升波特率=是" in log_text(tab))
+    check("传输中勾选框/切换等待/通道一并冻结",
+          tab.chk_boost_baud.isEnabled() is False
+          and tab.spin_boost_wait.isEnabled() is False
+          and tab.combo_channel.isEnabled() is False,
+          (tab.chk_boost_baud.isEnabled(), tab.spin_boost_wait.isEnabled()))
+
+    # 提升波特率期间：既没有在飞的 698 请求，任何回帧/超时都不成立
+    n = w.writes
+    w.deliver(EXEC_BAD)
+    settle()
+    check("提升波特率期间收到「执行升级 OMD + DAR≠0」杂帧 ⇒ 忽略（不凭空发执行升级帧）",
+          w.writes == n and tab._phase == "baud_boost"
+          and "忽略（提升波特率中" in log_text(tab), (w.writes, tab._phase))
+    tab._on_timeout()
+    settle()
+    check("提升波特率期间 _on_timeout() 不重发、不判失败",
+          w.writes == n and tab.state == "starting" and tab._phase == "baud_boost",
+          (w.writes, tab.state))
+    check("这类超时被记进日志（现场可查）",
+          "提升波特率期间无在飞的请求 ⇒ 忽略超时/重试判定" in log_text(tab), last_log(tab))
+
+    time.sleep(0.12)                                   # 400ms 未到
+    settle()
+    check("等待未满 400ms ⇒ 仍不切速率", w.baud == 9600 and tab._boosted is False,
+          (w.baud, tab._boosted))
+    time.sleep(0.35)                                   # 累计 > 400ms
+    settle()
+    check("到点 ⇒ 主机切到 115200（恰好一次）",
+          w.baud == 115200 and w.baud_calls == [115200] and tab._boosted is True,
+          (w.baud, w.baud_calls))
+    check("切完立刻继续升级：下一帧是启动传输、PIID 从 0 起（命令帧不占 PIID）",
+          w.writes == n + 1 and omd_of(w.sent[-1]) == upg.OMD_START
+          and resp_apdu(w.sent[-1])[2] == 0 and tab._phase == "start",
+          f"{w.writes} / {tab._phase} / {resp_apdu(w.sent[-1])[2]}")
+    check("切速日志写明「切回时机」",
+          "主机串口已切到 115200" in log_text(tab) and "先切回 9600" in log_text(tab)
+          and "两种速率上各试一遍" in log_text(tab),
+          last_log(tab))
+
+    # ③ 写文件跑在高速率上；传完/等复位升级时才切回
+    w.deliver(ack_for(w.sent[-1]))
+    settle()
+    w.deliver(ack_for(w.sent[-1]))
+    settle()
+    check("写文件期间没人提前切回去（仍 115200）",
+          w.baud == 115200 and tab._boosted is True and tab._phase == "blocks",
+          (w.baud, tab._phase))
+    w.deliver(ack_for(w.sent[-1]))                     # 末包确认 → 执行升级帧
+    settle()
+    check("执行升级帧仍在 115200 发出（设备此刻还在高速率）",
+          omd_of(w.sent[-1]) == upg.OMD_EXEC and w.baud == 115200, w.baud)
+    w.deliver(ack_for(w.sent[-1]))                     # 执行升级确认 → 进「等设备复位」
+    settle()
+    check("传完 + 执行升级确认 ⇒ 已切回 9600（恰好一次）",
+          w.baud == 9600 and w.baud_calls == [115200, 9600] and tab._boosted is False,
+          (w.baud, w.baud_calls))
+    check("切回日志写明原因（文件传输完成，等待设备升级）",
+          "文件传输完成，等待设备升级：串口波特率已切回 9600" in log_text(tab), last_log(tab))
+    check("升级后读版本帧发出时主机已在 9600（读得通才谈得上读）",
+          is_ver_frame(w.sent[-1]) and w.baud == 9600, (w.baud, is_ver_frame(w.sent[-1])))
+    w.deliver(ver_ack_for(w.sent[-1]))
+    settle()
+    check("收尾 done 且速率停在默认值",
+          tab.state == "done" and w.baud == 9600, (tab.state, w.baud))
+    tab.cleanup()
+    check("cleanup 幂等且不再多切一次", w.baud_calls == [115200, 9600], w.baud_calls)
+
+    # ④ 倒计时等待（delay=10）：切回发生在**进入等待那一刻**，不是等倒计时走完
+    w2 = FakeSerialWorker()
+    tab2, _, _ = make_tab(w2)
+    tab2.spin_block.setValue(100)
+    tab2._on_file_selected(write_pkg(payload))
+    tab2.chk_boost_baud.setChecked(True)
+    tab2.spin_boost_wait.setValue(0)                   # 0ms ⇒ 下一轮事件循环就切
+    tab2.chk_read_after.setChecked(True)
+    tab2.spin_read_after_delay.setValue(10)
+    tab2.btn_start.click()
+    settle()
+    check("切换等待=0 ⇒ 不空等，命令发出后立刻切到 115200",
+          w2.baud == 115200 and tab2._phase == "start", (w2.baud, tab2._phase))
+    w2.deliver(ack_for(w2.sent[-1]))
+    settle()
+    w2.deliver(ack_for(w2.sent[-1]))
+    settle()
+    w2.deliver(ack_for(w2.sent[-1]))                   # 末包 → 执行升级帧
+    settle()
+    w2.deliver(ack_for(w2.sent[-1]))                   # 执行升级确认 → 等设备复位
+    settle()
+    check("进入「等待设备复位」的那一刻就已切回 9600（倒计时还没走）",
+          tab2._phase == "wait_reset" and tab2._reset_left == 10 and w2.baud == 9600,
+          (tab2._phase, tab2._reset_left, w2.baud))
+    n2 = w2.writes
+    check("等待期间一帧都没新发（命令1 + 启动1 + 2包 + 执行1 = 5，切速不带出流量）",
+          n2 == 5, n2)
+    tab2._end_reset_wait()                             # 快进倒计时
+    settle()
+    check("倒计时走完才发升级后读版本帧，且仍跑在 9600",
+          w2.writes == n2 + 1 and is_ver_frame(w2.sent[-1]) and w2.baud == 9600,
+          (w2.writes, w2.baud))
+    w2.deliver(ver_ack_for(w2.sent[-1]))
+    settle()
+    check("正常收尾 done", tab2.state == "done", tab2.state)
+    tab2.cleanup()
+
+    # ⑤ 终态兜底：中止也要还回默认速率（不把共享串口留在 115200）
+    w3 = FakeSerialWorker()
+    tab3, _, _ = make_tab(w3)
+    tab3.spin_block.setValue(100)
+    tab3._on_file_selected(write_pkg(payload))
+    tab3.chk_boost_baud.setChecked(True)
+    tab3.spin_boost_wait.setValue(0)
+    tab3.btn_start.click()
+    settle()
+    w3.deliver(ack_for(w3.sent[-1]))
+    settle()
+    check("前置：已提升且在传输中", w3.baud == 115200 and tab3.state == "transferring",
+          (w3.baud, tab3.state))
+    tab3.btn_abort.click()
+    settle()
+    check("中止 ⇒ 切回 9600 且状态 aborted",
+          tab3.state == "aborted" and w3.baud == 9600 and tab3._boosted is False,
+          (tab3.state, w3.baud))
+    check("中止时的切回写进日志", "本轮已结束：串口波特率已切回 9600" in log_text(tab3),
+          last_log(tab3))
+    check("中止后勾选框解冻（可原地重跑）", tab3.chk_boost_baud.isEnabled() is True)
+    tab3.cleanup()
+
+    # ⑥ 切速失败 ⇒ 停下并说明（不蒙着头继续按旧速率发帧）
+    w4 = FakeSerialWorker()
+    tab4, _, _ = make_tab(w4)
+    tab4.spin_block.setValue(100)
+    tab4._on_file_selected(write_pkg(payload))
+    tab4.chk_boost_baud.setChecked(True)
+    tab4.spin_boost_wait.setValue(0)
+    w4.fail_baud = True
+    tab4.btn_start.click()
+    settle()
+    check("切速失败 ⇒ failed、只发了那条命令、日志给出原因",
+          tab4.state == "failed" and w4.writes == 1
+          and "切换波特率到 115200 失败" in log_text(tab4),
+          (tab4.state, w4.writes, last_log(tab4)))
+    check("切速失败不算「已提升」（不会去切回一个没切成的速率）",
+          tab4._boosted is False and w4.baud_calls == [115200], w4.baud_calls)
+    tab4.cleanup()
+
+    # ⑦ 蓝牙通道：没有波特率这一说 ⇒ 置灰 + 跳过 + 只记日志，不动串口速率
+    w5 = FakeSerialWorker()
+    bt = FakeBleWorker()
+    tab5, _, _ = make_tab(w5)
+    tab5.set_bluetooth_provider(lambda: bt)
+    tab5.spin_block.setValue(100)
+    tab5._on_file_selected(write_pkg(payload))
+    tab5.chk_boost_baud.setChecked(True)
+    tab5.combo_channel.setCurrentIndex(1)
+    settle()
+    check("蓝牙通道下「提升波特率」置灰", tab5.chk_boost_baud.isEnabled() is False)
+    tab5.btn_start.click()
+    settle()
+    check("蓝牙通道下不发命令、不动串口速率，升级照常从启动传输开始",
+          upg_ui.BAUD_BOOST_COMMAND not in w5.sent and w5.baud_calls == []
+          and len(bt.sent) == 1 and omd_of(bytes(bt.sent[-1])) == upg.OMD_START,
+          (w5.writes, len(bt.sent)))
+    check("跳过这件事写进日志（不静默）",
+          "蓝牙通道不支持「提升波特率」" in log_text(tab5), last_log(tab5))
+    tab5._on_abort()
+    tab5.cleanup()
+
+    # ⑧ cleanup（页面被拆掉）也还回默认速率 + 等待中的切速作废
+    w6 = FakeSerialWorker()
+    tab6, _, _ = make_tab(w6)
+    tab6.spin_block.setValue(100)
+    tab6._on_file_selected(write_pkg(payload))
+    tab6.chk_boost_baud.setChecked(True)
+    tab6.spin_boost_wait.setValue(0)
+    tab6.btn_start.click()
+    settle()
+    check("前置：已切到 115200", w6.baud == 115200, w6.baud)
+    tab6.cleanup()
+    check("页面关闭 ⇒ 切回 9600", w6.baud == 9600 and tab6._boosted is False, w6.baud)
+
+    w7 = FakeSerialWorker()
+    tab7, _, _ = make_tab(w7)
+    tab7.chk_boost_baud.setChecked(True)
+    tab7.spin_boost_wait.setValue(600)
+    tab7.spin_block.setValue(100)
+    tab7._on_file_selected(write_pkg(payload))
+    tab7.btn_start.click()
+    settle()
+    tab7.cleanup()                                     # 还在「等设备切速」时把页面拆掉
+    check("页面关闭时等待中的切速作废（定时器已停）", tab7._boost_timer.isActive() is False)
+    time.sleep(0.7)
+    settle()
+    check("拆掉后即使等满了也不动共享串口速率",
+          w7.baud == 9600 and w7.baud_calls == [], (w7.baud, w7.baud_calls))
+
+    # ⑨ 配置持久化往返
+    cfg_path = os.path.join(str(SANDBOX), upg_ui.CONFIG_NAME)
+    if os.path.exists(cfg_path):
+        os.remove(cfg_path)
+    t8, _, _ = make_tab(fresh=False)
+    t8.chk_boost_baud.setChecked(True)
+    t8.spin_boost_wait.setValue(1200)
+    check("落盘成功", t8._save_persisted() is True)
+    t8.cleanup()
+    t9, _, _ = make_tab(fresh=False)
+    check("读回 boost_baud / boost_wait_ms",
+          t9.chk_boost_baud.isChecked() is True and t9.spin_boost_wait.value() == 1200,
+          (t9.chk_boost_baud.isChecked(), t9.spin_boost_wait.value()))
+    t9.cleanup()
+    with open(cfg_path, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps({"boost_baud": False, "boost_wait_ms": "abc"}))
+    t10, _, _ = make_tab(fresh=False)
+    check("boost_wait_ms 非数 ⇒ 回落默认 300（与每包字节数/等待秒数同一口径）",
+          t10.chk_boost_baud.isChecked() is False and t10.spin_boost_wait.value() == 300,
+          (t10.chk_boost_baud.isChecked(), t10.spin_boost_wait.value()))
+    t10.cleanup()
+    with open(cfg_path, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps({"boost_wait_ms": 999999}))
+    t11, _, _ = make_tab(fresh=False)
+    check("boost_wait_ms 越界 ⇒ 回落默认 300，控件仍夹在 0~10000 内",
+          t11.spin_boost_wait.value() == 300
+          and t11.spin_boost_wait.maximum() == 10000, t11.spin_boost_wait.value())
+    t11.cleanup()
+    if os.path.exists(cfg_path):
+        os.remove(cfg_path)
+
+
+def _prep_boosted_tab(payload: bytes = None):
+    """公共前置：勾「提升波特率」+ 勾「升级后读版本」(立即读) + 每种速率只试 1 次。
+
+    `spin_retries=0` 是为了让「一种速率用尽重试」= **一次** `_on_timeout()`，用例可逐次
+    驱动到「9600 失败」「115200 也失败」两个节点，不必等真实计时。
+    """
+    w = FakeSerialWorker()
+    tab, _, _ = make_tab(w)
+    tab.spin_block.setValue(100)
+    tab._on_file_selected(
+        write_pkg(payload if payload is not None else bytes(range(200))))   # 每包 100 → 2 包
+    tab.chk_boost_baud.setChecked(True)
+    tab.spin_boost_wait.setValue(0)
+    tab.chk_read_after.setChecked(True)
+    tab.spin_read_after_delay.setValue(0)      # 0 = 立即读，跳过真实 10 秒倒计时
+    tab.spin_retries.setValue(0)
+    return tab, w
+
+
+def _run_to_post_read_frame(tab, w, guard: int = 8) -> None:
+    """点「开始升级」→ 逐帧喂确认 → 推到**升级后读版本帧已发出**（phase == ver_post）。
+
+    覆盖「提升波特率命令(不喂确认) → 启动传输 → 2 包 → 执行升级 → 等复位(0s)」。
+    """
+    tab.btn_start.click()
+    settle()
+    for _ in range(guard):
+        if tab._phase == "ver_post":
+            return
+        w.deliver(ack_for(w.sent[-1]))
+        settle()
+    raise AssertionError(f"没推到升级后读版本：phase={tab._phase} writes={w.writes}")
+
+
+def test_post_read_dual_baud():
+    section("[26] 升级后读版本的双波特率尝试（设备升级失败可能仍停在 115200）")
+
+    # ① 前置与「切回时机」：提升过 + 传完 ⇒ 9600 先读（读不到再换 115200）
+    tab, w = _prep_boosted_tab()
+    _run_to_post_read_frame(tab, w)
+    check("前置：升级后读版本帧已在 9600 发出（phase=ver_post）",
+          tab._phase == "ver_post" and is_ver_frame(w.sent[-1]) and w.baud == 9600
+          and w.baud_calls == [115200, 9600],
+          (tab._phase, w.baud_calls))
+    check("前置：本轮计划是「9600 → 115200」两种速率",
+          tab._post_bauds == [9600, 115200] and tab._post_baud_idx == 0,
+          (tab._post_bauds, tab._post_baud_idx))
+    check("前置：提升过这件事被黏性记住（切回后仍是 True）",
+          tab._boost_used is True and tab._boosted is False,
+          (tab._boost_used, tab._boosted))
+
+    # ② 9600 读不到 ⇒ 切 115200 重发（不是判失败）
+    n = w.writes
+    piid_before = resp_apdu(w.sent[-1])[2]
+    tab._on_timeout()
+    settle()
+    check("9600 读不到 ⇒ 自动切到 115200 并把该步重发一次",
+          w.baud == 115200 and w.baud_calls == [115200, 9600, 115200]
+          and w.writes == n + 1 and tab._phase == "ver_post",
+          (w.baud, w.baud_calls, w.writes, tab._phase))
+    check("重发帧仍是读版本帧、PIID 自增（不是其它步骤的帧）",
+          is_ver_frame(w.sent[-1])
+          and resp_apdu(w.sent[-1])[2] == (piid_before + 1) & 0x7F,
+          (hexs_or_none(w, -1), piid_before))
+    check("换速率不改「已提升」标记（收尾仍要带回来）", tab._boosted is True)
+    check("换速率的前因后果写进日志（不静默）",
+          "9600 波特率下读不到升级后版本信息" in log_text(tab)
+          and "已切到 115200 再试一次" in log_text(tab), last_log(tab))
+
+    # ③ 在 115200 读到 ⇒ 照常成功收尾，且**速率被带回来**
+    w.deliver(ver_ack_for(w.sent[-1]))
+    settle()
+    check("115200 下读到 ⇒ 状态 done、进度 100%",
+          tab.state == "done" and tab.progress.value() == 100, tab.state)
+    check("成功读到的内容进了「升级完成后」展示区（不是只写日志）",
+          "升级完成后 · 通用 ·" in panel_post(tab)
+          and "厂商代码" in panel_post(tab), panel_post(tab))
+    check("收尾把端口带回 9600（绝不留 115200）",
+          w.baud == 9600 and tab._boosted is False
+          and w.baud_calls == [115200, 9600, 115200, 9600],
+          (w.baud, w.baud_calls))
+    tab.cleanup()
+
+    # ④ 两种速率都读不到 ⇒ 才算读不到（原因里同时给出两个速率）
+    tab2, w2 = _prep_boosted_tab()
+    _run_to_post_read_frame(tab2, w2)
+    tab2._on_timeout()                       # 9600 用尽
+    settle()
+    n2 = w2.writes
+    tab2._on_timeout()                       # 115200 用尽 ⇒ 没有下一种速率了
+    settle()
+    check("两种速率都读不到 ⇒ 不再换速率、不再发帧",
+          w2.writes == n2 and w2.baud_calls == [115200, 9600, 115200, 9600],
+          (w2.writes, w2.baud_calls))
+    check("升级本身照常收尾（读版本失败不阻断、状态 done）",
+          tab2.state == "done" and tab2.progress.value() == 100, tab2.state)
+    check("失败原因里**两个速率都写明**（现场能看出都试过了）",
+          "9600 波特率下" in panel_post(tab2) and "115200 波特率下" in panel_post(tab2),
+          panel_post(tab2))
+    check("日志明说两种波特率都读不到",
+          "9600 / 115200 两种波特率都读不到升级后版本信息" in log_text(tab2), last_log(tab2))
+    check("收尾仍把端口带回 9600", w2.baud == 9600 and tab2._boosted is False, w2.baud)
+    tab2.cleanup()
+
+    # ⑤ 没勾提升波特率 ⇒ 单速率、零切速（与旧版行为逐字相同：设备一直跑在默认速率）
+    w3 = FakeSerialWorker()
+    tab3, _, _ = make_tab(w3)
+    tab3.spin_block.setValue(100)
+    tab3._on_file_selected(write_pkg(bytes(range(200))))
+    tab3.chk_boost_baud.setChecked(False)
+    tab3.chk_read_after.setChecked(True)
+    tab3.spin_read_after_delay.setValue(0)
+    tab3.spin_retries.setValue(0)
+    _run_to_post_read_frame(tab3, w3)
+    check("没提升过 ⇒ 计划里只有一种速率",
+          tab3._post_bauds == [9600] and tab3._boost_used is False, tab3._post_bauds)
+    n3 = w3.writes
+    tab3._on_timeout()
+    settle()
+    check("没提升过 ⇒ 读不到就判读不到，**一次都不切速率**",
+          w3.baud_calls == [] and w3.baud == 9600 and w3.writes == n3
+          and tab3.state == "done",
+          (w3.baud_calls, w3.writes, tab3.state))
+    check("没提升过 ⇒ 原因文案保持旧样（不带速率前缀）",
+          "9600 波特率下" not in panel_post(tab3), panel_post(tab3))
+    tab3.cleanup()
+
+    # ⑥ 升级**前**读版本失败**不**换速率（设备此刻一定在提升速率上，换了反而发不出去）
+    w4 = FakeSerialWorker()
+    tab4, _, _ = make_tab(w4)
+    tab4.spin_block.setValue(100)
+    tab4._on_file_selected(write_pkg(bytes(range(100))))
+    tab4.chk_boost_baud.setChecked(True)
+    tab4.spin_boost_wait.setValue(0)
+    tab4.chk_read_before.setChecked(True)
+    tab4.spin_retries.setValue(0)
+    tab4.btn_start.click()
+    settle()
+    check("前置：升级前读版本帧已在 115200 发出",
+          tab4._phase == "ver_pre" and w4.baud == 115200 and is_ver_frame(w4.sent[-1]),
+          (tab4._phase, w4.baud))
+    tab4._on_timeout()
+    settle()
+    check("升级前读版本失败 ⇒ **不**换速率，直接推进启动传输",
+          w4.baud == 115200 and w4.baud_calls == [115200]
+          and tab4._phase == "start" and omd_of(w4.sent[-1]) == upg.OMD_START,
+          (w4.baud_calls, tab4._phase))
+    tab4._on_abort()
+    tab4.cleanup()
+    check("中止照样把端口带回 9600", w4.baud == 9600 and tab4._boosted is False, w4.baud)
+
+    # ⑦ 切回失败 ⇒ 标记保留（收尾还会再试一次），不许一次失败就永久留在 115200
+    w5 = FakeSerialWorker()
+    tab5, _, _ = make_tab(w5)
+    tab5.spin_block.setValue(100)
+    tab5._on_file_selected(write_pkg(bytes(range(100))))
+    tab5.chk_boost_baud.setChecked(True)
+    tab5.spin_boost_wait.setValue(0)
+    tab5.btn_start.click()
+    settle()
+    check("前置：已在 115200", w5.baud == 115200 and tab5._boosted is True, w5.baud)
+    w5.fail_baud = True
+    tab5._restore_baud("用例⑦")
+    check("切回失败 ⇒ 「已提升」标记**保留**（否则再没人把端口带回来）",
+          tab5._boosted is True, tab5._boosted)
+    check("切回失败写进日志（含手动核对提示）",
+          "切回 9600 波特率失败" in log_text(tab5)
+          and "手动核对" in log_text(tab5), last_log(tab5))
+    w5.fail_baud = False
+    tab5._restore_baud("用例⑦")
+    check("再试成功 ⇒ 标记清掉、速率真的回到 9600",
+          tab5._boosted is False and w5.baud == 9600, (tab5._boosted, w5.baud))
+    tab5._on_abort()
+    tab5.cleanup()
+
+    # ⑧ 反例自检：判据不是恒真/恒假
+    check("反例：`_post_baud_reason()` 对单速率**原样返回**、对双速率才加前缀",
+          upg_ui_helper_single_reason() == "X"
+          and upg_ui_helper_dual_reason() == "9600 波特率下 X；115200 波特率下 Y")
+
+
+def upg_ui_helper_single_reason() -> str:
+    """`_post_baud_reason()` 的单速率分支（脱离页面直接调，见 [26]⑧）。"""
+    tab, w = _prep_boosted_tab()
+    tab._post_baud_fails = [(9600, "X")]
+    out = tab._post_baud_reason()
+    tab._on_abort()
+    tab.cleanup()
+    return out
+
+
+def upg_ui_helper_dual_reason() -> str:
+    """`_post_baud_reason()` 的双速率分支（见 [26]⑧）。"""
+    tab, w = _prep_boosted_tab()
+    tab._post_baud_fails = [(9600, "X"), (115200, "Y")]
+    out = tab._post_baud_reason()
+    tab._on_abort()
+    tab.cleanup()
+    return out
+
+
+def _verdict_run(pre_fields=VER_FIELDS, post_fields=VER_FIELDS, *,
+                 read_before=True, read_after=True, post_fail=False):
+    """跑到收尾并按给定字段投版本响应：版本变了 / 没变 / 读不到 三种情形共用。
+
+    `post_fail=True` 不投响应、直接让「升级完成后读版本」超时（retries=0 ⇒ 一次就到底），
+    用来验「读不到版本时判定条不得宣称成功或失败」。
+    """
+    w = FakeSerialWorker()
+    tab, _, _ = make_tab(w)
+    tab.spin_block.setValue(100)
+    tab._on_file_selected(write_pkg(bytes(range(200))))      # 每包 100 → 2 包
+    tab.chk_read_before.setChecked(bool(read_before))
+    tab.chk_read_after.setChecked(bool(read_after))
+    tab.spin_read_after_delay.setValue(0)                    # 0 = 立即读，不等真 10 秒
+    tab.spin_retries.setValue(0)                             # 超时一次即到底（读不到的情形）
+    tab.btn_start.click()
+    settle()
+    for _ in range(40):
+        if tab.state in ("done", "failed", "aborted"):
+            return tab, w
+        if tab._phase == upg_ui.PHASE_WAIT_RESET:
+            tab._end_reset_wait()
+            settle()
+            continue
+        tx = w.sent[-1]
+        if tab._phase == upg_ui.PHASE_VER_PRE:
+            w.deliver(ver_ack_for(tx, fields=pre_fields))
+            settle()
+        elif tab._phase == upg_ui.PHASE_VER_POST:
+            if post_fail:
+                tab._on_timeout()
+                settle()
+            else:
+                w.deliver(ver_ack_for(tx, fields=post_fields))
+                settle()
+        else:
+            w.deliver(ack_for(tx))
+            settle()
+    raise AssertionError(f"没走到终态：phase={tab._phase} state={tab.state}")
+
+
+def test_version_verdict():
+    section("[27] 升级前/后版本比对判定（变了=升级成功，完全一致=升级失败）")
+    W = upg_ui.Dlt698UpgradeWidget
+
+    # ① 纯比对口径：**原始字节优先**（值只是展示格式，不能拿它判等）
+    pre = W._version_entries([
+        {"名称": "软件版本日期", "值": "2025-09-01", "原始": "0A06323530393031"},
+        {"名称": "厂商代码", "值": "JCDZ", "原始": "0A044A43445A"},
+    ])
+    same_raw_other_text = W._version_entries([
+        {"名称": "软件版本日期", "值": "2025-9-1", "原始": "0A06323530393031"},
+        {"名称": "厂商代码", "值": "jcdz", "原始": "0a044a43445a"},
+    ])
+    diffs = W._compare_version_entries(pre, same_raw_other_text)
+    check("原始字节相同 ⇒ 即使值的大小写/格式不同也判「没变」",
+          diffs and not any(d["changed"] for d in diffs), diffs)
+    other_raw = W._version_entries([
+        {"名称": "软件版本日期", "值": "2025-09-01", "原始": "0A06323531303130"},
+        {"名称": "厂商代码", "值": "JCDZ", "原始": "0A044A43445A"},
+    ])
+    diffs = W._compare_version_entries(pre, other_raw)
+    check("原始字节不同 ⇒ 即使值显示一样也判「变了」",
+          [d["name"] for d in diffs if d["changed"]] == ["软件版本日期"], diffs)
+    added = W._compare_version_entries(pre, pre + [("厂商扩展信息", "NEW", "0A034E4557")])
+    check("只在一边出现的字段 ⇒ 算变化（新增/消失不得被忽略）",
+          [d["name"] for d in added if d["changed"]] == ["厂商扩展信息"], added)
+    # 解析器的 ⚠ 诊断行不是版本字段：它变没变不能决定升级成败
+    warn_row = {"名称": "⚠ 长度未自证", "值": "表191 声明 X，本次实发 Y", "原始": ""}
+    filtered = W._compare_version_entries(
+        W._version_entries(list(pre)), W._version_entries(list(pre) + [warn_row]))
+    check("⚠ 诊断行被排除在比对之外（不参与判定）",
+          not any(d["changed"] for d in filtered)
+          and all("⚠" not in d["name"] for d in filtered), filtered)
+    check("长值在判定条上被截断（完整值仍在明细面板/日志）",
+          W._verdict_value("X" * 60).endswith("…")
+          and len(W._verdict_value("X" * 60)) == upg_ui.VERDICT_VALUE_MAX + 1)
+    check("空值显示为 (空)", W._verdict_value("") == "(空)")
+
+    # ② 初始态：还没读 ⇒ 「尚未比对」，不能先摆一个结论
+    tab0, w0, _ = make_tab()
+    check("初始判定条说「尚未比对」（不是失败、也不是成功）",
+          tab0._ver_verdict["level"] == upg_ui.VERDICT_PENDING
+          and "尚未比对" in tab0.lbl_verdict.text(), tab0.lbl_verdict.text())
+    check("初始判定条不预支字段值（明细只在下面两栏）",
+          "厂商代码" not in tab0.lbl_verdict.text(), tab0.lbl_verdict.text())
+    tab0.cleanup()
+
+    # ③ 升级前后**完全一致** ⇒ 判定升级失败
+    tab, w = _verdict_run()                                  # pre/post 都用默认 VER_FIELDS
+    text = tab.lbl_verdict.text()
+    log = log_text(tab)
+    check("版本一致 ⇒ 判定级别 same", tab._ver_verdict["level"] == upg_ui.VERDICT_SAME,
+          tab._ver_verdict)
+    check("判定条写明「判定升级失败」且用 ❌ 标出",
+          "判定升级失败" in text and "❌" in text and "完全一致" in text, text)
+    check("判定条给足依据（6 项全部相同 + 提示设备没换新固件）",
+          "6 项全部相同" in text and "没换新固件" in text, text)
+    check("收尾状态行也带结论（现场最后看的就是这行）",
+          "判定：升级失败（版本未变化）" in tab.lbl_status.text(), tab.lbl_status.text())
+    check("日志同步记一条失败级判定（现场回看可查）",
+          "[失败] 版本比对：判定升级失败" in log,
+          [x for x in log.splitlines() if "版本比对" in x])
+    check("判定不打断流程：状态仍 done、进度 100%（流程完成 ≠ 固件升级成功）",
+          tab.state == "done" and tab.progress.value() == 100, tab.state)
+    check("判定行不复述字段值（字段值只该在明细里出现一次，不刷屏）",
+          sum(1 for x in log.splitlines() if "厂商代码" in x and "JCDZ" in x) == 2,
+          [x for x in log.splitlines() if "厂商代码" in x])
+    tab.cleanup()
+
+    # ④ 软件版本变了 ⇒ 判定升级成功，并给出「旧 → 新」
+    NEW = ("JCDZ", "V2.0", "251015", "V1.0", "230602", "SHANDONG")
+    tab2, w2 = _verdict_run(post_fields=NEW)
+    text2 = tab2.lbl_verdict.text()
+    log2 = log_text(tab2)
+    check("版本变了 ⇒ 判定级别 changed",
+          tab2._ver_verdict["level"] == upg_ui.VERDICT_CHANGED, tab2._ver_verdict)
+    check("判定条写明「判定升级成功」且用 ✅ 标出",
+          "判定升级成功" in text2 and "✅" in text2 and "版本已变化" in text2, text2)
+    check("判定条给出逐项变更（软件版本号 V1.5 → V2.0）",
+          "软件版本号：V1.5 → V2.0" in text2, text2)
+    check("判定条给出变更计数（只算真正变的项：版本号 + 日期 = 2/6）",
+          "2/6 项" in text2 and "硬件版本号" not in text2 and "厂商代码" not in text2, text2)
+    check("收尾状态行带成功结论",
+          "判定：升级成功（版本已变化）" in tab2.lbl_status.text(), tab2.lbl_status.text())
+    check("日志记一条成功级判定",
+          "[信息] 版本比对：判定升级成功" in log2,
+          [x for x in log2.splitlines() if "版本比对" in x])
+    tab2.cleanup()
+
+    # ⑤ 只有「软件版本日期」变（版本号没变）也算变了 —— 判定只看差异，不猜哪一项才算数
+    DATE_ONLY = ("JCDZ", "V1.5", "251015", "V1.0", "230602", "SHANDONG")
+    tab3, w3 = _verdict_run(post_fields=DATE_ONLY)
+    check("只有日期变 ⇒ 仍是「升级成功」（按差异判定，不挑字段）",
+          tab3._ver_verdict["level"] == upg_ui.VERDICT_CHANGED
+          and "软件版本日期：2025-09-01 → 2025-10-15" in tab3.lbl_verdict.text(),
+          tab3.lbl_verdict.text())
+    tab3.cleanup()
+
+    # ⑥ 没勾「升级前读版本」⇒ 没有基线 ⇒ 无法判定（不得硬说成功/失败）
+    tab4, w4 = _verdict_run(read_before=False)
+    check("缺升级前版本 ⇒ 无法判定",
+          tab4._ver_verdict["level"] == upg_ui.VERDICT_UNKNOWN
+          and "没有升级前版本" in tab4.lbl_verdict.text(), tab4.lbl_verdict.text())
+    check("缺基线时状态行不给任何结论",
+          "判定：升级成功" not in tab4.lbl_status.text()
+          and "判定：升级失败" not in tab4.lbl_status.text(), tab4.lbl_status.text())
+    check("缺基线仍照常收尾（done / 100%）",
+          tab4.state == "done" and tab4.progress.value() == 100, tab4.state)
+    tab4.cleanup()
+
+    # ⑦ 升级完成后读不到版本 ⇒ 无法判定（读不到 ≠ 升级失败）
+    tab5, w5 = _verdict_run(post_fail=True)
+    check("升级后版本读不到 ⇒ 无法判定（不得判成失败）",
+          tab5._ver_verdict["level"] == upg_ui.VERDICT_UNKNOWN
+          and "无法判定" in tab5.lbl_verdict.text(), tab5.lbl_verdict.text())
+    check("读不到时判定条写明「升级完成后未读到」",
+          "升级完成后未读到" in tab5.lbl_verdict.text(), tab5.lbl_verdict.text())
+    check("读不到时状态行不下结论",
+          "判定：升级成功" not in tab5.lbl_status.text()
+          and "判定：升级失败" not in tab5.lbl_status.text(), tab5.lbl_status.text())
+    check("读不到仍照常收尾（done）", tab5.state == "done", tab5.state)
+    tab5.cleanup()
+
+    # ⑧ 前后读的不是同一项版本内容 ⇒ 值不同也不能当「变了」（口径都不一致）
+    tab6, _, _ = make_tab()
+    tab6._ver_info = {
+        "pre": {"target": "通用", "time": "10:00:00", "note": "", "reason": "",
+                "rows": [{"名称": "软件版本号", "值": "V1.5", "原始": "0A0456312E35"}]},
+        "post": {"target": "内部", "time": "10:01:00", "note": "", "reason": "",
+                 "rows": [{"名称": "软件版本号", "值": "V9.9", "原始": "0A0456392E39"}]},
+    }
+    tab6._recompute_verdict()
+    tab6._render_version_panel()
+    check("前后读的不是同一项 ⇒ 无法判定（不把口径差异当升级成功）",
+          tab6._ver_verdict["level"] == upg_ui.VERDICT_UNKNOWN
+          and "不是同一项" in tab6.lbl_verdict.text(), tab6.lbl_verdict.text())
+    tab6.cleanup()
+
+    # ⑨ 判定条跟随主题换色（暗色/浅色各自可读）
+    tab7, _, _ = make_tab()
+    tab7._ver_info = {
+        "pre": {"target": "通用", "time": "10:00:00", "note": "", "reason": "",
+                "rows": [{"名称": "软件版本号", "值": "V1.5", "原始": "0A0456312E35"}]},
+        "post": {"target": "通用", "time": "10:01:00", "note": "", "reason": "",
+                 "rows": [{"名称": "软件版本号", "值": "V1.5", "原始": "0A0456312E35"}]},
+    }
+    tab7._recompute_verdict()
+    tab7.restyle_for_theme(False)
+    light = tab7.lbl_verdict.styleSheet()
+    tab7.restyle_for_theme(True)
+    dark = tab7.lbl_verdict.styleSheet()
+    check("判定条配色随主题切换（浅色/暗色不同色）",
+          upg_ui.LOG_PALETTES[False]["fail"] in light
+          and upg_ui.LOG_PALETTES[True]["fail"] in dark and light != dark,
+          (light, dark))
+    check("判定条在主题切换后仍保留结论文案",
+          "判定升级失败" in tab7.lbl_verdict.text(), tab7.lbl_verdict.text())
+    tab7.cleanup()
+
+    # ⑩ 两侧都「成功但无数据」（DAR=0 且响应不带版本内容）⇒ 空 vs 空不是「版本一致」
+    tab8, _, _ = make_tab()
+    empty = {"target": "通用", "time": "10:00:00", "note": "", "reason": "", "rows": []}
+    tab8._ver_info = {"pre": dict(empty), "post": dict(empty, time="10:01:00")}
+    tab8._recompute_verdict()
+    tab8._render_version_panel()
+    check("两侧都没带版本内容 ⇒ 无法判定（不得判成「完全一致=失败」）",
+          tab8._ver_verdict["level"] == upg_ui.VERDICT_UNKNOWN
+          and "都没带版本内容" in tab8.lbl_verdict.text(), tab8.lbl_verdict.text())
+    check("无数据时提示去确认 OAD 是否被设备支持",
+          "OAD" in tab8.lbl_verdict.text(), tab8.lbl_verdict.text())
+    tab8.cleanup()
+
+    # ⑪ 两侧都只有兜底文本（无逐字段明细）⇒ 退化为比对那段文本
+    tab9, _, _ = make_tab()
+    tab9._ver_info = {
+        "pre": {"target": "通用", "time": "10:00:00", "rows": [], "reason": "",
+                "note": "V1.5"},
+        "post": {"target": "通用", "time": "10:01:00", "rows": [], "reason": "",
+                 "note": "V2.0"},
+    }
+    tab9._recompute_verdict()
+    tab9._render_version_panel()
+    check("只有兜底文本时也比对（V1.5 → V2.0 判成功）",
+          tab9._ver_verdict["level"] == upg_ui.VERDICT_CHANGED
+          and "V1.5 → V2.0" in tab9.lbl_verdict.text(), tab9.lbl_verdict.text())
+    tab9.cleanup()
+
+
+def test_package_path_persist():
+    section("[28] 升级包路径持久化（重开程序显示上次的文件，只有换新文件才更新）")
+    cfg_path = os.path.join(str(SANDBOX), upg_ui.CONFIG_NAME)
+
+    def cfg():
+        with open(cfg_path, encoding="utf-8") as fh:
+            return json.load(fh)
+
+    if os.path.exists(cfg_path):
+        os.remove(cfg_path)
+
+    # ① 选过文件 ⇒ 重开页面自动恢复（路径/字节/分包/摘要全都回来）
+    path_a = write_pkg(bytes(range(180)))
+    t1, _, _ = make_tab()
+    t1.spin_block.setValue(100)
+    t1._on_file_selected(path_a)
+    check("选择后路径进内存", t1._path == path_a, t1._path)
+    check("落盘内容带 file_path",
+          t1._save_persisted() is True and cfg()["file_path"] == path_a, cfg().get("file_path"))
+    t1.cleanup()
+
+    t2, _, _ = make_tab(fresh=False)
+    check("重开页面自动恢复上次的文件路径", t2._path == path_a, t2._path)
+    check("拖放区显示文件名（basename）",
+          t2.lbl_file_name.text() == os.path.basename(path_a), t2.lbl_file_name.text())
+    check("完整路径挂在 tooltip（同名不同目录分得清）",
+          t2.lbl_file_name.toolTip() == path_a, t2.lbl_file_name.toolTip())
+    check("恢复后文件字节已读、分包已建（可直接开始）",
+          t2._data == bytes(range(180)) and t2._num_blocks() == 2,
+          (len(t2._data), t2._num_blocks()))
+    check("恢复后大小标签按真实字节数", "180" in t2.lbl_file_size.text(), t2.lbl_file_size.text())
+    check("恢复日志写明完整路径（现场可查是哪个包）", path_a in log_text(t2), last_log(t2))
+    check("恢复不写「分包完成」日志（开页面不刷屏）",
+          "分包完成" not in log_text(t2), [x for x in log_text(t2).splitlines() if "分包" in x])
+    check("恢复后能通过开始前校验（不是只显示个名字）",
+          t2._validate_inputs() == "", t2._validate_inputs())
+
+    # ② 恢复不冲掉手工「文件大小」覆盖值（那是用户落盘参数，不是文件的从属值）
+    t2.spin_size.setValue(12345)
+    check("落盘成功", t2._save_persisted() is True)
+    t2.cleanup()
+    t3, _, _ = make_tab(fresh=False)
+    check("恢复不冲掉手工「文件大小」覆盖值",
+          t3.spin_size.value() == 12345 and t3._path == path_a,
+          (t3.spin_size.value(), t3._path))
+    t3.spin_size.setValue(0)
+    check("复位覆盖值后落盘", t3._save_persisted() is True)
+    t3.cleanup()
+
+    # ③ **只有换新文件才更新路径**（这是用户的原话口径）
+    path_b = write_pkg(b"\xBB" * 64)
+    t4, _, _ = make_tab(fresh=False)
+    check("新实例仍是上次的路径", t4._path == path_a, t4._path)
+    t4._on_file_selected(path_b)
+    check("换了新文件 ⇒ 路径与字节都更新",
+          t4._path == path_b and t4._data == b"\xBB" * 64, (t4._path, len(t4._data)))
+    check("落盘也更新成新路径",
+          t4._save_persisted() is True and cfg()["file_path"] == path_b, cfg().get("file_path"))
+    t4.cleanup()
+
+    # ④ 文件没了 ⇒ 不恢复（不能显示成一个「看着能开始」的假状态），但**不删**用户的记录
+    os.remove(path_b)
+    t5, _, _ = make_tab(fresh=False)
+    check("文件不存在 ⇒ 不恢复（保持未选择，避免误开始）",
+          t5._path == "" and t5._data == b"" and t5.lbl_file_name.text() == "未选择文件",
+          (t5._path, t5.lbl_file_name.text()))
+    check("拖放区写明原因", "上次的升级包不可用" in t5.lbl_drop_hint.text(),
+          t5.lbl_drop_hint.text())
+    check("日志记一条告警（现场可查）",
+          "[警告]" in log_text(t5) and "上次的升级包不可用" in log_text(t5), last_log(t5))
+    check("开始前校验拦住（提示先选文件）",
+          t5._validate_inputs() == "请先拖入（或浏览选择）升级包文件", t5._validate_inputs())
+    check("落盘路径**仍保留**（U 盘/网络盘可能回来，不替用户删记录）",
+          cfg()["file_path"] == path_b, cfg().get("file_path"))
+    t5._on_file_selected(path_a)
+    check("换到可用文件后拖放区告警撤掉、提示回到常态",
+          t5._restore_note == "" and t5.lbl_drop_hint.text() == upg_ui.DROP_HINT_IDLE,
+          t5.lbl_drop_hint.text())
+    t5.cleanup()
+
+    # ⑤「清除」保留文件与路径（文档口径：清除只清日志/进度，便于原地重跑）
+    t6, _, _ = make_tab(fresh=False)
+    t6.btn_clear.click()
+    settle()
+    check("「清除」保留文件与路径",
+          t6._path == path_a and t6._collect_settings()["file_path"] == path_a,
+          (t6._path, t6._collect_settings()["file_path"]))
+    t6.cleanup()
+
+    # ⑥ 恢复路径下 crcmod 缺失：只写日志、**不弹模态**（开页面弹框会打断现场）
+    calls = []
+    with patch.object(upg_ui.QMessageBox, "warning", lambda *a, **k: calls.append(a)):
+        with patch.dict(sys.modules, {"dl_t698_45_upgrade": None}):
+            t7, _, _ = make_tab(fresh=False)
+    check("恢复路径下 crcmod 缺失不弹框（只写日志）", calls == [], calls)
+    check("crcmod 缺失时仍恢复文件名（只是分包算不出，开始时会照常给提示）",
+          t7._path == path_a and t7.lbl_file_name.text() == os.path.basename(path_a),
+          (t7._path, t7.lbl_file_name.text()))
+    check("crcmod 缺失时确实写了可读提示",
+          upg_ui.MISSING_CRCMOD in log_text(t7), last_log(t7))
+    t7.cleanup()
+
+    if os.path.exists(cfg_path):
+        os.remove(cfg_path)
+
+
 def main():
     print("=" * 64)
     print("协议8 升级页 dlt698_upgrade_widget offscreen 回归")
@@ -2122,6 +2973,10 @@ def main():
     test_reset_wait_before_post_read()
     test_bluetooth_channel()
     test_bluetooth_channel_isolation()
+    test_baud_boost()
+    test_post_read_dual_baud()
+    test_version_verdict()
+    test_package_path_persist()
 
     print()
     print("=" * 64)

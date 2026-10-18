@@ -6,6 +6,8 @@ import sys
 import json
 sys.stdout.reconfigure(encoding='utf-8')
 
+import _path_setup  # noqa: E402  （cwd 切到项目根，读写 oi_to_class.json）
+
 with open('面向对象的用电信息数据交换协议(20210910).md', 'r', encoding='utf-8') as f:
     content = f.read()
 

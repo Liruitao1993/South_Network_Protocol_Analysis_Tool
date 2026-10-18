@@ -3,6 +3,9 @@
 """
 import json
 
+import _path_setup  # noqa: E402  （cwd 切到项目根，产物 dlt645_di.json 落仓库根）
+
+
 def generate_di_map():
     di_map = {}
 

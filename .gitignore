@@ -151,3 +151,15 @@ build*.zip
 /aoci.code.txt
 /aoci.meta.txt
 /.acl-recovery/
+
+# ── 归档区（阶段0「清场归档」：一次性脚本/日志/导出件/截图，纯本地隔离）────────
+# 目的：让仓库根目录只保留生产模块、入口脚本、协议文档；被归档的文件仍完整留在
+# 本机 archive/ 下，且在 git 历史中可取回（git show e45df52:<原路径>）。
+# 目录内容、来源与体积清单见 archive/MANIFEST.md。
+/archive/
+
+# ── 维护脚本的生成物（可由 tools/ 下脚本重建，不入库）──────────────────────
+# pdf_extract内容.txt：tools/extract_pdf.py 的 PDF 文本提取结果
+# reports/：tools/regression_gate.py 采集的回归基线/比对报告
+/tools/pdf_extract内容.txt
+/tools/reports/

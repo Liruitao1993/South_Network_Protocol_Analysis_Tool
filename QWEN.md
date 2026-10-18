@@ -30,16 +30,16 @@
 ├── main_gui.py            # PySide6桌面GUI应用（主入口）
 ├── custom_di.json         # 自定义DI配置文件
 ├── 南网协议解析工具.spec   # PyInstaller打包配置
-├── analyze_e8000302.py    # 特定DI分析脚本
-├── analyze_frame.py       # 帧分析辅助脚本
-├── extract_di_definitions.py  # DI定义提取脚本
-├── extract_pdf.py         # PDF提取脚本
-├── search_di.py           # DI搜索工具
 ├── send_frame_lib.py      # 帧发送库
 ├── 1.md, 1-1.md, 2.md, 4.md  # 协议文档（Markdown格式）
 ├── 2.pdf                  # 原始协议标准文档
-└── pdf_extract内容.txt    # 从PDF提取的文本内容
+├── tools/                 # 维护脚本（extract_pdf.py / extract_di_definitions.py 等）
+│   └── pdf_extract内容.txt # 从PDF提取的文本内容（由 tools/extract_pdf.py 生成）
+└── archive/               # 归档区（一次性脚本 / 日志 / 导出件，见 archive/MANIFEST.md）
 ```
+
+> 注：`analyze_*.py` / `search_di.py` / `extract_*.py` 等一次性脚本已迁至 `archive/dead-code/`
+> 与 `tools/`；根目录只保留生产模块、入口脚本与协议文档。
 
 ## 核心组件
 

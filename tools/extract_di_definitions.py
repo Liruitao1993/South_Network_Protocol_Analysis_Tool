@@ -2,9 +2,10 @@
 提取 PDF 文档中所有 DI 的数据内容格式定义
 """
 import re
+from pathlib import Path
 
-# 读取 PDF 提取内容
-with open("pdf_extract内容.txt", "r", encoding="utf-8") as f:
+# 读取 PDF 提取内容（由 tools/extract_pdf.py 生成，与本脚本同目录）
+with open(Path(__file__).resolve().with_name("pdf_extract内容.txt"), "r", encoding="utf-8") as f:
     content = f.read()
 
 # 查找所有 DI 定义 (格式: E8 XX XX XX：描述)
