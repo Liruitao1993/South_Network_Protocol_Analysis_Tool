@@ -26,9 +26,11 @@ jobs:
           cache: pip
 
       - name: 安装依赖
+        # 与本地运行环境对齐：少装一个 pyserial 会让大批测试在
+        # imports 阶段就 ModuleNotFoundError（表现成「测试坏了」）
         run: |
           python -m pip install --upgrade pip
-          pip install pyside6 crcmod lupa openpyxl
+          pip install pyside6 crcmod lupa openpyxl networkx pandas scapy pyserial reflex
 
       - name: 跑核心测试套件
         # test/test_core_suite.py 与 release_check.py 共用同一份清单
