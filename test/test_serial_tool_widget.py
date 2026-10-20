@@ -29,6 +29,14 @@ from PySide6.QtCore import QObject, QPoint, Qt, Signal  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox  # noqa: E402
 
+# 单独运行本脚本时（不经 release_check 的 PYTHONIOENCODING）在 GBK 控制台下
+# print ✓ 会抛 UnicodeEncodeError，被误读成"测试失败"。这里统一兜底为 UTF-8。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 import _config_sandbox  # noqa: E402
 
 import protocol_registry as pr  # noqa: E402

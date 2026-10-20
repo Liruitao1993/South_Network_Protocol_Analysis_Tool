@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtCore import QObject, QRect, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,

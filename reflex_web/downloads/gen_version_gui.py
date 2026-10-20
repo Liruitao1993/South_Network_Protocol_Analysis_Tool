@@ -193,7 +193,10 @@ class VersionGenApp:
 
             self.root.after(0, lambda: self._on_success(out_path, sha))
         except Exception as e:
-            self.root.after(0, lambda: self._on_error(str(e)))
+            # 先把消息取出再进闭包：except 块结束后 `e` 会被解绑，
+            # 而 after(0, ...) 是延迟执行，届时 str(e) 会抛 NameError 吞掉真实错误
+            err_msg = str(e)
+            self.root.after(0, lambda: self._on_error(err_msg))
 
     def _on_success(self, out_path: Path, sha: str):
         self.gen_btn.config(state="normal")

@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QComboBox, QSpinBox, QMessageBox, QFileDialog, QTextEdit,
     QDialog, QLineEdit, QGroupBox, QMenu, QPlainTextEdit
 )
-from PySide6.QtCore import Qt, Signal, QTimer, QObject
+from PySide6.QtCore import Qt, Signal, QTimer, QObject, QRect
 from PySide6.QtGui import (
     QFont, QColor, QTextCursor, QKeySequence,
     QSyntaxHighlighter, QTextCharFormat, QBrush

@@ -5,7 +5,10 @@
 """
 
 import networkx as nx
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
+
+if TYPE_CHECKING:  # 仅为类型注解；运行时导入会与 topology_widget 形成循环依赖
+    from topology_widget import TopoNode
 
 
 class TopologyGraph:
