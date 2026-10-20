@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 使用文档 / 常见问题
+    url: https://github.com/Liruitao1993/South_Network_Protocol_Analysis_Tool#常见问题
+    about: 杀软误报、启动慢、「⚠ 未填充」等现象已在此说明
+  - name: 讨论区（用法交流 / 报文求助）
+    url: https://github.com/Liruitao1993/South_Network_Protocol_Analysis_Tool/discussions
+    about: 不确定是不是 bug、想找人看报文，来这里

@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core-tests:
+    name: 核心解析测试
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyside6 crcmod lupa openpyxl
+
+      - name: 跑核心测试套件
+        # test/test_core_suite.py 与 release_check.py 共用同一份清单
+        env:
+          PYTHONIOENCODING: utf-8
+          QT_QPA_PLATFORM: offscreen
+        run: python test/test_core_suite.py
+
+  undefined-names:
+    name: 未定义名检查（ruff F821）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: 安装 ruff
+        run: pip install ruff
+
+      # 只用 F821（真实缺陷：未定义变量/名字），不做风格规则。
+      # 仓库其余 ruff 告警（F401/F841/F541）是历史存量，故不在 CI 阻断。
+      - name: 检查未定义名
+        run: ruff check . --select F821 --output-format=github
+
+  protocol-registry:
+    name: 协议注册表一致性
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyside6 crcmod
+
+      - name: 校验注册表
+        # 新增协议必须同步下拉框/分派/校验器，注册表测试是最省事的守门人
+        run: python test/test_protocol_registry.py

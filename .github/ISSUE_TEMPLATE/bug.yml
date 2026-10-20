@@ -1,0 +1,88 @@
+name: 问题反馈 / Bug report
+description: 解析不对、校验报错、程序崩溃、界面异常
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！带 **报文 hex + 协议名** 的 issue 基本能直接定位问题，请尽量填全。
+
+  - type: input
+    id: version
+    attributes:
+      label: 工具版本
+      description: 见「帮助 → 关于」，或状态栏
+      placeholder: 例如 1.23.86
+    validations:
+      required: true
+
+  - type: dropdown
+    id: protocol
+    attributes:
+      label: 相关协议
+      options:
+        - 0 南网协议
+        - 1 PLC RF 协议
+        - 2 HDLC/国网DLMS
+        - 3 DLMS-APDU（国网）
+        - 4 DLMS Wrapper 裸报文
+        - 5 DLMS-APDU 裸报文
+        - 6 DLT645-2007
+        - 7 国网协议
+        - 8 698.45 协议
+        - 9 新一代载波协议
+        - 10 国网新一代双模
+        - 11 HDC 1.0
+        - 12 模组化终端功能模块接口
+        - 13 依瓦定制645
+        - 14 南网上行通信规约
+        - 与具体协议无关（界面 / 系统集成 / 打包）
+    validations:
+      required: true
+
+  - type: textarea
+    id: frame
+    attributes:
+      label: 报文（十六进制）
+      description: 可复现的最小报文。敏感地址可替换为等长字节，但请保持长度与校验可复现
+      render: text
+      placeholder: 68 0E 00 00 00 00 01 00 01 E8 00 05 EF 16
+    validations:
+      required: false
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望结果
+      description: 你认为正确的解析 / 校验结论，能引用协议条款更好
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果
+      description: 工具给出的结论。可粘贴解析结果表格，或截图后拖入本框
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 选择协议 X
+        2. 粘贴报文 / 点批量解析导入某文件
+        3. 看到 ...
+    validations:
+      required: false
+
+  - type: input
+    id: env
+    attributes:
+      label: 运行环境
+      description: Windows 版本 + 是 exe 还是源码运行
+      placeholder: Windows 11 23H2 / exe 1.23.86
+    validations:
+      required: false

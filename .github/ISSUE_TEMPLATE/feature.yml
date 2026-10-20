@@ -1,0 +1,51 @@
+name: 功能建议 / Feature request
+description: 新协议、新台体、新页面或体验改进
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请尽量说明**使用场景**：现场要解决什么问题、现在绕路怎么做。这比「希望支持 XX」有用得多。
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: 建议类型
+      options:
+        - 新增协议 / 协议子集
+        - 支持新台体 / 新包装格式
+        - 解析结果更细（字段级 / 人话结论）
+        - 组帧与预设命令
+        - 串口 / 蓝牙 / TCP 收发链路
+        - 批量解析与导出
+        - 界面与易用性
+        - 打包 / 部署 / 系统集成
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 使用场景
+      description: 谁在什么环节用、现在的痛点是什么
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 你期望的样子
+      description: 有报文示例、协议条款、截图或同类工具的做法都可以贴
+    validations:
+      required: true
+
+  - type: textarea
+    id: samples
+    attributes:
+      label: 报文 / 协议资料
+      description: 可脱敏。涉及新协议时，标准号与版本非常关键
+      render: text
+    validations:
+      required: false
