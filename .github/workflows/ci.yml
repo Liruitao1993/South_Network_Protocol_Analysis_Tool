@@ -34,9 +34,15 @@ jobs:
 
       - name: 跑核心测试套件
         # test/test_core_suite.py 与 release_check.py 共用同一份清单
+        #
+        # 注意：这里**故意不设 QT_QPA_PLATFORM**。
+        # windows-latest 上有可用桌面会话，Qt 走默认 windows 平台即可；
+        # 之前强制 offscreen 会触发
+        #   SystemError: <function FlowLayout.itemAt ...> returned a result with an exception set
+        # 让一批实际上「全部通过」的 GUI 测试以非 0 退出码收场，误报成失败。
+        # 各测试文件已自行 os.environ.setdefault(...)，无需外部再覆盖。
         env:
           PYTHONIOENCODING: utf-8
-          QT_QPA_PLATFORM: offscreen
         run: python test/test_core_suite.py
 
   undefined-names:
