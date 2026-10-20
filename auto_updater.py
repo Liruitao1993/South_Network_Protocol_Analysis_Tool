@@ -24,7 +24,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 APP_VERSION_ATTR = "APP_VERSION"  # main_gui 的版本常量名（供外部读取，避免循环依赖）
 
