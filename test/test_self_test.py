@@ -47,10 +47,12 @@ def test_cli_flag_exits_without_qt():
     """`python main_gui.py --self-test` 应在建窗之前退出（不阻塞、不写文件）。"""
     import subprocess
 
+    # 显式按 UTF-8 解码：子进程输出是中文（self_test 里已 reconfigure 成 UTF-8），
+    # 而 Windows CI runner 的默认 locale 是 cp1252，用 text=True 会 UnicodeDecodeError。
     proc = subprocess.run(
         [sys.executable, str(Path(__file__).resolve().parent.parent / "main_gui.py"), "--self-test"],
         cwd=str(Path(__file__).resolve().parent.parent),
-        capture_output=True, text=True, timeout=120,
+        capture_output=True, encoding="utf-8", errors="replace", timeout=120,
         env={**__import__("os").environ, "PYTHONIOENCODING": "utf-8", "QT_QPA_PLATFORM": "offscreen"},
     )
     assert proc.returncode == 0, (proc.returncode, proc.stdout[-500:], proc.stderr[-500:])
