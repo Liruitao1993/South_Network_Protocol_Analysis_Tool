@@ -173,8 +173,11 @@ class DLT69845Parser:
         result = result.lstrip('0')
         return result if result else '0'
 
-    def parse(self, frame_bytes: bytes) -> dict:
+    def parse(self, frame_bytes: bytes, verify: bool = True) -> dict:
         """解析完整帧，返回嵌套字典
+
+        ``verify=False`` 时走容错解析（不要求帧完整/长度自洽/校验通过），
+        按实收字节尽量往下拆，拆不动的地方原样保留（见 `_parse_tolerant`）。
 
         Returns: {
             "帧头": {...},
@@ -190,6 +193,9 @@ class DLT69845Parser:
             "错误信息": ...,
         }
         """
+        if not verify:
+            return self._parse_tolerant(frame_bytes)
+
         result = {"解析状态": "成功", "原始数据": frame_bytes.hex().upper()}
 
         # 前导 FE 唤醒字节（DL/T 698.45-2017 §6.3.1 b)「在有效数据帧前加 4 个 FEH」）：
@@ -287,14 +293,20 @@ class DLT69845Parser:
 
         return result
 
-    def parse_to_table(self, frame_bytes: bytes) -> list:
+    def parse_to_table(self, frame_bytes: bytes, verify: bool = True) -> list:
         """解析为 GUI 表格格式
+
+        ``verify=False`` 时走容错表格（`_build_tolerant_table`）：能拆多少拆多少，
+        末尾始终给出「原始报文」，拆不动的字节单独列「未解析字节」。
 
         Returns: [(字段名, 原始值, 解析值, 说明, byte_start, byte_end), ...]
 
         带 FE 前导时：首行给出「唤醒前导字节」，其后**所有帧内行的偏移整体 +skip**，
         使高亮始终与用户输入的原始报文（含 FE）对齐。
         """
+        if not verify:
+            return self._build_tolerant_table(frame_bytes)
+
         table_data = []
         total_len = len(frame_bytes)
         result = self.parse(frame_bytes)
@@ -397,6 +409,263 @@ class DLT69845Parser:
             ))
 
         return table_data
+
+    # ------------------------------------------------------------------
+    # 容错解析（勾掉「校验该帧」时使用）
+    # ------------------------------------------------------------------
+    def _parse_tolerant(self, frame_bytes: bytes) -> dict:
+        """按实收字节尽量解析，不因长度/校验/结束符问题整帧放弃。
+
+        与 `parse()` 的区别：
+        - 起始符、HCS、FCS、结束符**只记录不抛错**；
+        - 长度域只作参考，APDU 长度按实收字节推断（末尾是 0x16 才切 FCS/结束符）；
+        - 结构化解析走不下去时，剩余字节放进 `未解析字节`，由表格原样输出。
+        """
+        result: dict = {"解析状态": "成功", "原始数据": frame_bytes.hex().upper(),
+                        "容错模式": True}
+        frame, skipped = strip_wakeup_prefix(frame_bytes)
+        if skipped:
+            result["唤醒前导"] = {
+                "字节数": skipped,
+                "原始值": wakeup_display(skipped),
+                "说明": "规范 §6.3.1 b) 前导码（FEH），非帧内容，解析已跳过",
+            }
+        notes: list = []
+        n = len(frame)
+        if n == 0:
+            result["解析状态"] = "失败"
+            result["错误信息"] = "没有可解析的字节"
+            return result
+
+        # 起始字符（错误也继续）
+        result["帧头"] = {"起始字符": f"0x{frame[0]:02X}"}
+        if frame[0] != self.START_CHAR:
+            notes.append(f"起始字符不是 0x68（实际 0x{frame[0]:02X}），仍按帧结构继续")
+
+        if n < 3:
+            notes.append(f"实收仅 {n} 字节，长度域不完整")
+            result["结构异常"] = notes
+            result["未解析字节"] = {"原始字节": frame[1:].hex().upper(), "起始偏移": 1}
+            return result
+
+        try:
+            length_info, offset = self._parse_length(frame, 1)
+            result["长度域"] = length_info
+        except Exception as exc:  # noqa: BLE001
+            notes.append(f"长度域解析失败：{exc}")
+            result["结构异常"] = notes
+            result["未解析字节"] = {"原始字节": frame[1:].hex().upper(), "起始偏移": 1}
+            return result
+
+        # 698 的长度域 L 覆盖「长度域本身 → FCS」，整帧长 = L + 2（起始符 + 结束符）
+        declared = int(length_info.get("长度值") or 0)
+        if declared and declared + 2 != n:
+            notes.append(
+                f"长度域 L={declared}（整帧应为 {declared + 2} 字节），"
+                f"实收 {n} 字节，按实收字节继续解析"
+            )
+
+        # 控制域
+        if offset >= n:
+            notes.append("控制域缺失")
+            result["结构异常"] = notes
+            result["未解析字节"] = {"原始字节": frame[offset:].hex().upper(),
+                                    "起始偏移": offset}
+            return result
+        result["控制域"] = self._parse_control(frame[offset])
+        offset += 1
+
+        # 地址域（SA+CA）：失败就停下，剩余原样保留
+        try:
+            addr, offset_after_addr = self._parse_address(frame, offset)
+            result["地址域"] = addr
+        except Exception as exc:  # noqa: BLE001
+            notes.append(f"地址域不完整（{exc}），其后字节无法按结构继续")
+            result["结构异常"] = notes
+            result["未解析字节"] = {"原始字节": frame[offset:].hex().upper(),
+                                    "起始偏移": offset}
+            return result
+
+        # HCS：不足 2 字节只标注，不放弃
+        if offset_after_addr + 2 <= n:
+            hcs_raw = int.from_bytes(frame[offset_after_addr:offset_after_addr + 2], "little")
+            hcs_calc = self._calc_crc(frame[1:offset_after_addr])
+            result["帧头校验HCS"] = {
+                "原始值": f"0x{hcs_raw:04X}",
+                "计算值": f"0x{hcs_calc:04X}",
+                "校验结果": "通过" if hcs_raw == hcs_calc else "失败（容错模式：继续解析）",
+            }
+            offset_after_addr += 2
+        else:
+            notes.append("HCS 不足 2 字节，帧头校验无法计算")
+            result["帧头校验HCS"] = {"原始值": "-", "计算值": "-",
+                                     "校验结果": "数据不足"}
+
+        # 尾部：末尾是 0x16 才认为有 FCS+结束符，否则全部当用户数据
+        tail = frame[offset_after_addr:]
+        end_present = len(tail) >= 1 and tail[-1] == self.END_CHAR
+        if end_present and len(tail) >= 3:
+            apdu_data = tail[:-3]
+            fcs_raw = int.from_bytes(tail[-3:-1], "little")
+            fcs_off = offset_after_addr + len(apdu_data)
+            fcs_calc = self._calc_crc(frame[1:fcs_off])
+            result["帧校验FCS"] = {
+                "原始值": f"0x{fcs_raw:04X}",
+                "计算值": f"0x{fcs_calc:04X}",
+                "校验结果": "通过" if fcs_raw == fcs_calc else "失败（容错模式：继续解析）",
+            }
+            result["结束符"] = {"结束字符": "0x16"}
+            consumed = len(frame)
+        elif end_present and len(tail) == 1:
+            apdu_data = b""
+            result["结束符"] = {"结束字符": "0x16"}
+            consumed = len(frame)
+        else:
+            apdu_data = tail
+            notes.append("结束符 0x16 缺失或不在末尾，末尾字节已并入用户数据")
+            result["结束符"] = {"缺失": True}
+            consumed = len(frame)
+
+        result["链路用户数据"] = {
+            "原始字节": apdu_data.hex().upper(),
+            "长度": len(apdu_data),
+        }
+        if apdu_data:
+            try:
+                result["链路用户数据"]["APDU"] = self.apdu_parser.parse(apdu_data)
+            except Exception as exc:  # noqa: BLE001
+                result["链路用户数据"]["APDU解析错误"] = str(exc)
+                notes.append("APDU 无法完整解析，已原样输出其字节")
+
+        if n > consumed:
+            result["未解析字节"] = {
+                "原始字节": frame[consumed:].hex().upper(),
+                "起始偏移": consumed,
+            }
+        if notes:
+            result["结构异常"] = notes
+        return result
+
+    @staticmethod
+    def _short_hex(raw_hex: str, limit: int = 160) -> str:
+        """表格里展示原始字节：过长时截断并标注总长度。"""
+        text = " ".join(raw_hex[i:i + 2] for i in range(0, len(raw_hex), 2)) if " " not in raw_hex else raw_hex
+        if len(text) <= limit:
+            return text
+        return text[:limit] + f" …（共 {len(raw_hex) // 2} 字节）"
+
+    def _build_tolerant_table(self, frame_bytes: bytes) -> list:
+        """容错解析的表格输出：拆到哪算到哪，最后永远给原始报文/未解析字节。"""
+        result = self._parse_tolerant(frame_bytes)
+        table: list = []
+        skip = int(result.get("唤醒前导", {}).get("字节数", 0) or 0)
+
+        for note in result.get("结构异常", []) or []:
+            table.append(("⚠ 容错提示", "-", "-", str(note), None, None))
+
+        if "帧头" in result:
+            table.append(("起始字符", result["帧头"]["起始字符"], "-",
+                          "帧起始标志", 0, 0))
+
+        ld = result.get("长度域")
+        if ld:
+            table.append(("长度域", ld["原始字节"], str(ld["长度值"]),
+                          f"{ld['说明']}, 单位={ld['单位']}；实收 {len(frame_bytes)} 字节",
+                          1, 2))
+
+        ctrl = result.get("控制域")
+        if ctrl:
+            table.append(("控制域", ctrl["原始字节"], "-", "", 3, 3))
+            for key in ("DIR", "PRM", "分帧标志", "扰码标志", "功能码"):
+                value = ctrl[key]
+                if key == "功能码":
+                    table.append((f"  {key}", str(value["值"]), value["说明"], "", 3, 3))
+                else:
+                    table.append((f"  {key}", str(value["位"]), value["解析"], value["说明"], 3, 3))
+            table.append(("  DIR+PRM", "-", ctrl["DIR+PRM"], "组合意义", 3, 3))
+
+        addr = result.get("地址域")
+        addr_start = 4
+        if addr:
+            af = addr["地址特征"]
+            table.append(("地址特征", af["原始字节"], "-",
+                          f"长度={af['地址长度']}, {af['逻辑地址']}, {af['地址类型']}",
+                          addr_start, addr_start))
+            sa = addr["服务器地址SA"]
+            sa_len = len(sa["原始字节"].replace(" ", "")) // 2
+            table.append(("服务器地址SA", sa["原始字节"], sa.get("解析值", "-"),
+                          f"{sa_len}字节", addr_start + 1, addr_start + sa_len))
+            ca = addr["客户机地址CA"]
+            ca_pos = addr_start + 1 + sa_len
+            table.append(("客户机地址CA", ca["原始字节"], str(ca["值"]), ca["说明"],
+                          ca_pos, ca_pos))
+
+        hcs = result.get("帧头校验HCS")
+        hcs_pos = (addr_start + 1 + (len(addr["服务器地址SA"]["原始字节"].replace(" ", "")) // 2) + 1) if addr else None
+        if hcs:
+            table.append(("帧头校验HCS", hcs["原始值"], hcs["计算值"], hcs["校验结果"],
+                          hcs_pos, None if hcs_pos is None else hcs_pos + 1))
+
+        apdu = result.get("链路用户数据")
+        apdu_pos = None if hcs_pos is None else hcs_pos + 2
+        if apdu:
+            apdu_len = apdu["长度"]
+            table.append(("链路用户数据", self._short_hex(apdu["原始字节"]), f"{apdu_len}字节",
+                          "APDU 内容（按实收字节）", apdu_pos, apdu_pos + apdu_len - 1 if apdu_len else apdu_pos))
+            apdu_result = apdu.get("APDU")
+            if apdu_result:
+                table.append(("  APDU类型", apdu_result.get("服务码", "-"),
+                              apdu_result.get("APDU类型", "-"),
+                              apdu_result.get("子类型", "") or apdu_result.get("说明", ""),
+                              None, None))
+                if apdu_result.get("解析状态") == "成功":
+                    self._add_apdu_to_table(apdu_result, table, level=2)
+                else:
+                    err = apdu_result.get("错误信息", "")
+                    if err:
+                        table.append(("    解析错误", "-", err, "", None, None))
+                    # APDU 解析失败也要把原始字节摆出来，别让用户只看到一句错误
+                    apdu_raw = apdu_result.get("原始数据", "")
+                    if apdu_raw:
+                        table.append(("    APDU原始字节", self._short_hex(apdu_raw),
+                                      f"{len(apdu_raw) // 2}字节", "", None, None))
+            err = apdu.get("APDU解析错误", "")
+            if err:
+                table.append(("  APDU解析错误", "-", err, "APDU 未完整解析，下行为其原始字节", None, None))
+                table.append(("  APDU原始字节", self._short_hex(apdu["原始字节"]),
+                              f"{apdu_len}字节", "", None, None))
+
+        fcs = result.get("帧校验FCS")
+        fcs_pos = None if apdu_pos is None else apdu_pos + (apdu["长度"] if apdu else 0)
+        if fcs:
+            table.append(("帧校验FCS", fcs["原始值"], fcs["计算值"], fcs["校验结果"],
+                          fcs_pos, None if fcs_pos is None else fcs_pos + 1))
+        end = result.get("结束符")
+        if end:
+            end_pos = None if fcs_pos is None else fcs_pos + 2
+            if end.get("缺失"):
+                table.append(("结束符", "-", "-", "未找到 0x16（容错模式）", None, None))
+            else:
+                table.append(("结束符", "0x16", "-", "帧结束标志", end_pos, end_pos))
+
+        raw_hex = frame_bytes.hex().upper()
+        table.append(("原始报文", self._short_hex(raw_hex), f"{len(frame_bytes)}字节",
+                      "容错模式：按实收字节解析；声明长度仅作参考", None, None))
+        leftover = result.get("未解析字节")
+        if leftover:
+            start = leftover.get("起始偏移", 0)
+            raw = leftover["原始字节"]
+            length = len(raw) // 2
+            table.append(("未解析字节", self._short_hex(raw), f"{length}字节",
+                          "按当前协议结构无法继续，原样输出", start, start + length - 1))
+
+        if skip:
+            table = shift_row_offsets(table, skip)
+            table.insert(0, make_wakeup_row(
+                skip,
+                "规范 §6.3.1 b) 前导码（FEH），非帧内容，解析已跳过",
+            ))
+        return table
 
     def _add_eb_business_fields(self, biz: dict, table_data: list, level: int):
         """展示 EB 字段解码结果 {字段名: {值, 类型, 长度, 原始值}} 或标准字符串值"""

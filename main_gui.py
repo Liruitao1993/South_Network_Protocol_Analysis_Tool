@@ -120,8 +120,12 @@ from system_integration.taskbar_buttons import TaskbarButtons
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.91"
-BUILD_DATE = "2026-10-20"  # 编译日期，每次打包前更新
+#: 支持「容错解析」（不校验帧完整性，按实收字节继续拆）的协议索引。
+#: 目前只有 698.45（协议8）实现了 parse_to_table(..., verify=False)。
+TOLERANT_PARSE_PROTOCOLS = {8}
+
+APP_VERSION = "1.23.92"
+BUILD_DATE = "2026-10-21"  # 编译日期，每次打包前更新
 
 # 作者 GitHub 仓库地址 —— 「关于」对话框 Star 按钮的**唯一来源**。
 # 改地址只改这一处（按钮文案/提示/跳转都读它，不要在别处再写死一份）。
@@ -145,6 +149,17 @@ _WINDOW_STATE_TABLES = (
 )
 
 CHANGELOG = [
+    (
+        "1.23.92",
+        "2026-10-21",
+        [
+            "**单帧解析新增「校验该帧」勾选项（默认勾选）**：勾选 = 原有严格行为（帧结构/长度自洽/HCS/FCS 完整才解析，不完整直接报「❌ 解析失败」）；取消 = **容错解析**，不因半截帧整帧放弃，按实收字节一拆到底。目前仅 **698.45（协议8）** 支持，切到其它协议时该勾选框置灰并提示；勾选状态存 `config.json` 的 `single_parse.verify`，重开保持",
+            "**698.45 容错解析（`parse_to_table(..., verify=False)`）**：长度域只作参考（明确提示「L=532，整帧应 534 字节，实收 256 字节」）；起始符/HCS/FCS/结束符**只记录不阻断**（校验不过标注「失败（容错模式：继续解析）」，结束符缺失标注「未找到 0x16」）；末尾按实收字节切 APDU（末尾是 0x16 才切 FCS+结束符，否则把尾部全部当用户数据）；结构化拆不动时输出「未解析字节」，表格末尾**永远给一行「原始报文」**（含总字节数）",
+            "**APDU 解析失败不丢数据**：APDU 内部解析异常时输出「APDU解析错误」+「APDU原始字节」，不会因为 APDU 拆不开而整帧作废",
+            "测试：新增 `test/test_dl698_tolerant_parse.py` **7 项**（严格模式仍报错 / 容错模式头部到末尾 / **全部 257 个截断前缀零异常** / 合法帧无告警且 HCS·FCS 通过 / 缺结束符 / 坏 FCS 继续 / 空与超短输入）+ `test/test_tolerant_parse_gui.py` **12 项**（勾选框存在与默认勾选 / 勾选时半截帧报失败 / 取消后出现头部与原始报文且不弹框 / 写盘 / 非协议8 置灰 / 切回保留状态）；均已登记 `release_check.py`",
+            "配套：`APP_VERSION 1.23.91 → 1.23.92`、`BUILD_DATE 2026-10-21`、两个 `.iss` 同步；`parse` / `parse_to_table` 新增 `verify` 关键字参数（默认 `True`，对既有调用零行为变化）",
+        ],
+    ),
     (
         "1.23.91",
         "2026-10-20",
@@ -3393,6 +3408,22 @@ class MainWindow(QMainWindow):
         self.verify_btn.clicked.connect(self.verify_single)
         btn_layout.addWidget(self.verify_btn)
 
+        # 「校验该帧」：勾选=严格解析（默认，帧不完整/校验不过就报错）；
+        # 取消=容错解析，按实收字节能拆多少拆多少，拆不动的原样输出。
+        self.verify_frame_chk = QCheckBox("校验该帧")
+        self.verify_frame_chk.setChecked(
+            bool(self._app_config.get("single_parse", {}).get("verify", True))
+        )
+        self.verify_frame_chk.setToolTip(
+            "勾选（默认）：要求帧结构、长度自洽、HCS/FCS 通过才解析，"
+            "不完整时报「解析失败」。\n"
+            "取消：按实收字节容错解析，能拆到哪算哪，剩余字节以「未解析字节 / 原始报文」原样输出。\n"
+            "目前仅 698.45（协议8）支持容错解析。"
+        )
+        self.verify_frame_chk.setMinimumHeight(32)
+        btn_layout.addWidget(self.verify_frame_chk)
+        self._sync_verify_frame_chk()
+
         self.add_to_test_btn = QPushButton("添加到测试方案")
         set_btn(self.add_to_test_btn, "success", "lg")
         set_btn_icon(self.add_to_test_btn, "apply")
@@ -5109,9 +5140,28 @@ class MainWindow(QMainWindow):
             # 弹出列表无下拉箭头，左右各留 pad_extra 余量
             combo.view().setMinimumWidth(widest + pad_extra * 2)
 
+    def _sync_verify_frame_chk(self):
+        """「校验该帧」只对支持容错解析的协议可用（当前 698.45）。"""
+        chk = getattr(self, "verify_frame_chk", None)
+        if chk is None:
+            return
+        try:
+            supported = int(self.current_protocol) in TOLERANT_PARSE_PROTOCOLS
+        except Exception:  # noqa: BLE001
+            supported = False
+        chk.setEnabled(supported)
+        if supported:
+            chk.setToolTip(
+                "勾选（默认）：要求帧结构、长度自洽、HCS/FCS 通过才解析，不完整时报「解析失败」。\n"
+                "取消：按实收字节容错解析，能拆到哪算哪，剩余字节以「未解析字节 / 原始报文」原样输出。"
+            )
+        else:
+            chk.setToolTip("当前协议暂不支持容错解析（目前仅 698.45 / 协议8 支持）")
+
     def _on_protocol_changed(self, index: int):
         """协议选择改变时的回调"""
         self.current_protocol = index
+        self._sync_verify_frame_chk()
         spec = protocol_registry.get_protocol(index)
         # 更新占位符提示
         self.single_input.setPlaceholderText(spec.placeholder)
@@ -7618,7 +7668,16 @@ class MainWindow(QMainWindow):
 
             # 使用当前选中的解析器
             current_parser = self._get_current_parser()
-            table_data = current_parser.parse_to_table(frame_bytes)
+            tolerant = (
+                hasattr(self, "verify_frame_chk")
+                and not self.verify_frame_chk.isChecked()
+                and int(self.current_protocol) in TOLERANT_PARSE_PROTOCOLS
+            )
+            table_data = (
+                current_parser.parse_to_table(frame_bytes, verify=False)
+                if tolerant
+                else current_parser.parse_to_table(frame_bytes)
+            )
             # ED 监控头前置 + 业务行偏移修正
             if ed_meta_rows:
                 # 业务行的 byte_start/byte_end 需要加上 ED 头偏移
@@ -13570,6 +13629,10 @@ class MainWindow(QMainWindow):
                 except ValueError:
                     file_paths[key] = str(path)
         config["file_paths"] = file_paths
+
+        # 单帧解析偏好：是否校验该帧（容错解析开关）
+        if hasattr(self, "verify_frame_chk"):
+            config["single_parse"] = {"verify": bool(self.verify_frame_chk.isChecked())}
 
         # 更新主题与字体配置（含毛玻璃参数）
         config["ui"] = ThemeManager.to_config(

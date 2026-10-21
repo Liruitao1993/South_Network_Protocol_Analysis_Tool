@@ -47,6 +47,7 @@ CRITICAL_DATAS = (
 CORE_TESTS = [
     # P0 加固：原子写 / 升级回滚脚本 / 诊断包（纯逻辑 + 主程序静态守卫）
     "test/test_p0_hardening.py",
+    "test/test_dl698_tolerant_parse.py",
     "test/test_crash_handler.py",
     "test/test_frame_corpus.py",
     "test/test_parser_fuzz.py",
@@ -184,6 +185,7 @@ GUI_TESTS = [
     # 短时长稳：反复切页（内存必须收敛）+ 高频收包（日志块上限/队列清空）
     "test/test_soak_stability.py",
     "test/test_appearance_gui.py",
+    "test/test_tolerant_parse_gui.py",
     # 协议8 文件传输升级页（offscreen 假串口：逐包确认/重试/超时/中止/进度/拖放/不裁字）+ 真实 MainWindow 接线
     "test/test_dl698_upgrade_gui.py",
     "test/test_dl698_upgrade_tab_wiring.py",

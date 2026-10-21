@@ -1387,6 +1387,12 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 
 > 详细版本变更记录请查看 `main_gui.py:CHANGELOG`（按版本倒序），或运行 `git log --oneline` 查看提交历史。本文档保留近期版本的摘要。
 
+### 1.23.92 — 2026-10-21
+
+- **单帧「校验该帧」开关**：`TOLERANT_PARSE_PROTOCOLS = {8}`；勾选走原严格路径，取消调用 `parse_to_table(frame, verify=False)`。`_sync_verify_frame_chk()` 在协议切换时置灰非协议8；状态存 `config.json: single_parse.verify`。
+- **698 容错解析**：`parse(frame, verify=True)` / `parse_to_table(frame, verify=True)` 新增关键字参数（默认 True，零行为变化）。容错分支 `_parse_tolerant` + `_build_tolerant_table`：长度域只作参考（整帧 = L+2）、起始/HCS/FCS/结束符只标注、末尾是 0x16 才切 FCS、拆不动给「未解析字节」、**必定输出「原始报文」行**；APDU 异常时给「APDU解析错误 + APDU原始字节」。
+- 测试：`test_dl698_tolerant_parse.py`（7）+ `test_tolerant_parse_gui.py`（12，GUI_TESTS）。
+
 ### 1.23.91 — 2026-10-20
 
 - **外观模式（浅/深/跟随系统）与主题解耦**：`theme_settings.resolve_appearance(theme, mode, system_dark) -> (实际主题, 是否深色)`；`ThemeManager.apply(..., mode=, system_dark=)` 新增两个默认参数（向后兼容）。`PALETTE_DARK_THEMES = ("fusion","windows","windowsvista")`：深色时**保留主题 id**、换 `build_dark_palette()` 并叠加 `DARK_QSS`（只换调色板会出现"菜单黑了、页面还是白"的割裂）；`default/glass/mica` 深色时落 `dark` 主题。
