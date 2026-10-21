@@ -27,6 +27,8 @@ _STANDARD_ICON_MAP = {
     "stop": QStyle.StandardPixmap.SP_MediaStop,                 # 停止/关闭
     "pause": QStyle.StandardPixmap.SP_MediaPause,               # 暂停
     "copy": QStyle.StandardPixmap.SP_FileDialogContentsView,    # 复制/查询/搜索/定位
+    "search": QStyle.StandardPixmap.SP_FileDialogContentsView,  # 查询/搜索（归档页、拓扑页在用）
+    "settings": QStyle.StandardPixmap.SP_FileDialogDetailedView,  # 设置/初始化（归档页在用）
     "help": QStyle.StandardPixmap.SP_MessageBoxInformation,     # 帮助/说明
     "warning": QStyle.StandardPixmap.SP_MessageBoxWarning,      # 警告类
 }

@@ -7,6 +7,8 @@
 - 点击按钮发出信号，由主窗口恢复到组帧页面
 """
 
+from atomic_io import atomic_write_json
+
 import json
 import uuid
 from datetime import datetime
@@ -93,8 +95,7 @@ class PresetButtonManager:
         if path is None:
             path = _get_path(protocol)
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump({"commands": commands}, f, ensure_ascii=False, indent=2)
+            atomic_write_json(path, {"commands": commands})
             return True
         except OSError as e:
             print(f"保存 {path.name} 失败: {e}")

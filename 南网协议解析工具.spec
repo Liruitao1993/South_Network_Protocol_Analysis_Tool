@@ -210,7 +210,12 @@ a = Analysis(
         'command_lookup',
         'dlt645_di_lookup',
         'gdw_afn_lookup',
+        'atomic_io',  # 配置原子写（main_gui 顶层 import）
+        'diagnostics',  # 诊断包（main_gui 帮助菜单里函数级 import）
+        'crash_handler',  # 崩溃兜底（main() 里函数级 import）
+        'self_test',  # `exe --self-test` 自检入口（main() 里函数级 import）
         'auto_updater',  # 自动升级检查（main_gui 函数体内运行时 import）
+        'update_dialogs',  # 升级对话框：版本列表+更新说明 / 发现新版本（main_gui 函数体内运行时 import）
         'thread_registry',  # QThread 注册中心（main_gui 顶层 import，显式声明保险）
         'proc_stats',  # 状态栏 CPU/内存采样（main_gui 顶层 import，纯标准库，显式声明保险）
         'frame_gen_widget',
@@ -275,6 +280,9 @@ a = Analysis(
         'bluetooth_core',
         'bluetooth_worker',
         'bluetooth_tool_widget',
+        # 生产测试架（main_gui 内**函数级**惰性 import，静态分析扫不到，必须显式声明）
+        'production_testbench_core',
+        'production_testbench_widget',
         # 可选依赖
         'crcmod',
         'serial',

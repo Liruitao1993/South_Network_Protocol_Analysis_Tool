@@ -5,6 +5,8 @@
 可嵌入main_gui.py作为独立标签页使用。
 """
 
+from atomic_io import atomic_write_json
+
 from typing import Dict, Any, List, Tuple
 from datetime import datetime
 
@@ -63,6 +65,7 @@ from yw645_parser import YW645Parser
 # =============================================================================
 # 通用字段模板类型定义
 # =============================================================================
+
 
 class CustomFieldTemplate:
     """通用字段模板项（参考图2模式）"""
@@ -2007,12 +2010,9 @@ class FrameGenWidget(QWidget):
         self._refresh_dlt645_addr_items()
         self._update_dlt645_addr_type_label()
         try:
-            import json
             from app_paths import data_path
-            with open(str(data_path("dlt645_addr_history.json")), "w",
-                      encoding="utf-8") as fh:
-                json.dump({"history": self._dlt645_addr_history}, fh,
-                          ensure_ascii=False, indent=2)
+            atomic_write_json(str(data_path("dlt645_addr_history.json")),
+                              {"history": self._dlt645_addr_history})
         except Exception:
             pass
 

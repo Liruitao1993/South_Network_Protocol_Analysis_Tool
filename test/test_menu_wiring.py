@@ -52,6 +52,7 @@ EXPECTED = {
     "恢复默认窗口布局(&W)": "_reset_window_layout",
     "检查更新(&C)": "_check_update_manual",
     "问题反馈(&F)...": "_show_feedback_dialog",
+    "生成诊断包(&D)...": "_export_diagnostics",
     "关于(&A)": "_show_about_dialog",
 }
 

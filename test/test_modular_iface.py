@@ -776,7 +776,9 @@ def main():
 
     print(f"\n结果: PASS={PASS} FAIL={FAIL}")
     sys.stdout.flush()
-    os._exit(0 if FAIL == 0 else 1)
+    # 不用 os._exit：Qt 已加载时直接 ExitProcess 会偶发 0xC0000409（DLL 卸载期崩溃），
+    # 正常 SystemExit 让解释器按序析构，实测 12/12 稳定。
+    raise SystemExit(0 if FAIL == 0 else 1)
 
 
 if __name__ == "__main__":

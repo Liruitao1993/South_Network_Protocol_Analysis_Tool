@@ -56,7 +56,7 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 | 13 | 依瓦定制645 | 依瓦定制645协议 V1.0 | 地址域高字节在前 / 数据域逐字节 | 8位位组算术和（数据域 ±0x33） |
 | 14 | 南网上行通信规约 | Q/CSG 11109004-2013 | 小端（长度L/地址域/多字节字段） | 8位位组算术和（控制域+地址域+链路用户数据） |
 
-> 协议覆盖差异：**HDC 1.0（索引 11）在 PySide6 主程序与 Reflex Web 版均支持**（2026-09-15 核实）。Web 版无实时监控器/档案/拓扑；组帧与预设标签页在 Web 存在但协议 9/10/11 均不支持（与桌面一致），协议11 另有「无实时监控器/组帧/预设」的说明见 §8 陷阱 27。**「频谱图」标签页两端都有**（与协议无关，常驻）：桌面 `spectrum_widget.py`（QPainter 自绘），Web `reflex_web/reflex_web/spectrum_web.py`（SVG）——两侧共用同一份纯逻辑层。**Web 另有主题系统**（浅色/深色/跟随系统 + 6 个预设 + 5 个强调色，`reflex_web/reflex_web/theme_web.py`，token 化 CSS）；桌面为 7 套 QSS 主题（`theme_settings.py`，含毛玻璃/云母，Web 无对应）。NiceGUI/TUI 版本已于 2026-08-17 移除。**协议8/6 另有专用页**：协议8 有「光伏升级」标签页（698.45 文件传输升级：启动传输 → 写文件×N → 执行升级，拖入升级包、逐包等确认、进度条，1.23.85 起；另有**可选**的「升级前/升级完成后读版本信息」两步——通用版本 `OAD 43000300` 或厂家扩展内部版本 `OAD FF100400` 二选一，默认不勾、失败不阻断升级，**两次读到的版本会自动比对给出「升级成功（版本已变化）/ 升级失败（版本完全一致）/ 无法判定」结论**（1.23.86 起）；以及仅串口的**可选**「提升波特率」——升级前先发 FT1.2 命令让设备切 115200，传完切回 9600，升级后读版本在两种速率上各试一遍（1.23.86 起）；后端为纯逻辑 `dl_t698_45_upgrade.py`，**Web 无对应**），协议6 有「645虚拟表」（1.23.5 起）。
+> 协议覆盖差异：**HDC 1.0（索引 11）在 PySide6 主程序与 Reflex Web 版均支持**（2026-09-15 核实）。Web 版无实时监控器/档案/拓扑；组帧与预设标签页在 Web 存在但协议 9/10/11 均不支持（与桌面一致），协议11 另有「无实时监控器/组帧/预设」的说明见 §8 陷阱 27。**「频谱图」标签页两端都有**（与协议无关，常驻）：桌面 `spectrum_widget.py`（QPainter 自绘），Web `reflex_web/reflex_web/spectrum_web.py`（SVG）——两侧共用同一份纯逻辑层。**Web 另有主题系统**（浅色/深色/跟随系统 + 6 个预设 + 5 个强调色，`reflex_web/reflex_web/theme_web.py`，token 化 CSS）；桌面为 7 套 QSS 主题（`theme_settings.py`，含毛玻璃/云母，Web 无对应）。NiceGUI/TUI 版本已于 2026-08-17 移除。**协议8/6 另有专用页**：协议8 有「光伏升级」标签页（698.45 文件传输升级：启动传输 → 写文件×N → 执行升级，拖入升级包、逐包等确认、进度条，1.23.85 起；另有**可选**的「升级前/升级完成后读版本信息」两步——通用版本 `OAD 43000300` 或厂家扩展内部版本 `OAD FF100400` 二选一，默认不勾、失败不阻断升级，**两次读到的版本会自动比对给出「升级成功（版本已变化）/ 升级失败（版本完全一致）/ 无法判定」结论**（1.23.86 起）；以及仅串口的**可选**「提升波特率」——升级前先发 FT1.2 命令让设备切 115200，传完切回 9600，升级后读版本在两种速率上各试一遍（1.23.86 起）；后端为纯逻辑 `dl_t698_45_upgrade.py`，**Web 无对应**），协议6 有「645虚拟表」（1.23.5 起）。**「生产测试架」也是常驻页**（与协议无关，1.23.88 起）：类串口助手（5 条发送配置，各自 HEX/ASCII + checksum8）+ 一条可配置的测试架参数帧（49 项参数，改动即生成 75 字节整帧），纯逻辑在 `production_testbench_core.py`，**Web 无对应**。
 
 > **Web 路由（1.23.14 起，改链接前必读）**：`/` = **产品首页**（落地页，介绍桌面客户端：Hero/功能卡/协议表/命令行与系统集成/下载区/页脚，实现在 `reflex_web/reflex_web/landing_web.py`）；`/app` = **在线工具**（原主页的 9 个标签页，函数名 `index()` 已更名 `tool_page()`）；`/share`、`/feedback`、`/feedback-admin` 不变。首页数据全部读 `reflex_web/downloads/`（`version.json` 版本、`*.exe` 体积、`client_screenshot.png` 截图，缺图降级占位卡）。**新增/修改站内链接时必须按语义选目标**（回介绍页 `/`、回工具 `/app`），`landing_web.INTERNAL_LINKS` 是落地页侧的唯一来源，`test/test_web_landing.py` 有死链白名单守卫。
 
@@ -91,6 +91,12 @@ python main_gui.py --minimized
 
 # 读取剪贴板中的十六进制报文并直接弹出解析结果
 python main_gui.py --clipboard
+
+# 打包后自检（不建窗、不读写文件；返回码 0 才算打包合格）
+南网协议解析工具_v1.23.90_xxxx.exe --self-test
+
+# 自动化冒烟专用：跳过单实例检查（正常用户不要设置）
+NW_NO_SINGLE_INSTANCE=1 QT_QPA_PLATFORM=offscreen 南网协议解析工具_v1.23.90_xxxx.exe
 ```
 
 **依赖：**
@@ -262,6 +268,10 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
 │                             #   （不用共享单例）；`parse_one_frame` 是「单帧解析」的唯一实现，
 │                             #   worker 与详情按需重解析共用；1.23.15 起）
 ├── custom_di_store.py        # 南网自定义DI存储单源（纯逻辑无Qt：custom_di.json 读写/校验/upsert/批量删；main_gui·lookup_pages·protocol_parser 共用）
+├── production_testbench_core.py # 生产测试架纯逻辑（无 Qt，1.23.88）：FieldSpec/FIELD_GROUPS 字段表（界面与组帧单一来源）、75 字节组帧、checksum8、HEX/ASCII、配置合并与原子写
+├── atomic_io.py             # 原子写（纯标准库，1.23.89）：tmp+fsync+os.replace，失败保留旧文件；main_gui 的 config.json 全部走它
+├── diagnostics.py           # 诊断包（无 Qt，1.23.89）：环境信息 + 配置（递归脱敏）+ 日志尾部 → zip，入口在帮助菜单
+├── crash_handler.py         # 崩溃兜底（1.23.90）：sys/threading excepthook → logs/crash_*.log（保留 20 份）
 ├── wakeup_prefix.py          # 68 家族前导 FEH 唤醒字节单源（1.23.76）：判定/剥离/表格前导行/偏移位移；
 │                             #   协议8（§6.3.1 b）与协议6（§5.3.1）的解析器·校验器共用，其余协议禁止引用（见 §8 陷阱 75）
 ├── frame_deframe.py          # 串口分帧族单源（1.23.85 抽出，纯逻辑无 Qt）：68 家族 L+2 / 末字节 16H 自证 / 前导 FEH 容忍、
@@ -337,6 +347,9 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
 │   ├── app_icons.py                # 图标加载（icons/lucide/*.svg；按钮/窗口图标）
 │   ├── thread_registry.py          # QThread 登记表（新增 QThread 必须 track；_shutdown_threads 兜底回收依赖）
 │   ├── auto_updater.py             # 自动升级：版本比对/下载/update.bat 替换编排（纯逻辑无Qt；配置在 config.json update 段）
+│   │                               #   更新源默认 **GitHub Release**（owner/repo 由 AUTHOR_GITHUB_URL 解析注入，单一来源）；
+│   │                               #   另支持 Gitee / 私有 HTTP；GitHub 资产 digest→sha256、body=更新说明（1.23.87 起）
+│   ├── update_dialogs.py           # 升级对话框：版本列表+更新说明面板 / 「发现新版本」确认（markdown 渲染；不发网络请求）
 │   ├── llm_preprocess.py           # LLM 日志预处理纯逻辑（LLMWorker 线程，thread_registry 登记）
 │   ├── llm_preprocess_widget.py    # LLM 日志预处理面板（挂在批量解析输入区，默认折叠）
 │   ├── llm_api_manager.py          # LLM API Key 管理对话框（llm_preprocess 的 API 配置）
@@ -358,6 +371,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
 │   │                                 #   `frame_addr_fix`：纯逻辑 `replace_frame_address` / `addr_field_errors`，
 │   │                                 #   前导 FEH 只对协议 6/8 剥离并恢复；见 §8 陷阱 69、component-guidelines §7l）
 │   ├── spectrum_widget.py           # 频谱图标签页 (SpectrumWidget/SpectrumCanvas) - 频谱仪参数 + trace 数值 → 仪器式网格频谱图；光标读数/MARK标记/两点Δ测量/峰值搜索 + 导出PNG（常驻，与协议无关；1.23.9 起）
+│   ├── production_testbench_widget.py # 生产测试架页 (ProductionTestbenchWidget) - 类串口助手：5 条发送配置（各自 HEX/ASCII + checksum8 三种落位）+ HEX/ASCII 日志/时间戳 + 测试架参数帧（49 项，改动即组帧）；常驻、懒加载、复用共享串口（1.23.88 起）
 │   ├── feedback_dialog.py           # 问题反馈对话框 (FeedbackDialog) - 帮助菜单入口，提交到 Web 服务端共享 feedback.db（1.20.0 起）
 │   ├── share_dialog.py              # 报文分享对话框 (ShareDialog) - 单帧解析「分享此帧」，JSON POST /api/frameshare（1.21.0 起）
 │   ├── enhanced_export.py           # 增强导出功能 (EnhancedBatchResultExporter) - Excel/CSV/TXT/JSON
@@ -696,6 +710,16 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
   - **右栏「显示响应解析」开关**：协议9 是纯组帧场景，进页面强制收起（把高度让给实时解析预览），其它协议按用户偏好显示；`_apply_resp_visibility()` 只覆盖显示状态、不改偏好
   - 回归：`test/test_csg_frame_gen_gui.py`（139 项，offscreen GUI 端到端）+ `test/test_csg_link_frame_gen.py`（176 项）+ `test/test_csg_frame_reverse.py`（96 项，纯逻辑）+ `test/test_csg_frame_templates.py`（92 项）+ `test/test_csg_test_ext_0009.py`（76 项，2.0 测试扩展 `0x0009` 解析/组帧/回填/摘要）+ `test/test_collapsible_section.py`（51 项）
 - **解析重点**：支持多物理块重组、聚合帧级联块应用层解析、NET 帧可变区域解析；批量解析支持监控日志前缀剥离与业务摘要；ED..EE 包装的数据域若为《测试装置通信控制协议V1.1》工装板/功能驱动板控制帧，也由协议9解析器识别展开
+- **批量前缀剥离必须放行「测试装置控制帧」（1.23.87 修，改 `_strip_csg_new_gen_frame_prefix` / `batch_core.strip_csg_new_gen_frame_prefix` / Web `web_utils.strip_csg_new_gen_prefix` 前必读）**：工装板/功能驱动板控制帧（`FE×n + 05 地址 命令码 6字节数据 校验`，功能驱动板以 `AA 0D 0A` 结尾）**没有 FC 起始签名**、也大多不以 `ED` 开头（现场常直接贴裸帧，如 `FEFEFE0501051400000000001AAA0D0A` = 台体控制衰减器）。此前剥离层的 FC 扫描判定「无有效起始」把它**整行丢弃** → 批量弹「预处理后未保留有效报文内容！」，而**同一帧单帧解析正常**（`parse_to_table` 第一步就优先判它）。三条不可拆：
+  - 判据是**解析器里的单一实现** `csg_new_gen_parser.is_test_device_control_frame(data)`（入参同时收 `bytes` 与纯 hex `str`，判据内部复用 `_parse_test_device_control`）；**禁止**在剥离层另写一份帧格式判据（陷阱 31 的漂移根因）。
+  - 三处剥离实现（桌面 `main_gui`、共享 `batch_core`、Web `web_utils`）都要有该分支 —— 它们目前是**三份同源副本**，改一处必须三处同改（残留的重复本身就是漂移风险，见「已知待办」）。
+  - 只在 `auto / fc_pb / fc_only / fc_efc / pb_only / mac_only` 放行；**`app` 级别刻意不放行**（用户已声明「输入即应用层报文」，控制帧不属该级别）。
+  - 回归：`test/test_csg_batch_parse_level.py`（新增 5 项：整行保留 / 端到端解析出「命令码=衰减器C」/ app 级别不放行 / 非帧行仍丢弃 / 共享 `batch_core` 同口径）、`test/test_csg_test_device_control.py`（判据正反例）、`reflex_web/tests/test_csg_ed_control.py`（Web 同口径 + 端到端）。**变异反证 2 条**：判据恒 False → 三层全红；只改坏 `batch_core` 分支 → 该层单独变红（各副本独立覆盖）。
+- **测试装置控制帧的**批量摘要**必须给「命令专属解析值」（1.23.87 修，改摘要前必读）**：用户报障「解析摘要里居然没有衰减值」—— 此前这类表落到 `_get_csg_new_gen_summary` 的**兜底分支**，只取了 `table_data[:4]` 的**说明文案**（结果长成「射频信号切换/衰减控制（9600 8N1…） | 数据帧开始 | 00=广播预留，01=工装板默认地址 | 测试装置通信控制协议 V1.1」，**核心值全丢**）。三条：
+  - 共享单一实现 `batch_core.test_device_summary(table_data)`（桌面 `_get_csg_new_gen_summary` 与 Web `get_frame_summary` 都调它，**禁止再写第二份**）；摘要格式 = `命令名 | 命令专属行=解析值…`，例：`衰减器C | 衰减器C衰减值=20 dB`、`设置引脚状态/衰减器A | CCO仓引脚控制=…；STA仓引脚控制=STA1；RST=高电平；EVENT=高电平`。
+  - 「命令专属行」用**排除法**识别（跳过 `起始字符/帧头/地址/命令码/校验和/结束符` 与 `数据项字节N`），因此**解析器新增命令时摘要自动跟随**，不要在摘要层再维护一张命令表。
+  - **ED..EE 包装的控制帧不接管**（表里同时有包装头行与控制行）：那类仍走既有 ED 摘要分支（含包装名 + 业务帧核心值），抢过来会丢包装上下文 —— 回归 `test_web_summary_contains_control_state` 钉住这一点。
+  - 回归：`test/test_csg_summary.py`（+3 项：5 类控制帧核心值 / 无噪声行 / 反例普通帧不被污染）、`reflex_web/tests/test_csg_ed_control.py`（+1 项 Web 摘要）。**变异反证**：摘要不接管（恒返回空）→ 桌面与 Web 两项同时变红，且举证输出正是改前那段无核心值的文案。
 - **信标条目解析的实机差异（2026-10-08 实测，改动前先读）**：
   - **`0x10 代理角色条目` 实机按 1 字节长度字段发送**（表59/表72 写的是 16 比特）：按规格宽度读会得到 `04 60 → 0x6004 = 24580` 这类荒谬长度，把其后全部字节（含后续条目）吞成「代理角色条目 28字节 / 代理站点数 14」。`_parse_beacon_entries` 现按表59 宽度读，仅当**声明值超出剩余字节**时退回 1 字节重读（声明值合法时仍按表59），并在该条目「条目长度」行注明「长度字段实发 1 字节」；`0x00`（表59 非法值）处停止，不再把补齐/校验序列当条目
   - **帧载荷校验序列不再无条件取末 4 字节**：旧逻辑先切掉末 4 字节再解析条目，输入若是**裁剪过的 PB 载荷（到最后一个条目为止、不含 BPCS）**，就会把最后一个条目的末 4 字节吞掉（实测该帧末 4 字节是 `0x02 时隙分配条目` 的 CSMA时隙信息）。现改为先按条目解析定位条目末尾，再在剩余字节里取末 4 字节（`_beacon_tail_rows`），无剩余字节时明确提示「未包含」、剩余多于 4 字节时注明补齐字节数
@@ -1321,6 +1345,23 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
     - **判定不改状态机**：流程照常收尾 `done` / 进度 100%（**流程跑完 ≠ 固件升级成功**），结论只在三处外显：判定条（`_render_version_verdict`，配色走 `LOG_PALETTES` 随主题）、收尾状态行（`_set_status` 仅在 `STATE_DONE` 且结论明确时追加「判定：升级成功/失败」）、日志（`_log_verdict`）。
     - **日志不许复述字段值**：`pending` 只写结论行、不写明细。待比对时把升级前字段值再抄一遍会与「帧下一行的读版本明细」重复刷屏，且会破坏既有断言「`厂商代码`+`JCDZ` 的日志行恰好 2 行」（`test_dl698_upgrade_gui.py` [17]）。
     - 回归：`test/test_dl698_upgrade_gui.py` [27]（纯比对口径 + 相同/变化/缺基线/读不到/口径不一致/主题换色 六类场景）。
+81. **协议9/10「原有扩展命令」（表61）的跨字节字段一律「字节号小的端为低位」，且测试模式 6 与 8 语义不同（1.23.87 起，改 `csg_new_gen_cmd_payloads._parse_legacy_ext_cmd` / `gw_new_gen_cmd_payloads._parse_comm_test_ext` 前必读）**：
+    - **12bit「转发数据长度/模式持续时间/频段值/ToneMask值/无线信道号/MCS值」= 字节2 bit4-7（低 4 位）| 字节3 << 4（高 8 位）**——与协议11 `hdc10_parser.config_val`、协议10 `gw_new_gen_cmd_payloads` 同口径（即「字节号小的端为低位」，同陷阱 54 的 LSB-first）。旧协议9 按大端拼（`(b2>>4)<<8 | b3`）会把用户帧 `20 00` 读成 512（应为 2）、把「30 分钟」读成 3585。
+    - **报文头长度是 6bit**：字节0 bit6-7 为低 2 位 + 字节1 bit0-3 为高 4 位（表61 跨两行）。只取字节0 的 2bit 会把 `81 61…` 报成「2」（正确 6 = 整根 6 字节报文头）。
+    - **测试模式 6 ≠ 8**：模式 6 = **频段切换（载波切频）**，配置值 = 目标**频段值**（0/1/2 → 通信频段 0/1/2 及 MHz 范围）；模式 8 = **无线信道切换**，才是 Option（字节2 bit4-7）+ 信道号（字节3）。两者不可合并解析——历史上一次「与模式8 一致」的改动让载波切频帧显示成一堆无线信道号（用户 2026-10-19 报障）。频段映射单源在各 payload 模块的 `_BAND_MAP`。
+    - 回归：`test/test_csg_summary.py::test_legacy_mode6_band_switch_is_carrier_semantics`（用户真实帧：模式6→频段值2/报文头长度6/无无线信道字段 + 模式8 仍为无线信道口径 的反例对拍）、`test/test_gw_ext_cmd.py` T3/T13/T14。
+82. **自动升级默认查 GitHub Release，仓库地址只有一个来源，更新说明必须渲染出来（1.23.87 起，改 `auto_updater.py` / `update_dialogs.py` / 更新设置前必读）**：
+    - **默认源 = GitHub**：`DEFAULT_UPDATE_CONFIG.source_type = "github"`，接口 `api.github.com/repos/{owner}/{repo}/releases/latest`（列表 `?per_page=30`），未鉴权 60 次/小时足够（启动一次 + 每 30 分钟一次）。**不要**把默认改回 `gitee` 或把 owner/repo 再写死一份 —— owner/repo 由 `merge_update_config(..., repo_url=AUTHOR_GITHUB_URL)` 从「关于」那个常量解析注入（`parse_github_repo_url` 容忍 `/releases/...`、`.git`、查询串），用户显式配置优先、**空串视为未设置**（设置对话框清空 = 回默认，否则会拿空 owner 去请求、报错原因还看不出是配置问题）。
+    - **更新说明是 Release `body`（markdown）**：版本列表对话框（左列表 + 右说明）与「发现新版本」确认框都用 `QTextBrowser.setMarkdown` 渲染（链接可点）；空说明给「（该版本未填写更新说明）」占位，**不许静默留白**；`summarize_notes()` 只用于状态栏/tooltip 的一行摘要（剥 `#`/`**`/表格竖线），**不要**拿它替换对话框里的完整说明。
+    - **GitHub 资产的 `digest`（`sha256:…`）就是校验值**：`_digest_to_sha256` 只认 sha256 且必须是 64 位十六进制，顶层 `sha256`（私有 version.json）优先。此前 GitHub 源永远取不到 sha256 ⇒ 勾了「校验 SHA-256」其实没校验。
+    - **失败一律给中文人话**（`describe_http_status`：404=地址不存在或还没发 Release、401=非公开仓库、403/429=频率限制、5xx=服务器错误），`_http_get_text` / `_download_to_stream` 里 `HTTPError` **必须**先于 `URLError` 捕获（前者是后者子类）。
+    - **源码压缩包不是安装包**：资产名命中 `source code`/`source.zip`/`src.zip`/`源码` 一律排除，避免把源码包当 exe 下下来替换自身；版本列表里**草稿（draft）略过**、无安装包资产的版本不进列表（列表里禁用下载按钮而不是点了报错）。
+    - **【阻塞级·必读】发布对象的顶层 `url` 是 API 端点，不是下载地址**：GitHub/Gitee release 对象的 `url` = `api.github.com/repos/{o}/{r}/releases/{id}`。历史上（含 1.23.87 发布前）旧逻辑在「资产没匹配到 exe」时回落到顶层 `url` ⇒ 实测仓库里「有 Release 但没传安装包」的旧版本 `1.8.2` 被列进版本列表，点下载拿到的是**接口 JSON**，再被当作新 exe 覆盖自身。现行规则：**发布对象（含 `assets`/`tag_name`/`html_url`）只认资产直链**；顶层 `url`/`download_url` 仅供私有 version.json（非发布对象）使用；任何路径命中 `api.github.com/repos/` 或 `gitee.com/api/v5/repos/` 一律拒绝；无资产即抛「没有可下载的安装包资产」。回归：`test_auto_updater.py::test_extract_release_never_uses_api_endpoint_as_download_url`。
+    - **替换 exe 前必须有 PE 兜底**（`is_pe_executable`：`MZ` 魔数 + `MIN_PE_BYTES`）：更新源写错 / 拿到 HTML 错误页 / 接口 JSON 时，SHA-256 往往也没配（无预期值即视为通过），只有这道闸能拦住「把 exe 覆盖成垃圾」。**不要**因为「有 sha256 校验了」就删掉它 —— 校验通过的前提是更新源给的就是正确摘要。
+    - **`sha256_verify` 必须真的接进下载线程**（`_UpdateDownloadWorker(verify_sha=...)`）：它曾在全仓库里只有设置对话框读写、实际是否校验只看「摘要有没拿到」⇒ 勾不勾一样（死开关）。改这块时保持「关掉=不校验、打开=摘要不匹配即拒绝」三态可测。
+    - **保存时把等于默认值的 owner/repo 收敛成空串**（`github_fields_for_save`）：否则用户点过一次「更新设置→确定」就把默认值落盘，显式配置优先会让**此后再改 `AUTHOR_GITHUB_URL` 失效**；`DEFAULT_GITHUB_OWNER/REPO` 与 `AUTHOR_GITHUB_URL` 两处硬编码的一致性由 `test_update_notes_gui.py::test_repo_url_single_source_no_drift` 看守。
+    - **临时文件名必须过 `safe_file_stem()`**：tag 含 `/`（`release/1.24`）会把临时文件写成子目录、`: * ?` 等字符在 Windows 非法 ⇒ 表现为一句「下载失败」，现场查不出原因。
+    - 回归：`test/test_auto_updater.py`（40 项）、`test/test_update_notes_gui.py`（54 项 offscreen，含接线源码守卫、下载线程 PE 三态与 sha256 开关三态 —— 防被改回内联 `QMessageBox` 拼原始 markdown / 防删掉 PE 闸或把开关改回死代码）。
 
 ## 9. 开发原则
 1. **协议定义优先**：遇到不确定的协议字段、字节序、校验范围，**先查 §5 对应文档**，不要凭记忆或猜测。
@@ -1345,6 +1386,44 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 ## 10. 变更日志
 
 > 详细版本变更记录请查看 `main_gui.py:CHANGELOG`（按版本倒序），或运行 `git log --oneline` 查看提交历史。本文档保留近期版本的摘要。
+
+### 1.23.91 — 2026-10-20
+
+- **外观模式（浅/深/跟随系统）与主题解耦**：`theme_settings.resolve_appearance(theme, mode, system_dark) -> (实际主题, 是否深色)`；`ThemeManager.apply(..., mode=, system_dark=)` 新增两个默认参数（向后兼容）。`PALETTE_DARK_THEMES = ("fusion","windows","windowsvista")`：深色时**保留主题 id**、换 `build_dark_palette()` 并叠加 `DARK_QSS`（只换调色板会出现"菜单黑了、页面还是白"的割裂）；`default/glass/mica` 深色时落 `dark` 主题。
+- **主界面**：菜单栏右上角新增 `appearance_btn`（sun/moon/monitor），与顶栏折叠按钮同容器；`_cycle_appearance()` 三态循环（暗色主题 + 浅色模式点击自动回 default，否则"点了没反应"）；`_is_dark_theme()` 改为按 `resolve_appearance` 计算，所有 `restyle_for_theme(dark)` 自动跟随；`colorSchemeChanged` 仅 system 模式实时跟随。
+- **配置**：`ui.appearance` 落盘（`ThemeManager.load_mode / to_config(..., mode=)`），旧配置缺键按 `theme == dark` 推断。
+- 测试：`test_appearance_mode.py` 10 项 + `test_appearance_gui.py` 16 项（含"fusion 深色后 Window=#202225、切回恢复 #efefef"）。
+
+### 1.23.90 — 2026-10-20
+
+- **性能**：`topology_widget` 不再顶层导入 `TopologyGraph`，改为 `@property topo_graph` 按需创建 —— 首开 1586 ms → 13 ms（`networkx` 导入 ~0.97 s 不再压在开页上）；20 页全开 RSS 156 → 125 MB。**注意**：以后任何在 `topology_graph` 上加逻辑的改动，都不能把它改回顶层 import。
+- **崩溃兜底**：新增 `crash_handler.py`（`install(app_version, build_date, base_dir, on_crash)`）：`sys.excepthook` + `threading.excepthook` → `<数据目录>/logs/crash_YYYYmmdd_HHMMSS_微秒_pid.log`，保留最近 20 份；`SystemExit` 忽略；写盘/回调异常全部吞掉；主线程才弹框（子线程只落盘）。`main()` 在 `QApplication` 之后、`MainWindow` 之前安装。
+- **日志合并刷新**：`production_testbench_widget` 的 `_log` 入队 + 100 ms `_flush_log`（`LOG_FLUSH_MS` / `LOG_FLUSH_MAX=300` 立即刷）；清空丢弃队列、`cleanup()` 先刷后停。
+- **状态写入原子化全覆盖**：`custom_di_store` / `dlt645_di_lookup` / `command_lookup` / `obis_lookup` / `preset_buttons` / `archive_widget` / `llm_api_manager` / `llm_preprocess_widget` / `frame_gen_widget` / `meter_sim_widget` 的 JSON 写入统一 `atomic_write_json`；`test_p0_hardening.STATE_WRITERS` 静态守卫（新增状态写入点必须加进清单）。
+- **短时长稳**：`test/test_soak_stability.py`（GUI_TESTS）—— 切页 600 次 RSS 158→185→189→189（末段 0 增长）+ 5000 帧灌入 0.1 s、日志块 ≤ 上限、队列清空。
+- **解析健壮性**：修 `gdw10376_parser` 截断帧越界（`cs_pos` 夹回 `frame_len-2`，取 AFN 前再判 `offset < frame_len`）。新增 `test/frames/<registry_key>/*.hex` 语料库 + `test/test_frame_corpus.py`、`test/test_parser_fuzz.py`（固定 seed、12 解析器、含全前缀截断与国网回归）、`test/test_crash_handler.py`；均进 CORE_TESTS。
+- 配套：`APP_VERSION 1.23.90`；spec 增补 `crash_handler`；`--sync-iss`。
+
+### 1.23.89 — 2026-10-20
+
+- **P0 加固三项**（依据 `docs/产品级优化评估-2026-10-20.md`）：
+  1. **配置原子写**：新增 `atomic_io.py`（纯标准库：同目录 tmp + flush/fsync + `os.replace`，Windows 占用重试 4 次；失败保留旧文件、清理 tmp）。`main_gui` 6 处 `open(config.json,"w")+json.dump` 全部换成 `atomic_write_json`。
+  2. **升级失败可回滚**：`auto_updater.UPDATE_BAT_TEMPLATE` 重写为「等旧进程退出 → 备份 `.bak` → 覆盖 → 新旧文件大小比对 → 启动 → `ping -n 16` 15 秒健康检查 → 失败删新文件（重试 10 次）→ 还原 `.bak` 并重启」。备份移动失败（占用）时放弃升级、不动旧文件；成功后保留一份 `.bak`。
+  3. **诊断包**：新增 `diagnostics.py`（无 Qt），从 `app_data_dir()` 收集 环境信息 + 5 个配置文件（递归脱敏 `api_key/token/password/secret/cookie/authorization` 等）+ `Output/` 最近 5 个日志尾部（单个 ≤200KB、总包 ≤5MB）；缺文件只跳过。入口：帮助 → 生成诊断包。
+- 另修：`gui_utils._STANDARD_ICON_MAP` 补 `search` / `settings` 两键（归档/拓扑按钮原本静默无图标）。
+- **回归**：新增 `test/test_p0_hardening.py` **13 项**（原子写 5 + 升级脚本 2 + 诊断包 4 + 主程序静态守卫 2），已进 `release_check.py` CORE_TESTS；`test_auto_updater.py` 40 项仍全绿。
+- 配套：`APP_VERSION 1.23.88 → 1.23.89`、`BUILD_DATE 2026-10-20`、两个 `.iss` 已 `--sync-iss`；spec `hiddenimports` 增补 `atomic_io` / `diagnostics`；`release_check` 支持「动态 Release 徽章」（不再要求静态版本徽章）。
+
+### 1.23.88 — 2026-10-19
+
+- **新增「生产测试架」标签页**（常驻、与协议无关、懒加载，图标 `flask-conical`）：**三栏布局** —— 左「发送配置」**5 条发送框**（各自 HEX/ASCII、各自 checksum8 + 落位方式：追加 / 覆盖末字节 / 插在 16H 前）、中「接收日志」（HEX/ASCII 显示、时间戳开关、自动滚动、收发计数）、右「测试架参数帧」（现场参数表 49 项 + 6 字节地址域，改动即时生成 75 字节整帧，可发送 / 复制 / 恢复现场示例；**发送形态可选 HEX / ASCII**：HEX 发 75 字节二进制帧、ASCII 发大写 HEX 文本 150 字符）
+- **左右两栏可折叠、三栏宽度可拖**：折叠按钮在标题行**外沿**（左栏在左、右栏在右），折叠后只剩 30 px 窄条（按钮 + 竖排栏名），宽度全给中栏日志；展开还原折叠前三栏宽度；`QSplitter` 分隔条直接拖动；折叠状态 + 三栏宽度随配置落盘。参数分组在右栏**单列排布**（不裁标签、不出横向滚动条）
+- **现场样例逐字节复现**：`68 AAAAAAAAAAAA 68 14 35 55AA55AA 01 00 60 0E 12 08 18 13 2F 05 FE … 00 39 16`（75 字节）。帧结构 = `68 + 地址6 + 68 + 14(控制域) + 35(参数区 53 字节) + 55AA55AA(命令标识) + 测试STA + 测试无线 + 参数区 + 保留4×00 + CS8 + 16`；**CS8 = 首字节到保留位末字节的 8 位算术和**。参数区 47 项：`动态电流最大值` 为 2 字节保留（样例 `05 FE`），`表号高位` 4 字节，`无线模块版本日期` 3 字节
+- **字段表是单一来源**：`production_testbench_core` 的 `FieldSpec`（`HEADER_FIELDS` 2 项 + `BODY_FIELDS` 47 项）的 key/标签/长度/默认值/下拉选项同时驱动界面、组帧与落盘；`FIELD_GROUPS` 只决定界面分组；导入即断言参数区 = 53 字节
+- **纯逻辑 / Qt 分层**：`production_testbench_core.py` 无 Qt（组帧 / checksum8 / HEX·ASCII / 时间戳 / 配置合并与 `.tmp`+`os.replace` 原子写），`production_testbench_widget.py` 只做界面；主窗口 5 处接线（import / 占位 tab / 懒加载注入共享串口 / `_restyle_for_theme` / 退出 `cleanup`），不改协议可见性逻辑；串口只订阅 `raw_data_received` / `connection_changed` / `error_occurred`，**绝不开/关端口**
+- **落盘** `production_testbench.json`：发送框（名称/内容/模式/CS8/落位）、全部参数、地址域、显示偏好、三栏折叠状态与宽度；脏值（非 HEX、长度不符、下拉越界）逐字段回落默认，坏 JSON 整体回落默认
+- **测试**：`test/test_production_testbench.py` **120 项**（A 纯逻辑 55：golden、校验范围反例、CS8 三态、文本编解码、字段偏移、非法输入、配置合并、布局配置、`frame_payload` HEX/ASCII；B GUI 56：三栏布局、折叠/展开还原、拖动宽度、窄条竖排标题、无横向滚动条、参数帧 HEX/ASCII 发送、5 框联动、非法拒发、时间戳、恢复示例、落盘重开、主题、断开、cleanup 幂等；C 接线 9：常驻 tab、排在蓝牙工具之后、懒加载注入共享串口、切协议不隐藏、主题钩子、cleanup），已登记 `release_check.py` GUI_TESTS
+- 配套：`APP_VERSION` `1.23.87 → 1.23.88`；spec `hiddenimports` 增补两个新模块（函数级惰性 import，静态分析扫不到）；README 功能表 / 本节说明
 
 ### 1.23.85 — 2026-10-15
 

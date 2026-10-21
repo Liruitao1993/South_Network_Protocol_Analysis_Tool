@@ -24,7 +24,6 @@ from send_frame_lib import ProtocolFrameGenerator
 from gdw_send_frame_lib import GDWFrameGenerator
 from protocol_parser import ProtocolFrameParser
 from gdw10376_parser import GDW10376Parser
-from topology_graph import TopologyGraph
 from gui_utils import set_btn, set_btn_icon
 
 
@@ -373,8 +372,9 @@ class TopologyWidget(QWidget):
         self._gdw_start_seq = 1
         self._gdw_fn = 21        # 默认 F21（单模），也支持 F20（双模）
 
-        # networkx 拓扑图存储
-        self.topo_graph = TopologyGraph()
+        # networkx 拓扑图存储：**延迟到第一次真正用到时**才创建
+        # （networkx 导入约 1 s，曾让本页首开卡 1.6 s；页面先出壳，等到加载/清除/导出再导入）
+        self._topo_graph = None
 
         # 自动刷新
         self._refresh_timer = QTimer(self)
@@ -401,6 +401,15 @@ class TopologyWidget(QWidget):
     # ------------------------------------------------------------------
     # UI
     # ------------------------------------------------------------------
+    @property
+    def topo_graph(self):
+        """按需创建 networkx 拓扑图（首开页面不再为导入 networkx 付 1 s）。"""
+        if self._topo_graph is None:
+            from topology_graph import TopologyGraph
+
+            self._topo_graph = TopologyGraph()
+        return self._topo_graph
+
     def setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setSpacing(6)

@@ -385,6 +385,10 @@ class GDW10376Parser:
         # 计算用户数据区长度和校验和位置
         user_data_len = length_val - 6
         cs_pos = 4 + user_data_len  # 校验和在用户数据区之后(起始1+长度2+控制1+用户数据user_data_len)
+        # 长度域可能大于实收字节（截断帧/粘贴不全）：把 CS 位置夹回帧内，
+        # 否则后面用 offset < cs_pos 判断会越界取下标（畸形输入曾触发 IndexError）。
+        if cs_pos > frame_len - 2:
+            cs_pos = max(4, frame_len - 2)
         end_pos = cs_pos + 1
 
         # 校验长度是否合理
@@ -605,7 +609,7 @@ class GDW10376Parser:
             offset += addr_len
 
         # 6. 应用数据域
-        if offset < cs_pos:
+        if offset < cs_pos and offset < frame_len:
             # AFN
             afn = frame_bytes[offset]
             afn_name = self.get_afn_name(afn)

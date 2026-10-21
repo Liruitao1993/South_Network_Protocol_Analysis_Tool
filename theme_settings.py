@@ -21,7 +21,7 @@ import json
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtGui import QColor, QFont, QGuiApplication, QPalette
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QColorDialog, QDialog, QFileDialog, QFontComboBox,
@@ -1839,6 +1839,88 @@ def is_dark(theme_id: Optional[str]) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# 外观模式（浅色 / 深色 / 跟随系统）——与「主题」正交
+# ---------------------------------------------------------------------------
+#: 外观模式；与主题 id 分开存（config.json `ui.appearance`）
+APPEARANCE_MODES = ("light", "dark", "system")
+APPEARANCE_LABELS: Dict[str, str] = {"light": "浅色", "dark": "深色", "system": "跟随系统"}
+#: 调色板型主题：没有暗色 QSS，但保留原生风格、换 QPalette 就能深色（经典 / 原生）
+PALETTE_DARK_THEMES = ("fusion", "windows", "windowsvista")
+
+
+def detect_system_dark() -> bool:
+    """系统当前是否深色（Qt 6.5+ 优先 styleHints，失败退回 Windows 注册表）。"""
+    try:
+        hints = QGuiApplication.styleHints()
+        scheme = hints.colorScheme()
+        if scheme != Qt.ColorScheme.Unknown:
+            return scheme == Qt.ColorScheme.Dark
+    except Exception:  # noqa: BLE001 - 老 Qt / 非 Windows
+        pass
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+        ) as key:
+            return int(winreg.QueryValueEx(key, "AppsUseLightTheme")[0]) == 0
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def resolve_appearance(theme_id: Optional[str], mode: str = "light",
+                       system_dark: bool = False) -> Tuple[str, bool]:
+    """把「主题 + 外观模式 + 系统深浅」解析成 ``(实际主题 id, 是否深色)``。
+
+    规则：
+    - 主题本身是「Fusion 暗色」⇒ 永远深色（主题是显式选择，优先于模式）；
+    - 模式 dark、或模式 system 且系统深色：
+        * 调色板型主题（fusion / windows / windowsvista）→ **保留主题**，只换深色 QPalette；
+        * 其它（default / glass / mica）→ 用 `dark` 主题的 QSS（它们没有暗色版本）；
+    - 模式 light 且主题是 dark ⇒ 回退 `default`。
+    """
+    mode = mode if mode in APPEARANCE_MODES else "light"
+    theme_id = theme_id or "default"
+    if theme_id == "dark":
+        return "dark", True
+    dark = mode == "dark" or (mode == "system" and bool(system_dark))
+    if not dark:
+        return theme_id, False
+    if theme_id in PALETTE_DARK_THEMES:
+        return theme_id, True
+    return "dark", True
+
+
+def build_dark_palette() -> QPalette:
+    """Fusion/原生风格下的深色 QPalette（QSS 主题不走这里）。"""
+    p = QPalette()
+    window = QColor("#202225")
+    base = QColor("#1b1d20")
+    alt = QColor("#24262a")
+    text = QColor("#e6e8ea")
+    disabled = QColor("#7c8288")
+    p.setColor(QPalette.ColorRole.Window, window)
+    p.setColor(QPalette.ColorRole.WindowText, text)
+    p.setColor(QPalette.ColorRole.Base, base)
+    p.setColor(QPalette.ColorRole.AlternateBase, alt)
+    p.setColor(QPalette.ColorRole.ToolTipBase, window)
+    p.setColor(QPalette.ColorRole.ToolTipText, text)
+    p.setColor(QPalette.ColorRole.Text, text)
+    p.setColor(QPalette.ColorRole.Button, QColor("#2b2e33"))
+    p.setColor(QPalette.ColorRole.ButtonText, text)
+    p.setColor(QPalette.ColorRole.BrightText, QColor("#ff6b6b"))
+    p.setColor(QPalette.ColorRole.Link, QColor("#5aa9e6"))
+    p.setColor(QPalette.ColorRole.Highlight, QColor("#2f6ea5"))
+    p.setColor(QPalette.ColorRole.HighlightedText, QColor("#ffffff"))
+    p.setColor(QPalette.ColorRole.PlaceholderText, disabled)
+    for role in (QPalette.ColorRole.WindowText, QPalette.ColorRole.Text,
+                 QPalette.ColorRole.ButtonText):
+        p.setColor(QPalette.ColorGroup.Disabled, role, disabled)
+    return p
+
+
+# ---------------------------------------------------------------------------
 # Windows 亚克力背景模糊（毛玻璃主题专用）
 # ---------------------------------------------------------------------------
 def _set_windows_acrylic(win_id: int, enabled: bool, tint: str = "#f0f5ff") -> bool:
@@ -1982,6 +2064,20 @@ class ThemeManager:
     DEFAULT_THEME_ID = "default"
     DEFAULT_FONT_FAMILY = "Microsoft YaHei"
     DEFAULT_FONT_SIZE = 10
+    # 外观模式常量（类方法门面，供 main_gui 统一从 ThemeManager 取）
+    APPEARANCE_MODES = APPEARANCE_MODES
+    APPEARANCE_LABELS = APPEARANCE_LABELS
+
+    @staticmethod
+    def detect_system_dark() -> bool:
+        """系统当前是否深色（模块函数的类方法门面，供 main_gui 统一从 ThemeManager 调用）。"""
+        return detect_system_dark()
+
+    @staticmethod
+    def resolve_appearance(theme_id: Optional[str], mode: str = "light",
+                           system_dark: bool = False) -> Tuple[str, bool]:
+        """主题 + 外观模式 → (实际主题 id, 是否深色)。"""
+        return resolve_appearance(theme_id, mode, system_dark)
 
     @staticmethod
     def _refresh_table_fonts(app: "QApplication") -> None:
@@ -1999,7 +2095,9 @@ class ThemeManager:
               theme_id: Optional[str] = None,
               font_family: Optional[str] = None,
               font_size: Optional[int] = None,
-              glass: Optional[Dict] = None) -> None:
+              glass: Optional[Dict] = None,
+              mode: str = "light",
+              system_dark: Optional[bool] = None) -> None:
         """将主题与字体应用到 QApplication（全局生效）
 
         glass: 毛玻璃参数 {"opacity": 0~100, "bg_image": 路径, "tint": "#rrggbb"}。
@@ -2010,12 +2108,20 @@ class ThemeManager:
         theme_id = theme_id or ThemeManager.DEFAULT_THEME_ID
         font_family = font_family or ThemeManager.DEFAULT_FONT_FAMILY
         font_size = font_size or ThemeManager.DEFAULT_FONT_SIZE
-        theme = get_theme(theme_id)
+        if system_dark is None:
+            system_dark = detect_system_dark()
+        # 外观模式与主题正交：解析出「实际用哪个主题 + 是否深色」
+        effective_id, dark = resolve_appearance(theme_id, mode, bool(system_dark))
+        theme = get_theme(effective_id)
 
         style = QStyleFactory.create(theme["style"])
         if style:
             app.setStyle(style)
         qss = theme["qss"] or ""
+        # 调色板型主题（经典 / 原生）没有自己的暗色 QSS：深色时叠加 DARK_QSS，
+        # 否则只有 Qt 原生绘制的部分变深、页面里自绘的白色底仍是亮的（实测割裂）。
+        if dark and effective_id in PALETTE_DARK_THEMES:
+            qss = DARK_QSS
         g = {**GLASS_DEFAULTS, **(glass or {})}
         is_glass = bool(theme.get("win_blur"))
         is_mica = bool(theme.get("mica"))
@@ -2031,9 +2137,19 @@ class ThemeManager:
                 qss = theme["qss"] or ""
         # 统一按钮风格追加在末尾：同特异性下后出现的规则胜出，
         # 覆盖各主题旧的 QPushButton 块，保证圆角/形状/语义色在所有主题一致。
-        qss = qss + "\n" + button_qss_for_theme(theme_id)
+        qss = qss + "\n" + button_qss_for_theme("dark" if dark else effective_id)
         app.setStyleSheet(qss)
         app.setFont(QFont(font_family, font_size))
+        # 调色板：调色板型主题在深色模式下换 QPalette（经典/原生也能深色）；
+        # 其它情况恢复该风格的出厂调色板，避免从深色切回浅色时残留黑底。
+        try:
+            base_palette = style.standardPalette() if style else app.style().standardPalette()
+            if dark and effective_id in PALETTE_DARK_THEMES:
+                app.setPalette(build_dark_palette())
+            else:
+                app.setPalette(base_palette)
+        except Exception:  # noqa: BLE001 - 调色板失败不应影响启动
+            pass
         # 图标前景色：QSS 主题显式下发（标签页等图标经 QIconEngine.pixmap
         # 通道渲染，拿不到 QSS polish 后的控件 palette）；原生样式主题
         # （fusion/windows 无 QSS）传 None，跟随系统与组件 palette，
@@ -2041,7 +2157,7 @@ class ThemeManager:
         try:
             import app_icons
 
-            if is_dark(theme_id):
+            if dark:
                 app_icons.set_theme_color("#e0e0e0")
             elif theme.get("win_blur") or (theme.get("qss") or "").strip():
                 app_icons.set_theme_color("#1f2937")
@@ -2059,7 +2175,9 @@ class ThemeManager:
         try:
             _apply_glass_blur(app, is_glass, g["tint"])
             _apply_mica_corners(app, is_mica)
-            _apply_window_opacity(app, 100 if is_glass else g["opacity"])
+            # 深色模式下窗口必须不透明：原主题若是毛玻璃，opacity 是给"浅色半透明"
+            # 用的，切深色后仍按它设整窗透明会出现"整页发灰发透"的观感。
+            _apply_window_opacity(app, 100 if (is_glass or dark) else g["opacity"])
         except Exception:
             pass
         # QSS font-size 不反映到 widget.font()，表格缩放基准需按新样式重置
@@ -2077,6 +2195,15 @@ class ThemeManager:
         )
 
     @staticmethod
+    def load_mode(app_config: Dict) -> str:
+        """读取外观模式（浅色/深色/跟随系统）；旧配置缺键时按主题推断。"""
+        ui = app_config.get("ui", {}) if isinstance(app_config, dict) else {}
+        mode = str(ui.get("appearance", "")).lower()
+        if mode in APPEARANCE_MODES:
+            return mode
+        return "dark" if str(ui.get("theme", "")) == "dark" else "light"
+
+    @staticmethod
     def load_glass_config(app_config: Dict) -> Dict:
         """从应用配置 dict 读取毛玻璃参数，带默认值"""
         ui = app_config.get("ui", {}) if isinstance(app_config, dict) else {}
@@ -2089,13 +2216,15 @@ class ThemeManager:
 
     @staticmethod
     def to_config(theme_id: str, font_family: str, font_size: int,
-                  glass: Optional[Dict] = None) -> Dict:
-        """构造 config.json 的 ui 段（glass 非空时附带毛玻璃参数）"""
+                  glass: Optional[Dict] = None, mode: Optional[str] = None) -> Dict:
+        """构造 config.json 的 ui 段（glass 非空时附带毛玻璃参数）。"""
         cfg = {
             "theme": theme_id,
             "font_family": font_family,
             "font_size": font_size,
         }
+        if mode in APPEARANCE_MODES:
+            cfg["appearance"] = mode
         if glass is not None:
             cfg["glass"] = {k: glass.get(k, GLASS_DEFAULTS[k]) for k in GLASS_DEFAULTS}
         return cfg
@@ -2113,7 +2242,8 @@ class ThemeManager:
         except Exception:
             app_config = {}
         ThemeManager.apply(app, *ThemeManager.load_from_config(app_config),
-                           glass=ThemeManager.load_glass_config(app_config))
+                           glass=ThemeManager.load_glass_config(app_config),
+                           mode=ThemeManager.load_mode(app_config))
 
 
 # ---------------------------------------------------------------------------
@@ -2128,12 +2258,14 @@ class ThemeSettingsDialog(QDialog):
     """
 
     def __init__(self, theme_id: str, font_family: str, font_size: int,
-                 glass: Optional[Dict] = None, parent=None):
+                 glass: Optional[Dict] = None, parent=None, mode: str = "light"):
         super().__init__(parent)
         self.setWindowTitle("主题与字体设置")
         self.setMinimumWidth(500)
         self._app = QApplication.instance()
         self._orig = (theme_id, font_family, font_size)
+        # 外观模式（浅色/深色/跟随系统）由主界面右上角图标切换，这里只跟随、不修改
+        self._mode = mode if mode in APPEARANCE_MODES else "light"
         self._orig_glass = {**GLASS_DEFAULTS, **(glass or {})}
         self._glass_tint = str(self._orig_glass.get("tint", GLASS_DEFAULTS["tint"]))
 
@@ -2158,6 +2290,14 @@ class ThemeSettingsDialog(QDialog):
         self.theme_desc = QLabel()
         self.theme_desc.setWordWrap(True)
         layout.addWidget(self.theme_desc)
+
+        appearance_hint = QLabel(
+            "外观（浅色 / 深色 / 跟随系统）：由主界面右上角「太阳 / 月亮」图标切换。\n"
+            "经典 / Windows 原生主题在深色下改用深色调色板；其它主题若无暗色版，深色时使用「Fusion 暗色」渲染。"
+        )
+        appearance_hint.setWordWrap(True)
+        appearance_hint.setStyleSheet("color: #6b7280;")
+        layout.addWidget(appearance_hint)
 
         # ---- 透明度与玻璃/云母选项 ----
         # 透明度全局生效：毛玻璃/云母主题缩放 QSS 半透明 alpha（云母另启用 DWM
@@ -2317,6 +2457,7 @@ class ThemeSettingsDialog(QDialog):
             self.font_combo.currentFont().family(),
             self.size_spin.value(),
             glass=self.get_glass_settings(),
+            mode=self._mode,
         )
 
     def _reset_defaults(self) -> None:
@@ -2351,5 +2492,6 @@ class ThemeSettingsDialog(QDialog):
 
     def reject(self) -> None:
         """取消：还原进入对话框前的主题、字体与毛玻璃参数"""
-        ThemeManager.apply(self._app, *self._orig, glass=self._orig_glass)
+        ThemeManager.apply(self._app, *self._orig, glass=self._orig_glass,
+                           mode=self._mode)
         super().reject()

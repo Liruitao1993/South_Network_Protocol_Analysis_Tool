@@ -5,6 +5,8 @@
 异步 LLM 调用。集成到 MainWindow 的批量解析标签页。
 API 配置通过菜单栏「模型API管理」统一管理。
 """
+
+from atomic_io import atomic_write_json
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QLabel,
     QPushButton, QComboBox, QGroupBox, QFileDialog,
@@ -457,5 +459,4 @@ class LLMPreprocessWidget(QWidget):
         old_llm["chunk_lines"] = int(self.chunk_spin.currentText() or 200)
         old_llm["prompt"] = self.prompt_edit.toPlainText().strip()
         cfg["llm"] = old_llm
-        with open(config_path, "w", encoding="utf-8") as f:
-            json.dump(cfg, f, indent=2, ensure_ascii=False)
+        atomic_write_json(config_path, cfg)

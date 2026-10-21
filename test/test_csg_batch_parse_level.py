@@ -253,6 +253,71 @@ def test_parser_multi_pb_uplink():
     print("[OK] 解析器 多PB重组(上行并发抄读)通过")
 
 
+# ── 测试装置工装板/功能驱动板控制帧：无 FC 起始签名，必须整行保留（1.23.87 用户报障）──
+
+#: 用户报障帧 —— 台体「控制衰减器」的功能驱动板帧（FE×n + 05 地址 命令 数据 校验 + AA 0D 0A）
+TEST_DEVICE_FUNCTION = "FEFEFE0501051400000000001AAA0D0A"
+#: 工装板帧（无 FE 前导，10 字节 CCO 仓模块电源）
+TEST_DEVICE_FIXTURE_BARE = "05010280000000000083"
+#: 工装板帧（4×FE 前导，STA 仓引脚控制）
+TEST_DEVICE_FIXTURE_FE = "FEFEFEFE05010300030000000007"
+
+
+def test_strip_test_device_bare_frame_kept():
+    """工装板/功能驱动板控制帧必须**整行保留**（此前被 FC 扫描判定「无有效起始」丢弃）。
+
+    现场表现：同一帧单帧解析正常，批量却弹「预处理后未保留有效报文内容！」。
+    """
+    strip = _get_strip_fn()
+    stub = _Stub()
+    for lvl in ("auto", "fc_pb", "fc_only", "fc_efc"):
+        for frame in (TEST_DEVICE_FUNCTION, TEST_DEVICE_FIXTURE_BARE,
+                      TEST_DEVICE_FIXTURE_FE):
+            out = strip(stub, frame, lvl)
+            assert out == frame, f"{lvl} 级别应整行保留 {frame}, 实际: {out!r}"
+    print("[OK] 预处理 测试装置控制帧整行保留通过")
+
+
+def test_strip_test_device_end_to_end_parse():
+    """端到端：剥离保留后解析器应展开为工装板控制协议字段（报障帧 = 衰减器控制）"""
+    strip = _get_strip_fn()
+    stub = _Stub()
+    out = strip(stub, TEST_DEVICE_FUNCTION, "auto")
+    t = CSGNewGenParser().parse_to_table(bytes.fromhex(out), parse_level="auto")
+    assert _find(t, "── 测试装置功能驱动板控制协议 ──") is not None, "应识别为功能驱动板协议"
+    cmd = _find(t, "命令码")
+    assert cmd is not None and cmd[2] == "衰减器C", f"命令码应为衰减器C, 实际: {cmd}"
+    assert _find(t, "结束符") is not None, "功能驱动板帧应有 AA 0D 0A 结束符"
+    print("[OK] 预处理 测试装置控制帧端到端解析通过")
+
+
+def test_strip_test_device_app_level_dropped():
+    """app 级别：用户已声明「输入即应用层报文」，控制帧不适用该级别（口径保持）"""
+    strip = _get_strip_fn()
+    stub = _Stub()
+    assert strip(stub, TEST_DEVICE_FUNCTION, "app") == "", "app 级别不应保留控制帧"
+    print("[OK] 预处理 app 级别不保留控制帧（已声明应用层输入）通过")
+
+
+def test_strip_non_frame_lines_still_dropped():
+    """反例：新分支不得把文本行/残片也留下（保持「非报文行一律丢弃」）"""
+    strip = _get_strip_fn()
+    stub = _Stub()
+    for junk in ("15:50:23 186 HPLC_STA_test", "纯文本备注", "abc def", "FEFEFE", "0501", ""):
+        assert strip(stub, junk, "auto") == "", f"非帧行应被丢弃: {junk!r}"
+    print("[OK] 反例 非帧行仍被丢弃通过")
+
+
+def test_shared_batch_core_same_result():
+    """共享实现 batch_core（桌面/Web 同源）对本帧同口径保留"""
+    from batch_core import strip_csg_new_gen_frame_prefix
+    for frame in (TEST_DEVICE_FUNCTION, TEST_DEVICE_FIXTURE_BARE, TEST_DEVICE_FIXTURE_FE):
+        res = strip_csg_new_gen_frame_prefix(frame, "auto")
+        assert res.text == frame, f"batch_core 应保留 {frame}, 实际: {res.text!r}"
+        assert res.line_map == (0,), f"行映射应为 (0,), 实际: {res.line_map}"
+    print("[OK] 共享 batch_core 剥离同口径通过")
+
+
 def main():
     print("=" * 56)
     print("南网新一代批量解析级别与帧起始定位测试")
@@ -270,6 +335,11 @@ def main():
     test_strip_multi_frame_batch()
     test_strip_tcp_eda5_prefix()
     test_strip_tcp_eda5_with_quotes()
+    test_strip_test_device_bare_frame_kept()
+    test_strip_test_device_end_to_end_parse()
+    test_strip_test_device_app_level_dropped()
+    test_strip_non_frame_lines_still_dropped()
+    test_shared_batch_core_same_result()
     print("=" * 56)
     print("[OK] 全部测试通过")
 

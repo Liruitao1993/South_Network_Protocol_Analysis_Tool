@@ -331,6 +331,17 @@ def strip_csg_new_gen_prefix(text: str, parse_level: str = "auto") -> str:
             if not found:
                 continue
         else:
+            # 台体工装板/功能驱动板控制帧（FE×n + 05 …，功能驱动板以 AA 0D 0A 结尾）：
+            # 不是载波 FC/PB 业务帧、没有 FC 起始签名，但它**是**能被解析器完整识别的帧
+            # （parse_to_table 优先判它）⇒ 原样保留；否则会被下面的 FC 扫描整行丢弃，
+            # 现场表现为「同一帧单帧解析正常、批量却报『预处理后未保留有效报文内容！』」。
+            # 判据复用解析器（单一来源，桌面 main_gui / 共享 batch_core 同口径）。
+            from csg_new_gen_parser import is_test_device_control_frame
+
+            if is_test_device_control_frame(hex_clean):
+                out_lines.append(hex_clean)
+                continue
+
             # fc_pb / fc_only / fc_efc / auto: 扫描 FC 起始特征
             # 低4位 ∈ {0x8, 0x9, 0xA, 0xB} 即 bit3=1 且 bit0-2<=3
             found = False
@@ -1137,6 +1148,15 @@ def get_frame_summary(
     """
     if not table_data:
         return "空"
+
+    # 测试装置（工装板/功能驱动板）控制帧：核心内容是**命令专属解析值**（衰减器X衰减值 /
+    # CCO·STA 仓电源与引脚 / 220V 状态），与桌面 `_get_csg_new_gen_summary` 同走
+    # `batch_core.test_device_summary` 单源实现（非该类报文返回空串，直接落回下方分派）。
+    from batch_core import test_device_summary
+
+    device_summary = test_device_summary(table_data)
+    if device_summary:
+        return device_summary
 
     if protocol_index == 13:
         # 依瓦定制645：摘要委托解析器 get_summary（**不在 Web 侧另写字段拼接**）。

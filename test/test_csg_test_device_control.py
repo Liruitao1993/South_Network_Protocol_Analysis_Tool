@@ -3,7 +3,7 @@
 
 import _path_setup  # noqa: F401
 
-from csg_new_gen_parser import CSGNewGenParser
+from csg_new_gen_parser import CSGNewGenParser, is_test_device_control_frame
 
 
 def find_field(table, name):
@@ -76,6 +76,42 @@ def test_reject_non_test_payload():
     assert find_field(table, "报文端口号") is not None
 
 
+def test_predicate_accepts_bytes_and_hex_str():
+    """判据 is_test_device_control_frame：bytes 与纯 hex 字符串**都**认（批量剥离层给的是 str）"""
+    cases = (
+        "FEFEFE0501051400000000001AAA0D0A",   # 用户报障帧（功能驱动板·衰减器）
+        "FEFEFE0501030800000000000CAA0D0A",   # 功能驱动板·衰减器A
+        "05010280000000000083",               # 工装板·CCO 仓模块电源（无 FE 前导）
+        "FEFEFEFE05010300030000000007",       # 工装板·STA 仓引脚控制
+    )
+    for hex_str in cases:
+        assert is_test_device_control_frame(hex_str) is True, f"hex 字符串应识别: {hex_str}"
+        assert is_test_device_control_frame(bytes.fromhex(hex_str)) is True, \
+            f"bytes 应识别: {hex_str}"
+    # 带分隔符的写法同样认（`bytes.fromhex` 语义：空格可有可无；剥离层传进来的是已清洗的 str）
+    assert is_test_device_control_frame(
+        "FE FE FE 05 01 05 14 00 00 00 00 00 1A AA 0D 0A") is True
+    print("[OK] 判据 bytes/hex 字符串双认通过")
+
+
+def test_predicate_rejects_non_frames():
+    """判据反例：普通业务帧 / 残片 / 非法输入一律 False（不得把噪声留下）"""
+    negatives = (
+        "19012000030000417804005B1000000000000000030045000210004111",  # FC 业务帧
+        "110101000000000100010000",                                    # 应用层报文
+        "FEFEFE",                                                      # 太短
+        "0501051400000000001BAA0D0A",                                  # 校验和不符（0x1B≠0x1A）
+        "FEFEFE0502051400000000001BAA0D0A",                            # 命令码/负载非法
+        "abc def",                                                     # 非 hex
+        "",                                                            # 空
+    )
+    for item in negatives:
+        assert is_test_device_control_frame(item) is False, f"不应识别: {item!r}"
+    for bad in (None, 123, b"\xff\xfe"):
+        assert is_test_device_control_frame(bad) is False, f"非法入参不应抛异常: {bad!r}"
+    print("[OK] 判据反例（业务帧/残片/非法入参）通过")
+
+
 TESTS = [
     test_fixture_cco_power,
     test_fixture_220v_power,
@@ -83,6 +119,8 @@ TESTS = [
     test_function_board_attenuator,
     test_ed_wrapper_control_payload,
     test_reject_non_test_payload,
+    test_predicate_accepts_bytes_and_hex_str,
+    test_predicate_rejects_non_frames,
 ]
 
 

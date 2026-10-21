@@ -75,6 +75,7 @@ import app_icons
 import batch_source_view
 import custom_di_store
 import batch_core
+from atomic_io import atomic_write_json
 import proc_stats
 import protocol_registry as protocol_registry
 import thread_registry
@@ -119,8 +120,8 @@ from system_integration.taskbar_buttons import TaskbarButtons
 from test_plan_widget import TestPlanWidget
 from theme_settings import ThemeManager, ThemeSettingsDialog
 
-APP_VERSION = "1.23.86"
-BUILD_DATE = "2026-10-18"  # 编译日期，每次打包前更新
+APP_VERSION = "1.23.91"
+BUILD_DATE = "2026-10-20"  # 编译日期，每次打包前更新
 
 # 作者 GitHub 仓库地址 —— 「关于」对话框 Star 按钮的**唯一来源**。
 # 改地址只改这一处（按钮文案/提示/跳转都读它，不要在别处再写死一份）。
@@ -144,6 +145,83 @@ _WINDOW_STATE_TABLES = (
 )
 
 CHANGELOG = [
+    (
+        "1.23.91",
+        "2026-10-20",
+        [
+            "**主界面新增「外观」按钮（太阳 / 月亮 / 显示器）**：菜单位置右上角、顶栏折叠按钮左侧，点击循环 `浅色 → 深色 → 跟随系统`；图标随**实际效果**变化（深色=月亮、浅色=太阳、跟随系统=显示器），提示写清三态与当前值。选择持久化到 `config.json` 的 `ui.appearance`，重开保持",
+            "**主题与外观解耦，7 套主题都能深色**：新增 `resolve_appearance()`（主题 + 模式 + 系统深浅 → 实际主题与是否深色）。**经典（Fusion）/ Windows 原生 / Vista** 这类调色板型主题在深色下保留自身风格、改用深色 QPalette（`#202225` 底 + 浅色文字）并叠加暗色 QSS，切回浅色恢复出厂调色板；默认 / 毛玻璃 / 云母没有独立暗色版，深色时用「Fusion 暗色」渲染（主题对话框已写明这条规则）",
+            "**跟随系统**：`QStyleHints.colorSchemeChanged` 实时跟随系统深浅（仅「跟随系统」模式生效；浅色/深色模式不受系统影响）；老 Qt 无该信号时安全降级",
+            "**修复两处体验问题**：① 选中「Fusion 暗色」主题但模式是浅色时，点按钮原来「没反应」——现在自动回默认浅色主题；② 切页重绘的毛玻璃判断改用**实际生效主题**，避免深色模式下仍按 glass 走重绘分支",
+            "测试：`test/test_appearance_mode.py` **10 项**（模式常量、7 主题 × 3 模式 × 系统深浅矩阵、旧配置回落、`ui.appearance` 落盘、深色调色板对比度）+ `test/test_appearance_gui.py` **16 项**（按钮存在/图标非空/三态循环/图标随状态变化/经典主题深色真变深且可恢复/跟随系统/持久化/暗色主题点击回浅色）；已登记 `release_check.py`",
+            "配套：`APP_VERSION 1.23.90 → 1.23.91`；主题对话框新增外观说明；`ThemeManager.apply` 增加 `mode` / `system_dark` 参数（默认值向后兼容）",
+        ],
+    ),
+    (
+        "1.23.90",
+        "2026-10-20",
+        [
+            "**性能（实测）**：`拓扑信息` 首开 **1586 ms → 13 ms**，全部 20 页走一遍的内存 **156 MB → 125 MB**。做法：`TopologyGraph` 改成 `@property` 按需创建，页面先出壳，`networkx`（导入约 1 s）延迟到第一次「加载/清除/导出拓扑」时才导入；`topology_widget` 不再顶层 `from topology_graph import TopologyGraph`",
+            "**稳定性（崩溃兜底）**：新增 `crash_handler.py` —— 安装 `sys.excepthook` + `threading.excepthook`，把异常类型/消息/完整 traceback/版本/系统/线程名写进 `<数据目录>/logs/crash_*.log`（微秒级文件名，保留最近 20 份）；写日志自身失败、回调失败都被吞掉，主线程崩溃才弹提示，子线程崩溃只落盘不碰界面。诊断包已自动收集 `logs/crash_*.log`",
+            "**性能（高吞吐日志）**：`生产测试架` 接收日志从「每行一次 `insertText`」改为**入队 + 100 ms 合并刷新**（相邻同色行合并成一次写入、自动滚动每次刷一次），超过 300 行立即刷；清空/退出时先刷队列，不丢尾包",
+            "**全项目状态写入原子化**：除 `config.json` 6 处外，又把 `custom_di.json`（自定义 DI）、`dlt645_custom_di`、PLC RF 命令字、OBIS 自定义、预设命令、档案数据、LLM profiles/预处理配置、645 地址历史、虚拟表档案导出的写入全部换成 `atomic_write_json`（共 11 个模块），并加静态守卫测试禁止回退成 `open(w)+json.dump`",
+            "**新增短时长稳测试** `test/test_soak_stability.py`（GUI_TESTS）：反复切页 600 次（20 个页面）RSS 158→185→189→189 MB（**最后 200 次 0 增长**，证明无泄漏）+ 高频灌 5000 帧（0.1 s，日志块达上限、队列清空），断言内存收敛与上限",
+            "**解析健壮性（实测抓到并修复的真实缺陷）**：`gdw10376_parser` 在「长度域大于实收字节」的截断帧上会 `IndexError`（模糊测试 1200 次命中 277 次）。修复：把 `cs_pos` 夹回帧内（`min(4, frame_len-2)` 兜底）+ 取 AFN 前再判 `offset < frame_len`；修复后全协议随机/截断输入 **0 异常**",
+            "新增 `test/test_crash_handler.py` **6 项**（格式化/落盘/清理旧文件/坏目录不抛/钩子落盘+回调/回调异常吞掉/幂等）、`test/test_frame_corpus.py` **3 项**（真实帧语料库 `test/frames/<key>/*.hex`：目录名必须是注册表 key、每帧解析非空、两次解析一致）、`test/test_parser_fuzz.py` **4 项**（固定 seed 随机/带头随机/语料全前缀截断/空与超短输入，12 个解析器共约 3000 例，断言不抛异常且总耗时 < 25 s；内含国网截断帧回归）；均已登记 `release_check.py` CORE_TESTS",
+            "配套：`APP_VERSION` `1.23.89 → 1.23.90`；spec `hiddenimports` 增补 `crash_handler`；`docs/产品级优化评估-2026-10-20.md` 的 P1 性能/稳定性/协议准确性条目标记完成",
+        ],
+    ),
+    (
+        "1.23.89",
+        "2026-10-20",
+        [
+            "**P0 加固（配置不再可能写坏）**：新增 `atomic_io.py`（纯标准库）——同目录临时文件 + flush/fsync + `os.replace` 原子替换，失败时旧文件保持原样、临时文件自动清理；Windows 文件被占用时带 4 次退避重试。`main_gui` 里 6 处 `open(config.json,'w') + json.dump`（更新设置 / 系统设置 / 预处理命令 / Python 脚本 / 窗口状态 / 通用保存）全部换成 `atomic_write_json`，写到一半崩溃/断电/强杀不再产生半截 JSON",
+            "**P0 加固（自动升级失败可回滚）**：`auto_updater.UPDATE_BAT_TEMPLATE` 重写 —— 等旧进程退出 → **先把旧 exe 备份成 `.bak`** → 覆盖 → **比对新旧文件大小**（不等长即视为复制不完整）→ 启动新版 → **15 秒健康检查**（进程不在就回滚）→ 回滚时删可疑文件（重试 10 次，文件可能仍被占用）→ 还原 `.bak` 并重启旧版。备份移动失败（文件被占用）时**直接放弃升级，一个字节都不动**；成功升级后保留一份 `.bak` 作为人工回退点",
+            "**P0 新增「生成诊断包」（帮助菜单）**：`diagnostics.py`（纯逻辑、无 Qt）把 环境信息（版本/编译日期/Python/PySide6/系统/是否打包）+ 各配置文件 + 最近 5 个日志尾部 打成一个 zip。配置里的 `api_key` / `token` / `password` / `secret` / `cookie` 等字段递归替换为「***已脱敏***」；单个日志最多 200 KB、总包上限 5 MB、缺文件只跳过不失败。用户反馈问题时只需发这一个 zip",
+            "**修复启动日志里的图标告警**：`gui_utils._STANDARD_ICON_MAP` 缺 `search` / `settings` 两个键，导致归档页「初始化/查询」与拓扑页「查询/搜索」按钮**静默没有图标**（日志里只有一行告警）。已补映射（`SP_FileDialogContentsView` / `SP_FileDialogDetailedView`）",
+            "测试：新增 `test/test_p0_hardening.py` **13 项** —— 原子写（创建/覆盖/失败保留旧文件且无残留/Unicode 往返/坏 JSON 回落）、升级脚本静态断言（备份/大小校验/15 秒健康检查/回滚还原/删除重试/占位符清零）、诊断包（脱敏保留非敏感字段/日志截断/总大小上限/缺文件跳过/嵌套结构脱敏）、主程序静态守卫（`atomic_write_json` 已接线、旧写法清零、诊断包入口存在、`diagnostics` 不依赖 Qt）；已登记 `release_check.py` CORE_TESTS",
+            "配套：`APP_VERSION` `1.23.88 → 1.23.89`、`BUILD_DATE` 2026-10-20、两个 `.iss` 同步；`docs/产品级优化评估-2026-10-20.md` 的 P0-1/2/4 标记为已完成（P0-3 代码签名需证书，短期仍以 SHA-256 公示为主）",
+        ],
+    ),
+    (
+        "1.23.88",
+        "2026-10-19",
+        [
+            "**新增「生产测试架」标签页**（常驻可见、与协议无关、懒加载；图标 flask-conical）：**三栏布局** —— 左「发送配置」（5 条发送框）、中「接收日志」、右「测试架参数」。串口只借用顶部「串口配置」的共享连接（`set_serial_worker`，本页不开/关端口），未连接时所有发送按钮禁用并给出提示",
+            "**左右两栏可折叠、三栏宽度可拖**（用户反馈：参数面板与日志挤在一栏会吃掉日志空间）：两栏标题行的**外沿**各一个折叠按钮（左栏在左、右栏在右），折叠后只留 30 px 窄条（按钮 + 竖排栏名），**宽度全部让给中间日志**；再点一次展开并**还原折叠前的三栏宽度**；三栏之间的分隔条可直接拖动；折叠状态与三栏宽度一起落盘，重开程序保持",
+            "**5 条发送配置框**：每条独立选 HEX / ASCII、独立勾选 **checksum8** 并选落位方式（`追加到末尾` / `覆盖末字节` / `插在 16H 前`），一键发送；名称与内容落盘，重开程序直接恢复；HEX 写错（奇数位 / 非法字符）**拒发并写明原因**，绝不静默改按文本发",
+            "**接收日志**：HEX / ASCII 显示切换（ASCII 把不可打印字节显示为 `.`）、**时间戳开关**（`YYYY-MM-DD HH:MM:SS.mmm`，默认开）、自动滚动、清空、收发字节计数；单行超过 512 字节只显示头尾并标注总长（一条 4KB 回包不刷屏）",
+            "**「发送参数帧」可选 HEX / ASCII 形态**：右栏底部与左侧发送框同一套语义 —— `HEX` 发 75 字节二进制帧（现场测试架默认）、`ASCII` 把报文按大写 HEX 文本字符发送（150 个字符，给接文本协议的工装）；选择会落盘，ASCII 形态在日志里额外记一行「按 ASCII 文本发送（150 字符）」，避免把 150 字符误当二进制帧",
+            "**测试架参数帧**（现场样例 `68AAAAAAAAAAAA68143555AA55AA0100600E120818132F05FE…003916`，75 字节）：49 项参数（帧头 2 项测试开关 + 参数区 47 项 / 53 字节）+ 6 字节地址域（默认 `AA×6` 广播），**改动即时重算整帧并在预览行显示长度与 CS8**；参数按分组**单列排布**（右栏可拖窄也不出横向滚动条，标签不裁字）；`发送参数帧` / `复制报文` / `恢复现场示例` 三个动作；参数非法时只写日志与预览行、指出**具体字段名**，不弹框",
+            "**逐字节复现现场样例**（`test/test_production_testbench.py` 断其相等）：帧结构 `68 + 地址6 + 68 + 14(控制域) + 35(参数区长度53) + 55AA55AA(命令标识) + 测试STA + 测试无线 + 参数区53 + 保留4×00 + CS8 + 16`，**CS8 = 首字节到保留位末字节的 8 位算术和**（不溢出），字段顺序/长度/校验范围任一改动即变红；反例断言：校验范围若不含 68H 帧头则对不上",
+            "**参数表是唯一来源**：`production_testbench_core` 的 `FieldSpec` 字段表（`HEADER_FIELDS` 2 项 + `BODY_FIELDS` 47 项：key/标签/长度/默认值/下拉选项/提示）+ `FIELD_GROUPS` 同时驱动界面生成、组帧与落盘；参数区长度导入即断言 = 53 字节（防字段表被改坏）",
+            "**纯逻辑 / Qt 分层**：`production_testbench_core.py` 无 Qt（组帧、checksum8、HEX/ASCII、时间戳、配置合并与原子写），`production_testbench_widget.py` 只做界面与信号接线；主窗口仅 5 处接线（import/占位 tab/懒加载/主题/退出清理），不改协议可见性逻辑",
+            "**配置落盘** `production_testbench.json`（发送框 / 全部参数 / 地址域 / 显示偏好 / 三栏折叠状态与宽度）：脏值逐字段回落默认（非 HEX、长度不符、下拉越界都不采纳），`save` 走 `.tmp` + `os.replace` 原子写，坏 JSON 回落默认",
+            "测试：`test/test_production_testbench.py` **120 项**（A 纯逻辑 55 项：golden/校验范围反例/三种 CS8 落位/文本编解码/字段偏移/非法输入/配置合并/布局配置/参数帧发送形态；B GUI 56 项：三栏布局/折叠展开还原/拖动宽度/窄条竖排标题/无横向滚动条/参数帧 HEX-ASCII 发送/5 框联动/CS8 三态/非法拒发/时间戳/恢复示例/落盘重开/主题/断开/cleanup 幂等；C main_gui 接线 9 项）；已登记 `release_check.py` GUI_TESTS",
+            "配套：`APP_VERSION` `1.23.87 → 1.23.88`、spec `hiddenimports` 增补 `production_testbench_core` / `production_testbench_widget`（main_gui 内函数级惰性 import，静态分析扫不到）、README 功能表与本节、AGENTS §1/§3/§10",
+        ],
+    ),
+    (
+        "1.23.87",
+        "2026-10-19",
+        [
+            "**修复协议9 测试帧「测试模式6（频段切换/载波切频）」被解析成无线信道号**（用户报障：`09 00 F0 FF … 81 61 20 00 …` 按协议9 解析，模式6 后面的字段显示成「Option值 / 无线信道号」，要求按**载波的值**解析）。依据 `南网新一代20260226校对/宽带双模通信模块（通感一体物联版）相关测试命令定义_260922.docx`「原有测试命令」第 6 条：**模式6 = 进行频段切换操作，配置值填「需要切换到的目标频段对应的值」**（值 0/1/2 → 通信频段 0/1/2 及 MHz 范围）；`Option值 + 信道号` 是**模式8（无线信道切换）**，两者语义不同",
+            "**根因两处**（协议9 `csg_new_gen_cmd_payloads._parse_legacy_ext_cmd`）**：① 12bit 配置值按大端拼**（`(b2>>4)<<8 | b3`）——正确拼法是「**字节号小的端为低位**」（协议10 `gw_new_gen_cmd_payloads`、协议11 `hdc10_parser` 均如此），同一拼法还会把「30 分钟」的测试持续时间读成 3585；**② 模式6 与模式8 合并**按「Option+无线信道号」解析（一次错误改动引入「与模式8 一致」，协议10 同源一并改）",
+            "**报文头长度同批修正**：该字段是 **6bit**（字节0 bit6-7 为**低**2位 + 字节1 bit0-3 为**高**4位，文档表61 跨两行），旧实现只取字节0 的 2bit ⇒ 用户帧 `81 61…` 显示「2」，正确值 **6 = 表61 整根 6 字节报文头**（与协议10/11 口径一致）",
+            "**落地口径**：模式6 → 新增/改为「`频段值(目标频段)`」行（原始值 12bit 十六进制 + 解析值 0/1/2 + 通信频段名称与 MHz 范围，说明注明「表61 第6条」），**不再出现任何无线信道字段**；模式7（ToneMask）/模式8（无线信道 Option+信道号）语义保持不变；频段映射单源化在各 payload 模块的 `_BAND_MAP`（与 `csg_new_gen_frame_gen.BAND_MAP`、`hdc10_parser.EXT_BAND_RANGES` 同口径）",
+            "测试：`test/test_csg_summary.py` 新增 `test_legacy_mode6_band_switch_is_carrier_semantics`（用户真实帧：模式6 → 频段值=2 / 通信频段2（0.781~2.930MHz）/ 报文头长度=6 / **模式6 无无线信道字段** + 模式8 仍为无线信道口径 的反例对拍）；`test/test_gw_ext_cmd.py` T3/T13/T14 的旧期望（「Option 2 / 信道 0」）改为频段值口径并加「模式6 不应出现无线信道字段」回归；相关联调全绿（`test_csg_summary`、`test_gw_ext_cmd` 48/48、`test_gw_monitor_summary` 18/18、`test_gw_app_summary_detail` 44/44、`test_hdc10_app_dispatch` 94/94、`test_web_gui_parity` 83/83、`test_csg_frame_reverse`、`test_csg_test_ext_0009`、`test_csg_batch_parse_level`、`test_gw_parse_levels`、`test_hdc10_bitfield_display` 47/47）",
+            "**自动升级默认源改为作者 GitHub Release**（需求：默认查 GitHub 的 release 节点，并把更新说明加载出来，让自动升级功能完整）。`auto_updater.DEFAULT_UPDATE_CONFIG.source_type` 由 `gitee` 改为 **`github`**，配 `github_owner`/`github_repo`；仓库地址**仍是单一来源** —— 启动时用 `merge_update_config(..., repo_url=AUTHOR_GITHUB_URL)` 从「关于」的那个常量解析出 owner/repo（改地址只改一处，Star 按钮与更新源不会走偏），config.json 里显式填写的值优先、**清空输入框 = 回到默认**",
+            "**GitHub 源直连接口**：最新版 `api.github.com/repos/{owner}/{repo}/releases/latest`、版本列表 `.../releases?per_page=30`（启动 3s + 每 30 分钟各查一次，未鉴权 60 次/小时的上限绰绰有余）。接口无需 token；**草稿版本一律略过**（作者还没打算放出去），预发布版本在列表里标 `[预发布]`",
+            "**更新说明（Release body，markdown）加载并渲染**：手动「检查更新」的版本列表对话框改为**左列表 + 右更新说明**（`QTextBrowser.setMarkdown`，GitHub 的标题/列表/表格/链接都能看，链接可点）；「发现新版本」确认框也换成带滚动说明的对话框（顺带显示安装包名，并给「查看发布页」按钮打开 `html_url`），不再把原始 markdown 塞进 `QMessageBox` 纯文本；状态栏绿色⬆提示的 tooltip 用新 `summarize_notes()` 去掉 `#`/`**`/表格竖线等噪音。空说明给「（该版本未填写更新说明）」占位，**不静默留白**",
+            "**校验与容错**：GitHub 资产的官方 `digest`（`sha256:…`）直接作为校验值 ⇒ 勾选「校验 SHA-256」时下载完真的能校验（此前 GitHub 源永远拿不到 sha256）；网络/接口失败一律翻译成中文人话（`describe_http_status`：404=「地址不存在或还没有 Release」、403/429=「频率限制」、5xx=「服务器错误」），不再把英文 urllib 栈抛给用户；下载阶段同样按状态码给原因",
+            "**两个升级对话框拆到独立模块 `update_dialogs.py`**（主程序已 14000+ 行，且这两块可脱离 MainWindow 单独测试；已登记 spec `hiddenimports`）；「更新设置」对话框新增 GitHub owner/repo 输入框与当前更新源回显，GitHub / Gitee / 私有 HTTP 三源并存（老配置里的 `source_type: private` 行为不变）",
+            "**修掉一条会毁掉客户端的升级缺陷（发布前独立验证发现）**：GitHub/Gitee 的 release 对象里，顶层 `url` 字段指向的是 **API 端点**（`api.github.com/repos/.../releases/<id>`），而旧逻辑在「资产没匹配到 exe」时会把顶层 `url` 当下载地址 —— 实测仓库里的旧版本 `1.8.2` 正是「有 Release 但没上传安装包资产」的形态，于是它会被列进版本列表，点下载拿到的是**接口返回的 JSON**，再被当成新 exe 覆盖正在运行的程序。两处收紧：① **发布对象（有 assets/tag_name/html_url）的下载地址只认资产直链**，顶层 `url`/`download_url` 仅在私有 version.json（非发布对象）里继续可用，且任何路径下命中 `api.github.com/repos/` 或 `gitee.com/api/v5/repos/` 一律拒绝；无安装包资产的版本**不进版本列表**（发布对象缺资产即报「没有可下载的安装包资产」）。② **替换 exe 前的最后一道闸**：新增 `is_pe_executable()`（`MZ` 魔数 + 最小体积），下载物不是 Windows 可执行程序就报错取消（哪怕 SHA-256 被跳过）—— 更新源写错、页面被劫持、拿到 HTML 错误页都不会把 exe 覆盖成垃圾。回归：`test_auto_updater.py::test_extract_release_never_uses_api_endpoint_as_download_url` / `test_extract_private_json_url_still_allowed` / `test_fetch_all_releases_skips_release_without_asset` / `test_is_pe_executable_guard`、`test_update_notes_gui.py::test_download_worker_rejects_non_pe`（JSON / HTML / 真 PE 三态）；真实接口复核：版本列表由 5 条（含异常 `1.8.2`）收敛为 4 条，每条均为资产直链",
+            "**「校验 SHA-256」开关从此真的生效**：此前全仓库只有设置对话框读写 `sha256_verify`，实际是否校验只看「摘要有没拿到」，勾不勾一样（死开关）。现在下载线程按配置接：关掉即不带预期摘要、打开且摘要不匹配则拒绝并提示「SHA-256 校验失败，文件可能损坏」",
+            "**「仓库地址唯一来源」在保存后依然成立**：原先打开一次「更新设置」点确定，就会把默认 owner/repo 显式写进 config.json，此后修改 `AUTHOR_GITHUB_URL` 不再生效。现改为**与默认值相同即存空串**（下次打开仍回显同一个默认值，用户无感），并加了「内置常量 vs AUTHOR_GITHUB_URL」一致性守卫测试把漂移风险钉成红灯",
+            "**临时文件名清洗**：`_start_download` 的临时文件名按 `safe_file_stem()` 处理 tag（含 `/` 如 `release/1.24` 时原会把临时文件写成子目录、`:` 等 Windows 非法字符会让下载以 OSError 表现为「下载失败」）",
+            "测试：新增 `test/test_update_notes_gui.py`（**54 项** offscreen：markdown 渲染与空说明占位、渲染异常退回纯文本、行文案 `[最新]/[预发布]/← 当前`、切行 → 说明联动、无资产禁用下载、双击=下载、拒绝/取消返回语义、`_UpdateCheckWorker` 带 repo_url、`_confirm_update_download` 真实方法体传参、接线源码守卫、下载线程 PE 三态、sha256 开关三态、仓库地址一致性、文件名清洗）+ `test/test_auto_updater.py` 扩至 **40 项**（默认源=github、`parse_github_repo_url` 各写法、repo_url 与用户配置优先级、空串回落、digest→sha256、源码压缩包不被当安装包、API 端点不被当下载地址、无资产版本剔除、PE 兜底、默认值收敛为可存空串、文件名清洗、版本列表降序/草稿剔除、私有源顶层 sha256 优先、错误文案）；两条测试均登记进 `release_check.py` 核心回归",
+        ],
+    ),
     (
         "1.23.86",
         "2026-10-18",
@@ -2686,6 +2764,9 @@ class MainWindow(QMainWindow):
             ThemeManager.load_from_config(self._app_config)
         )
         self._glass_settings = ThemeManager.load_glass_config(self._app_config)
+        # 外观模式（浅色 / 深色 / 跟随系统）：与主题正交，右上角太阳/月亮图标切换
+        self._appearance_mode = ThemeManager.load_mode(self._app_config)
+        self._system_dark = ThemeManager.detect_system_dark()
         # 系统集成配置（config.json "system" 段）
         self._system_settings: dict[str, Any] = {}
         self._load_system_settings()
@@ -2697,13 +2778,26 @@ class MainWindow(QMainWindow):
         self._load_update_settings()
         from auto_updater import merge_update_config
 
-        self._update_settings = merge_update_config(self._update_settings)
+        # 默认更新源 = 作者 GitHub 仓库的 Release（地址唯一来源仍是 AUTHOR_GITHUB_URL）
+        self._update_settings = merge_update_config(
+            self._update_settings, repo_url=AUTHOR_GITHUB_URL
+        )
 
         self.setup_ui()
         self._setup_menu_bar()
         # 菜单栏图标按钮在 _setup_menu_bar 创建；套用顶栏折叠态须在其后
         self._apply_top_bar_collapse_state()
         self._update_window_title()
+
+        # 跟随系统外观：系统深浅色变化时实时跟随（只有 mode == system 才真正应用）
+        try:
+            _app = QApplication.instance()
+            if _app is not None:
+                _app.styleHints().colorSchemeChanged.connect(
+                    self._on_system_color_scheme_changed
+                )
+        except Exception:  # noqa: BLE001 - 老 Qt 没有 colorSchemeChanged
+            pass
 
         # 发现新版本不再弹窗打扰：状态栏右下角常驻绿色⬆提示，点击可选择下载更新
         self._pending_update = None
@@ -3198,6 +3292,12 @@ class MainWindow(QMainWindow):
         self._bluetooth_tool_placeholder = QWidget()
         self._bluetooth_tool_tab_index = self.tab_widget.addTab(
             self._bluetooth_tool_placeholder, app_icons.load_icon("bluetooth"), "蓝牙工具"
+        )
+
+        # 生产测试架页面（串口助手 + 测试架参数帧；始终可见，懒加载）
+        self._testbench_placeholder = QWidget()
+        self._testbench_tab_index = self.tab_widget.addTab(
+            self._testbench_placeholder, app_icons.load_icon("flask-conical"), "生产测试架"
         )
 
         # 协议8 光伏升级页（698.45 文件传输升级；注册表 has_upgrade，仅协议8 可见；懒加载，
@@ -4449,7 +4549,12 @@ class MainWindow(QMainWindow):
         repaint() 会立即强制重绘整页（含大表格）导致卡顿不响应；update() 由
         Qt 合并多次请求，只在事件循环空闲时重绘一次。
         """
-        if self._theme_id != "glass":
+        effective_theme = ThemeManager.resolve_appearance(
+            self._theme_id,
+            getattr(self, "_appearance_mode", "light"),
+            getattr(self, "_system_dark", False),
+        )[0]
+        if effective_theme != "glass":
             return
         self._pending_repaint_tab = index
         if not hasattr(self, "_tab_repaint_timer"):
@@ -4475,6 +4580,8 @@ class MainWindow(QMainWindow):
             self._ensure_tcp_monitor_tab()
         elif index == getattr(self, "_serial_tool_tab_index", -1):
             self._ensure_serial_tool_tab()
+        elif index == getattr(self, "_testbench_tab_index", -1):
+            self._ensure_testbench_tab()
         elif index == getattr(self, "_bluetooth_tool_tab_index", -1):
             self._ensure_bluetooth_tool_tab()
         elif index == getattr(self, "_seq_diagram_tab_index", -1):
@@ -4567,6 +4674,27 @@ class MainWindow(QMainWindow):
         tab.set_parse_provider(self._serial_parse_provider)
         self._replace_lazy_tab(
             self._serial_tool_placeholder, self._serial_tool_tab_index, tab
+        )
+        apply_chinese_context_menus(tab)
+        return tab
+
+    def _ensure_testbench_tab(self):
+        """懒加载创建「生产测试架」页（串口助手 + 测试架参数帧，与协议无关、始终可见）。
+
+        接线口径与串口工具页一致：复用主窗口**共享**的 `SerialWorker`（只订阅信号，
+        绝不开/关端口 —— 一个 COM 口只能被打开一次）；组帧 / 校验 / 编解码全部在
+        `production_testbench_core`（纯逻辑），本页不 import `main_gui`。
+        """
+        if hasattr(self, "testbench_tab"):
+            return self.testbench_tab
+        from production_testbench_widget import ProductionTestbenchWidget
+
+        tab = ProductionTestbenchWidget()
+        self.testbench_tab = tab
+        tab.set_serial_worker(self.serial_worker)
+        tab.restyle_for_theme(self._is_dark_theme())
+        self._replace_lazy_tab(
+            self._testbench_placeholder, self._testbench_tab_index, tab
         )
         apply_chinese_context_menus(tab)
         return tab
@@ -4709,6 +4837,82 @@ class MainWindow(QMainWindow):
                 bar_lay.activate()
 
     # ==================== 顶部栏显隐（协议+串口一起，菜单栏图标开关） ====================
+
+    # ==================== 外观模式（浅色 / 深色 / 跟随系统） ====================
+
+    def _create_appearance_btn(self) -> QToolButton:
+        """菜单栏右上角的「太阳/月亮/显示器」按钮：循环切换外观模式。"""
+        btn = QToolButton()
+        btn.setObjectName("appearance_btn")
+        btn.setAutoRaise(True)
+        btn.setFixedSize(28, 28)
+        btn.setIconSize(QSize(16, 16))
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.clicked.connect(self._cycle_appearance)
+        self._sync_appearance_btn(btn)
+        return btn
+
+    def _sync_appearance_btn(self, btn=None) -> None:
+        """按「实际显示效果 + 模式」刷新图标与提示。"""
+        btn = btn if btn is not None else getattr(self, "appearance_btn", None)
+        if btn is None:
+            return
+        dark = self._is_dark_theme()
+        mode = getattr(self, "_appearance_mode", "light")
+        if dark:
+            icon_key = "moon"
+        elif mode == "system":
+            icon_key = "monitor"
+        else:
+            icon_key = "sun"
+        try:
+            btn.setIcon(app_icons.load_icon(icon_key))
+        except Exception:  # noqa: BLE001
+            pass
+        label = ThemeManager.APPEARANCE_LABELS.get(mode, "浅色")
+        extra = "（当前主题为 Fusion 暗色）" if (dark and self._theme_id == "dark") else ""
+        btn.setToolTip(f"外观：{label}{extra}\n点击切换：浅色 → 深色 → 跟随系统")
+
+    def _cycle_appearance(self) -> None:
+        """循环切换外观：浅色 → 深色 → 跟随系统 → 浅色。
+
+        「Fusion 暗色」是显式主题，模式为浅色时点一下应回到浅色（换回默认主题），
+        否则会出现「点了没反应」。
+        """
+        if self._is_dark_theme() and self._theme_id == "dark":
+            self._theme_id = "default"
+            self._appearance_mode = "light"
+        elif getattr(self, "_appearance_mode", "light") == "light":
+            self._appearance_mode = "dark"
+        elif self._appearance_mode == "dark":
+            self._appearance_mode = "system"
+        else:
+            self._appearance_mode = "light"
+        self._apply_appearance()
+
+    def _apply_appearance(self, persist: bool = True) -> None:
+        """把当前「主题 + 外观模式」应用到全局，并同步动态控件与按钮图标。"""
+        app = QApplication.instance()
+        self._system_dark = ThemeManager.detect_system_dark()
+        if app is not None:
+            try:
+                ThemeManager.apply(
+                    app, self._theme_id, self._font_family, self._font_size,
+                    glass=self._glass_settings,
+                    mode=self._appearance_mode,
+                )
+            except Exception as e:  # noqa: BLE001 - 切主题失败不能带崩主程序
+                print(f"[外观] 应用失败: {e}")
+        self._restyle_for_theme()
+        self._sync_appearance_btn()
+        if persist:
+            self._save_app_config()
+
+    def _on_system_color_scheme_changed(self, *_args) -> None:
+        """系统深浅色变化：仅「跟随系统」模式下实时跟随。"""
+        self._system_dark = ThemeManager.detect_system_dark()
+        if getattr(self, "_appearance_mode", "light") == "system":
+            self._apply_appearance(persist=False)
 
     def _create_topbar_toggle_btn(self) -> QToolButton:
         """菜单栏右上角的小图标按钮：一键显示/隐藏整条「协议选择+串口配置」栏。"""
@@ -6877,6 +7081,9 @@ class MainWindow(QMainWindow):
         if self.CSG_MONITOR_PREFIX in text:
             return self._strip_csg_monitor_prefix(text)
 
+        # 测试装置工装板/功能驱动板控制帧的判据来自解析器（单一来源，见 csg_new_gen_parser）
+        from csg_new_gen_parser import is_test_device_control_frame
+
         out_lines = []
         out_map = []
 
@@ -6966,6 +7173,13 @@ class MainWindow(QMainWindow):
             else:
                 if hex_clean.startswith("ED"):
                     pass  # ED 包装帧直接保留
+                elif is_test_device_control_frame(hex_clean):
+                    # 台体工装板/功能驱动板控制帧（FE×n + 05 …，功能驱动板以 AA 0D 0A 结尾）：
+                    # 不是载波 FC/PB 业务帧、没有 FC 起始签名，但它**是**能被解析器完整识别的帧
+                    # （parse_to_table 优先判它）⇒ 必须原样保留。否则会被下面的 FC 扫描判定为
+                    # 「无有效起始」整行丢弃 —— 现场表现是同一帧单帧解析正常、批量却报
+                    # 「预处理后未保留有效报文内容！」（1.23.87 修）。
+                    pass
                 else:
                     found = False
                     i = 0
@@ -7810,9 +8024,16 @@ class MainWindow(QMainWindow):
         """创建菜单栏"""
         menubar = self.menuBar()
 
-        # 右上角小图标：一键显示/隐藏「协议选择+串口配置」整栏（折叠后协议进标题、串口进状态栏）
+        # 右上角小图标：外观（太阳/月亮/跟随系统）+ 一键显示/隐藏「协议选择+串口配置」整栏
+        self.appearance_btn = self._create_appearance_btn()
         self.topbar_toggle_btn = self._create_topbar_toggle_btn()
-        menubar.setCornerWidget(self.topbar_toggle_btn, Qt.Corner.TopRightCorner)
+        corner = QWidget(menubar)
+        corner_lay = QHBoxLayout(corner)
+        corner_lay.setContentsMargins(0, 0, 6, 0)
+        corner_lay.setSpacing(2)
+        corner_lay.addWidget(self.appearance_btn)
+        corner_lay.addWidget(self.topbar_toggle_btn)
+        menubar.setCornerWidget(corner, Qt.Corner.TopRightCorner)
 
         # 配置菜单
         config_menu = menubar.addMenu("配置(&C)")
@@ -7841,6 +8062,10 @@ class MainWindow(QMainWindow):
         feedback_act = help_menu.addAction("问题反馈(&F)...")
         feedback_act.triggered.connect(self._show_feedback_dialog)
 
+        diag_act = help_menu.addAction("生成诊断包(&D)...")
+        diag_act.setToolTip("把版本、脱敏后的配置与最近日志打成一个 zip，方便反馈问题时一次发全")
+        diag_act.triggered.connect(self._export_diagnostics)
+
         about_action = help_menu.addAction("关于(&A)")
         about_action.triggered.connect(self._show_about_dialog)
 
@@ -7861,6 +8086,51 @@ class MainWindow(QMainWindow):
             dlg.exec()
         except Exception as e:  # noqa: BLE001 - 反馈功能不应影响主程序
             QMessageBox.critical(self, "问题反馈", f"反馈功能打开失败：{e}")
+
+    # ==================== 诊断包 ====================
+    def _export_diagnostics(self):
+        """帮助菜单「生成诊断包」：版本 + 脱敏配置 + 最近日志 → 一个 zip。
+
+        远程排障时用户只需发这一个文件。**不收集报文原文与个人身份信息**，
+        配置里的 API Key / Token 等字段由 `diagnostics.redact` 统一替换。
+        """
+        from datetime import datetime
+
+        try:
+            from diagnostics import build_diagnostics
+        except Exception as e:  # noqa: BLE001 - 诊断功能不应影响主程序
+            QMessageBox.critical(self, "生成诊断包", f"诊断模块不可用：{e}")
+            return
+
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_path = Path.home() / "Desktop" / f"南网解析诊断包_v{APP_VERSION}_{stamp}.zip"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "保存诊断包", str(default_path), "ZIP 压缩包 (*.zip)")
+        if not path:
+            return
+        if not path.lower().endswith(".zip"):
+            path += ".zip"
+        try:
+            result = build_diagnostics(
+                path, app_data_dir(), APP_VERSION, BUILD_DATE,
+                extra={
+                    "当前协议": self.protocol_combo.currentText(),
+                    "当前页面": self.tab_widget.tabText(self.tab_widget.currentIndex()),
+                    "已打开串口": bool(getattr(self.serial_worker, "is_open", lambda: False)()),
+                },
+            )
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.critical(self, "生成诊断包", f"生成失败：{e}")
+            return
+
+        size_kb = max(1, int(result.get("bytes", 0) / 1024))
+        skipped = result.get("skipped") or []
+        tip = f"\n\n跳过 {len(skipped)} 项（不存在或超出大小上限）" if skipped else ""
+        QMessageBox.information(
+            self, "生成诊断包",
+            f"已生成（{size_kb} KB，{len(result.get('included', []))} 个文件）：\n"
+            f"{result.get('path', path)}{tip}\n\n"
+            "配置文件中的密钥类字段已脱敏，不含报文原文。\n请把这个 zip 发给开发者。")
 
     def _show_share_dialog(self):
         """单帧解析页「分享此帧」：把最近解析的报文分享到 Web 服务端
@@ -7917,8 +8187,7 @@ class MainWindow(QMainWindow):
                 except Exception:
                     config = {}
             config["update"] = self._update_settings
-            with open(self._config_path, "w", encoding="utf-8") as f:
-                json.dump(config, f, ensure_ascii=False, indent=2)
+            atomic_write_json(self._config_path, config)
         except Exception as e:
             print(f"[更新] 保存配置失败: {e}")
 
@@ -7966,7 +8235,9 @@ class MainWindow(QMainWindow):
 
         self._update_ctx = {"silent": silent, "show_list": show_list}
 
-        thread = _UpdateCheckWorker(cfg, APP_VERSION, list_all=show_list)
+        thread = _UpdateCheckWorker(
+            cfg, APP_VERSION, list_all=show_list, repo_url=AUTHOR_GITHUB_URL
+        )
         self._update_check_thread = thread
         thread_registry.track(thread, "UpdateCheckWorker")
         if show_list:
@@ -8002,18 +8273,36 @@ class MainWindow(QMainWindow):
             # 自动/周期检查：不弹窗，仅状态栏右下角绿色⬆提示，用户点击后再确认下载
             self._set_update_status(latest)
             return
-        local = result.get("local", APP_VERSION)
-        remote = latest.get("version", "?")
-        notes = (latest.get("notes") or "").strip()
-        msg = f"发现新版本：{local} → {remote}\n\n{notes}\n\n是否下载并更新？"
-        ret = QMessageBox.question(
-            self,
-            "发现新版本",
-            msg,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if ret == QMessageBox.StandardButton.Yes:
+        if self._confirm_update_download(latest):
             self._start_download(latest)
+
+    def _source_label(self) -> str:
+        """当前更新源的一句话描述（对话框里给用户看）。"""
+        from auto_updater import describe_source
+
+        return describe_source(self._update_settings)
+
+    def _release_page_url(self) -> str:
+        """当前更新源的发布页地址（无则空串）。"""
+        try:
+            from auto_updater import VersionChecker
+
+            return VersionChecker(self._update_settings).release_page_url()
+        except Exception:
+            return ""
+
+    def _confirm_update_download(self, latest: dict) -> bool:
+        """「发现新版本」确认：版本对比 + **更新说明**（可滚动）+ 发布页入口。
+
+        返回 True 表示用户点了「下载并更新」。说明用 Markdown 渲染
+        （GitHub Release body 就是 markdown），不再把原始 markdown 塞进
+        QMessageBox 的纯文本里。
+        """
+        from update_dialogs import ask_update_available
+
+        return ask_update_available(
+            self, APP_VERSION, latest, release_page_url=self._release_page_url()
+        )
 
     def _set_update_status(self, latest):
         """设置/清除状态栏「发现新版本」提示（latest=None 时隐藏，表示已是最新版）。"""
@@ -8027,12 +8316,14 @@ class MainWindow(QMainWindow):
             return
         self._pending_update = latest
         remote = latest.get("version", "?")
-        notes = " ".join((latest.get("notes") or "").split())[:80]
+        from auto_updater import summarize_notes
+
+        notes = summarize_notes(latest.get("notes") or "", 120)
         lbl.setText(f"⬆ 发现新版本 v{remote}，点击更新")
         lbl.setToolTip(
-            f"发现新版本：{APP_VERSION} → {remote}\n{notes}\n点击下载并更新"
+            f"发现新版本：{APP_VERSION} → {remote}\n{notes}\n点击查看更新说明并下载"
             if notes
-            else f"发现新版本：{APP_VERSION} → {remote}\n点击下载并更新"
+            else f"发现新版本：{APP_VERSION} → {remote}\n点击查看更新说明并下载"
         )
         lbl.setStyleSheet(self._update_status_style())
         lbl.show()
@@ -8042,26 +8333,17 @@ class MainWindow(QMainWindow):
         """状态栏更新提示样式：绿色加粗醒目显示（暗色主题用亮绿）。"""
         from theme_settings import is_dark
 
-        color = "#4ade80" if is_dark(self._theme_id) else "#0a8f2e"
+        color = "#4ade80" if self._is_dark_theme() else "#0a8f2e"
         return f"color: {color}; font-weight: bold; font-size: {self._font_size + 1}pt; padding: 0 6px;"
 
     def _on_update_status_clicked(self):
-        """点击状态栏更新提示：弹确认框，确认后下载更新。"""
+        """点击状态栏更新提示：弹确认框（含更新说明），确认后下载更新。"""
         if getattr(self, "_is_closing", False):
             return
         latest = getattr(self, "_pending_update", None)
         if not latest:
             return
-        remote = latest.get("version", "?")
-        notes = (latest.get("notes") or "").strip()
-        msg = f"发现新版本：{APP_VERSION} → {remote}\n\n{notes}\n\n是否下载并更新？"
-        ret = QMessageBox.question(
-            self,
-            "发现新版本",
-            msg,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if ret == QMessageBox.StandardButton.Yes:
+        if self._confirm_update_download(latest):
             self._start_download(latest)
 
     def _on_version_list_result_cb(self, releases: list, err: str):
@@ -8071,19 +8353,7 @@ class MainWindow(QMainWindow):
         self._on_version_list_result(releases, err)
 
     def _on_version_list_result(self, releases: list, err: str):
-        """手动「检查更新」：显示仓库全部版本列表，用户可选择任意版本下载。"""
-        from PySide6.QtCore import Qt as _Qt
-        from PySide6.QtWidgets import (
-            QDialog,
-            QHBoxLayout,
-            QLabel,
-            QListWidget,
-            QListWidgetItem,
-            QMessageBox,
-            QPushButton,
-            QVBoxLayout,
-        )
-
+        """手动「检查更新」：显示仓库全部版本列表 + **更新说明**面板，可下载任意版本。"""
         if err:
             QMessageBox.warning(self, "检查更新", f"获取版本列表失败：{err}")
             return
@@ -8091,68 +8361,17 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "检查更新", "仓库中没有可更新的版本。")
             return
 
-        dlg = QDialog(self)
-        dlg.setWindowTitle("检查更新 - 版本列表")
-        dlg.setMinimumSize(560, 420)
-        layout = QVBoxLayout(dlg)
+        from update_dialogs import ask_version_list
 
-        cur = APP_VERSION
-        tip = QLabel(f"当前版本：{cur}\n选择下方任意版本下载（默认为最新版）：")
-        tip.setWordWrap(True)
-        layout.addWidget(tip)
-
-        listw = QListWidget()
-        for r in releases:
-            ver = r.get("version", "?")
-            created = r.get("created_at", "")[:10]
-            notes = r.get("notes") or ""
-            notes_one = " ".join(notes.split())[:60] if notes else "（无说明）"
-            tag = "[最新] " if r is releases[0] else ""
-            cur_tag = (
-                " ← 当前"
-                if ver.strip().lower().lstrip("v") == cur.strip().lower()
-                else ""
-            )
-            label = f"{tag}{ver}  ({created}){cur_tag}"
-            item = QListWidgetItem(label)
-            item.setData(
-                _Qt.ItemDataRole.UserRole, {"version": ver, "url": r.get("url", "")}
-            )
-            item.setToolTip(notes)
-            listw.addItem(item)
-        # 默认选中最新版
-        if listw.count():
-            listw.setCurrentRow(0)
-        layout.addWidget(listw)
-
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        download_btn = QPushButton("下载选中版本")
-        download_btn.setFixedWidth(130)
-        cancel_btn = QPushButton("取消")
-        cancel_btn.setFixedWidth(80)
-        cancel_btn.clicked.connect(dlg.reject)
-        btn_row.addWidget(download_btn)
-        btn_row.addWidget(cancel_btn)
-        btn_row.addStretch()
-        layout.addLayout(btn_row)
-
-        def on_download():
-            item = listw.currentItem()
-            if item is None:
-                QMessageBox.information(dlg, "下载", "请先选择一个版本。")
-                return
-            data = item.data(_Qt.ItemDataRole.UserRole) or {}
-            if not data.get("url"):
-                QMessageBox.warning(dlg, "下载", "该版本缺少下载地址。")
-                return
-            dlg.accept()
-            self._start_download(data)
-
-        download_btn.clicked.connect(on_download)
-        listw.itemDoubleClicked.connect(lambda item: on_download())
-
-        dlg.exec()
+        chosen = ask_version_list(
+            self,
+            releases,
+            APP_VERSION,
+            source_label=self._source_label(),
+            release_page_url=self._release_page_url(),
+        )
+        if chosen:
+            self._start_download(chosen)
 
     def _start_download(self, latest: dict):
         """后台下载新版 exe 到临时目录，进度条展示，完成后编排替换。"""
@@ -8172,10 +8391,13 @@ class MainWindow(QMainWindow):
 
         import tempfile
 
+        from auto_updater import safe_file_stem
+
         tmp_dir = Path(tempfile.gettempdir()) / "jiexigongju_updater"
         tmp_dir.mkdir(parents=True, exist_ok=True)
+        # tag 含 `/`、`:` 等字符时直接拼会把临时文件写成子目录/非法路径 → 清洗
         new_exe = Path(tmp_dir) / (
-            "南网解析工具_" + latest.get("version", "new") + ".exe"
+            "南网解析工具_" + safe_file_stem(latest.get("version", "new")) + ".exe"
         )
 
         dlg = QProgressDialog("正在下载更新...", "取消", 0, 100, self)
@@ -8191,7 +8413,11 @@ class MainWindow(QMainWindow):
         }
 
         thread = _UpdateDownloadWorker(
-            url, new_exe, latest.get("sha256", ""), parent=self
+            url,
+            new_exe,
+            latest.get("sha256", ""),
+            verify_sha=bool(self._update_settings.get("sha256_verify", True)),
+            parent=self,
         )
         self._download_thread = thread
         thread_registry.track(thread, "UpdateDownloadWorker")
@@ -8246,13 +8472,13 @@ class MainWindow(QMainWindow):
             QLineEdit,
         )
 
-        from auto_updater import merge_update_config
+        from auto_updater import describe_source, merge_update_config
 
-        cfg = merge_update_config(self._update_settings)
+        cfg = merge_update_config(self._update_settings, repo_url=AUTHOR_GITHUB_URL)
 
         dialog = QDialog(self)
         dialog.setWindowTitle("更新设置")
-        dialog.setMinimumWidth(460)
+        dialog.setMinimumWidth(520)
         form = QFormLayout(dialog)
 
         enabled_cb = QCheckBox("启用自动更新")
@@ -8264,21 +8490,40 @@ class MainWindow(QMainWindow):
         form.addRow("启动检查", start_cb)
 
         source_combo = QComboBox()
+        source_combo.addItem("GitHub Releases（默认）", "github")
         source_combo.addItem("Gitee Releases（国内）", "gitee")
         source_combo.addItem("私有 HTTP 服务器", "private")
-        idx = source_combo.findData(cfg.get("source_type", "gitee"))
+        idx = source_combo.findData(cfg.get("source_type", "github"))
         source_combo.setCurrentIndex(max(0, idx))
         form.addRow("更新源", source_combo)
 
-        owner_edit = QLineEdit(str(cfg.get("gitee_owner", "")))
-        form.addRow("Gitee owner", owner_edit)
-        repo_edit = QLineEdit(str(cfg.get("gitee_repo", "")))
-        form.addRow("Gitee repo", repo_edit)
+        source_tip = QLabel(f"当前：{describe_source(cfg)}")
+        source_tip.setStyleSheet("color: #888;")
+        source_tip.setWordWrap(True)
+        form.addRow("", source_tip)
+
+        github_tip = (
+            "留空即用内置默认（与「关于」里的作者仓库同源：\n"
+            f"{AUTHOR_GITHUB_URL}）"
+        )
+        owner_edit = QLineEdit(str(cfg.get("github_owner", "")))
+        owner_edit.setPlaceholderText("例如 Liruitao1993")
+        owner_edit.setToolTip(github_tip)
+        form.addRow("GitHub owner", owner_edit)
+        repo_edit = QLineEdit(str(cfg.get("github_repo", "")))
+        repo_edit.setPlaceholderText("例如 South_Network_Protocol_Analysis_Tool")
+        repo_edit.setToolTip(github_tip)
+        form.addRow("GitHub repo", repo_edit)
+
+        gitee_owner_edit = QLineEdit(str(cfg.get("gitee_owner", "")))
+        form.addRow("Gitee owner", gitee_owner_edit)
+        gitee_repo_edit = QLineEdit(str(cfg.get("gitee_repo", "")))
+        form.addRow("Gitee repo", gitee_repo_edit)
         private_edit = QLineEdit(str(cfg.get("private_url", "")))
         private_edit.setPlaceholderText("https://host/version.json")
         form.addRow("私有源 URL", private_edit)
 
-        sha_cb = QCheckBox("校验 SHA-256")
+        sha_cb = QCheckBox("校验 SHA-256（GitHub 源自动取官方摘要）")
         sha_cb.setChecked(bool(cfg.get("sha256_verify", True)))
         form.addRow("安全校验", sha_cb)
 
@@ -8290,12 +8535,20 @@ class MainWindow(QMainWindow):
         form.addRow(buttons)
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
+            # 与默认相同的 owner/repo 存空串 ⇒ 继续跟随 AUTHOR_GITHUB_URL（唯一来源）
+            from auto_updater import github_fields_for_save
+
+            gh = github_fields_for_save(
+                owner_edit.text(), repo_edit.text(), repo_url=AUTHOR_GITHUB_URL
+            )
             self._update_settings = {
                 "enabled": enabled_cb.isChecked(),
                 "check_on_start": start_cb.isChecked(),
                 "source_type": source_combo.currentData(),
-                "gitee_owner": owner_edit.text().strip(),
-                "gitee_repo": repo_edit.text().strip(),
+                "github_owner": gh["github_owner"],
+                "github_repo": gh["github_repo"],
+                "gitee_owner": gitee_owner_edit.text().strip(),
+                "gitee_repo": gitee_repo_edit.text().strip(),
                 "private_url": private_edit.text().strip(),
                 "sha256_verify": sha_cb.isChecked(),
             }
@@ -8537,8 +8790,7 @@ class MainWindow(QMainWindow):
                     with open(self._config_path, encoding="utf-8") as f:
                         config = json.load(f)
                 config["system"] = self._system_settings
-                with open(self._config_path, "w", encoding="utf-8") as f:
-                    json.dump(config, f, ensure_ascii=False, indent=2)
+                atomic_write_json(self._config_path, config)
             except Exception as e:
                 print(f"[系统设置保存失败] {e}")
         except Exception as e:
@@ -8836,6 +9088,14 @@ class MainWindow(QMainWindow):
         if serial_tool is not None:
             try:
                 serial_tool.cleanup()
+            except Exception:
+                pass
+
+        # 6b-2) 生产测试架：停防抖定时器 + 断开共享串口信号 + 落盘（不关串口）
+        testbench = getattr(self, "testbench_tab", None)
+        if testbench is not None:
+            try:
+                testbench.cleanup()
             except Exception:
                 pass
 
@@ -10240,21 +10500,38 @@ class MainWindow(QMainWindow):
         if not table_data:
             return "-"
 
-        # 解析失败：提取失败原因
+        # ── 单次遍历同时完成四件事（协议9 摘要逐帧调用；原实现扫 table_data 4 遍）──
+        #   ① 解析失败：提取失败原因（命中即返回）
+        #   ② 字段索引：快速定位关键字段
+        #   ③ ED 监控包装帧标题探测（原为对 fields 的键再扫一遍）
+        #   ④ 测试装置表标题探测（命中才调 test_device_summary ⇒ 普通帧省掉一次
+        #      函数调用与整表扫描；判定口径与 `batch_core.is_test_device_table` 一致）
+        fields = {}
+        ed_hdr = None
+        has_test_device = False
         for item in table_data:
-            if item[0].startswith("❌"):
+            name = item[0]
+            if name.startswith("❌"):
                 return item[3] if item[3] else "解析失败"
+            fields[name] = item
+            if ed_hdr is None and "监控包装头" in name:
+                ed_hdr = name
+            if not has_test_device and name.startswith("──"):
+                has_test_device = (
+                    name.startswith("── 测试装置") and "控制协议" in name
+                )
 
-        # ── 字段索引：快速定位关键字段 ──
-        fields = {item[0]: item for item in table_data}
+        # ── 测试装置工装板/功能驱动板控制协议（优先，避免落到兜底只显示说明文案）──
+        # 摘要的核心是**命令专属解析值**（衰减器X衰减值 / 仓电源与引脚 / 220V 状态），
+        # 走 batch_core 的共享实现（桌面/Web 同源，单一来源）。
+        if has_test_device:
+            test_dev_summary = batch_core.test_device_summary(table_data)
+            if test_dev_summary:
+                return test_dev_summary
 
         # ── ED 监控包装帧（标题含「监控包装头」；文案按协议/布局由 batch_core 单源给出）──
         from batch_core import ed_wrapper_summary_name
 
-        ed_hdr = next(
-            (k for k in fields if "监控包装头" in str(k)),
-            None,
-        )
         if ed_hdr:
             parts = [ed_wrapper_summary_name(ed_hdr)]
             ctrl1 = fields.get("控制域1")
@@ -11334,8 +11611,7 @@ class MainWindow(QMainWindow):
         ]
         config["pp_commands"] = commands
         try:
-            with open(self._config_path, "w", encoding="utf-8") as f:
-                json.dump(config, f, ensure_ascii=False, indent=2)
+            atomic_write_json(self._config_path, config)
         except Exception as e:
             print(f"[预处理命令保存失败] {e}")
 
@@ -11477,8 +11753,7 @@ class MainWindow(QMainWindow):
 
         config["py_scripts"] = scripts
         try:
-            with open(self._config_path, "w", encoding="utf-8") as f:
-                json.dump(config, f, ensure_ascii=False, indent=2)
+            atomic_write_json(self._config_path, config)
         except Exception as e:
             print(f"[Python脚本保存失败] {e}")
 
@@ -13242,8 +13517,7 @@ class MainWindow(QMainWindow):
                 with open(self._config_path, encoding="utf-8") as f:
                     config = json.load(f)
             config["system"] = self._system_settings
-            with open(self._config_path, "w", encoding="utf-8") as f:
-                json.dump(config, f, ensure_ascii=False, indent=2)
+            atomic_write_json(self._config_path, config)
         except Exception as e:
             print(f"[系统设置保存失败] {e}")
 
@@ -13303,6 +13577,7 @@ class MainWindow(QMainWindow):
             self._font_family,
             self._font_size,
             glass=getattr(self, "_glass_settings", None),
+            mode=getattr(self, "_appearance_mode", None),
         )
 
         # 更新 LLM 预处理配置
@@ -13338,8 +13613,7 @@ class MainWindow(QMainWindow):
             config.pop("window", None)
 
         try:
-            with open(self._config_path, "w", encoding="utf-8") as f:
-                json.dump(config, f, ensure_ascii=False, indent=2)
+            atomic_write_json(self._config_path, config)
         except Exception as e:
             print(f"[配置保存失败] {e}")
 
@@ -13384,8 +13658,15 @@ class MainWindow(QMainWindow):
     # ==================== 主题与字体 ====================
 
     def _is_dark_theme(self) -> bool:
-        """当前是否为暗色主题"""
-        return self._theme_id == "dark"
+        """当前**实际**是否深色（主题 + 外观模式 + 系统深浅共同决定）。"""
+        try:
+            return ThemeManager.resolve_appearance(
+                self._theme_id,
+                getattr(self, "_appearance_mode", "light"),
+                getattr(self, "_system_dark", False),
+            )[1]
+        except Exception:  # noqa: BLE001
+            return self._theme_id == "dark"
 
     def _make_stats_label(self, text: str = "", size: int = 12) -> QLabel:
         """创建随主题适配的统计/状态标签（注册到列表，主题切换时统一重设）"""
@@ -13511,6 +13792,11 @@ class MainWindow(QMainWindow):
                 self._sync_topbar_toggle_btn()
             except RuntimeError:
                 pass
+        if hasattr(self, "appearance_btn"):
+            try:
+                self._sync_appearance_btn()
+            except RuntimeError:
+                pass
         if hasattr(self, "_serial_statusbar_lbl"):
             try:
                 self._update_serial_statusbar()
@@ -13551,6 +13837,11 @@ class MainWindow(QMainWindow):
                 self.upgrade_tab.restyle_for_theme(self._is_dark_theme())
             except RuntimeError:
                 pass
+        if getattr(self, "testbench_tab", None) is not None:
+            try:
+                self.testbench_tab.restyle_for_theme(self._is_dark_theme())
+            except RuntimeError:
+                pass
         # 字段树与解析结果表同字号（主题 QSS 已含 QTreeWidget）
         if getattr(self, "result_tree_widget", None) is not None:
             try:
@@ -13567,6 +13858,7 @@ class MainWindow(QMainWindow):
             self._font_size,
             glass=self._glass_settings,
             parent=self,
+            mode=getattr(self, "_appearance_mode", "light"),
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._theme_id, self._font_family, self._font_size = dialog.get_settings()
@@ -13702,6 +13994,18 @@ class MainWindow(QMainWindow):
 
 
 def main():
+    # 打包后自检：`exe --self-test` 不启动界面、不读配置、不写文件，返回码 0 才算合格。
+    # 放在单实例检查之前 —— 自检不该被「已有实例在运行」拦掉。
+    if "--self-test" in sys.argv[1:]:
+        try:
+            from self_test import run as _run_self_test
+
+            sys.exit(_run_self_test())
+        except SystemExit:
+            raise
+        except Exception:            # noqa: BLE001 - 自检自身失败也要给出非 0
+            sys.exit(2)
+
     # 修复 Windows 终端中文乱码：将 stdout/stderr 切换为 UTF-8
     # PyInstaller GUI 模式（console=False）下 sys.stdout/stderr 为 None，需守卫
     if sys.platform == "win32":
@@ -13716,13 +14020,37 @@ def main():
                 sys.stderr.buffer, encoding="utf-8", errors="replace"
             )
 
-    # 单实例：已有实例在运行则传参并退出
+    # 单实例：已有实例在运行则传参并退出。
+    # `NW_NO_SINGLE_INSTANCE=1` 仅供自动化冒烟（离屏启动验证）使用，正常用户不会设置。
     from system_integration.single_instance import try_connect_existing
 
-    if try_connect_existing(sys.argv[1:]):
+    if os.environ.get("NW_NO_SINGLE_INSTANCE") != "1" and try_connect_existing(sys.argv[1:]):
         return 0
 
     app = QApplication(sys.argv)
+
+    # 未捕获异常兜底：打包后 console=False，没有控制台，崩溃现场只能落文件。
+    # 放在 MainWindow 之前安装 —— 建窗过程中的异常同样能记下来。
+    try:
+        import threading as _threading
+
+        from crash_handler import install as _install_crash_handler
+
+        def _on_crash(path, _summary):
+            if _threading.current_thread() is not _threading.main_thread():
+                return                     # 子线程里不要碰界面
+            try:
+                where = f"\n\n崩溃日志：{path}" if path else "\n\n（崩溃日志写入失败）"
+                QMessageBox.critical(
+                    None, "程序遇到错误",
+                    "程序遇到未处理的错误，已记录现场。" + where
+                    + "\n\n请通过「帮助 → 生成诊断包」把日志发给我们。")
+            except Exception:              # noqa: BLE001 - 提示失败不能再抛
+                pass
+
+        _install_crash_handler(APP_VERSION, BUILD_DATE, app_data_dir(), _on_crash)
+    except Exception:                      # noqa: BLE001 - 兜底安装失败不影响启动
+        pass
 
     # 提前设全局默认字体，避免 Qt 回退到 MS Sans Serif 触发 DirectWrite 警告
     app.setFont(QFont("Microsoft YaHei UI", 9))
@@ -13765,12 +14093,18 @@ class _UpdateCheckWorker(QThread):
     release_list_ready = Signal(list, str)  # 全部版本列表 + 错误信息（list_all 模式）
 
     def __init__(
-        self, cfg: dict, local_version: str, list_all: bool = False, parent=None
+        self,
+        cfg: dict,
+        local_version: str,
+        list_all: bool = False,
+        repo_url: str = "",
+        parent=None,
     ):
         super().__init__(parent)
         self.cfg = cfg
         self.local_version = local_version
         self.list_all = list_all
+        self.repo_url = repo_url
 
     def run(self):
         if self.list_all:
@@ -13786,7 +14120,9 @@ class _UpdateCheckWorker(QThread):
             return
         from auto_updater import check_for_update
 
-        res = check_for_update(self.local_version, self.cfg)
+        res = check_for_update(
+            self.local_version, self.cfg, repo_url=self.repo_url
+        )
         self.result_ready.emit(res)
 
 
@@ -13796,15 +14132,21 @@ class _UpdateDownloadWorker(QThread):
     progress = Signal(int)
     done = Signal(bool, str, str)  # (ok, error, new_path)
 
-    def __init__(self, url: str, dest_file: Path, sha256: str, parent=None):
+    def __init__(
+        self, url: str, dest_file: Path, sha256: str, verify_sha: bool = True, parent=None
+    ):
         super().__init__(parent)
         self.url = url
         self.dest_file = Path(dest_file)
         self.sha256 = sha256
+        # 「配置→更新设置」的「校验 SHA-256」开关**真的生效**：
+        # 关掉即不带预期摘要（此前是死开关，勾不勾都按「有摘要就校验」走）
+        self.verify_sha = bool(verify_sha)
 
     def run(self):
-        from auto_updater import Opdater
+        from auto_updater import Opdater, is_pe_executable
 
+        expected = self.sha256 if self.verify_sha else ""
         try:
             op = Opdater()
             op.download(
@@ -13812,12 +14154,23 @@ class _UpdateDownloadWorker(QThread):
                 self.dest_file,
                 progress_cb=lambda p: self.progress.emit(int(p)),
             )
-            if self.sha256 and not op.verify(self.dest_file, self.sha256):
+            if expected and not op.verify(self.dest_file, expected):
                 self.done.emit(
                     False, "SHA-256 校验失败，文件可能损坏", str(self.dest_file)
                 )
-            else:
-                self.done.emit(True, "", str(self.dest_file))
+                return
+            # 替换 exe 前的最后一道闸：下载物必须是 Windows 可执行文件。
+            # 更新源地址给错（接口 JSON / 登录页 HTML / 错误页）时魔数与体积都对不上，
+            # 宁可报错也不能把正在运行的 exe 覆盖成垃圾。
+            if not is_pe_executable(self.dest_file):
+                self.done.emit(
+                    False,
+                    "下载到的文件不是 Windows 可执行程序（可能是错误页或接口数据），"
+                    "已取消更新；请检查「配置→更新设置」里的更新源",
+                    str(self.dest_file),
+                )
+                return
+            self.done.emit(True, "", str(self.dest_file))
         except Exception as e:
             self.done.emit(False, str(e), str(self.dest_file))
 

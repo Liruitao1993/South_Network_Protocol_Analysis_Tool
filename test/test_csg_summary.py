@@ -193,6 +193,62 @@ def test_legacy_test_frame_mode_summary():
     print("[OK] 1.0测试帧测试模式通过")
 
 
+def test_legacy_mode6_band_switch_is_carrier_semantics():
+    """1.0测试帧·测试模式6（频段切换/载波切频）→ 按**载波频段值**解析，不出无线信道号。
+
+    用户 2026-10-19 报障：真实帧（ED 封装 SOF · 1.0测试 · 模式6）后半段被解析成
+    「Option值 / 无线信道号」一堆无线信道号。依据文档《宽带双模通信模块（通感一体
+    物联版）相关测试命令定义》「原有测试命令」第 6 条：模式6 = 进行频段切换操作，
+    配置值填**目标频段对应的值**（0/1/2 → 通信频段 0/1/2）；Option+信道号是**模式8**。
+
+    根因两处（协议9 与协议10 同源）：
+      ① 12bit 配置值按大端拼（`(b2>>4)<<8 | b3`）——正确为**字节号小的端为低位**
+         （协议10/11 均如此），用户帧 20 00 → 旧算 512、正确 2；
+      ② 模式6 与模式8 合并按「Option+无线信道号」解析（一次错误改动引入）。
+    """
+    sdu = bytes([0x03, 0x00, 0x06, 0x00]) + bytes(
+        [0x81, 0x61, 0x20, 0x00, 0x00, 0x00]
+    )
+    parser = CSGNewGenParser()
+    table = parser.parse_to_table(_app_frame(0x4002, sdu), parse_level="app")
+    names = [str(r[0]) for r in table]
+
+    def cell(*keywords):
+        for r in table:
+            if all(k in str(r[0]) for k in keywords):
+                return r
+        return None
+
+    mode_row = cell("测试模式/配置操作")
+    assert mode_row is not None, names
+    assert mode_row[2] == "6", f"测试模式应为6: {mode_row}"
+
+    band_row = cell("频段值")
+    assert band_row is not None, f"应产出「频段值(目标频段)」行: {names}"
+    assert band_row[2] == "2", f"目标频段值应为2（小端 20 00）: {band_row}"
+    assert "通信频段2" in str(band_row[3]), band_row
+    assert "0.781~2.930MHz" in str(band_row[3]), band_row
+
+    # 模式6 不得出现无线信道语义（回归本次报障）
+    assert not any("无线信道" in n for n in names), f"模式6 不应有无线信道字段: {names}"
+    # 报文头长度：字节0 bit6-7 低2位 + 字节1 bit0-3 高4位 = 6（表61 整根 6 字节头）
+    hdr_row = cell("报文头长度")
+    assert hdr_row is not None and hdr_row[2] == "6", f"报文头长度应为6: {hdr_row}"
+
+    # 模式8 仍是无线信道口径（不被本次改动波及）
+    parser8 = CSGNewGenParser()
+    table8 = parser8.parse_to_table(
+        _app_frame(0x4002, bytes([0x03, 0x00, 0x06, 0x00])
+                   + bytes([0x81, 0x81, 0x10, 0x24, 0x00, 0x00])),
+        parse_level="app",
+    )
+    names8 = [str(r[0]) for r in table8]
+    assert any("无线信道号" in n for n in names8), f"模式8 应保留无线信道号: {names8}"
+    assert not any("频段值" in n for n in names8), f"模式8 不应有频段值: {names8}"
+    print(f"1.0测试帧·模式6 频段值: {band_row[2]} / {band_row[3]}")
+    print("[OK] 模式6 载波频段语义 + 模式8 无线信道口径 通过")
+
+
 def test_test_2_0_frame_ext_id_summary():
     """2.0测试帧（Bitloading表下发）整帧→摘要：回退体现测试ID + 扩展ID"""
     parser = CSGNewGenParser()
@@ -245,6 +301,60 @@ def test_non_test_frame_has_no_mode_text():
     print("[OK] 非测试帧无测试模式片段通过")
 
 
+# ── 测试装置（工装板/功能驱动板）控制帧：摘要必须给命令专属解析值 ──
+# 用户报障：「解析摘要中居然没有衰减值，这个核心内容」。这类帧的核心就是命令专属
+# 解析值；此前落到兜底分支只取了标题/注释（如「… | 数据帧开始 | 00=广播预留…」）。
+DEVICE_SUMMARY_CASES = (
+    ("工装板·CCO仓模块电源", "05010280000000000083",
+     "模块上下电/8762A连接方式", "CCO仓模块电源状态=STA1模块=上电"),
+    ("工装板·220V电源", "05010401000000000006",
+     "设置220V电源/衰减器B", "工装板220V电源状态=连接状态"),
+    ("工装板·STA仓引脚", "FEFEFEFE05010300030000000007",
+     "设置引脚状态/衰减器A", "STA仓引脚控制=STA1；RST=高电平；EVENT=高电平"),
+    ("功能驱动板·衰减器A", "FEFEFE0501030800000000000CAA0D0A",
+     "设置引脚状态/衰减器A", "衰减器A衰减值=8 dB"),
+    ("功能驱动板·衰减器C（用户报障帧）", "FEFEFE0501051400000000001AAA0D0A",
+     "衰减器C", "衰减器C衰减值=20 dB"),
+)
+
+
+def test_test_device_control_summary_has_core_value():
+    """测试装置控制帧摘要必须含**命令名 + 命令专属解析值**（衰减值/电源/引脚）"""
+    parser = CSGNewGenParser()
+    for label, hex_str, want_cmd, want_core in DEVICE_SUMMARY_CASES:
+        table = parser.parse_to_table(bytes.fromhex(hex_str))
+        assert not str(table[0][0]).startswith("❌"), f"{label} 解析失败: {table[0][3]}"
+        s = _summary(table)
+        assert want_cmd in s, f"{label}: 摘要缺命令名 -> {s}"
+        assert want_core in s, f"{label}: 摘要缺核心解析值 -> {s}"
+    print("[OK] 测试装置控制帧摘要含核心解析值通过")
+
+
+def test_test_device_summary_has_no_noise_rows():
+    """摘要不得混入固定结构行（帧头/地址/6字节数据项/校验和/结束符）"""
+    parser = CSGNewGenParser()
+    table = parser.parse_to_table(bytes.fromhex("FEFEFE0501051400000000001AAA0D0A"))
+    s = _summary(table)
+    for noise in ("帧头=", "地址=", "数据项字节", "校验和=", "结束符=", "起始字符="):
+        assert noise not in s, f"摘要不应含噪声行 {noise} -> {s}"
+    print("[OK] 测试装置摘要无噪声行通过")
+
+
+def test_test_device_summary_not_applied_to_normal_frames():
+    """反例：普通载波 MPDU 帧摘要不得被误加控制协议内容"""
+    parser = CSGNewGenParser()
+    frame = bytes.fromhex(
+        "19012000030000417804005B1000000000000000030045000210004111"
+        "0805000301110101000160020109003700640198900000011100682119"
+        "70051E0025000210006801110068211968110433333433661610006801"
+        "1100682119681104343433376B16A89D0543" + "00" * 44 + "0B8F8D"
+    )
+    s = _summary(parser.parse_to_table(frame))
+    for wrong in ("衰减", "工装板", "引脚", "220V"):
+        assert wrong not in s, f"普通帧摘要被污染（含 {wrong}）-> {s}"
+    print("[OK] 反例 普通帧摘要未被污染通过")
+
+
 if __name__ == "__main__":
     print("=" * 60)
     print("新一代载波协议批量解析摘要生成 - 测试")
@@ -265,6 +375,8 @@ if __name__ == "__main__":
     print()
     test_legacy_test_frame_mode_summary()
     print()
+    test_legacy_mode6_band_switch_is_carrier_semantics()
+    print()
     test_test_2_0_frame_ext_id_summary()
     print()
     test_uplink_test_frame_summary()
@@ -272,5 +384,11 @@ if __name__ == "__main__":
     test_non_test_uplink_frames_not_polluted()
     print()
     test_non_test_frame_has_no_mode_text()
+    print()
+    test_test_device_control_summary_has_core_value()
+    print()
+    test_test_device_summary_has_no_noise_rows()
+    print()
+    test_test_device_summary_not_applied_to_normal_frames()
     print("=" * 60)
     print("全部测试通过 ✓")

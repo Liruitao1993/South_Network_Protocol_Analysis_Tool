@@ -34,6 +34,8 @@
   - 本模块 —— 界面与对话框（**不** import `main_gui`，能力一律由注入提供）
 """
 
+from atomic_io import atomic_write_json
+
 import os
 import re
 from collections import deque
@@ -111,6 +113,7 @@ LOG_FLUSH_BURST = 40
 
 # 自定义报文按钮网格列数
 BUTTON_GRID_COLUMNS = 3
+
 
 
 class ButtonScrollArea(QScrollArea):
@@ -3452,8 +3455,7 @@ class BluetoothToolWidget(QWidget):
         import json
 
         try:
-            with open(path, "w", encoding="utf-8") as handle:
-                json.dump(self._buttons, handle, ensure_ascii=False, indent=2)
+            atomic_write_json(path, self._buttons)
         except OSError as exc:
             QMessageBox.warning(self, "导出失败", f"{path}\n\n{exc}")
             return

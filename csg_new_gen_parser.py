@@ -232,6 +232,31 @@ BROADCAST_DIR_MAP = {
 }
 
 
+def is_test_device_control_frame(data) -> bool:
+    """``data`` 是否可识别为「测试装置（工装板 / 功能驱动板）通信控制帧」。
+
+    入参**同时接受** ``bytes`` 与**纯 hex 字符串**（前缀剥离层手上是 str，解析层是 bytes；
+    字符串容忍空格等分隔符 —— 即 ``bytes.fromhex`` 语义），非法入参返回 ``False`` 而不抛异常。
+
+    用途：批量解析的**前缀剥离层**据此决定「整行原样保留」。这类帧（``FE×n + 05 地址
+    命令 6字节数据 校验``，功能驱动板以 ``AA 0D 0A`` 结尾）不是载波 FC/PB 业务帧、没有
+    FC 起始签名，若不特判就会被 FC 扫描分支整行丢弃 —— 实测表现为「同一帧单帧解析正常，
+    批量却提示『预处理后未保留有效报文内容！』」。
+
+    判据**复用** :meth:`CSGNewGenParser._parse_test_device_control`（帧格式的单一来源），
+    调用点（``batch_core`` / ``main_gui`` / Web ``web_utils``）**禁止**另写一份帧格式判据
+    （AGENTS.md 陷阱 31 的漂移根因）。
+    """
+    try:
+        raw = bytes.fromhex(data) if isinstance(data, str) else bytes(data)
+    except (TypeError, ValueError):
+        return False
+    try:
+        return CSGNewGenParser()._parse_test_device_control(raw) is not None
+    except Exception:  # noqa: BLE001 - 判据函数不得把异常抛给调用方
+        return False
+
+
 class CSGNewGenParser:
     """新一代载波协议解析器 (通感一体化)"""
 

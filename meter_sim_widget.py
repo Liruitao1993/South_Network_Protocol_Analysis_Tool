@@ -8,6 +8,8 @@
 档案数据 meter_sim_data.json（OI→A-XDR 数据）可在「档案数据」页增删改、导入导出。
 核心逻辑在 meter_sim 包（不依赖 Qt）。
 """
+
+from atomic_io import atomic_write_json
 import json
 import time
 from typing import Optional
@@ -518,9 +520,7 @@ class VirtualMeterWidget(QWidget):
         if not path:
             return
         items = self._collect_archive_from_table()
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump({"version": 1, "items": items}, f,
-                      ensure_ascii=False, indent=1)
+        atomic_write_json(path, {"version": 1, "items": items}, indent=1)
         self._log(f"档案已导出: {path}")
 
     # ── 设置持久化 ────────────────────────────────────────

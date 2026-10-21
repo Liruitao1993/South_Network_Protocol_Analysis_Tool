@@ -6,12 +6,15 @@ DLT645-2007 数据标识(DI)查询模块
 单一来源：桌面查询页与 Reflex Web 查询页均读本模块）。
 """
 
+from atomic_io import atomic_write_json
+
 import json
 import os
 from typing import List, Tuple, Optional
 
 from app_paths import data_path
 from dlt645_pv_ext import merge_pv_di_map
+
 
 
 class DLT645DILookup:
@@ -170,8 +173,7 @@ class DLT645DILookup:
 
         # 保存
         try:
-            with open(self._custom_file, 'w', encoding='utf-8') as f:
-                json.dump(custom_list, f, ensure_ascii=False, indent=2)
+            atomic_write_json(self._custom_file, custom_list)
             # 重新加载
             self._load_di_map()
             return True
@@ -198,8 +200,7 @@ class DLT645DILookup:
                 return False  # 没找到
 
             # 保存
-            with open(self._custom_file, 'w', encoding='utf-8') as f:
-                json.dump(custom_list, f, ensure_ascii=False, indent=2)
+            atomic_write_json(self._custom_file, custom_list)
 
             # 重新加载
             self._load_di_map()

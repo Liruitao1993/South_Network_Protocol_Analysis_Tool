@@ -383,6 +383,15 @@ _EXT_TEST_MODES = {
     15: "新一代扩展测试模式",
 }
 
+#: 频段切换操作（测试模式=6）的目标频段取值（文档「原有测试命令」第 6 条原文）：
+#: 0→通信频段0（1.953~11.96MHz）、1→通信频段1（2.441~5.615MHz）、2→通信频段2（0.781~2.930MHz）。
+#: 与 `csg_new_gen_cmd_payloads._BAND_MAP` / `hdc10_parser.EXT_BAND_RANGES` 同口径。
+_BAND_MAP = {
+    0: "通信频段0（1.953~11.96MHz）",
+    1: "通信频段1（2.441~5.615MHz）",
+    2: "通信频段2（0.781~2.930MHz）",
+}
+
 _EXT_SEC_MODES = {
     1: "SHA256算法测试", 2: "SM3算法测试",
     3: "ECC签名测试", 4: "ECC验签测试",
@@ -490,8 +499,16 @@ def _parse_comm_test_ext(table: list, payload: bytes, base_offset: int,
            "转发数据规约类型字段扩展为新一代测试模式", base_offset + 2, base_offset + 2)
         _f(table, "数据转发长度", f"{config_val}", f"{config_val}字节", "数据域内容长度(12bit)",
            base_offset + 2, base_offset + 3)
-    elif test_mode in (6, 8):
-        # 切频(频段切换)/无线信道切换: Option值(字节2高4位) + 无线信道号(字节3)
+    elif test_mode == 6:
+        # 频段切换操作（载波/PLC 频段）：12bit 配置值 = **目标频段值**（表61 第 6 条），
+        # **不是** Option+信道号（那是模式 8）。曾与模式 8 合并按无线信道解析，
+        # 导致载波切频帧显示成无线信道号（用户 2026-10-19 报障，与协议9 同源）。
+        band_name = _BAND_MAP.get(config_val, f"保留({config_val})")
+        _f(table, "频段值(目标频段)", f"{config_val}", f"{config_val}（{band_name}）",
+           f"频段切换操作的目标频段（表61 第6条）: {band_name}",
+           base_offset + 2, base_offset + 3)
+    elif test_mode == 8:
+        # 无线信道切换: Option值(字节2高4位) + 无线信道号(字节3)
         option = (b2 >> 4) & 0x0F
         _f(table, "Option值", f"{option}", f"Option {option}", "无线Option值",
            base_offset + 2, base_offset + 2)

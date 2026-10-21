@@ -1595,6 +1595,17 @@ _LEGACY_TEST_MODE_MAP = {
     15: "新一代扩展测试模式",
 }
 
+#: 频段切换操作（测试模式=6）的目标频段取值。
+#: 文档《宽带双模通信模块（通感一体物联版）相关测试命令定义》「原有测试命令」第 6 条原文：
+#: 值 0 表示通信频段 0（1.953~11.96MHz）、值 1 表示通信频段 1（2.441~5.615MHz）、
+#: 值 2 表示通信频段 2（0.781~2.930MHz）。
+#: 口径与 `hdc10_parser.EXT_BAND_RANGES`（协议11 同一条）一致。
+_BAND_MAP = {
+    0: "通信频段0（1.953~11.96MHz）",
+    1: "通信频段1（2.441~5.615MHz）",
+    2: "通信频段2（0.781~2.930MHz）",
+}
+
 
 def _parse_legacy_ext_cmd(data: bytes, base: int) -> list:
     """解析原有扩展命令格式数据区（表61，8字节结构）
@@ -1615,11 +1626,16 @@ def _parse_legacy_ext_cmd(data: bytes, base: int) -> list:
         _f(table, "❌ 解析失败", "", "", "原有扩展命令数据不足（<2字节）", base, base + len(data) - 1)
         return table
 
-    # 字节0: 协议版本号(bit0-5) + 报文头长度(bit6-7)
+    # 字节0: 协议版本号(bit0-5) + 报文头长度低2位(bit6-7)
+    # 报文头长度共 6bit：字节0[bit7-6] 为**低**2位、字节1[bit3-0] 为**高**4位
+    # （文档表61 该字段跨两行「0 | 6-7」+「1 | 0-3」，共 6bit；口径同协议10/11
+    #  ——「字节号小的端为低位」。旧实现只取字节0 的 2bit，实测用户帧 81 61…
+    #  给出「2」，而正确值为 6 = 表61 整根 6 字节报文头）
     ver = data[0] & 0x3F
-    hdr_len = (data[0] >> 6) & 0x03
+    hdr_len = ((data[1] & 0x0F) << 2) | ((data[0] >> 6) & 0x03)
     _f(table, "协议版本号", f"0x{ver:02X}", str(ver), "原有扩展命令协议版本号", base, base)
-    _f(table, "报文头长度", f"0x{hdr_len:02X}", str(hdr_len), "报文头长度(2bit)", base, base)
+    _f(table, "报文头长度", f"0x{hdr_len:02X}", str(hdr_len),
+       "报文头长度(6bit: 字节0 bit6-7 低2位 + 字节1 bit0-3 高4位)", base, base + 1)
 
     if len(data) < 6:
         # 数据不足时只解析已存在字段
@@ -1642,16 +1658,31 @@ def _parse_legacy_ext_cmd(data: bytes, base: int) -> list:
     _f(table, "转发数据规约类型", f"0x{proto_type:01X}", str(proto_type),
        "转发数据的规约类型（低4位）", base + 2, base + 2)
 
-    # 数据长度 12bit: (字节2 bit4-7)<<8 | 字节3
+    # 12bit 配置值：**字节号小的端为低位**（口径同协议10 `gw_new_gen_cmd_payloads`
+    # 的「小端 nibble 组合」与协议11 `hdc10_parser.config_val`）：
+    #   值 = 字节2 bit4-7（低 4 位）| 字节3 << 4（高 8 位）
+    # 旧实现按大端拼（(b2>>4)<<8 | b3），实测用户帧 81 61 20 00 给出 512，
+    # 而正确值为 2（= 通信频段2）；同样会把「30 分钟」的持续时间读成 3585。
     b3 = data[3]
-    data_len12 = ((b2 >> 4) & 0x0F) << 8 | b3
-    # 依据测试模式区分字段含义：3/4/5/9/10/11/12=持续时间(分)，6/8=Option+信道号，7=ToneMask
+    config_val = ((b2 >> 4) & 0x0F) | (b3 << 4)
+    # 依据测试模式区分字段含义：
+    #   3/4/5/9/10/11/12 = 测试模式持续时间(分)｜6 = 目标频段值｜7 = ToneMask｜8 = 无线信道
     len_desc = "转发数据长度/模式持续时间"
-    parsed_val = str(data_len12)
+    parsed_val = str(config_val)
     if test_mode in (3, 4, 5, 9, 10, 11, 12):
-        len_desc = f"测试模式持续时间: {data_len12} 分钟"
-    elif test_mode in (6, 8):
-        # 切频(频段切换)/无线信道切换：目标为 Option(字节2 bit4-7) + 信道号(字节3)
+        len_desc = f"测试模式持续时间: {config_val} 分钟"
+    elif test_mode == 6:
+        # 频段切换操作（载波/PLC 频段）：配置值 = **目标频段对应的值**（文档表61 第 6 条）。
+        # 注意：这不是「Option+无线信道号」——那是模式 8（无线信道切换）。
+        # 曾把两者合并按无线信道解析（见 main_gui CHANGELOG 1.23.x「与模式8 一致」），
+        # 导致载波切频帧显示成一堆无线信道号（用户 2026-10-19 报障）。
+        band_name = _BAND_MAP.get(config_val, f"保留({config_val})")
+        parsed_val = f"{config_val}（{band_name}）"
+        len_desc = f"目标频段值: {config_val} → {band_name}"
+        _f(table, "  频段值(目标频段)", f"0x{config_val:03X}", str(config_val),
+           f"频段切换操作的目标频段（表61 第6条）: {band_name}", base + 2, base + 3)
+    elif test_mode == 8:
+        # 无线信道切换：目标为 Option(字节2 bit4-7) + 信道号(字节3)（文档表61 第 8 条）
         opt = (b2 >> 4) & 0x0F
         ch = b3
         parsed_val = f"Option={opt}, 信道号={ch}"
@@ -1659,9 +1690,9 @@ def _parse_legacy_ext_cmd(data: bytes, base: int) -> list:
         _f(table, "  Option值", f"0x{opt:02X}", str(opt), "无线信道切换Option值", base + 2, base + 2)
         _f(table, "  无线信道号", f"0x{ch:02X}", str(ch), "无线信道切换信道号", base + 3, base + 3)
     elif test_mode == 7:
-        len_desc = f"目标ToneMask: {data_len12}"
+        len_desc = f"目标ToneMask: {config_val}"
     else:
-        len_desc = f"转发数据长度/模式持续时间: {data_len12}"
+        len_desc = f"转发数据长度/模式持续时间: {config_val}"
     _f(table, "转发数据长度/模式持续时间", f"{b2:02X} {b3:02X}", parsed_val,
        len_desc, base + 2, base + 3)
 

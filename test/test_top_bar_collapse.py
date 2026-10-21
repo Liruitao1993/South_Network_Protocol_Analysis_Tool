@@ -100,9 +100,20 @@ def main():
         win.windowTitle(),
     )
     check("展开态状态栏串口标签隐藏", win._serial_statusbar_lbl.isHidden())
+    corner = win.menuBar().cornerWidget()
+    corner_children = corner.findChildren(type(win.topbar_toggle_btn)) if corner else []
     check(
         "开关在菜单栏角标、不在顶栏内",
-        win.menuBar().cornerWidget() is win.topbar_toggle_btn,
+        corner is not None
+        and win.topbar_toggle_btn in corner_children
+        and not win.top_bar_widget.isAncestorOf(win.topbar_toggle_btn),
+    )
+    # 1.23.91：角标里还有「外观（太阳/月亮）」按钮，两者并排、顺序为 外观 → 折叠
+    check(
+        "角标同时包含外观与折叠按钮",
+        corner is not None
+        and hasattr(win, "appearance_btn")
+        and win.appearance_btn in corner_children,
     )
 
     section("[2] 一键折叠：协议+串口一起消失")

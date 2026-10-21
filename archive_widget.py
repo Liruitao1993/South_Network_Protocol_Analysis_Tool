@@ -4,6 +4,8 @@
 包含档案表格、操作按钮、串口交互和响应解析。
 """
 
+from atomic_io import atomic_write_json
+
 import json
 import struct
 from typing import Dict, Any, List, Tuple, Optional
@@ -28,6 +30,7 @@ from gui_utils import ZoomableTableWidget, set_btn_icon
 from app_paths import data_path
 
 ARCHIVE_FILE = str(data_path("archive_data.json"))
+
 
 
 def _crc16_x25(data: bytes) -> int:
@@ -576,8 +579,7 @@ class ArchiveWidget(QWidget):
     def _save_archive(self):
         """将当前档案数据保存到 JSON 文件"""
         try:
-            with open(ARCHIVE_FILE, "w", encoding="utf-8") as f:
-                json.dump(self._node_data, f, ensure_ascii=False, indent=2)
+            atomic_write_json(ARCHIVE_FILE, self._node_data)
         except Exception:
             pass  # 静默失败，不影响主流程
 
@@ -615,8 +617,7 @@ class ArchiveWidget(QWidget):
         if not path:
             return
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(self._node_data, f, ensure_ascii=False, indent=2)
+            atomic_write_json(path, self._node_data)
             self._log(f"[本地] 档案已导出: {path}")
         except Exception as e:
             QMessageBox.critical(self, "导出失败", str(e))

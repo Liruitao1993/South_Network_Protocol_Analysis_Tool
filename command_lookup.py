@@ -3,11 +3,14 @@ PLC RF 协议命令字查询模块
 用于万胜 PLC RF 协议的命令字查询
 """
 
+from atomic_io import atomic_write_json
+
 import json
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
 from app_paths import data_path
+
 
 
 class CommandLookup:
@@ -77,8 +80,7 @@ class CommandLookup:
             })
 
         try:
-            with open(filepath, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            atomic_write_json(filepath, data)
             return True
         except Exception as e:
             print(f"保存自定义命令字失败: {e}")

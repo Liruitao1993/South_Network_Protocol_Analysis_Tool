@@ -269,6 +269,9 @@ def strip_csg_new_gen_frame_prefix(text: str, parse_level: str = "auto") -> Stri
 
     hex_frames = _split_hex_frames_with_lines(text)
 
+    # 测试装置工装板/功能驱动板控制帧的判据来自解析器（单一来源，见 csg_new_gen_parser）
+    from csg_new_gen_parser import is_test_device_control_frame
+
     out_lines = []
     out_map = []
     for hex_clean, src_idx in hex_frames:
@@ -298,6 +301,13 @@ def strip_csg_new_gen_frame_prefix(text: str, parse_level: str = "auto") -> Stri
         else:
             if hex_clean.startswith("ED"):
                 pass  # ED 包装帧直接保留
+            elif is_test_device_control_frame(hex_clean):
+                # 台体工装板/功能驱动板控制帧（FE×n + 05 …，功能驱动板以 AA 0D 0A 结尾）：
+                # 不是载波 FC/PB 业务帧、没有 FC 起始签名，但它**是**能被解析器完整识别的帧
+                # （parse_to_table 优先判它）⇒ 必须原样保留。否则会被下面的 FC 扫描判定为
+                # 「无有效起始」整行丢弃 —— 现场表现是同一帧单帧解析正常、批量却报
+                # 「预处理后未保留有效报文内容！」（1.23.87 修）。
+                pass
             else:
                 found = False
                 i = 0
@@ -541,6 +551,75 @@ def ed_wrapper_summary_name(title: str) -> str:
     if "广西" in t:
         return "广西台体监控包装帧"
     return "PLC2.0监控包装帧"
+
+
+# ── 测试装置（工装板/功能驱动板）控制帧摘要 ────────────────────────────────
+# 用户口径：「摘要里居然没有衰减值」—— 这类帧的核心内容就是**命令专属的解析值**
+# （衰减器X衰减值 / CCO·STA 仓电源与引脚 / 220V 电源状态），必须进摘要。
+# 判定「命令专属行」用**排除法**（跳过帧头/地址/命令码/校验和/结束符与固定 6 字节
+# 数据项），因此解析器新增命令时摘要自动跟随，**不需要在摘要层再维护一张命令表**。
+
+#: 摘要要跳过的非业务行（固定结构行 + 无信息量的数据项字节）
+_TEST_DEVICE_SKIP_ROWS = frozenset({
+    "起始字符", "帧头", "地址", "命令码", "校验和", "结束符",
+})
+
+
+def is_test_device_table(table_data: list) -> bool:
+    """该解析表是否为「测试装置工装板/功能驱动板控制协议」表（标题行判定）。
+
+    性能：本函数在批量解析里**逐帧**走（协议9 摘要路径），而标题行必须形如
+    ``── 测试装置…控制协议`` ⇒ 先用廉价的「``──``」前缀筛掉普通数据行，只对
+    区块标题行做完整判定（真实 3.2 万行日志实测：把每帧约 40 行的
+    ``str().startswith()`` 全量判定降为约 2 行的标题行判定）。
+    """
+    for row in table_data or ():
+        if not row:
+            continue
+        name = row[0]
+        if not isinstance(name, str):
+            name = str(name)
+        if not name.startswith("──"):
+            continue  # 普通数据行不可能匹配标题，直接跳过（省掉两次字符串判定）
+        if name.startswith("── 测试装置") and "控制协议" in name:
+            return True
+    return False
+
+
+def test_device_summary(table_data: list) -> str:
+    """测试装置控制帧摘要：``命令名 | 命令专属解析值…``（非该类报文返回空串）。
+
+    例：功能驱动板「控制衰减器」→ ``衰减器C | 衰减器C衰减值=20 dB``；
+    工装板引脚控制 → ``设置引脚状态/衰减器A | CCO仓引脚控制=…；STA仓引脚控制=…``。
+
+    **ED..EE 包装帧不在此接管**：那类表里既有包装头行又有控制行，既有 ED 摘要分支
+    已经给出「包装名 + 业务帧核心值」，抢过来反而丢掉包装上下文（回归见
+    `reflex_web/tests/test_csg_ed_control.py::test_web_summary_contains_control_state`）。
+    """
+    if not is_test_device_table(table_data):
+        return ""
+    if any(row and "监控包装头" in str(row[0]) for row in table_data):
+        return ""
+    parts: list = []
+    for row in table_data:
+        if not row:
+            continue
+        name = str(row[0])
+        if name == "命令码":
+            # 命令名本身即核心信息（如「衰减器C」）：取解析值而非 name=value
+            cmd = str(row[2] or "")
+            if cmd:
+                parts.append(cmd)
+            continue
+        if not name or name.startswith("──") or name in _TEST_DEVICE_SKIP_ROWS:
+            continue
+        if name.startswith("数据项字节"):
+            continue
+        parsed = row[2] if len(row) > 2 else ""
+        if parsed in ("", None):
+            continue
+        parts.append(f"{name}={parsed}")
+    return " | ".join(parts)
 
 
 _CTRL1_NAMES = {0x00: "数据报文", 0x01: "控制报文"}
@@ -1643,19 +1722,22 @@ def get_csg_new_gen_summary(table_data: list, protocol_index: int = 9) -> str:
     if not table_data:
         return "-"
 
-    # 解析失败：提取失败原因
+    # ── 单次遍历同时完成三件事（协议9 摘要逐帧调用；原实现扫 table_data 3 遍）──
+    #   ① 解析失败：提取失败原因（命中即返回）
+    #   ② 字段索引：快速定位关键字段
+    #   ③ ED 监控包装帧标题探测（原为对 fields 的键再扫一遍）
+    # 结果与「先扫一遍找 ❌ → 再建 dict → 再扫键找包装头」逐字等价：dict 键保持
+    # 插入序（同一键保留最后一条），ed_hdr 取首个命中（`is None` 守卫），
+    # item[0] 在此处必为 str（否则原实现的 `item[0].startswith` 早已抛错）。
+    fields = {}
+    ed_hdr = None
     for item in table_data:
-        if item[0].startswith("❌"):
+        name = item[0]
+        if name.startswith("❌"):
             return item[3] if item[3] else "解析失败"
-
-    # ── 字段索引：快速定位关键字段 ──
-    fields = {item[0]: item for item in table_data}
-
-    # ── ED 监控包装帧（标题含「监控包装头」；文案按协议/布局单源）──
-    ed_hdr = next(
-        (k for k in fields if "监控包装头" in str(k)),
-        None,
-    )
+        fields[name] = item
+        if ed_hdr is None and "监控包装头" in name:
+            ed_hdr = name
     if ed_hdr:
         parts = [ed_wrapper_summary_name(ed_hdr)]
         ctrl1 = fields.get("控制域1")

@@ -4,6 +4,8 @@
 支持多供应商预设、多配置增删改、测试连接、活跃配置选择。
 配置持久化到 config.json 的 llm_profiles 段。
 """
+
+from atomic_io import atomic_write_json
 import json
 import os
 from typing import Dict, Any, List, Optional
@@ -127,8 +129,7 @@ def save_profiles(data: Dict[str, Any]):
     except Exception:
         cfg = {}
     cfg["llm_profiles"] = data
-    with open(_config_path(), "w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=2, ensure_ascii=False)
+    atomic_write_json(_config_path(), cfg)
 
 
 def get_active_profile() -> Optional[Dict[str, str]]:

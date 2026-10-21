@@ -45,6 +45,13 @@ CRITICAL_DATAS = (
 
 # 核心回归（纯逻辑 / 无 Qt 优先，默认全跑）
 CORE_TESTS = [
+    # P0 加固：原子写 / 升级回滚脚本 / 诊断包（纯逻辑 + 主程序静态守卫）
+    "test/test_p0_hardening.py",
+    "test/test_crash_handler.py",
+    "test/test_frame_corpus.py",
+    "test/test_parser_fuzz.py",
+    "test/test_self_test.py",
+    "test/test_appearance_mode.py",
     "test/test_protocol_registry.py",
     "test/test_pcap_import.py",
     "test/test_dlms.py",
@@ -165,11 +172,18 @@ CORE_TESTS = [
     "test/test_yw645_extract.py",
     "test/test_yw645_validator.py",
     "test/test_csg_uplink.py",
+    # 自动升级：版本比对 / GitHub 源（默认）/ digest→sha256 / 版本列表 / 错误文案
+    "test/test_auto_updater.py",
+    # 自动升级对话框：更新说明（markdown）渲染 / 版本列表 / 接线守卫（offscreen）
+    "test/test_update_notes_gui.py",
 ]
 
 # 可选 offscreen GUI（慢；主题套件本机既有 12 项失败，仅报告不阻断默认）
 GUI_TESTS = [
     "test/test_quick_parse_panel.py",
+    # 短时长稳：反复切页（内存必须收敛）+ 高频收包（日志块上限/队列清空）
+    "test/test_soak_stability.py",
+    "test/test_appearance_gui.py",
     # 协议8 文件传输升级页（offscreen 假串口：逐包确认/重试/超时/中止/进度/拖放/不裁字）+ 真实 MainWindow 接线
     "test/test_dl698_upgrade_gui.py",
     "test/test_dl698_upgrade_tab_wiring.py",
@@ -186,6 +200,8 @@ GUI_TESTS = [
     "test/test_app_icon_path.py",
     "test/test_button_icons.py",
     "test/test_spectrum_gui.py",
+    # 生产测试架（串口助手 + 测试架参数帧）：纯逻辑 golden + GUI + main_gui 接线
+    "test/test_production_testbench.py",
 ]
 
 # 已知环境失败：不因它挡发布，但会标 WARN
@@ -254,7 +270,13 @@ def check_versions(rep: Report) -> tuple[str, str]:
             README.read_text(encoding="utf-8"),
         )
         if not m:
-            rep.warn("README 版本徽章未找到")
+            # 项目已改用「动态 Release 徽章」（img.shields.io/github/v/release/…），
+            # 版本号由 GitHub 实时渲染，不需要也不应该再维护一个静态版本徽章。
+            text = README.read_text(encoding="utf-8")
+            if "img.shields.io/github/v/release/" in text:
+                rep.ok("README 使用动态 Release 徽章（无需同步静态版本号）")
+            else:
+                rep.warn("README 版本徽章未找到")
         elif m.group(1) == version:
             rep.ok(f"README 版本徽章 = {version}")
         else:

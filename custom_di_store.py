@@ -23,6 +23,7 @@
 """
 
 from __future__ import annotations
+from atomic_io import atomic_write_json
 
 import json
 from pathlib import Path
@@ -41,6 +42,7 @@ DIKey = Tuple[int, int, int, int]
 
 
 # ── 校验 / 格式化（纯函数）───────────────────────────────────────────
+
 
 
 def parse_hex_byte(text: str) -> Optional[int]:
@@ -138,8 +140,7 @@ def save_custom_di(entries: Sequence[dict], path: Optional[Path] = None) -> None
     """
     if path is None:
         path = app_paths.data_path(CUSTOM_DI_FILE)
-    with open(path, "w", encoding="utf-8") as fp:
-        json.dump(list(entries), fp, ensure_ascii=False, indent=2)
+    atomic_write_json(path, list(entries))
 
 
 # ── 列表增删（纯函数，不碰磁盘）──────────────────────────────────────
