@@ -124,8 +124,8 @@ from theme_settings import ThemeManager, ThemeSettingsDialog
 #: 目前只有 698.45（协议8）实现了 parse_to_table(..., verify=False)。
 TOLERANT_PARSE_PROTOCOLS = {8}
 
-APP_VERSION = "1.23.92"
-BUILD_DATE = "2026-10-21"  # 编译日期，每次打包前更新
+APP_VERSION = "1.23.94"
+BUILD_DATE = "2026-10-22"  # 编译日期，每次打包前更新
 
 # 作者 GitHub 仓库地址 —— 「关于」对话框 Star 按钮的**唯一来源**。
 # 改地址只改这一处（按钮文案/提示/跳转都读它，不要在别处再写死一份）。
@@ -149,6 +149,43 @@ _WINDOW_STATE_TABLES = (
 )
 
 CHANGELOG = [
+    (
+        "1.23.94",
+        "2026-10-22",
+        [
+            "**新增「提交问题到 GitHub」：把问题自动提交到仓库的 Issue（需求：软件直接提问题到 GitHub 的 ISSUE）**：帮助菜单新增「提交问题到 GitHub(&G)」。新增 `github_issue.py`（纯逻辑无 Qt）+ `github_issue_dialog.py`（PySide6 对话框）。**两条通道**：① **API 直连**（首选，真正的自动）—— 填好 GitHub 令牌后点一次「直接提交到 GitHub」，走 REST API `POST /repos/{owner}/{repo}/issues` 建单，**issue 立刻出现在仓库里**并弹窗给出编号与链接，全程不碰浏览器；② **浏览器预填**（兜底，无需任何令牌）—— 按仓库现有 Issue Form 的**字段 id** 预填 `issues/new?template=bug.yml&...`，用户在网页上点一次提交即可",
+            "**表单对齐仓库现有模板**：仓库已有 `.github/ISSUE_TEMPLATE/bug.yml` 与 `feature.yml`，对话框按「问题反馈（Bug）/ 功能建议（Feature）」两种形态分别对应这两张表单；`github_issue.FORM_PROTOCOL_OPTIONS` 抄的是 bug.yml 里 protocol 下拉的**逐字**选项文本（GitHub 下拉预填要求与选项完全一致才会选中），`test/test_github_issue.py` 直接拿仓库里的真实 yml 对拍，**模板改了这边没跟上会直接变红**。因 API 建单不经过 YAML 表单，正文段标题刻意写成与表单一致的 `### 工具版本` / `### 期望结果` 等，issue 页面看起来与网页表单提交的没差别",
+            "**自动收集现场信息**：自动带入**当前协议**、**最近一次解析的报文 hex**、运行环境（版本 / 系统 / 是否 exe / Python）—— 带 hex 的 issue 最快定位；**运行环境不含**用户名、机器名等可识别个人的信息（与 `diagnostics` 脱敏口径一致）",
+            "**崩溃一键提交**：程序崩溃的提示框新增「提交到 GitHub」按钮，点了就把**完整 traceback** 填进对话框直接发成 issue（崩溃时 MainWindow 可能还没建好，故走模块级 `_report_crash_to_github`，与菜单入口共用同一份仓库地址与令牌，不会出现「一个能提交一个不能」的分裂）；提交前会**抹掉崩溃日志里的本机路径行**（`可执行文件：C:\\Users\\<用户名>\\...`），避免把 Windows 用户名发到公开仓库",
+            "**令牌不写进 exe**：只从「本对话框输入 → 存本机 config.json 的 `github_issue.token` 段」或「环境变量 `GITHUB_TOKEN` / `GH_TOKEN`」读取，优先级为 显式 > 环境变量 > config.json。别人拿到你的 exe 也拿不到你的令牌（也就不能替你在仓库里刷 issue）；令牌落 config.json 后会被 `diagnostics.redact` 自动脱敏（键名含 token），诊断包不会泄露",
+            "**地址单一来源**：owner/repo 由 `github_issue.resolve_owner_repo(AUTHOR_GITHUB_URL)` 从「关于」按钮那个常量解析而来，与自动升级源同源，**改地址只改那一处**；「仓库地址不对」不会再出现两份地址打架",
+            "**健壮性**：HTTP 401/403/404/422/429/5xx 一律翻译成中文人话（不暴露英文 urllib 栈）；**标签不存在导致 422 时自动去掉 labels 重试一次**（标签可有可无，issue 必须建出来）；浏览器兜底链接超长（>6000 字符）时明确提示改用 API 通道而不是被静默截断",
+            "测试：新增 `test/test_github_issue.py` **32 项**（与仓库 yml 模板逐字对拍 ×3 / 标题正文拼装 ×4 / API 建单成功与 6 种错误码翻译 / 标签 422 自动去标签重试 / 预填 URL 编码与未知字段过滤 / 令牌优先级与 config 读写 / 令牌被诊断包脱敏 / 崩溃摘要路径脱敏 / offscreen 对话框冒烟与浏览器兜底 / 主程序接线守卫），已登记 `release_check.py:CORE_TESTS`",
+            "配套：`APP_VERSION 1.23.93 → 1.23.94`、`BUILD_DATE 2026-10-22`、两个 `.iss` 同步；spec `hiddenimports` 增补 `github_issue` / `github_issue_dialog`；仓库 `bug.yml` 增补 `contact`（联系方式）字段，使浏览器兜底通道也能带上联系方式",
+        ],
+    ),
+    (
+        "1.23.93",
+        "2026-10-21",
+        [
+            "**协议9：OFDMA（多站点）帧解析修复（现场报「解析不了 eFC」）**：帧 `D9 01 F0 FF DF 03 00 00 8E …` 实际是 **UL-OFDMA 的 SACK 帧（类型3）**，三处叠加导致无输出 —— ① `_detect_channel` 用「预测帧长==实际帧长」投票，OFDMA 的 FC 布局与单站点不同，ISAC 公式算出 968 字节、HRF 默认 16 字节 PB 恰好蒙中 32 字节 ⇒ 整帧被按 HRF（表45）解；现改为 **多站点标识 `var[3]&1` 为 1 时直接判 plc**。② `_parse_mpdu_sof_isac` 的 `if multi_site:` 只有 `pass`，ISAC 版 OFDMA 可变域从未解析；现抽出共享 `_parse_ofdma_variable`（表26，BPLC/ISAC 同构）供两分支调用（且只调用一处，避免行重复）。③ eFC 判定：文档只规定 **类型 1（DL-OFDMA 的 SACK / UL-OFDMA）不携带 eFC**，类型 0/2/3 各有 eFC 定义（表27/28/29）；**类型 3 的 eFC 必须按表29 解析**（每站点 3 字节：TEI + 接收状态 + 保留）。修复过程中一度误把类型 3 也排除，已纠正；并新增「eFC携带判定」行把四种类型依据写明。修复后该帧正确给出：多站点帧=1、OFDMA类型=3（UL-OFDMA SACK）、站点数=4、**携带 eFC**（站点0~3 TEI=2/3/4/5、接收状态 PB0:OK PB1:FAIL、CRC-24 通过）、通道=plc",
+            "**「启动传输」兼容多设备 + 校验值改为 2 字节 CRC-16**（现场两帧实报）：① 现场设备用的是 **方法14**（`OMD=F0010E00`「启动传输（带块大小/版本/下载方标识）」），参数比方法7 多「软件版本数组 / 下载方标识数组 / 2 字节标识」三项，新增 `build_start_transfer_v14` 并**逐字节复现现场两帧**；② 这两帧只差 1 个类型标签（第 6 项 `09` octet-string vs `0A` visible-string），对应两类只认其一的新旧设备；③ 页面新增「启动格式」下拉：选 `自动兼容` 即按 方法14(octet) → 方法14(visible) → 方法7 逐个试，**哪条回 DAR=0 就用哪种继续下发文件块**，某格式重试用尽不算失败、换下一种，三种都不回才判失败（默认仍 `方法7`，老设备与既有轨迹零变化）；④ **校验值宽度错误修复**：此前 `kind=crc` 用 `zlib.crc32` 出 4 字节，设备要 **2 字节** —— 现场包 `DPU_APP_V1.0.3.4.bin`(469,200B) 的实帧校验是 `09 02 73 73`，经 CRC-16/**X-25** 计算恰好 `0x7373`（ARC/CCITT-FALSE/XMODEM/KERMIT/DNP/AUG 全部对不上，非随意选型），现 `calc_checksum_value('crc')` 出 2 字节，「按文件计算」对现场包直接给 `7373`；⑤ 判定用当前格式的 OMD（`_start_omd`），写死 07 会把方法14 的确认当杂帧忽略",
+            "**修复「光伏升级」页读版本信息退化成原始 hex**（现场报障：升级前读版本只显示 `数据 = 0206...`）：设备把「厂商扩展信息」回成 A-XDR `null`（`00`）时，`version_like_members` 因「要求 6 个成员全部是 visible-string」把整条结构判成「非版本形状」，界面于是只给一行原始内容。现在判据放宽为「6 个成员，每个是 visible-string **或 null**」，NULL 成员显示 `NULL` 并追加一行「⚠ 字段缺失」点名（表191 声明为定长 visible-string，缺失要说清依据）；定长字段的 NUL 补齐（`CNC\\0`）在显示前剥掉、`原始` 列仍保留字节可追溯。回归：`test/test_dl698_upgrade.py` A12 ③b/③c（286 → 293 项）",
+            "**协议8 新增「协议测试」页（按 OAD 分类的预置测试库，仅协议8 可见）**：与「协议组帧」页的分工 —— 组帧页临时/任意填，本页是**预先做好**的测试项，按协议的对象标识（OI）把 **777 个对象**分成「电能量 / 需量 / 变量 / 事件 / 参变量 / 冻结数据 / 采集 / 文件与应用 / 控制 / 厂家扩展」十类（子类按 OI 高字节 0H/1H… 排序，与协议分配表一致），勾选即下发，用于设备一致性/功能测试",
+            "**叶子名写「这个 OAD 是什么」**：叶子括号里不再是类级属性名（`分相数值数组`），而是具体语义 —— `20000200（电压）`、`20000201（A相电压）`、`20000301（A相电压换算及单位）`、`43000300（版本信息）`、`43000200（设备描述符）`。规则：通用属性名补对象名（`逻辑名`→`电压逻辑名`）、**具体属性名原样保留**（早先把后缀无差别套用，`43000200` 被叫成「电气设备」）、兄弟数组加限定词（`（扩展精度）/（尾数）/（带品质）`）区分；**分相类（class 3）按 A/B/C 展开**为索引 01H/02H/03H 三条（§7.3.5「01H=第一个元素」+ 仓库内 `_decode_phase_array` 的 A/B/C 口径），选中时「元素索引」同步跟上；功率类（class 4）证据不足不拆。叶子总数 4526 → **4658 条**",
+            "**分类树带简要信息，且叶子是「每个属性一条具体 OAD」**（共 **4658 条**，与现场同类工具同形）：顶层 `4H: 参变量`（OI 高字节高 4 位）、子层 `3H: 设备管理`（低 4 位）、叶子 `43000300_（版本信息）_(索引=0)_(优先级及序号=00)` —— 点 `43000300` 直接发读版本信息的帧，不必再挑属性；「设置方法」页的叶子是具体 OMD（`00100100_（复位）_(优先级及序号=00)`）。叶子里的 `优先级及序号` 表示「点这条会用什么 PIID 发」，**PIID/优先级一变全树同步改文案**（4500 余条 setText 约 30ms），不让标签对用户撒谎",
+            "**四类功能分页**：读取属性（GET-Request Normal）｜设置属性（SET-Request Normal）｜读取记录（GET-Request Record，支持 RSD 不选择/方法1/方法2/方法9/方法10 + RCSD 列选择）｜设置方法（ACTION-Request Normal）。每页「筛选框 + 分类树 + 当前项参数 + 实时帧预览」；筛选支持名称/OI 十六进制前缀/接口类名",
+            "**获取设备地址**：顶部「读地址」发 GET `40010200`（通信地址），响应里的 octet-string 直接回填「读地址 / 服务器地址」（「写地址」为空时也回填，**不覆盖**用户已填值）；「写地址」「读时间」「写时间」「建立应用连接」同理，后续每个 OAD 都用这份地址组帧",
+            "**发送控制**：勾选项逐条下发；「Lst发送」把多个 OAD 合成**一帧** GET-Request Normal-List（`05 02`）；「循环发送」发完自动重来；超时按「等待响应/超时重发」重发，重发用尽记超时；「终止」立停；「清空」清日志与两张表。底部「信息表（时间/结果/信息）」+「报文表（时间/方向/长度/报文）」，右栏逐条日志（TX/RX + 字段行）",
+            "**「编辑」= OAD/OMD 覆盖**：把当前项取值填进覆盖框就地改一两个字节再发（预置库覆盖不到厂家自定义对象）；留空仍按属性/索引生成，非法长度在预览与发送处都报 ⚠ 而不是静默退回",
+            "**组帧口径全部逐字节对齐协议文档附录 H**（新增 `dlt698_test_core.py` 纯逻辑层 + `dlt698_test_widget.py` 页面）：H.3.1 读属性 `05 01 01 40 01 02 00 00`、H.3.2 读多属性 `05 02 02 02 20 00 02 00 20 01 02 00 00`、H.3.3 读记录（含 RSD/RCSD）、H.4.1 设置 `06 01 02 40 00 02 00 1C 07 E0 01 14 10 1B 0B 00`、H.5.1 操作 `07 01 05 00 10 01 00 0F 00 00`、H.2 建立连接 `02 00 …`（40 字节）；帧的 HCS/FCS 仍只由 `DLT69845FrameGenerator` 算（新增 `generate_apdu_frame` / `generate_connect_request`，既有调用零行为变化）",
+            "**不冒充判定**：CONNECT-Response 与记录型二维数据体未做字段级解析（文档无自证布局）⇒ 结果给「已收到/未做字段级解析」而非「成功」；DAR 文案取自解析器 `_enrich_dar`（单一来源），失败时带 DAR 值与中文说明",
+            "复用主窗口共享串口（`raw_data_received` + `write_raw`，不自建端口、不用 `send_frame`、不订阅 `frame_received`）；RX 按 `frame_deframe` 的 `L+2` 判据自组帧并按 68H/FEH 重同步丢噪声；参数落盘 `dlt698_testbench.json`，「远程升级」按钮跳「光伏升级」页",
+            "**收发日志输出完整字段表**（用户口径「解析器已经很完备，要详细输出」）：勾「详细解析」（默认勾、落盘）后 **TX 与 RX 都**逐字段打印整帧结构 —— 起始字符/长度域/控制域各位/地址域/SA/CA/HCS/APDU 类型/PIID/OAD 语义/数据 A-XDR/FCS/结束符，数据源就是 `DLT69845Parser.parse_to_table`（**单帧解析页那张表**，不在页面里另写字段拆解）；四列按显示宽度对齐（CJK 算 2 列），长 hex 与结构化值压缩成「前 32 字符 …（共 N 字符）」，不让一行撑到屏幕外；未请求的帧（主动上报）也走同一套明细。双击底部「报文」表任意行 → 送「单帧解析」页看完整解析树",
+            "测试：新增 `test/test_dlt698_testbench.py` **279 项**（6 条附录 H 黄金逐字节 + HCS/FCS 自解析 + L+2 自洽、OAD/OMD/PIID、date_time_s、SA、RSD/RCSD、分类库 777 项与记录型筛选、树三层文案与 4526 条 OAD 叶子、逐字段明细与长 hex 压缩、响应判定含 DAR/列表/记录/CONNECT 不冒充/坏帧、地址与时间提取、筛选、offscreen 页面构建与发送队列/超时重发/终止、读地址回填、OAD 覆盖、PIID 联动、详细解析开关与双击送解析、落盘与 cleanup、RX 半帧与噪声重同步、主题、源码护栏）+ `test/test_dlt698_test_tab_wiring.py` **22 项**（注册表 `has_test` 只属协议8、页签标题与位置、协议显隐、懒加载、串口注入、远程升级跳转、主题、收尾不关串口）；`test/test_yw645_gui.py` 页签矩阵补入本页",
+            "配套：`APP_VERSION 1.23.92 → 1.23.93`、`protocol_registry` 新增 `has_test` 能力位（仅索引8 为真）+ `protocols_with_test()`",
+        ],
+    ),
     (
         "1.23.92",
         "2026-10-21",
@@ -3324,6 +3361,14 @@ class MainWindow(QMainWindow):
         )
         self.tab_widget.setTabVisible(self._upgrade_tab_index, False)
 
+        # 协议8「协议测试」页（按 OAD 分类的预置测试库；注册表 has_test，仅协议8 可见；
+        # 懒加载、创建即隐藏 —— 理由同上：构造期 _on_protocol_changed 可能一次都不触发）
+        self._test_placeholder = QWidget()
+        self._test_tab_index = self.tab_widget.addTab(
+            self._test_placeholder, app_icons.load_icon("flask-conical"), "协议测试"
+        )
+        self.tab_widget.setTabVisible(self._test_tab_index, False)
+
         # 实时监控器页面（南网新一代(9)/国网新一代(10) 专用，默认隐藏）
         self.monitor_tab = RealtimeMonitorWidget()
         self.monitor_tab.set_serial_worker(self.serial_worker)
@@ -4619,6 +4664,8 @@ class MainWindow(QMainWindow):
             self._ensure_seq_diagram_tab()
         elif index == getattr(self, "_upgrade_tab_index", -1):
             self._ensure_upgrade_tab()
+        elif index == getattr(self, "_test_tab_index", -1):
+            self._ensure_test_tab()
 
     def _ensure_frame_gen_tab(self):
         if hasattr(self, "frame_gen_tab"):
@@ -4808,6 +4855,26 @@ class MainWindow(QMainWindow):
         self._replace_lazy_tab(
             self._upgrade_placeholder, self._upgrade_tab_index, tab
         )
+        apply_chinese_context_menus(tab)
+        return tab
+
+    def _ensure_test_tab(self):
+        """懒加载创建 698.45 协议测试页（仅协议8 可见；复用共享串口）。"""
+        if hasattr(self, "test_tab"):
+            return self.test_tab
+        from dlt698_test_widget import Dlt698TestWidget
+
+        tab = Dlt698TestWidget()
+        self.test_tab = tab
+        # 与升级页/组帧页同一约定：端口与波特率只在顶部「串口配置」设置，
+        # 本页只订阅 raw_data_received、经 write_raw 发送，不自建句柄。
+        tab.set_serial_worker(self.serial_worker)
+        # 「远程升级」按钮切到光伏升级页（升级流程只实现一份）
+        tab.open_upgrade.connect(
+            lambda: self._goto_tab(getattr(self, "_upgrade_tab_index", -1)))
+        # 双击报文表 → 送「单帧解析」页看完整解析树（与监控器同一注入点）
+        tab.frame_to_single_parse.connect(self._send_frame_to_single_parse)
+        self._replace_lazy_tab(self._test_placeholder, self._test_tab_index, tab)
         apply_chinese_context_menus(tab)
         return tab
 
@@ -5203,6 +5270,9 @@ class MainWindow(QMainWindow):
         # 协议8 698.45 文件传输升级：注册表 has_upgrade（仅协议8 可见）
         if hasattr(self, "_upgrade_tab_index"):
             self.tab_widget.setTabVisible(self._upgrade_tab_index, spec.has_upgrade)
+        # 协议8 698.45 协议测试（按 OAD 分类的预置测试库）：注册表 has_test
+        if hasattr(self, "_test_tab_index"):
+            self.tab_widget.setTabVisible(self._test_tab_index, spec.has_test)
         # 档案管理 / 拓扑信息
         if hasattr(self, "_archive_tab_index"):
             self.tab_widget.setTabVisible(self._archive_tab_index, spec.has_archive)
@@ -8121,6 +8191,13 @@ class MainWindow(QMainWindow):
         feedback_act = help_menu.addAction("问题反馈(&F)...")
         feedback_act.triggered.connect(self._show_feedback_dialog)
 
+        github_issue_act = help_menu.addAction("提交问题到 GitHub(&G)...")
+        github_issue_act.setToolTip(
+            "把问题整理成 GitHub Issue：填好令牌可一键直连建单，"
+            "没有令牌则在浏览器里按表单预填后提交"
+        )
+        github_issue_act.triggered.connect(self._show_github_issue_dialog)
+
         diag_act = help_menu.addAction("生成诊断包(&D)...")
         diag_act.setToolTip("把版本、脱敏后的配置与最近日志打成一个 zip，方便反馈问题时一次发全")
         diag_act.triggered.connect(self._export_diagnostics)
@@ -8145,6 +8222,41 @@ class MainWindow(QMainWindow):
             dlg.exec()
         except Exception as e:  # noqa: BLE001 - 反馈功能不应影响主程序
             QMessageBox.critical(self, "问题反馈", f"反馈功能打开失败：{e}")
+
+    # ==================== 提交问题到 GitHub ====================
+    def _show_github_issue_dialog(self):
+        """帮助菜单「提交问题到 GitHub」：把现场整理成一条 issue。
+
+        两条通道（见 `github_issue.py`）：
+        - 填了令牌 → **直连 REST API 一键建单**，issue 立刻出现在仓库里；
+        - 没填令牌 → 打开浏览器，按 Issue Form 的字段 id 预填，用户点一次提交。
+
+        仓库地址与「关于」按钮、自动升级源同源（`AUTHOR_GITHUB_URL`）；
+        令牌只存本机 config.json，不随程序分发。
+        """
+        try:
+            from github_issue import protocol_option, resolve_owner_repo, resolve_token
+            from github_issue_dialog import GitHubIssueDialog
+
+            owner, repo = resolve_owner_repo(AUTHOR_GITHUB_URL)
+            token = resolve_token(self._config_path)
+            dlg = GitHubIssueDialog(
+                parent=self,
+                owner=owner,
+                repo=repo,
+                token=token,
+                app_version=APP_VERSION,
+                build_date=BUILD_DATE,
+                protocol_option=protocol_option(self.current_protocol),
+                frame_hex=(self._last_parsed_hex or ""),
+                config_path=self._config_path,
+            )
+            dlg.exec()
+            # 用户填了令牌就顺手记住（下次直接建单，不用再粘一遍）
+            if dlg.token_edit.text().strip() and dlg.token_edit.text().strip() != token:
+                dlg.persist_token()
+        except Exception as e:  # noqa: BLE001 - 反馈功能不应影响主程序
+            QMessageBox.critical(self, "提交问题到 GitHub", f"功能打开失败：{e}")
 
     # ==================== 诊断包 ====================
     def _export_diagnostics(self):
@@ -9171,6 +9283,14 @@ class MainWindow(QMainWindow):
         if upgrade is not None:
             try:
                 upgrade.cleanup()
+            except Exception:
+                pass
+
+        # 6e) 698.45 协议测试页：停等待/重发定时器 + 断开串口信号 + 落盘（不得关闭串口）
+        test_tab = getattr(self, "test_tab", None)
+        if test_tab is not None:
+            try:
+                test_tab.cleanup()
             except Exception:
                 pass
 
@@ -13900,6 +14020,11 @@ class MainWindow(QMainWindow):
                 self.upgrade_tab.restyle_for_theme(self._is_dark_theme())
             except RuntimeError:
                 pass
+        if getattr(self, "test_tab", None) is not None:
+            try:
+                self.test_tab.restyle_for_theme(self._is_dark_theme())
+            except RuntimeError:
+                pass
         if getattr(self, "testbench_tab", None) is not None:
             try:
                 self.testbench_tab.restyle_for_theme(self._is_dark_theme())
@@ -14056,6 +14181,43 @@ class MainWindow(QMainWindow):
         self._update_serial_statusbar()
 
 
+def _report_crash_to_github(crash_path, crash_summary: str) -> None:
+    """崩溃后把现场提交成 GitHub issue（模块级函数，崩溃时 MainWindow 可能还没建好）。
+
+    崩溃发生在建窗阶段时没有主窗口可用，故这里自建对话框；仓库地址与令牌
+    的取法与「帮助 → 提交问题到 GitHub」完全一致（同一份 AUTHOR_GITHUB_URL
+    与 config.json），两条入口不会出现「一个能提交一个不能」的分裂。
+    """
+    try:
+        from github_issue import resolve_owner_repo, resolve_token
+        from github_issue_dialog import GitHubIssueDialog
+
+        owner, repo = resolve_owner_repo(AUTHOR_GITHUB_URL)
+        config_path = data_path("config.json")
+        dlg = GitHubIssueDialog(
+            parent=None,
+            owner=owner,
+            repo=repo,
+            token=resolve_token(config_path),
+            app_version=APP_VERSION,
+            build_date=BUILD_DATE,
+            config_path=config_path,
+            crash_summary=str(crash_summary or ""),
+        )
+        dlg.setWindowTitle("提交崩溃报告到 GitHub")
+        dlg.exec()
+        if dlg.token_edit.text().strip():
+            dlg.persist_token()
+    except Exception:                      # noqa: BLE001 - 崩溃路径上不能再抛
+        try:
+            QMessageBox.warning(
+                None, "提交崩溃报告",
+                f"崩溃报告窗口打开失败，请手动反馈。\n崩溃日志：{crash_path}",
+            )
+        except Exception:                  # noqa: BLE001
+            pass
+
+
 def main():
     # 打包后自检：`exe --self-test` 不启动界面、不读配置、不写文件，返回码 0 才算合格。
     # 放在单实例检查之前 —— 自检不该被「已有实例在运行」拦掉。
@@ -14104,10 +14266,19 @@ def main():
                 return                     # 子线程里不要碰界面
             try:
                 where = f"\n\n崩溃日志：{path}" if path else "\n\n（崩溃日志写入失败）"
-                QMessageBox.critical(
-                    None, "程序遇到错误",
+                box = QMessageBox(None)
+                box.setIcon(QMessageBox.Icon.Critical)
+                box.setWindowTitle("程序遇到错误")
+                box.setText(
                     "程序遇到未处理的错误，已记录现场。" + where
-                    + "\n\n请通过「帮助 → 生成诊断包」把日志发给我们。")
+                    + "\n\n可点「提交到 GitHub」把崩溃现场自动发成一条 issue"
+                    "（需填令牌），或用「帮助 → 生成诊断包」把日志发给我们。"
+                )
+                gh_btn = box.addButton("提交到 GitHub", QMessageBox.ButtonRole.AcceptRole)
+                box.addButton("确定", QMessageBox.ButtonRole.RejectRole)
+                box.exec()
+                if box.clickedButton() is gh_btn:
+                    _report_crash_to_github(path, _summary)
             except Exception:              # noqa: BLE001 - 提示失败不能再抛
                 pass
 

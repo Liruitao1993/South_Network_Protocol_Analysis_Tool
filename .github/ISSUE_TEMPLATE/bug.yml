@@ -86,3 +86,12 @@ body:
       placeholder: Windows 11 23H2 / exe 1.23.86
     validations:
       required: false
+
+  - type: input
+    id: contact
+    attributes:
+      label: 联系方式（选填）
+      description: 便于回访；GitHub 上直接回复也可以
+      placeholder: 如 QQ / 微信 / 邮箱
+    validations:
+      required: false

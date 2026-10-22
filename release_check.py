@@ -49,6 +49,7 @@ CORE_TESTS = [
     "test/test_p0_hardening.py",
     "test/test_dl698_tolerant_parse.py",
     "test/test_crash_handler.py",
+    "test/test_github_issue.py",
     "test/test_frame_corpus.py",
     "test/test_parser_fuzz.py",
     "test/test_self_test.py",
@@ -189,6 +190,9 @@ GUI_TESTS = [
     # 协议8 文件传输升级页（offscreen 假串口：逐包确认/重试/超时/中止/进度/拖放/不裁字）+ 真实 MainWindow 接线
     "test/test_dl698_upgrade_gui.py",
     "test/test_dl698_upgrade_tab_wiring.py",
+    # 协议8 协议测试页（按 OAD 分类的预置测试库）：附录 H 黄金组帧 + offscreen 页面 + 真实 MainWindow 接线
+    "test/test_dlt698_testbench.py",
+    "test/test_dlt698_test_tab_wiring.py",
     # 粘性入口：托盘菜单内嵌输入框 + 任务栏缩略图按钮（HICON/降级/WM_COMMAND 路由/按钮分派）
     "test/test_tray_taskbar_entries.py",
     "test/test_csg_sequence_gui.py",
@@ -321,13 +325,29 @@ def check_spec(rep: Report) -> None:
     if not SPEC.exists():
         rep.fail("缺少 南网协议解析工具.spec")
         return
+    # datas / hiddenimports / excludes 的单一来源是 pyinstaller_meta.py（两份 spec 共用），
+    # 所以「关键文件是否随包」必须把两个文件合起来看 —— 只看 spec 会把已迁移的清单误判成缺失。
+    meta = ROOT / "pyinstaller_meta.py"
     text = SPEC.read_text(encoding="utf-8", errors="replace")
+    if meta.exists():
+        text += "\n" + meta.read_text(encoding="utf-8", errors="replace")
+        rep.ok("存在 pyinstaller_meta.py（spec 清单单一来源）")
+    else:
+        rep.fail("缺少 pyinstaller_meta.py（spec 的 datas/hiddenimports 单一来源）")
     for name in CRITICAL_DATAS:
         # 宽松匹配 datas 中的文件名
         if name in text:
             rep.ok(f"spec 含 {name}")
         else:
             rep.fail(f"spec datas 缺少关键文件：{name}")
+
+    # onedir 规格：安装脚本 南网解析工具.iss 取的是 dist/协议解析工具/协议解析工具.exe，
+    # 没有这份 spec 就没人重新生成那个目录（历史上曾停更 2 个月）。
+    onedir = ROOT / "协议解析工具_onedir.spec"
+    if onedir.exists():
+        rep.ok("存在 协议解析工具_onedir.spec（安装包用的文件夹形态）")
+    else:
+        rep.fail("缺少 协议解析工具_onedir.spec（.iss 的 Source 目录将无人生成）")
 
 
 def run_test_script(rel: str, timeout: int = 180) -> tuple[bool, str]:

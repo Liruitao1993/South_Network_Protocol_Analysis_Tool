@@ -56,6 +56,7 @@ python main_gui.py --clipboard
 - `system_integration/`：系统托盘、全局热键、剪贴板报文自动检测、Notepad++ 集成、单实例、注册表右键菜单、开机自启与系统设置
 - `reflex_web/`：Reflex Web 版（实验性）
 - `validator/`：统一协议校验引擎，各协议 validator 继承 `BaseValidator`
+- `github_issue.py` / `github_issue_dialog.py`：问题反馈到 GitHub Issue（纯逻辑 + 对话框），API 直连或浏览器预填双通道
 
 主要解析器：
 

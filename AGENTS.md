@@ -227,14 +227,27 @@ python reflex_web/build_offline_deploy.py --port 8091                # UV 包
 
 2. **exe 文件名自动带版本号+时间戳**：`南网协议解析工具.spec` 顶部从 `main_gui.py` 的 `APP_VERSION` 自动读取版本号，输出名固定为 `南网协议解析工具_v{APP_VERSION}_{YYYYMMDDHHMMSS}.exe`（时间戳精确到秒）。窗口标题版本号与 exe 文件名版本号**天然对齐**（同一数据源），无需手工同步。spec 还会动态生成 `_version_info_gen.txt`（Windows 文件属性 FileVersion/ProductVersion 与 APP_VERSION 对齐），旧的静态 `version_info_nw.txt` 不再使用。
 
-3. **打包流程**：
+3. **打包流程**（两种形态，版本资源/清单/依赖清单的单一来源都是 `pyinstaller_meta.py`）：
 
    ```bash
    # 1. 更新 BUILD_DATE 为当前日期（APP_VERSION 仅在功能变更时 bump）
-   # 2. 执行打包命令
+
+   # 2a. 文件夹形态（推荐对外分发 + 安装包用；无自解压，被杀软拦的概率更低、启动更快）
+   pyinstaller 协议解析工具_onedir.spec --noconfirm
+   dist\协议解析工具\协议解析工具.exe --self-test      # 返回码 0 才算打包合格
+   # 然后编译 南网解析工具.iss（它的 Source 就是 dist\协议解析工具\协议解析工具.exe）
+
+   # 2b. 单文件便携版（Release 附件用）
    pyinstaller 南网协议解析工具.spec --noconfirm
    # 3. 在 dist/ 下验证带版本号+时间戳的 exe 文件生成
    ```
+
+   - **`协议解析工具_onedir.spec` 的 exe 名必须叫 `协议解析工具`** —— 与 `南网解析工具.iss`
+     的 `MyAppExeName` 绑定；改名会让安装包找不到源文件。
+   - 杀软/SmartScreen 拦截的成因、申诉入口、签名选型与稳定性清单见
+     [`docs/anti_virus_and_signing.md`](docs/anti_virus_and_signing.md)（**别指望元数据能解误报**）。
+   - 本机构建被实时防护打断时（会造成产物缺文件 → 随机崩溃）：
+     `python scripts/defender_exclude_build.py --add`（只放行 `dist\` 与 `build\`，需管理员）。
 
 4. **版本号管理**：
    - `APP_VERSION`：功能版本号，仅在有功能变更时更新；是 exe 文件名、文件属性、窗口标题的唯一版本源
@@ -373,6 +386,10 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
 │   ├── spectrum_widget.py           # 频谱图标签页 (SpectrumWidget/SpectrumCanvas) - 频谱仪参数 + trace 数值 → 仪器式网格频谱图；光标读数/MARK标记/两点Δ测量/峰值搜索 + 导出PNG（常驻，与协议无关；1.23.9 起）
 │   ├── production_testbench_widget.py # 生产测试架页 (ProductionTestbenchWidget) - 类串口助手：5 条发送配置（各自 HEX/ASCII + checksum8 三种落位）+ HEX/ASCII 日志/时间戳 + 测试架参数帧（49 项，改动即组帧）；常驻、懒加载、复用共享串口（1.23.88 起）
 │   ├── feedback_dialog.py           # 问题反馈对话框 (FeedbackDialog) - 帮助菜单入口，提交到 Web 服务端共享 feedback.db（1.20.0 起）
+│   ├── github_issue.py              # GitHub Issue 提交纯逻辑（无 Qt，1.23.94）：建单 payload（段标题对齐 bug.yml 表单）/ REST 建单（含 422 去标签重试）/
+│   │                               #   浏览器兜底预填 URL（按表单字段 id）/ 令牌优先级（显式>环境变量>config.json）/ 崩溃摘要本机路径脱敏
+│   ├── github_issue_dialog.py       # GitHub Issue 反馈对话框 (GitHubIssueDialog) - 帮助菜单「提交问题到 GitHub」+ 崩溃弹窗一键提交；
+│   │                               #   API 直连（真自动）与浏览器预填（免令牌）双通道，自动带入当前协议/最近报文 hex/运行环境（1.23.94 起）
 │   ├── share_dialog.py              # 报文分享对话框 (ShareDialog) - 单帧解析「分享此帧」，JSON POST /api/frameshare（1.21.0 起）
 │   ├── enhanced_export.py           # 增强导出功能 (EnhancedBatchResultExporter) - Excel/CSV/TXT/JSON
 │   ├── theme_settings.py            # 主题与字体设置 (ThemeManager + ThemeSettingsDialog) - 7套主题(含Win11云母Mica)/QSS/字体持久化
@@ -686,11 +703,42 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
   - **发送通道：串口（默认）/ 蓝牙（1.23.85 追加）**：蓝牙通道**复用「蓝牙工具」页的连接**（升级页经 `main_gui._upgrade_bluetooth_source()` 注入的取值回调拿 worker，不建不断连接）；发送走 `_BleSendPort` → `worker.send_data(frame, single_write=True)`（**整帧一次 ATT 写**，超限由 worker 拒发不静默分包），接收订阅 `notification_received` 喂本页 `_on_raw_data`（698 分帧归本页）。**每包上限自动算**：`worker.single_write_limit()`（特征码写上限或 `MTU−3`，**不叠**蓝牙页 200 字节 `_max_chunk`；单一实现 `_limit_plan`）→ `upgrade.max_block_bytes_for_frame_limit()` 用真实组帧二分反推（MTU 512 ⇒ 509 ⇒ 每包 **475**，用户口径 ≤480 成立）→ `spin_block.setMaximum(cap)` + 夹值 + 标签写明过程（`wordWrap` 防截断）。上限算不出（未连接/`mtu_is_unnegotiated`/放不下帧头）⇒ **不设假上限**、禁用开始并写明原因；重算时机=通道切换/连接变化/`mtu_updated`/SA 变化。回归：GUI [23]、`test_bluetooth_worker.py` [8]、`test_dl698_upgrade.py` A13、wiring [5b]
   - **版本信息的「展示与详细解析」（1.23.85 现场反馈追加）**：① 日志改成「`[RX] <整帧>` 单独一行 + `  → 版本信息（升级前·内部）读取成功（N 项）` + 缩进字段行」—— **不要再贴在帧尾**（日志 NoWrap，70 字节响应帧会把内容顶到屏幕外）；② 参数栏之下新增「版本信息」区，`升级前`/`升级完成后` **并排两栏**只读框（每栏高度 ≥ 7 行行距，防挤掉日志），`开始升级`/`清除` 都重置；③ 逐字段解析走 `dl_t698_45_data_decode` 的**单一来源**（`VERSION_FIELDS`/`VERSION_FIELD_BYTES`/`version_like_members`/`version_lengths_match`/`decode_version_info`，`CLASS_ATTR_TEMPLATES[(19,3)]` 引用它）⇒ `dl_t698_45_upgrade.version_rows` 给 `名称/值/原始/长度`；**长度与表191 声明不符时命名照给但必须带 `⚠ 长度未自证` 行**，非结构数据兜底一行 `数据`。现场实帧（内部版本响应，6 项 4/4/6/4/6/8）解析为 厂商代码=LHIN / 软件版本号=0039 / 软件版本日期=2026-08-03 / 硬件版本号=001A / 硬件版本日期=2025-10-13 / 厂商扩展信息=GWGSXXXX
   - **升级前/后版本比对判定（1.23.86 追加）**：「版本信息」组顶部有**判定条**（`lbl_verdict`，位于并排两栏之上）：**版本有差异 ⇒ 判定升级成功（✅ 绿）**；**完全一致 ⇒ 判定升级失败（❌ 红，设备没换新固件）**；缺基线/有一侧没读到/前后读的不是同一项 ⇒ **无法判定（⚠ 橙）**，两侧都没读 ⇒ **尚未比对（⏳ 灰）**。判等**优先比原始字节**（`值` 会补全日期、裁剪长值，拿它判等会把同一版本误判成变了）、`⚠` 诊断行不参与；结论同时写进收尾状态行（`状态：done｜已发送 N 帧｜判定：升级成功（版本已变化）`）与日志（`[信息]/[失败] 版本比对：…`）。**判定不改状态机**（流程照常 `done`/100%，流程跑完 ≠ 固件升级成功）。详见 §8 陷阱 80
+  - **「升级前/后读版本」必须逐字段命名，NULL 成员也不例外（1.23.93 现场修正，改前必读）**：现场报障「升级前读版本只显示 `数据 = 0206...` 原始内容」。根因是 `version_like_members` 要求 **6 个成员全部是 visible-string**，而设备把「厂商扩展信息」回成 A-XDR `null`（`00`）⇒ 整条结构被判「非版本形状」⇒ `version_rows` 退化成单行 `数据`。修法三条：① 判据改为「6 个成员，每个是 **visible-string 或 null**」（与 `_decode_version_structure` 本就容忍非字符串的行为对齐）；② null 成员显示 `NULL` 并**追加一行「⚠ 字段缺失」**点名是哪几项（表191 声明为定长 visible-string，缺失要说出依据，不能静默吞掉）；③ 定长字段常用 **NUL 补齐**（`CNC\0`）⇒ 显示前 `rstrip("\x00")`，但「原始」列保留 NUL 字节可追溯。判据单一来源 `dl_t698_45_data_decode._is_null_member`（升级页经 `_is_null_version_member` 转调，**不要另写一份**）。回归：`test/test_dl698_upgrade.py` A12 ③b/③c
   - **TX/RX 日志的帧显示口径**（1.23.85 用户反馈修订；唯一入口 `dlt698_upgrade_widget.fmt_hex`，`HEX_LOG_LIMIT = 200`）：**≤200 字节整帧打印**（启动传输 62 字节帧原被截到 48 字节，尾部校验值/结束符看不到）；**>200 字节**（写文件大帧）只显**头尾各 100 字节 + 中间 `...` + `(共 N 字节)`**，省略的正是升级包数据体。**不要退回「只显前 N 字节」**
   - **「提升波特率」+ 升级后读版本的「双波特率尝试」（1.23.86 追加；改这块前必读）**：升级页串口通道新增勾选 `提升波特率`（`chk_boost_baud`，默认不勾、落盘、传输中冻结）+ `切换等待(ms)`（`spin_boost_wait`，默认 300、0~10000）。**顺序铁律**：开始升级前先发那条 31 字节 FT1.2 现场实帧 `BAUD_BOOST_COMMAND`（`68 1D 00 43 05 AA×6 A0 28 98 07 01 3E FF 10 80 00 5F 0A 02 08 01 00 00 6B C4 16`，L=29=31−2、末字节 `16`）让**设备**先切自己的 UART，静默 `切换等待(ms)` 之后**主机**才跟着切到 `BAUD_BOOST`（115200）——主机先切就连命令都发不出去；命令**只发不等确认**（`PHASE_BAUD_BOOST` 期间任何回帧都忽略：设备切完速率时主机还停在旧速率，等它只会白等一个超时）。切速**必须**走 `SerialWorker.set_baudrate()`（端口开着也安全：`with self._write_lock:` 内**先 `flush()` 排空发送缓冲、再改 DCB**——顺序反了前半截会按旧速率发成残帧；**绝不** `close_port`/重开端口，会丢设备侧会话表现为掉线），成功后才发 `baudrate_changed` 供 `main_gui._on_serial_baudrate_changed` 同步顶部回显（**刻意不落盘**：热切换是升级临时状态，不是用户下次启动的默认值）。**切回 `BAUD_DEFAULT`（9600）的时机**：`_begin_reset_wait` 入口（覆盖「勾/不勾自动执行」两条路径）+ `_finish_buttons` 终态兜底 + `cleanup`；`_restore_baud` **只在真切成功时才清 `_boosted`**（失败保留标记，收尾会再试一次），否则共享串口会被永久留在 115200 而顶栏与页面都按 9600 说话、现场查不出原因。**「升级完成后读版本信息」要两种速率各试一遍**：设备升级**成功**会复位回 9600，**失败则可能仍停在 115200**（现场口径，`POST_READ_BAUDS = (9600, 115200)`，9600 优先——命中率更高且是共享串口的「安全态」）⇒ `ver_post` 的重试用尽**不等于**读不到：`_continue_after_version_failure` 先 `_switch_post_baud()` 换速率重发一轮（清 RX 缓冲、`_attempt` 归零、切到 115200 时置 `_boosted` 让收尾带回来），**两种都读不到才**记原因收尾，原因文案同时给出两个速率。只在 `_boost_used`（黏性：切回后仍为 True）为真时才换速率——**没提升过就是单速率、一次切速都不做**（与旧版逐字相同）；`ver_pre`（升级前）**也换速率**（设备此刻必在提升速率上）。回归：`test/test_dl698_upgrade_gui.py` [25]/[26]、`test/test_serial_worker_set_baudrate.py`
   - **升级包路径持久化（1.23.86 追加，现场口径）**：拖入/浏览选中的升级包**路径随配置落盘**（`DEFAULTS["file_path"]`，只存路径不存字节 —— 升级包几十 MB 塞进 JSON 会拖慢启动，且文件随时会被替换），重开程序/重开本页**直接显示上次的文件**，**只有换新文件才更新路径**。恢复在 `_load_persisted` 末尾（参数就位之后）调 `_restore_package`：文件没了/变目录/读失败 ⇒ **不恢复**（保持「未选择文件」，`_validate_inputs` 会拦住开始），拖放区写明原因 + 一条 `[警告]` 日志，**落盘路径仍保留**（U 盘/网络盘可能回来，不替用户删记录）；恢复**不弹框**（`_upgrade_module(quiet=True)`）、**不冲掉**手工「文件大小」覆盖值（`set_size=False`）、**不写**「分包完成」日志（`announce=False`）。手工选择与恢复**共用 `_apply_package`**（防两条路走偏）；选到可用文件后撤掉告警提示（`DROP_HINT_IDLE`）。文件名只显 basename、**完整路径挂 tooltip**（同名不同目录要分得清）；`_on_file_selected` 选完**立刻** `_schedule_save()`（不等 400ms 防抖，选完就关窗口也不丢）；「清除」按原契约**保留**文件与路径。回归：`test/test_dl698_upgrade_gui.py` [28]
-  - **校验值的算法/字节序未经现场证实** ⇒ 默认 `zlib.crc32` 大端且允许手工覆盖；**不要把「与设备一致」当成已验证事实**
+  - **启动传输的两种报文 + 校验值必须是 2 字节 CRC-16/X-25（1.23.93 现场修正，改前必读）**：
+  - **校验值宽度错了 4 个月**：1.23.93 及以前 `calc_checksum_value(kind="crc")` 用 `zlib.crc32` 出 **4 字节**，而设备要的是 **2 字节**。现场实帧 `DPU_APP_V1.0.3.4.bin`（469,200 B）的校验字段是 `09 02 73 73`，即 `0x7373`；用 **CRC-16/X-25**（poly 0x1021 反射 / init 0xFFFF / xorout 0xFFFF，与链路层 HCS/FCS 同一规格）算该文件**恰好** `0x7373`。反证：ARC-MODBUS=0x4739、CCITT-FALSE=0x6F1E、XMODEM=0x834A、KERMIT=0xA6BB、DNP=0x3F8D、AUG-CCITT=0xCCE4 全部对不上 ⇒ 不是"随便挑个 CRC16"。唯一实现 `dl_t698_45_upgrade.crc16_x25`（内部就用 `crcmod` 的 `x-25`）
+  - **方法14 = 现场真身**：现场两帧都用 `OMD=F0010E00`（方法14「启动传输（带块大小/版本/下载方标识）」），不是文档示例的方法7。参数 = `02 06 | 文件信息 | 块大小 | 校验 | 软件版本数组 | 下载方标识数组 | 2字节标识 | 00`，其中「软件版本/下载方标识」是 `01 01 0A <len> <ascii>`（数组仅 1 项）。实现 `build_start_transfer_v14(...)`，**两帧现场报文逐字节复现**（`test_dl698_upgrade.py` A14）
+  - **两种现场帧只差 1 个类型标签**：第 6 项「2 字节标识」用 `09`(octet-string) 还是 `0A`(visible-string)，不同设备只认其中一种 ⇒ `variant="octet"/"visible"`
+  - **自动兼容（页面「启动格式」下拉）**：`自动兼容` 时按 `START_FORMATS` 顺序逐个试，**哪条回 DAR=0 就用哪种继续下发文件块**；某一种重试用尽**不算失败**，先换下一种（`_next_start_format`），三种都不回才判失败。默认仍是 `v7`（老设备/既有测试的既有轨迹零变化），新设备切一次即落盘保持
+  - **判定必须用当前格式的 OMD**：`_expected_omd` 在 `PHASE_START` 返回 `_start_omd(upg)`（方法14=0E / 方法7=07），写死 07 会把方法14 的确认帧当"非本步"忽略
+  - 页面「校验」下拉文案同步改为 `CRC-16(X-25)`；`按文件计算` 对现场包给 `7373`
+  - 回归：`test/test_dl698_upgrade.py` A14（两帧逐字节 + 差异仅 3 字节 + CRC 口径）、A7（2 字节宽度）；`test/test_dl698_upgrade_gui.py` `test_start_format_fallback`（自动逐个试 / 锁定单格式不换 / 确认后进写文件）
+- **校验值的算法/字节序未经现场证实** ⇒ 默认 `zlib.crc32` 大端且允许手工覆盖；**不要把「与设备一致」当成已验证事实**
+- **「协议测试」页（1.23.93 新增，`has_test`，仅协议8 可见）**：按 OAD 分类的**预置测试库**，与「协议组帧」页分工明确 —— 组帧页临时/任意，本页预先做好可直接下发
+  - 落点：`dlt698_test_core.py`（纯逻辑：分类库 + 组帧 + 响应判定，零 Qt）+ `dlt698_test_widget.py`（页面，仅协议8）
+  - **分类口径**：OI 高字节 → 顶层分类（`HBYTE_INFO`：0x00~0x05 电能量 / 0x10~0x11 需量 / 0x20~0x28 变量 / 0x30~0x37 事件 / 0x40~0x49 参变量 / 0x50 冻结 / 0x60 采集 / 0x70~0x73 文件与应用 / 0x80~0x82 控制 / 0xF0~0xF4 厂家扩展），**子类必须按高字节排序**（按中文名排会把「关联」排到「总电能」前面）；对象名与接口类/属性/方法表全部取自 `OILookup`（777 个对象，唯一来源，**不要另建 OI 表**）
+  - **树的三层文案（与现场同类工具同形，改前必读）**：顶层 `4H: 参变量`（OI 高字节的**高 4 位**）、子层 `3H: 设备管理`（**低 4 位**）、叶子 `43000300_（版本信息）_(索引=0)_(优先级及序号=00)`。**叶子是「每个属性一条具体 OAD」**（`leaf_entries`/`record_entries`/`omd_entries` 摊平，共 **4658 条**；设置方法页的叶子是具体 OMD），不是「一个对象一条」—— 现场点 `43000300` 就该直接发读版本信息的帧，不必再挑属性。`index=0` 照工具写数字（不翻译成「全部」）；叶子里的 `优先级及序号` 表示「点这条会用什么 PIID 发」，**PIID/优先级一变必须全树同步文案**（`_on_piid_changed`），否则标签对用户撒谎
+  - **叶子名必须写「这个 OAD 是什么」，不是类级属性名**（用户纠正；`leaf_base_name` 单一实现）：
+    - 通用属性名补对象名：`逻辑名` → `电压逻辑名`、`换算及单位` → `电压换算及单位`、`分相数值数组`/`数值`/`参数`/`…数组` → **对象名本身**（`电压`）
+    - **具体属性名原样保留**：`设备描述符`/`版本信息`/`生产日期`/`事件记录表`/`A相各次谐波数值数组`。早先把后缀映射无差别套用，`43000200` 被叫成「电气设备」、`43000300` 被叫成「电气设备换算及单位」，把真名盖掉了
+    - 同对象的兄弟数组加限定词区分：`（扩展精度2）`/`（扩展精度）`/`（尾数）`/`（带品质）`（class 1 有 6 个电能量数组，全叫「正向有功电能」就分不清）
+    - **分相展开**：仅 class 3（分相变量类）的属性 1/2/3/31 按 A/B/C 拆成 `20000201 A相电压`、`20000202 B相电压`、`20000203 C相电压`。依据 §7.3.5「00H=整个属性，01H=第一个元素」+ 仓库内唯一解码口径 `dl_t698_45_data_decode._decode_phase_array` 的 `labels=["A相","B相","C相"]`。**class 4（功率类）不拆** —— 其「总及分相数值数组」在解码器里按 A/B/C 标注、与「总+三相」四元素说法冲突，证据不足就不猜。选中分相叶子时「元素索引」同步成该叶子的索引（否则帧仍发 00H）
+    - 参考工具里 `2000020A`（索引 0x0A）这类写法**不照抄**：按协议 0x0A 是「第 10 个元素」，设备上没有，照发只会回 DAR
+  - **四个分页**：读取属性（GET Normal）/ 设置属性（SET Normal）/ 读取记录（GET Record，RSD 支持 `0/1/2/9/10`，`3~8/11` 结构未用到 ⇒ **传进去直接抛**，不要猜）/ 设置方法（ACTION Normal）。「属性/方法」下拉已改为**只读回显**（叶子已定死属性），「元素索引」仍可调，改动只作用于选中那一条并同步其文案
+  - **组帧黄金（协议文档附录 H，逐字节断言在 `test_dlt698_testbench.py`）**：读属性 `05 01 PIID OAD 00`｜读多属性 `05 02 PIID 个数 OAD×n 00`（= 页面「Lst发送」）｜读记录 `05 03 PIID OAD RSD RCSD 00`｜设置 `06 01 PIID OAD Data 00`｜操作 `07 01 PIID OMD Data 00`｜建立连接 `02 PIID 协议版本(2B) 协议一致性(8B) 功能一致性(15B) 发送帧长(2B) 接收帧长(2B) 窗口(1B) 最大APDU(2B) 超时(4B) 认证 00`（默认参数 = 文档 H.2 的 40 字节）
+  - **HCS/FCS 仍只由 `DLT69845FrameGenerator` 算**（新增公开方法 `generate_apdu_frame` / `generate_connect_request`，既有调用零行为变化）；SA 编码复用 `dl_t698_45_upgrade.build_sa`（唯一实现）—— **页面与逻辑层都不得手拼 `68 … 16`**（陷阱 31）
+  - **「获取设备地址」**：读 `OAD 40010200`（通信地址，`OILookup` 里 OI 0x4001 属参数变量类、属性2），响应 octet-string 回填「服务器地址」，后续所有 OAD 都用它组帧；**不覆盖**用户已填的「写地址」
+  - **不冒充判定**：CONNECT-Response 与记录型二维数据体没有可自证的字段布局 ⇒ `evaluate_response` 给 `ok=None` + 「未做字段级解析」，**不得写「成功」**；DAR 中文取自解析器 `_enrich_dar`（单一来源）
+  - **收发日志的逐字段解析（1.23.93 追加；用户口径「解析器已经很完备，要详细输出」）**：勾选「详细解析」（`chk_detail`，默认勾、落盘）后，**TX 与 RX 都**打印整帧字段表 —— 数据源是 `DLT69845Parser.parse_to_table`（**就是单帧解析页那张表**），单一实现 `dlt698_test_core.parse_table` / `detail_lines` / `format_table_rows`，**禁止在页面里另写字段拆解**（陷阱 31 的漂移根因）。四列 `字段 | 原始值 | 解析值 | 说明` 按显示宽度对齐（CJK 算 2 列）；长 hex 与结构化值必须压缩（`_compact_hex_like` / `_clip`），否则一行能撑到屏幕外 —— **压缩判据不能要求「长度为偶数」**（解析器偶尔给出被截断的奇数长度编码，早先这样判会整段漏压）。未请求的帧（主动上报）也走同一套明细。双击底部「报文」表任意行 → 送主窗口「单帧解析」页看完整解析树（`frame_to_single_parse` 信号，与监控器共用 `_send_frame_to_single_parse` 注入点）；报文表「行号 → 原字节」映射在裁剪行时必须重建，否则双击会送上一帧
+  - **「编辑」= OAD/OMD 覆盖框**（就地改一两个字节；留空回到按属性生成），非法长度在预览与发送处都报 ⚠，**不静默退回**
+  - 复用共享串口（`write_raw` + `raw_data_received`，自组帧用 `frame_deframe` 的 `L+2` 判据，见陷阱 77）；落盘 `dlt698_testbench.json`；「远程升级」按钮跳「光伏升级」页
+  - 回归：`test/test_dlt698_testbench.py`（279 项）+ `test/test_dlt698_test_tab_wiring.py`（22 项，接线/显隐/注入/跳转/收尾）
 - **A-XDR 三处口径（1.23.85 修正，改 `dl_t698_45_axdr.py` 前必读）**：① **`bit-string` 长度域 = 位数**（`04 03 E0` = 3 位、1 字节；旧实现按字节数读 ⇒ 解析上述 doc 帧必崩 `未知类型(0x76)`，因为 0x76 就是 `"v1.0"` 的 `v`）；② **定长类型不带长度域**（`date_time` tag+10 / `date` tag+5 / `time` tag+3 / `date_time_s` tag+7；规范类型表 tag 25/26/27/28 + §7.3.26/7.3.27 + 示例 `1C 07 E0 01 14 00 00 00` = 2016-01-20，**不是**「tag+长度 07+6 字节」）；③ `_encode_bit_string` 只能表达「N 字节 = 8N 位」，而 `bit-string(SIZE(3))` 这种**声明位宽 ≠ 8×字节数**的形态必须由调用方硬编码 `04 03 <byte>`（`build_file_info` 即如此）。改这三处后 `frame_gen_widget` / `reflex_web/frame_gen_utils` 的「A-XDR 自定义」模式已收口为委托 `AXDRCoder.encode`（此前各自手拼、多写长度域）。详见 §8 陷阱 76
+
+- ⚠ **改解析判据前先跑历史版本（1.23.93 现场教训，改 `csg_new_gen_parser` 任何判据前必读）**：现场报「eFC 解析不了」，我在修的过程中把 eFC 判据从 `类型 != 1` 改成 `类型 in (0, 2)`（误读文档中段，认定类型 3 不带 eFC），**把原本正确的类型 3 eFC 解析改坏了**，用户用截图打回「曾经这个帧我是能够解析的」。根因三条：① 只读了文档中段就外推（漏读后面「表29 UL-OFDMA SACK 的 eFC」）；② **动手前没验证历史版本的行为**，不知道「以前能解析」对应的是哪条路径；③ 改判据时没意识到原判据本来就是对的。
+  **规矩**：① 改判据前先 `git stash push -- <file>` 跑一次历史版本拿到基线，再 `git stash pop`；② 判据类改动**逐条对照文档全文**（含表格与后续小节），「某类型不带 X」先搜全文确认无第二处反例；③ 修复必须补**回归测试断言「原先能解析的仍能解析」**；④ 既有判据已被 934/49,532 帧 corpus 验证过时**只做加法**（补字段、补说明行），不重写条件表达式（陷阱 41：解析器带跟帧可变状态，判据一改历史行为就变）。
 
 ### 5.7 新一代载波协议 / 通感一体化（索引 9，**1.7.0 新增**）
 
@@ -699,6 +747,13 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
   - `csg_new_gen_cmd_payloads.py` — 应用层命令业务数据单元解析（依据第5部分）
 - **校验器**：`validator/csg_new_gen_validator.py`
 - **GUI 特性**：协议索引 9 时显示解析级别下拉（auto / fc_pb / fc_efc / fc_only / app / pb_only），pb_only 模式可指定 SOF/信标/ACK/NET 帧类型；由 `_csg_parse_level` 控制
+- **OFDMA（多站点）帧：通道判别必须先看「多站点帧标识」（1.23.93 修，改 `_detect_channel` / eFC 判定前必读）**：现场帧 `D9 01 F0 FF DF …`（32 字节）报「解析不了 eFC」，实际是三个坑叠加：
+  - ① **通道被误判成 HRF**：`_detect_channel` 用「预测帧长 == 实际帧长」投票，而 OFDMA 帧的 FC 布局（表26）与单站点完全不同 —— ISAC 单站点公式按 `var[3]` 取「物理块个数」得到 7（实际是多站点标识+OFDMA类型），预测 968 字节；HRF 假设默认 16 字节 PB ⇒ 预测 32 字节**恰好命中**，于是整帧按 HRF（表45）解，OFDMA 与 eFC 全丢。修法：**`var[3] & 0x01`（多站点标识）为 1 时直接判 `plc`**（OFDMA 是载波侧多站点调度，HRF 是点对点无线）
+  - ② **ISAC 分支不解析 OFDMA 可变域**：`_parse_mpdu_sof_isac` 里 `if multi_site:` 只有 `pass`（BPLC 分支才实现），ISAC 版 OFDMA 帧被按单站点帧解、字段全错位。修法：抽出共享方法 `_parse_ofdma_variable`（表26，BPLC/ISAC 同构），两个分支都调用；**只允许一处调用**（早先两处叠加会导致 OFDMA 行重复两份）
+  - ③ **eFC 携带规则只能按 `类型 != 1`**（**别想当然把类型 3 也排除**）：文档「OFDMA帧类型不同，携带的eFC内容不同」只有一句 **「类型 1（DL-OFDMA 的 SACK / UL-OFDMA）不携带 eFC」**；类型 0/2/3 各有 eFC 定义 —— **表27**（DL-OFDMA）、**表28**（UL-OFDMA trigger）、**表29**（UL-OFDMA 的 SACK，每站点 3 字节：TEI 12b + 接收状态 4b + 保留 8b）。1.23.93 修复过程中我一度把「类型 3」也当成不携带 eFC，结果这帧依旧看不到 eFC（**已被现场截图打回**）。判据保留 `_ofdma_frame_type != 1`，并新增一行「eFC携带判定」把四种类型的依据写出来
+  - 该帧正确结果：多站点帧=1、OFDMA类型=3（UL-OFDMA SACK）、站点数=4、**携带 eFC**（表29：站点0~3 的 TEI=2/3/4/5、接收状态均为 `PB0:OK PB1:FAIL`、CRC-24 通过）、通道=plc
+  - ⚠ 类型 3 的 eFC 与「物理块」在长度上**同为 16 字节且都用 13+3 的 CRC-24 尾**，单看 CRC 自证无法区分；区分只能靠 FC 的 OFDMA 类型。类型 1 的帧才是「FC 之后直接物理块」
+  - 回归：`test/test_csg_new_gen.py::test_ofdma_ul_sack_efc`（auto 与 fc_efc 两档：识别多站点 / 类型3 / 站点数4 / **携带 eFC** / 判 plc / 表29 四个站点 TEI=2~5 与接收状态 / eFC CRC 通过 / OFDMA 行只一份）
 - **组帧页（1.23.64 新增）**：协议9 也支持「协议组帧」（`protocol_registry` 的 `frame_gen_mode="csg"`，`preset_mode` 保持 `None`）。组帧页左栏是 `QStackedWidget`：第 0 页常规动态表单、**第 1 页协议9 链路层组帧**（`csg_test_frame_gen_widget.CsgTestFrameGenWidget`）。五层折叠表单：①FC 帧控制 / ②物理块 PBH+PBCS / ③MAC 帧头 / ④MSDU / ⑤ED 封装；进页面默认勾选「组装链路层」、默认帧类型 **SOF 帧**
   - 组帧器 `csg_link_frame_gen.py`（`put_bits_le` ↔ 解析器 `_extract_bits` 严格互逆；FCCS / PBCS 为 CRC-24，MAC 帧尾 ICV 为 CRC-32，全部自动算）+ 复用 `csg_new_gen_frame_gen.py` 的 **25 个测试模式**（1.23.77 新增 2.0 测试扩展 `0x0009`「报文聚合传输测试模式」：`报文聚合数目` 1 字节，解析/组帧/仿照回填/摘要四处同构）
   - 定界符三型：**SOF**（BPLC / ISAC-PLC 两版本、长/短 MAC 头、多物理块）｜**信标**（FC 后直接载荷，无物理块与 MAC 头）｜**选择确认帧 SACK**（仅 FC 16 字节）
@@ -851,6 +906,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
 - 实时监控器：`has_monitor` + `monitor_wrapper`（9=plc2/ED..EE，10=hplc/96..16；**11 无**）
 - 通信时序图：`has_sequence_diagram`（9/10/11）
 - 光伏升级（协议8 文件传输升级+可选读版本信息）：`has_upgrade`，仅 698.45(8)；tab 文案 = 「光伏升级」
+- 协议测试（协议8 按 OAD 分类的预置测试库）：`has_test`，仅 698.45(8)；tab 文案 = 「协议测试」，紧随「光伏升级」之后
 - TCP 监控 / 报文对比 / 报文工具 / 测试方案：始终可见
 
 ---
@@ -919,6 +975,8 @@ python test/test_gw_monitor_summary.py # 国网新一代监控摘要
 python test/test_sack_fix.py        # SACK 帧解析
 python test/test_ed_fallback_fix.py  # ED..EE 监控帧非法回退修复（1.11.1 起）
 python test/test_dl_t698_45_fujian.py # 698.45 福建简化698（choice=0x02 List）解析
+python test/test_dlt698_testbench.py # 协议8 协议测试页（1.23.93 起，279 项：附录 H 六条组帧 golden 逐字节 + HCS/FCS 自解析 + L+2 自洽 / OAD·OMD·PIID / date_time_s / SA / RSD·RCSD / 分类库 777 项与记录型筛选 / 响应判定含 DAR·列表·记录·CONNECT 不冒充 / 地址与时间提取 / 筛选 / offscreen 页面与发送队列·超时重发·终止 / 读地址回填 / OAD 覆盖 / 落盘与 cleanup / RX 半帧与噪声重同步 / 主题 / 源码护栏）
+python test/test_dlt698_test_tab_wiring.py # 协议测试页 main_gui 接线（22 项：has_test 只属协议8 / 页签标题与位置 / 协议显隐 / 懒加载 / 串口注入 / 远程升级跳转 / 主题 / 收尾不关串口，1.23.93 起）
 python test/test_diff_engine.py    # 报文对比引擎
 python test/test_plan_widget.py     # 测试计划组件（需 GUI 环境）
 python test/test_monitor_widget.py  # 实时监控器组件（需 GUI 环境）
@@ -936,6 +994,7 @@ python test/test_web_data_paths.py      # Web 运行时数据外置（数据根�
 python test/test_web_feedback.py        # Web 版问题反馈（存储层/截图校验/防穿越/run_app 语法，1.19.0 起）
 python test/test_feedback_api.py        # 反馈提交 API（submit_from_api/parse_multipart/频率限制/旧库迁移，31 项，1.20.0 起）
 python test/test_feedback_dialog.py     # GUI 反馈对话框（URL/config/校验/sys_info/offscreen 冒烟，30 项，1.20.0 起）
+python test/test_github_issue.py        # GitHub Issue 提交（与仓库 yml 模板逐字对拍/API 建单与错误码/令牌优先级与脱敏/崩溃摘要脱敏/offscreen 对话框，32 项，1.23.94 起）
 python test/test_frame_share.py         # 报文分享（normalize_hex/submit_share/Store 分页搜索/GUI payload+offscreen，57 项，1.21.0 起）
 python test/test_spectrum_model.py      # 频谱图纯逻辑（含 trace 日志清洗：分隔符解析/行尾取值/时间戳防护/统计不变式/错误兼容，225 项，1.23.9 起）
 python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块粘贴绘制、清洗提示不丢失、行号报错，135 项，1.23.9 起）
@@ -1363,6 +1422,16 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
     - **临时文件名必须过 `safe_file_stem()`**：tag 含 `/`（`release/1.24`）会把临时文件写成子目录、`: * ?` 等字符在 Windows 非法 ⇒ 表现为一句「下载失败」，现场查不出原因。
     - 回归：`test/test_auto_updater.py`（40 项）、`test/test_update_notes_gui.py`（54 项 offscreen，含接线源码守卫、下载线程 PE 三态与 sha256 开关三态 —— 防被改回内联 `QMessageBox` 拼原始 markdown / 防删掉 PE 闸或把开关改回死代码）。
 
+83. **「提交问题到 GitHub」：两条通道、令牌不入包、字段 id 与仓库模板逐字绑定（1.23.94 起，改 `github_issue.py` / `github_issue_dialog.py` 前必读）**：
+    - **两条通道，语义不同**：① **API 直连** = `POST /repos/{owner}/{repo}/issues`，**真自动**（issue 立刻出现在仓库里，不需要碰浏览器），前提是令牌对该仓库有 **Issues: write**（细粒度 PAT）或 `repo`（经典 PAT）权限；② **浏览器预填** = `issues/new?template=bug.yml&<字段 id>=…`，**不需要任何令牌**，用户在网页点一次提交。**不要**把浏览器兜底当成 API 的等价替代（前者用户还要点一次），也**不要**在无令牌时静默失败 —— 明确提示改用浏览器通道。
+    - **令牌绝不能进 exe / 源码 / 日志**：只从「环境变量 `GITHUB_TOKEN` / `GH_TOKEN`」或「本机 config.json 的 `github_issue.token`」读，优先级 **显式 > 环境变量 > config.json**。理由：exe 是公开分发的，嵌了令牌 = 任何拿到 exe 的人都能替你在仓库里刷 issue。config.json 里的令牌会被 `diagnostics.redact` 自动脱敏（键名含 `token`），诊断包不会泄露。**开发机上环境里可能真的存在 `GH_TOKEN`** —— 写测试时必须先把这两个变量摘掉再断言优先级，否则会被真实令牌干扰（实测踩过）。
+    - **字段 id 与仓库 yml 强绑定**：浏览器兜底靠 GitHub 按 **Issue Form 的字段 id** 预填，`FORM_PROTOCOL_OPTIONS` 抄的是 `.github/ISSUE_TEMPLATE/bug.yml` 里 protocol 下拉的**逐字**选项文本（GitHub 下拉要求与选项**完全一致**才会选中 —— 多一个空格、少「双模互联互通」都不生效）。`test/test_github_issue.py::test_form_protocol_options_match_bug_yml` 拿仓库里的真实 yml 对拍，**改了模板必须同步改代码**（反之亦然），否则直接变红。
+    - **API 建单不经过 YAML 表单**：正文段标题刻意写成 `### 工具版本` / `### 期望结果` 等**与表单 label 一致**的 Markdown，让 issue 页面看起来与网页表单提交的没差别；空段不占位。
+    - **标签可有可无**：仓库里没有的标签会让 GitHub 直接 422 ⇒ `submit_issue` 捕获后**自动去掉 labels 重试一次**（不能因为一个标签建不出 issue）。
+    - **崩溃提交要脱敏本机路径**：`crash_handler` 的报告含「可执行文件 / 工作目录」两行（`C:\Users\<用户名>\…`），提交到**公开仓库**前必须抹掉（`sanitize_crash_summary`），否则泄露提交者的 Windows 用户名。运行环境摘要同理**不含**用户名 / 机器名。
+    - **崩溃时 MainWindow 可能还没建好**：崩溃提交入口是**模块级** `_report_crash_to_github`（`main_gui.py`），不是 `MainWindow` 方法；两条入口（菜单 / 崩溃）必须共用同一份仓库地址与令牌来源，否则会出现「一个能提交一个不能」的分裂。
+    - 回归：`test/test_github_issue.py`（32 项，含与仓库 yml 逐字对拍 ×3、API 错误码中文翻译、422 去标签重试、令牌优先级与脱敏、崩溃摘要脱敏、offscreen 对话框与接线守卫），已进 `release_check.py:CORE_TESTS`。
+
 ## 9. 开发原则
 1. **协议定义优先**：遇到不确定的协议字段、字节序、校验范围，**先查 §5 对应文档**，不要凭记忆或猜测。
 2. **PDF 文档用 pdf skill 检索**：645 补遗、IEC 62056-46、DLT645 原始标准都是 PDF，调用 pdf skill 而非人工翻阅。
@@ -1386,6 +1455,13 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 ## 10. 变更日志
 
 > 详细版本变更记录请查看 `main_gui.py:CHANGELOG`（按版本倒序），或运行 `git log --oneline` 查看提交历史。本文档保留近期版本的摘要。
+
+### 1.23.94 — 2026-10-22
+
+- **「提交问题到 GitHub」**：新增 `github_issue.py`（纯逻辑无 Qt）+ `github_issue_dialog.py`（PySide6）。帮助菜单「提交问题到 GitHub」与**崩溃弹窗「提交到 GitHub」**两个入口。**两条通道**：API 直连（`POST /repos/{owner}/{repo}/issues`，填令牌即可真自动建单）/ 浏览器预填（按 Issue Form 字段 id 预填，免令牌）。自动带入当前协议、最近解析报文 hex、运行环境（不含个人信息）；崩溃摘要提交前抹掉本机路径行。
+- **令牌不入 exe**：来源优先级 显式 > `GITHUB_TOKEN`/`GH_TOKEN` 环境变量 > config.json 的 `github_issue.token`；config.json 内令牌被 `diagnostics.redact` 自动脱敏。owner/repo 由 `resolve_owner_repo(AUTHOR_GITHUB_URL)` 解析，与「关于」/自动升级源同源。
+- **字段 id 与仓库 yml 绑定**：`FORM_PROTOCOL_OPTIONS` 与 `.github/ISSUE_TEMPLATE/bug.yml` 的 protocol 下拉逐字一致，测试直接对拍；仓库 `bug.yml` 增补 `contact` 字段。
+- 测试：`test/test_github_issue.py`（32 项）；spec `hiddenimports` 增补两个新模块。
 
 ### 1.23.92 — 2026-10-21
 
