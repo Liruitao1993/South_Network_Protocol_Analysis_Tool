@@ -1427,3 +1427,36 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Next Steps
 
 - 若要「任务栏按钮常驻」需把「关到托盘」改成「最小化到托盘」（行为变更，待用户确认）；SMTC 伪媒体卡片（截图那种）未做，需要先探针实测非媒体会话是否显示
+
+## Session 43: 多线程下载器四批次加固（1.23.96）
+
+1.23.95 首次把自动升级改成多线程分段下载后，逐行评审出 R1~R17 共 17 个问题（其中 3 个是 P0：回 200 会按段偏移写整文件、退出删掉几百 MB 分片、重复点下载起两个 worker 抢同一个 .part）。本会话把 17 条全部落地，每条都配可反证的自动化测试。
+
+### Main Changes
+
+- downloader.py：`_RangeUnsupported` 判不可分段 → 回落单流；每段自证 Content-Range（起始偏移 + 总长）；progress.json 的 url 参与校验（换源整份作废）；单流回落也支持续传；`wait_resumed()` 事件阻塞取代 `sleep(0.1)`；`on_cancel="keep"/"clean"` 两态；`_describe_os_error` 把 ENOSPC 等翻成中文；429/Retry-After 退避（夹上限 10 s）；取消立即返回；删死参数 `http_probe`；`DEFAULT_MAX_THREADS` 真正成为「自动」默认
+- update_download_dialog.py：`changeEvent(FontChange)` 重算 `fit_btn_width`（14 号字下「后台运行」原本被压回旧下限裁字）；表格状态列与标题随 `progress.state` 走（已暂停 / 重新开始）
+- main_gui.py：新增「配置 → 下载进度(&D)...」菜单；`_start_download` 加 `isRunning()` 重入守卫（重复触发只唤回面板）；`_shutdown_threads` 里对下载线程先 `on_cancel="keep"` 再 cancel；`_on_download_done` 清状态栏；新增 `_show_download_panel` / `_hide_download_panel` / `_discard_download_cache`；删 `_UpdateDownloadWorker.progress` 死信号
+- test/test_downloader.py +12 项（总 42）、test/test_update_download_dialog.py +12 项（总 26，含宿主级重入守卫/菜单重开/状态栏清理）
+- 文档：AGENTS 陷阱 84 追加四条不可回退约定 + §7/§10，README 补下载行为说明；版本 1.23.96 / BUILD_DATE 2026-10-23，两个 .iss 同步
+- 顺带修两处测试假红：test_menu_wiring.py 结尾 `✓` 在 GBK 控制台抛 UnicodeEncodeError；test_app_icon_path.py 仍在 .spec 正文 grep 图标字面量（spec 早已改为 `datas=list(meta.DATAS)`）
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ebddc5e` | feat(downloader): 多线程下载器四批次加固 + 协议8「协议测试」页（1.23.93~1.23.96） |
+
+### Testing
+
+- [OK] test/test_downloader.py 42 项、test/test_update_download_dialog.py 26 项全绿
+- [OK] 6 条变异反证逐条实测变红后逐字节还原（段自证 / keep 保留 / 进度推进 / 共用句柄 / Retry-After 上限 / 面板模态）
+- [OK] release_check.py --with-gui：PASS=161 FAIL=0 WARN=0
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 提交时发现工作区混有 1.23.93/1.23.95/1.23.96 三批未提交改动（downloader.py 等仍是未跟踪新文件），与用户确认后合并为一个发布提交；trellis/.claude/.agents 的运行时升级改动仍留在工作区未提交
