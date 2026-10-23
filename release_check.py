@@ -50,6 +50,8 @@ CORE_TESTS = [
     "test/test_dl698_tolerant_parse.py",
     "test/test_crash_handler.py",
     "test/test_github_issue.py",
+    "test/test_downloader.py",
+    "test/test_update_download_dialog.py",
     "test/test_frame_corpus.py",
     "test/test_parser_fuzz.py",
     "test/test_self_test.py",

@@ -676,10 +676,62 @@ def test_isac_sof_tmi_mode():
     print("[OK] ISAC SOF TMI模式解析通过")
 
 
+def test_ofdma_ul_sack_efc():
+    """OFDMA（多站点）UL-OFDMA SACK 帧：按表26 读可变域 + 按表29 解 eFC。
+
+    现场帧（32 字节）：
+      D9 01 F0 FF DF 03 00 00 8E 00 00 00 20 | 3E 3B FC | eFC 16 字节（含 CRC-24）
+    FC 第4字节 0xDF：bit0=1（多站点）、bits1-2=3（UL-OFDMA SACK）、站点数=4。
+    eFC（表29）= 每站点 3 字节：TEI(12b) + 接收状态(4b) + 保留(8b)，4 站点 + CRC-24 = 16 字节。
+
+    报障历史：① 整帧曾被判成 HRF（HRF 默认 16 字节 PB 恰好蒙中帧长）⇒ OFDMA/eFC 全丢；
+    ② 中途曾误把「类型 3」判为不携带 eFC ⇒ 依然看不到 eFC。两处都已纠正。
+    """
+    frame = bytes.fromhex(
+        "D901F0FFDF0300008E000000203E3BFC02100003100004100005100000C76C8C")
+
+    for level in ("auto", "fc_efc"):
+        p = CSGNewGenParser()
+        table = p.parse_to_table(frame, parse_level=level)
+
+        multi = find_field(table, "多站点帧标识")
+        assert multi and multi[2] == "1", f"[{level}] 应识别为多站点帧: {multi}"
+
+        t = find_field(table, "OFDMA帧类型")
+        assert t and t[2] == "3", f"[{level}] OFDMA 类型应为 3: {t}"
+
+        st = find_field(table, "站点数")
+        assert st and st[2] == "4", f"[{level}] 站点数应为 4: {st}"
+
+        efc_flag = find_field(table, "eFC携带判定")
+        assert efc_flag and efc_flag[2] == "携带 eFC", f"[{level}] 类型3 应携带 eFC: {efc_flag}"
+
+        ch = find_field(table, "通道判定")
+        assert ch and ch[1] == "plc", f"[{level}] OFDMA 应判 plc: {ch}"
+
+        # 表29：4 个站点的 TEI 应为 2/3/4/5（现场帧实测）
+        teis = [r[1] for r in table if "TEI" in r[0] and r[0].startswith("eFC:")]
+        assert teis == ["0x002", "0x003", "0x004", "0x005"], f"[{level}] 站点 TEI: {teis}"
+
+        # 每站点接收状态 = 0x1（PB0 成功、PB1 失败）
+        statuses = [r[2] for r in table if "接收状态" in r[0]]
+        assert statuses == ["PB0:OK PB1:FAIL"] * 4, f"[{level}] 接收状态: {statuses}"
+
+        # eFC 的 CRC-24 自证通过
+        crc_row = find_field(table, "eFC CRC校验")
+        assert crc_row and "校验通过" in crc_row[3], f"[{level}] eFC CRC: {crc_row}"
+
+        # 不得重复解析 OFDMA 块
+        assert len([r for r in table if r[0] == "OFDMA帧类型"]) == 1, f"[{level}] OFDMA 行重复"
+
+    print("[OK] OFDMA(类型3/SACK) 表26 可变域 + 表29 eFC（4 站点 TEI 2~5、CRC 通过）")
+
+
 def main():
     print("=" * 50)
     print("新一代载波协议解析器测试")
     print("=" * 50)
+    test_ofdma_ul_sack_efc()
     test_confirm()
     test_deny()
     test_data_transparent_to_device_downlink()

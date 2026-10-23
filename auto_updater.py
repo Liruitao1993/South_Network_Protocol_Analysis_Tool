@@ -603,13 +603,36 @@ def build_update_bat(new_exe: Path, old_exe: Path) -> str:
 class Opdater:
     """下载新版 exe 并编排就地替换（Windows exe 自替换）。"""
 
-    def __init__(self, http_get_binary=None):
+    def __init__(self, http_get_binary=None, max_threads: Optional[int] = None):
         self.http_get_binary = http_get_binary
+        #: 线程数上限（None = 按文件大小/CPU 自适应，上限 32）
+        self.max_threads = max_threads
 
-    def download(self, url: str, dest_file: Path, progress_cb=None) -> Path:
-        """下载到 dest_file；服务器给出 Content-Length 时回调 percent(0..100)。"""
-        return _download_to_stream(url, dest_file, progress_cb=progress_cb,
-                                   http_get_binary=self.http_get_binary)
+    def download(self, url: str, dest_file: Path, progress_cb=None,
+                 stats_cb=None, control=None, resume: bool = True,
+                 on_cancel: str = "clean") -> Path:
+        """下载到 dest_file；回调 percent(0..100)。
+
+        **默认走多线程分段下载**（`downloader.download_multithreaded`）：
+        分段 + 最多 32 线程并发 + 断点续传 + 可暂停/取消；
+        服务端不支持 Range 时自动回落单流。
+
+        - ``stats_cb(DownloadProgress)``：给 GUI 画「每线程进度 / 速率」；
+        - ``control(DownloadControl)``：暂停 / 取消；
+        - ``on_cancel``：取消时临时文件去留（``"keep"`` 保留可续传 / ``"clean"`` 清理）；
+        - 注：``http_get_binary`` 注入（测试用）时仍走原来的单流分支 ——
+          那是「把整个响应体交给回调」的测试契约，不能用分段。
+        """
+        if self.http_get_binary is not None:
+            return _download_to_stream(url, dest_file, progress_cb=progress_cb,
+                                       http_get_binary=self.http_get_binary)
+        from downloader import download_multithreaded
+
+        return download_multithreaded(
+            url, Path(dest_file), progress_cb=progress_cb,
+            max_threads=self.max_threads, stats_cb=stats_cb,
+            control=control, resume=resume, on_cancel=on_cancel,
+        )
 
     def verify(self, dest_file: Path, expected_sha256: str) -> bool:
         """可选 SHA-256 校验；无预期值视为通过。"""
@@ -696,6 +719,8 @@ DEFAULT_UPDATE_CONFIG: Dict[str, Any] = {
     "gitee_repo": "",
     "private_url": "",
     "sha256_verify": True,
+    # 下载线程数：0 = 自动（按文件大小/CPU 自适应），上限 32（见 downloader.MAX_THREADS）
+    "download_threads": 0,
     "last_check": "",
 }
 

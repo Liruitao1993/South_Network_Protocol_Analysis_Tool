@@ -543,7 +543,8 @@ def test_happy_path():
     start_transfer(tab, w, payload, block=200)
     check("分包数 = 3", len(tab._blocks) == 3, [len(b) for b in tab._blocks])
     check("开始只发出 1 帧（启动传输）", w.writes == 1, w.writes)
-    check("首帧 OMD = F0010700", omd_of(w.sent[0]) == upg.OMD_START)
+    check("首帧 OMD = F0010700（默认启动格式=方法7）",
+          omd_of(w.sent[0]) == upg.OMD_START, omd_of(w.sent[0]))
     run_to_end(tab, w)
     settle()
     check("状态 done", tab.state == "done", tab.state)
@@ -623,6 +624,68 @@ def test_plan_single_source():
           tab._pending_blocks())
     tab._on_abort()
     tab.cleanup()
+
+
+def test_start_format_fallback():
+    """启动报文格式自动兼容：前一种没确认就换下一种，全部不回才判失败。"""
+    tab, worker, _ = make_tab(FakeSerialWorker(), pkg_bytes=b"X" * 300)
+    tab.chk_read_before.setChecked(False)
+    tab.chk_auto_exec.setChecked(False)
+    tab.spin_retries.setValue(0)
+
+    check("启动格式默认 = 方法7（既有行为不变）",
+          tab.combo_start_format.currentData(), "v7")
+    # 切到「自动兼容」才会逐个试
+    tab.combo_start_format.setCurrentIndex(tab.combo_start_format.findData("auto"))
+    tab._on_start()
+    sent = worker.sent
+    check("首帧走方法14（OMD F0010E00）", "F0010E00" in sent[-1].hex().upper(),
+          sent[-1].hex(" ").upper())
+    check("首帧标识用 octet-string（09 02 0118）",
+          "09020118" in sent[-1].hex().upper(), sent[-1].hex(" ").upper())
+
+    # 重试用尽 → 换第 2 种格式（不判失败）
+    before = len(sent)
+    tab._retry_or_fail("无确认响应")
+    check("换格式后自动重发", len(sent), before + 1)
+    check("第二次走 visible 编码（0A 02 0118）",
+          "0A020118" in sent[-1].hex().upper(), sent[-1].hex(" ").upper())
+    check("仍在 starting（未判失败）", tab.state, "starting")
+
+    # 第三次换方法7
+    tab._retry_or_fail("无确认响应")
+    check("第三次走方法7（OMD F0010700）", "F0010700" in sent[-1].hex().upper(),
+          sent[-1].hex(" ").upper())
+
+    # 没有更多格式 ⇒ 这时才失败
+    tab._retry_or_fail("无确认响应")
+    check("三种都试过后才判失败", tab.state, "failed")
+    tab.cleanup()
+
+    # 锁定单一格式：不换变体，重试用尽即失败
+    tab2, worker2, _ = make_tab(FakeSerialWorker(), pkg_bytes=b"X" * 300)
+    tab2.chk_read_before.setChecked(False)
+    tab2.spin_retries.setValue(0)
+    tab2.combo_start_format.setCurrentIndex(tab2.combo_start_format.findData("v7"))
+    tab2._on_start()
+    check("锁定方法7 ⇒ 首帧就是 F0010700", "F0010700" in worker2.sent[-1].hex().upper(),
+          worker2.sent[-1].hex(" ").upper())
+    n = len(worker2.sent)
+    tab2._retry_or_fail("无确认响应")
+    check("锁定格式不换变体", len(worker2.sent), n)
+    check("锁定格式重试用尽即失败", tab2.state, "failed")
+    tab2.cleanup()
+
+    # 方法14 收到正确响应 → 继续下发文件块
+    tab3, worker3, _ = make_tab(FakeSerialWorker(), pkg_bytes=b"X" * 300)
+    tab3.chk_read_before.setChecked(False)
+    tab3.chk_auto_exec.setChecked(False)
+    tab3._on_start()
+    worker3.deliver(ack_for(worker3.sent[-1]))
+    check("方法14 确认后进入写文件", tab3._phase, upg_ui.PHASE_BLOCKS)
+    check("随后写出第 1 包", "F0010800" in worker3.sent[-1].hex().upper(),
+          worker3.sent[-1].hex(" ").upper())
+    tab3.cleanup()
 
 
 def test_progress_only_on_ack():
@@ -1351,7 +1414,8 @@ def test_version_read_nonblocking():
     check("日志写明读版本未成功 + 继续升级", "读版本信息未成功" in log
           and "继续升级流程" in log, last_log(tab))
     check("升级继续：第 3 帧是启动传输（不是失败停住）",
-          w.writes == 3 and omd_of(w.sent[2]) == upg.OMD_START and tab.state == "starting",
+          w.writes == 3 and omd_of(w.sent[2]) == tab._start_omd(upg)
+          and tab.state == "starting",
           f"{w.writes} / {tab.state} / {[omd_of(f) for f in w.sent]}")
     check("全过程没有失败态弹框路径", tab.state != "failed", tab.state)
     # 失败也要在展示区**说出来**（PRD：未读到 → `—— 未读到：<原因>`；不是留空让人以为没读）
@@ -2951,6 +3015,7 @@ def main():
     test_disconnected()
     test_happy_path()
     test_plan_single_source()
+    test_start_format_fallback()
     test_progress_only_on_ack()
     test_retry_then_ok()
     test_retries_exhausted()

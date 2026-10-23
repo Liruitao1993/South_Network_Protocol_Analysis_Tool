@@ -363,6 +363,10 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
 │   │                               #   更新源默认 **GitHub Release**（owner/repo 由 AUTHOR_GITHUB_URL 解析注入，单一来源）；
 │   │                               #   另支持 Gitee / 私有 HTTP；GitHub 资产 digest→sha256、body=更新说明（1.23.87 起）
 │   ├── update_dialogs.py           # 升级对话框：版本列表+更新说明面板 / 「发现新版本」确认（markdown 渲染；不发网络请求）
+│   ├── update_download_dialog.py   # 下载面板（非模态，1.23.95 / 1.23.96 加固）：逐线程进度表 + 实时速率 + 剩余时间；
+│   │                               #   暂停/继续/取消并清理缓存/后台运行（不做网络 IO，快照由 worker 喂入）
+│   ├── downloader.py               # 多线程分段下载器（纯逻辑无 Qt，1.23.95）：Range 分段 + 最多 32 线程并发 +
+│   │                               #   断点续传 + 暂停/取消 + 不支持 Range 时回落单流；只写 .part，合并后才落目标文件
 │   ├── llm_preprocess.py           # LLM 日志预处理纯逻辑（LLMWorker 线程，thread_registry 登记）
 │   ├── llm_preprocess_widget.py    # LLM 日志预处理面板（挂在批量解析输入区，默认折叠）
 │   ├── llm_api_manager.py          # LLM API Key 管理对话框（llm_preprocess 的 API 配置）
@@ -995,6 +999,8 @@ python test/test_web_feedback.py        # Web 版问题反馈（存储层/截图
 python test/test_feedback_api.py        # 反馈提交 API（submit_from_api/parse_multipart/频率限制/旧库迁移，31 项，1.20.0 起）
 python test/test_feedback_dialog.py     # GUI 反馈对话框（URL/config/校验/sys_info/offscreen 冒烟，30 项，1.20.0 起）
 python test/test_github_issue.py        # GitHub Issue 提交（与仓库 yml 模板逐字对拍/API 建单与错误码/令牌优先级与脱敏/崩溃摘要脱敏/offscreen 对话框，32 项，1.23.94 起）
+python test/test_downloader.py          # 多线程分段下载（分段规划/并发字节一致/断点续传/暂停·继续·取消端到端/失败不留半截文件/url 变更作废/Content-Range 自证/单流续传/磁盘中文提示/Retry-After 夹上限，42 项，1.23.95 起）
+python test/test_update_download_dialog.py  # 下载面板（非模态守卫/逐线程进度/速率/暂停取消/后台运行/状态文案随 state/大字号不裁字/宿主级重入守卫·菜单重开·状态栏清理，26 项，1.23.95 起）
 python test/test_frame_share.py         # 报文分享（normalize_hex/submit_share/Store 分页搜索/GUI payload+offscreen，57 项，1.21.0 起）
 python test/test_spectrum_model.py      # 频谱图纯逻辑（含 trace 日志清洗：分隔符解析/行尾取值/时间戳防护/统计不变式/错误兼容，225 项，1.23.9 起）
 python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块粘贴绘制、清洗提示不丢失、行号报错，135 项，1.23.9 起）
@@ -1432,6 +1438,17 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
     - **崩溃时 MainWindow 可能还没建好**：崩溃提交入口是**模块级** `_report_crash_to_github`（`main_gui.py`），不是 `MainWindow` 方法；两条入口（菜单 / 崩溃）必须共用同一份仓库地址与令牌来源，否则会出现「一个能提交一个不能」的分裂。
     - 回归：`test/test_github_issue.py`（32 项，含与仓库 yml 逐字对拍 ×3、API 错误码中文翻译、422 去标签重试、令牌优先级与脱敏、崩溃摘要脱敏、offscreen 对话框与接线守卫），已进 `release_check.py:CORE_TESTS`。
 
+84. **自动升级下载：多线程分段可以，但「并发写同一句柄」会把文件写错；下载面板必须非模态（1.23.95 起，改 `downloader.py` / `update_download_dialog.py` 前必读）**：
+    - **【阻塞级·必读】每个线程必须用自己的文件句柄**：`seek()` + `write()` **不是原子操作**。多线程共用一个 `handle` 写不同区间时，线程之间会互相踩掉文件偏移 —— 实测表现为「**第一次下载就与源文件字节不一致**」，且第一个错位点在 64 KB（`READ_BLOCK`）边界；而「第二次下载又对了」，极易被误判为偶发网络问题。正确做法：每个线程 `open(part_path, "r+b")` 独立 fd，各自 seek 到自己那一段。回归：`test_downloader.py::test_multithreaded_download_matches_source`（本地 HTTP 端到端逐字节对拍）。
+    - **只写 `.part`，全部段完成并合并后才 `os.replace` 到目标路径**：自动升级会拿目标文件覆盖正在运行的 exe，**半截文件是破坏性的**。合并时逐段核对长度，少一个字节直接失败。取消时 `cleanup_partial()` 把 `.part` / `.progress.json` 一起删掉。
+    - **暂停 = 复用续传，不是新机制**：`DownloadControl.pause()` 让各线程在**块边界**（64 KB）抛内部 `_SegmentPaused` 停下（已写字节保留），`download_multithreaded` **正常返回**；worker 看 `control.paused` 决定「发 paused 信号并等待」，`resume()` 后**再调一轮** `download_multithreaded(resume=True)`，只补未完成的段。**取消要能穿透暂停**（`cancel()` 会清掉 pause 事件），否则线程卡在暂停等待里退不出来。
+    - **进度必须按字节上报，不能按段完成**：段很大时（100 MB / 16 线程 ≈ 6.5 MB 一段）「段完成才报」会让进度条长时间不动，看起来像卡死。现每写满一个 64 KB 块回调一次，节流 0.15 s。
+    - **面板必须 `NonModal`**：此前是 `QProgressDialog` + `WindowModal`，下载时整个程序不能操作（用户现场口径）。现在 `show()` 而非 `exec()`，并提供「后台运行」收起面板、进度留在状态栏。回归：`test_update_download_dialog.py::test_dialog_is_non_modal` 与 `test_main_gui_uses_non_modal_panel`（后者断言**源码里不得残留 `QProgressDialog`**，防止被改回去）。
+    - **服务端不认 Range 就老实单流**：`probe_size` 只认 `206`（`Range: bytes=0-0` 探测）。返回 200 时 `supports_range=False` ⇒ 走 `_download_single_stream`，不因为「并发不了」就下载失败。
+    - **段布局变化必须让旧进度作废**：`.progress.json` 记录每段 `(start, end)` 与 `etag`/`total`；线程数变了导致段边界变了而 done 计数还按老布局走 ⇒ 拼出来的文件字节错位。对不上就整份作废、从头下。
+    - **【1.23.96 起追加】四条不可回退的约定**：① **每段响应必须自证** `Content-Range`（起始偏移 == 请求起点、总长 == 计划总长）；不认 Range 的源回 200 时**判为不可分段并回落单流**，绝不按段偏移写整文件 —— 那会产出「大小对、内容错」的 exe，PE 与 SHA 都拦不住（摘要对得上是因为文件本身就是错的内容，只有体积恰好相同才危险；实测服务端/代理忽略 Range 是真实场景）。② **暂停等待必须是事件阻塞**（`DownloadControl.wait_resumed()`），不许 `sleep` 轮询 —— 轮询让「继续」平均晚 50 ms 生效，且退出时更难点干净。③ **退出时取消但保留分片**（`qt.on_cancel = "keep"` 后再 `cancel()`）：默认 `clean` 会把几百 MB 的 `.part` 删掉，等于每次关程序白下。④ **同一时刻只允许一个下载任务**：`_start_download` 有 `isRunning()` 重入守卫，两个 worker 抢同一个 `.part` 会拼出坏文件；重复触发只把面板叫回前台。回归：`test_downloader.py`（42 项，含 `test_cancel_keep_leaves_resumable_part` / `test_segment_response_self_check`），与 `test_update_download_dialog.py` 的 `test_start_download_refuses_second_task` / `test_download_panel_reopen_from_menu` / `test_download_done_clears_statusbar`）。
+    - 回归：`test/test_downloader.py`（42 项，含暂停/继续/取消的**端到端**验证、失败时目标文件不出现）、`test/test_update_download_dialog.py`（26 项 offscreen）。
+
 ## 9. 开发原则
 1. **协议定义优先**：遇到不确定的协议字段、字节序、校验范围，**先查 §5 对应文档**，不要凭记忆或猜测。
 2. **PDF 文档用 pdf skill 检索**：645 补遗、IEC 62056-46、DLT645 原始标准都是 PDF，调用 pdf skill 而非人工翻阅。
@@ -1455,6 +1472,21 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 ## 10. 变更日志
 
 > 详细版本变更记录请查看 `main_gui.py:CHANGELOG`（按版本倒序），或运行 `git log --oneline` 查看提交历史。本文档保留近期版本的摘要。
+
+### 1.23.96 — 2026-10-23
+
+- **下载器四批次加固（R1~R17）**：① 分段收到 `HTTP 200` 不再按段偏移写入，判「该源不可分段」并回落单流；② 退出时 cancel 下载但**保留分片**（`on_cancel="keep"`），并等线程结束；③ 同一时刻只允许一个下载任务，重复触发把已有面板唤到前台；④ url 变化让 `progress.json` 整份作废；⑤ 每段自证 `Content-Range` 偏移与总长；⑥ 单流也支持续传、不支持时明示；⑦ `OSError(ENOSPC)` 翻成「磁盘空间不足：需要至少 X」；⑧ 关面板=后台继续 + 新菜单「配置 → 下载进度…」可叫回；⑨ 下载结束清空状态栏；⑩ 面板按钮走 `fit_btn_width` 且在 `FontChange` 后重算（14 号字下实测会裁）；⑪ 标题/状态列由 `progress.state` 驱动；⑫ `DEFAULT_MAX_THREADS`(16) 成为「自动」上限；⑬ 删 `http_probe` 死参数；⑭ 删 `_UpdateDownloadWorker.progress` 死信号；⑮ 取消默认保留进度 + 独立「清理缓存」；⑯ 取消立即返回；⑰ 识别 `429`/`Retry-After`（上限 10 s）。
+- **暂停等待改事件阻塞**：`DownloadControl.wait_resumed()` 取代 `sleep(0.1)` 轮询。
+- 测试：`test_downloader.py` **42 项**、`test_update_download_dialog.py` **26 项**（含**宿主级**重入守卫/菜单重开/状态栏清理），6 条变异反证逐条变红后还原。
+- 顺带修两处测试假红：`test_menu_wiring.py` 打印 `✓` 在 GBK 控制台崩；`test_app_icon_path.py` 改查 `pyinstaller_meta.DATAS`（spec 已改为 `datas=list(meta.DATAS)`）。
+
+### 1.23.95 — 2026-10-22
+
+- **自动升级改多线程分段下载**：新增 `downloader.py`（Range 分段 + 线程池，上限 **32 线程** + 断点续传 + 暂停/取消；服务端不支持 Range 时自动回落单流）。只写 `.part`，全部段完成并合并后才落目标文件；SHA-256 与 PE 兜底不变。
+- **下载面板重做**：新增 `update_download_dialog.py` —— **非模态**（下载时主程序可用）、逐线程进度表、实时速率 + 剩余时间、暂停/继续、取消并清理缓存、后台运行。替换掉原 `QProgressDialog`。
+- **修掉一个真实并发缺陷**：多线程共用文件句柄导致 `seek/write` 互相踩偏移 ⇒ 下载字节错位（错位点在 64 KB 边界）；改为每线程独立句柄。实测发现，非理论推演。
+- 「配置 → 更新设置」新增「下载线程」（自动 / 8 / 16 / 24 / 32），存 `update.download_threads`。
+- 测试：`test_downloader.py`（30）+ `test_update_download_dialog.py`（14）。
 
 ### 1.23.94 — 2026-10-22
 

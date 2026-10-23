@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "验收时逐条对照质量门禁与可反证要求"}
+{"file": "AGENTS.md", "reason": "项目陷阱 20b/40/63/73 与测试放置规则是验收硬约束"}

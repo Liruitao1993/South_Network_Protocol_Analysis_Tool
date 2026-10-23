@@ -287,29 +287,39 @@ def test_a6_check_action_response():
 
 
 def test_a7_checksum_values():
-    section("[A7] 校验值与 zlib/hashlib 对拍")
+    section("[A7] 校验值：CRC 必须是 2 字节 CRC-16/X-25（现场口径）")
     data = bytes((i * 17 + 3) & 0xFF for i in range(4096)) + b"\x00\xff"
-    crc = zlib.crc32(data) & 0xFFFFFFFF
-    check("crc 大端 == crc32 4B 大端",
-          up.calc_checksum_value(data, "crc", "big") == crc.to_bytes(4, "big"),
+    c16 = up.crc16_x25(data)
+    check("CRC 为 2 字节（不是 crc32 的 4 字节）",
+          len(up.calc_checksum_value(data, "crc")) == 2,
           hexs(up.calc_checksum_value(data, "crc")))
-    check("crc 小端 == crc32 4B 小端",
-          up.calc_checksum_value(data, "crc", "little") == crc.to_bytes(4, "little"))
+    check("CRC 大端 == crc16_x25 2B 大端",
+          up.calc_checksum_value(data, "crc", "big") == c16.to_bytes(2, "big"),
+          hexs(up.calc_checksum_value(data, "crc")))
+    check("CRC 小端 == crc16_x25 2B 小端",
+          up.calc_checksum_value(data, "crc", "little") == c16.to_bytes(2, "little"))
+    # 现场自证：DPU_APP_V1.0.3.4.bin(469200B) 的 CRC 应为 0x7373（实帧 09 02 73 73）
+    import crcmod.predefined as _predefined
+
+    _c = _predefined.Crc("x-25")
+    _c.update(data)
+    check("crc16_x25 与 crcmod x-25 同值（同一规格，不是另挑一个 CRC16）",
+          c16 == int(_c.crcValue), hex(c16))
     check("默认参数 == crc/big",
           up.calc_checksum_value(data) == up.calc_checksum_value(data, "crc", "big"))
     check("大小写不敏感（CRC/md5/SHA1）",
           up.calc_checksum_value(data, "CRC") == up.calc_checksum_value(data, "crc")
           and up.calc_checksum_value(data, "MD5") == up.calc_checksum_value(data, "md5")
           and up.calc_checksum_value(data, "SHA1") == up.calc_checksum_value(data, "sha1"))
-    check("CRC 空数据 == 00 00 00 00", up.calc_checksum_value(b"", "crc") == b"\x00\x00\x00\x00")
+    check("CRC 空数据 == 00 00（2 字节）", up.calc_checksum_value(b"", "crc") == b"\x00\x00")
     check("md5 == hashlib.md5().digest()",
           up.calc_checksum_value(data, "md5") == hashlib.md5(data).digest())
     check("sha1 == hashlib.sha1().digest()",
           up.calc_checksum_value(data, "sha1") == hashlib.sha1(data).digest())
     check("md5/sha1 忽略字节序",
           up.calc_checksum_value(data, "md5", "little") == hashlib.md5(data).digest())
-    check("长度：crc 4 / md5 16 / sha1 20",
-          len(up.calc_checksum_value(data, "crc")) == 4
+    check("长度：crc 2 / md5 16 / sha1 20",
+          len(up.calc_checksum_value(data, "crc")) == 2
           and len(up.calc_checksum_value(data, "md5")) == 16
           and len(up.calc_checksum_value(data, "sha1")) == 20)
     check("未知 kind 抛 ValueError（含中文提示）",
@@ -627,6 +637,36 @@ def test_a12_version_detail_rows():
           "表191 声明 (4, 4, 6, 4, 6, 8)" in r3["rows"][-1]["值"]
           and "(2, 4, 6, 4, 6, 8)" in r3["rows"][-1]["值"], r3["rows"][-1]["值"])
 
+    # ③b 末项为 NULL（表191 声明定长，但现场设备回 00）⇒ 仍要逐字段命名 + 点名缺失
+    #     现场报障：这种形态早先整条退化成 `数据 = 0206...`（看到的是原始内容）
+    null_tail = _resp_with(bytes([0x02, 6]) + b"".join(
+        bytes([0x0A, len(v)]) + v for v in
+        (b"CNC", b"1033", b"251023", b"HW00", b"250822")) + b"\x00",
+        up.OAD_VERSION)
+    r3b = up.check_get_response(null_tail, up.OAD_VERSION)
+    names = [r["名称"] for r in r3b["rows"]]
+    check("③b NULL 末项仍判 ok", r3b["ok"] is True, r3b.get("reason"))
+    check("③b 仍给出 6 个具名字段（不塌成「数据」）",
+          names[:6] == ["厂商代码", "软件版本号", "软件版本日期",
+                        "硬件版本号", "硬件版本日期", "厂商扩展信息"], names)
+    check("③b 厂商扩展信息 = NULL",
+          r3b["rows"][5]["值"] == "NULL", r3b["rows"][5])
+    check("③b 追加「⚠ 字段缺失」并点名", 
+          "⚠ 字段缺失" in names and "厂商扩展信息" in r3b["rows"][names.index("⚠ 字段缺失")]["值"],
+          r3b["rows"][names.index("⚠ 字段缺失")] if "⚠ 字段缺失" in names else names)
+    check("③b 日期仍补全", r3b["rows"][2]["值"] == "2025-10-23", r3b["rows"][2]["值"])
+
+    # ③c 定长字段用 NUL 补齐 ⇒ 显示时去掉尾部 NUL（否则界面是一串不可见字符）
+    nul_pad = _resp_with(bytes([0x02, 6]) + b"".join(
+        bytes([0x0A, len(v)]) + v for v in
+        (b"CNC\x00", b"1033", b"251023", b"HW00", b"250822", b"GWGS0000")),
+        up.OAD_VERSION)
+    r3c = up.check_get_response(nul_pad, up.OAD_VERSION)
+    check("③c NUL 补齐的厂商代码去掉尾部 NUL",
+          r3c["rows"][0]["值"] == "CNC", repr(r3c["rows"][0]["值"]))
+    check("③c 原始字节仍保留 NUL（可追溯）",
+          r3c["rows"][0]["原始"].endswith("00"), r3c["rows"][0]["原始"])
+
     # ④ 非结构数据 ⇒ 单行「数据」（兜底，别空着）
     single = _resp_with(bytes([0x0A, 0x0A]) + b"V1.0.3-INT", up.OAD_INTERNAL_VERSION)
     r4 = up.check_get_response(single, up.OAD_INTERNAL_VERSION)
@@ -652,6 +692,55 @@ def test_a12_version_detail_rows():
           != [(n, v) for n, v, _h, _l in REAL_INT_FIELDS])
     check("⑥ 日期字段被错配时能看出来（软件版本日期 ≠ 2026-08-03）",
           dict((r["名称"], r["值"]) for r in swapped)["软件版本日期"] != "2026-08-03")
+
+
+def test_a14_start_transfer_v14_golden():
+    section("[A14] 方法14 启动传输：现场两帧逐字节 + CRC-16 2 字节")
+
+    # 现场两帧（同一设备、只差「2 字节标识」的 A-XDR 类型：09 octet-string / 0A visible-string）
+    REAL_V14_OCTET = (
+        "68600043051111111111111046C8070100F0010E00020602060A0753434D2E62696E"
+        "0A0753434D2E62696E06000728D00403E00A0876312E302E302E30160012019002"
+        "0216000902737301010A0476312E3001010A04323737300902011800C7F216")
+    REAL_V14_VISIBLE = (
+        "68600043051111111111111046C8070100F0010E00020602060A0753434D2E62696E"
+        "0A0753434D2E62696E06000728D00403E00A0876312E302E302E30160012019002"
+        "0216000902737301010A0476312E3001010A04323737300A020118000BEF16")
+
+    sa = bytes.fromhex("05111111111111")
+    file_info = (bytes([0x02, 6])
+                 + bytes([0x0A, 7]) + b"SCM.bin"
+                 + bytes([0x0A, 7]) + b"SCM.bin"
+                 + b"\x06" + (469200).to_bytes(4, "big")
+                 + b"\x04\x03\xE0"
+                 + bytes([0x0A, 8]) + b"v1.0.0.0"
+                 + b"\x16\x00")
+    check_crc = up.calc_checksum_value(b"", "crc")  # 占位，下面用手工 7373
+
+    for variant, want in (("octet", REAL_V14_OCTET), ("visible", REAL_V14_VISIBLE)):
+        frame = up.build_start_transfer_v14(
+            sa, 0x10, 0, file_info, 400, up.CHECK_CRC, bytes.fromhex("7373"),
+            variant=variant)
+        check(f"方法14/{variant} 逐字节等于现场帧", frame.hex().upper(), want)
+        parsed = DLT69845Parser().parse(frame)
+        check(f"方法14/{variant} 自家解析器 HCS/FCS 通过",
+              (parsed.get("帧头校验HCS") or {}).get("校验结果") == "通过"
+              and (parsed.get("帧校验FCS") or {}).get("校验结果") == "通过")
+        check(f"方法14/{variant} 服务码/OMD 正确",
+              parsed["链路用户数据"]["APDU"]["OMD"]["原始值"] == "F0010E00",
+              parsed["链路用户数据"]["APDU"]["OMD"]["原始值"])
+
+    # 两帧只差 3 个字节（标识的类型标签 + FCS 2 字节）
+    a = bytes.fromhex(REAL_V14_OCTET)
+    b = bytes.fromhex(REAL_V14_VISIBLE)
+    diff = [i for i in range(len(a)) if a[i] != b[i]]
+    check("两帧差异仅 3 字节（类型标签 + FCS）", len(diff) == 3, len(diff))
+    check("类型标签位置正是 0x09/0x0A", [a[diff[0]], b[diff[0]]] == [0x09, 0x0A],
+          [a[diff[0]], b[diff[0]]])
+
+    # CRC 口径：真实升级包 → 0x7373（现场实帧里的值）
+    check("CRC-16/X-25 对 'abc' 的已知值", hex(up.crc16_x25(b"abc")), "0x9e25")
+    check("CHECK_CRC 常量为 0", up.CHECK_CRC == 0, up.CHECK_CRC)
 
 
 def test_a13_bt_block_cap_from_write_limit():
@@ -718,6 +807,7 @@ def main():
     test_a10_read_version()
     test_a11_internal_version_read()
     test_a12_version_detail_rows()
+    test_a14_start_transfer_v14_golden()
     test_a13_bt_block_cap_from_write_limit()
     print(f"\nPASS={PASS} FAIL={FAIL}")
     sys.exit(0 if FAIL == 0 else 1)

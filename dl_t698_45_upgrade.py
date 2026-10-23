@@ -20,7 +20,6 @@ FCS 实现），本模块只负责 A-XDR 参数与 SA 编码。
 """
 
 import hashlib
-import zlib
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -37,6 +36,20 @@ from dl_t698_45_data_decode import (
 
 # ─── 协议常量 ───────────────────────────────────────────────────────────────
 OMD_START = bytes.fromhex("F0010700")   # 方法7 启动传输（进入接收升级包状态）
+#: 方法14「启动传输（带块大小/版本/下载方标识）」—— 现场新一代设备（SCM/DPU）实际吃这条，
+#: 参数比方法7 多三项（软件版本数组 / 下载方标识数组 / 一个 2 字节标识）。两种都要能发。
+OMD_START_V14 = bytes.fromhex("F0010E00")
+
+#: 校验类型（表：`校验::=structure{类型 enum, 值 octet-string}`）
+CHECK_CRC = 0        # 值 = CRC-16/X-25 的 2 字节
+CHECK_MD5 = 1
+CHECK_SHA1 = 2
+
+#: 启动传输的**报文变体**（不同厂家对「最后那个 2 字节标识」的编码不同）。
+#: - `octet`：`09 02 xx xx`（octet-string，现场 SCM/DPU 其一）
+#: - `visible`：`0A 02 xx xx`（visible-string，同内容的另一种编码）
+#: 现场要求「都发一遍，哪个回正确响应就用哪个」，见 `dlt698_upgrade_widget` 的变体重试。
+START_VARIANTS = ("octet", "visible")
 OMD_WRITE = bytes.fromhex("F0010800")   # 方法8 写文件（传输一个数据块）
 OMD_EXEC = bytes.fromhex("F0010D00")    # 方法13 执行升级
 
@@ -63,6 +76,7 @@ _TAG_DOUBLE_LONG_UNSIGNED = 0x06       # [6] double-long-unsigned（长帧传输
 _TAG_OCTET_STRING = 0x09
 _TAG_VISIBLE_STRING = 0x0A
 _TAG_LONG_UNSIGNED = 0x12              # [18] long-unsigned（短帧传输块尺寸）
+_TAG_ARRAY = 0x01                     # array
 _TAG_ENUM = 0x16
 _TAG_DATE_TIME_S = 0x1C                # 定长 7 字节、**无长度域**
 
@@ -315,6 +329,78 @@ def build_read_version(sa: bytes, ca: int, piid: int,
         sa, int(ca), int(piid), oad, time_tag_none=True)
 
 
+# ─── 方法14「启动传输（带块大小/版本/下载方标识）」 ────────────────────────
+#: 方法14 参数里三个现场项的默认值（取自现场实帧，协议文档未定义语义 ⇒ 只做「照现场发」）
+V14_DEFAULT_SOFTWARE = "v1.0"      # 成员4：array(1) of visible-string
+V14_DEFAULT_DOWNLOADER = "2770"    # 成员5：array(1) of visible-string
+V14_DEFAULT_MARK = bytes.fromhex("0118")   # 成员6：2 字节标识
+
+
+def _array_of_one_visible_string(text: str) -> bytes:
+    """`01 01 0A <len> <ascii>` —— 方法14 里的「数组仅 1 项 visible-string」。"""
+    data = str(text or "").encode("ascii", errors="replace")
+    return (bytes([_TAG_ARRAY, 1])
+            + bytes([_TAG_VISIBLE_STRING]) + _ber_len(len(data)) + data)
+
+
+def build_start_transfer_v14(sa: bytes, ca: int, piid: int, file_info: bytes,
+                             block_size: int, check_type: int = CHECK_CRC,
+                             check_value: bytes = b"",
+                             software: str = V14_DEFAULT_SOFTWARE,
+                             downloader: str = V14_DEFAULT_DOWNLOADER,
+                             mark: bytes = V14_DEFAULT_MARK,
+                             variant: str = "octet") -> bytes:
+    """组「启动传输」整帧（**方法14**，OMD=F0010E00）—— 现场 SCM/DPU 走这条。
+
+    参数 ::= `02 06 | 文件信息 | 传输块大小 | 校验 | 软件版本数组 | 下载方标识数组 |
+    标识(2B) | TimeTag(00)`，现场实帧逐字节为：
+
+        02 06
+        02 06 0A07 "SCM.bin" 0A07 "SCM.bin" 06 000728D0 04 03E0 0A08 "v1.0.0.0" 16 00
+        12 01 90                     ← 块大小 400
+        02 02 16 00 09 02 73 73      ← 校验：类型=CRC(0)、值=2 字节 0x7373
+        01 01 0A 04 "v1.0"           ← 软件版本数组
+        01 01 0A 04 "2770"           ← 下载方标识数组
+        09 02 01 18                  ← 2 字节标识（`variant="visible"` 时为 `0A 02 01 18`）
+        00                           ← 无时间标签
+
+    `variant`：`octet` ⇒ 标识用 octet-string（`09`）；`visible` ⇒ visible-string（`0A`）。
+    两种编码对应现场两种设备，**其余字节完全相同**（同一台设备只认其中一种）。
+
+    块大小超过 65535 时自动切长帧（`06 <u32>`），与 `build_start_transfer` 同一口径。
+    """
+    block_size = int(block_size)
+    if block_size <= 0:
+        raise ValueError(f"传输块大小必须为正整数: {block_size}")
+
+    if block_size > _MAX_SHORT_BLOCK_SIZE:
+        block_field = bytes([_TAG_DOUBLE_LONG_UNSIGNED]) + block_size.to_bytes(4, "big")
+    else:
+        block_field = bytes([_TAG_LONG_UNSIGNED]) + block_size.to_bytes(2, "big")
+
+    value = bytes(check_value or b"")
+    check_field = (bytes([_TAG_STRUCTURE, 2])
+                   + bytes([_TAG_ENUM, int(check_type) & 0xFF])
+                   + bytes([_TAG_OCTET_STRING]) + _ber_len(len(value)) + value)
+
+    mark = bytes(mark or b"")
+    if not mark:
+        raise ValueError("方法14 的 2 字节标识不能为空")
+    tag = _TAG_VISIBLE_STRING if str(variant).lower() == "visible" else _TAG_OCTET_STRING
+    mark_field = bytes([tag]) + _ber_len(len(mark)) + mark
+
+    param = (bytes([_TAG_STRUCTURE, 6])
+             + bytes(file_info)
+             + block_field
+             + check_field
+             + _array_of_one_visible_string(software)
+             + _array_of_one_visible_string(downloader)
+             + mark_field
+             + APDU_TIME_TAG_NONE)
+    return DLT69845FrameGenerator().generate_action_request_normal(
+        sa, int(ca), int(piid), OMD_START_V14, param)
+
+
 # ─── 蓝牙通道：按「一次 ATT 写」的上限反推每包最大块长 ──────────────────────
 def max_block_bytes_for_frame_limit(limit: int, sa: bytes, ca: int = 0) -> int:
     """「整帧 ≤ ``limit`` 字节」时，写文件帧里**块数据**最多能放多少字节（0 = 一个都放不下）。
@@ -346,22 +432,39 @@ def max_block_bytes_for_frame_limit(limit: int, sa: bytes, ca: int = 0) -> int:
 
 
 # ─── 校验值 ─────────────────────────────────────────────────────────────────
+def crc16_x25(data: bytes) -> int:
+    """CRC-16/X-25（poly 0x1021 反射、init 0xFFFF、xorout 0xFFFF）—— **0~65535 的整数**。
+
+    为什么是它（现场反推，2026-10-22）：
+    - 现场实帧 `DPU_APP_V1.0.3.4.bin`（469,200 B）的「校验」字段是 `09 02 73 73`，
+      即 2 字节值 `0x7373`；用本函数对该文件计算**恰好** `0x7373`（逐字节自证）；
+    - 同族算法（ARC/MODBUS=0x4739、CCITT-FALSE=0x6F1E、XMODEM=0x834A、KERMIT=0xA6BB、
+      DNP=0x3F8D、AUG-CCITT=0xCCE4）全部对不上，故不是"随便挑一个 CRC16"；
+    - 与链路层 HCS/FCS 用的 `crcmod` `x-25` **同一个规格**，仓库内只此一处实现。
+    """
+    import crcmod.predefined
+
+    crc = crcmod.predefined.Crc("x-25")
+    crc.update(bytes(data or b""))
+    return int(crc.crcValue) & 0xFFFF
+
+
 def calc_checksum_value(data: bytes, kind: str = "crc", endian: str = "big") -> bytes:
     """计算「启动传输」参数里的校验值字节（文件内容摘要，供从站校验整包）。
 
-    kind：`crc`/`CRC` → `zlib.crc32`（X.25 多项式族，非 CRC16）得 32 位整数，按 `endian`
-    （`big` 默认 / `little`）输出 4 字节；`md5`/`MD5` → 16 字节；`sha1`/`SHA1` → 20 字节
-    （摘要为字节串，忽略 `endian`）。未知 kind / 未知字节序抛 ValueError。
-    ⚠ doc 只给校验值 `7F 7E D9 D2`、未给对应文件 ⇒ **不宣称**与现场设备一致，UI 允许手工覆盖。
+    kind：
+    - `crc`/`CRC` → **CRC-16/X-25，2 字节**（现场口径：`DPU_APP_V1.0.3.4.bin` ⇒ `73 73`）。
+      ⚠ 1.23.93 及以前这里错误地用 `zlib.crc32` 出 **4 字节**，与设备要求不符（现场报障）。
+    - `md5` → 16 字节；`sha1` → 20 字节（摘要字节串，忽略 `endian`）。
+    `endian` 只影响 CRC（`big` 默认 / `little`）；未知 kind / 未知字节序抛 ValueError。
     """
     data = bytes(data or b"")
     k = (kind or "").strip().lower()
     if k == "crc":
-        val = zlib.crc32(data) & 0xFFFFFFFF
         e = (endian or "big").strip().lower()
         if e not in ("big", "little"):
             raise ValueError(f"CRC 字节序只支持 big/little: {endian}")
-        return val.to_bytes(4, e)
+        return crc16_x25(data).to_bytes(2, e)
     if k == "md5":
         return hashlib.md5(data).digest()
     if k == "sha1":
@@ -439,6 +542,13 @@ _VERSION_TEXT_MAX_FIELDS = 8
 _VERSION_TEXT_MAX_CHARS = 160
 
 
+def _is_null_version_member(member) -> bool:
+    """成员是否为 A-XDR null（判据复用 `dl_t698_45_data_decode.is_null_member`）。"""
+    from dl_t698_45_data_decode import is_null_member
+
+    return is_null_member(member)
+
+
 def _version_text(apdu: dict) -> str:
     """从 GET-Response 的解析结果取**可读版本内容**（尽量给命名字段，否则给数据值串）。
 
@@ -497,8 +607,18 @@ def version_rows(apdu: dict) -> List[dict]:
                 "原始": str(member.get("原始编码", "")).upper(),
                 "长度": len(str(member.get("原始值", ""))) // 2,
             })
+        # NULL 成员单独点名（比只报「长度不符」更能说明问题：设备说「无此信息」）
+        null_names = [rows[i]["名称"] for i, m in enumerate(members)
+                      if _is_null_version_member(m)]
+        if null_names:
+            rows.append({
+                "名称": "⚠ 字段缺失",
+                "值": ("设备对这些字段回了 NULL（表191 声明为定长 visible-string）："
+                        + "、".join(null_names)),
+                "原始": "", "长度": 0,
+            })
         if not version_lengths_match(members):
-            actual = tuple(r["长度"] for r in rows)
+            actual = tuple(r["长度"] for r in rows[:len(members)])
             rows.append({
                 "名称": "⚠ 长度未自证",
                 "值": f"表191 声明 {VERSION_FIELD_BYTES}，本次实发 {actual}",

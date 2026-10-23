@@ -44,6 +44,8 @@ class ProtocolSpec:
     monitor_wrapper: Optional[str] = None  # plc2 | hplc
     has_sequence_diagram: bool = False
     has_upgrade: bool = False
+    # 698 协议测试页（按 OAD 分类的预置测试库；协议8）
+    has_test: bool = False
     # 解析级别族：None | csg | gw | hdc10（GUI 控件共用/复用）
     parse_level_family: Optional[str] = None
     # ED..EE 监控包装：单帧「ED监控协议」勾选 + 包装头格式下拉 + 字节剔除
@@ -190,6 +192,7 @@ _PROTOS: Tuple[ProtocolSpec, ...] = (
         frame_gen_mode="dlt698",
         has_virtual_meter=True,
         has_upgrade=True,
+        has_test=True,
         preset_mode="dlt698",
         extract_strategy="dlt698_45",
         validator_class="validator.dl_t698_45_validator:DLT69845Validator",
@@ -366,6 +369,10 @@ def protocols_with_sequence_diagram() -> Tuple[int, ...]:
 
 def protocols_with_upgrade() -> Tuple[int, ...]:
     return tuple(p.index for p in _PROTOS if p.has_upgrade)
+
+
+def protocols_with_test() -> Tuple[int, ...]:
+    return tuple(p.index for p in _PROTOS if p.has_test)
 
 
 def protocols_with_monitor() -> Tuple[int, ...]:

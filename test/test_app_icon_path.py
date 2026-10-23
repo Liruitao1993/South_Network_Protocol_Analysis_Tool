@@ -87,10 +87,12 @@ def main():
         if orig[1] is None and hasattr(sys, "_MEIPASS"):
             del sys._MEIPASS
 
-    # 4. spec datas 防漏打包
-    spec_text = (project_root / "南网协议解析工具.spec").read_text(encoding="utf-8")
-    check("spec datas 含 app_icon.ico",
-          "('app_icon.ico', '.')" in spec_text)
+    # 4. 打包数据防漏：真正的单一来源是 pyinstaller_meta.DATAS
+    #    （spec 已改为 ``datas=list(meta.DATAS)``，在 .spec 正文里 grep 字面量已无意义）
+    import pyinstaller_meta
+
+    check("DATAS 含 app_icon.ico",
+          ('app_icon.ico', '.') in pyinstaller_meta.DATAS)
 
     print("=" * 50)
     if FAILURES:

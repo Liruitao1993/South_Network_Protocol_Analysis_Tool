@@ -909,8 +909,14 @@ class CSGNewGenParser:
             if parse_level == "fc_only":
                 return table_data
 
-            # ── eFC 扩展帧控制解析（OFDMA帧，type!=1时）──
-            # 预校验 CRC-24：若校验失败说明该帧实际不含 eFC（如非OFDMA帧被误判），跳过eFC解析
+            # ── eFC 扩展帧控制解析（OFDMA 帧，除类型 1 外都携带）──
+            # 依据（§「其中，OFDMA帧类型不同，携带的eFC内容不同」）：
+            #   类型 0 = DL-OFDMA      → 表27 有 eFC
+            #   类型 1 = DL-OFDMA 的 SACK / UL-OFDMA → **不携带 eFC**
+            #   类型 2 = UL-OFDMA trigger → 表28 有 eFC
+            #   类型 3 = UL-OFDMA 的 SACK → **表29 有 eFC**（每站点 3 字节：TEI+接收状态+保留）
+            # ⚠ 1.23.93 中途曾把类型 3 也排除，导致该帧「解析不了 eFC」—— 已纠正。
+            # 预校验 CRC-24：类型允许但校验不符 ⇒ 实际没带 eFC（误判/截断），跳过。
             if (getattr(self, '_ofdma_frame_type', -1) >= 0
                     and self._ofdma_frame_type != 1
                     and delimiter_type == 1):  # 仅SOF帧携带eFC
@@ -928,6 +934,12 @@ class CSGNewGenParser:
                             table_data)
                         offset = efc_end
                     # CRC校验失败时不解析eFC，后续数据作为PB处理
+                    else:
+                        table_data.append((
+                            "eFC", "—", "不带 eFC",
+                            f"OFDMA 类型 {self._ofdma_frame_type} 起始处 16 字节不满足 eFC 的 "
+                            "CRC-24 自证 ⇒ 本帧无 eFC，FC 之后直接是物理块",
+                            offset, min(offset + efc_size, frame_len) - 1))
                 else:
                     table_data.append(("⚠️ eFC数据不足", "",
                                       "", f"需要{efc_size}字节但仅剩{frame_len - offset}字节",
@@ -1783,6 +1795,15 @@ class CSGNewGenParser:
         var = frame_bytes[1:12]
         std_version = (frame_bytes[12] >> 4) & 0x0F
 
+        # ── 多站点帧（OFDMA）先判 ──
+        # FC 第 4 字节 bit0=1 表示多站点帧（表26），其可变域布局与单站点完全不同：
+        # ISAC/BPLC 的「物理块个数」字段在 OFDMA 下**不存在**。套单站点公式会算出离谱帧长，
+        # 再被 HRF 假设（默认 16 字节 PB）蒙中长度 ⇒ 整帧按 HRF 解，OFDMA 与 eFC 全丢
+        # （现场报障「解析不了 eFC」的根因）。
+        # OFDMA 是载波侧多站点调度（HRF 为点对点无线）⇒ 直接判 plc。
+        if var[3] & 0x01:
+            return 'plc'
+
         # HRF 假设（表45）: 载荷PB大小 = byte6[4-7]（表44: 0=16,1=40,2=72,3=136,4=264,5=520）
         hrf_pb = CSGNewGenParser.HRF_PB_SIZE_TABLE.get((var[5] >> 4) & 0x0F, 136)
         if hrf_pb == 40:  # 40 字节 PB 仅 HRF 支持（表44 值1）
@@ -2029,6 +2050,57 @@ class CSGNewGenParser:
 
         return offset, table
 
+    def _parse_ofdma_variable(self, frame_bytes: bytes, offset: int,
+                              table: list) -> None:
+        """解析 OFDMA 帧的可变域（表26，字节 4~11）—— BPLC / ISAC 两版本同构共用。
+
+        ⚠ 只负责「读字段 + 置位 `_ofdma_frame_type`」；**是否带 eFC 由类型决定**
+        （0/2 带、1/3 不带，见 eFC 解析处的判定），本方法不做取舍。
+        """
+        b4 = frame_bytes[offset + 3]
+        ofdma_type = (b4 >> 1) & 0x03
+        band_id = (b4 >> 3) & 0x07
+        station_count = ((b4 >> 6) & 0x03) + 1
+        self._ofdma_frame_type = ofdma_type
+        self._ofdma_station_count = station_count
+        _OFDMA_TYPE_MAP = {0: "DL-OFDMA帧", 1: "DL-OFDMA SACK/UL-OFDMA帧",
+                           2: "UL-OFDMA trigger帧", 3: "UL-OFDMA SACK帧"}
+        table.append(("OFDMA帧类型", f"0b{ofdma_type:02b}", str(ofdma_type),
+                      _OFDMA_TYPE_MAP.get(ofdma_type, f"保留({ofdma_type})"),
+                      offset + 3, offset + 3))
+        table.append(("频段标识", f"0x{band_id:X}", str(band_id),
+                      f"频段{band_id}", offset + 3, offset + 3))
+        table.append(("站点数", f"0x{station_count:X}", str(station_count),
+                      f"{station_count}个站点", offset + 3, offset + 3))
+        _EFC_RULE = {
+            0: "携带 eFC（表27：TF个数 + 每站点 PB个数/TEI/TMI/RU/SACK_RU）",
+            1: "不携带 eFC（DL-OFDMA 的 SACK / UL-OFDMA：载荷直接是数据/确认）",
+            2: "携带 eFC（表28：UL-OFDMA trigger，调度各站点上行）",
+            3: "携带 eFC（表29：每站点 3 字节 = TEI + 接收状态 + 保留）",
+        }
+        table.append(("eFC携带判定", "—",
+                      "不携带 eFC" if ofdma_type == 1 else "携带 eFC",
+                      _EFC_RULE.get(ofdma_type, "保留类型"), offset + 3, offset + 3))
+        # eFC符号个数(2b) + 保留(6b)
+        b5 = frame_bytes[offset + 4]
+        efc_sym_cfg = b5 & 0x03
+        efc_sym_map = {0: 2, 1: 4, 2: 8, 3: 12}
+        self._efc_symbol_count = efc_sym_map.get(efc_sym_cfg, 2)
+        table.append(("eFC符号个数", f"0b{efc_sym_cfg:02b}", str(self._efc_symbol_count),
+                      f"{self._efc_symbol_count}个eFC符号", offset + 4, offset + 4))
+        # PL符号数(9b): byte6[0:7]+byte7[0]
+        b6 = frame_bytes[offset + 5]
+        b7 = frame_bytes[offset + 6]
+        pl_symbols = b6 | ((b7 & 0x01) << 8)
+        table.append(("PL符号数", f"0x{pl_symbols:03X}", str(pl_symbols),
+                      f"{pl_symbols}个PL符号", offset + 5, offset + 6))
+        # 帧长(12b): byte8[0:7]+byte9[0:3]
+        b8 = frame_bytes[offset + 7]
+        b9 = frame_bytes[offset + 8]
+        frame_len_pb = b8 | ((b9 & 0x0F) << 8)
+        table.append(("帧长", f"0x{frame_len_pb:03X}", f"{frame_len_pb * 10}μs",
+                      f"占用信道时长", offset + 7, offset + 8))
+
     def _parse_mpdu_sof_bplc(self, frame_bytes: bytes, offset: int, table: list) -> int:
         """解析 BPLC 版本 SOF 帧可变区域 (字节1-11)"""
         # 源TEI (12b: byte1[0:7] + byte2[0:3])
@@ -2106,7 +2178,8 @@ class CSGNewGenParser:
                      "多站点帧(OFDMA)" if multi_site else "单站点帧", offset + 3, offset + 3))
 
         if multi_site:
-            # OFDMA帧时 byte4 bit1-7 为 OFDMA专用字段（在下方OFDMA块解析）
+            # OFDMA 帧：可变域按表26（下方统一解析，与 BPLC 同构共享实现）。
+            # 早先这里只 pass ⇒ ISAC 版 OFDMA 帧被按单站点帧解、eFC 拿不到类型。
             pass
         else:
             # 非OFDMA: bit1=训练帧标识
@@ -2140,41 +2213,8 @@ class CSGNewGenParser:
         self._efc_symbol_count = 0
 
         if multi_site:
-            # ── OFDMA帧 (表26) ──
-            b4 = frame_bytes[offset + 3]
-            ofdma_type = (b4 >> 1) & 0x03
-            band_id = (b4 >> 3) & 0x07
-            station_count = ((b4 >> 6) & 0x03) + 1
-            self._ofdma_frame_type = ofdma_type
-            self._ofdma_station_count = station_count
-            OFDMA_TYPE_MAP = {0: "DL-OFDMA帧", 1: "DL-OFDMA SACK/UL-OFDMA帧",
-                              2: "UL-OFDMA trigger帧", 3: "UL-OFDMA SACK帧"}
-            table.append(("OFDMA帧类型", f"0b{ofdma_type:02b}", str(ofdma_type),
-                         OFDMA_TYPE_MAP.get(ofdma_type, f"保留({ofdma_type})"),
-                         offset + 3, offset + 3))
-            table.append(("频段标识", f"0x{band_id:X}", str(band_id),
-                         f"频段{band_id}", offset + 3, offset + 3))
-            table.append(("站点数", f"0x{station_count:X}", str(station_count),
-                         f"{station_count}个站点", offset + 3, offset + 3))
-            # eFC符号个数(2b) + 保留(6b)
-            b5 = frame_bytes[offset + 4]
-            efc_sym_cfg = b5 & 0x03
-            efc_sym_map = {0: 2, 1: 4, 2: 8, 3: 12}
-            self._efc_symbol_count = efc_sym_map.get(efc_sym_cfg, 2)
-            table.append(("eFC符号个数", f"0b{efc_sym_cfg:02b}", str(self._efc_symbol_count),
-                         f"{self._efc_symbol_count}个eFC符号", offset + 4, offset + 4))
-            # PL符号数(9b): byte6[0:7]+byte7[0]
-            b6 = frame_bytes[offset + 5]
-            b7 = frame_bytes[offset + 6]
-            pl_symbols = b6 | ((b7 & 0x01) << 8)
-            table.append(("PL符号数", f"0x{pl_symbols:03X}", str(pl_symbols),
-                         f"{pl_symbols}个PL符号", offset + 5, offset + 6))
-            # 帧长(12b): byte8[0:7]+byte9[0:3]
-            b8 = frame_bytes[offset + 7]
-            b9 = frame_bytes[offset + 8]
-            frame_len_pb = b8 | ((b9 & 0x0F) << 8)
-            table.append(("帧长", f"0x{frame_len_pb:03X}", f"{frame_len_pb * 10}μs",
-                         f"占用信道时长", offset + 7, offset + 8))
+            # ── OFDMA帧 (表26)：与 ISAC 版本同构，共享实现 ──
+            self._parse_ofdma_variable(frame_bytes, offset, table)
         elif not training:
             # ── 数据帧(非OFDMA)：TF符号数(3b) + PL频段(3b) + TF扩展频段(1b) + 保留(1b) ──
             b5 = frame_bytes[offset + 4]

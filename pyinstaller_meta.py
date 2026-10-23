@@ -217,6 +217,8 @@ HIDDENIMPORTS = [
     'feedback_dialog',
     'github_issue',  # GitHub Issue 提交纯逻辑（main_gui 函数级 import，静态分析扫不到）
     'github_issue_dialog',  # GitHub Issue 反馈对话框（同上）
+    'downloader',  # 多线程分段下载器（auto_updater 函数级 import）
+    'update_download_dialog',  # 下载面板（main_gui 函数级 import）
     'protocol_parser',
     'plc_rf_parser',
     'hdlc_parser',

@@ -124,12 +124,29 @@ from theme_settings import ThemeManager, ThemeSettingsDialog
 #: 目前只有 698.45（协议8）实现了 parse_to_table(..., verify=False)。
 TOLERANT_PARSE_PROTOCOLS = {8}
 
-APP_VERSION = "1.23.94"
-BUILD_DATE = "2026-10-22"  # 编译日期，每次打包前更新
+APP_VERSION = "1.23.96"
+BUILD_DATE = "2026-10-23"  # 编译日期，每次打包前更新
 
 # 作者 GitHub 仓库地址 —— 「关于」对话框 Star 按钮的**唯一来源**。
 # 改地址只改这一处（按钮文案/提示/跳转都读它，不要在别处再写死一份）。
 AUTHOR_GITHUB_URL = "https://github.com/Liruitao1993/South_Network_Protocol_Analysis_Tool"
+
+
+def _resolve_download_threads(update_settings: dict | None) -> int | None:
+    """「更新设置 → 下载线程」的取值 → 下载器线程数。
+
+    - 缺省 / 0 / 非法 ⇒ ``None`` = **自动**（按文件大小与 CPU 核数自适应，上限 32）；
+    - 其余夹到 ``1..32``（上限来自 ``downloader.MAX_THREADS``，用户口径「最高 32 线程」）。
+    """
+    from downloader import MAX_THREADS
+
+    try:
+        value = int((update_settings or {}).get("download_threads", 0) or 0)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    return max(1, min(MAX_THREADS, value))
 
 # 窗口状态持久化（config.json 顶层 "window" 段）的表格清单：
 # 只收「用户拖动列宽才有意义」的主表；弹窗/克隆表不做持久化（见任务 PRD 的
@@ -149,6 +166,37 @@ _WINDOW_STATE_TABLES = (
 )
 
 CHANGELOG = [
+    (
+        "1.23.96",
+        "2026-10-23",
+        [
+            "**多线程下载器四批次加固（1.23.95 上线后的评审整改）**：R1~R17 逐条落地，目标是一句话——**下载不会产出错文件、退出不会卡死、面板不再自相矛盾**",
+            "**批次一 · 数据与退出安全（P0）**：① 分段请求收到 `HTTP 200`（服务端/代理忽略 Range）时**绝不再按段偏移写入**，判为「该源不可分段」⇒ 作废该段缓存并**自动回落单流**整份重下（此前会把整文件写进某一段的偏移，产出「大小对、内容错」的 exe）；② 主窗口退出（含托盘退出 / 自动更新重启）时**主动 cancel 并等待下载线程结束**，且取消时**保留**已下载分片（`on_cancel=\"keep\"`）——关一次程序不再白丢几百 MB；③ 同一时刻**只允许一个下载任务**：重复点「检查更新→下载」不再起第二个 worker 抢同一个 `.part`，而是把已有面板唤到前台",
+            "**批次二 · 续传自证（P1）**：④ `progress.json` 的 `url` 参与校验，**url 变了整份进度作废**（换源后拿旧分片拼接＝必然坏文件）；⑤ 每段响应必须**自证** `Content-Range` 起始偏移 == 请求起点、总长 == 计划总长，不符即判该源不可分段（不静默错位写入）；⑥ 单流回落路径**也能续传**（`Range: bytes=off-` 追加写），不支持时在面板明示「该源不支持断点续传」，`resume=False` 时清理旧 `.part`；⑦ 磁盘满 / 写入失败等 `OSError` 一律翻成**中文可读提示**（含「磁盘空间不足：需要至少 X 可用空间」），不再把英文 `WinError 112` 抛给用户",
+            "**批次三 · 交互可用性（P1）**：⑧ 面板点 X 关闭 = **转入后台继续下载**，并可从新菜单「配置 → 下载进度(&D)...」重新打开继续暂停/取消；⑨ 下载结束后**清空状态栏进度**（不再永久占住状态栏顶掉后续消息）；⑩ 面板按钮宽度走 `gui_utils.fit_btn_width` 且**字号变化时重算**（实测 14 号字下「后台运行」会被压回旧下限而裁字）；⑪ 进度快照的 `state` 驱动标题/状态列（暂停显示「⏸ 已暂停」、服务端不认 Range 重新开始时显示「↻ 重新开始」），不再靠百分比猜",
+            "**批次四 · 一致性与清理（P2）**：⑫ `DEFAULT_MAX_THREADS`（16）真正成为「自动」的默认上限（此前用 `MAX_THREADS` 兜底，常量是死代码）；⑬ 停用/删除无人使用的 `http_probe` 死参数；⑭ 删掉 `_UpdateDownloadWorker.progress` 死信号（没人连接，留着会误导接线）；⑮ 取消**默认保留**已下载进度，另给「清理缓存」入口（两者行为可测地不同）；⑯ 取消后立即返回（不再顺序等所有分段 future）、去掉取消分支的空语句；⑰ 分段重试识别 `429` / `Retry-After`（有该头按其秒数退避，夹上限 10 s，无则沿用线性退避）",
+            "**暂停等待改成真正的事件阻塞**：`DownloadControl.wait_resumed()`（`threading.Event`）取代 `sleep(0.1)` 轮询 —— 点「继续」立即生效，不再平均晚 50 ms，也不白唤醒 CPU",
+            "测试：`test/test_downloader.py` **42 项**（新增 url 变更作废 / `Content-Range` 自证 / 单流续传与不支持时明示 / 磁盘提示中文 / 取消保留 vs 清理两条路径 / 取消及时返回 / `Retry-After` 夹上限 / 「自动」= 16 线程语义）+ `test/test_update_download_dialog.py` **26 项**（新增状态文案随 `state` / 大字号不裁字 / 关窗=后台 / 清理缓存可用性 / **真实宿主级**重入守卫、菜单重新打开、状态栏清理），**6 条变异反证**逐条实测变红后逐字节还原（段自证 / keep 保留 / 进度推进 / 共用句柄 / Retry-After 上限 / 面板模态）",
+            "顺带修复两处既有测试自身的问题（与本次功能无关但会报假红）：`test/test_menu_wiring.py` 末尾打印 `✓` 在 GBK 控制台抛 `UnicodeEncodeError`（测试全绿却以 exit=1 结束）；`test/test_app_icon_path.py` 仍在 `.spec` 正文里 grep `app_icon.ico` 字面量，而 spec 早已改为 `datas=list(meta.DATAS)` ⇒ 改查 `pyinstaller_meta.DATAS`（真正的单一来源）",
+            "配套：`APP_VERSION 1.23.95 → 1.23.96`、`BUILD_DATE 2026-10-23`、两个 `.iss` 同步；新增菜单项已登记 `test/test_menu_wiring.py` 的 EXPECTED",
+        ],
+    ),
+    (
+        "1.23.95",
+        "2026-10-22",
+        [
+            "**自动升级改多线程分段下载（现场报「下载新版本太慢」）**：新增 `downloader.py`（纯逻辑无 Qt）—— 原自动升级走**单流** `urllib` 拉 100 MB 的 exe，慢到用户受不了；现改为 **HTTP Range 分段 + 线程池并发**：先探测总长并切成 N 段，每段一个 `Range: bytes=a-b` 请求并发拉取，**线程数上限 32**（用户口径「最高 32 线程」），跑满带宽。已实测 GitHub Release 资产直链支持 `Accept-Ranges: bytes`、Range 请求返回 `206 Partial Content` 且 `Content-Range` 正确（资产 URL 是 302 → S3，**跟随重定向**已处理）",
+            "**断点续传**：已完成的分段记录在 `<exe>.progress.json` 边车文件里（记录每段 `(start, end)` 布局与已完成字节），**重跑只补没下完的段**；单段中途断掉也只重下那一段，不是整个文件重来。**段布局变了**（线程数变化/实现调整）或**资源变了**（etag/长度不同）⇒ 旧进度自动作废、从头下（否则拼出来的文件字节错位）",
+            "**安全底线不变**：分段只写 `<exe>.part` 临时文件，**全部段完成并按段序合并、逐段核对长度后才改名为目标文件** ⇒ 中断/崩溃**绝不会**留下「看着像下载完了其实是半截」的 exe（自动升级会拿它覆盖正在运行的程序）。SHA-256 校验与 **PE 魔数兜底**（`MZ` + 最小体积，更新源给错时拦住）**一道都没动**",
+            "**服务端不认 Range 就老实单流**：探测到服务端返回 200（而非 206）时**自动回落单流下载**，不因为「并发不了」就下载失败；拿不到总长时同样回落",
+            "**「配置 → 更新设置」新增「下载线程」**（自动（推荐）/ 8 / 16 / 24 / 32）：默认「自动」= 按文件大小与 CPU 核数自适应（小文件自动收敛线程数，避免每段一个 HTTP 往返的开销）；存 `config.json` 的 `update.download_threads`（0 = 自动）",
+            "**进度条按字节实时推进**：此前按「段完成」上报 ⇒ 大文件长时间「进度不动」；现每写满一个 64 KB 块即上报（节流 0.2 s），单调递增",
+            "**修掉一个真实并发缺陷**（实测发现，非理论推演）：多线程**共用一个文件句柄**写不同区间时，`seek()` + `write()` 不是原子操作，线程之间会互相踩掉文件偏移 ⇒ **下载出来的文件字节错位**（实测错位点正好在 64 KB = READ_BLOCK 边界，且「第一次下载就与源文件不一致」）。修法：**每线程一个独立文件句柄**，各自 seek 到自己那一段（OS 按各自 fd 的文件偏移写，互不干扰）",
+            "**下载界面重做（现场口径：面板挡操作、看不到线程和速率）**：新增 `update_download_dialog.py` —— ① **非模态**（`NonModal`）：下载期间**主程序照常可用**（原先是 `WindowModal` 的 `QProgressDialog`，弹出来整个程序不能动），还可以「后台运行」收起面板、进度留在状态栏；② **看得见线程**：顶部显示「N 线程并发 · 进行中 x / y」，表格**逐行显示每个分段的实时进度**（区间 / 进度条 / 已下载 / 状态）；③ **看得见速率**：当前 MB/s + 已下载/总量 + **剩余时间估算**；④ **暂停 / 继续**：暂停后各线程在 64 KB 块边界停下、已完成字节保留，点「继续」**从断点接着下**（复用续传机制，不重头再来）；⑤ **取消并清理**：立即停止并**删除 `.part` 与进度文件**，不留垃圾",
+            "测试：新增 `test/test_downloader.py` **31 项**（分段规划与均分守恒 / 线程数上限 32 与小文件收敛 / **本地 HTTP 服务端端到端**：并发下载字节与源**逐字节一致**、不支持 Range 时回落单流、续传只补缺失段、进度单调递增且有中间态 / **暂停端到端**：暂停后线程能退出、`.part` 保留、继续后字节完全一致 / **取消端到端**：抛 `DownloadCancelled`、`.part` 与进度文件都被清理（分段与单流回落两条路径都测）/ **失败路径**：目标文件**不出现**、合并数据缺口必须失败 / 与 auto_updater 衔接与 PE 兜底仍在 / GUI 线程数配置贯通）+ `test/test_update_download_dialog.py` **14 项**（**非模态守卫** / 线程数与速率与逐线程表格 / 暂停按钮切换与信号 / 取消终态提示「已清理」/ 后台运行收起但不结束 / 完成态 / 主程序接线守卫**含「不得残留 QProgressDialog 实例化」**/ worker 支持 pause·resume·cancel），均已登记 `release_check.py:CORE_TESTS`",
+            "配套：`APP_VERSION 1.23.94 → 1.23.95`、两个 `.iss` 同步；spec `hiddenimports` 增补 `downloader` / `update_download_dialog`",
+        ],
+    ),
     (
         "1.23.94",
         "2026-10-22",
@@ -8179,6 +8227,9 @@ class MainWindow(QMainWindow):
         llm_api_action.triggered.connect(self._show_llm_api_manager)
         update_act = config_menu.addAction("更新设置(&U)...")
         update_act.triggered.connect(self._show_update_settings_dialog)
+        # 下载在后台进行时，面板被收起也能从这里叫回来（R8）
+        dl_progress_act = config_menu.addAction("下载进度(&D)...")
+        dl_progress_act.triggered.connect(self._show_download_panel)
         config_menu.addSeparator()
         reset_layout_act = config_menu.addAction("恢复默认窗口布局(&W)")
         reset_layout_act.triggered.connect(self._reset_window_layout)
@@ -8545,12 +8596,20 @@ class MainWindow(QMainWindow):
             self._start_download(chosen)
 
     def _start_download(self, latest: dict):
-        """后台下载新版 exe 到临时目录，进度条展示，完成后编排替换。"""
-        from PySide6.QtWidgets import QProgressDialog
+        """后台下载新版 exe（**非模态**面板：可继续用主程序、可暂停、可取消）。"""
+        from update_download_dialog import UpdateDownloadDialog
 
         url = latest.get("url", "")
         if not url:
             QMessageBox.warning(self, "更新", "未获取到下载地址。")
+            return
+
+        # 已有下载在跑就不再起第二个线程：两轮下载会抢同一个 `.part`（同一目的文件），
+        # 实测会拼出字节错位的文件。改为把面板叫回前台即可。
+        running = getattr(self, "_download_thread", None)
+        if running is not None and running.isRunning():
+            self._show_download_panel()
+            self.statusBar().showMessage("已有下载任务在进行中，已显示下载面板", 5000)
             return
 
         exe_path = Path(sys.argv[0]) if getattr(sys, "frozen", False) else None
@@ -8571,32 +8630,115 @@ class MainWindow(QMainWindow):
             "南网解析工具_" + safe_file_stem(latest.get("version", "new")) + ".exe"
         )
 
-        dlg = QProgressDialog("正在下载更新...", "取消", 0, 100, self)
-        dlg.setWindowTitle("下载更新")
-        dlg.setWindowModality(Qt.WindowModality.WindowModal)
-        dlg.setAutoClose(True)
-
-        # 保存上下文供 done 回调使用
-        self._download_ctx = {
-            "exe_path": str(exe_path),
-            "dlg": dlg,
-            "latest": latest,
-        }
-
+        max_threads = _resolve_download_threads(self._update_settings)
+        dlg = UpdateDownloadDialog(
+            self,
+            version=str(latest.get("version", "") or ""),
+            total_size=0,
+            threads=max_threads or 0,
+        )
         thread = _UpdateDownloadWorker(
             url,
             new_exe,
             latest.get("sha256", ""),
             verify_sha=bool(self._update_settings.get("sha256_verify", True)),
             parent=self,
+            max_threads=max_threads,
         )
         self._download_thread = thread
+        self._download_dlg = dlg
+        self._download_ctx = {
+            "exe_path": str(exe_path),
+            "dlg": dlg,
+            "latest": latest,
+            "dest": str(new_exe),
+        }
         thread_registry.track(thread, "UpdateDownloadWorker")
-        thread.progress.connect(dlg.setValue)
+
+        # 下载 → 界面
+        thread.stats.connect(dlg.update_progress)
+        thread.stats.connect(self._on_download_stats_statusbar)
+        # 界面 → 下载（暂停 / 继续 / 取消）
+        dlg.pause_requested.connect(thread.pause)
+        dlg.resume_requested.connect(thread.resume)
+        dlg.cancel_requested.connect(thread.cancel)
+
+        thread.paused.connect(self._on_download_paused_cb)
+        thread.cancelled.connect(self._on_download_cancelled_cb)
         thread.done.connect(self._on_download_done_cb)
         thread.finished.connect(thread.deleteLater)
+        # 「后台运行」/ 关窗口：只收起面板，下载继续（状态栏保留进度）
+        dlg.background_requested.connect(
+            lambda d=dlg: self._hide_download_panel(d))
+        # 「清理缓存」：删掉 .part 与进度文件（只剩「已取消」态可用）
+        dlg.discard_requested.connect(
+            lambda d=dlg: self._discard_download_cache(d))
+
+        # **非模态**：show() 而不是 exec()，下载期间主程序照常可用
+        dlg.show()
         thread.start()
 
+    def _show_download_panel(self, *_args):
+        """「配置→下载进度」：把下载面板叫回前台（后台运行时也能回来）。"""
+        dlg = getattr(self, "_download_dlg", None)
+        running = getattr(self, "_download_thread", None)
+        if dlg is None or (running is not None and not running.isRunning()):
+            self.statusBar().showMessage("当前没有正在进行的下载", 4000)
+            return
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+
+    def _hide_download_panel(self, dlg):
+        """「后台运行」：只收起面板，下载线程继续跑。"""
+        if dlg is not None:
+            dlg.hide()
+        self.statusBar().showMessage(
+            "下载已在后台进行，可从「配置→下载进度」重新打开面板", 8000)
+
+    def _discard_download_cache(self, dlg):
+        """「清理缓存」：删掉 `.part` 与进度文件（仅在无下载进行时可用）。"""
+        from downloader import cleanup_partial
+
+        ctx = getattr(self, "_download_ctx", {}) or {}
+        dest = ctx.get("dest", "")
+        running = getattr(self, "_download_thread", None)
+        if running is not None and running.isRunning():
+            QMessageBox.information(self, "下载", "下载进行中，先暂停或取消再清理缓存。")
+            return
+        try:
+            if dest:
+                cleanup_partial(Path(dest))
+        except Exception as exc:        # noqa: BLE001 - 清理失败不该弹异常栈
+            self.statusBar().showMessage(f"清理缓存失败：{exc}", 8000)
+            return
+        if dlg is not None and hasattr(dlg, "mark_cancelled"):
+            dlg.mark_cancelled()
+        self.statusBar().showMessage("已清理下载缓存（临时文件与进度文件）", 6000)
+
+    def _on_download_stats_statusbar(self, progress):
+        """后台下载时在状态栏保留一行进度（面板收起后也能看到）。"""
+        try:
+            from downloader import format_speed
+
+            text = (
+                f"下载更新 {float(progress.percent):.0f}%"
+                f" · {format_speed(progress.speed_bps)}"
+                f" · {int(progress.threads)} 线程"
+            )
+            self.statusBar().showMessage(text)
+        except Exception:                  # noqa: BLE001 - 状态栏不该影响下载
+            pass
+
+    def _on_download_paused_cb(self):
+        self.statusBar().showMessage("下载已暂停（点「继续」从断点接着下）", 8000)
+
+    def _on_download_cancelled_cb(self):
+        ctx = getattr(self, "_download_ctx", {}) or {}
+        dlg = ctx.get("dlg")
+        if dlg is not None and hasattr(dlg, "mark_cancelled"):
+            dlg.mark_cancelled()
+        self.statusBar().showMessage("下载已取消，临时文件已清理", 8000)
     def _on_download_done_cb(self, ok: bool, err: str, new_path: str):
         """下载完成回调（GUI 线程安全）。"""
         ctx = getattr(self, "_download_ctx", {}) or {}
@@ -8611,7 +8753,16 @@ class MainWindow(QMainWindow):
 
     def _on_download_done(self, ok, err, new_path, exe_path, dlg, latest):
         """下载结束：成功则编排替换并退出，失败提示。"""
+        # 状态栏那行「下载更新 x%」必须撤掉：否则下载完了还挂着 100% 的旧进度
+        try:
+            self.statusBar().clearMessage()
+        except Exception:              # noqa: BLE001 - 状态栏不该影响收尾
+            pass
         if dlg is not None:
+            if ok and hasattr(dlg, "mark_completed"):
+                dlg.mark_completed()
+            elif not ok and hasattr(dlg, "mark_failed"):
+                dlg.mark_failed(err)
             dlg.close()
         if not ok:
             QMessageBox.warning(self, "下载更新", f"下载失败：{err}")
@@ -8698,6 +8849,21 @@ class MainWindow(QMainWindow):
         sha_cb.setChecked(bool(cfg.get("sha256_verify", True)))
         form.addRow("安全校验", sha_cb)
 
+        # 下载线程数：多线程分段下载（跑满带宽）。0 = 自动（按文件大小/CPU 自适应）
+        threads_combo = QComboBox()
+        for label, value in (("自动（推荐）", 0), ("8 线程", 8), ("16 线程", 16),
+                             ("24 线程", 24), ("32 线程（最快）", 32)):
+            threads_combo.addItem(label, value)
+        saved_threads = int(cfg.get("download_threads", 0) or 0)
+        t_idx = threads_combo.findData(saved_threads)
+        threads_combo.setCurrentIndex(t_idx if t_idx >= 0 else 0)
+        threads_combo.setToolTip(
+            "下载新版时用几个线程并发拉取分段（分段 + 断点续传）。\n"
+            "线程越多，在带宽/延迟受限的网络上越快；默认 32 线程为上限。\n"
+            "「自动」= 按文件大小与 CPU 核数自适应。"
+        )
+        form.addRow("下载线程", threads_combo)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -8722,6 +8888,8 @@ class MainWindow(QMainWindow):
                 "gitee_repo": gitee_repo_edit.text().strip(),
                 "private_url": private_edit.text().strip(),
                 "sha256_verify": sha_cb.isChecked(),
+                # 0 = 自动（自适应）；其余为固定线程数（1~32）
+                "download_threads": int(threads_combo.currentData() or 0),
             }
             self._save_update_settings()
 
@@ -9215,6 +9383,14 @@ class MainWindow(QMainWindow):
             qt = getattr(self, tname, None)
             if qt is None:
                 continue
+            if tname == "_download_thread" and qt.isRunning():
+                # 退出时取消下载但**保留**已下载的分段（on_cancel=keep）：
+                # 默认 clean 会把几白 MB 的 .part 删掉，下次开机白重来
+                try:
+                    qt.on_cancel = "keep"
+                    qt.cancel()
+                except RuntimeError:
+                    pass
             try:
                 qt.disconnect(qt)
             except (RuntimeError, TypeError):
@@ -14361,13 +14537,16 @@ class _UpdateCheckWorker(QThread):
 
 
 class _UpdateDownloadWorker(QThread):
-    """后台线程下载新版 exe（QThread 子类化）。"""
+    """后台线程下载新版 exe（多线程分段 + 可暂停 / 取消）。"""
 
-    progress = Signal(int)
-    done = Signal(bool, str, str)  # (ok, error, new_path)
+    stats = Signal(object)                 # downloader.DownloadProgress（逐线程明细/速率）
+    paused = Signal()                      # 已暂停（线程已停在块边界）
+    cancelled = Signal()                   # 已取消（临时文件已清理）
+    done = Signal(bool, str, str)          # (ok, error, new_path)
 
     def __init__(
-        self, url: str, dest_file: Path, sha256: str, verify_sha: bool = True, parent=None
+        self, url: str, dest_file: Path, sha256: str, verify_sha: bool = True,
+        parent=None, max_threads: int | None = None,
     ):
         super().__init__(parent)
         self.url = url
@@ -14376,18 +14555,82 @@ class _UpdateDownloadWorker(QThread):
         # 「配置→更新设置」的「校验 SHA-256」开关**真的生效**：
         # 关掉即不带预期摘要（此前是死开关，勾不勾都按「有摘要就校验」走）
         self.verify_sha = bool(verify_sha)
+        # 下载线程数上限（None = 按文件大小/CPU 自适应，上限 32）
+        self.max_threads = max_threads
 
+        from downloader import DownloadControl
+
+        #: 暂停 / 取消的控制句柄（GUI 通过 pause()/resume()/cancel() 操作）
+        self.control = DownloadControl()
+        #: 取消时临时文件去留：正常「取消」= clean（回收磁盘）；程序退出前置 keep
+        #: （已下载的分段要留着，下次才能续传，否则关一次程序就白下几白 MB）
+        self.on_cancel = "clean"
+
+    # ── 外部控制 ────────────────────────────────────────────────────
+    def pause(self) -> None:
+        """暂停：各线程在下一个 64 KB 块边界停下，已完成字节保留（可续传）。"""
+        self.control.pause()
+
+    def resume(self) -> None:
+        """继续：从断点接着下（复用续传机制，不重头再来）。"""
+        self.control.resume()
+
+    def cancel(self) -> None:
+        """取消：立即停下，并清理已下载的临时文件。"""
+        self.control.cancel()
+
+    # ── 主流程 ──────────────────────────────────────────────────────
     def run(self):
         from auto_updater import Opdater, is_pe_executable
+        from downloader import DownloadCancelled
 
         expected = self.sha256 if self.verify_sha else ""
+        self.control.reset()
+        op = Opdater(max_threads=self.max_threads)
         try:
-            op = Opdater()
-            op.download(
-                self.url,
-                self.dest_file,
-                progress_cb=lambda p: self.progress.emit(int(p)),
-            )
+            # 暂停 = 「本轮下载提前返回、目标文件还没生成」；继续 = 再来一轮（复用续传）
+            while True:
+                if self.control.cancelled:
+                    self.cancelled.emit()
+                    return
+                try:
+                    op.download(
+                        self.url,
+                        self.dest_file,
+                        stats_cb=self.stats.emit,
+                        control=self.control,
+                        on_cancel=self.on_cancel,
+                    )
+                except DownloadCancelled:
+                    self.cancelled.emit()
+                    return
+                except Exception as exc:      # noqa: BLE001
+                    # 用户取消引发的网络/读取异常统一按「已取消」处理
+                    if self.control.cancelled:
+                        self.cancelled.emit()
+                        return
+                    self.done.emit(False, str(exc), str(self.dest_file))
+                    return
+
+                if self.control.cancelled:
+                    self.cancelled.emit()
+                    return
+                # 暂停：dest 尚未生成（合并只在全部段完成后才做）
+                if self.control.paused and not self.dest_file.exists():
+                    self.paused.emit()
+                    # **阻塞等** resume()/cancel()，不要 sleep(0.1) 轮询：
+                    # 轮询会让暂停期间的「继续」平均晚 50ms 才生效，且浪费唤醒。
+                    self.control.wait_resumed()
+                    if self.control.cancelled:
+                        if self.on_cancel == "clean":
+                            from downloader import cleanup_partial
+
+                            cleanup_partial(self.dest_file)
+                        self.cancelled.emit()
+                        return
+                    continue                 # 继续下载（断点续传）
+                break                        # 真正完成
+
             if expected and not op.verify(self.dest_file, expected):
                 self.done.emit(
                     False, "SHA-256 校验失败，文件可能损坏", str(self.dest_file)
@@ -14405,7 +14648,10 @@ class _UpdateDownloadWorker(QThread):
                 )
                 return
             self.done.emit(True, "", str(self.dest_file))
-        except Exception as e:
+        except Exception as e:              # noqa: BLE001
+            if self.control.cancelled:
+                self.cancelled.emit()
+                return
             self.done.emit(False, str(e), str(self.dest_file))
 
 

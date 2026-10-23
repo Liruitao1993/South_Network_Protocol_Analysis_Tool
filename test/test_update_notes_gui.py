@@ -289,7 +289,9 @@ def test_sha256_verify_toggle_actually_gates(app):
             self.mismatch = mismatch
             self.verified = []
 
-        def download(self, url, dest_file, progress_cb=None):
+        def download(self, url, dest_file, progress_cb=None,
+                     stats_cb=None, control=None, resume=True,
+                     on_cancel="clean"):
             Path(dest_file).write_bytes(b"MZ" + b"\x00" * 4096)
             return Path(dest_file)
 
@@ -302,7 +304,7 @@ def test_sha256_verify_toggle_actually_gates(app):
     try:
         # ① 开关关闭：即便摘要给的是错的，也不校验（按用户意图放行）
         ops.append(FakeOp(mismatch=True))
-        auto_updater.Opdater = lambda: ops[-1]
+        auto_updater.Opdater = lambda *a, **k: ops[-1]
         w = main_gui._UpdateDownloadWorker("u", tmp / "a.exe", "f" * 64, verify_sha=False)
         w.done.connect(lambda ok, err, p: results.append((ok, err)))
         w.run()
@@ -311,7 +313,7 @@ def test_sha256_verify_toggle_actually_gates(app):
 
         # ② 开关打开 + 摘要不匹配：拦住
         ops.append(FakeOp(mismatch=True))
-        auto_updater.Opdater = lambda: ops[-1]
+        auto_updater.Opdater = lambda *a, **k: ops[-1]
         w2 = main_gui._UpdateDownloadWorker("u", tmp / "b.exe", "f" * 64, verify_sha=True)
         w2.done.connect(lambda ok, err, p: results.append((ok, err)))
         w2.run()
@@ -321,7 +323,7 @@ def test_sha256_verify_toggle_actually_gates(app):
 
         # ③ 开关打开 + 匹配：放行
         ops.append(FakeOp(mismatch=False))
-        auto_updater.Opdater = lambda: ops[-1]
+        auto_updater.Opdater = lambda *a, **k: ops[-1]
         w3 = main_gui._UpdateDownloadWorker("u", tmp / "c.exe", "f" * 64, verify_sha=True)
         w3.done.connect(lambda ok, err, p: results.append((ok, err)))
         w3.run()
@@ -356,7 +358,9 @@ def test_download_worker_rejects_non_pe(app):
         def __init__(self, payload):
             self.payload = payload
 
-        def download(self, url, dest_file, progress_cb=None):
+        def download(self, url, dest_file, progress_cb=None,
+                     stats_cb=None, control=None, resume=True,
+                     on_cancel="clean"):
             Path(dest_file).write_bytes(self.payload)
             if progress_cb:
                 progress_cb(100.0)
@@ -368,7 +372,7 @@ def test_download_worker_rejects_non_pe(app):
     real = auto_updater.Opdater
     try:
         # ① 接口 JSON（无资产版本被误当下载地址时的真实产物）
-        auto_updater.Opdater = lambda: FakeOp(b'{"tag_name":"1.8.2","assets":[]}')
+        auto_updater.Opdater = lambda *a, **k: FakeOp(b'{"tag_name":"1.8.2","assets":[]}')
         w = make_worker(tmp / "a.exe")
         w.done.connect(lambda ok, err, p: results.append((ok, err)))
         w.run()
@@ -376,14 +380,14 @@ def test_download_worker_rejects_non_pe(app):
         check("JSON 不会被当成新 exe（拒绝并给出原因）", ok is False and "可执行程序" in err, err)
 
         # ② HTML 错误页
-        auto_updater.Opdater = lambda: FakeOp(b"<html><body>404</body></html>" + b"x" * 2048)
+        auto_updater.Opdater = lambda *a, **k: FakeOp(b"<html><body>404</body></html>" + b"x" * 2048)
         w2 = make_worker(tmp / "b.exe")
         w2.done.connect(lambda ok, err, p: results.append((ok, err)))
         w2.run()
         check("HTML 错误页被拒绝", results[-1][0] is False, results[-1][1])
 
         # ③ 真 PE → 放行
-        auto_updater.Opdater = lambda: FakeOp(b"MZ" + b"\x00" * 4096)
+        auto_updater.Opdater = lambda *a, **k: FakeOp(b"MZ" + b"\x00" * 4096)
         w3 = make_worker(tmp / "c.exe")
         w3.done.connect(lambda ok, err, p: results.append((ok, err)))
         w3.run()

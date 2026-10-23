@@ -148,6 +148,7 @@ def test_tab_visibility():
         ("_monitor_tab_index", spec.has_monitor, "监控器"),
         ("_seq_diagram_tab_index", spec.has_sequence_diagram, "通信时序图"),
         ("_upgrade_tab_index", spec.has_upgrade, "光伏升级"),
+        ("_test_tab_index", spec.has_test, "协议测试"),
     ]
     for attr, expected, label in pairs:
         idx = getattr(win, attr, None)

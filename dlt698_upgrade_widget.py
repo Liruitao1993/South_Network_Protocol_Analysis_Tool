@@ -226,7 +226,19 @@ TIMEOUT_MIN, TIMEOUT_MAX = 100, 600000
 RETRY_MIN, RETRY_MAX = 0, 10
 
 #: 校验类型下拉：label / 协议 enum 值 / `calc_checksum_value(kind=…)`
-CHECK_TYPES = (("CRC", 0, "crc"), ("md5", 1, "md5"), ("SHA1", 2, "sha1"))
+CHECK_TYPES = (("CRC-16(X-25)", 0, "crc"), ("md5", 1, "md5"), ("SHA1", 2, "sha1"))
+
+#: 「启动传输」报文格式（(键, 显示名)）。
+#: 现场不同厂家对「最后那个 2 字节标识」的编码不同，甚至用的方法号都不同 ⇒ 需要**逐个试**，
+#: 哪个回 DAR=0 就认定这个设备吃哪种，再继续下发文件块。
+#: 顺序即尝试顺序（先方法14 的 octet 形态 —— 现场 SCM/DPU 最常见）。
+START_FORMATS = (
+    ("v14_octet", "方法14 · 标识=octet-string（现场默认）"),
+    ("v14_visible", "方法14 · 标识=visible-string"),
+    ("v7", "方法7（旧版精简参数）"),
+)
+#: 下拉里的「自动兼容」：按 START_FORMATS 顺序全部试一遍
+START_FORMAT_AUTO = "auto"
 
 #: 文件类别（表188 属性2：`文件类别 enum{当前设备文件(0)/其他设备文件(1)}`）
 FILE_CATEGORIES = (("当前设备文件", 0), ("其他设备文件", 1))
@@ -261,6 +273,7 @@ DEFAULTS = {
     "check_kind": 0,
     "check_value": "",
     "check_endian": "big",
+    "start_format": "v7",
     "exec_mode": "now",                 # now = 立即执行（全 FF）；sched = 指定时间
     "exec_time": "",                    # "YYYY-MM-DD HH:MM:SS"
     "license_hex": "",
@@ -527,6 +540,9 @@ class Dlt698UpgradeWidget(QWidget):
         self._post_baud_idx = 0
         self._post_baud_fails = []
         self._frozen = False             # 传输中冻结计划类输入（`_freeze_plan_inputs` 的唯一写入点）
+        #: 启动报文格式尝试游标：没有下一种格式前不判失败（现场设备吃哪种组帧不确定）
+        self._fmt_order = [k for k, _n in START_FORMATS]
+        self._fmt_idx = 0
 
         self._serial_worker = None
         self._bt_provider = None         # 取蓝牙 worker 的回调（主窗口注入；蓝牙通道用）
@@ -736,6 +752,18 @@ class Dlt698UpgradeWidget(QWidget):
         for label, value in FILE_CATEGORIES:
             self.combo_category.addItem(label, value)
         row3.addWidget(self.combo_category)
+        row3.addSpacing(12)
+        row3.addWidget(QLabel("启动格式"))
+        self.combo_start_format = QComboBox()
+        self.combo_start_format.addItem("自动兼容（逐个试）", START_FORMAT_AUTO)
+        for _key, _name in START_FORMATS:
+            self.combo_start_format.addItem(_name, _key)
+        self.combo_start_format.setToolTip(
+            "现场不同厂家对「启动传输」的组帧不同（方法14 的两种标识编码 / 方法7 精简参数）。\n"
+            "自动兼容：按顺序逐个试，哪条回 DAR=0 就用哪种继续下发文件块；\n"
+            "全部不回才判失败。锁定某一种时只发那一条。")
+        self.combo_start_format.currentIndexChanged.connect(lambda *_a: self._schedule_save())
+        row3.addWidget(self.combo_start_format)
         row3.addStretch(1)
         form.addLayout(row3)
 
@@ -1699,7 +1727,7 @@ class Dlt698UpgradeWidget(QWidget):
 
     def _expected_omd(self, upg) -> bytes:
         if self._phase == PHASE_START:
-            return upg.OMD_START
+            return self._start_omd(upg)
         if self._phase == PHASE_BLOCKS:
             return upg.OMD_WRITE
         return upg.OMD_EXEC
@@ -1912,9 +1940,7 @@ class Dlt698UpgradeWidget(QWidget):
                 # OAD 取「读版本内容」下拉（通用 43000300 / 厂家扩展内部版本 FF100400）
                 frame = upg.build_read_version(sa, ca, piid, oad=self._read_oad(upg))
             elif self._phase == PHASE_START:
-                frame = upg.build_start_transfer(
-                    sa, ca, piid, self._file_info(upg), self.spin_block.value(),
-                    self._check_type(), self._check_value(upg))
+                frame = self._build_start_frame(upg, sa, ca, piid)
             elif self._phase == PHASE_BLOCKS:
                 frame = upg.build_write_block(
                     sa, ca, piid, self._block_idx, self._blocks[self._block_idx])
@@ -1933,6 +1959,52 @@ class Dlt698UpgradeWidget(QWidget):
         self._log(f"[TX] {fmt_hex(frame)}  ({label})", "tx")
         self._set_status()
         self._wait_timer.start(self.spin_timeout.value())
+
+    def _start_format_keys(self) -> list:
+        """本次要尝试的启动报文格式顺序（下拉=自动 ⇒ 全部；否则只试选中的那一种）。"""
+        key = self.combo_start_format.currentData() if hasattr(self, "combo_start_format") else None
+        if key and key != START_FORMAT_AUTO:
+            return [key]
+        return [k for k, _n in START_FORMATS]
+
+    def _start_format_label(self) -> str:
+        key = self._current_start_format()
+        for k, name in START_FORMATS:
+            if k == key:
+                return name
+        return key
+
+    def _current_start_format(self) -> str:
+        keys = self._start_format_keys()
+        if self._fmt_idx >= len(keys):
+            self._fmt_idx = len(keys) - 1
+        return keys[max(0, self._fmt_idx)]
+
+    def _build_start_frame(self, upg, sa: bytes, ca: int, piid: int) -> bytes:
+        """按**当前尝试的格式**组启动传输帧（方法14 两种编码 / 方法7）。"""
+        fmt = self._current_start_format()
+        fi = self._file_info(upg)
+        block = self.spin_block.value()
+        check_type = self._check_type()
+        check_value = self._check_value(upg)
+        if fmt == "v7":
+            return upg.build_start_transfer(sa, ca, piid, fi, block, check_type, check_value)
+        return upg.build_start_transfer_v14(
+            sa, ca, piid, fi, block, check_type, check_value,
+            variant=("visible" if fmt == "v14_visible" else "octet"))
+
+    def _start_omd(self, upg) -> bytes:
+        """当前格式对应的 OMD（方法14=0E、方法7=07）—— 判定确认帧必须用它。"""
+        return upg.OMD_START if self._current_start_format() == "v7" else upg.OMD_START_V14
+
+    def _next_start_format(self) -> bool:
+        """切到下一种启动报文格式；没有下一种返回 False。"""
+        keys = self._start_format_keys()
+        if self._fmt_idx + 1 >= len(keys):
+            return False
+        self._fmt_idx += 1
+        self._attempt = 0
+        return True
 
     def _on_ack(self) -> None:
         """收到本步确认：停表 → 只把**已确认**的包计入进度 → 推进下一步。"""
@@ -2069,6 +2141,12 @@ class Dlt698UpgradeWidget(QWidget):
             self._attempt += 1
             prefix = "[超时]" if "无确认响应" in why else "[失败]"
             self._log(f"{prefix} {step} {why}，已重试 {self._attempt}/{limit}，重发", "warn")
+            self._send_current_step()
+            return
+        if self._phase == PHASE_START and self._next_start_format():
+            # 启动传输：这台设备不认当前格式 ⇒ 换下一种继续（**不算失败**）
+            self._log(f"[信息] {why}；改用「{self._start_format_label()}」再试一次启动传输", "warn")
+            self._wait_timer.stop()
             self._send_current_step()
             return
         if self._phase in VER_PHASES:
@@ -2482,6 +2560,7 @@ class Dlt698UpgradeWidget(QWidget):
         self._rx_buf.clear()
         self.log_text.clear()
         self._reset_version_info()
+        self._fmt_idx = 0
         self.progress.setValue(0)
         self._confirmed_bytes = 0
         self._sent_frames = 0
@@ -2622,6 +2701,7 @@ class Dlt698UpgradeWidget(QWidget):
             "check_kind": int(self.combo_check.currentData()),
             "check_value": self.edit_check.text(),
             "check_endian": self.combo_endian.currentData(),
+            "start_format": self.combo_start_format.currentData(),
             "exec_mode": self.combo_exec_mode.currentData(),
             "exec_time": self.edit_exec_time.text(),
             "license_hex": self.edit_license.text(),
@@ -2692,6 +2772,10 @@ class Dlt698UpgradeWidget(QWidget):
         _set_combo(self.combo_sa_len, _bounded_int(s["sa_len"], 6, 1, 6))
         _set_combo(self.combo_category, _bounded_int(s["category"], 0, 0, 1))
         _set_combo(self.combo_check, _bounded_int(s["check_kind"], 0, 0, 2))
+        _sf = str(s.get("start_format") or START_FORMAT_AUTO)
+        _set_combo(self.combo_start_format,
+                   _sf if _sf in [START_FORMAT_AUTO] + [k for k, _n in START_FORMATS]
+                   else START_FORMAT_AUTO)
         _set_combo(self.combo_endian,
                    s["check_endian"] if s["check_endian"] in ("big", "little") else "big")
         _set_combo(self.combo_exec_mode,

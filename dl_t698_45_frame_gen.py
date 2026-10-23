@@ -97,6 +97,50 @@ class DLT69845FrameGenerator:
         control = 0x43
         return self._assemble_frame(sa, ca, control, apdu)
 
+    def generate_apdu_frame(self, sa: bytes, ca: int = 0, apdu: bytes = b"",
+                            control: int = 0x43) -> bytes:
+        """通用装帧：把已拼好的 APDU 装进链路帧（HCS/FCS 仍只由本类算）。
+
+        用途：`generate_*` 未覆盖的客户机服务（CONNECT-Request、GET-Record、代理请求等）。
+        控制域默认 `0x43` = DIR 0（客户机→服务器）/ PRM 1 / SC 0 / 功能码 3（用户数据）。
+        **不要**在调用方手拼 68…16 —— 那会造出第二份 FCS 实现（AGENTS §8 陷阱 31 的漂移根因）。
+        """
+        return self._assemble_frame(sa, ca, int(control), bytes(apdu or b""))
+
+    def generate_connect_request(self, sa: bytes, ca: int = 0, piid: int = 0,
+                                 protocol_version: int = 0x0010,
+                                 protocol_conformance: bytes = b"\xFF" * 8,
+                                 function_conformance: bytes = b"\xFF" * 15,
+                                 client_tx_max: int = 0x0400,
+                                 client_rx_max: int = 0x0400,
+                                 client_window: int = 1,
+                                 client_max_apdu: int = 0x0400,
+                                 timeout_s: int = 100,
+                                 auth: bytes = b"\x00") -> bytes:
+        """生成 CONNECT-Request（建立应用连接，§7.4.3.2 表40）。
+
+        APDU = `02 PIID | 协议版本号(2B) | 协议一致性块(8B) | 功能一致性块(15B) |
+        客户机发送帧最大尺寸(2B) | 客户机接收帧最大尺寸(2B) | 接收窗口(1B) |
+        最大可处理APDU(2B) | 连接超时(4B) | 认证请求对象 | 00(无时间标签)`。
+
+        **默认参数逐字节复现协议文档附录 H.2 示例**：
+        `02 00 00 10 FF×8 FF×15 04 00 04 00 01 04 00 00 00 00 64 00 00`（40 字节）。
+        多字节字段（版本号/帧尺寸/超时）按 A-XDR 规则**大端**。
+        """
+        apdu = (bytes([0x02, int(piid) & 0xFF])
+                + struct.pack('>H', int(protocol_version) & 0xFFFF)
+                + bytes(protocol_conformance)
+                + bytes(function_conformance)
+                + struct.pack('>H', int(client_tx_max) & 0xFFFF)
+                + struct.pack('>H', int(client_rx_max) & 0xFFFF)
+                + bytes([int(client_window) & 0xFF])
+                + struct.pack('>H', int(client_max_apdu) & 0xFFFF)
+                + struct.pack('>I', int(timeout_s) & 0xFFFFFFFF)
+                + bytes(auth)
+                + b'\x00')
+        # 建立应用连接属应用层服务 ⇒ 功能码 3（用户数据）
+        return self.generate_apdu_frame(sa, ca, apdu, control=0x43)
+
     def generate_get_response_normal(self, sa: bytes, ca: int, piid_acd: int,
                                      oad: bytes, data_bytes: bytes,
                                      dar: int = 0) -> bytes:

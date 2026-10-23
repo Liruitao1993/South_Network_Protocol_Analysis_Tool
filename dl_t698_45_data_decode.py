@@ -109,12 +109,28 @@ ANHUI_ATTR_TEMPLATES: Dict[int, Dict[str, Any]] = {
                             "spec": "dispatch_plan_unit"}}},
 }
 
+def is_null_member(item: Any) -> bool:
+    """成员是否为 A-XDR ``null``（表191 的「无此信息」现场写法）。"""
+    if not isinstance(item, dict):
+        return item is None
+    return (item.get("tag_name") == "null" or item.get("类型") == "null"
+            or item.get("解析值") is None and item.get("tag_name") in (None, "null"))
+
+
 def version_like_members(data_dict: Any) -> Optional[list]:
     """若 ``data_dict`` 是「版本信息形状」的 structure ⇒ 返回其 6 个成员，否则 ``None``。
 
-    形状判据（宽松档）：`structure` + **恰好 6 个**成员 + 每个成员都是 `visible-string`。
+    形状判据（宽松档）：`structure` + **恰好 6 个**成员 + 每个成员是 `visible-string`
+    **或 `null`**。
     更严的「长度是否与表191 声明一致」由 :func:`version_lengths_match` 单独回答 ——
     命名可以照给（值/原始字节一起展示），但长度不符时调用方**必须**把这一点说出来。
+
+    ⚠ **为什么允许 `null`**（1.23.93 现场修正，改前必读）：表191 声明 6 项都是定长
+    visible-string(4/4/6/4/6/8)，但现场设备把「厂商扩展信息」回成 `00`（A-XDR null）。
+    早先这里要求**全部**是 visible-string ⇒ 整条结构被判成「非版本形状」，界面于是
+    退化成一行 `数据 = 0206...`（现场看到的就是「版本信息变成原始内容」）。
+    既然 :func:`_decode_version_structure` 本就容忍非字符串成员，判定就应与之一致：
+    **命名照给，缺失另报**（`version_rows` 会追加「⚠ 字段缺失」行）。
     """
     if not isinstance(data_dict, dict):
         return None
@@ -124,6 +140,8 @@ def version_like_members(data_dict: Any) -> Optional[list]:
     if not isinstance(items, list) or len(items) != len(VERSION_FIELDS):
         return None
     for item in items:
+        if is_null_member(item):
+            continue
         if not isinstance(item, dict):
             return None
         if item.get("tag_name") != "visible-string" and item.get("类型") != "visible-string":
@@ -161,9 +179,16 @@ def _decode_version_structure(data_dict: Dict[str, Any],
         return result
     for i, item in enumerate(items):
         name = field_names[i] if i < len(field_names) else f"字段{i + 1}"
+        if is_null_member(item):
+            # 设备回 null（= 无此信息）：仍然给出字段名，别让整条塌成 hex
+            result[name] = "NULL"
+            continue
         val = item.get("解析值") if isinstance(item, dict) else item
         if not isinstance(val, str):
             continue
+        # 定长 visible-string 常用 NUL 补齐（表191 的 SIZE(4)/(6)/(8)）⇒ 显示前去掉尾部 NUL，
+        # 否则界面上是一串不可见字符，粘到别处还会带上 \x00
+        val = val.rstrip("\x00")
         if "日期" in name and len(val) == 6 and val.isdigit():
             # YYMMDD → 20YY-MM-DD
             try:

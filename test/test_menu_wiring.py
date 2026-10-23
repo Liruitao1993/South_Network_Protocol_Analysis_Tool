@@ -49,6 +49,7 @@ EXPECTED = {
     "系统集成设置(&S)...": "_show_system_settings_dialog",
     "模型API管理(&M)...": "_show_llm_api_manager",  # ← 曾因 connect 被误删而失效
     "更新设置(&U)...": "_show_update_settings_dialog",
+    "下载进度(&D)...": "_show_download_panel",
     "恢复默认窗口布局(&W)": "_reset_window_layout",
     "检查更新(&C)": "_check_update_manual",
     "问题反馈(&F)...": "_show_feedback_dialog",
@@ -185,7 +186,9 @@ def main():
     if FAIL:
         print(f"失败 {FAIL} 项 / 通过 {PASS} 项")
     else:
-        print(f"全部通过（{PASS} 项）✓")
+        # 不用 ✓：Windows 控制台默认 GBK，打印它会 UnicodeEncodeError 把进程带崩
+        # （测试全绿却以 exit=1 结束，看起来像真失败）
+        print(f"全部通过（{PASS} 项）")
     print("=" * 64)
     sys.stdout.flush()
     os._exit(1 if FAIL else 0)
