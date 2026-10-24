@@ -1460,3 +1460,39 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Next Steps
 
 - 提交时发现工作区混有 1.23.93/1.23.95/1.23.96 三批未提交改动（downloader.py 等仍是未跟踪新文件），与用户确认后合并为一个发布提交；trellis/.claude/.agents 的运行时升级改动仍留在工作区未提交
+
+
+## Session 44: 发布 1.24.0：编译单文件 exe + GitHub Release
+<!-- trellis-session: v=2 fp=8ea0ae646a480f49 -->
+
+**Date**: 2026-10-24
+**Task**: 发布 1.24.0：编译单文件 exe + GitHub Release
+**Branch**: `main`
+
+### Summary
+
+1.24.0 批次（协议15 Modbus、协议2 HDLC 定义级修正、645 无线组帧、串口蓝牙通道）编译打包并发布；先修两处门禁红，门禁 PASS=145 FAIL=0 WARN=0；Release 资产 exe+SUM 与本地 sha256 三方一致
+
+### Main Changes
+
+- protocol_registry/main_gui/AGENTS/README/.iss 版本四件套；reflex_web/landing_web.py 补 Modbus 协议行；test/test_self_test.py 解析器计数改按注册表取
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6dc01b2` | feat: 1.24.0 —— 新增协议15 Modbus + 协议2 HDLC 字段级重写 + 645 无线模组组帧 |
+
+### Testing
+
+- [OK] release_check.py PASS=145 FAIL=0 WARN=0（含 GUI）
+- [OK] exe --self-test 退出 0（13 个解析器已加载）
+- [OK] dist exe FileVersion=1.24.0.0；sha256 ca7d9708… 与 Release 资产 digest 一致
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 协议2 HDLC 未覆盖项（安全 HLS/glo-ded、SN 短名、分段重组、ACCESS 展开）与 dlms_parser.py 旧表同步待办
