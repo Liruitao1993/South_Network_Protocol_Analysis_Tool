@@ -1,0 +1,28 @@
+{
+  "id": "sync-web-download-version",
+  "name": "sync-web-download-version",
+  "title": "同步 Web 下载区版本信息到 1.24.0",
+  "description": "目标服务器已发布 1.24.0，但工程内 reflex_web/downloads/version.json（本地数据根，gitignore）仍是 1.14.13 的 LAN 地址，且随部署包分发的 client_readme.md 仍写 1.14.0 / 12 种协议。同步为 1.24.0 / 16 种协议 + GitHub Release 资产地址与 sha256，并用纯逻辑校验（与 protocol_registry 对拍）。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "Liruitao1993",
+  "assignee": "Liruitao1993",
+  "createdAt": "2026-10-24",
+  "completedAt": "2026-10-24",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "kind": "maintenance"
+  }
+}
