@@ -1496,3 +1496,38 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Next Steps
 
 - 协议2 HDLC 未覆盖项（安全 HLS/glo-ded、SN 短名、分段重组、ACCESS 展开）与 dlms_parser.py 旧表同步待办
+
+
+## Session 45: 同步 Web 下载区版本信息到 1.24.0
+<!-- trellis-session: v=2 fp=114623a3f32f23a8 -->
+
+**Date**: 2026-10-24
+**Task**: 同步 Web 下载区版本信息到 1.24.0
+**Branch**: `main`
+
+### Summary
+
+工程内下载区与已部署的 1.24.0 对齐：version.json（gitignore/部署排除）指向 GitHub Release 资产，随包分发的 client_readme.md 从 1.14.0/12 种协议更新为 1.24.0/16 种，downloads/README.md 重写为数据根语义
+
+### Main Changes
+
+- reflex_web/downloads/client_readme.md：版本徽章/协议表 16 行/功能表纠正/1.24.0 更新记录
+- reflex_web/downloads/README.md：随包静态资源 vs 运行时发布产物（数据根）
+- reflex_web/downloads/version.json（本地，不入库）：1.24.0 + GitHub 资产 URL + sha256
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `328b665` | docs(web): 下载区同步到 1.24.0 / 16 种协议 |
+
+### Testing
+
+- [OK] protocol_registry 对拍 16 行全对齐
+- [OK] resolve_download_target/顶栏徽章读到 1.24.0
+- [OK] Release 资产 URL 302→200, Content-Length 105030178
+- [OK] test_web_landing(104)/test_web_download_url(35)/test_web_data_paths(126) 全绿
+
+### Status
+
+[OK] **Completed**

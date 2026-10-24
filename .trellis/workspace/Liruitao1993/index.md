@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 44
+- **Total Sessions**: 45
 - **Last Active**: 2026-10-24
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1498 | Active |
+| `journal-1.md` | ~1533 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 45 | 2026-10-24 | 同步 Web 下载区版本信息到 1.24.0 | `328b665` | `main` |
 | 44 | 2026-10-24 | 发布 1.24.0：编译单文件 exe + GitHub Release | `6dc01b2` | `main` |
 | 42 | 2026-10-16 | 桌面粘性入口：托盘菜单内嵌报文输入框 + 任务栏缩略图按钮 | `6a5afe1` | `main` |
 | 41 | 2026-10-15 | 光伏升级：发送通道（串口/蓝牙）+ 按 ATT 上限自动算每包最大字节数 | `eeb046c` | `main` |
