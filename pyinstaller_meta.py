@@ -284,6 +284,12 @@ HIDDENIMPORTS = [
     'csg_uplink_frame_gen',  # 组帧
     'csg_uplink_frame_gen_widget',  # 组帧页（frame_gen_widget 静态 import）
     'validator.csg_uplink_validator',  # make_validator importlib
+    # 协议15（Modbus RTU/TCP）
+    'modbus_parser',  # 解析（parser_registry 懒加载）
+    'modbus_core',  # 帧层/PDU 层解析单源（parser 与 validator 静态 import）
+    'modbus_register_store',  # 寄存器列表存储（modbus_registers.json 读写）
+    'modbus_register_widget',  # 寄存器列表管理对话框 + 查询页浏览面板
+    'validator.modbus_validator',  # make_validator importlib
     'dlt645_sim',  # DLT645 虚拟表包（从站引擎 + LME 下发，dlt645_meter_sim_widget 静态 import）
     'dlt645_sim.engine',
     'dlt645_sim.archive',

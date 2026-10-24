@@ -312,9 +312,25 @@ _PROTOS: Tuple[ProtocolSpec, ...] = (
         validator_class="validator.csg_uplink_validator:CSGUplinkValidator",
         parser_wrapper="direct",
     ),
+    ProtocolSpec(
+        index=15,
+        name="[15] Modbus 协议 (RTU/TCP)",
+        short_name="Modbus",
+        parser_key="modbus",
+        placeholder="请输入Modbus RTU/TCP报文，例如：01 03 00 00 00 02 C4 0B",
+        # 别名用于命令行/快捷小窗按名称选协议；「Modbus RTU/TCP」都指向同一实现
+        aliases=("Modbus", "MODBUS", "modbus", "Modbus RTU", "Modbus TCP", "莫迪康"),
+        # 查询页 = 寄存器列表浏览/选择（配置文件 modbus_registers.json）
+        lookup_kind="modbus",
+        lookup_tab_title="寄存器列表",
+        # 批量：按 CRC16 / MBAP 长度域切帧（一行可多帧，容忍日志前缀）
+        extract_strategy="modbus",
+        validator_class="validator.modbus_validator:ModbusValidator",
+        parser_wrapper="modbus",
+    ),
 )
-
 _BY_INDEX = {p.index: p for p in _PROTOS}
+
 _INDEX_BY_ALIAS: dict = {}
 for _p in _PROTOS:
     for _a in _p.aliases:
@@ -536,6 +552,24 @@ class GWGenGuiParser:
         return self.parser.parse_to_table(data, **kwargs)
 
 
+class ModbusGuiParser:
+    """Modbus（协议15）：每次解析自动带上当前选中的寄存器列表。
+
+    选中状态由 ``modbus_register_store`` 持有（顶栏下拉框 / 查询页改变它），
+    因此单帧解析、批量解析、详情重解析走的是同一份选择，不会各读一份。
+    """
+
+    def __init__(self, parser):
+        self.parser = parser
+
+    def parse_to_table(self, data):
+        import modbus_register_store
+
+        return self.parser.parse_to_table(
+            data, profile=modbus_register_store.selected_profile()
+        )
+
+
 class HDC10GuiParser:
     def __init__(self, parser, level, ftype=None, channel="plc"):
         self.parser = parser
@@ -580,6 +614,8 @@ def build_gui_parser(
         return GWGenGuiParser(base_parser, parse_level or "auto", frame_type, channel)
     if wrap == "hdc10":
         return HDC10GuiParser(base_parser, parse_level or "auto", frame_type, channel)
+    if wrap == "modbus":
+        return ModbusGuiParser(base_parser)
     raise ValueError(f"Unknown parser_wrapper: {wrap}")
 
 
@@ -598,6 +634,7 @@ def lookup_builder_method(kind: Optional[str]) -> Optional[str]:
         "modular": "_create_modular_iface_lookup_content",
         "di_yw645": "_create_yw645_lookup_content",
         "di_csg_uplink": "_create_csg_uplink_lookup_content",
+        "modbus": "_create_modbus_lookup_content",
     }
     if not kind:
         return None
@@ -626,4 +663,5 @@ __all__ = [
     "CSGGenGuiParser",
     "GWGenGuiParser",
     "HDC10GuiParser",
+    "ModbusGuiParser",
 ]

@@ -124,8 +124,8 @@ from theme_settings import ThemeManager, ThemeSettingsDialog
 #: 目前只有 698.45（协议8）实现了 parse_to_table(..., verify=False)。
 TOLERANT_PARSE_PROTOCOLS = {8}
 
-APP_VERSION = "1.23.96"
-BUILD_DATE = "2026-10-23"  # 编译日期，每次打包前更新
+APP_VERSION = "1.24.0"
+BUILD_DATE = "2026-10-24"  # 编译日期，每次打包前更新
 
 # 作者 GitHub 仓库地址 —— 「关于」对话框 Star 按钮的**唯一来源**。
 # 改地址只改这一处（按钮文案/提示/跳转都读它，不要在别处再写死一份）。
@@ -166,6 +166,62 @@ _WINDOW_STATE_TABLES = (
 )
 
 CHANGELOG = [
+    (
+        "1.24.0",
+        "2026-10-24",
+        [
+            "**南网光伏协议转换单元·无线模组接口手册 V1.6：协议组帧能力扩展（承接上一版的解析扩展）**：① 新增 `dlt645_pv_wireless_frame.py`（纯逻辑，12 个扩展 DI 的字段模板 + 数据域编码器，与解析侧 `dlt645_pv_wireless.parse_wireless_di` 严格互为逆运算）；② `dlt645_frame_schema.py` 按「DI 是否属于本手册」前置分派 —— `get_di_info` / `build_di_fields` / `build_data` / `length_warning` 四处都是无线优先、非无线原样交回，**标准 645 行为零改动**；③ 新增四个扩展控制码命令：`06H` 上报确认应答、`86H` 主动上报（与 06H 的 `ctrl & 0x1F` 同为 0x06 但 DIR 相反，靠方向位区分）、`1EH` 在网状态上报（数据域固定 `028100FF` + 在网状态）、`9EH` 在网状态确认（L=00H）；命令下拉新增「从站上报」分组；④ 组帧页 DI 下拉把 12 个无线 DI **置顶**（原先不在 `dlt645_di.json` 里，只能手输），不定长 DI 长度显示「不定长」；⑤ 读请求特例：`02EB0000` 数据转发要求带 `Z+C+T+DATA`（L=07H+len），其余无线 DI 的 11H 请求只带 DI；⑥ 手册口径统一：超时 T 按 **BCD** 编码（10H→1000ms）、信道 2 字节 BCD **低字节在前**、地址列表 `1+6×M`、执行升级时间 10 位 BCD 低字节在前且全 FF=立即执行、拓扑每条 `地址+信号质量+父节点+保留2`（父节点全 FF 表示未入网）",
+            "回归：新增 `test/test_dlt645_pv_wireless_frame.py` **106 项全过** —— 含 §4.4.1 / §4.4.2 / §4.4.3 / §4.4.6 手册原文发送帧**逐字节复现**、12 个 DI 的组帧→解析闭环、关键字节序（BCD/低字节在前）与非法输入中文报错，已进 `CORE_TESTS`；`test_dlt645_frame_gen`(161) 与 `_frame_gen_gui`(74) 的门禁断言随「从站上报」新分组同步更新，其余 645 测试全过",
+            "手册内部两处不一致**如实落实现、不臆造**：`04900103` 长度列写 108 但字段累加只有 106，按 108 补 2 字节「尾部保留」与解析侧闭环；`04E60001` 继续按本手册 `1+6×M`（附件1 的「长度列 16」无法自洽切分）",
+            "配套：`APP_VERSION 1.23.99 → 1.24.0`；两个 `.iss` 同步",
+        ],
+    ),
+    (
+        "1.23.99",
+        "2026-10-23",
+        [
+            "**协议2 字段级覆盖审计（依据 `协议文档/2.DLMS协议` 的 Green Book Ed.11 全文）**：逐章核对 HDLC 链路层（第 8 章）、应用层（第 9 章）、传输层（第 7 章）与 A-XDR 编码，修正 4 处**定义级错误**（不是缺字段，是本来解析错）",
+            "**① APDU 标签表整体错标**：旧表把 0x01/0x02/0x03/0x04 当 AARQ/AARE/RLRQ/RLRE、0x0C 当 ConfirmedServiceError、0x0E 当 GeneralBlockTransfer。按 Green Book 9.4.1 的 XDLMS-APDU CHOICE 更正：0x01=InitiateRequest、0x05=ReadRequest、0x06=WriteRequest、0x08=InitiateResponse、0x0C=ReadResponse、0x0D=WriteResponse、0x0E=ConfirmedServiceError、0x0F=DataNotification、0x10=DataNotificationConfirm、0x16=UnconfirmedWrite、0x18=InformationReport；ACSE 释放为 **0x62=RLRQ / 0x63=RLRE**（原 0x03/0x04 是错的）；补 0xCA（glo 事件通知）与 0xD2（ded 事件通知）",
+            "**② `Invoke-Id-And-Priority` 位序颠倒**：文档（L7669-7693）是「低 4 位=invoke-id、bit6=service-class（0=Unconfirmed/1=Confirmed）、bit7=priority（0=Normal/1=High）」；旧实现取高 4 位当 ID、bit2 当 service-class、bit1-0 当 priority —— 真实帧 `C1` 被显示成 `ID=12, Unconfirmed, Low`（正确是 `ID=1, Confirmed, High`）",
+            "**③ DataAccessResult / Action-Result 枚举错位**：文档是稀疏枚举（0 success、1 hardware-fault、2 temporary-failure、3 read-write-denied、4 object-undefined、9 object-class-inconsistent、11 object-unavailable、12 type-unmatched、13 scope-of-access-violated、14 data-block-unavailable、15/16/17/18 长读长写、19 data-block-number-invalid、250 other-reason），旧表按 0~21 连续编号、含义与标准不符（如 3 被标成「读写对象未定义」，标准是 read-write-denied）",
+            "**④ ExceptionResponse 结构错**：文档为 `state-error [0] ENUMERATED { service-not-allowed(1), service-unknown(2) }` + `service-error [1] CHOICE { operation-not-possible[1] … invocation-counter-error[6] Unsigned32 }`；旧实现按 0/1/2 的枚举硬编码（0=service-not-allowed、2=service-busy 等均不存在），且未处理第 6 种附带的 4 字节计数器",
+            "**补齐子类型与分支**：`Set-Response` 子类型 4/5 顺序按文档更正（4=last-datablock-with-list、5=with-list）；`Action-Request` 补 6=with-pblock 并修正 2/4/5 编号；`Action-Response` 去掉不存在的 5。新增解析分支：**RLRQ/RLRE**（BER：reason[0] + user-information[30]）、**Get-Request-With-List**（COUNT + N×(属性描述符+选择访问)）、**Get-Response-With-List**（COUNT + N×(data/data-access-result)）、**Set-Response-With-List**（COUNT + N×DataAccessResult）、**Action-Request-With-List**（方法描述符列表+参数列表）、**Action-Response-With-List**（COUNT + N×(Action-Result+返回数据)）、**DataNotification 的 date-time 前置字段**（09 0C 12 字节）、**长 Invoke-Id 的 bit28~31 语义**（自描述/遇错继续/服务级别/优先级）",
+            "**解析输出中文化（国内现场口径）：中文在前、标准英文原名括注**：SNRM/UA 协商参数（发送最大信息域长度（Max Info Field Length - Transmit））、Get/Set/Action 子类型（正常读（Normal）、数据块响应（With-data-block））、DataAccessResult / Action-Result / Exception 枚举（读写被拒绝（read-write-denied）、服务不允许（service-not-allowed））、A-XDR 类型名（说明列「16 位有符号整数（long），共 3 字节」而非只有 `long（3 字节）`）、BER 标签（「上下文 [30] 用户信息（user-information）」「通用（Universal） 字节串（OCTET STRING）」）、Invoke-Id（「不需确认（Unconfirmed）」「高优先级（High）」）、COSEM 类名（「时钟（Clock）」，抽成类常量 `COSEM_CLASS_NAMES` 单一来源，Action 分支原先自带的英文小表并进来）、特殊地址（「无站地址（NO_STATION）」）；APDU 名称保留英文原名在前（AARQ / Get-Request 是国内现场通用叫法）",
+            "**帧长自证（新增）**：格式域声明的帧长与整帧字节数不再视而不见 —— 串口半包 / 抓包截断 / 多帧粘包时表格出现「警告」行、`parse()` 的「格式域」多一个「帧长校验」文字（如「帧长声明 25 字节，实际只有 12 字节，疑似截断（还差 14 字节）」），容错口径不变（解析状态仍为成功，已有字段照常展示）",
+            "**主题一致性修复（深色主题下成片白底的控件）**：① 「光伏升级」「协议测试」「蓝牙工具」三个**懒加载**页创建时没按当前主题初始化（内部 `_dark` 初值 False），于是「先选深色主题、再首次打开该页」→ 版本信息框 / 升级日志 / 收发日志 / 帧预览全是白底；改为创建后立刻 `restyle_for_theme(_is_dark_theme())`（与「生产测试架」同口径）。② QCompleter 补全弹层是**独立顶层 QListView**，选不中 `QComboBox QAbstractItemView` 规则，组帧页 4 处只能各自写死白底 → 四套 QSS 各补独立 `QListView` 规则，并删掉 `frame_gen_widget` 里的 5 处硬编码。③ 拓扑页节点详情 `QMessageBox`、`gui_utils` 文本框右键菜单同样写死白底 → 交给全局 QSS。验证：全 16 协议 × 深色 / 浅色 / 深浅往返三轮**像素级扫描**（`widget.grab()` 取四角亮度），亮底与暗底异常控件 0 个；真机截图纯白像素占比 光伏升级 0.08% / 协议测试 0.12%，回归 `test_theme_settings`(73)、`test_appearance_gui`(17)、`test_dl698_upgrade_gui`(523)、`test_dlt698_testbench`(279)、`test_csg_frame_gen_gui`(139)、`test_dlt645_frame_gen_gui`(73) 全通过",
+            "**串口工具支持「通道」选择（串口 / 蓝牙复用，按你的要求新增）**：「发送配置」行新增「通道」下拉（串口 / 蓝牙，随配置落盘）。选蓝牙时**复用「蓝牙工具」页**已建立的 BLE 连接（`set_bluetooth_provider` 注入，本页不建/不断连接）：`frame_received`（重组后的整帧）走同一套接收 / 断帧 / 解析 / 匹配 / 统计，发送由 `BluetoothWriteAdapter` 把 `SerialSendWorker` 的 `write_raw` 转成蓝牙 `send_data`（发送节奏、序号回指、失败处理全部复用串口那套，不另写线程）。两个通道的字节**绝不混用**（非当前通道收到的一律丢弃），状态标签显示蓝牙设备名、未连接时「开始发送」禁用并提示去蓝牙页连接。回归：新增 `test/test_serial_tool_channel.py` **25 项**（默认通道 / 未连接禁用 / 已连接可用 / 写入口转调 / 通道隔离双向 / 持久化与非法值回落），已进 `CORE_TESTS`；真机在蓝牙通道下实测 21 帧收发正常",
+            "**南网光伏无线模组接口手册 V1.6：PDF → Markdown + 645 解析扩展**：① 把 `协议文档/6.645协议/南网光伏协议转换单元无线接口手册-V1.6.pdf`（13 页、带文本层）识别并整理成同名 `.md`（章节、两张交互矩阵、11 张 DI 表、帧格式、6 条示例报文全部重排为 Markdown，示例帧附字节级拆解与核对结论）；② 新增 `dlt645_pv_wireless.py`（12 个 DI + 控制码扩展语义），`dlt645_parser.py` 按「DI + 控制码」分派：`02EB0000` 逆变器数据转发（波特率特征字按位、校验方式、**超时 T 按 BCD**、透传数据）、`04E60001` 地址列表（`1+6×M`，**优先于**附件1 接管该 DI）、`04E60002` 无线频段（调制方式 / 信道 2 字节 BCD / 协商使能）、`04900100` 拓扑（逐节点地址/信号质量/父节点，父节点全 FF 标「未入网」）、`04900101~04900106` 升级（块状态字位图 + 连续性、状态码中文、文件信息、块序号+数据、最大块大小、执行时间全 FF=立即执行）、`04900107` 版本、`028100FF` 在网状态；控制码扩展到 `86H/06H`（主动上报 / 主站确认）、`1EH/9EH`（模组在网状态上报 / 确认）、`D1H`（数据转发异常，`ERR=0x80` 位展开为「无线接口转换器未入网」）；③ 修掉首版把超时 T 按整数解的错误（0x10 应为 1000ms，不是 1600ms）。回归：新增 `test/test_dlt645_pv_wireless.py` **65 项**（6 条 §4.4 原文示例 + 升级类构造帧 + 普通 DI 反例 + 工具函数），已进 `CORE_TESTS`；`test_dlt645_pv_ext.py` 改为在 pv 模块层锁附件1 的歧义切分契约（**156 项全过**），`test_dlt645_frame_gen`(161) / `_tolerant_parse`(135) / `_status_word_bits`(130) / `_table_offsets`(40) / `_lme` / `_sim` 全通过",
+            "测试：`test/test_hdlc_corpus.py` 扩至 **39 项**（27 条真实帧语料 + 中文化守卫 5 项 + 帧长自证 2 项 + Action 请求/应答、glo-* 与 Confirmed-Service-Error 兜底、Access 请求应答、坏输入容错；原有的 Invoke-Id 位序双断言、DataAccessResult=3 → read-write-denied、RLRQ/RLRE、Get-Request-With-List 全部保留）；中文化守卫会拦住以后新增的纯英文枚举，避免回退",
+            "**未覆盖（本轮明确不做，已登记 AGENTS §8 陷阱 85）**：安全（HLS 挑战/响应计算、glo-/ded- 解密与安全头校验）、SN（短名）引用、HDLC 分段重组（I-FIRST/FRAGMENT/LAST）、ACCESS 服务（0xD9/0xDA）的访问描述符展开、接口类属性表（Blue Book Ed.18）、完整 OBIS 代码表、CoAP 传输；`dlms_parser.py`（协议1 PLC RF 的内嵌 DLMS 子解析）仍有同类旧表，属协议1 范围待同步",
+            "配套：`APP_VERSION 1.23.98 → 1.23.99`；两个 `.iss` 同步",
+        ],
+    ),
+    (
+        "1.23.98",
+        "2026-10-23",
+        [
+            "**协议2（HDLC/国网DLMS）解析能力修复（用 27 条真实报文做语料回归）**：语料取自 DLMS UA《Examples for DLMS/COSEM Information Exchange》、DLMS Handbook 第 3 章与 Gurux 论坛实抓帧，覆盖 SNRM/UA（1/2/4 字节地址、HDLC 参数协商）、AARQ/AARE（LN 无认证 + LLS 认证）、Get/Set 请求响应、date-time/int8/int16/uint8/bool/enum/octet-string 等数据类型、事件通知，逐帧比对 HCS/FCS 与字段语义",
+            "**修掉 6 个真实缺陷（都会让现场报文解析失败或给出错误值）**：① `parse()` 结构化解析 100% 抛 `TypeError`（`**ctrl_details` 展开一个 list）→ 控制域子字段改为「位明细」列表；② **DLMS A-XDR 数据类型表整体错位**（0x02 当 Boolean、0x09 当 Visible-String、0x10 当 Compact-Array）→ 按 IEC 62056-6-2 重写（array/structure/boolean/bit-string/int8/16/32/64/uint8/16/32/64/enum/float32/64/octet-string/visible-string/utf8/bcd/date-time/date/time），date-time 按「年(2)+月+日+星期+时+分+秒+百分秒+UTC偏差+状态」解码（示例帧 → `2002-12-04 10:06:11 星期三 UTC偏差 120 分钟 状态正常`）；③ AARQ/AARE 的 BER 解析漏掉 APDU 标签，整棵树错位一层（application-context OID 碎成「BER 标签/长度」）→ 把 tag 拼回去再解析；④ BER 解析对 primitive 类型也递归（OID 被拆成嵌套 TLV）→ 只对 constructed 递归；⑤ 未识别 APDU（事件通知 0xC2、数据通知 0x0F、异常响应 0xD8、访问服务 0xD9/0xDA）被当 BER 树乱解析 → 补齐 APDU 类型表与解析分支（事件通知 = 4 字节 invoke + date-time + 描述符 + 数据；数据通知 = invoke + 通知体；异常响应 = state/service error），`_looks_like_ber_tlv` 收紧为只认 0x60/0x61 且长度自洽；⑥ 批量切帧按**字符**在 hex 串里搜 \"7E\"（`67 E6` 中间的字符被当成帧边界，实测把 32 字节响应切成 8+24 两条残帧）且不支持相邻帧共用 7E → 改为按字节匹配 + 共享标志复用",
+            "**地址语义增强**：4 字节服务器地址不再只显示 HDLC 7 位拼接值（如 0x02200080，对现场无意义），改为「逻辑设备 0x0001 / 逻辑块 0x0011」；2 字节显示服务器地址（0x1181）；1 字节标注客户端地址。两种口径都保留，便于与 Gurux / 厂家文档对照",
+            "**摘要与类型名**：协议 2/3/4/5（DLMS 族）此前落到「其他协议」兜底，批量表里摘要变成「0x7E | 目的地址 | 源地址」→ 改为「控制域 + APDU 类型 + 类ID + OBIS」（如 `I帧 (信息帧) | Get-Request (读请求) | 类:Clock (时钟) | OBIS:0.0.1.0.0.255`），「协议/类型」列优先显示 APDU 类型",
+            "测试：新增 `test/test_hdlc_corpus.py` **23 项**（27 条真实帧解析不崩溃 + HCS/FCS 正确、文档笔误帧如实报错、地址语义、控制域序号、APDU 类型识别、AARQ BER/OID/user-information、date-time 与整数/布尔/枚举、SNRM/UA 参数协商、分块响应/数据通知/异常响应/分段位、共享 7E 切帧、DLMS 摘要与类型名）",
+            "配套：`APP_VERSION 1.23.97 → 1.23.98`；`release_check.py` 的 CORE_TESTS 登记新测试",
+        ],
+    ),
+    (
+        "1.23.97",
+        "2026-10-23",
+        [
+            "**新增 Modbus 协议解析（协议15，RTU / TCP 自动识别）**：`modbus_core.py`（纯逻辑）实现帧层 + PDU 层 —— RTU（从站地址 + PDU + CRC16，多项式 0xA001）与 TCP（MBAP 头 + PDU，校验事务标识/协议标识/长度域）自动识别；功能码覆盖 0x01~0x04 读线圈/离散输入/保持寄存器/输入寄存器、0x05/0x06 写单个、0x0F/0x10 写多个、0x16 屏蔽写、0x17 读写多个、0x08 诊断、0x2B 设备识别，以及异常响应（功能码 | 0x80）+ 异常码中文解释",
+            "**寄存器列表驱动解析（可按品牌记录并选择）**：新增 `modbus_register_store.py` 与配置文件 `modbus_registers.json` —— 每份列表记录「地址 + 名称 + 数据类型（uint16/int16/uint32/int32/float32/float64/bit/hex/ascii）+ 寄存器数量 + 系数 + 单位 + 说明」，整份列表另有字节序 / 字序 / 响应起始地址；内置 2 份示例（单相 / 三相电表，明确标注为示例数据，请按厂家手册修改）。顶栏「寄存器列表」下拉选择后，单帧与批量解析都按该表把裸字节翻译成工程量（如 0x0064 × 0.1 → 10 V）",
+            "**未选择寄存器列表时按通用方式解析**：只解析到「读还是写、起始地址与数量、寄存器原始值」。Modbus **响应帧本身不含寄存器地址**，故通用模式下地址按 0x0000 起推导，并在说明列明确标注「响应帧不含寄存器地址，按响应顺序推导」+ 提示选择寄存器列表，绝不假装知道品牌含义",
+            "**寄存器列表管理界面**：查询页新增「寄存器列表」面板（下拉选择 + 只读浏览 + 管理入口）；`ModbusRegisterDialog` 支持新建 / 复制 / 删除 / 编辑 / 导入导出 JSON，保存走 `atomic_io` 原子写（文件损坏时回落内置示例，绝不打断解析）。地址按十六进制录入（0x0000），校验重复地址 / 非法系数 / 非法地址",
+            "**批量解析**：`extract_modbus_frames` 先按「空格分隔的 hex 字节段」分组（时间戳/序号不会被当成帧内容），再按 CRC16 / MBAP 长度域切帧（一行可多帧）；切不出来时整段当一帧继续解析并在表格里标注 CRC 错误，不静默丢帧",
+            "**校验器**：新增 `validator/modbus_validator.py`（帧长度 / 传输类型 / 从站地址范围 / CRC16 / MBAP 长度域 / 功能码合法性 / PDU 长度自洽 / 异常响应提示），判据与解析器同一实现（直接复用 `modbus_core`），避免两份判据漂移",
+            "测试：`test/test_modbus.py`（纯逻辑：CRC 已知值、RTU/TCP 请求与响应、异常响应、线圈、写单个/多个、寄存器表映射与 32 位字序、通用模式、帧提取、store 增删改查与导入导出、注册表一致性）+ `test/test_modbus_gui.py`（协议15 下顶栏下拉可见、选择寄存器列表后表格出现品牌名称、查询页面板、管理对话框读写）",
+            "配套：`APP_VERSION 1.23.96 → 1.23.97`；`pyinstaller_meta.py` 的 hiddenimports 增补 modbus 五个模块（打包后仍可解析）；Web 版（reflex_web）本轮不接入，桌面端协议下拉为 0~15",
+        ],
+    ),
     (
         "1.23.96",
         "2026-10-23",
@@ -3185,6 +3241,36 @@ class MainWindow(QMainWindow):
         self.gw_channel_combo.setVisible(False)
         proto_layout.addWidget(self.gw_channel_combo)
 
+        # ---- Modbus 寄存器列表选择（仅协议索引15时可见）----
+        # 「选择寄存器列表来解析」：选中项写入 modbus_registers.json 的 selected，
+        # 单帧/批量解析都读同一份（protocol_registry.ModbusGuiParser）。
+        self.modbus_profile_label = QLabel("寄存器列表：")
+        self.modbus_profile_label.setFont(self._ui_font(-1))
+        self.modbus_profile_label.setToolTip(
+            "选择要用于解析的寄存器列表（按品牌电表配置文件保存）。\n"
+            "选择「通用解析」或列表为空时，只解析到读/写操作、寄存器地址与值。"
+        )
+        self.modbus_profile_label.setVisible(False)
+        proto_layout.addWidget(self.modbus_profile_label)
+
+        self.modbus_profile_combo = QComboBox()
+        self.modbus_profile_combo.setFont(self._ui_font(-1))
+        self.modbus_profile_combo.setMinimumWidth(160)
+        self.modbus_profile_combo.currentIndexChanged.connect(
+            self._on_modbus_profile_changed
+        )
+        self.modbus_profile_combo.setVisible(False)
+        proto_layout.addWidget(self.modbus_profile_combo)
+
+        self.modbus_manage_btn = QPushButton("管理…")
+        self.modbus_manage_btn.setFont(self._ui_font(-1))
+        self.modbus_manage_btn.setToolTip(
+            "新建 / 编辑 / 删除 / 导入导出寄存器列表（写入 modbus_registers.json）"
+        )
+        self.modbus_manage_btn.clicked.connect(self._open_modbus_register_dialog)
+        self.modbus_manage_btn.setVisible(False)
+        proto_layout.addWidget(self.modbus_manage_btn)
+
         top_bar.addWidget(proto_group, 1)
 
         # ---- 串口配置分组 ----
@@ -4798,6 +4884,10 @@ class MainWindow(QMainWindow):
         # 解析能力同样走注入（本页不 import main_gui，避免循环依赖）：
         # 按命令协议解析 RX 帧并在日志输出文字
         tab.set_parse_provider(self._serial_parse_provider)
+        # 通道（1.23.99）：本页也可复用「蓝牙工具」页已建立的 BLE 连接。
+        # 与「光伏升级」页同一注入点（`_upgrade_bluetooth_source` 现在由两页共用，
+        # 语义是「取蓝牙工具页当前的 worker，没有则 None」），本页不建/不断蓝牙连接。
+        tab.set_bluetooth_provider(self._upgrade_bluetooth_source)
         self._replace_lazy_tab(
             self._serial_tool_placeholder, self._serial_tool_tab_index, tab
         )
@@ -4858,6 +4948,10 @@ class MainWindow(QMainWindow):
         # 协议下拉默认跟随主窗口当前协议（用户在本页手选后落盘，下次沿用）
         tab.set_protocol_provider(self._bluetooth_protocol_provider)
         tab.set_send_to_single_handler(self._send_frame_to_single_parse)
+        # 懒加载创建时按**当前**主题初始化一次：否则「先选深色主题、后首次打开本页」
+        # 会保留 __init__ 里的 _dark=False 初值（深色界面上出现白色面板）。
+        # 与 _ensure_testbench_tab 同一口径。
+        tab.restyle_for_theme(self._is_dark_theme())
         self._replace_lazy_tab(
             self._bluetooth_tool_placeholder, self._bluetooth_tool_tab_index, tab
         )
@@ -4900,6 +4994,8 @@ class MainWindow(QMainWindow):
         # 蓝牙通道：复用「蓝牙工具」页那条连接（本页不自己建/断连接）——注入取值回调，
         # 因为蓝牙 worker 是蓝牙页**惰性创建**的，注入时可能还不存在。
         tab.set_bluetooth_provider(self._upgrade_bluetooth_source)
+        # 同上：创建即按当前主题初始化（否则深色主题下版本框/日志框仍是白底）
+        tab.restyle_for_theme(self._is_dark_theme())
         self._replace_lazy_tab(
             self._upgrade_placeholder, self._upgrade_tab_index, tab
         )
@@ -4922,6 +5018,8 @@ class MainWindow(QMainWindow):
             lambda: self._goto_tab(getattr(self, "_upgrade_tab_index", -1)))
         # 双击报文表 → 送「单帧解析」页看完整解析树（与监控器同一注入点）
         tab.frame_to_single_parse.connect(self._send_frame_to_single_parse)
+        # 同上：创建即按当前主题初始化（否则深色主题下收发日志 / 帧预览仍是白底）
+        tab.restyle_for_theme(self._is_dark_theme())
         self._replace_lazy_tab(self._test_placeholder, self._test_tab_index, tab)
         apply_chinese_context_menus(tab)
         return tab
@@ -5376,6 +5474,15 @@ class MainWindow(QMainWindow):
         self.gw_channel_label.setVisible(show_gw_level)
         self.gw_channel_combo.setVisible(show_gw_level)
 
+        # Modbus 寄存器列表选择：仅协议15 可见；切进来时按配置文件刷新内容
+        show_modbus = index == 15
+        if hasattr(self, "modbus_profile_label"):
+            self.modbus_profile_label.setVisible(show_modbus)
+            self.modbus_profile_combo.setVisible(show_modbus)
+            self.modbus_manage_btn.setVisible(show_modbus)
+            if show_modbus:
+                self._refresh_modbus_profile_combo()
+
         # 同步解析级别combo到对应协议的当前值
         if index == 10:
             idx = self.gw_parse_level_combo.findData(self._gw_parse_level)
@@ -5402,6 +5509,8 @@ class MainWindow(QMainWindow):
         self._fit_combo_to_current(self.gw_channel_combo, min_w=96)
         self._fit_combo_to_current(self.csg_pb_frame_type_combo, min_w=90)
         self._fit_combo_to_current(self.gw_pb_frame_type_combo, min_w=90)
+        if hasattr(self, "modbus_profile_combo"):
+            self._fit_combo_to_current(self.modbus_profile_combo, min_w=120)
         self._reflow_proto_group()
         # 协议折叠时窗口标题中间的协议名跟随切换
         self._update_window_title()
@@ -5436,6 +5545,108 @@ class MainWindow(QMainWindow):
         # 持久化协议选择（UI 全部就绪后才写盘，避免构造期触发保存）
         if getattr(self, "_ui_ready", False):
             self._save_app_config()
+
+    # ── Modbus 寄存器列表（协议15）────────────────────────────────
+    def _refresh_modbus_profile_combo(self):
+        """按配置文件刷新顶栏「寄存器列表」下拉（选中项来自 store 的 selected）。"""
+        import modbus_register_store
+
+        modbus_register_store.ensure_store_file()
+        combo = getattr(self, "modbus_profile_combo", None)
+        if combo is None:
+            return
+        current = modbus_register_store.selected_id()
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("通用解析（不指定寄存器列表）", "")
+        for profile in modbus_register_store.profiles():
+            label = str(profile.get("name") or "未命名")
+            brand = str(profile.get("brand") or "").strip()
+            if brand:
+                label = f"{label}（{brand}）"
+            combo.addItem(label, profile.get("id") or "")
+        index = combo.findData(current)
+        combo.setCurrentIndex(index if index >= 0 else 0)
+        combo.blockSignals(False)
+        self._fit_combo_to_current(combo, min_w=120)
+
+    def _on_modbus_profile_changed(self, index: int):
+        """顶栏寄存器列表切换：持久化选中项 → 同步查询页 → 重解析当前帧。"""
+        combo = getattr(self, "modbus_profile_combo", None)
+        if combo is None:
+            return
+        self._apply_modbus_profile_selection(
+            combo.currentData() or "", source="top"
+        )
+
+    def _apply_modbus_profile_selection(self, profile_id, *, source: str = "top"):
+        """把寄存器列表选择落盘并同步各处（顶栏 / 查询页），然后重解析。"""
+        import modbus_register_store
+
+        target = str(profile_id or "")
+        try:
+            modbus_register_store.set_selected(target)
+        except OSError as exc:
+            QMessageBox.warning(
+                self, "Modbus 寄存器列表", f"保存选择失败：{exc}"
+            )
+        # 同步顶栏下拉（来自查询页/对话框时）
+        combo = getattr(self, "modbus_profile_combo", None)
+        if combo is not None and source != "top":
+            index = combo.findData(target)
+            combo.blockSignals(True)
+            combo.setCurrentIndex(index if index >= 0 else 0)
+            combo.blockSignals(False)
+            self._fit_combo_to_current(combo, min_w=120)
+        # 同步查询页面板（面板对象可能已被 _clear_layout 销毁）
+        panel = getattr(self, "modbus_lookup_panel", None)
+        if panel is not None:
+            try:
+                panel.set_current_id(target)
+            except RuntimeError:
+                self.modbus_lookup_panel = None
+        # 选择切换后立即重解析当前单帧（批量解析下次运行时自然生效）
+        if self.single_input.toPlainText().strip():
+            self.parse_single()
+
+    def _open_modbus_register_dialog(self):
+        """打开寄存器列表管理对话框；关闭后刷新下拉/查询页并重解析。"""
+        from modbus_register_widget import ModbusRegisterDialog
+        import modbus_register_store
+
+        modbus_register_store.ensure_store_file()
+        dialog = ModbusRegisterDialog(
+            self, select_id=modbus_register_store.selected_id()
+        )
+        dialog.exec()
+        self._on_modbus_profiles_changed()
+
+    def _on_modbus_profiles_changed(self):
+        """寄存器列表内容被修改后：重读文件 → 刷新下拉与查询页 → 重解析。"""
+        import modbus_register_store
+
+        modbus_register_store.reload()
+        self._refresh_modbus_profile_combo()
+        panel = getattr(self, "modbus_lookup_panel", None)
+        if panel is not None:
+            try:
+                panel.refresh()
+            except RuntimeError:
+                self.modbus_lookup_panel = None
+        if self.single_input.toPlainText().strip():
+            self.parse_single()
+
+    def _create_modbus_lookup_content(self, layout):
+        """Modbus 查询页：寄存器列表浏览 + 选择（协议15）。"""
+        from modbus_register_widget import ModbusRegisterPanel
+
+        panel = ModbusRegisterPanel(self)
+        panel.selectionChanged.connect(
+            lambda pid: self._apply_modbus_profile_selection(pid, source="panel")
+        )
+        panel.manageRequested.connect(self._open_modbus_register_dialog)
+        self.modbus_lookup_panel = panel
+        layout.addWidget(panel)
 
     def _sync_ed_wrapper_combo_labels(self, protocol_index: int):
         """按协议语境刷新 ED 包装格式下拉文案（数据值 auto/plc2/gx 不变）。"""
@@ -10218,6 +10429,9 @@ class MainWindow(QMainWindow):
         if not self._batch_snapshot_text and full_text.strip():
             self._set_batch_snapshot(full_text, "输入框内容")
         input_text = full_text.strip()
+        # Modbus（协议15）：帧边界依赖「空格分节的 hex 字节段」+ CRC16 / MBAP 长度域，
+        # 必须在 hex 清洗**之前**从原始文本抽帧（清洗会把时间戳数字和报文粘成一串）。
+        raw_for_frames = input_text
         # 行号回跳：记录首部空白行剥离偏移与前缀剥离行映射（strip 函数填充）
         lead = len(full_text) - len(full_text.lstrip())
         self._batch_lead_lines = full_text[:lead].count("\n") if lead else 0
@@ -10296,7 +10510,11 @@ class MainWindow(QMainWindow):
             return
 
         # 根据当前协议选择帧提取方式
-        frames = self._extract_frames_for_protocol(input_text, self.current_protocol)
+        # Modbus 用未清洗的原始文本（见上方 raw_for_frames 说明），其余协议用清洗后文本
+        extract_source = (
+            raw_for_frames if self.current_protocol == 15 else input_text
+        )
+        frames = self._extract_frames_for_protocol(extract_source, self.current_protocol)
         strip_map = getattr(self, "_last_strip_line_map", None)
         self._last_strip_line_map = None
         # 行映射快照交给后台 worker（下次解析会覆盖 _last_strip_line_map）
@@ -10809,6 +11027,58 @@ class MainWindow(QMainWindow):
                     summary_parts.append(f"信息类:{dt_raw}")
             if apdu_val:
                 summary_parts.append(apdu_val)
+            return " | ".join(summary_parts) if summary_parts else "-"
+
+        elif proto == 15:
+            # Modbus（RTU/TCP）：寄存器列表名 + 从站 + 功能码 + 寄存器数量
+            # 行名与 modbus_core.parse_frame 输出保持一致（不另立第二份判据）
+            slave_val = func_val = profile_val = None
+            reg_count = 0
+            for item in table_data:
+                field_name = str(item[0])
+                parsed_val = str(item[2] or "").strip()
+                if field_name in ("从站地址", "单元标识") and slave_val is None:
+                    slave_val = parsed_val
+                elif field_name == "功能码" and func_val is None:
+                    func_val = parsed_val
+                elif field_name == "寄存器列表":
+                    profile_val = parsed_val
+                elif field_name.startswith(("  寄存器", "  线圈", "  离散输入")):
+                    reg_count += 1
+            if profile_val and profile_val != "通用解析（未指定寄存器列表）":
+                summary_parts.append(profile_val)
+            if slave_val:
+                summary_parts.append(f"从站{slave_val}")
+            if func_val:
+                summary_parts.append(func_val)
+            if reg_count:
+                summary_parts.append(f"{reg_count} 个寄存器/位")
+            return " | ".join(summary_parts) if summary_parts else "-"
+
+        elif proto in (2, 3, 4, 5):
+            # DLMS 族（HDLC / APDU / Wrapper）：控制域 + APDU 类型 + 类ID/OBIS
+            # ⚠ 此前落到「其他协议」兜底分支，摘要变成「0x7E | 目的地址 | 源地址」，
+            #   既不说明帧类型也不说明业务，批量表里完全看不出这条帧在干什么。
+            ctrl_val = apdu_val = obis_val = class_val = None
+            for item in table_data:
+                field_name = str(item[0]).strip()
+                parsed_val = str(item[2] or "").strip()
+                if field_name == "控制域" and not ctrl_val:
+                    ctrl_val = parsed_val
+                elif field_name.endswith("DLMS APDU") and not apdu_val:
+                    apdu_val = parsed_val.split(" (整个")[0]
+                elif "类ID" in field_name and not class_val:
+                    class_val = parsed_val
+                elif "OBIS码" in field_name and not obis_val:
+                    obis_val = parsed_val
+            if ctrl_val:
+                summary_parts.append(ctrl_val)
+            if apdu_val:
+                summary_parts.append(apdu_val)
+            if class_val:
+                summary_parts.append(f"类:{class_val}")
+            if obis_val:
+                summary_parts.append(f"OBIS:{obis_val}")
             return " | ".join(summary_parts) if summary_parts else "-"
 
         elif proto == 9:
@@ -11378,6 +11648,12 @@ class MainWindow(QMainWindow):
             # 整帧 = L + 8（唯一实现在 csg_uplink_wire.extract_csg_uplink_frames，Web 端同源）。
             clean = re.sub(r"[^0-9A-Fa-f]", "", text).upper()
             return self._extract_csg_uplink_frames(clean)
+        if strategy == "modbus":
+            # Modbus RTU/TCP：按「空格分隔的 hex 字节段」分组，再按 CRC16 / MBAP
+            # 长度域切帧（唯一实现 modbus_core.extract_modbus_frames，单帧页共用同一帧判据）。
+            import modbus_core
+
+            return modbus_core.extract_modbus_frames(text)
         if strategy == "dlt698_45":
             # 698.45：68开头，16结束，但长度域定义不同
             clean = re.sub(r"[^0-9A-Fa-f]", "", text).upper()
@@ -11480,23 +11756,50 @@ class MainWindow(QMainWindow):
         return frames if frames else [re.sub(r"[^0-9A-Fa-f]", "", text).upper()]
 
     def _extract_hdlc_frames(self, clean: str) -> list:
-        """提取HDLC帧（7E开头，7E结束）"""
+        """提取 HDLC 帧（7E 开头、7E 结束）。
+
+        两个真实缺陷都在这里修掉：
+
+        1. **必须按字节（每 2 个 hex 字符）找 0x7E**。按字符在 hex 串里搜 "7E"
+           会把 `67 E6` 这种相邻字节中间的字符 "7E" 当成帧边界 ——
+           实测 `... 6F 67 E6 E7 00 ...` 被切成 8 字节残帧 + 错位残帧。
+        2. **相邻两帧可共用一个 7E**（前一帧的结束标志同时是后一帧的起始标志），
+           旧实现从 `end + 2` 继续找，第二帧会缺起始标志。
+        """
+        text = str(clean or "").strip().upper()
+        if len(text) % 2:
+            text = text[:-1]
+        if len(text) < 8:
+            return []
+        try:
+            data = bytes.fromhex(text)
+        except ValueError:
+            # 兜底：去掉非 hex 字符再试（正常调用方已清洗）
+            import re as _re
+
+            text = _re.sub(r"[^0-9A-F]", "", text)
+            if len(text) % 2:
+                text = text[:-1]
+            try:
+                data = bytes.fromhex(text)
+            except ValueError:
+                return []
+
         frames = []
-        i = 0
-        while i < len(clean) - 3:
-            # 找下一个7E起始
-            pos = clean.find("7E", i)
-            if pos == -1:
+        index = 0
+        total = len(data)
+        while index < total - 3:
+            start = data.find(0x7E, index)
+            if start == -1:
                 break
-            # 找下一个7E结束
-            end = clean.find("7E", pos + 2)
+            end = data.find(0x7E, start + 1)
             if end == -1:
-                # 如果没找到结束，直接取到结尾或者最大长度
-                end = min(pos + 512, len(clean))
-            candidate = clean[pos : end + 2]
-            if len(candidate) >= 6:  # 至少3字节
+                end = min(start + 256, total - 1)
+            candidate = data[start:end + 1].hex().upper()
+            if len(candidate) >= 6:  # 至少 3 字节
                 frames.append(candidate)
-            i = end + 2
+            # 共用标志：end 处的 7E 就是下一帧的起始；空帧（7E 7E）时前进 1 字节
+            index = end if end > start else start + 1
         return frames
 
     def _extract_68_frames(self, clean: str) -> list:
@@ -12873,14 +13176,19 @@ class MainWindow(QMainWindow):
             return "698.45协议"
 
         elif proto in (2, 3, 4, 5):  # DLMS 族
+            # 「协议/类型」列优先给 APDU 类型（AARQ / Get-Response …），其次控制域
+            ctrl_val = apdu_val = ""
             for item in table_data:
-                field = str(item[0])
-                if (
-                    "帧类型" in field or "服务" in field or "功能" in field
-                ) and not field.startswith(" "):
-                    val = str(item[3] or item[2] or "")
-                    if val:
-                        return val
+                field = str(item[0]).strip()
+                parsed = str(item[2] or "").strip()
+                if field == "控制域" and not ctrl_val:
+                    ctrl_val = parsed
+                elif field.endswith("DLMS APDU") and not apdu_val:
+                    apdu_val = parsed.split(" (整个")[0]
+            if apdu_val:
+                return apdu_val
+            if ctrl_val:
+                return ctrl_val
             proto_names = {2: "HDLC", 3: "DLMS-APDU", 4: "DLMS-Wrapper", 5: "DLMS-APDU"}
             return proto_names[proto]
 
@@ -12926,6 +13234,15 @@ class MainWindow(QMainWindow):
                     if val and not val.startswith("安全模式"):
                         return val
             return "HDC 1.0"
+
+        elif proto == 15:  # Modbus（RTU/TCP）
+            # 「协议/类型」列 = 功能码名（如 "0x03 读保持寄存器" / "0x83（0x03 异常响应）"）
+            for item in table_data:
+                if str(item[0]) == "功能码":
+                    val = str(item[2] or item[3] or "").strip()
+                    if val:
+                        return val
+            return "Modbus"
 
         elif proto == 12:  # 模组化终端功能模块接口
             # 信息帧取 APDU 名，确认/否认帧取控制码名（不能落到薜底分支：

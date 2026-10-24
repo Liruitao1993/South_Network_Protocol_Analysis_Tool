@@ -38,151 +38,210 @@ class HDLCParser:
     # 地址域特殊地址
     SPECIAL_ADDRESSES = {
         # 客户端特殊地址
-        0x00: "NO_STATION (无站地址)",
+        0x00: "无站地址（NO_STATION）",
         0x01: "客户端管理进程",
         0x10: "公共客户端 (最低安全级)",
-        0x7F: "ALL_STATION (广播地址)",
+        0x7F: "广播地址（ALL_STATION）",
         # 服务器端特殊地址
     }
 
     # HDLC链路层协商参数标识符（SNRM/UA信息域TLV标签，见ISO/IEC 13239 5.5.3.2）
     SNRM_UA_PARAM_TAGS = {
-        0x05: "Max Info Field Length - Transmit (发送最大信息域长度)",
-        0x06: "Max Info Field Length - Receive (接收最大信息域长度)",
-        0x07: "Window Size - Transmit (发送窗口大小)",
-        0x08: "Window Size - Receive (接收窗口大小)",
+        0x05: "发送最大信息域长度（Max Info Field Length - Transmit）",
+        0x06: "接收最大信息域长度（Max Info Field Length - Receive）",
+        0x07: "发送窗口大小（Window Size - Transmit）",
+        0x08: "接收窗口大小（Window Size - Receive）",
+    }
+
+    # COSEM 对象类名（Class-ID → 中文名，IEC 62056-6-2 蓝皮书对象模型）
+    # 单一来源：`_parse_cosem_descriptor` 与 Action 分支都查这张表，避免两处表漂移。
+    COSEM_CLASS_NAMES = {
+        1: "数据（Data）", 3: "寄存器（Register）", 4: "扩展寄存器（Extended-Register）",
+        5: "需量寄存器（Demand-Register）", 6: "活动日历（Activity-Calendar）",
+        7: "通用曲线（Profile-Generic）", 8: "时钟（Clock）", 9: "脚本表（Script-Table）",
+        10: "调度器（Schedule）", 15: "特殊日表（Special-Days-Table）",
+        17: "关联逻辑设备（Association-Logical-Device）",
+        20: "关联快照（Association-Snapshot）",
+        42: "M-Bus 客户端端口（MBus-Client-Port）", 70: "脉冲计数器（Pulse-Counter）",
+        81: "HDLC 通信端口（Comms-Port-HDLC）",
+        100: "应用关联（Application-Association）",
+        101: "安全设置（Security-Setup）",
+        111: "断开控制（Disconnect-Control）",
     }
 
     # DLMS APDU类型映射（按IEC 62056标准/Green Book定义）
     APDU_TYPES = {
-        0x01: "AARQ (关联请求)",
-        0x02: "AARE (关联响应)",
-        0x03: "RLRQ (释放请求)",
-        0x04: "RLRE (释放响应)",
-        0x0C: "Confirmed-Service-Error",
-        0x0E: "General-Block-Transfer",
-        0x60: "AARQ (关联请求-BER)",
-        0x61: "AARE (关联响应-BER)",
+        # ── ACSE（BER 编码，标签 = APPLICATION 0~3；Green Book 9.4.1 / 9.3.2）──
+        0x60: "AARQ (关联请求)",
+        0x61: "AARE (关联响应)",
+        0x62: "RLRQ (释放请求)",
+        0x63: "RLRE (释放响应)",
+        # ── xDLMS 标准 APDU（无加密、非 LN 引用；Green Book 9.4.1 CHOICE）──
+        0x01: "Initiate-Request (初始化请求)",
+        0x05: "Read-Request (读请求·SN 引用)",
+        0x06: "Write-Request (写请求·SN 引用)",
+        0x08: "Initiate-Response (初始化响应)",
+        0x0C: "Read-Response (读应答·SN 引用)",
+        0x0D: "Write-Response (写应答·SN 引用)",
+        0x0E: "Confirmed-Service-Error (确认服务错误)",
+        0x0F: "Data-Notification (数据通知/主动推送)",
+        0x10: "Data-Notification-Confirm (数据通知确认)",
+        0x16: "Unconfirmed-Write-Request (非确认写)",
+        0x18: "Information-Report-Request (信息报告)",
+        # ── xDLMS（LN 引用，无加密）──
         0xC0: "Get-Request (读请求)",
         0xC1: "Set-Request (写请求)",
+        0xC2: "Event-Notification-Request (事件通知)",
         0xC3: "Action-Request (方法请求)",
         0xC4: "Get-Response (读应答)",
         0xC5: "Set-Response (写应答)",
         0xC7: "Action-Response (方法应答)",
+        # ── 全局密钥加密（glo-*）──
         0xC8: "Glo-Get-Request (加密读请求)",
         0xC9: "Glo-Set-Request (加密写请求)",
+        0xCA: "Glo-Event-Notification-Request (加密事件通知)",
         0xCB: "Glo-Action-Request (加密方法请求)",
         0xCC: "Glo-Get-Response (加密读应答)",
         0xCD: "Glo-Set-Response (加密写应答)",
         0xCF: "Glo-Action-Response (加密方法应答)",
+        # ── 专属密钥加密（ded-*）──
         0xD0: "Ded-Get-Request (专属加密读请求)",
         0xD1: "Ded-Set-Request (专属加密写请求)",
+        0xD2: "Ded-Event-Notification-Request (专属加密事件通知)",
         0xD3: "Ded-Action-Request (专属加密方法请求)",
         0xD4: "Ded-Get-Response (专属加密读应答)",
         0xD5: "Ded-Set-Response (专属加密写应答)",
         0xD7: "Ded-Action-Response (专属加密方法应答)",
-        0xE6: "Event-Notification (事件通知)",
-        0xE7: "Data-Notification (数据推送)",
+        # ── 异常 / 访问 ──
+        0xD8: "Exception-Response (异常响应)",
+        0xD9: "Access-Request (访问请求)",
+        0xDA: "Access-Response (访问应答)",
+        # 注意：0xE6/0xE7 是 **LLC 地址字节**，不是 APDU 标签。
+        # 旧表把 0x01/0x02/0x03/0x04 当 AARQ/AARE/RLRQ/RLRE、0x0C 当
+        # ConfirmedServiceError、0x0E 当 GBT —— 与 Green Book 9.4.1 不符
+        # （0x01=InitiateRequest、0x0C=ReadResponse、0x0E=ConfirmedServiceError，
+        #  RLRQ/RLRE 是 ACSE 的 0x62/0x63），已按文档更正。
     }
 
     # Get-Request/Response 子类型
+    # Get-Request/Response 子类型（中文在前、IEC 英文原名括注，方便国内现场对照文档）
     GET_REQUEST_TYPES = {
-        0x01: "Normal (正常读)",
-        0x02: "Next-Data-block (下一数据块)",
-        0x03: "With-list (批量读)",
-        0x04: "With-block (分块读)",
+        0x01: "正常读（Normal）",
+        0x02: "下一数据块（Next-Data-block）",
+        0x03: "批量读（With-list）",
+        0x04: "分块读（With-block）",
     }
     GET_RESPONSE_TYPES = {
-        0x01: "Normal (正常响应)",
-        0x02: "With-data-block (数据块响应)",
-        0x03: "With-list (批量响应)",
+        0x01: "正常响应（Normal）",
+        0x02: "数据块响应（With-data-block）",
+        0x03: "批量响应（With-list）",
     }
 
     # Set-Request/Response 子类型
     SET_REQUEST_TYPES = {
-        0x01: "Normal (正常写)",
-        0x02: "With-first-data-block (首块写)",
-        0x03: "With-data-block (数据块写)",
-        0x04: "With-list (批量写)",
-        0x05: "With-list-and-first-data-block (批量首块写)",
+        0x01: "正常写（Normal）",
+        0x02: "首块写（With-first-data-block）",
+        0x03: "数据块写（With-data-block）",
+        0x04: "批量写（With-list）",
+        0x05: "批量首块写（With-list-and-first-data-block）",
     }
     SET_RESPONSE_TYPES = {
-        0x01: "Normal (正常响应)",
-        0x02: "With-data-block (数据块响应)",
-        0x03: "With-last-data-block (最后块响应)",
-        0x04: "With-list (批量响应)",
-        0x05: "With-list-and-last-data-block (批量最后块响应)",
+        # Green Book 9.4.1（L7072-7086）
+        0x01: "正常响应（Normal）",
+        0x02: "数据块响应（Datablock）",
+        0x03: "最后块响应（Last-datablock）",
+        0x04: "批量最后块响应（Last-datablock-with-list）",
+        0x05: "批量响应（With-list）",
     }
 
-    # Action-Request/Response 子类型
+    # Action-Request/Response 子类型（Green Book 9.4.1，L7142-7240）
     ACTION_REQUEST_TYPES = {
-        0x01: "Normal (普通)",
-        0x02: "With-first-pblock (首参数块)",
-        0x03: "With-list (批量)",
-        0x04: "With-first-pblock-and-list (批量首参数块)",
-        0x05: "With-pblock (参数块)",
+        0x01: "普通（Normal）",
+        0x02: "下一参数块（Next-pblock）",
+        0x03: "批量（With-list）",
+        0x04: "首参数块（With-first-pblock）",
+        0x05: "批量首参数块（With-list-and-first-pblock）",
+        0x06: "参数块（With-pblock）",
     }
     ACTION_RESPONSE_TYPES = {
-        0x01: "Normal (普通)",
-        0x02: "With-pblock (参数块)",
-        0x03: "With-list (批量)",
-        0x04: "Next-pblock (下一参数块)",
-        0x05: "With-list-and-first-pblock (批量首参数块)",
+        0x01: "普通（Normal）",
+        0x02: "参数块（With-pblock）",
+        0x03: "批量（With-list）",
+        0x04: "下一参数块（Next-pblock）",
     }
 
-    # Data-Access-Result 错误码
+    # Data-Access-Result（Green Book 9.4.1，L7591-7627；稀疏枚举，不是连续 0~N）
     DATA_ACCESS_RESULTS = {
-        0x00: "成功",
-        0x01: "硬件故障",
-        0x02: "临时失败",
-        0x03: "读写对象未定义",
-        0x04: "对象不可访问",
-        0x05: "数据类型不匹配",
-        0x06: "对象未定义",
-        0x07: "对象地址不匹配",
-        0x08: "对象地址非法",
-        0x09: "对象未定义",
-        0x0A: "对象不在",
-        0x0B: "对象访问被拒绝",
-        0x0C: "类型不匹配",
-        0x0D: "对象未激活",
-        0x0E: "方法未定义",
-        0x0F: "方法不支持",
-        0x10: "参数数量错误",
-        0x11: "参数类型错误",
-        0x12: "参数值非法",
-        0x13: "参数非法",
-        0x14: "操作不支持",
-        0x15: "其他原因",
+        0: "成功（success）",
+        1: "硬件故障（hardware-fault）",
+        2: "临时失败（temporary-failure）",
+        3: "读写被拒绝（read-write-denied）",
+        4: "对象未定义（object-undefined）",
+        9: "对象类不一致（object-class-inconsistent）",
+        11: "对象不可用（object-unavailable）",
+        12: "类型不匹配（type-unmatched）",
+        13: "访问范围越界（scope-of-access-violated）",
+        14: "数据块不可用（data-block-unavailable）",
+        15: "长读被中止（long-get-aborted）",
+        16: "无进行中的长读（no-long-get-in-progress）",
+        17: "长写被中止（long-set-aborted）",
+        18: "无进行中的长写（no-long-set-in-progress）",
+        19: "数据块号非法（data-block-number-invalid）",
+        250: "其他原因（other-reason）",
     }
 
-    # Action-Result 错误码
+    # Action-Result（Green Book 9.4.1，L7629-7661）
     ACTION_RESULTS = {
-        0x00: "成功",
-        0x01: "硬件故障",
-        0x02: "临时失败",
-        0x03: "读写对象未定义",
-        0x04: "对象不可访问",
-        0x05: "数据类型不匹配",
-        0x06: "对象未定义",
-        0x07: "对象地址不匹配",
-        0x08: "对象地址非法",
-        0x09: "对象未定义",
-        0x0A: "对象不在",
-        0x0B: "对象访问被拒绝",
-        0x0C: "类型不匹配",
-        0x0D: "对象未激活",
+        0: "成功（success）",
+        1: "硬件故障（hardware-fault）",
+        2: "临时失败（temporary-failure）",
+        3: "读写被拒绝（read-write-denied）",
+        4: "对象未定义（object-undefined）",
+        9: "对象类不一致（object-class-inconsistent）",
+        11: "对象不可用（object-unavailable）",
+        12: "类型不匹配（type-unmatched）",
+        13: "访问范围越界（scope-of-access-violated）",
+        14: "数据块不可用（data-block-unavailable）",
+        15: "长方法调用被中止（long-action-aborted）",
+        16: "无进行中的长方法调用（no-long-action-in-progress）",
+        19: "数据块号非法（data-block-number-invalid）",
+        250: "其他原因（other-reason）",
+    }
+
+    # Exception-Response 的 service-error CHOICE（Green Book 9.4.1，L7291-7307）
+    EXCEPTION_STATE_ERRORS = {
+        1: "服务不允许（service-not-allowed）",
+        2: "服务未知（service-unknown）",
+    }
+    EXCEPTION_SERVICE_ERRORS = {
+        1: "操作不允许（operation-not-possible）",
+        2: "服务不支持（service-not-supported）",
+        3: "其他原因（other-reason）",
+        4: "PDU 超长（pdu-too-long）",
+        5: "解密失败（deciphering-error）",
+        6: "调用计数器错误（invocation-counter-error），后跟 4 字节计数",
     }
 
     @staticmethod
     def _decode_invoke_id(invoke_byte: int) -> dict:
+        """解码 Invoke-Id-And-Priority（Green Book 9.4.1，L7669-7693）。
+
+        位定义（DLMS UA 从 bit0 起算）：
+
+        - bits 0-3：invoke-id（0~15）
+        - bits 4-5：保留
+        - bit 6：service-class（0 = Unconfirmed，1 = Confirmed）
+        - bit 7：priority（0 = Normal，1 = High）
+
+        ⚠ 旧实现取**高** 4 位当 invoke-id、bit2 当 service-class、bit1-0 当
+        priority，与文档相反：真实帧 `81`（1000 0001）应为「invoke-id=1、
+        Confirmed、High」，旧实现显示「ID=8、Confirmed、Low」。
         """
-        解码Invoke-Id-And-Priority字节
-        结构: bit7-4=Invoke-ID(0-15), bit2=ServiceClass(0=Confirmed,1=Unconfirmed), bit1-0=Priority(0=High,1=Low)
-        """
-        invoke_id = (invoke_byte >> 4) & 0x0F
-        service_class = "Confirmed(需确认)" if (invoke_byte & 0x04) == 0 else "Unconfirmed(不需确认)"
-        priority = "High(高优先级)" if (invoke_byte & 0x03) == 0 else "Low(低优先级)"
+        invoke_id = invoke_byte & 0x0F
+        service_class = (
+            "需确认（Confirmed）" if (invoke_byte & 0x40) else "不需确认（Unconfirmed）"
+        )
+        priority = "高优先级（High）" if (invoke_byte & 0x80) else "普通优先级（Normal）"
         return {
             "invoke_id": invoke_id,
             "service_class": service_class,
@@ -232,6 +291,13 @@ class HDLCParser:
         table_data.append(("格式域", f"0x{format_field:04X}", 
                           f"格式类型={format_type_str}, 分段位={segmentation_bit}, 帧长={frame_length}",
                           "格式域（2字节）", offset, offset + 1))
+        # 帧长自证（IEC 62056-46 Type 3）：格式域声明值 = 首尾 7E 之间的字节数。
+        # 现场抓包截断 / 串口半包时这里必然对不上；非阻断告警，但必须显式提示，
+        # 否则「长度对不上」的残帧会被当成正常帧解析（实测 12 字节残帧曾判为解析成功）。
+        length_hint = self._check_declared_length(frame_bytes, frame_length)
+        if length_hint:
+            table_data.append(("警告", f"声明 {frame_length} 字节", f"实际 {len(frame_bytes)} 字节",
+                              length_hint, format_field_start, format_field_start + 1))
         offset += 2
 
         # 验证格式类型
@@ -245,7 +311,10 @@ class HDLCParser:
             table_data.append(("错误", "-", "-", "目的地址解析失败", offset, offset))
             return table_data
         
-        dest_addr_desc = self._format_address_description(dest_addr, dest_addr_len, "目的")
+        dest_addr_desc = self._format_address_description(
+            dest_addr, dest_addr_len, "目的",
+            frame_bytes[dest_addr_start:dest_addr_start + dest_addr_len],
+        )
         table_data.append(("目的地址域", self._bytes_to_hex(frame_bytes[offset:offset + dest_addr_len]),
                           dest_addr_desc, f"目的地址（{dest_addr_len}字节）", offset, offset + dest_addr_len - 1))
         offset += dest_addr_len
@@ -257,7 +326,10 @@ class HDLCParser:
             table_data.append(("错误", "-", "-", "源地址解析失败", offset, offset))
             return table_data
         
-        src_addr_desc = self._format_address_description(src_addr, src_addr_len, "源")
+        src_addr_desc = self._format_address_description(
+            src_addr, src_addr_len, "源",
+            frame_bytes[src_addr_start:src_addr_start + src_addr_len],
+        )
         table_data.append(("源地址域", self._bytes_to_hex(frame_bytes[offset:offset + src_addr_len]),
                           src_addr_desc, f"源地址（{src_addr_len}字节）", offset, offset + src_addr_len - 1))
         offset += src_addr_len
@@ -420,22 +492,40 @@ class HDLCParser:
 
         return address, length
 
-    def _format_address_description(self, address: int, length: int, role: str) -> str:
-        """格式化地址描述"""
-        # 检查特殊地址
-        special = self.SPECIAL_ADDRESSES.get(address, "")
+    def _format_address_description(self, address: int, length: int, role: str,
+                                    raw: bytes = b"") -> str:
+        """格式化地址描述。
+
+        HDLC 地址按 7 位一组编码（每字节 LSB 为扩展位），所以 4 字节
+        ``00 02 00 23`` 的「HDLC 地址值」是 0x02200080 —— 这个数字对现场没有
+        意义。DLMS（Green Book）把服务器地址拆成「逻辑设备 + 逻辑块」：
+
+        - 2 字节：整体是服务器地址（HDLC 7 位值，如 ``02 47`` → 0x1181）
+        - 4 字节：前 2 字节 = 逻辑设备地址、后 2 字节 = 逻辑块地址
+          （每字节取高 7 位、组内大端：``00 02`` → 0x0001，``00 23`` → 0x0011）
+
+        两种口径都给出，便于与厂家文档 / 抓包工具（Gurux）对照。
+        """
+        special = self.SPECIAL_ADDRESSES.get(address, "") if length == 1 else ""
+        head = f"0x{address:0{max(2, length * 2)}X}"
         if special:
-            return f"0x{address:02X} ({special})"
-        
-        # 普通地址
-        if length == 1:
-            return f"0x{address:02X} ({role}单字节地址)"
-        elif length == 2:
-            return f"0x{address:04X} ({role}双字节地址)"
-        elif length == 4:
-            return f"0x{address:08X} ({role}四字节地址)"
+            head += f" ({special})"
+
+        if length == 2 and len(raw) == 2:
+            server = (raw[0] >> 1) | ((raw[1] >> 1) << 7)
+            detail = f"服务器地址 0x{server:04X}（{server}）"
+        elif length == 4 and len(raw) == 4:
+            device = ((raw[0] >> 1) << 8) | (raw[1] >> 1)
+            block = ((raw[2] >> 1) << 8) | (raw[3] >> 1)
+            detail = (
+                f"服务器地址：逻辑设备 0x{device:04X}（{device}），"
+                f"逻辑块 0x{block:04X}（{block}）"
+            )
+        elif length == 1:
+            detail = f"{role}地址（1 字节；客户端地址恒为 1 字节）"
         else:
-            return f"0x{address:X} ({role}{length}字节地址)"
+            detail = f"{role}地址（{length} 字节）"
+        return f"{head}，{detail}"
 
     def _parse_control_field(self, control_byte: int, direction: str = "unknown") -> Tuple[str, str, List[Tuple[str, str, str]]]:
         """
@@ -560,6 +650,29 @@ class HDLCParser:
         # 未识别类型
         return f"未知帧(0x{control_byte:02X})", "未识别的控制域类型", []
 
+    @staticmethod
+    def _check_declared_length(frame_bytes: bytes, frame_length: int) -> str:
+        """校验格式域声明的帧长与实际字节数是否自洽（返回中文告警；自洽返回空串）。
+
+        协议口径（IEC 62056-46 Type 3）：帧长 = 首尾 7E 之间的字节数（不含 7E 本身）。
+
+        - 首尾都是 7E（完整帧）：整帧 = 帧长 + 2；
+        - 只有起始 7E（半包）：整帧 = 帧长 + 1。
+
+        现场意义：串口半包、抓包被截断、多帧粘在一起时，声明值一定对不上；
+        这时仍应尽量解析已有字段，但必须让使用者看到「这条帧不完整/有残留」。
+        """
+        if frame_length <= 0:
+            return ""
+        has_tail_flag = len(frame_bytes) >= 2 and frame_bytes[-1] == HDLCParser.HDLC_FLAG
+        expected = frame_length + (2 if has_tail_flag else 1)
+        if len(frame_bytes) == expected:
+            return ""
+        if len(frame_bytes) < expected:
+            return (f"帧长声明 {frame_length} 字节，实际只有 {len(frame_bytes)} 字节，"
+                    f"疑似截断（还差 {expected - len(frame_bytes)} 字节）")
+        return (f"帧长声明 {frame_length} 字节，实际有 {len(frame_bytes)} 字节，"
+                f"多出 {len(frame_bytes) - expected} 字节（可能粘包）")
     def _calculate_fcs(self, data: bytes) -> int:
         """
         计算FCS/HCS校验和
@@ -699,31 +812,31 @@ class HDLCParser:
                     dir_desc = "LLC地址"
 
                 table_data.append(("  LLC DSAP", f"0x{dsap:02X}",
-                                  f"0x{(dsap >> 1):02X}" if dsap & 1 else f"0x{dsap:02X}",
-                                  "目的服务接入点",
+                                  f"SAP 0x{dsap >> 1:02X}（目的）",
+                                  "LLC 目的服务接入点（DLMS 固定 0xE6）",
                                   base_offset + offset, base_offset + offset))
                 offset += 1
 
                 table_data.append(("  LLC SSAP", f"0x{ssap:02X}",
-                                  f"0x{(ssap >> 1):02X}" if ssap & 1 else f"0x{ssap:02X}",
-                                  "源服务接入点",
+                                  f"SAP 0x{ssap >> 1:02X}（源）",
+                                  "LLC 源服务接入点（0xE6=客户端发起 / 0xE7=服务端应答）",
                                   base_offset + offset, base_offset + offset))
                 offset += 1
 
                 table_data.append(("  LLC控制", f"0x{llc_ctrl:02X}",
-                                  dir_desc, "LLC服务质量",
+                                  dir_desc, "UI 帧（无编号信息，LLC 控制字段=0x00）",
                                   base_offset + offset, base_offset + offset))
                 offset += 1
             elif dsap >= 0xE0 and ssap >= 0xE0:
-                # 其他LLC地址（兼容旧版）
+                # 其他 LLC 地址（兼容旧版）
                 table_data.append(("  LLC DSAP", f"0x{dsap:02X}",
-                                  f"0x{(dsap >> 1):02X}" if dsap & 1 else f"0x{dsap:02X}",
+                                  f"SAP 0x{dsap >> 1:02X}",
                                   "目的服务接入点",
                                   base_offset + offset, base_offset + offset))
                 offset += 1
 
                 table_data.append(("  LLC SSAP", f"0x{ssap:02X}",
-                                  f"0x{(ssap >> 1):02X}" if ssap & 1 else f"0x{ssap:02X}",
+                                  f"SAP 0x{ssap >> 1:02X}",
                                   "源服务接入点",
                                   base_offset + offset, base_offset + offset))
                 offset += 1
@@ -856,9 +969,23 @@ class HDLCParser:
                                   base_offset + original_offset, apdu_end))
     
     def _looks_like_ber_tlv(self, data: bytes) -> bool:
-        """检查数据是否像BER-TLV编码"""
-        # 只要长度>=2，都尝试解析BER-TLV，因为标签可以是任何值
-        return len(data) >= 2
+        """是否像 ACSE 的 BER-TLV 编码（只有 AARQ 0x60 / AARE 0x61）。
+
+        ⚠ 这里曾写成「长度 ≥ 2 就返回 True」，于是所有未识别 APDU（事件通知 0xC2、
+        数据通知 0x0F、异常响应 0xD8 等）都被当成 BER 树解析，输出一堆错位的
+        「BER 标签/长度」（真实帧实测）。DLMS 信息域里的 APDU 是 raw 编码，
+        只有 ACSE 的 AARQ/AARE 使用 BER（tag 0x60/0x61）。
+        """
+        if len(data) < 3 or data[0] not in (0x60, 0x61):
+            return False
+        length_byte = data[1]
+        if length_byte < 0x80:
+            return 2 + length_byte <= len(data)
+        num = length_byte & 0x7F
+        if num not in (1, 2) or len(data) < 2 + num:
+            return False
+        declared = int.from_bytes(data[2:2 + num], "big")
+        return 2 + num + declared <= len(data)
     
     def _parse_ber_tlv(self, data: bytes, table_data: list, base_offset: int):
         """解析BER-TLV编码的数据，循环解析直到所有字节处理完"""
@@ -890,14 +1017,15 @@ class HDLCParser:
                 else:
                     tag_desc = "高标签号（不完整）"
             elif 0x60 <= tag <= 0x7F:
-                # APPLICATION标签
+                # APPLICATION 标签：0x60=AARQ、0x61=AARE、0x62=RLRQ、0x63=RLRE
+                # ⚠ 曾按 `tag - 0x60` 配表却把 0 写成 AARQ、1 写成 AARE 的同时
+                #   又让 0x60 落到「APPLICATION 0」，结果 AARE 被标成 AARQ。
                 app_num = tag - 0x60
                 app_names = {
-                    0: "APPLICATION 0",
-                    1: "AARQ (关联请求)",
-                    2: "AARE (关联响应)",
-                    3: "RLRQ (释放请求)",
-                    4: "RLRE (释放响应)"
+                    0: "AARQ (关联请求)",
+                    1: "AARE (关联响应)",
+                    2: "RLRQ (释放请求)",
+                    3: "RLRE (释放响应)",
                 }
                 tag_desc = app_names.get(app_num, f"APPLICATION {app_num}")
             elif 0xA0 <= tag <= 0xBF:
@@ -905,58 +1033,58 @@ class HDLCParser:
                 ctx_num = tag - 0xA0
                 # AARQ/AARE 中常见 Context-Specific 标签含义
                 ctx_names = {
-                    0: "negotiated-dlms-version",
-                    1: "proposed-parameter-pp",
-                    2: "proposed-parameter-challenge",
-                    3: "client-sap-id",
-                    4: "association-information",
-                    5: "xdlms-context-info",
-                    6: "authentication",
-                    7: "mechanism-name",
-                    8: "challenge",
-                    9: "response",
-                    10: "server-sap-id",
-                    11: "proposed-quality-of-service",
-                    12: "password",
-                    30: "user-information",
+                    0: "协商 DLMS 版本（negotiated-dlms-version）",
+                    1: "提议参数（proposed-parameter-pp）",
+                    2: "提议参数挑战字（proposed-parameter-challenge）",
+                    3: "客户端 SAP 标识（client-sap-id）",
+                    4: "关联信息（association-information）",
+                    5: "xDLMS 上下文信息（xdlms-context-info）",
+                    6: "认证（authentication）",
+                    7: "认证机制名（mechanism-name）",
+                    8: "挑战字（challenge）",
+                    9: "响应（response）",
+                    10: "服务端 SAP 标识（server-sap-id）",
+                    11: "提议的服务质量（proposed-quality-of-service）",
+                    12: "密码（password）",
+                    30: "用户信息（user-information）",
                 }
                 if ctx_num in ctx_names:
-                    tag_desc = f"Context-Specific [{ctx_num}] {ctx_names[ctx_num]}"
+                    tag_desc = f"上下文 [{ctx_num}] {ctx_names[ctx_num]}"
                 else:
-                    tag_desc = f"Context-Specific [{ctx_num}]"
+                    tag_desc = f"上下文 [{ctx_num}]"
             else:
                 # 解析 BER 标签: 解码 class + constructed + tag number
                 tag_class = (tag >> 6) & 0x03
                 constructed = (tag >> 5) & 0x01
                 tag_number = tag & 0x1F
-                class_names = {0: "Universal", 1: "Application", 2: "Context-Specific", 3: "Private"}
-                class_name = class_names.get(tag_class, f"Class-{tag_class}")
-                constructed_str = " constructed" if constructed else ""
+                class_names = {0: "通用（Universal）", 1: "应用（Application）",
+                               2: "上下文（Context-Specific）", 3: "私有（Private）"}
+                class_name = class_names.get(tag_class, f"类别 {tag_class}")
+                constructed_str = "（构造类型）" if constructed else ""
 
-                # 通用标签名称映射
+                # 通用标签名称映射（中文在前，BER/ASN.1 英文原名括注）
                 universal_names = {
-                    0x01: "BOOLEAN",
-                    0x02: "INTEGER",
-                    0x03: "BIT STRING",
-                    0x04: "OCTET STRING",
-                    0x05: "NULL",
-                    0x06: "OBJECT IDENTIFIER",
-                    0x09: "REAL",
-                    0x0A: "ENUMERATED",
-                    0x0D: "ENUMERATED",
-                    0x10: "SEQUENCE",
-                    0x13: "SET",
-                    0x30: "SEQUENCE",
-                    0x31: "SET",
-                    0x35: "SEQUENCE OF",
-                    0x47: "OCTET STRING",
-                    0xBE: "Context-Specific [30]",
+                    0x01: "布尔值（BOOLEAN）",
+                    0x02: "整数（INTEGER）",
+                    0x03: "位串（BIT STRING）",
+                    0x04: "字节串（OCTET STRING）",
+                    0x05: "空值（NULL）",
+                    0x06: "对象标识（OBJECT IDENTIFIER）",
+                    0x09: "实数（REAL）",
+                    0x0A: "枚举（ENUMERATED）",
+                    0x10: "序列（SEQUENCE）",
+                    0x13: "集合（SET）",
+                    0x30: "序列（SEQUENCE）",
+                    0x31: "集合（SET）",
+                    0x35: "序列集合（SEQUENCE OF）",
                 }
                 if tag_class == 0 and tag_number in universal_names:
                     tag_desc = f"{class_name} {universal_names[tag_number]}{constructed_str}"
-                elif tag_class == 2:  # Context-Specific
+                elif tag_class == 2:  # 上下文专用（编号 = tag & 0x1F）
                     ctx_names = {
-                        4: "invoke-id-and-priority",
+                        4: "调用标识与优先级（invoke-id-and-priority）",
+                        10: "发起方 ACSE 要求（sender-acse-requirements）",
+                        12: "主叫认证值（calling-authentication-value）",
                     }
                     if tag_number in ctx_names:
                         tag_desc = f"{class_name} [{tag_number}] {ctx_names[tag_number]}{constructed_str}"
@@ -1057,9 +1185,11 @@ class HDLCParser:
                 # 判断是否是 constructed 类型（bit6 = 1 表示 constructed）
                 # 编码: [bit8-7: class][bit6: constructed][bits5-1: tag]
                 is_constructed = (tag & 0x20) != 0  # bit6 是 constructed 标志
-                # constructed 类型肯定包含嵌套 TLV，递归解析
-                # primitive 类型如果长度大于 2 也可能包含嵌套（比如 OCTET STRING 包含 SEQUENCE）
-                if (is_constructed or len(value_data) > 2) and len(value_data) >= 2:
+                # ⚠ 只对 constructed 递归。曾经写成「constructed 或长度>2 都递归」，
+                # 于是 OBJECT IDENTIFIER / OCTET STRING 这类 primitive 的值被当成
+                # 嵌套 TLV 拆开（AARQ 的 application-context OID 就这样碎成了
+                # 「BER 标签 0x60 / BER 长度 85 74 ...」）。
+                if is_constructed and len(value_data) >= 2:
                     self._parse_ber_tlv(value_data, table_data, local_offset)
 
                 # 移动偏移
@@ -1081,21 +1211,10 @@ class HDLCParser:
 
         # Class-ID (2字节, 大端序)
         class_id = struct.unpack('>H', data[offset:offset + 2])[0]
-        class_name = {
-            1: "Data (数据)", 3: "Register (寄存器)", 4: "Extended-Register (扩展寄存器)",
-            5: "Demand-Register (需求寄存器)", 6: "Activity-Calendar (活动日历)",
-            7: "Profile-Generic (配置文件)", 8: "Clock (时钟)", 9: "Script-Table (脚本表)",
-            10: "Schedule (调度器)", 15: "Special-Days-Table (特殊天数表)",
-            17: "Association-Logical-Device (关联逻辑设备)",
-            20: "Association-Snapshot (关联快照)",
-            42: "MBus-Client-Port", 70: "Pulse-Counter (脉冲计数器)",
-            81: "Comms-Port-HDLC (通信口HDLC)",
-            100: "Application-Association (应用关联)",
-            101: "Security-Setup (安全设置)",
-            111: "Disconnect-Control (断开控制)",
-        }.get(class_id, f"Class-{class_id}")
-
-        table_data.append((f"{label_prefix}类ID (Class-ID)", f"0x{class_id:04X}", class_name,
+        class_name = self.COSEM_CLASS_NAMES.get(
+            class_id, f"未登记类 {class_id}（Class-{class_id}）"
+        )
+        table_data.append((f"{label_prefix}COSEM 类ID（Class-ID）", f"0x{class_id:04X}", class_name,
                           "COSEM对象类", base_offset + offset, base_offset + offset + 1))
         offset += 2
 
@@ -1243,136 +1362,273 @@ class HDLCParser:
             return 0
 
         type_tag = data[0]
-        offset = 1
 
-        type_names = {
-            0x00: "Null", 0x01: "Array/Structure", 0x02: "Boolean", 0x03: "Bit-String",
-            0x04: "Double-Long-Unsigned", 0x05: "Double-Long", 0x06: "Octet-String",
-            0x09: "Visible-String", 0x0A: "UTF8-String", 0x0B: "BCD",
-            0x0C: "Integer(16bit)", 0x0D: "Long(32bit)", 0x0F: "Long-Unsigned(16bit)",
-            0x10: "Compact-Array", 0x11: "Long64-Unsigned", 0x12: "Long64",
-            0x13: "Enum", 0x16: "Float32", 0x17: "Float64",
-            0x18: "DateTime", 0x19: "Date", 0x1A: "Time", 0x1B: "Dont-Care",
+        # A-XDR 数据类型标签（IEC 62056-6-2 表 3 / DLMS Blue Book「Data」编码）。
+        # 值 = (IEC 英文原名, 中文名)；解析值/说明列按「中文（英文原名）」展示，
+        # 便于国内现场对照标准文档。
+        # ⚠ 这张表曾经整体错位：0x02 当 Boolean、0x06 当 Octet-String、0x09 当
+        #   Visible-String、0x10 当 Compact-Array —— 真实帧里 `09 0C <12 字节>`
+        #   的 date-time 被当成可见字符串输出乱码，`10 00 78` 的 int16 完全解析不出来。
+        TYPE_NAMES = {
+            0x00: ("null", "空值"), 0x01: ("array", "数组"), 0x02: ("structure", "结构"),
+            0x03: ("boolean", "布尔值"), 0x04: ("bit-string", "位串"),
+            0x05: ("double-long", "32 位有符号整数"),
+            0x06: ("double-long-unsigned", "32 位无符号整数"),
+            0x09: ("octet-string", "字节串"), 0x0A: ("visible-string", "可见字符串"),
+            0x0C: ("utf8-string", "UTF-8 字符串"), 0x0D: ("bcd", "BCD 码"),
+            0x0F: ("integer", "8 位有符号整数"), 0x10: ("long", "16 位有符号整数"),
+            0x11: ("unsigned", "8 位无符号整数"), 0x12: ("long-unsigned", "16 位无符号整数"),
+            0x13: ("compact-array", "压缩数组"), 0x14: ("long64", "64 位有符号整数"),
+            0x15: ("long64-unsigned", "64 位无符号整数"), 0x16: ("enum", "枚举"),
+            0x17: ("float32", "32 位浮点数"), 0x18: ("float64", "64 位浮点数"),
+            0x19: ("date-time", "日期时间"), 0x1A: ("date", "日期"), 0x1B: ("time", "时间"),
         }
-        type_name = type_names.get(type_tag, f"未知(0x{type_tag:02X})")
+        if type_tag in TYPE_NAMES:
+            type_name, type_cn = TYPE_NAMES[type_tag]
+            type_label = f"{type_cn}（{type_name}）"
+        else:
+            type_name = f"未知(0x{type_tag:02X})"
+            type_label = type_name
 
-        # 定长类型
-        fixed_lengths = {0x02: 1, 0x04: 4, 0x05: 4, 0x0C: 2, 0x0D: 4, 0x0F: 2,
-                         0x11: 8, 0x12: 8, 0x13: 1, 0x16: 4, 0x17: 8, 0x18: 12, 0x19: 5, 0x1A: 4}
+        def add(parsed: str, consumed: int, note: str = "") -> None:
+            """追加一行（原始值取本类型值的字节范围）。"""
+            raw = data[:consumed]
+            table_data.append((
+                label,
+                self._bytes_to_hex(raw[:32]) + ("..." if len(raw) > 32 else ""),
+                parsed,
+                note or f"{type_label}，共 {consumed} 字节",
+                base_offset,
+                base_offset + max(0, consumed - 1),
+            ))
 
-        if type_tag == 0x00:  # Null
-            table_data.append((label, "-", "Null", type_name, base_offset, base_offset))
+        # null
+        if type_tag == 0x00:
+            add("空值（null）", 1)
             return 1
-        elif type_tag == 0x01:  # Array/Structure
-            if len(data) > offset:
-                elem_count = data[offset]
-                offset += 1
-                table_data.append((label, f"0x{type_tag:02X} ({elem_count})", f"{type_name}, 元素数={elem_count}",
-                                  "复合数据", base_offset, base_offset + 1))
-                # 逐个解析每个元素
-                current_offset = offset
-                for i in range(elem_count):
-                    if current_offset >= len(data):
-                        break
-                    # 每个元素都是一个 DLMS 数据值，递归解析
-                    elem_len = self._parse_dlms_value(data[current_offset:], table_data,
-                                                    base_offset + current_offset,
-                                                    f"    {label} [{i}]")
-                    if elem_len <= 0:
-                        break
-                    current_offset += elem_len
-                return current_offset
-        elif type_tag == 0x06:  # Octet-String
-            if len(data) > offset:
-                str_len = data[offset]
-                offset += 1
-                if len(data) >= offset + str_len:
-                    str_data = data[offset:offset + str_len]
-                    # 检查是否是DateTime (12字节)
-                    if str_len == 12:
-                        try:
-                            year = struct.unpack('>H', str_data[0:2])[0]
-                            month = str_data[2]
-                            day = str_data[3]
-                            hour = str_data[4]
-                            minute = str_data[5]
-                            second = str_data[6]
-                            dt_str = f"{year}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}"
-                            table_data.append((f"{label} (DateTime)", self._bytes_to_hex(str_data), dt_str,
-                                              type_name, base_offset, base_offset + str_len))
-                            return offset + str_len
-                        except Exception:
-                            pass
-                    table_data.append((label, self._bytes_to_hex(str_data[:20]) + ("..." if str_len > 20 else ""),
-                                      f"{str_len}字节", type_name, base_offset, base_offset + str_len))
-                    return offset + str_len
-        elif type_tag == 0x09:  # Visible-String
-            if len(data) > offset:
-                str_len = data[offset]
-                offset += 1
-                if len(data) >= offset + str_len:
-                    str_data = data[offset:offset + str_len]
-                    try:
-                        str_value = str_data.decode('ascii', errors='replace')
-                    except Exception:
-                        str_value = self._bytes_to_hex(str_data)
-                    table_data.append((label, self._bytes_to_hex(str_data), f'"{str_value}"',
-                                      f"{type_name}({str_len}字节)", base_offset, base_offset + str_len))
-                    return offset + str_len
-        elif type_tag == 0x0A:  # UTF8-String
-            if len(data) > offset:
-                str_len = data[offset]
-                offset += 1
-                if len(data) >= offset + str_len:
-                    str_data = data[offset:offset + str_len]
-                    try:
-                        str_value = str_data.decode('utf-8', errors='replace')
-                    except Exception:
-                        str_value = self._bytes_to_hex(str_data)
-                    table_data.append((label, self._bytes_to_hex(str_data), f'"{str_value}"',
-                                      f"{type_name}({str_len}字节)", base_offset, base_offset + str_len))
-                    return offset + str_len
-        elif type_tag == 0x03:  # Bit-String
-            if len(data) > offset:
-                bit_len = data[offset]
-                offset += 1
-                byte_len = (bit_len + 7) // 8  # 向上取整，计算需要多少字节存储
-                if len(data) >= offset + byte_len:
-                    bit_data = data[offset:offset + byte_len]
-                    table_data.append((label, self._bytes_to_hex(bit_data),
-                                      f"{bit_len} bits ({byte_len}字节)",
-                                      type_name, base_offset, base_offset + byte_len))
-                    # 递归解析后面的内容，每个bit之后可能紧跟着下一个DLMS数据项
-                    return offset + byte_len
-        elif type_tag in fixed_lengths:
-            fl = fixed_lengths[type_tag]
-            if len(data) >= offset + fl:
-                value_data = data[offset:offset + fl]
-                # 解析具体值
-                if type_tag == 0x04:  # Double-Long-Unsigned
-                    val = struct.unpack('>I', value_data)[0]
-                    table_data.append((label, self._bytes_to_hex(value_data), str(val), type_name,
-                                      base_offset, base_offset + fl - 1))
-                elif type_tag == 0x0F:  # Long-Unsigned
-                    val = struct.unpack('>H', value_data)[0]
-                    table_data.append((label, self._bytes_to_hex(value_data), str(val), type_name,
-                                      base_offset, base_offset + fl - 1))
-                elif type_tag == 0x11:  # Long64-Unsigned
-                    val = struct.unpack('>Q', value_data)[0]
-                    table_data.append((label, self._bytes_to_hex(value_data), str(val), type_name,
-                                      base_offset, base_offset + fl - 1))
-                elif type_tag == 0x13:  # Enum
-                    table_data.append((label, self._bytes_to_hex(value_data), str(value_data[0]), type_name,
-                                      base_offset, base_offset))
-                else:
-                    table_data.append((label, self._bytes_to_hex(value_data), f"{fl}字节", type_name,
-                                      base_offset, base_offset + fl - 1))
-                return offset + fl
 
-        # 兜底：显示原始数据
-        table_data.append((label, self._bytes_to_hex(data[:20]) + ("..." if len(data) > 20 else ""),
-                          f"{len(data)}字节", type_name, base_offset, base_offset + min(19, len(data) - 1)))
+        # array(0x01) / structure(0x02)：元素数(1) + 元素序列
+        if type_tag in (0x01, 0x02):
+            if len(data) < 2:
+                add("数据不足", len(data))
+                return len(data)
+            count = data[1]
+            table_data.append((
+                label,
+                f"0x{type_tag:02X} ({count})",
+                f"{type_label}，元素数={count}",
+                "复合数据类型（递归解析每个元素）",
+                base_offset,
+                base_offset + 1,
+            ))
+            cursor = 2
+            for index in range(count):
+                if cursor >= len(data):
+                    break
+                step = self._parse_dlms_value(
+                    data[cursor:], table_data, base_offset + cursor,
+                    f"    {label} [{index}]",
+                )
+                if step <= 0:
+                    break
+                cursor += step
+            if cursor < len(data):
+                table_data.append((
+                    f"    {label} [未解析]",
+                    self._bytes_to_hex(data[cursor:cursor + 20]) + ("..." if len(data) - cursor > 20 else ""),
+                    f"{len(data) - cursor}字节",
+                    "元素个数/长度与声明不符，剩余字节原样展示",
+                    base_offset + cursor,
+                    base_offset + len(data) - 1,
+                ))
+                cursor = len(data)
+            return cursor
+
+        # boolean
+        if type_tag == 0x03:
+            if len(data) < 2:
+                add("数据不足", len(data))
+                return len(data)
+            value = data[1]
+            add("TRUE" if value else "FALSE", 2)
+            return 2
+
+        # bit-string：位数(1) + 数据
+        if type_tag == 0x04:
+            if len(data) < 2:
+                add("数据不足", len(data))
+                return len(data)
+            bit_len = data[1]
+            byte_len = (bit_len + 7) // 8
+            if len(data) < 2 + byte_len:
+                add(f"数据不足（声明 {bit_len} 位）", len(data))
+                return len(data)
+            add(f"{bit_len} 位", 2 + byte_len, f"{type_label}，{bit_len} 位")
+            return 2 + byte_len
+
+        # 定长数值类型
+        fixed = {
+            0x05: (4, ">i"),   # double-long（32 位有符号）
+            0x06: (4, ">I"),   # double-long-unsigned
+            0x0F: (1, ">b"),   # integer（8 位有符号）
+            0x10: (2, ">h"),   # long（16 位有符号）
+            0x11: (1, ">B"),   # unsigned（8 位）
+            0x12: (2, ">H"),   # long-unsigned（16 位）
+            0x14: (8, ">q"),   # long64
+            0x15: (8, ">Q"),   # long64-unsigned
+            0x16: (1, ">B"),   # enum
+            0x17: (4, ">f"),   # float32
+            0x18: (8, ">d"),   # float64
+        }
+        if type_tag in fixed:
+            size, fmt = fixed[type_tag]
+            if len(data) < 1 + size:
+                add("数据不足", len(data))
+                return len(data)
+            value = struct.unpack(fmt, data[1:1 + size])[0]
+            text = f"{value:g}" if isinstance(value, float) else str(value)
+            add(text, 1 + size)
+            return 1 + size
+
+        # octet-string：12 字节按 date-time、6 字节按 OBIS 逻辑名、其余十六进制
+        if type_tag == 0x09:
+            if len(data) < 2:
+                add("数据不足", len(data))
+                return len(data)
+            length = data[1]
+            if len(data) < 2 + length:
+                add(f"数据不足（声明 {length} 字节）", len(data))
+                return len(data)
+            payload = data[2:2 + length]
+            # 12 字节只有在「像合法 date-time」时才按日期解释；否则是普通
+            # OCTET STRING（例如 0x09 0C FF4F19F3... 这种全 FF 的无效值）。
+            if length == 12 and self._looks_like_dlms_datetime(payload):
+                table_data.append((
+                    f"{label} (date-time)",
+                    self._bytes_to_hex(payload),
+                    self._format_dlms_datetime(payload),
+                    f"{type_label}（12 字节日期时间）",
+                    base_offset,
+                    base_offset + 1 + length,
+                ))
+            else:
+                text = self._bytes_to_hex(payload) if payload else "-"
+                if length == 6:
+                    text = f"{text}  (OBIS {'.'.join(str(b) for b in payload)})"
+                table_data.append((
+                    label,
+                    self._bytes_to_hex(payload),
+                    text,
+                    f"{type_label}（{length} 字节）",
+                    base_offset,
+                    base_offset + 1 + length,
+                ))
+            return 2 + length
+
+        # visible-string / utf8-string / bcd：长度(1) + 内容
+        if type_tag in (0x0A, 0x0C, 0x0D):
+            if len(data) < 2:
+                add("数据不足", len(data))
+                return len(data)
+            length = data[1]
+            if len(data) < 2 + length:
+                add(f"数据不足（声明 {length} 字节）", len(data))
+                return len(data)
+            payload = data[2:2 + length]
+            if type_tag == 0x0A:
+                text = payload.decode("ascii", errors="replace")
+            elif type_tag == 0x0C:
+                text = payload.decode("utf-8", errors="replace")
+            else:
+                text = "".join(f"{b >> 4}{b & 0x0F}" for b in payload)
+            table_data.append((
+                label,
+                self._bytes_to_hex(payload),
+                f'"{text}"',
+                f"{type_label}（{length} 字节）",
+                base_offset,
+                base_offset + 1 + length,
+            ))
+            return 2 + length
+
+        # date-time(0x19) / date(0x1A) / time(0x1B)：无长度前缀的定长类型
+        if type_tag in (0x19, 0x1A, 0x1B):
+            size = 12 if type_tag == 0x19 else (5 if type_tag == 0x1A else 4)
+            if len(data) < 1 + size:
+                add("数据不足", len(data))
+                return len(data)
+            payload = data[1:1 + size]
+            if type_tag == 0x19:
+                text = self._format_dlms_datetime(payload)
+            elif type_tag == 0x1A:
+                text = (
+                    f"{int.from_bytes(payload[0:2], 'big'):04d}-"
+                    f"{payload[2]:02d}-{payload[3]:02d}（星期{payload[4]}）"
+                )
+            else:
+                text = f"{payload[0]:02d}:{payload[1]:02d}:{payload[2]:02d}.{payload[3]:02d}"
+            add(text, 1 + size)
+            return 1 + size
+
+        # compact-array：元素类型/数量在数据内部，暂按原始字节展示
+        if type_tag == 0x13:
+            add(f"compact-array（{max(0, len(data) - 1)} 字节）", len(data),
+                "压缩数组：元素类型与数量编码在数据内部，暂按原始字节展示")
+            return len(data)
+
+        # 未知类型：原样展示
+        table_data.append((
+            label,
+            self._bytes_to_hex(data[:20]) + ("..." if len(data) > 20 else ""),
+            f"{len(data)}字节",
+            type_label,
+            base_offset,
+            base_offset + min(19, len(data) - 1),
+        ))
         return len(data)
+
+    @staticmethod
+    def _format_dlms_datetime(payload: bytes) -> str:
+        """DLMS date_time（12 字节）→ 可读文本。
+
+        布局（IEC 62056-6-2）：年(2) 月 日 星期 时 分 秒 百分秒(1) 偏差(2，有符号分钟) 状态(1)。
+        ``0xFF`` / ``0xFFFF`` 表示「未指定」。
+        """
+        if len(payload) != 12:
+            return HDLCParser._bytes_to_hex(payload)
+        year = int.from_bytes(payload[0:2], "big")
+        month, day, weekday = payload[2], payload[3], payload[4]
+        hour, minute, second = payload[5], payload[6], payload[7]
+        hundredths = payload[8]
+        deviation = int.from_bytes(payload[9:11], "big", signed=True)
+        status = payload[11]
+        time_text = f"{hour:02d}:{minute:02d}:{second:02d}"
+        if hundredths != 0xFF:
+            time_text += f".{hundredths:02d}"
+        parts = [f"{year:04d}-{month:02d}-{day:02d}", time_text]
+        weekdays = "一二三四五六日"
+        if 1 <= weekday <= 7:
+            parts.append(f"星期{weekdays[weekday - 1]}")
+        parts.append(f"UTC偏差 {deviation} 分钟")
+        parts.append("状态正常" if status == 0 else f"状态 0x{status:02X}（非 0，可能有异常）")
+        return " ".join(parts)
+
+    @staticmethod
+    def _looks_like_dlms_datetime(payload: bytes) -> bool:
+        """12 字节是否像合法 date-time（用于「可选日期字段」判别，避免硬套结构）。"""
+        if len(payload) != 12:
+            return False
+        year = int.from_bytes(payload[0:2], "big")
+        month, day = payload[2], payload[3]
+        hour, minute, second = payload[5], payload[6], payload[7]
+        return (
+            1970 <= year <= 2200
+            and 1 <= month <= 12
+            and 1 <= day <= 31
+            and hour <= 23
+            and minute <= 59
+            and second <= 59
+        )
 
     def _parse_apdu_content(self, data: bytes, table_data: list, offset: int,
                             apdu_type: int, base_offset: int = 0, direction: str = "unknown") -> int:
@@ -1403,13 +1659,13 @@ class HDLCParser:
                 req_type = remaining[0]
                 type_name = self.GET_REQUEST_TYPES.get(req_type, f"未知(0x{req_type:02X})")
                 table_data.append(("    请求类型", f"0x{req_type:02X}", type_name,
-                                  "Get-Request类型", bo + local_offset, bo + local_offset))
+                                  "Get-Request（读请求）类型", bo + local_offset, bo + local_offset))
                 local_offset += 1
 
             if len(remaining) >= 2:
                 invoke_byte = remaining[1]
                 inv = self._decode_invoke_id(invoke_byte)
-                table_data.append(("    Invoke-Id-And-Priority", f"0x{invoke_byte:02X}",
+                table_data.append(("    调用标识与优先级（Invoke-Id-And-Priority）", f"0x{invoke_byte:02X}",
                                   f"ID={inv['invoke_id']}, {inv['service_class']}, {inv['priority']}",
                                   "调用标识和优先级", bo + local_offset, bo + local_offset))
                 local_offset += 1
@@ -1425,7 +1681,7 @@ class HDLCParser:
                         # 最后一个字节可能是 Selective Access 标记
                         remaining_after_desc = remaining[local_offset:]
                         if len(remaining_after_desc) > 0:
-                            table_data.append(("    Selective-Access",
+                            table_data.append(("    选择性访问（Selective-Access）",
                                               self._bytes_to_hex(remaining_after_desc[:5]) + ("..." if len(remaining_after_desc) > 5 else ""),
                                               f"{len(remaining_after_desc)}字节", "选择性访问描述符(可选)",
                                               bo + local_offset, bo + min(local_offset + 4, len(remaining) - 1)))
@@ -1436,6 +1692,40 @@ class HDLCParser:
                     table_data.append(("    Block-Number", f"0x{block_num:08X}", str(block_num),
                                       "数据块序号", bo + local_offset, bo + local_offset + 3))
 
+                # With-List：invoke + COUNT + N ×（属性描述符 + 选择访问）
+                elif req_type == 0x03 and len(remaining) >= 3:
+                    count = remaining[2]
+                    table_data.append(("    属性描述符数量", f"0x{count:02X}", str(count),
+                                      "Get-Request-With-List 条目数",
+                                      bo + local_offset + 1, bo + local_offset + 1))
+                    pos = 3
+                    for index in range(count):
+                        if pos + 9 > len(remaining):
+                            table_data.append((f"    [{index}] 数据不足",
+                                              self._bytes_to_hex(remaining[pos:]),
+                                              f"{len(remaining) - pos}字节", "条目被截断",
+                                              bo + pos, bo + len(remaining) - 1))
+                            pos = len(remaining)
+                            break
+                        consumed = self._parse_cosem_descriptor(
+                            remaining[pos:], table_data, bo + pos, f"    [{index}] "
+                        )
+                        pos += consumed if consumed > 0 else 9
+                        if pos < len(remaining):
+                            sel = remaining[pos]
+                            table_data.append((f"    [{index}] 选择访问", f"0x{sel:02X}",
+                                              "无" if sel == 0 else "有（原始字节）",
+                                              "Cosem-Attribute-Descriptor-With-Selection",
+                                              bo + pos, bo + pos))
+                            pos += 1
+                            if sel == 0x01 and pos < len(remaining):
+                                table_data.append((f"    [{index}] 选择器",
+                                                  f"0x{remaining[pos]:02X}",
+                                                  "选择性访问选择器（结构随对象类型）",
+                                                  "access-selector", bo + pos, bo + pos))
+                                pos += 1
+                    local_offset = pos
+
         # ======== Get-Response (0xC4) ========
         # 结构: Response-Type(1) + InvokeIdAndPriority(1) + 后续内容(取决于type)
         elif apdu_type == 0xC4:
@@ -1443,13 +1733,13 @@ class HDLCParser:
                 resp_type = remaining[0]
                 type_name = self.GET_RESPONSE_TYPES.get(resp_type, f"未知(0x{resp_type:02X})")
                 table_data.append(("    响应类型", f"0x{resp_type:02X}", type_name,
-                                  "Get-Response类型", bo + local_offset, bo + local_offset))
+                                  "Get-Response（读应答）类型", bo + local_offset, bo + local_offset))
                 local_offset += 1
 
             if len(remaining) >= 2:
                 invoke_byte = remaining[1]
                 inv = self._decode_invoke_id(invoke_byte)
-                table_data.append(("    Invoke-Id-And-Priority", f"0x{invoke_byte:02X}",
+                table_data.append(("    调用标识与优先级（Invoke-Id-And-Priority）", f"0x{invoke_byte:02X}",
                                   f"ID={inv['invoke_id']}, {inv['service_class']}, {inv['priority']}",
                                   "调用标识和优先级", bo + local_offset, bo + local_offset))
                 local_offset += 1
@@ -1460,8 +1750,8 @@ class HDLCParser:
                         result_tag = remaining[2]
                         if result_tag == 0x00:
                             # Data 成功
-                            table_data.append(("    结果", "0x00", "成功(Data)",
-                                              "Get-Data-Result", bo + local_offset, bo + local_offset))
+                            table_data.append(("    结果", "0x00", "成功（data）",
+                                              "Get-Data-Result（读取结果）", bo + local_offset, bo + local_offset))
                             local_offset += 1
                             # 解析返回数据
                             if len(remaining) > 3:
@@ -1472,21 +1762,85 @@ class HDLCParser:
                             if len(remaining) >= 4:
                                 err_code = remaining[3]
                                 err_name = self.DATA_ACCESS_RESULTS.get(err_code, f"未知(0x{err_code:02X})")
-                                table_data.append(("    结果", f"0x{result_tag:02X}", f"DataAccessError: {err_name}",
-                                                  "Get-Data-Result(错误)", bo + local_offset, bo + local_offset + 1))
+                                table_data.append(("    结果", f"0x{result_tag:02X}", f"访问结果错误：{err_name}",
+                                                  "Get-Data-Result（读取结果·错误）", bo + local_offset, bo + local_offset + 1))
                             else:
-                                table_data.append(("    结果", "0x01", "DataAccessError",
-                                                  "Get-Data-Result(错误)", bo + local_offset, bo + local_offset))
+                                table_data.append(("    结果", "0x01", "访问结果错误（DataAccessError）",
+                                                  "Get-Data-Result（读取结果·错误）", bo + local_offset, bo + local_offset))
 
                 elif resp_type == 0x02:
-                    # Get-Response-With-Data-Block: block-control + payload
-                    remaining_len = len(remaining) - 2
-                    table_data.append(("    返回数据(分块)",
-                                      self._bytes_to_hex(remaining[2:min(17, len(remaining))]) + ("..." if len(remaining) > 17 else ""),
-                                      f"{remaining_len}字节", "分块传输数据",
-                                      bo + local_offset, bo + local_offset + remaining_len - 1))
-                    # 消耗掉所有剩余字节
-                    local_offset += remaining_len
+                    # Get-Response-With-Data-Block:
+                    #   block-control(1) + block-number(4) + raw-data(n)
+                    # 真实帧（分块读 profile/电能）先给块控制与块号，原始数据留给
+                    # 「首块 + 后续块」拼装后按 A-XDR 解析。
+                    pos = 2
+                    if len(remaining) >= pos + 1:
+                        block_control = remaining[pos]
+                        table_data.append((
+                            "    Block-Control",
+                            f"0x{block_control:02X}",
+                            "最后一块" if (block_control & 0x01) else "非最后一块（后续还有块）",
+                            "分块控制：bit0 = last-block",
+                            bo + local_offset + pos,
+                            bo + local_offset + pos,
+                        ))
+                        pos += 1
+                    if len(remaining) >= pos + 4:
+                        block_number = int.from_bytes(remaining[pos:pos + 4], "big")
+                        table_data.append((
+                            "    Block-Number",
+                            self._bytes_to_hex(remaining[pos:pos + 4]),
+                            str(block_number),
+                            "数据块序号（从 1 开始）",
+                            bo + local_offset + pos,
+                            bo + local_offset + pos + 3,
+                        ))
+                        pos += 4
+                    raw_data = remaining[pos:]
+                    if raw_data:
+                        table_data.append((
+                            "    分块数据",
+                            self._bytes_to_hex(raw_data[:20]) + ("..." if len(raw_data) > 20 else ""),
+                            f"{len(raw_data)}字节",
+                            "raw-data（与首块拼装后再按 A-XDR 解析）",
+                            bo + local_offset + pos,
+                            bo + len(remaining) - 1,
+                        ))
+                    local_offset += len(remaining)
+                # With-List：invoke + COUNT + N × Get-Data-Result（0x00=data / 0x01=错误）
+                elif resp_type == 0x03 and len(remaining) >= 3:
+                    count = remaining[2]
+                    table_data.append(("    结果数量", f"0x{count:02X}", str(count),
+                                      "Get-Response-With-List 条目数",
+                                      bo + local_offset + 1, bo + local_offset + 1))
+                    pos = 3
+                    for index in range(count):
+                        if pos >= len(remaining):
+                            break
+                        tag = remaining[pos]
+                        if tag == 0x00:
+                            table_data.append((f"    [{index}] 结果", "0x00", "成功（data）",
+                                              "Get-Data-Result（数据）", bo + pos, bo + pos))
+                            pos += 1
+                            if pos < len(remaining):
+                                consumed = self._parse_dlms_value(
+                                    remaining[pos:], table_data, bo + pos, f"    [{index}] 数据"
+                                )
+                                pos += consumed if consumed > 0 else 0
+                        elif tag == 0x01:
+                            error = remaining[pos + 1] if pos + 1 < len(remaining) else 0
+                            table_data.append((f"    [{index}] 结果", f"0x{error:02X}",
+                                              self.DATA_ACCESS_RESULTS.get(error, f"未知(0x{error:02X})"),
+                                              "Get-Data-Result（数据访问结果）",
+                                              bo + pos, bo + min(pos + 1, len(remaining) - 1)))
+                            pos += 2
+                        else:
+                            table_data.append((f"    [{index}] 未识别", f"0x{tag:02X}",
+                                              "非 0x00/0x01 标签", "Get-Data-Result（读取结果）",
+                                              bo + pos, bo + len(remaining) - 1))
+                            pos = len(remaining)
+                            break
+                    local_offset = pos
                 else:
                     # 未知响应类型，消耗掉所有剩余字节，作为原始数据展示
                     remaining_len = len(remaining) - 2
@@ -1504,13 +1858,13 @@ class HDLCParser:
                 req_type = remaining[0]
                 type_name = self.SET_REQUEST_TYPES.get(req_type, f"未知(0x{req_type:02X})")
                 table_data.append(("    请求类型", f"0x{req_type:02X}", type_name,
-                                  "Set-Request类型", bo + local_offset, bo + local_offset))
+                                  "Set-Request（写请求）类型", bo + local_offset, bo + local_offset))
                 local_offset += 1
 
             if len(remaining) >= 2:
                 invoke_byte = remaining[1]
                 inv = self._decode_invoke_id(invoke_byte)
-                table_data.append(("    Invoke-Id-And-Priority", f"0x{invoke_byte:02X}",
+                table_data.append(("    调用标识与优先级（Invoke-Id-And-Priority）", f"0x{invoke_byte:02X}",
                                   f"ID={inv['invoke_id']}, {inv['service_class']}, {inv['priority']}",
                                   "调用标识和优先级", bo + local_offset, bo + local_offset))
                 local_offset += 1
@@ -1524,7 +1878,7 @@ class HDLCParser:
                     if local_offset < len(remaining):
                         sel_byte = remaining[local_offset]
                         if sel_byte == 0x00:
-                            table_data.append(("    Selective-Access", "0x00", "无",
+                            table_data.append(("    选择性访问（Selective-Access）", "0x00", "无",
                                               "无选择性访问", bo + local_offset, bo + local_offset))
                             local_offset += 1
 
@@ -1540,13 +1894,13 @@ class HDLCParser:
                 resp_type = remaining[0]
                 type_name = self.SET_RESPONSE_TYPES.get(resp_type, f"未知(0x{resp_type:02X})")
                 table_data.append(("    响应类型", f"0x{resp_type:02X}", type_name,
-                                  "Set-Response类型", bo + local_offset, bo + local_offset))
+                                  "Set-Response（写应答）类型", bo + local_offset, bo + local_offset))
                 local_offset += 1
 
             if len(remaining) >= 2:
                 invoke_byte = remaining[1]
                 inv = self._decode_invoke_id(invoke_byte)
-                table_data.append(("    Invoke-Id-And-Priority", f"0x{invoke_byte:02X}",
+                table_data.append(("    调用标识与优先级（Invoke-Id-And-Priority）", f"0x{invoke_byte:02X}",
                                   f"ID={inv['invoke_id']}, {inv['service_class']}, {inv['priority']}",
                                   "调用标识和优先级", bo + local_offset, bo + local_offset))
                 local_offset += 1
@@ -1566,6 +1920,22 @@ class HDLCParser:
                                           f"{remaining_len}字节", "额外数据",
                                           bo + local_offset, bo + len(remaining) - 1))
                         local_offset += remaining_len
+                elif resp_type in (0x04, 0x05) and len(remaining) >= 3:
+                    # With-List / Last-Datablock-With-List：COUNT + N × Data-Access-Result
+                    count = remaining[2]
+                    table_data.append(("    结果数量", f"0x{count:02X}", str(count),
+                                      "Set-Response-With-List 条目数",
+                                      bo + local_offset + 1, bo + local_offset + 1))
+                    pos = 3
+                    for index in range(count):
+                        if pos >= len(remaining):
+                            break
+                        value = remaining[pos]
+                        table_data.append((f"    [{index}] 结果", f"0x{value:02X}",
+                                          self.DATA_ACCESS_RESULTS.get(value, f"未知(0x{value:02X})"),
+                                          "Data-Access-Result", bo + pos, bo + pos))
+                        pos += 1
+                    local_offset = pos
                 else:
                     # 未知响应类型，消耗所有剩余字节
                     remaining_len = len(remaining) - 2
@@ -1583,13 +1953,13 @@ class HDLCParser:
                 req_type = remaining[0]
                 type_name = self.ACTION_REQUEST_TYPES.get(req_type, f"未知(0x{req_type:02X})")
                 table_data.append(("    请求类型", f"0x{req_type:02X}", type_name,
-                                  "Action-Request类型", bo + local_offset, bo + local_offset))
+                                  "Action-Request（方法请求）类型", bo + local_offset, bo + local_offset))
                 local_offset += 1
 
             if len(remaining) >= 2:
                 invoke_byte = remaining[1]
                 inv = self._decode_invoke_id(invoke_byte)
-                table_data.append(("    Invoke-Id-And-Priority", f"0x{invoke_byte:02X}",
+                table_data.append(("    调用标识与优先级（Invoke-Id-And-Priority）", f"0x{invoke_byte:02X}",
                                   f"ID={inv['invoke_id']}, {inv['service_class']}, {inv['priority']}",
                                   "调用标识和优先级", bo + local_offset, bo + local_offset))
                 local_offset += 1
@@ -1598,15 +1968,11 @@ class HDLCParser:
                 if req_type == 0x01 and len(remaining) >= 11:
                     # Class-ID (2字节)
                     class_id = struct.unpack('>H', remaining[2:4])[0]
-                    class_name = {
-                        1: "Data", 3: "Register", 4: "Extended-Register",
-                        7: "Profile-Generic", 8: "Clock", 9: "Script-Table",
-                        17: "Association-Logical-Device", 70: "Pulse-Counter",
-                        81: "Comms-Port-HDLC", 100: "Application-Association",
-                        101: "Security-Setup", 111: "Disconnect-Control",
-                    }.get(class_id, f"Class-{class_id}")
+                    class_name = self.COSEM_CLASS_NAMES.get(
+                        class_id, f"未登记类 {class_id}（Class-{class_id}）"
+                    )
 
-                    table_data.append(("    类ID (Class-ID)", f"0x{class_id:04X}", class_name,
+                    table_data.append(("    COSEM 类ID（Class-ID）", f"0x{class_id:04X}", class_name,
                                       "COSEM对象类", bo + local_offset, bo + local_offset + 1))
                     local_offset += 2
 
@@ -1639,6 +2005,39 @@ class HDLCParser:
                             table_data.append(("    方法参数标记", "0x00", "无参数",
                                               "无方法调用参数", bo + local_offset, bo + local_offset))
 
+                elif req_type == 0x03 and len(remaining) >= 3:
+                    # With-List：invoke + COUNT + N × 方法描述符 + COUNT + N × 参数
+                    count = remaining[2]
+                    table_data.append(("    方法描述符数量", f"0x{count:02X}", str(count),
+                                      "Action-Request-With-List 条目数",
+                                      bo + local_offset + 1, bo + local_offset + 1))
+                    pos = 3
+                    for index in range(count):
+                        if pos + 9 > len(remaining):
+                            table_data.append((f"    [{index}] 数据不足",
+                                              self._bytes_to_hex(remaining[pos:]),
+                                              f"{len(remaining) - pos}字节", "条目被截断",
+                                              bo + pos, bo + len(remaining) - 1))
+                            pos = len(remaining)
+                            break
+                        consumed = self._parse_cosem_descriptor(
+                            remaining[pos:], table_data, bo + pos, f"    [{index}] "
+                        )
+                        pos += consumed if consumed > 0 else 9
+                    if pos < len(remaining):
+                        pcount = remaining[pos]
+                        table_data.append(("    参数数量", f"0x{pcount:02X}", str(pcount),
+                                          "SEQUENCE OF Data（方法调用参数）",
+                                          bo + pos, bo + pos))
+                        pos += 1
+                        for index in range(pcount):
+                            if pos >= len(remaining):
+                                break
+                            consumed = self._parse_dlms_value(
+                                remaining[pos:], table_data, bo + pos, f"    [{index}] 参数"
+                            )
+                            pos += consumed if consumed > 0 else 0
+                    local_offset = pos
         # ======== Action-Response (0xC7) ========
         # 结构: Response-Type(1) + InvokeIdAndPriority(1) + Action-Result(2) + [Return-Parameters]
         elif apdu_type == 0xC7:
@@ -1646,13 +2045,13 @@ class HDLCParser:
                 resp_type = remaining[0]
                 type_name = self.ACTION_RESPONSE_TYPES.get(resp_type, f"未知(0x{resp_type:02X})")
                 table_data.append(("    响应类型", f"0x{resp_type:02X}", type_name,
-                                  "Action-Response类型", bo + local_offset, bo + local_offset))
+                                  "Action-Response（方法应答）类型", bo + local_offset, bo + local_offset))
                 local_offset += 1
 
             if len(remaining) >= 2:
                 invoke_byte = remaining[1]
                 inv = self._decode_invoke_id(invoke_byte)
-                table_data.append(("    Invoke-Id-And-Priority", f"0x{invoke_byte:02X}",
+                table_data.append(("    调用标识与优先级（Invoke-Id-And-Priority）", f"0x{invoke_byte:02X}",
                                   f"ID={inv['invoke_id']}, {inv['service_class']}, {inv['priority']}",
                                   "调用标识和优先级", bo + local_offset, bo + local_offset))
                 local_offset += 1
@@ -1667,7 +2066,7 @@ class HDLCParser:
                     if result_tag == 0x00:
                         # 00 = success
                         table_data.append(("    操作结果", "0x00", "成功",
-                                          "Action-Result (success)", bo + local_offset + 2, bo + local_offset + 2))
+                                          "Action-Result（操作结果·成功）", bo + local_offset + 2, bo + local_offset + 2))
                         local_offset_after_result = 3  # 已经用了 2+1=3 字节 (索引到3)
 
                         # success 之后可能有 return-data，可能带 0x00 标签
@@ -1697,7 +2096,7 @@ class HDLCParser:
                         # 结构: Action-Result(1B) + Data-Access-Result(1B) + result(1B)
                         result_name = self.ACTION_RESULTS.get(result_tag, f"type-unmatched({result_tag})")
                         table_data.append(("    Action-Result", f"0x{result_tag:02X}", result_name,
-                                          "Action-Result CHOICE", bo + local_offset + 2, bo + local_offset + 2))
+                                          "Action-Result（操作结果 CHOICE）", bo + local_offset + 2, bo + local_offset + 2))
 
                         # 下一个字节是 Data-Access-Result 标签
                         if len(remaining) >= 4:
@@ -1712,17 +2111,186 @@ class HDLCParser:
                                 table_data.append(("    Data-Access-Result", f"0x{dar_tag:02X}", "",
                                                   "Data-Access-Result", bo + local_offset + 3, bo + local_offset + 3))
 
-        # ======== AARQ/AARE (0x60/0x61 或 0x01/0x02) ========
-        elif apdu_type in (0x01, 0x02, 0x60, 0x61):
-            # AARQ/AARE 使用BER编码，深度解析BER-TLV结构
-            table_data.append(("    关联数据",
-                              self._bytes_to_hex(remaining[:20]) + ("..." if len(remaining) > 20 else ""),
-                              f"{len(remaining)}字节",
-                              "关联请求/响应（BER编码）",
-                              bo + local_offset, bo + min(local_offset + 19, len(remaining) - 1)))
-            # 深度解析 BER-TLV，_parse_ber_tlv 会解析完所有剩余字节
+                elif resp_type == 0x03 and len(remaining) >= 3:
+                    # With-List：invoke + COUNT + N × Action-Result（success 时可跟返回数据）
+                    count = remaining[2]
+                    table_data.append(("    结果数量", f"0x{count:02X}", str(count),
+                                      "Action-Response-With-List 条目数",
+                                      bo + local_offset + 1, bo + local_offset + 1))
+                    pos = 3
+                    for index in range(count):
+                        if pos >= len(remaining):
+                            break
+                        result = remaining[pos]
+                        table_data.append((f"    [{index}] 结果", f"0x{result:02X}",
+                                          self.ACTION_RESULTS.get(result, f"未知(0x{result:02X})"),
+                                          "Action-Result（操作结果）", bo + pos, bo + pos))
+                        pos += 1
+                        if result == 0 and pos < len(remaining):
+                            consumed = self._parse_dlms_value(
+                                remaining[pos:], table_data, bo + pos, f"    [{index}] 返回数据"
+                            )
+                            pos += consumed if consumed > 0 else 0
+                    local_offset = pos
+
+        # ======== Event-Notification-Request (0xC2) ========
+        # 结构: Long-Invoke-Id-And-Priority(4) + DateTime(12) + AttributeDescriptor(9) + Data
+        elif apdu_type == 0xC2:
+            if len(remaining) >= 4:
+                invoke = int.from_bytes(remaining[0:4], "big")
+                table_data.append(("    长调用标识与优先级（Long-Invoke-Id-And-Priority）", self._bytes_to_hex(remaining[0:4]),
+                                  f"ID={invoke & 0x0FFFFFFF}", "4 字节调用标识（低 4 位为优先级/服务级别）",
+                                  bo + local_offset, bo + local_offset + 3))
+                local_offset += 4
+            if len(remaining) >= local_offset + 12 and self._looks_like_dlms_datetime(
+                remaining[local_offset:local_offset + 12]
+            ):
+                dt = remaining[local_offset:local_offset + 12]
+                table_data.append(("    事件时间 (date-time)", self._bytes_to_hex(dt),
+                                  self._format_dlms_datetime(dt), "事件发生的日期时间",
+                                  bo + local_offset, bo + local_offset + 11))
+                local_offset += 12
+                if len(remaining) >= local_offset + 9:
+                    consumed = self._parse_cosem_descriptor(
+                        remaining[local_offset:], table_data, bo + local_offset
+                    )
+                    if consumed > 0:
+                        local_offset += consumed
+            # ⚠ 非标准/自定义的事件通知帧（日期字段不是合法 date-time）不硬套
+            #   标准结构，直接按 A-XDR 数据解析剩余内容，避免输出荒谬时间。
+            while local_offset < len(remaining):
+                consumed = self._parse_dlms_value(
+                    remaining[local_offset:], table_data, bo + local_offset, "    事件数据"
+                )
+                if consumed <= 0:
+                    break
+                local_offset += consumed
+
+        # ======== Data-Notification (0x0F) ========
+        # 结构（Green Book 9.4.1，L7322-7327）：
+        #   long-invoke-id-and-priority(4) + date-time(OCTET STRING 12B) + notification-body
+        elif apdu_type == 0x0F:
+            if len(remaining) >= 4:
+                invoke = int.from_bytes(remaining[0:4], "big")
+                table_data.append(("    长调用标识与优先级（Long-Invoke-Id-And-Priority）", self._bytes_to_hex(remaining[0:4]),
+                                  f"ID={invoke & 0xFFFFFF}，bit28 自描述={1 if invoke & (1 << 28) else 0}，"
+                                  f"bit29 遇错继续={1 if invoke & (1 << 29) else 0}，"
+                                  f"bit30 服务级别={'Confirmed' if invoke & (1 << 30) else 'Unconfirmed'}，"
+                                  f"bit31 优先级={'High' if invoke & (1 << 31) else 'Normal'}",
+                                  "4 字节长调用标识（低 24 位为 invoke-id）",
+                                  bo + local_offset, bo + local_offset + 3))
+                local_offset += 4
+            # date-time：A-XDR OCTET STRING（09 0C + 12 字节）
+            if (
+                local_offset + 2 <= len(remaining)
+                and remaining[local_offset] == 0x09
+                and remaining[local_offset + 1] == 12
+                and self._looks_like_dlms_datetime(
+                    remaining[local_offset + 2: local_offset + 14]
+                )
+            ):
+                payload = remaining[local_offset + 2: local_offset + 14]
+                table_data.append(("    通知时间 (date-time)", self._bytes_to_hex(payload),
+                                  self._format_dlms_datetime(payload),
+                                  "主动推送的采集时间",
+                                  bo + local_offset, bo + local_offset + 13))
+                local_offset += 14
+            elif (
+                local_offset + 12 <= len(remaining)
+                and self._looks_like_dlms_datetime(remaining[local_offset: local_offset + 12])
+            ):
+                # 少数实现直接跟 12 字节裸 date-time（不带 A-XDR 标签）
+                payload = remaining[local_offset: local_offset + 12]
+                table_data.append(("    通知时间 (date-time)", self._bytes_to_hex(payload),
+                                  self._format_dlms_datetime(payload),
+                                  "主动推送的采集时间（裸 12 字节）",
+                                  bo + local_offset, bo + local_offset + 11))
+                local_offset += 12
+            if local_offset < len(remaining):
+                body = remaining[local_offset]
+                body_name = (
+                    "data-notification（主动推送数据）"
+                    if body == 0x00
+                    else f"未知通知体(0x{body:02X})"
+                )
+                table_data.append(("    通知体类型", f"0x{body:02X}", body_name,
+                                  "Notification-Body CHOICE", bo + local_offset, bo + local_offset))
+                local_offset += 1
+            while local_offset < len(remaining):
+                consumed = self._parse_dlms_value(
+                    remaining[local_offset:], table_data, bo + local_offset, "    通知数据"
+                )
+                if consumed <= 0:
+                    break
+                local_offset += consumed
+
+        # ======== Exception-Response (0xD8) ========
+        # 结构：state-error [0] ENUMERATED(1/2) + service-error [1] CHOICE(1~6)
+        elif apdu_type == 0xD8:
+            if len(remaining) >= 1:
+                state = remaining[0]
+                table_data.append((
+                    "    State-Error",
+                    f"0x{state:02X}",
+                    self.EXCEPTION_STATE_ERRORS.get(state, f"未知/保留({state})"),
+                    "异常响应：状态错误（1=服务不允许，2=服务未知）",
+                    bo + local_offset, bo + local_offset,
+                ))
+                local_offset += 1
             if len(remaining) >= 2:
-                self._parse_ber_tlv(remaining, table_data, bo + local_offset)
+                service = remaining[1]
+                table_data.append((
+                    "    Service-Error",
+                    f"0x{service:02X}",
+                    self.EXCEPTION_SERVICE_ERRORS.get(service, f"未知/保留({service})"),
+                    "异常响应：服务错误 CHOICE（1~6）",
+                    bo + local_offset, bo + local_offset,
+                ))
+                local_offset += 1
+                if service == 6 and len(remaining) >= 6:
+                    counter = int.from_bytes(remaining[2:6], "big")
+                    table_data.append((
+                        "    调用计数器",
+                        self._bytes_to_hex(remaining[2:6]),
+                        str(counter),
+                        "invocation-counter-error 附带的 4 字节计数器",
+                        bo + local_offset, bo + local_offset + 3,
+                    ))
+                    local_offset += 4
+            if local_offset < len(remaining):
+                table_data.append((
+                    "    剩余数据",
+                    self._bytes_to_hex(remaining[local_offset:local_offset + 16]),
+                    f"{len(remaining) - local_offset}字节",
+                    "异常响应附加数据",
+                    bo + local_offset, bo + len(remaining) - 1,
+                ))
+                local_offset = len(remaining)
+
+        # ======== Access-Request / Access-Response (0xD9 / 0xDA) ========
+        elif apdu_type in (0xD9, 0xDA):
+            table_data.append(("    Access 数据", self._bytes_to_hex(remaining[:20]) + ("..." if len(remaining) > 20 else ""),
+                              f"{len(remaining)}字节",
+                              "DLMS 访问服务（access-request/response）：结构随访问描述符变化，"
+                              "暂按原始字节展示",
+                              bo + local_offset, bo + min(local_offset + 19, len(remaining) - 1)))
+            local_offset = len(remaining)
+
+        # ======== ACSE：AARQ/AARE/RLRQ/RLRE（0x60~0x63，BER 编码）========
+        elif apdu_type in (0x60, 0x61, 0x62, 0x63):
+            # AARQ/AARE 使用 BER 编码：APDU tag(0x60/0x61) + BER 长度 + 内容。
+            # ⚠ remaining 已跳过 tag，必须把 tag 拼回去再交给 BER 解析 ——
+            # 否则长度字节会被当成下一个 tag（真实 AARQ 帧实测整棵 BER 树错位一层）。
+            ber = bytes([apdu_type]) + remaining
+            table_data.append(("    关联数据",
+                              self._bytes_to_hex(ber[:20]) + ("..." if len(ber) > 20 else ""),
+                              f"{len(ber)}字节",
+                              "关联请求/响应（BER 编码，含 APDU 标签与长度）",
+                              max(0, bo + local_offset - 1),
+                              max(0, bo + local_offset - 1) + min(19, len(ber) - 1)))
+            # 深度解析 BER-TLV（_parse_ber_tlv 从 tag 开始，自带长度域处理）
+            if len(ber) >= 2:
+                self._parse_ber_tlv(ber, table_data, max(0, bo + local_offset - 1))
                 # BER-TLV 解析了所有剩余字节，local_offset 加上全部长度
                 local_offset += len(remaining)
 
@@ -1788,6 +2356,8 @@ class HDLCParser:
             "格式类型": f"0x{format_type:X} (Type 3)" if format_type == 0x0A else f"0x{format_type:X}",
             "分段位": segmentation_bit,
             "帧长度": frame_length,
+            # 帧长自证：与声明不符时给出中文提示（不改变「解析状态」，保持容错可用）
+            "帧长校验": self._check_declared_length(frame_bytes, frame_length) or "与声明一致",
             "说明": "HDLC Type 3格式"
         }
         offset += 2
@@ -1798,7 +2368,9 @@ class HDLCParser:
             "原始值": self._bytes_to_hex(frame_bytes[offset:offset + dest_len]),
             "地址值": f"0x{dest_addr:X}",
             "地址长度": f"{dest_len}字节",
-            "说明": self._format_address_description(dest_addr, dest_len, "目的")
+            "说明": self._format_address_description(
+                dest_addr, dest_len, "目的", frame_bytes[offset:offset + dest_len]
+            )
         }
         offset += dest_len
         
@@ -1808,7 +2380,9 @@ class HDLCParser:
             "原始值": self._bytes_to_hex(frame_bytes[offset:offset + src_len]),
             "地址值": f"0x{src_addr:X}",
             "地址长度": f"{src_len}字节",
-            "说明": self._format_address_description(src_addr, src_len, "源")
+            "说明": self._format_address_description(
+                src_addr, src_len, "源", frame_bytes[offset:offset + src_len]
+            )
         }
         offset += src_len
         
@@ -1827,7 +2401,12 @@ class HDLCParser:
             "原始值": f"0x{control_byte:02X}",
             "帧类型": ctrl_type,
             "说明": ctrl_desc,
-            **ctrl_details
+            # ctrl_details 是 [(字段名, 原始bit, 解析值), ...] 的列表，
+            # 不能 ** 展开（真实帧一跑就 TypeError）；这里转成可序列化的明细
+            "位明细": [
+                {"字段": name, "原始": raw, "解析": parsed}
+                for name, raw, parsed in (ctrl_details or [])
+            ],
         }
         offset += 1
         

@@ -21,7 +21,9 @@ def test_run_ok_and_reports():
     code = self_test.run(buf)
     text = buf.getvalue()
     assert code == 0, text
-    assert "解析器：12 个已加载" in text
+    # 解析器个数随协议增加（现 13：0~15 里 12 有独立解析器 + 南网/国网等），
+    # 不写死数字，改为与注册表同源，避免每次加协议都要改测试。
+    assert f"解析器：{len(parser_registry._PARSER_SPECS)} 个已加载" in text
     assert "75 字节样例一致" in text
     assert text.strip().endswith("OK")
 

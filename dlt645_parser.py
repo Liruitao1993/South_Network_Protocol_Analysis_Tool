@@ -8,6 +8,10 @@ from dlt645_data_codec import (
     split_write_request, split_change_password, split_clear_command,
 )
 from dlt645_pv_ext import merge_pv_di_map, is_pv_di, parse_pv_di
+from dlt645_pv_wireless import (
+    merge_wireless_di_map, is_wireless_di, parse_wireless_di,
+    control_extra, err_bits_text,
+)
 from wakeup_prefix import strip_wakeup_prefix
 
 # LME自定义DI集合（手册《LME产品相关信息生产运维接口手册_V2.4》中走645框架的接口）
@@ -21,21 +25,23 @@ class DLT645Parser:
         """从 JSON 文件加载完整的 DI 映射表
 
         并入光伏协议转换单元 DL/T645-2007 扩展协议 DI（dlt645_pv_ext.PV_DI_MAP，
-        单一来源；dlt645_di.json 是生成物，不写入扩展 DI）。
+        单一来源；dlt645_di.json 是生成物，不写入扩展 DI），以及无线模组接口
+        手册 V1.6 的 DI（dlt645_pv_wireless.WIRELESS_DI_MAP；它覆盖 04E60001 ——
+        该 DI 两边都有，无线手册给了明确长度模型 1+6×M 与实测报文）。
         """
         json_path = os.path.join(os.path.dirname(__file__), 'dlt645_di.json')
 
         try:
             with open(json_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                return merge_pv_di_map(data.get('di_map', {}))
+                return merge_wireless_di_map(merge_pv_di_map(data.get('di_map', {})))
         except Exception as e:
             print(f"加载 DLT645 DI 映射表失败: {e}")
             # 返回基本 DI 映射作为后备
-            return merge_pv_di_map({
+            return merge_wireless_di_map(merge_pv_di_map({
                 "00010000": {"name": "当前正向有功总电能", "unit": "kWh", "data_type": "XXXXXX.XX", "length": 4},
                 "00020000": {"name": "当前反向有功总电能", "unit": "kWh", "data_type": "XXXXXX.XX", "length": 4},
-            })
+            }))
 
     @staticmethod
     def check_structure(data: bytes) -> Tuple[bool, str]:
@@ -223,6 +229,15 @@ class DLT645Parser:
             ctrl_parsed_value.append("D6=1(异常应答)")
 
         result['control_desc'] = ' | '.join(ctrl_desc)
+
+        # 南网光伏无线模组接口手册 V1.6 扩展控制码（06H/86H、1EH/9EH、11H 数据转发）：
+        # 只**补语义**、不改标准 645 的判定 —— 不往 FUNC_NAMES 里塞（06H 与 86H 方向相反）
+        _wl_ctrl = control_extra(result['di_code'], ctrl)
+        if _wl_ctrl:
+            # 06H/1EH 在标准 645 里没有对应功能码（会显示「未知功能码06H」，
+            # 且 DIR=0 的 1EH 会被标成「主站请求」）—— 命中扩展时整段换成手册口径
+            _wl_dir = "从站/模组方向" if (ctrl & 0x80) else "请求方向（模组→接口转换器）"
+            result['control_desc'] = f"{_wl_dir} | {_wl_ctrl}"
         result['control_parsed'] = '; '.join(ctrl_parsed_value)
 
         # LME自定义接口（手册4.2/4.6/4.7）：按DI+控制码分派深度解析
@@ -235,9 +250,21 @@ class DLT645Parser:
             except Exception as e:
                 lme_rows = [('  └ ⚠ LME解析异常', str(e), '已回退显示原始数据')]
 
+        # 南网光伏无线模组接口手册 V1.6（§4）：按 DI 分派深度解析。
+        # 优先级**高于**附件1 扩展：04E60001 两边都有，无线手册的长度模型（1+6×M）
+        # 有实测报文自证，附件1 的「长度列 16」无法自洽切分（见 pv_ext 歧义行）。
+        wl_rows = None
+        if is_wireless_di(result['di_code']):
+            try:
+                wl_rows, wl_name = parse_wireless_di(result['di_code'], ctrl, result['data'])
+                if wl_name:
+                    result['di_desc'] = wl_name
+            except Exception as e:
+                wl_rows = [('  └ ⚠ 无线扩展解析异常', str(e), '已回退显示原始数据')]
+
         # 光伏协议转换单元 DL/T645-2007 扩展协议（附件1 §D.1 三张表）：按 DI 分派深度解析
         pv_rows = None
-        if is_pv_di(result['di_code']):
+        if is_pv_di(result['di_code']) and not is_wireless_di(result['di_code']):
             try:
                 pv_rows, pv_name = parse_pv_di(result['di_code'], ctrl, result['data'])
                 if pv_name:
@@ -279,10 +306,16 @@ class DLT645Parser:
 
         if err_in_data:
             # 异常应答：数据域仅 1 字节错误信息字 ERR
-            err_raw = f"{result['data'][0]:02X}"
+            err_byte = result['data'][0]
+            err_raw = f"{err_byte:02X}"
             result['fields'].append(
                 ('错误信息字 ERR', err_raw, decode_err(result['data'][0:1]) or err_raw,
                  'D6=1 异常应答，错误码定义见DL/T645-2007附录C'))
+            # 南网光伏无线模组接口手册 V1.6 §4.1.3：ERR 位定义 + 0x80 扩展语义
+            result['fields'].append(
+                ('  └ ERR 位展开', f"0x{err_byte:02X}", err_bits_text(err_byte),
+                 '南网光伏无线模组接口手册 V1.6 §4.1.3：Bit7=1（0x80）= 目标无线接口转换器'
+                 '未入网（模组立即返回异常应答）'))
         elif addr_in_data:
             # 读/写通信地址：数据域即6字节表地址（BCD低位在前，与地址域同序）
             addr_raw = ' '.join(f"{b:02X}" for b in result['data'][0:6])
@@ -329,6 +362,12 @@ class DLT645Parser:
                         '  └ ※ 透传内容按扩展协议展开', '', result['di_desc'],
                         '该 DI 命中光伏协议转换单元扩展协议表，展开其数据块'))
                     result['fields'].extend(pv_rows)
+            elif wl_rows is not None:
+                # 南网光伏无线模组接口手册 V1.6：逐字段深度解析（契约同 LME 行列表）
+                result['fields'].extend(wl_rows)
+                if body:
+                    result['fields'].append(('数据内容(原始)', body.hex().upper(),
+                                             '减33H后原始数据（备查）'))
             elif lme_rows is not None:
                 # LME自定义接口：逐字段深度解析
                 result['fields'].extend(lme_rows)

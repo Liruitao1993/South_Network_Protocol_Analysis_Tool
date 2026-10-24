@@ -57,6 +57,9 @@ CORE_TESTS = [
     "test/test_self_test.py",
     "test/test_appearance_mode.py",
     "test/test_protocol_registry.py",
+    "test/test_modbus.py",
+    # 协议2（HDLC/国网DLMS）真实报文语料：SNRM/UA、AARQ/AARE、Get/Set、数据类型、批量切帧
+    "test/test_hdlc_corpus.py",
     "test/test_pcap_import.py",
     "test/test_dlms.py",
     "test/test_hdlc.py",
@@ -95,6 +98,10 @@ CORE_TESTS = [
     "test/test_dlt645_status_word_bits.py",
     "test/test_dlt645_lme.py",
     "test/test_dlt645_pv_ext.py",
+    # 南网光伏无线模组接口手册 V1.6（无线模组扩展 DI/控制码：频段/地址列表/拓扑/升级/在网状态）
+    "test/test_dlt645_pv_wireless.py",
+    # 同一手册的**组帧**方向（12 个扩展 DI 的字段模板 + 06H/86H/1EH/9EH 命令 + 组帧↔解析闭环）
+    "test/test_dlt645_pv_wireless_frame.py",
     "test/test_dlt645_sim.py",
     "test/test_dlt645_sim_lme_query.py",
     "test/test_dlt645_sim_event_word.py",
@@ -144,6 +151,8 @@ CORE_TESTS = [
     # 前导 FE 唤醒字节（协议8/6）：解析/表格偏移/校验一致性 + offscreen GUI（AGENTS §8 前导 FE 陷阱）
     "test/test_wakeup_fe_prefix.py",
     "test/test_serial_tool_widget.py",
+    # 串口工具「通道」：串口 / 蓝牙复用同一套发送接收（含通道隔离与持久化）
+    "test/test_serial_tool_channel.py",
     "test/test_serial_proto_frame.py",
     "test/test_serial_worker_write_raw.py",
     # 串口运行中热切换波特率（纯逻辑假串口：先 flush 再改速、共写锁、不关端口、失败不改 _baudrate）
@@ -189,6 +198,8 @@ GUI_TESTS = [
     "test/test_soak_stability.py",
     "test/test_appearance_gui.py",
     "test/test_tolerant_parse_gui.py",
+    # 协议15 Modbus：顶栏寄存器列表下拉 + 查询页面板 + 管理对话框（offscreen）
+    "test/test_modbus_gui.py",
     # 协议8 文件传输升级页（offscreen 假串口：逐包确认/重试/超时/中止/进度/拖放/不裁字）+ 真实 MainWindow 接线
     "test/test_dl698_upgrade_gui.py",
     "test/test_dl698_upgrade_tab_wiring.py",

@@ -41,6 +41,8 @@ from dlt645_frame_schema import (
     list_commands,
 )
 from dlt645_parser import DLT645Parser
+from dlt645_pv_wireless import WIRELESS_DI_MAP
+from dlt645_pv_wireless_frame import REQ_WITH_PAYLOAD_DI
 from modular_iface_frame_gen import (
     CTRL_INFO,
     build_frame as modular_build_frame,
@@ -144,9 +146,6 @@ class FrameGenWidget(QWidget):
         self.di_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.di_combo.completer().setCompletionMode(self.di_combo.completer().CompletionMode.PopupCompletion)
         self.di_combo.completer().setFilterMode(Qt.MatchFlag.MatchContains)
-        self.di_combo.completer().popup().setStyleSheet(
-            "background-color: #ffffff; color: #000000; selection-background-color: #2196F3; selection-color: #ffffff;"
-        )
         self._populate_di_combo()
         self.di_combo.currentIndexChanged.connect(self._on_di_changed)
         cmd_layout.addWidget(self.di_combo)
@@ -158,9 +157,6 @@ class FrameGenWidget(QWidget):
         self.afn_fn_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.afn_fn_combo.completer().setCompletionMode(self.afn_fn_combo.completer().CompletionMode.PopupCompletion)
         self.afn_fn_combo.completer().setFilterMode(Qt.MatchFlag.MatchContains)
-        self.afn_fn_combo.completer().popup().setStyleSheet(
-            "background-color: #ffffff; color: #000000; selection-background-color: #2196F3; selection-color: #ffffff;"
-        )
         self._populate_afn_fn_combo()
         self.afn_fn_combo.currentIndexChanged.connect(self._on_afn_fn_changed)
         self.afn_fn_combo.setVisible(False)
@@ -335,9 +331,6 @@ class FrameGenWidget(QWidget):
         self.dlt698_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.dlt698_combo.completer().setCompletionMode(self.dlt698_combo.completer().CompletionMode.PopupCompletion)
         self.dlt698_combo.completer().setFilterMode(Qt.MatchFlag.MatchContains)
-        self.dlt698_combo.completer().popup().setStyleSheet(
-            "background-color: #ffffff; color: #000000; selection-background-color: #2196F3; selection-color: #ffffff;"
-        )
         self._populate_dlt698_combo()
         self.dlt698_combo.currentIndexChanged.connect(self._on_dlt698_changed)
         self.dlt698_combo.setVisible(False)
@@ -447,10 +440,6 @@ class FrameGenWidget(QWidget):
         self.dlt645_combo.completer().setCompletionMode(
             self.dlt645_combo.completer().CompletionMode.PopupCompletion)
         self.dlt645_combo.completer().setFilterMode(Qt.MatchFlag.MatchContains)
-        self.dlt645_combo.completer().popup().setStyleSheet(
-            "background-color: #ffffff; color: #000000; "
-            "selection-background-color: #2196F3; selection-color: #ffffff;"
-        )
         self._populate_dlt645_combo()
         self.dlt645_combo.currentIndexChanged.connect(self._on_dlt645_cmd_changed)
         self.dlt645_combo.currentIndexChanged.connect(self._schedule_realtime_update)
@@ -555,10 +544,6 @@ class FrameGenWidget(QWidget):
         self.modular_combo.completer().setCompletionMode(
             self.modular_combo.completer().CompletionMode.PopupCompletion)
         self.modular_combo.completer().setFilterMode(Qt.MatchFlag.MatchContains)
-        self.modular_combo.completer().popup().setStyleSheet(
-            "background-color: #ffffff; color: #000000; "
-            "selection-background-color: #2196F3; selection-color: #ffffff;"
-        )
         self._populate_modular_combo()
         self.modular_combo.currentIndexChanged.connect(self._on_modular_cmd_changed)
         self.modular_combo.currentIndexChanged.connect(self._schedule_realtime_update)
@@ -1878,6 +1863,11 @@ class FrameGenWidget(QWidget):
     def _populate_dlt645_di_combo(self):
         """1099 条 DI 全量入下拉；搜索靠 completer 的 MatchContains（可输 DI 或中文）"""
         self.dlt645_di_combo.clear()
+        # 本手册（光伏协议转换单元·无线模组接口 V1.6）的 12 个扩展 DI 置顶：
+        # 它们在 dlt645_di.json 里没有（或只有附件1 的旧口径），不置顶就得手输
+        for di_code, entry in WIRELESS_DI_MAP.items():
+            self.dlt645_di_combo.addItem(
+                f"{di_code}  {entry.get('name', '')}（无线扩展）", di_code)
         try:
             from dlt645_di_lookup import get_dlt645_di_lookup
             rows = get_dlt645_di_lookup().data
@@ -2056,9 +2046,11 @@ class FrameGenWidget(QWidget):
         info = get_di_info(di)
         if info["name"]:
             unit = f"｜单位 {info['unit']}" if info["unit"] else ""
+            # 长度 0 = 不定长（本手册部分 DI 的长度由内容决定，如地址列表/拓扑/版本）
+            length_txt = f"{info['length']} 字节" if info["length"] else "不定长"
             self.dlt645_di_info.setText(
                 f"{di}｜{info['name']}｜格式 {info['data_type'] or '未声明'}"
-                f"｜长度 {info['length']} 字节{unit}")
+                f"｜长度 {length_txt}{unit}")
         else:
             self.dlt645_di_info.setText(f"{di}｜不在 dlt645_di.json 映射表，按裸字节填写")
 
@@ -2082,8 +2074,11 @@ class FrameGenWidget(QWidget):
             # 写数据 14H / 读应答 91H·92H 的数据域才含值，按掩码推导字段
             derived = build_di_fields(di) if di else []
             if key[0] == "req" and key[1] in (0x11, 0x12):
+                # 读请求数据域通常只含 DI；两个例外必须保留数据字段：
+                # LME 查询条目（FF00DD01）、本手册数据转发 02EB0000（带 Z+C+T+DATA）
+                keep_all = di in REQ_WITH_PAYLOAD_DI
                 derived = [f for f in derived
-                           if f.get("type") == "lme_entries"]
+                           if keep_all or f.get("type") == "lme_entries"]
             # schema 里的通用值字段被掩码推导出的专用字段取代（裸 hex 兜底保留）
             fields = derived + [f for f in fields if f.get("type") not in
                                 ("di_value", "demand", "demand_time")]
@@ -2532,10 +2527,6 @@ class FrameGenWidget(QWidget):
         # 类型下拉
         combo = QComboBox()
         combo.setFixedWidth(160)
-        combo.setStyleSheet(
-            "QComboBox { background-color: #ffffff; color: #000000; }"
-            "QComboBox QAbstractItemView { background-color: #ffffff; color: #000000; selection-background-color: #e3f2fd; }"
-        )
         for t_name, t_tag, t_desc in self.A_XDR_TYPE_LIST:
             combo.addItem(f"{t_desc} (0x{t_tag:02X})", t_tag)
         # 设置当前类型

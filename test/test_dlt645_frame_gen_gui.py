@@ -109,8 +109,13 @@ def main():
     print("== 2. 下拉数据源 ==")
     cmds = [tuple(w.dlt645_combo.itemData(i)) for i in range(w.dlt645_combo.count())
             if w.dlt645_combo.itemData(i)]
-    check("命令下拉含 12 个请求命令",
-          sum(1 for c in cmds if c[0] == "req") == 12, str(len(cmds)))
+    from dlt645_frame_schema import DLT645_CMD_SCHEMA, REQ
+    _want_req = len([k for k in DLT645_CMD_SCHEMA if k[0] == REQ])
+    check("命令下拉含全部请求命令（含无线扩展 06H/1EH）",
+          sum(1 for c in cmds if c[0] == "req") == _want_req,
+          f"{len(cmds)} 项，req 期望 {_want_req}")
+    check("下拉含无线模组扩展 06H 与 1EH",
+          ("req", 0x06) in cmds and ("req", 0x1E) in cmds)
     check("命令下拉含应答与异常应答",
           any(c[0] == "rsp" for c in cmds) and any(c[0] == "err" for c in cmds))
     check("命令项文本带分组前缀",

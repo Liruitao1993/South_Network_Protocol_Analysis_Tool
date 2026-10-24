@@ -21,8 +21,8 @@ _PARSER_SPECS: Dict[str, Tuple[str, str]] = {
     "modular": ("modular_iface_parser", "ModularIfaceParser"),
     "yw645": ("yw645_parser", "YW645Parser"),
     "csg_uplink": ("csg_uplink_parser", "CSGUplinkParser"),
+    "modbus": ("modbus_parser", "ModbusParser"),
 }
-
 _INSTANCES: Dict[str, Any] = {}
 _MODULES: Dict[str, Any] = {}
 

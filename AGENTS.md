@@ -55,8 +55,9 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 | 12 | 模组化终端功能模块接口 | Q/GDW 模组化终端功能模块接口协议 | 小端（链路层 L/C/FCS）/**大端（A-XDR 数据）** | CRC-16/PPP FCS（x-25） |
 | 13 | 依瓦定制645 | 依瓦定制645协议 V1.0 | 地址域高字节在前 / 数据域逐字节 | 8位位组算术和（数据域 ±0x33） |
 | 14 | 南网上行通信规约 | Q/CSG 11109004-2013 | 小端（长度L/地址域/多字节字段） | 8位位组算术和（控制域+地址域+链路用户数据） |
+| 15 | Modbus 协议（RTU/TCP） | Modbus Application Protocol V1.1b3 / Modbus over Serial Line V1.02 | 大端（寄存器内可配字节序/字序） | CRC-16（多项式 0xA001，RTU）/ TCP 靠 MBAP 长度域 |
 
-> 协议覆盖差异：**HDC 1.0（索引 11）在 PySide6 主程序与 Reflex Web 版均支持**（2026-09-15 核实）。Web 版无实时监控器/档案/拓扑；组帧与预设标签页在 Web 存在但协议 9/10/11 均不支持（与桌面一致），协议11 另有「无实时监控器/组帧/预设」的说明见 §8 陷阱 27。**「频谱图」标签页两端都有**（与协议无关，常驻）：桌面 `spectrum_widget.py`（QPainter 自绘），Web `reflex_web/reflex_web/spectrum_web.py`（SVG）——两侧共用同一份纯逻辑层。**Web 另有主题系统**（浅色/深色/跟随系统 + 6 个预设 + 5 个强调色，`reflex_web/reflex_web/theme_web.py`，token 化 CSS）；桌面为 7 套 QSS 主题（`theme_settings.py`，含毛玻璃/云母，Web 无对应）。NiceGUI/TUI 版本已于 2026-08-17 移除。**协议8/6 另有专用页**：协议8 有「光伏升级」标签页（698.45 文件传输升级：启动传输 → 写文件×N → 执行升级，拖入升级包、逐包等确认、进度条，1.23.85 起；另有**可选**的「升级前/升级完成后读版本信息」两步——通用版本 `OAD 43000300` 或厂家扩展内部版本 `OAD FF100400` 二选一，默认不勾、失败不阻断升级，**两次读到的版本会自动比对给出「升级成功（版本已变化）/ 升级失败（版本完全一致）/ 无法判定」结论**（1.23.86 起）；以及仅串口的**可选**「提升波特率」——升级前先发 FT1.2 命令让设备切 115200，传完切回 9600，升级后读版本在两种速率上各试一遍（1.23.86 起）；后端为纯逻辑 `dl_t698_45_upgrade.py`，**Web 无对应**），协议6 有「645虚拟表」（1.23.5 起）。**「生产测试架」也是常驻页**（与协议无关，1.23.88 起）：类串口助手（5 条发送配置，各自 HEX/ASCII + checksum8）+ 一条可配置的测试架参数帧（49 项参数，改动即生成 75 字节整帧），纯逻辑在 `production_testbench_core.py`，**Web 无对应**。
+> 协议覆盖差异：**HDC 1.0（索引 11）在 PySide6 主程序与 Reflex Web 版均支持**（2026-09-15 核实）。Web 版无实时监控器/档案/拓扑；组帧与预设标签页在 Web 存在但协议 9/10/11 均不支持（与桌面一致），协议11 另有「无实时监控器/组帧/预设」的说明见 §8 陷阱 27。**「频谱图」标签页两端都有**（与协议无关，常驻）：桌面 `spectrum_widget.py`（QPainter 自绘），Web `reflex_web/reflex_web/spectrum_web.py`（SVG）——两侧共用同一份纯逻辑层。**Web 另有主题系统**（浅色/深色/跟随系统 + 6 个预设 + 5 个强调色，`reflex_web/reflex_web/theme_web.py`，token 化 CSS）；桌面为 7 套 QSS 主题（`theme_settings.py`，含毛玻璃/云母，Web 无对应）。NiceGUI/TUI 版本已于 2026-08-17 移除。**协议8/6 另有专用页**：协议8 有「光伏升级」标签页（698.45 文件传输升级：启动传输 → 写文件×N → 执行升级，拖入升级包、逐包等确认、进度条，1.23.85 起；另有**可选**的「升级前/升级完成后读版本信息」两步——通用版本 `OAD 43000300` 或厂家扩展内部版本 `OAD FF100400` 二选一，默认不勾、失败不阻断升级，**两次读到的版本会自动比对给出「升级成功（版本已变化）/ 升级失败（版本完全一致）/ 无法判定」结论**（1.23.86 起）；以及仅串口的**可选**「提升波特率」——升级前先发 FT1.2 命令让设备切 115200，传完切回 9600，升级后读版本在两种速率上各试一遍（1.23.86 起）；后端为纯逻辑 `dl_t698_45_upgrade.py`，**Web 无对应**），协议6 有「645虚拟表」（1.23.5 起）。**「生产测试架」也是常驻页**（与协议无关，1.23.88 起）：类串口助手（5 条发送配置，各自 HEX/ASCII + checksum8）+ 一条可配置的测试架参数帧（49 项参数，改动即生成 75 字节整帧），纯逻辑在 `production_testbench_core.py`，**Web 无对应**。**Modbus（协议15，1.23.97 起）仅桌面端支持**：RTU/TCP 自动识别 + 可选「寄存器列表」（`modbus_registers.json`，按品牌记录地址/类型/系数/单位）翻译工程量；未选列表时按通用方式解析（只到功能码、地址/数量与原始值）。
 
 > **Web 路由（1.23.14 起，改链接前必读）**：`/` = **产品首页**（落地页，介绍桌面客户端：Hero/功能卡/协议表/命令行与系统集成/下载区/页脚，实现在 `reflex_web/reflex_web/landing_web.py`）；`/app` = **在线工具**（原主页的 9 个标签页，函数名 `index()` 已更名 `tool_page()`）；`/share`、`/feedback`、`/feedback-admin` 不变。首页数据全部读 `reflex_web/downloads/`（`version.json` 版本、`*.exe` 体积、`client_screenshot.png` 截图，缺图降级占位卡）。**新增/修改站内链接时必须按语义选目标**（回介绍页 `/`、回工具 `/app`），`landing_web.INTERNAL_LINKS` 是落地页侧的唯一来源，`test/test_web_landing.py` 有死链白名单守卫。
 
@@ -326,6 +327,10 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
 │   ├── csg_uplink_di.py       # AFN/数据密度/错误码 + DI 索引单源
 │   ├── csg_uplink_di_data.py  # DI 数据表（tools/gen_csg_uplink_di.py 从 PDF 抽取的生成物）
 │   └── csg_uplink_frame_gen.py / csg_uplink_frame_gen_widget.py  # 组帧逻辑 / 组帧页
+├── modbus_parser.py           # Modbus (ModbusParser) — 协议15 RTU/TCP
+│   ├── modbus_core.py         # 帧层/PDU 层解析单源（RTU CRC16 / MBAP 识别、功能码、寄存器映射、批量切帧）
+│   ├── modbus_register_store.py  # 寄存器列表配置 modbus_registers.json（读写/校验/导入导出/选中项）
+│   └── modbus_register_widget.py # 寄存器列表管理对话框 + 查询页浏览面板
 └── (解析级别：新一代 auto/fc_pb/fc_efc/fc_only/app/pb_only；国网新一代&HDC 1.0 auto/fc_pb/fc_only/mac_only/pb_only/fc_mac/app；通道：PLC 载波 / HRF 无线)
 │
 ├── 查询/映射模块（lookup）── 单例 get_xxx_lookup() 提供全局实例
@@ -665,6 +670,7 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
   - `DLT645-2007 多功能电表通信协议.pdf` — 原始 PDF
   - `国网计量中心电能表全性能试验检测公告-第4号补遗-事件记录采集-远程费控功能和负荷曲线抄读功能.pdf` — 补遗（PDF，需用 pdf skill 检索）
   - `协议文档/6.645协议/附件1：协议转换单元【低压分布式光伏协议转换单元】-技术规范书0625.md` — **光伏协议转换单元 DL/T645-2007 扩展协议**（§D.1 三张 DI 表：变量 `02E6xxxx`/参数 `04E6xxxx`/事件 `03E6xxxx`；附录 I.3.3.1 扩展控制码 `0FH`/`8FH` 透传帧。1.23.21 起支持解析，原 `.docx` 同目录）
+  - `协议文档/6.645协议/南网光伏协议转换单元无线接口手册-V1.6.md` — **无线模组接口扩展**（LME V1.6 / 2026-10-08，由同名 PDF 转换）：`02EB0000` 逆变器数据转发（波特率特征字 / 校验 / **超时 T 为 BCD**）、`04E60001` 地址列表（`1+6×M`）、`04E60002` 无线频段、`04900100` 拓扑、`04900101~04900106` 升级、`04900107` 版本、`028100FF` 在网状态；控制码扩展 `86H/06H`（上报 / 确认）、`1EH/9EH`（在网状态）、`D1H`（转发异常，`ERR=0x80` = 未入网）。解析在 `dlt645_pv_wireless.py`，**优先于**附件1 接管 `04E60001`（见 §8 陷阱 88）
 
 ### 5.5 国网协议（索引 7）
 
@@ -1448,6 +1454,39 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
     - **段布局变化必须让旧进度作废**：`.progress.json` 记录每段 `(start, end)` 与 `etag`/`total`；线程数变了导致段边界变了而 done 计数还按老布局走 ⇒ 拼出来的文件字节错位。对不上就整份作废、从头下。
     - **【1.23.96 起追加】四条不可回退的约定**：① **每段响应必须自证** `Content-Range`（起始偏移 == 请求起点、总长 == 计划总长）；不认 Range 的源回 200 时**判为不可分段并回落单流**，绝不按段偏移写整文件 —— 那会产出「大小对、内容错」的 exe，PE 与 SHA 都拦不住（摘要对得上是因为文件本身就是错的内容，只有体积恰好相同才危险；实测服务端/代理忽略 Range 是真实场景）。② **暂停等待必须是事件阻塞**（`DownloadControl.wait_resumed()`），不许 `sleep` 轮询 —— 轮询让「继续」平均晚 50 ms 生效，且退出时更难点干净。③ **退出时取消但保留分片**（`qt.on_cancel = "keep"` 后再 `cancel()`）：默认 `clean` 会把几百 MB 的 `.part` 删掉，等于每次关程序白下。④ **同一时刻只允许一个下载任务**：`_start_download` 有 `isRunning()` 重入守卫，两个 worker 抢同一个 `.part` 会拼出坏文件；重复触发只把面板叫回前台。回归：`test_downloader.py`（42 项，含 `test_cancel_keep_leaves_resumable_part` / `test_segment_response_self_check`），与 `test_update_download_dialog.py` 的 `test_start_download_refuses_second_task` / `test_download_panel_reopen_from_menu` / `test_download_done_clears_statusbar`）。
     - 回归：`test/test_downloader.py`（42 项，含暂停/继续/取消的**端到端**验证、失败时目标文件不出现）、`test/test_update_download_dialog.py`（26 项 offscreen）。
+
+85. **协议2（HDLC/国网DLMS）：A-XDR 类型表、BER 起点、批量 7E 切帧三个坑（1.23.98 起，改 `hdlc_parser.py` / `_extract_hdlc_frames` 前必读）**：
+    - **【阻塞级】A-XDR 数据类型表不能凭感觉编号**：真实帧里 `09 0C 07D2 0C 04 03 0A 06 0B FF 0078 00` 是 **octet-string(0x09) + 长度 12 的 date_time**（→ 2002-12-04 10:06:11 星期三），`10 00 78` 是 long(0x10)=120，`11 00` 是 unsigned(0x11)=0，`03 00` 是 boolean(0x03)。旧表整体错位一格（0x02 当 Boolean、0x09 当 Visible-String、0x10 当 Compact-Array）⇒ date-time 输出乱码、int16 解析不出来、uint8 越界读 8 字节。正确表见 `_parse_dlms_value` 的 `TYPE_NAMES`（IEC 62056-6-2：00 null / 01 array / 02 structure / 03 boolean / 04 bit-string / 05 double-long / 06 double-long-unsigned / 09 octet-string / 0A visible-string / 0C utf8 / 0D bcd / 0F integer / 10 long / 11 unsigned / 12 long-unsigned / 13 compact-array / 14 long64 / 15 long64-unsigned / 16 enum / 17 float32 / 18 float64 / 19 date-time / 1A date / 1B time）。
+    - **12 字节 octet-string ≠ 一定是 date-time**：全 FF（`FF4F19F3…`）要按普通 OCTET STRING 展示；用 `_looks_like_dlms_datetime`（年份 1970~2200、月/日/时分秒范围）判别，事件通知(0xC2) 的可选日期字段同理。
+    - **AARQ/AARE 的 BER 必须从 APDU tag(0x60/0x61) 开始解析**：`_parse_apdu_content` 收到的是「tag 之后」的数据，直接把 remaining 丢给 `_parse_ber_tlv` 会把长度字节当 tag，整棵树错位一层（OID 碎成「BER 标签/长度」）。另外 BER 只对 constructed 递归，OCTET STRING/OID 这类 primitive 一律不递归。
+    - **BER-TLV 判定不要「长度≥2 就 True」**：未识别 APDU（0xC2/0x0F/0xD8/0xD9/0xDA）会被当 BER 树拆碎；`_looks_like_ber_tlv` 只认 0x60/0x61 且长度自洽。这些 APDU 已在 `APDU_TYPES` + `_parse_apdu_content` 里独立解析（事件通知 = 4B invoke + 12B date-time + 9B 描述符 + 数据；数据通知 = 4B invoke + 通知体；异常响应 = state/service error）。**0xE6/0xE7 是 LLC 地址字节，不是 APDU tag**。
+    - **批量切帧必须按字节找 0x7E**：`_extract_hdlc_frames` 曾在 hex **字符串**里 `find("7E")`，把 `67 E6` 中间的字符当成帧边界 —— 实测一条 32 字节响应被切成 8+24 两条残帧（批量摘要显示「异常 / non-hexadecimal number」）。改为 `bytes.fromhex` 后 `data.find(0x7E)`，并支持相邻帧共用一个 7E（结束标志即下一帧起始）。
+    - **4 字节服务器地址给 DLMS 语义**：`00 02 00 23` 的 HDLC 7 位拼接值是 0x02200080（对现场无意义），应显示「逻辑设备 0x0001 / 逻辑块 0x0011」（每字节取高 7 位、2 字节组内大端）；2 字节整体是服务器地址（`02 47` → 0x1181）。
+    - **APDU 标签 / Invoke-Id 位序 / 结果码枚举必须按 Green Book 9.4.1（1.23.99 起）**：① APDU 标签不是 1~4（0x01=InitiateRequest），**RLRQ/RLRE = 0x62/0x63**、0x0C=ReadResponse、0x0D=WriteResponse、0x0E=ConfirmedServiceError、0x10=DataNotificationConfirm、0x16=UnconfirmedWrite、0x18=InformationReport；② `Invoke-Id-And-Priority` 是「低 4 位 invoke-id、bit6 service-class（0=Unconfirmed/1=Confirmed）、bit7 priority（0=Normal/1=High）」——`0xC1` = ID1/Confirmed/High；③ `DataAccessResult` / `Action-Result` 是**稀疏枚举**（0,1,2,3,4,9,11,12,13,14,15,16,17,18,19,250），不能按 0~N 连续编号；ExceptionResponse 的 state-error 只有 1/2，service-error 是 CHOICE 1~6（6 后跟 4 字节计数器）。回归：`test_hdlc_corpus.py` 的 invoke 位序、枚举、RLRQ/RLRE、with-list 用例。
+    - **解析输出一律「中文在前、英文原名括注」（1.23.99 续做，国内现场口径）**：面向用户的「解析值 / 说明」两列不要再写纯英文枚举。已统一的范围与写法：SNRM/UA 协商参数「发送最大信息域长度（Max Info Field Length - Transmit）」；Get/Set/Action 子类型「数据块响应（With-data-block）」；DataAccessResult / Action-Result / Exception「读写被拒绝（read-write-denied）」「服务不允许（service-not-allowed）」；A-XDR 类型说明「16 位有符号整数（long），共 3 字节」（旧写「long（3 字节）」既英文又会让人误读成类型长度）；BER 标签「上下文 [30] 用户信息（user-information）」「通用（Universal） 字节串（OCTET STRING）」；Invoke-Id「不需确认（Unconfirmed）」「高优先级（High）」；特殊地址「无站地址（NO_STATION）」。**APDU 名称例外，保留英文在前**（AARQ / Get-Request 是国内现场通用叫法）。**COSEM 类名只保留一份**：类常量 `COSEM_CLASS_NAMES`，`_parse_cosem_descriptor` 与 Action 分支都查它 —— 曾经两处各有一张表，Action 分支那份是纯英文 `Clock`，同一类在不同 APDU 下显示不一致。
+    - **帧长必须自证（`_check_declared_length`）**：格式域声明的帧长 = 首尾 7E 之间的字节数（完整帧整帧 = 帧长 + 2，半包 = 帧长 + 1）。串口半包 / 抓包截断 / 多帧粘包时表格出「警告」行、`parse()` 的「格式域」多一个「帧长校验」文字，但**解析状态不改成失败**（已有字段照常展示，容错优先）。曾把 12 字节残帧判为「解析成功」而毫无提示。
+    - 回归：`test/test_hdlc_corpus.py`（**39 项**：27 条真实帧 + 构造帧 + 文档笔误帧 + 共享 7E 切帧 + with-list/RLRQ + DLMS 摘要 + **中文化守卫 5 项**（枚举表必须含中文且英文用全角括号括注，新增纯英文枚举会变红）+ **帧长自证 2 项** + Action 请求/应答 + glo-*/Confirmed-Service-Error 兜底 + Access 请求应答 + 坏输入容错），已进 `CORE_TESTS`。
+
+86. **主题一致性：懒加载页 + 独立弹层是深色主题的两个白底雷区（1.23.99 起，改 `main_gui` 懒加载或 `theme_settings` QSS 前必读）**：
+    - **懒加载页创建时不会自动跟随主题**：带 `restyle_for_theme(dark)` 的页面（`Dlt698UpgradeWidget` / `Dlt698TestWidget` / `BluetoothToolWidget` / `ProductionTestbenchWidget` / `FrameDiffWidget` / `SpectrumWidget`）内部 `_dark` 初值都是 `False`；只在「主题切换」回调里刷新是不够的 —— 「先选深色主题、再首次打开该页」必然白底。**新建这类页要在 `_ensure_*_tab()` 里创建后立刻 `tab.restyle_for_theme(self._is_dark_theme())`**（`_ensure_upgrade_tab` / `_ensure_test_tab` / `_ensure_bluetooth_tool_tab` 曾三处漏掉，已补；`_ensure_testbench_tab` 是正确样板）。
+    - **QCompleter 的 popup 是独立顶层 `QListView`**，不是 QComboBox 的后代，`QComboBox QAbstractItemView` 选不中它；四套 QSS 现已各有一条独立 `QListView` 规则，**不要再在页面里 `.completer().popup().setStyleSheet(...)` 写死白底**（`frame_gen_widget.py` 原有 5 处已删）。
+    - **`QMessageBox` / `QMenu` 不要写局部 `background-color`**：局部样式盖掉全局 QSS 的深色规则（拓扑页节点详情弹窗、`gui_utils.setup_chinese_context_menu` 的文本框右键菜单都踩过；只留字号这类与颜色无关的属性）。
+    - **验证手法**：AX 树与 `get_app_state` 看不到颜色，用 `widget.grab()` 取四角像素算亮度（>170 判亮底、<90 判暗底），逐 tab 扫（`setCurrentIndex` 会触发懒加载）+ 深色 / 浅色 / 深浅往返三轮。
+
+87. **串口工具的「通道」复用蓝牙（1.23.99 起，改 `serial_tool_widget` / `bluetooth_worker` 前必读）**：
+    - 蓝牙连接**只**在「蓝牙工具」页建立；串口工具页经 `set_bluetooth_provider` 注入取值回调（main_gui 传 `_upgrade_bluetooth_source`，与「光伏升级」页**共用同一注入点**）。本页不建/不断连接，切到蓝牙时惰性重取 worker（蓝牙页可能才刚连上）。
+    - **发送复用 `SerialSendWorker`**：它只认 ``write_raw(bytes) -> bool``，蓝牙差异由 `BluetoothWriteAdapter` 吸收（转 `send_data`）。不要再为蓝牙另写一套发送线程 —— 发送节奏 / 序号回指 / 失败处理必然漂移。
+    - **接收用 `frame_received`**（BLE 通知重组后的整帧），不要用 `notification_received`（分包），否则断帧与响应匹配会把一帧拆成多次。
+    - **两个通道的字节绝不混用**：`_on_serial_raw` 与 `_on_bt_frame` 都先判当前通道，非当前通道直接丢；否则串口与蓝牙同时在收时会串台（日志与匹配统计全乱）。
+    - `_refresh_channel_ui` **不得**调用 `_channel_ready()`：后者会惰性重取 worker 再回调刷新，形成递归。界面刷新用已绑定的 worker 直接判定，懒重取只在 `_channel_ready` / `_send_target` 里做。
+    - 回归：`test/test_serial_tool_channel.py`（25 项：默认通道 / 未连接禁用 / 已连接可用 / 写入口转调 / 通道隔离双向 / 持久化与非法值回落），已进 `CORE_TESTS`。
+
+88. **南网光伏无线模组接口（V1.6）扩展：四条容易踩错的解析细节（1.23.99 起，改 `dlt645_pv_wireless.py` / `dlt645_parser.py` 前必读）**：
+    - **超时字段 T 是 BCD，不是整数**：`02EB0000` 数据转发里 `T=0x10` 表示 **10**（1000ms）；按整数读会得到 16 → 1600ms。手册 §3.1 明写「超时字段T（BCD 码）」，§4.4.4 示例即 `0x10` ↔ 正文「T=10，即 1000ms」（本仓首版即踩过，已按 BCD 修正并加断言 `"1600" not in` 守卫）。
+    - **无线信道是 2 字节 BCD、低字节在前**：线上 `00 32` → 32，不是按小端整数读成 50（v1.3 修订点，§4.4.2 有实测帧）。
+    - **`04E60001` 两份规范冲突**：附件1（§D.1）的「长度列 16 / 12 路地址」无法自洽切分；无线手册（V1.6）给 `1 + 6×M` 且 §4.4.3 实测报文自证（5 台 → 31 字节）⇒ `dlt645_pv_wireless` **优先接管**该 DI，附件1 的歧义切分只在 pv 模块层保留（`test_dlt645_pv_ext.py` 改为直接调 `pv.parse_pv_di` 锁契约，不要再从 parser 断言）。
+    - **控制码 `06H/86H`、`1EH/9EH` 在标准 645 里不存在**：不能塞进通用 `FUNC_NAMES`（`06H` 与 `86H` 的 `0x1F` 都是 0x06、方向相反）⇒ 用 `control_extra()` 在命中扩展时**整段替换** `control_desc`，否则会显示「未知功能码06H」、甚至把 `1EH` 标成「主站请求」。同理 `D1H + ERR=0x80` 在本手册是「目标无线接口转换器未入网」。
+    - 回归：`test/test_dlt645_pv_wireless.py`（**65 项**：6 条 §4.4 原文示例 + 升级类构造帧 + 普通 DI 反例 + 工具函数），已进 `CORE_TESTS`。
 
 ## 9. 开发原则
 1. **协议定义优先**：遇到不确定的协议字段、字节序、校验范围，**先查 §5 对应文档**，不要凭记忆或猜测。

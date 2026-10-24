@@ -34,6 +34,13 @@ from dlt645_data_codec import (
     parse_hex,
 )
 from dlt645_frame_gen import encode_addr, encode_di
+from dlt645_pv_wireless_frame import (
+    REQ_WITH_PAYLOAD_DI,
+    build_wireless_fields,
+    build_wireless_payload,
+    wireless_di_info,
+    wireless_request_extra,
+)
 
 REQ, RSP, ERR = "req", "rsp", "err"
 
@@ -213,6 +220,40 @@ DLT645_CMD_SCHEMA: Dict[tuple, Dict] = {
         "has_di": False, "data_len": 0, "fields": [],
         "hint": "C=95H；地址域为新地址，数据域为空（L=00H）",
     },
+
+    # ── 无线模组接口扩展（南网光伏协议转换单元 V1.6）：06H / 86H / 1EH / 9EH ──
+    # 这四个功能码在 DL/T 645-2007 里**不存在**，是本手册 §4.0 表定义的扩展；
+    # 86H 与 06H 的 ctrl & 0x1F 同为 0x06、方向相反，靠 DIR 位区分，不能合并。
+    (REQ, 0x06): {
+        "name": "上报确认应答（无线）", "func": 0x06, "dir": 0, "addr_default": _ADDR_ZERO,
+        "has_di": True, "data_len": None,
+        "fields": [_di_field(),
+                   fld("确认数据", F_DI_VALUE, "",
+                       "回带与上报帧相同的 DI + 数据；无线 DI 按手册字段自动编码"),
+                   fld("确认数据(裸hex)", F_HEX, "", "选填兜底")],
+        "hint": "C=06H；手册 §4.1.2：主站对 86H 主动上报的确认，数据域与上报帧同构（DI+DATA）",
+    },
+    (RSP, 0x06): {
+        "name": "主动上报数据（无线）", "func": 0x06, "dir": 1, "addr_default": _ADDR_ZERO,
+        "has_di": True, "data_len": None,
+        "fields": [_di_field(),
+                   fld("上报数据", F_DI_VALUE, "",
+                       "按所选 DI 填写；无线 DI 按手册字段自动编码"),
+                   fld("上报数据(裸hex)", F_HEX, "", "选填兜底")],
+        "hint": "C=86H；手册 §4.1.2：从站主动上报，数据域 = DI + DATA（明文）",
+    },
+    (REQ, 0x1E): {
+        "name": "在网状态上报（无线）", "func": 0x1E, "dir": 0, "addr_default": _ADDR_ZERO,
+        "has_di": False, "data_len": 5,
+        "fields": [fld("在网状态", F_HEX, "1",
+                       "0=离网、1=在网；数据域固定为 028100FF + 状态（手册 §4.3.1）")],
+        "hint": "C=1EH；地址域填无线接口转换器地址，L=05H，DI 固定 028100FF",
+    },
+    (RSP, 0x1E): {
+        "name": "在网状态确认（无线）", "func": 0x1E, "dir": 1, "addr_default": _ADDR_ZERO,
+        "has_di": False, "data_len": 0, "fields": [],
+        "hint": "C=9EH；接口转换器对 1EH 的确认应答，数据域为空（L=00H）",
+    },
 }
 
 #: 未在上表显式列出的正常应答（冻结/速率/密码/清零等）：数据域为空（L=00H）
@@ -279,10 +320,12 @@ def list_commands() -> List[tuple]:
         if key[0] != REQ:
             continue
         out.append((key, "主站请求", f"{spec['name']}（C={spec['func']:02X}H）"))
-    for func in (0x11, 0x12, 0x13, 0x14, 0x15) + _EMPTY_RSP_FUNCS:
+    for func, group in ([(f, "从站应答")
+                         for f in (0x11, 0x12, 0x13, 0x14, 0x15) + _EMPTY_RSP_FUNCS]
+                        + [(0x06, "从站上报"), (0x1E, "从站上报")]):
         spec = get_command((RSP, func))
         ctrl = 0x80 | func
-        out.append(((RSP, func), "从站应答", f"{spec['name']}（C={ctrl:02X}H）"))
+        out.append(((RSP, func), group, f"{spec['name']}（C={ctrl:02X}H）"))
     for func in (0x11, 0x14, 0x18, 0x1A, 0x1B):
         spec = get_command((ERR, func))
         out.append(((ERR, func), "异常应答", f"{spec['name']}（C={0xC0 | func:02X}H）"))
@@ -294,7 +337,15 @@ def list_commands() -> List[tuple]:
 # ---------------------------------------------------------------------------
 
 def get_di_info(di_code: str) -> Dict:
-    """DI → {name, unit, data_type, length}；查不到返回空壳（不抛异常）。"""
+    """DI → {name, unit, data_type, length}；查不到返回空壳（不抛异常）。
+
+    本手册（光伏协议转换单元·无线模组接口 V1.6）扩展的 12 个 DI **优先**由
+    :func:`dlt645_pv_wireless_frame.wireless_di_info` 给出 —— 否则 ``04E60001``
+    会命中附件1 的旧口径（长度列 16），与本手册的 ``1+6×M`` 冲突并误报长度。
+    """
+    wl = wireless_di_info(di_code)
+    if wl is not None:
+        return wl
     try:
         from dlt645_di_lookup import get_dlt645_di_lookup
         info = get_dlt645_di_lookup().get_di_info(di_code)
@@ -335,6 +386,10 @@ def build_di_fields(di_code: str) -> List[Dict]:
     - 空掩码（length=0）→ 无数据域，返回空列表
     - 未识别掩码 → 回退裸 hex 并标注
     """
+    wl = build_wireless_fields(di_code)
+    if wl is not None:
+        return wl       # 本手册扩展 DI：字段模板由 dlt645_pv_wireless_frame 提供
+
     info = get_di_info(di_code)
     dt = (info["data_type"] or "").strip()
     nlen = info["length"]
@@ -471,6 +526,18 @@ def _value_or_raw(fv: Dict, di_code: str, raw_key: str) -> bytes:
     return b""
 
 
+def _value_bytes(fv: Dict, di_code: str, raw_key: str) -> bytes:
+    """DI 之后的数据字节：本手册扩展 DI 走专用编码，其余走掩码/裸 hex。
+
+    无线 DI 的 ``data_type``（如 ``Z|C|T|DATA``）含 ``|``，会被
+    :func:`_is_multivalue_dt` 判成多值块而落到裸 hex 分支；所以必须先分派。
+    """
+    wl = build_wireless_payload(di_code, fv)
+    if wl is not None:
+        return wl
+    return _value_or_raw(fv, di_code, raw_key)
+
+
 def build_data(cmd_key, fv: Dict) -> bytes:
     """按命令与字段值拼出**未加扰**的逻辑数据域（加扰由生成器统一负责）。"""
     direction, func = _norm_key(cmd_key)
@@ -481,7 +548,14 @@ def build_data(cmd_key, fv: Dict) -> bytes:
     if direction == RSP:
         if func in (0x11, 0x12):
             di_b, di_code = _di_payload(fv)
-            return di_b + _value_or_raw(fv, di_code, "数据值(裸hex)")
+            return di_b + _value_bytes(fv, di_code, "数据值(裸hex)")
+        if func == 0x06:
+            # 主动上报（C=86H）：数据域 = DI + DATA，L=04H+m（手册 §4.1.2）
+            di_b, di_code = _di_payload(fv)
+            return di_b + _value_bytes(fv, di_code, "数据值(裸hex)")
+        if func == 0x1E:
+            # 在网状态确认应答（C=9EH）：L=00H（手册 §4.3.1）
+            return b""
         if func == 0x13:
             return encode_addr(_fv(fv, "通信地址", "000000000000"), "通信地址")
         if func == 0x14:
@@ -494,7 +568,18 @@ def build_data(cmd_key, fv: Dict) -> bytes:
         di_b, di_code = _di_payload(fv)
         if di_code == "FF00DD01":
             return di_b + _build_lme_query_payload(fv)
+        extra = wireless_request_extra(di_code, fv)
+        if extra:
+            # 02EB0000 数据转发请求：数据域 = DI + Z + C + T + DATA（手册 §4.1.3）
+            return di_b + extra
         return di_b
+    if func == 0x06:
+        # 上报确认应答（C=06H）：回带同一 DI + DATA（手册 §4.1.2）
+        di_b, di_code = _di_payload(fv)
+        return di_b + _value_bytes(fv, di_code, "数据值(裸hex)")
+    if func == 0x1E:
+        # 在网状态上报（C=1EH）：数据域 = 028100FF + 在网状态，L=05H（手册 §4.3.1）
+        return encode_di("028100FF") + (build_wireless_payload("028100FF", fv) or b"")
     if func == 0x12:
         di_b, _ = _di_payload(fv)
         return di_b + parse_hex(_fv(fv, "附加数据"), None, "附加数据")
@@ -581,6 +666,9 @@ def length_warning(cmd_key, fv: Dict) -> str:
     """数据长度与 DI 声明 length 不符时返回中文警告文案（**不阻断**组帧）。
 
     依据决策：不校验 DI 可写性，长度不符仅提示。
+
+    本手册（无线模组接口 V1.6）扩展 DI 用专用编码器计长；读请求（11H）里
+    不带数据域的无线 DI 不校验 —— 否则表单里根本没有输入框，会平白报 0 字节。
     """
     spec = get_command(cmd_key)
     if not spec.get("has_di"):
@@ -592,9 +680,17 @@ def length_warning(cmd_key, fv: Dict) -> str:
     declared = info["length"]
     if not declared:
         return ""
+    is_wl = build_wireless_fields(di_code) is not None
     try:
-        value_key = next((k for k in _VALUE_KEYS if _fv(fv, k)), "数据值")
-        actual = len(_encode_di_value(di_code, fv, value_key))
+        if is_wl:
+            direction, func = _norm_key(cmd_key)
+            if direction == REQ and func in (0x11, 0x12) and di_code not in REQ_WITH_PAYLOAD_DI:
+                return ""
+            wl_payload = build_wireless_payload(di_code, fv)
+            actual = len(wl_payload if wl_payload is not None else b"")
+        else:
+            value_key = next((k for k in _VALUE_KEYS if _fv(fv, k)), "数据值")
+            actual = len(_encode_di_value(di_code, fv, value_key))
     except Exception:
         return ""
     if actual != declared:

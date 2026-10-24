@@ -431,7 +431,7 @@ def test_registry():
     cls = PaR.get_parser_class("csg_uplink")
     check("parser 类可实例化", isinstance(PaR.get_parser("csg_uplink"), cls))
     check("别名可反查索引", PR.name_to_index("南网上行") == 14, str(PR.name_to_index("南网上行")))
-    check("协议总数 = 15", PR.protocol_count() == 15, str(PR.protocol_count()))
+    check("协议总数 = 16（0~15，含 Modbus）", PR.protocol_count() == 16, str(PR.protocol_count()))
     val = PR.make_validator(14)
     check("make_validator 返回校验器", val is not None and val.verify(good_frame()).valid)
     # 注册表里的「输入示例」帧必须真的能解析（规范 4 字节长度域形态）

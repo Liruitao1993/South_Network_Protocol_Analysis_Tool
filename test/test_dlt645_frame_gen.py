@@ -355,9 +355,11 @@ def t_di_fields():
     check("需量时间线序 mm hh DD MM", d[7:11] == bytes.fromhex("26160409"), d[7:11].hex())
 
     cmds = list_commands()
-    check("命令下拉含请求/应答/异常三组",
-          {g for _, g, _ in cmds} == {"主站请求", "从站应答", "异常应答"}, str(len(cmds)))
-    check("12 个请求命令齐全",
+    # 06H/86H/1EH/9EH 是手册扩展的「上报」类，与应答不同组（原先是三组）
+    check("命令下拉含请求/应答/上报/异常四组",
+          {g for _, g, _ in cmds} == {"主站请求", "从站应答", "从站上报", "异常应答"},
+          str(sorted({g for _, g, _ in cmds})))
+    check("请求命令数量与 schema 一致",
           sum(1 for k, g, _ in cmds if g == "主站请求") == len(
               [k for k in DLT645_CMD_SCHEMA if k[0] == REQ]),
           str([k for k in DLT645_CMD_SCHEMA if k[0] == REQ]))

@@ -155,7 +155,7 @@ FEATURES = [
     },
 ]
 
-# 12 种协议：索引 / 协议 / 标准号 / 字节序 / 校验
+# 16 种协议（索引 0~15）：索引 / 协议 / 标准号 / 字节序 / 校验
 # 数据来源：AGENTS.md §1 与 downloads/client_readme.md「支持协议」表（两处一致）
 PROTOCOLS = [
     {
@@ -262,6 +262,13 @@ PROTOCOLS = [
         "standard": "Q/CSG 11109004-2013",
         "endian": "低字节在前（长度L/地址域/多字节字段）",
         "check": "8 位位组算术和（控制域+地址域+链路用户数据）",
+    },
+    {
+        "index": "15",
+        "name": "Modbus 协议（RTU/TCP）",
+        "standard": "Modbus Application Protocol V1.1b3",
+        "endian": "大端（寄存器内可配字节序/字序）",
+        "check": "CRC-16（多项式 0xA001，RTU）/ MBAP 长度域（TCP）",
     },
 ]
 

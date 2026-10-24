@@ -318,6 +318,15 @@ LIGHT_QSS = """
         background-color: #e3f2fd;
         color: #000000;
     }
+    /* QCompleter 补全弹层：popup 是独立顶层 QListView，不匹配上面的 QComboBox 后代选择器，
+       以前各页只能各自写死白底（深色主题下弹出即白）。这里统一按主题给底色。 */
+    QListView {
+        border: 1px solid #888;
+        background-color: #ffffff;
+        color: #000000;
+        selection-background-color: #80b8e8;
+        selection-color: #000000;
+    }
 
     /* ========== 数值输入框 ========== */
     QSpinBox, QDoubleSpinBox {
@@ -662,6 +671,14 @@ DARK_QSS = """
     QComboBox QListView::item:hover {
         background-color: #4a4a4a;
         color: #e0e0e0;
+    }
+    /* QCompleter 补全弹层（独立顶层 QListView，说明见浅色段） */
+    QListView {
+        border: 1px solid #555555;
+        background-color: #2d2d2d;
+        color: #e0e0e0;
+        selection-background-color: #42a5f5;
+        selection-color: #ffffff;
     }
 
     /* ========== 数值输入框 ========== */
@@ -1045,6 +1062,14 @@ GLASS_QSS = """
     QComboBox QListView::item:hover {
         background-color: rgba(219, 234, 254, 150);
         color: #1f2937;
+    }
+    /* QCompleter 补全弹层（独立顶层 QListView，说明见浅色段） */
+    QListView {
+        border: 1px solid rgba(160, 180, 220, 200);
+        background-color: rgba(250, 251, 255, 240);
+        color: #1f2937;
+        selection-background-color: rgba(59, 130, 246, 150);
+        selection-color: #1f2937;
     }
 
     /* ========== 数值输入框 ========== */
@@ -1492,6 +1517,14 @@ MICA_QSS = """
     }
     QComboBox QListView::item:hover {
         background-color: #f0f0f0;
+    }
+    /* QCompleter 补全弹层（独立顶层 QListView，说明见浅色段） */
+    QListView {
+        border: 1px solid #e0e0e0;
+        background-color: #fbfbfb;
+        color: #1a1a1a;
+        selection-background-color: #e8f2fb;
+        selection-color: #1a1a1a;
     }
 
     /* ========== 数值输入框 ========== */

@@ -457,8 +457,11 @@ def test_parameter_and_ambiguous():
           str(fm.get("日发电量")))
 
     # A5 数量 + 12 路通信地址（歧义行，按文字描述切分）
+    # ⚠ 该 DI 现由《南网光伏无线模组接口手册 V1.6》接管（模型 1+6×M，有实测报文自证，
+    #    见 test_dlt645_pv_wireless）：这里直接调 pv 模块层，锁住附件1「歧义行」的切分契约。
     body = encode_di("04E60001") + bytes([0x03]) + bytes(range(0x11, 0x1D)) + b"\xff\xff\xff"
-    fm = field_map(parse(body))
+    _rows, _ = pv.parse_pv_di("04E60001", 0x91, body)
+    fm = field_map({"fields": _rows or []})
     check("A5 数量 M = 3", "3" in fm.get("有效下挂光伏逆变器数量 M（M<=12）", ("",))[0],
           str(fm.get("有效下挂光伏逆变器数量 M（M<=12）")))
     addrs = [k for k in fm if "的通信地址" in k]
@@ -554,8 +557,10 @@ def test_fallback_no_regression():
     check("未知 DI + 非读应答控制码走「数据内容」通用分支",
           field_map(r).get("数据内容", ("",))[2] == "0102", str(field_map(r)))
     # 未知控制码
+    # 未知控制码：1EH 在标准 645 里没有定义，现按《无线模组接口手册 V1.6》§4.3.1 解释
     r = parse(encode_di("00010000") + bcd_pack("1", 4), ctrl=0x1E)
-    check("未知功能码 1EH 标签不回归", "未知功能码1EH" in r["control_desc"], r["control_desc"])
+    check("1EH 按手册 V1.6 解释为模组在网状态上报",
+          "模组在网状态上报" in r["control_desc"], r["control_desc"])
     # 既有 LME 接口不回归（DI 分派互不干扰）
     r = parse(encode_di("FF00DD01") + bytes([0x00, 0x00]), ctrl=0x11)
     check("LME 双模查询请求仍走 LME 解析",

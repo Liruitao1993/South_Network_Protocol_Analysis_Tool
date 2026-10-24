@@ -120,10 +120,8 @@ class TopoNodeItem(QGraphicsEllipseItem):
         """双击节点弹出详细信息"""
         msg = QMessageBox()
         msg.setWindowTitle(f"节点详情 (TEI={self.node.tei})")
-        msg.setStyleSheet(
-            "QMessageBox { background-color: #FFFFFF; }"
-            "QLabel { color: #000000; font-size: 13px; }"
-        )
+        # 只设字号：背景与文字颜色交给全局 QSS（原来写死白底，深色主题下弹窗与界面不统一）
+        msg.setStyleSheet("QLabel { font-size: 13px; }")
         n = self.node
         detail = (
             f"<b>节点地址:</b> {n.address}<br>"

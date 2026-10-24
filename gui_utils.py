@@ -216,7 +216,8 @@ def setup_chinese_context_menu(widget):
 
     def _show_menu(pos):
         menu = widget.createStandardContextMenu()
-        menu.setStyleSheet("QMenu { background-color: white; color: black; } QMenu::item:selected { background-color: #e3f2fd; }")
+        # 不设局部样式：让全局 QSS 的 QMenu 规则生效，否则深色主题下右键菜单仍是白底黑字
+        # （与周边深色界面不统一）。浅/深/毛玻璃/云母四套 QSS 都已有 QMenu 规则。
         text_map = {
             "Undo": "撤销",
             "Redo": "恢复",

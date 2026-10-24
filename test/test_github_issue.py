@@ -83,11 +83,11 @@ def test_form_protocol_options_match_bug_yml():
 
 
 def test_form_protocol_options_cover_all_protocols():
-    """15 种协议（0~14）+ 「与具体协议无关」，与项目协议注册表口径一致。"""
+    """16 种协议（0~15）+ 「与具体协议无关」，与项目协议注册表口径一致。"""
     import protocol_registry
 
     count = protocol_registry.protocol_count()
-    assert count == 15, count
+    assert count == 16, count
     assert len(gi.FORM_PROTOCOL_OPTIONS) == count + 1
     # 每个协议索引都能取到对应选项
     for index in range(count):

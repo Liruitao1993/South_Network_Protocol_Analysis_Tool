@@ -123,8 +123,19 @@ FRAME_TIMEOUT_RANGES: Dict[str, Tuple[int, int]] = {
     "rx_frame_hold_max_ms": (100, 600000),
 }
 
+# ── 通道（1.23.99）：本页既可走顶部串口，也可**复用「蓝牙工具」页**已建立的 BLE 连接
+# 与「光伏升级」页同一口径：连接只在一处建立，本页只订阅数据、按当前通道发送；
+# 两个通道的字节**绝不混用**（非当前通道的数据一律丢弃，否则日志与匹配会被串台）。
+CHANNEL_SERIAL = "serial"
+CHANNEL_BLUETOOTH = "bluetooth"
+CHANNEL_OPTIONS: Tuple[Tuple[str, str], ...] = (
+    ("串口", CHANNEL_SERIAL),
+    ("蓝牙", CHANNEL_BLUETOOTH),
+)
+
 # 默认参数（默认值与源工具一致：100ms / 1 次 / 5000ms；波特率由顶部串口配置决定）
 DEFAULT_PARAMS: Dict[str, object] = {
+    "channel": CHANNEL_SERIAL,   # 发送/接收通道：serial | bluetooth
     "interval_ms": 100,
     "loop_count": 1,
     "timeout_ms": 5000,
@@ -1271,6 +1282,28 @@ def format_parse_rows(table_data, max_lines: int = DEFAULT_PARSE_MAX_LINES) -> L
     return rows
 
 
+class BluetoothWriteAdapter:
+    """把蓝牙 worker 包装成串口工具的写入口（只暴露 ``SerialSendWorker`` 用到的 ``write_raw``）。
+
+    为什么用适配器而不是在 `SerialSendWorker` 里分支：发送线程只认
+    ``write_raw(bytes) -> bool`` 这一个口径，把串口 ``write_raw`` / 蓝牙 ``send_data``
+    的差异在这里吸收掉之后，发送节奏、序号回指、失败处理全部复用同一份代码，
+    不必为蓝牙再写一套发送线程（两套必然漂移）。
+    """
+
+    def __init__(self, worker):
+        self._worker = worker
+
+    def write_raw(self, data) -> bool:
+        worker = self._worker
+        if worker is None or not worker.is_connected():
+            return False
+        try:
+            return bool(worker.send_data(bytes(data)))
+        except Exception:      # noqa: BLE001 - 单帧写失败不能带崩发送线程
+            return False
+
+
 class SerialSendWorker(QThread):
     """精确间隔发送线程（照搬源工具 SenderThread 的时序语义）。
 
@@ -1716,6 +1749,14 @@ class SerialToolWidget(QWidget):
         # 为什么不在本页另起一套串口：一个 COM 口只能被打开一次，各页各持一个
         # worker 会互相抢口（顶栏连上后本页再连必失败），且波特率会出现两处配置。
         self._serial_worker = None
+        # 通道（1.23.99）：默认串口；切到蓝牙时复用「蓝牙工具」页已建立的 BLE 连接，
+        # 本页只订阅数据、不建/不断连接（与「光伏升级」页同一约定）。
+        self._bt_provider = None          # 取蓝牙 worker 的回调（main_gui 注入）
+        self._bt_worker = None            # 当前绑定的蓝牙 worker（只由 _bind_bluetooth_worker 赋值）
+        self._channel = CHANNEL_SERIAL    # 当前通道（UI 下拉 + 落盘 _params["channel"]）
+        # 两个通道的连接态**各自**记录，界面只显示当前通道那一个
+        self._serial_connected = False
+        self._bt_connected = False
 
         # 解析：由 main_gui 注入回调（本页不 import main_gui，见 set_parse_provider）
         self._parse_provider = None
@@ -1804,11 +1845,12 @@ class SerialToolWidget(QWidget):
         """绑定主窗口共享的串口线程（与 `frame_gen_widget`/`monitor_widget` 同一约定）。
 
         只订阅信号，不负责打开/关闭端口：端口的生命周期归顶部「串口配置」。
+        串口数据只在**串口通道**下消费（见 `_on_serial_raw`）。
         """
         old = getattr(self, "_serial_worker", None)
         if old is not None:
             for signal, slot in (
-                (old.raw_data_received, self._on_raw_data),
+                (old.raw_data_received, self._on_serial_raw),
                 (old.error_occurred, self._on_serial_error),
                 (old.connection_changed, self._on_connection_changed),
             ):
@@ -1818,12 +1860,14 @@ class SerialToolWidget(QWidget):
                     pass
         self._serial_worker = worker
         if worker is None:
-            self._on_connection_changed(False)
+            self._serial_connected = False
+            self._refresh_channel_ui()
             return
-        worker.raw_data_received.connect(self._on_raw_data)
+        worker.raw_data_received.connect(self._on_serial_raw)
         worker.error_occurred.connect(self._on_serial_error)
         worker.connection_changed.connect(self._on_connection_changed)
-        self._on_connection_changed(worker.is_open())
+        self._serial_connected = bool(worker.is_open())
+        self._refresh_channel_ui()
 
     def set_parse_provider(self, provider):
         """注入解析回调（由 `main_gui` 提供，与 `set_serial_worker` 同一约定）。
@@ -1834,15 +1878,156 @@ class SerialToolWidget(QWidget):
         """
         self._parse_provider = provider
 
-    def _on_connection_changed(self, connected: bool):
-        """跟随顶部串口配置的连接状态（只读展示 + 控制发送按钮可用性）。"""
-        if connected:
+    # ── 通道（串口 / 蓝牙）────────────────────────────────────────────
+
+    def set_bluetooth_provider(self, provider):
+        """注入「取蓝牙通信线程」的取值回调（主窗口接到「蓝牙工具」页）。
+
+        建立/断开蓝牙连接的职责归「蓝牙工具」页；本页只在选定蓝牙通道时
+        消费它的 `frame_received`（重组后的整帧）与发送能力（`send_data`）。
+        """
+        self._bt_provider = provider
+        self._bind_bluetooth_worker(self._bt_worker_ref())
+
+    def _bt_worker_ref(self):
+        """按需取蓝牙 worker（蓝牙页**惰性**创建，取不到就是 None）。"""
+        fn = getattr(self, "_bt_provider", None)
+        if fn is None:
+            return None
+        try:
+            return fn()
+        except Exception:      # noqa: BLE001 - provider 由主窗口提供，异常不能带崩本页
+            return None
+
+    def _bt_slots(self, worker):
+        return (
+            (worker.frame_received, self._on_bt_frame),
+            (worker.connection_changed, self._on_bt_connection_changed),
+            (worker.error_occurred, self._on_bt_error),
+        )
+
+    def _bind_bluetooth_worker(self, worker):
+        old = self._bt_worker
+        if old is worker:
+            self._refresh_channel_ui()
+            return
+        if old is not None:
+            for signal, slot in self._bt_slots(old):
+                try:
+                    signal.disconnect(slot)
+                except (TypeError, RuntimeError):
+                    pass
+        self._bt_worker = worker
+        self._bt_connected = bool(worker is not None and worker.is_connected())
+        if worker is not None:
+            for signal, slot in self._bt_slots(worker):
+                signal.connect(slot)
+        self._refresh_channel_ui()
+
+    def _on_bt_frame(self, _uuid: str, data: bytes):
+        """蓝牙整帧（已按 BLE 通知重组）→ 与串口同一套接收路径。"""
+        if self._channel != CHANNEL_BLUETOOTH:
+            return          # 非当前通道：字节绝不混用（否则日志与响应匹配会串台）
+        self._on_raw_data(data)
+
+    def _on_bt_connection_changed(self, connected: bool):
+        self._bt_connected = bool(connected)
+        if self._channel != CHANNEL_BLUETOOTH:
+            return
+        self._refresh_channel_ui()
+        self._log("[蓝牙] " + ("已连接（复用「蓝牙工具」页的连接）" if connected
+                              else "已断开"), "sys" if connected else "warn")
+
+    def _on_bt_error(self, msg: str):
+        if self._channel != CHANNEL_BLUETOOTH:
+            return
+        self._log(f"[蓝牙错误] {msg}", "fail")
+
+    def channel(self) -> str:
+        """当前通道（serial / bluetooth）；测试与外部接线用。"""
+        return self._channel
+
+    def _ensure_bt_worker(self):
+        """按需重取蓝牙 worker —— 蓝牙页是**惰性**创建的，可能刚连上而本页还没取到。"""
+        worker = self._bt_worker
+        if worker is None and self._channel == CHANNEL_BLUETOOTH:
+            fresh = self._bt_worker_ref()
+            if fresh is not None:
+                self._bind_bluetooth_worker(fresh)
+                worker = fresh
+        return worker
+
+    def _channel_ready(self) -> bool:
+        """当前通道是否可发送（蓝牙分支会先按需重取一次 worker）。"""
+        if self._channel == CHANNEL_BLUETOOTH:
+            worker = self._ensure_bt_worker()
+            return bool(worker is not None and worker.is_connected())
+        return bool(self._serial_connected)
+
+    def _send_target(self):
+        """当前通道的写入口 —— `SerialSendWorker` 只认 ``write_raw``。"""
+        if self._channel == CHANNEL_BLUETOOTH:
+            return BluetoothWriteAdapter(self._ensure_bt_worker())
+        return self._serial_worker
+
+    def _on_channel_changed(self, *_args):
+        key = self.combo_channel.currentData()
+        if key not in (CHANNEL_SERIAL, CHANNEL_BLUETOOTH):
+            key = CHANNEL_SERIAL
+        if key == self._channel:
+            return
+        self._channel = key
+        self._log(
+            "[通道] 已切换到" + ("蓝牙（复用「蓝牙工具」页的连接）"
+                              if key == CHANNEL_BLUETOOTH else "串口"),
+            "sys",
+        )
+        if key == CHANNEL_BLUETOOTH:
+            # 切过来时重取一次：蓝牙 worker 可能在「蓝牙工具」页刚刚才建立
+            self._bind_bluetooth_worker(self._bt_worker_ref())
+        self._refresh_channel_ui()
+        self._schedule_save()
+
+    def _refresh_channel_ui(self):
+        """按当前通道刷新状态标签与「开始发送」可用性。
+
+        **不调用** `_channel_ready()`：后者会懒重取 worker 进而回调本方法，形成递归；
+        这里用当前已绑定的 worker 直接判定即可。
+        """
+        if self._channel == CHANNEL_BLUETOOTH:
+            worker = self._bt_worker
+            ready = bool(worker is not None and worker.is_connected())
+            if ready:
+                name = worker.device_name() or "未知设备"
+                self.lbl_conn.setText(f"蓝牙已连接：{name}")
+                self.lbl_conn.setStyleSheet("color: #008000;")
+                self.lbl_port.setText("")
+            else:
+                self.lbl_conn.setText("蓝牙未连接")
+                self.lbl_conn.setStyleSheet("color: #888;")
+                self.lbl_port.setText("（在「蓝牙工具」页连接）")
+            self.btn_start.setEnabled(ready)
+            return
+        if self._serial_connected:
             self.lbl_conn.setText("已连接")
             self.lbl_conn.setStyleSheet("color: #008000;")
         else:
             self.lbl_conn.setText("未连接")
             self.lbl_conn.setStyleSheet("color: #888;")
-        self.btn_start.setEnabled(bool(connected))
+        self.lbl_port.setText("")
+        self.btn_start.setEnabled(bool(self._serial_connected))
+
+    def _on_serial_raw(self, data: bytes):
+        """串口数据：只在串口通道下进入接收路径。"""
+        if self._channel != CHANNEL_SERIAL:
+            return
+        self._on_raw_data(data)
+
+    def _on_connection_changed(self, connected: bool):
+        """串口连接状态变化（顶部「串口配置」驱动）；蓝牙通道下只记录、不改界面。"""
+        self._serial_connected = bool(connected)
+        if self._channel == CHANNEL_SERIAL:
+            self._refresh_channel_ui()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -1992,6 +2177,18 @@ class SerialToolWidget(QWidget):
         send_group = QGroupBox("发送配置")
         send_layout = QHBoxLayout(send_group)
         send_layout.setSpacing(6)
+        send_layout.addWidget(QLabel("通道："))
+        self.combo_channel = QComboBox()
+        for _label, _key in CHANNEL_OPTIONS:
+            self.combo_channel.addItem(_label, _key)
+        self.combo_channel.setFixedWidth(74)
+        self.combo_channel.setToolTip(
+            "串口：走顶部「串口配置」的连接（本页只订阅，不持端口）\n"
+            "蓝牙：复用「蓝牙工具」页已建立的 BLE 连接，本页不建/不断连接\n"
+            "两个通道的数据不会混用：非当前通道收到的字节一律丢弃")
+        self.combo_channel.currentIndexChanged.connect(self._on_channel_changed)
+        send_layout.addWidget(self.combo_channel)
+
         send_layout.addWidget(QLabel("发送间隔(ms)："))
         self.interval_spin = QSpinBox()
         self.interval_spin.setRange(1, 10000)
@@ -2324,10 +2521,24 @@ class SerialToolWidget(QWidget):
         return [
             f"# {LOG_HEADER_TITLE}",
             f"# 开始时间: {format_log_time()}",
-            f"# 串口: {serial_context_text(self._serial_worker)}",
+            f"# 通道: {self._channel_context_text()}",
             "# 说明: 本文件是「串口工具」日志窗口内容的完整镜像；"
             "窗口只保留最近 10000 行，文件不截断（一直追加）",
         ]
+
+    def _channel_context_text(self) -> str:
+        """日志头里的通道描述：串口带端口/波特率，蓝牙带设备名与地址。"""
+        if self._channel == CHANNEL_BLUETOOTH:
+            worker = self._bt_worker
+            if worker is None or not worker.is_connected():
+                return "蓝牙（未连接）"
+            name = worker.device_name() or "未知设备"
+            try:
+                addr = worker.device_address()
+            except Exception:      # noqa: BLE001
+                addr = ""
+            return f"蓝牙 {name}" + (f" ({addr})" if addr else "")
+        return f"串口 {serial_context_text(self._serial_worker)}"
 
     def _stats_comment(self) -> str:
         """日志文件尾的统计行。"""
@@ -3188,6 +3399,13 @@ class SerialToolWidget(QWidget):
         self._rebuild_cmd_table()
 
     def _apply_params(self):
+        # 通道（1.23.99）：先恢复下拉，再套其它参数；切换槽是幂等的，不会产生多余落盘
+        _ch = str(self._params.get("channel", CHANNEL_SERIAL))
+        if _ch not in (CHANNEL_SERIAL, CHANNEL_BLUETOOTH):
+            _ch = CHANNEL_SERIAL
+        _ch_idx = self.combo_channel.findData(_ch)
+        if _ch_idx >= 0:
+            self.combo_channel.setCurrentIndex(_ch_idx)
         p = self._params
         self.interval_spin.setValue(int(p.get("interval_ms", 100)))
         self.loop_spin.setValue(int(p.get("loop_count", 1)))
@@ -3233,6 +3451,7 @@ class SerialToolWidget(QWidget):
 
     def _collect_params(self) -> dict:
         return {
+            "channel": self._channel,
             "interval_ms": int(self.interval_spin.value()),
             "loop_count": int(self.loop_spin.value()),
             "timeout_ms": int(self.timeout_spin.value()),
@@ -3272,10 +3491,16 @@ class SerialToolWidget(QWidget):
             self._start_send()
 
     def _start_send(self):
-        if not self._serial_worker or not self._serial_worker.is_open():
-            QMessageBox.information(
-                self, "串口工具", "串口未连接：请在顶部「串口配置」中先连接串口"
-            )
+        if not self._channel_ready():
+            if self._channel == CHANNEL_BLUETOOTH:
+                QMessageBox.information(
+                    self, "串口工具",
+                    "蓝牙未连接：请先在「蓝牙工具」页连接设备（本页复用那条连接）"
+                )
+            else:
+                QMessageBox.information(
+                    self, "串口工具", "串口未连接：请在顶部「串口配置」中先连接串口"
+                )
             return
         if not self.commands:
             QMessageBox.information(self, "串口工具", "请先添加命令")
@@ -3316,7 +3541,7 @@ class SerialToolWidget(QWidget):
         self._clear_cmd_statuses()          # 每轮开始重置状态图标（待测）
 
         self._sender = SerialSendWorker(
-            self._serial_worker, messages,
+            self._send_target(), messages,
             interval_ms=self.interval_spin.value(),
             loop_count=self.loop_spin.value(),
             parent=self,
