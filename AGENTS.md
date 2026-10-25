@@ -1488,6 +1488,13 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
     - **控制码 `06H/86H`、`1EH/9EH` 在标准 645 里不存在**：不能塞进通用 `FUNC_NAMES`（`06H` 与 `86H` 的 `0x1F` 都是 0x06、方向相反）⇒ 用 `control_extra()` 在命中扩展时**整段替换** `control_desc`，否则会显示「未知功能码06H」、甚至把 `1EH` 标成「主站请求」。同理 `D1H + ERR=0x80` 在本手册是「目标无线接口转换器未入网」。
     - 回归：`test/test_dlt645_pv_wireless.py`（**65 项**：6 条 §4.4 原文示例 + 升级类构造帧 + 普通 DI 反例 + 工具函数），已进 `CORE_TESTS`。
 
+89. **「关于」对话框的版本号与日期只有一份来源（1.24.1 起，改 `MainWindow._build_about_dialog` 前必读）**：
+    - **旧实现是假的**：对话框写死 `版本 2.0`、更新记录只有伪造的 v2.0 / v1.0 两条，日期用 `date.today()` 现取 ⇒ 版本号与实际发行版无关，且**每打开一次「关于」日期都不一样**（用户口语：「关于里面版本号有误，并且日期随时变」）。该遗留自 1.23.43 起登记在案，1.24.1 清偿。
+    - **现在两处都只读单一来源**：版本行 = `about_version_line()`（`APP_VERSION` + `CHANGELOG` 顶部条目日期）；更新记录 = `build_about_changelog_html()`（同一份 `CHANGELOG`：当前版本至多 `ABOUT_NOTE_ITEMS`(=4) 条要点摘要 + 最近 `ABOUT_HISTORY_VERSIONS`(=8) 个「版本号（日期）」+ 完整记录入口）。**不要在对话框里写死任何版本号或日期，也不要把 `date.today()` / `datetime.now()` 加回来** —— 「关于」的文案必须与窗口标题一致、且可重复（同进程两次构造逐字相同）。
+    - **版本与 `CHANGELOG` 不一致时的兜底**：`about_release_date()` 回落 `BUILD_DATE`（不冒出比版本还新的日期）；`release_check.py` 另有「`CHANGELOG` 顶部 == `APP_VERSION`」硬校验，两者都要过。
+    - **【1.24.2 修】标题栏 ✕ 点不动 = `setWindowFlags` 把 `WindowCloseButtonHint` 弄丢了**：**PySide6 的 `WindowType` 标志位取反（`~`）会连带清掉 `0x08000000`（CloseButtonHint）** —— 实测默认 `QDialog` 的 `flags=0x08003003`，执行 `f & ~WindowContextHelpButtonHint` 后只剩 `0x3003`（`int(f) & ~int(HELP)` 才是对的，PySide6 的 flag 对象运算不行）。此时窗口仍有 `WS_SYSMENU`（标题栏照画 ✕），但 Qt 把 `SC_CLOSE` 置灰 ⇒ 点击被系统丢弃，现场表现为「关闭按钮不起作用」，只能用「确定」或 Esc。**正确写法：先 `& ~WindowContextHelpButtonHint` 再 `| WindowCloseButtonHint`（顺序不能反：`(f | CLOSE) & ~HELP` 仍会被 `~` 清掉）**；`_show_system_settings_dialog` 是同款写法，已同修。回归：`test_about_version.py` 断言 `windowFlags()` 含 CloseButtonHint、不含 ContextHelpHint，并对两处对话框做源码守卫 + 旧值 `0x3003` 负例。
+    - 回归：`test/test_about_version.py`（**53 项** offscreen：单一来源、源码守卫（四个生成文案的函数体内不得出现 `date.today`/`datetime.now`，**docstring 不计**否则自我误报）、两次构造一致、要点条数/摘要字数/历史版本条数上限、`CHANGELOG` 为空与版本漂移两种兜底、窗口标志位与关闭按钮守卫、负例自检），已进 `CORE_TESTS`。
+
 ## 9. 开发原则
 1. **协议定义优先**：遇到不确定的协议字段、字节序、校验范围，**先查 §5 对应文档**，不要凭记忆或猜测。
 2. **PDF 文档用 pdf skill 检索**：645 补遗、IEC 62056-46、DLT645 原始标准都是 PDF，调用 pdf skill 而非人工翻阅。
@@ -1861,7 +1868,7 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 - **地址单一来源 `main_gui.AUTHOR_GITHUB_URL`**：按钮 tooltip / 跳转 / 测试都读它，改地址只改一处（`test/test_about_github_star.py` 有「main_gui.py 内 URL 字面量只有一处」守卫）；`QDesktopServices.openUrl` 返回 False（未装浏览器）或地址为空时**弹窗给出可手动复制的地址**，不静默无反应（同 §8 陷阱 23）
 - 「关于」对话框拆出 `_build_about_dialog()`（构造与 `exec()` 分离，便于测试直接检查控件与接线）；菜单接线不变（仍由 `test_menu_wiring.py` 守卫）
 - 新增 `test/test_about_github_star.py`（22 项，offscreen，登记 `release_check.CORE_TESTS`）；**变异反证 2 条**（删 `clicked.connect` / 加第二份 URL 字面量）均实测变红后还原
-- 遗留（本次未改）：该对话框内「版本 2.0」与更新记录仍是早期**写死的占位文案**，未读 `APP_VERSION` / `CHANGELOG`
+- 遗留（**1.24.1 已清偿**）：该对话框内「版本 2.0」与更新记录曾是早期**写死的占位文案**，未读 `APP_VERSION` / `CHANGELOG` —— 现改为单一来源、日期静态，见 §8 陷阱 89
 
 ### 1.23.42 — 2026-09-21
 
