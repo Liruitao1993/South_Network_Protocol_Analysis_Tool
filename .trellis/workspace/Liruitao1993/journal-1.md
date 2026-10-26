@@ -1641,3 +1641,25 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Status
 
 [OK] **Completed**
+
+
+## Session 51: 698光伏升级：传输块状态字门禁（F00104）
+<!-- trellis-session: v=2 fp=c505c67eddd6a07a -->
+
+**Date**: 2026-10-26
+**Task**: 698光伏升级：传输块状态字门禁（F00104）
+**Branch**: `main`
+
+### Summary
+
+全部数据块确认后先读传输块状态字（F00104），DAR=0 且位数>=块数且位图全部置位才允许执行升级；位序 MSB/LSB 兼容（LSB 记警告），缺块/补位/多报块拒绝并点名；不通过只重试状态字请求，用尽即 failed 且不发执行升级。core A15 + GUI 523 项全绿。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9ca0123` | feat(698升级): 传输块状态字校验通过后才允许执行升级 |
+
+### Status
+
+[OK] **Completed**
