@@ -100,6 +100,10 @@ def test_wiring():
         check("只建一次", win._ensure_dlt645_test_tab() is tab)
         check("注入共享串口", tab._serial_worker is win.serial_worker,
               f"{type(getattr(tab, '_serial_worker', None)).__name__}")
+        check("注入蓝牙取值回调（复用蓝牙工具页连接）",
+              callable(getattr(tab, "_bt_provider", None))
+              and tab._bt_provider == win._upgrade_bluetooth_source,
+              str(getattr(tab, "_bt_provider", None)))
         check("创建即按当前主题初始化（_dark 已赋值）",
               isinstance(getattr(tab, "_dark", None), bool))
         check("分类树已建出（DI 表可读，非空壳页面）",

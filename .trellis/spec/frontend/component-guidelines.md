@@ -751,6 +751,37 @@ engine = self._engine_factory()            # 否则才是发给本虚拟表的�
 - **已知边界**：`04000101 日期` 表内声明 4 字节、实际编码 3 字节（标准就是 3），页面给提示不阻断（§8 陷阱 91）；
   特殊命令页多选无意义（字段随命令变化）⇒ 只发当前一条；协议测试页不做自动轮询。
 
+### 7o. 协议测试页的串口 / 蓝牙双通道（`channel_link.ChannelController`，1.24.1）
+
+> 用户 → 「698 和 645 两个协议中的协议测试页面，均需要支持发送通道的选择，可以是蓝牙通道进行交互测试」。
+> 升级页 1.23.85 已跑通同一套蓝牙口径；本任务抽成共用控制器，698/645 两页复用。
+
+- **Scope**：协议测试页是「发一条请求、等一帧应答」的问答式交互，与升级页的长流程不同：
+  每帧都很小（698 读属性 ~24B、645 读 DI 16B），但**必须整帧一次 ATT 写**（否则设备收到被切断的帧）。
+- **分层**：`channel_link.ChannelController`（Qt，无协议细节）负责「选通道 / 取蓝牙 worker / 收发 /
+  状态文案 / 超限预检」；页面的分帧、判定、信息表仍归自己。**不要**在页面里再写 MTU/上限逻辑。
+- **信号契约**：`rx(bytes)`（只转发当前通道）、`state_changed(str, bool)`、
+  `channel_changed(str)`（页面据此清 `_rx_buf`）、`error(str)`（页面记日志）。
+- **页面接入五步**：
+  1. `self._channel = ch.ChannelController(self)` + 连 4 个信号（在 `_build_ui` 之前，控件回调要用）；
+  2. 顶部加「发送通道」下拉（`ch.CHANNELS`）+ 状态行（控制器 `state_text()`，含蓝牙 MTU/一次写上限）；
+  3. `set_serial_worker` / `set_bluetooth_provider` 转交控制器（页面保留 `_serial_worker` 引用供既有断言）；
+  4. 发送走 `controller.send(frame) -> (ok, reason)`；未就绪弹框用 `controller.ready()` 的**原因**
+     （不要再写死「串口未连接」）；单帧发不出去 → 记失败并继续下一条（不静默、不中止整批）；
+  5. `showEvent` → `rebind_bluetooth()`（蓝牙页懒加载，先选蓝牙后连接是常态）；`cleanup` → `controller.cleanup()`。
+- **超限口径**：`len(frame) > single_write_limit()` ⇒ 控制器**直接返回可读错误、不调用 worker**
+  （worker 自带文案是「请调小每包字节数」，对测试页误导）。**不要**改成自动分包。
+- **双通道不串味**：串口 `raw_data_received` 与蓝牙 `notification_received` 都进控制器，只转发当前通道；
+  页面**不得**再自己 `connect(raw_data_received)`（698 页源码护栏已断言）。
+- **连接生命周期**：归「蓝牙工具」页；控制器只断信号，`cleanup` 不得 `disconnect` 蓝牙。
+- **回归**：`test/test_channel_link.py`（**49 项**，`GUI_TESTS`：通道归一化/就绪/文案/provider 延迟出现/
+  `mtu_updated` 刷新/整帧单写/超限不调用 worker/双通道 RX 隔离/cleanup 不断连接）+
+  `test_dlt698_testbench.py` [18]（15 项）+ `test_dlt645_testbench.py` [4b]（17 项）+
+  两个接线测试的注入断言（`tab._bt_provider == win._upgrade_bluetooth_source`）。
+- **真机几何**：通道行加入后 1280×820 / 1000×700 零重叠、按钮不裁字、状态行可换行（不与按钮抢宽）。
+- **已知边界**：MTU 23（上限 20）下多数 698 帧会超限 ⇒ 给明确原因，让用户到蓝牙页重连（Windows 会异步协商）；
+  升级页仍用自己那份 `_BleSendPort`（未收口，后续可换控制器）。
+
 ### 8. Qt 陷阱（本项目实测）
 - **offscreen 无字体**：`QT_QPA_PLATFORM=offscreen` 下 `QFontDatabase: Cannot find font directory ...`，绘制出的文字是豆腐块 → 断言只能查尺寸/颜色/像素多样性；**要目视核对文字排版必须用默认平台**（`QApplication([])` 不设 offscreen + `widget.grab()` / `QImage.save()`，不需要窗口真的可见）。
 - **`bytes(image.constBits())` 必须持有 QImage 引用**：`bytes(canvas.render_image(w, h).constBits())`（临时对象上取 buffer）会 **access violation（0xC0000005）**；先 `img = ...` 再 `bytes(img.constBits())`。

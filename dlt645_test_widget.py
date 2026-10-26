@@ -29,6 +29,7 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QFormLayout,
     QGroupBox,
     QGridLayout,
@@ -51,6 +52,7 @@ from PySide6.QtWidgets import (
 )
 
 import app_paths
+import channel_link as ch
 import frame_deframe
 import gui_utils
 import wakeup_prefix
@@ -92,6 +94,7 @@ class Dlt645TestWidget(QWidget):
         self._palette = LOG_PALETTES[False]
 
         self._serial_worker = None
+        self._bt_provider = None
         self._rx_buf = bytearray()
         self._pages: Dict[str, dict] = {}
         self._queue: List[dict] = []
@@ -112,6 +115,13 @@ class Dlt645TestWidget(QWidget):
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
         self._save_timer.timeout.connect(self._save_config)
+
+        # 发送通道（串口 / 蓝牙）：控制器只负责收发与状态，分帧/判定仍在本页
+        self._channel = ch.ChannelController(self)
+        self._channel.rx.connect(self._on_rx_data)
+        self._channel.state_changed.connect(self._on_channel_state)
+        self._channel.channel_changed.connect(self._on_channel_switched)
+        self._channel.error.connect(lambda msg: self._log(f"[失败] {msg}", "fail"))
 
         self._build_ui()
         self._load_persisted()
@@ -143,6 +153,7 @@ class Dlt645TestWidget(QWidget):
         grid.setHorizontalSpacing(6)
         grid.setVerticalSpacing(4)
 
+        # 行 0：地址读写 + 校时
         grid.addWidget(QLabel("表地址："), 0, 0)
         self.edit_addr = QLineEdit("000000000000")
         self.edit_addr.setMaxLength(12)
@@ -176,28 +187,39 @@ class Dlt645TestWidget(QWidget):
         self.btn_broadcast_time.clicked.connect(self._on_broadcast_time)
         grid.addWidget(self.btn_broadcast_time, 0, 6)
 
-        self.lbl_state = QLabel("串口未连接")
-        self.lbl_state.setStyleSheet("color: #B42318;")
-        grid.addWidget(self.lbl_state, 1, 0, 1, 2)
+        # 行 1：发送通道（串口 / 蓝牙）+ 通道状态
+        grid.addWidget(QLabel("发送通道："), 1, 0)
+        self.combo_channel = QComboBox()
+        for label, key in ch.CHANNELS:
+            self.combo_channel.addItem(label, key)
+        self.combo_channel.setToolTip(
+            "串口 = 顶部「串口配置」的共享连接；蓝牙 = 「蓝牙工具」页已建立的连接"
+            "（协议帧整帧一次 ATT 写，超过一次写上限会明确报错）")
+        self.combo_channel.currentIndexChanged.connect(self._on_channel_combo_changed)
+        grid.addWidget(self.combo_channel, 1, 1)
+        self.lbl_state = QLabel("")
+        self.lbl_state.setWordWrap(True)
+        grid.addWidget(self.lbl_state, 1, 2, 1, 6)
 
-        grid.addWidget(QLabel("读取超时(ms)："), 1, 2)
+        # 行 2：超时 / 循环 / 发送控制
+        grid.addWidget(QLabel("读取超时(ms)："), 2, 0)
         self.spin_timeout = QSpinBox()
         self.spin_timeout.setRange(300, 60000)
         self.spin_timeout.setSingleStep(100)
         self.spin_timeout.setValue(3000)
         self.spin_timeout.setToolTip("发出请求后等待应答的时间；超时记「超时」并继续下一条")
-        grid.addWidget(self.spin_timeout, 1, 3)
+        grid.addWidget(self.spin_timeout, 2, 1)
 
         self.chk_loop = QCheckBox("循环发送")
         self.chk_loop.setToolTip("一轮队列发完后从头再来，直到点「停止」")
-        grid.addWidget(self.chk_loop, 1, 4)
+        grid.addWidget(self.chk_loop, 2, 2)
 
         self.btn_send = QPushButton("发送")
         gui_utils.set_btn(self.btn_send, "primary")
         gui_utils.set_btn_icon(self.btn_send, "play")
         self.btn_send.setToolTip("发送当前勾选的叶子（一个都没勾 = 当前选中项）")
         self.btn_send.clicked.connect(self._on_send)
-        grid.addWidget(self.btn_send, 1, 5)
+        grid.addWidget(self.btn_send, 2, 3)
 
         self.btn_stop = QPushButton("停止")
         gui_utils.set_btn(self.btn_stop, "danger")
@@ -205,12 +227,12 @@ class Dlt645TestWidget(QWidget):
             self.style().StandardPixmap.SP_MediaStop))
         self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self._on_stop)
-        grid.addWidget(self.btn_stop, 1, 6)
+        grid.addWidget(self.btn_stop, 2, 4)
 
         self.lbl_count = QLabel("TX 0 / RX 0")
         self.lbl_count.setStyleSheet("color: #57606A;")
-        grid.addWidget(self.lbl_count, 1, 7)
-        grid.setColumnStretch(7, 1)
+        grid.addWidget(self.lbl_count, 2, 5)
+        grid.setColumnStretch(6, 1)
 
         gui_utils.fit_btn_width(
             self.btn_read_addr, self.btn_write_addr, self.btn_broadcast_time,
@@ -690,10 +712,9 @@ class Dlt645TestWidget(QWidget):
 
     # ═════════════════════════════════════════════════════════════ 发送
     def _on_send(self) -> None:
-        if self._worker() is None:
-            QMessageBox.information(
-                self, "串口未连接",
-                "请先在顶部「串口配置」里打开串口，本页复用该连接发送。")
+        ok, reason = self._channel.ready()
+        if not ok:
+            QMessageBox.information(self, "发送通道未就绪", reason)
             return
         try:
             queue = self._build_queue()
@@ -757,22 +778,6 @@ class Dlt645TestWidget(QWidget):
                 })
         return entries
 
-    def _worker(self):
-        worker = self._serial_worker
-        if worker is None or not worker.is_open():
-            return None
-        return worker
-
-    def _write(self, frame: bytes) -> bool:
-        worker = self._worker()
-        if worker is None:
-            return False
-        try:
-            return bool(worker.write_raw(frame))
-        except Exception as exc:                   # noqa: BLE001
-            self._log(f"[失败] 串口写入异常：{exc}", "fail")
-            return False
-
     def _send_next(self) -> None:
         if self._stopped or self._awaiting:
             # `_awaiting` 守卫：上一轮遗留的 `_next_timer` 可能在「已发出、等应答」期间
@@ -788,8 +793,18 @@ class Dlt645TestWidget(QWidget):
             self._finish_run()
             return
         entry = self._queue.pop(0)
-        if not self._write(entry["frame"]):
-            self._finish_run()
+        sent, reason = self._channel.send(entry["frame"])
+        if not sent:
+            # 单帧发不出去（如蓝牙一次写上限超限）：记一条失败并继续下一条，
+            # **不静默、不中止整批**（现场更常见的是某几条超长、其余能发）。
+            # `row` 要在 `_record_result` 之前存在，保持与成功路径同一行号语义。
+            entry["row"] = self._add_info_row(entry["label"], entry["ident"], "失败")
+            self._record_result(entry, {
+                "status": _core().RESULT_FAIL, "summary": reason, "lines": [],
+                "address": "", "di": "", "value_text": "",
+            })
+            self._log(f"[失败] {entry['label']}：{reason}", "fail")
+            self._next_timer.start(10)
             return
         self._seq += 1
         self._tx_count += 1
@@ -847,7 +862,8 @@ class Dlt645TestWidget(QWidget):
         self._next_timer.start(10)
 
     # ═══════════════════════════════════════════════════════════ 接收
-    def _on_serial_raw_data(self, data: bytes) -> None:
+    def _on_rx_data(self, data: bytes) -> None:
+        """当前通道收到的字节（控制器已按通道过滤）；分帧仍在本页。"""
         if not data:
             return
         self._rx_buf.extend(data)
@@ -864,6 +880,9 @@ class Dlt645TestWidget(QWidget):
             skip = self._resync_junk()
             if not skip:
                 return
+
+    # 旧名别名：外部/测试可能按串口时代的名字调用（行为不变）
+    _on_serial_raw_data = _on_rx_data
 
     def _resync_junk(self) -> int:
         """丢掉确定不可能是帧起点的字节（返回丢掉的字节数）。
@@ -956,10 +975,9 @@ class Dlt645TestWidget(QWidget):
 
     def _run_single(self, frame: bytes, label: str, expect: dict) -> None:
         """把一个固定动作塞进队列（与「发送」同一套状态机）。"""
-        if self._worker() is None:
-            QMessageBox.information(
-                self, "串口未连接",
-                "请先在顶部「串口配置」里打开串口，本页复用该连接发送。")
+        ok, reason = self._channel.ready()
+        if not ok:
+            QMessageBox.information(self, "发送通道未就绪", reason)
             return
         if self._queue or self._awaiting:
             QMessageBox.information(self, "正在发送",
@@ -1049,41 +1067,48 @@ class Dlt645TestWidget(QWidget):
     def _update_txrx(self) -> None:
         self.lbl_count.setText(f"TX {self._tx_count} / RX {self._rx_count}")
 
-    # ═══════════════════════════════════════════════════════════ 串口
+    # ══════════════════════════════ 通道（串口 / 蓝牙，收发统一走控制器）
     def set_serial_worker(self, worker) -> None:
-        """绑定主窗口共享串口线程；只订阅收/连接态/错误。"""
-        old = self._serial_worker
-        if old is not None and old is not worker:
-            self._detach(old)
+        """注入主窗口共享串口线程（只记引用并转交控制器，订阅由控制器负责）。"""
         self._serial_worker = worker
-        if worker is None:
-            return
-        try:
-            worker.raw_data_received.connect(self._on_serial_raw_data)
-            worker.connection_changed.connect(self._on_connection_changed)
-            worker.error_occurred.connect(self._on_serial_error)
-            self._on_connection_changed(worker.is_open())
-        except (RuntimeError, TypeError):          # 老对象已销毁
-            pass
+        self._channel.set_serial_worker(worker)
 
-    def _detach(self, worker) -> None:
-        for signal, slot in (
-            (worker.raw_data_received, self._on_serial_raw_data),
-            (worker.connection_changed, self._on_connection_changed),
-            (worker.error_occurred, self._on_serial_error),
-        ):
-            try:
-                signal.disconnect(slot)
-            except (RuntimeError, TypeError):
-                pass
+    def set_bluetooth_provider(self, provider) -> None:
+        """注入「取蓝牙通信线程」的回调（主窗口接到「蓝牙工具」页；本页不建/不断连接）。"""
+        self._bt_provider = provider
+        self._channel.set_bluetooth_provider(provider)
+        self._refresh_channel_ui()
 
-    def _on_connection_changed(self, connected: bool) -> None:
-        self.lbl_state.setText("串口已连接" if connected else "串口未连接")
+    def _on_channel_combo_changed(self, *_args) -> None:
+        self._channel.set_channel(self.combo_channel.currentData())
+        self._schedule_save()
+
+    def _on_channel_switched(self, key: str) -> None:
+        """切通道：清分帧缓冲（半帧绝不跨通道拼接）+ 记日志。"""
+        self._rx_buf.clear()
+        self._log(f"[系统] 发送通道已切换为{('蓝牙' if key == 'bluetooth' else '串口')}", "sys")
+        self._refresh_channel_ui()
+
+    def _on_channel_state(self, text: str, ready: bool) -> None:
+        self.lbl_state.setText(text)
         self.lbl_state.setStyleSheet(
-            "color: #0A7D28;" if connected else "color: #B42318;")
+            "color: #0A7D28;" if ready else "color: #B42318;")
+        for btn in (self.btn_read_addr, self.btn_write_addr, self.btn_broadcast_time):
+            btn.setEnabled(bool(ready))
+        # 「发送」始终可点：未就绪时点击给**当前通道**的具体原因（灰按钮说不出原因）
+        self.btn_send.setEnabled(True)
 
-    def _on_serial_error(self, message: str) -> None:
-        self._log(f"[失败] 串口错误：{message}", "fail")
+    def _refresh_channel_ui(self) -> None:
+        """把控制器的当前状态刷到界面（注入 provider / 加载配置后调用）。"""
+        text = self._channel.state_text()
+        ok, _reason = self._channel.ready()
+        self._on_channel_state(text, ok)
+
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt 命名
+        """切回本页时重新对齐蓝牙 worker（蓝牙页可能在之后才连接/重建线程）。"""
+        super().showEvent(event)
+        self._channel.rebind_bluetooth()
+        self._refresh_channel_ui()
 
     # ═════════════════════════════════════════════════ 主题 / 落盘 / 收尾
     def restyle_for_theme(self, dark: bool) -> None:
@@ -1107,6 +1132,7 @@ class Dlt645TestWidget(QWidget):
             "timeout_ms": int(self.spin_timeout.value()),
             "loop": bool(self.chk_loop.isChecked()),
             "page": int(self.tabs.currentIndex()),
+            "channel": self._channel.channel,
         }
 
     def _load_persisted(self) -> None:
@@ -1128,6 +1154,11 @@ class Dlt645TestWidget(QWidget):
             page = int(data.get("page") or 0)
             if 0 <= page < len(PAGES):
                 self.tabs.setCurrentIndex(page)
+            channel = ch.normalize_channel(data.get("channel"))
+            index = self.combo_channel.findData(channel)
+            if index >= 0:
+                self.combo_channel.setCurrentIndex(index)   # 触发 set_channel
+            self._refresh_channel_ui()
         except (TypeError, ValueError):
             pass
 
@@ -1148,9 +1179,8 @@ class Dlt645TestWidget(QWidget):
                 timer.stop()
             except RuntimeError:
                 pass
-        if self._serial_worker is not None:
-            self._detach(self._serial_worker)
-            self._serial_worker = None
+        self._channel.cleanup()                 # 只断订阅，不断开串口/蓝牙连接
+        self._serial_worker = None
         try:
             self._save_config()
         except Exception:                          # noqa: BLE001

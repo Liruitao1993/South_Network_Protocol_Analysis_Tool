@@ -5020,9 +5020,11 @@ class MainWindow(QMainWindow):
 
         tab = Dlt698TestWidget()
         self.test_tab = tab
-        # 与升级页/组帧页同一约定：端口与波特率只在顶部「串口配置」设置，
-        # 本页只订阅 raw_data_received、经 write_raw 发送，不自建句柄。
+        # 与升级页/组帧页同一约定：端口与波特率只在顶部「串口配置」设置；
+        # 本页经 channel_link 控制器收发（串口/蓝牙二选一），不自建句柄。
         tab.set_serial_worker(self.serial_worker)
+        # 蓝牙通道复用「蓝牙工具」页的连接（取值回调与升级页同一注入点）
+        tab.set_bluetooth_provider(self._upgrade_bluetooth_source)
         # 「远程升级」按钮切到光伏升级页（升级流程只实现一份）
         tab.open_upgrade.connect(
             lambda: self._goto_tab(getattr(self, "_upgrade_tab_index", -1)))
@@ -5045,6 +5047,8 @@ class MainWindow(QMainWindow):
         # 与其它页同一约定：端口/波特率只在顶部「串口配置」设置，本页只订阅
         # raw_data_received 经 write_raw 发送，不自建句柄、不关端口。
         tab.set_serial_worker(self.serial_worker)
+        # 蓝牙通道复用「蓝牙工具」页的连接（与升级页/698 测试页同一注入点）
+        tab.set_bluetooth_provider(self._upgrade_bluetooth_source)
         # 双击报文表 → 单帧解析页（与监控器/698 测试页同一注入点）
         tab.frame_to_single_parse.connect(self._send_frame_to_single_parse)
         # 创建即按当前主题初始化（否则深色主题下日志/帧预览仍是白底）
@@ -5056,7 +5060,7 @@ class MainWindow(QMainWindow):
         return tab
 
     def _upgrade_bluetooth_source(self):
-        """「光伏升级」页取蓝牙通信线程的唯一入口：蓝牙工具页当前的 worker（没有则 None）。
+        """「光伏升级」与两个「协议测试」页取蓝牙通信线程的唯一入口：蓝牙工具页当前的 worker（没有则 None）。
 
         蓝牙 worker 由蓝牙页**惰性创建**（用户在那页点扫描/连接时才有），所以这里只能按需取；
         升级页不缓存、不创建、不销毁它 —— 连接生命周期完全归蓝牙页。

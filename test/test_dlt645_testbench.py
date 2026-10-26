@@ -94,11 +94,58 @@ class FakeWorker(QObject):
         return True
 
 
+class FakeBle(QObject):
+    """蓝牙 worker 替身（只实现 controller 用到的接口）。"""
+
+    notification_received = Signal(str, bytes)
+    connection_changed = Signal(bool)
+    mtu_updated = Signal(int, list)
+    error_occurred = Signal(str)
+
+    def __init__(self, limit=200, connected=True, name="645表计", mtu=247):
+        super().__init__()
+        self.sent = []
+        self.limit = int(limit)
+        self._connected = bool(connected)
+        self._name = name
+        self._mtu = int(mtu)
+
+    def is_connected(self):
+        return self._connected
+
+    def device_name(self):
+        return self._name
+
+    def device_address(self):
+        return "AA:BB:CC:DD:EE:FF"
+
+    def mtu_size(self):
+        return self._mtu
+
+    def single_write_limit(self):
+        return self.limit
+
+    def send_data(self, data, single_write=False):
+        payload = bytes(data)
+        if single_write and len(payload) > self.limit:
+            self.error_occurred.emit("oversize(worker)")
+            return False
+        self.sent.append((payload, bool(single_write)))
+        return True
+
+
 def logical_data(frame: bytes) -> bytes:
     """帧数据域 → 未加扰的逻辑字节（-0x33）。"""
     length = frame[9]
     payload = frame[10:10 + length]
     return bytes((b - 0x33) & 0xFF for b in payload)
+
+
+def force_serial(widget):
+    """把页面固定到串口通道（避免上一段落盘的蓝牙选择影响本段）。"""
+    index = widget.combo_channel.findData("serial")
+    if index >= 0:
+        widget.combo_channel.setCurrentIndex(index)
 
 
 def find_leaf(tree, predicate, item=None):
@@ -372,6 +419,7 @@ def test_gui_pages():
     widget = Dlt645TestWidget()
     worker = FakeWorker()
     widget.set_serial_worker(worker)
+    force_serial(widget)
     widget.show()
     app().processEvents()
     try:
@@ -463,6 +511,7 @@ def test_gui_pages():
     widget = Dlt645TestWidget()
     worker = FakeWorker()
     widget.set_serial_worker(worker)
+    force_serial(widget)
     widget.show()
     app().processEvents()
     try:
@@ -546,6 +595,7 @@ def test_gui_pages():
     widget = Dlt645TestWidget()
     worker = FakeWorker()
     widget.set_serial_worker(worker)
+    force_serial(widget)
     widget.edit_addr.setText("010203040506")
     widget.edit_write_addr.setText("0A0B0C0D0E0F")
     widget.edit_pa.setText("04")
@@ -574,6 +624,7 @@ def test_gui_pages():
 
     worker2 = FakeWorker()
     widget2.set_serial_worker(worker2)
+    force_serial(widget2)
     rsp = GEN.generate_frame(("rsp", 0x11),
                              {"数据标识 DI": "02010100", "数据值": "2.0"},
                              "000000000000")
@@ -627,12 +678,124 @@ def test_source_guards():
           "0x68" not in core and "b\"\\x68\"" not in core)
 
 
+
+# ── [4b] 双通道（串口 / 蓝牙）──────────────────────────────────────────────
+
+def test_channel_switch():
+    section("[4b] 双通道：蓝牙发送 / 超限拦截 / 通道隔离 / 落盘")
+    app()
+    widget = Dlt645TestWidget()
+    serial = FakeWorker()
+    ble = FakeBle(limit=64, connected=False)
+    widget.set_serial_worker(serial)
+    widget.set_bluetooth_provider(lambda: ble)
+    widget.show()
+    app().processEvents()
+    try:
+        idx = widget.combo_channel.findData("bluetooth")
+        check("下拉里有蓝牙通道", idx > 0, str(idx))
+        widget.combo_channel.setCurrentIndex(idx)
+        app().processEvents()
+        check("状态行切到蓝牙（未连接）",
+              "蓝牙通道" in widget.lbl_state.text()
+              and "未连接" in widget.lbl_state.text(), widget.lbl_state.text())
+        check("蓝牙未连时固定动作置灰", not widget.btn_read_addr.isEnabled())
+        ble._connected = True
+        ble.connection_changed.emit(True)
+        app().processEvents()
+        check("蓝牙连上后固定动作可用",
+              widget.btn_read_addr.isEnabled()
+              and "一次 ATT 写上限" in widget.lbl_state.text(),
+              widget.lbl_state.text())
+
+        # 蓝牙发送：读 A 相电压
+        tree = widget._pages["read"]["tree"]
+        leaf = find_leaf(tree, lambda t: "02010100" in t)
+        tree.setCurrentItem(leaf)
+        app().processEvents()
+        widget._on_send()
+        app().processEvents()
+        check("蓝牙通道：帧走 send_data(single_write=True)",
+              bool(ble.sent) and ble.sent[-1][1] is True and not serial.sent,
+              f"ble={ble.sent[-1:]} serial={serial.sent[-1:]}")
+        rsp = GEN.generate_frame(("rsp", 0x11),
+                                 {"数据标识 DI": "02010100", "数据值": "220.5"},
+                                 "000000000000")
+        ble.notification_received.emit("uuid", rsp)
+        QTest.qWait(60)
+        check("蓝牙通知被页内分帧并判定成功",
+              widget.table_info.rowCount() and
+              widget.table_info.item(widget.table_info.rowCount() - 1, 4).text() == "成功",
+              str([widget.table_info.item(r, 4).text()
+                   for r in range(widget.table_info.rowCount())]))
+        check("值已记录", widget._last_values.get("02010100") == "220.5 V",
+              str(widget._last_values.get("02010100")))
+
+        # 通道隔离：蓝牙通道下串口字节被丢弃
+        rx_before = widget._rx_count
+        serial.raw_data_received.emit(rsp)
+        QTest.qWait(40)
+        check("蓝牙通道下串口字节被丢弃", widget._rx_count == rx_before,
+              f"{widget._rx_count} vs {rx_before}")
+        # 串口通道下蓝牙通知被丢弃
+        widget.combo_channel.setCurrentIndex(widget.combo_channel.findData("serial"))
+        app().processEvents()
+        check("切回串口状态行", "串口通道" in widget.lbl_state.text(),
+              widget.lbl_state.text())
+        rx_before = widget._rx_count
+        ble.notification_received.emit("uuid", rsp)
+        QTest.qWait(40)
+        check("串口通道下蓝牙通知被丢弃", widget._rx_count == rx_before,
+              f"{widget._rx_count} vs {rx_before}")
+
+        # 超限：不发送 + 信息表失败
+        widget.combo_channel.setCurrentIndex(widget.combo_channel.findData("bluetooth"))
+        app().processEvents()
+        sent_before = len(ble.sent)
+        ble.limit = 5
+        widget._set_all_checked("read", False)
+        tree.setCurrentItem(leaf)
+        widget.spin_timeout.setValue(300)
+        widget._on_send()
+        QTest.qWait(120)
+        last = widget.table_info.rowCount() - 1
+        check("超限帧记失败", widget.table_info.item(last, 4).text() == "失败",
+              widget.table_info.item(last, 4).text())
+        summary = widget.table_info.item(last, 5).text()
+        check("超限原因含上限与实际字节",
+              "5" in summary and "上限" in summary, summary)
+        check("超限帧未调用 worker（不静默分包）", len(ble.sent) == sent_before,
+              f"{len(ble.sent)} vs {sent_before}")
+
+        # 落盘：通道选择重开保持
+        widget._save_config()
+        widget2 = Dlt645TestWidget()
+        check("通道落盘往返（蓝牙）",
+              widget2.combo_channel.currentData() == "bluetooth",
+              str(widget2.combo_channel.currentData()))
+        widget2.cleanup()
+        widget2.close()
+
+        # cleanup：断订阅、不断开蓝牙
+        widget.cleanup()
+        rx_before = widget._rx_count
+        ble.notification_received.emit("uuid", rsp)
+        check("cleanup 后蓝牙通知不再进页", widget._rx_count == rx_before)
+        check("cleanup 不断开蓝牙", ble.is_connected() is True)
+        check("cleanup 摘除串口引用", widget._serial_worker is None)
+    finally:
+        widget.combo_channel.setCurrentIndex(widget.combo_channel.findData("serial"))
+        widget._save_config()          # 收尾恢复串口，避免影响后续用例
+        widget.close()
+
+
 def main():
     tests = [
         ("[1] 分类库", test_catalog),
         ("[2] 命令库", test_commands),
         ("[3] 组帧", test_frames),
         ("[4] 响应判定", test_evaluate),
+        ("[4b] 双通道", test_channel_switch),
         ("[5]-[7] 页面/队列/落盘", test_gui_pages),
         ("[8] 共享渲染", test_shared_renderer),
         ("[9] 源码护栏", test_source_guards),
