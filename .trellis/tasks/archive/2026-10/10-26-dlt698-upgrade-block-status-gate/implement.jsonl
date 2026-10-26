@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "§7j 长流程串口页契约（逐包确认/重试/收尾）+ §8 Qt 陷阱"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复用 build_read_version/check_get_response/DLT69845Parser，禁止第二套组帧或解析"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "测试要求：逐字节 golden、判定矩阵、变异反证、门禁"}

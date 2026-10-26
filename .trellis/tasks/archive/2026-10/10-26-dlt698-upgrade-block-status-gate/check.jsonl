@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "复核项：状态机分支不误发执行升级、失败必须外显、日志可核对"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "纯逻辑判定可脱 GUI 断言；页面只做阶段推进与日志"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "复核项：既有 286/523 项不回归、新增断言有判别性"}
