@@ -211,6 +211,9 @@ GUI_TESTS = [
     # 协议6 645 协议测试页（按 DI 大类分类 + 地址读写）：组帧黄金 + 判定矩阵 + offscreen 页面 + 真实接线
     "test/test_dlt645_testbench.py",
     "test/test_dlt645_test_tab_wiring.py",
+    # 协议7 国网协议测试页（AFN/Fn 分类树 + EB 扩展）：组帧/判定/EB 黄金 + offscreen 页面 + 真实接线
+    "test/test_gdw_testbench.py",
+    "test/test_gdw_test_tab_wiring.py",
     # 协议测试页的串口/蓝牙双通道控制器（就绪/文案/整帧单写/超限/双通道 RX 隔离）
     "test/test_channel_link.py",
     # 粘性入口：托盘菜单内嵌输入框 + 任务栏缩略图按钮（HICON/降级/WM_COMMAND 路由/按钮分派）

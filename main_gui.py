@@ -3567,6 +3567,14 @@ class MainWindow(QMainWindow):
         )
         self.tab_widget.setTabVisible(self._dlt645_test_tab_index, False)
 
+        # 协议7「国网协议测试」页（按 AFN/Fn 分类的预置命令树 + EB 扩展；注册表
+        # has_gdw_test，仅协议7 可见；同样懒加载、创建即隐藏）
+        self._gdw_test_placeholder = QWidget()
+        self._gdw_test_tab_index = self.tab_widget.addTab(
+            self._gdw_test_placeholder, app_icons.load_icon("flask-conical"), "国网协议测试"
+        )
+        self.tab_widget.setTabVisible(self._gdw_test_tab_index, False)
+
         # 实时监控器页面（南网新一代(9)/国网新一代(10) 专用，默认隐藏）
         self.monitor_tab = RealtimeMonitorWidget()
         self.monitor_tab.set_serial_worker(self.serial_worker)
@@ -4869,6 +4877,8 @@ class MainWindow(QMainWindow):
             self._ensure_test_tab()
         elif index == getattr(self, "_dlt645_test_tab_index", -1):
             self._ensure_dlt645_test_tab()
+        elif index == getattr(self, "_gdw_test_tab_index", -1):
+            self._ensure_gdw_test_tab()
 
     def _ensure_frame_gen_tab(self):
         if hasattr(self, "frame_gen_tab"):
@@ -5125,6 +5135,29 @@ class MainWindow(QMainWindow):
         tab.restyle_for_theme(self._is_dark_theme())
         self._replace_lazy_tab(
             self._dlt645_test_placeholder, self._dlt645_test_tab_index, tab
+        )
+        apply_chinese_context_menus(tab)
+        return tab
+
+    def _ensure_gdw_test_tab(self):
+        """懒加载创建「国网协议测试」页（仅协议7 可见；复用共享串口/蓝牙）。"""
+        if hasattr(self, "gdw_test_tab"):
+            return self.gdw_test_tab
+        from gdw_test_widget import GdwTestWidget
+
+        tab = GdwTestWidget()
+        self.gdw_test_tab = tab
+        # 与其它协议测试页同一约定：端口/波特率只在顶部「串口配置」设置，
+        # 本页经 channel_link 控制器收发，不自建句柄、不关端口。
+        tab.set_serial_worker(self.serial_worker)
+        # 蓝牙通道复用「蓝牙工具」页的连接（与升级页/698/645 测试页同一注入点）
+        tab.set_bluetooth_provider(self._upgrade_bluetooth_source)
+        # 双击报文表 → 单帧解析页（与监控器/698/645 测试页同一注入点）
+        tab.frame_to_single_parse.connect(self._send_frame_to_single_parse)
+        # 创建即按当前主题初始化（否则深色主题下日志/帧预览仍是白底）
+        tab.restyle_for_theme(self._is_dark_theme())
+        self._replace_lazy_tab(
+            self._gdw_test_placeholder, self._gdw_test_tab_index, tab
         )
         apply_chinese_context_menus(tab)
         return tab
@@ -5623,6 +5656,10 @@ class MainWindow(QMainWindow):
         if hasattr(self, "_dlt645_test_tab_index"):
             self.tab_widget.setTabVisible(
                 self._dlt645_test_tab_index, spec.has_dlt645_test)
+        # 协议7 国网协议测试（按 AFN/Fn 分类的预置命令树 + EB 扩展）：注册表 has_gdw_test
+        if hasattr(self, "_gdw_test_tab_index"):
+            self.tab_widget.setTabVisible(
+                self._gdw_test_tab_index, spec.has_gdw_test)
         # 档案管理 / 拓扑信息
         if hasattr(self, "_archive_tab_index"):
             self.tab_widget.setTabVisible(self._archive_tab_index, spec.has_archive)
@@ -9890,6 +9927,14 @@ class MainWindow(QMainWindow):
         if dlt645_test_tab is not None:
             try:
                 dlt645_test_tab.cleanup()
+            except Exception:
+                pass
+
+        # 6g) 国网协议测试页：同上（停等待/重发定时器 + 断信号 + 落盘，不关串口）
+        gdw_test_tab = getattr(self, "gdw_test_tab", None)
+        if gdw_test_tab is not None:
+            try:
+                gdw_test_tab.cleanup()
             except Exception:
                 pass
 
@@ -14740,6 +14785,11 @@ class MainWindow(QMainWindow):
         if getattr(self, "dlt645_test_tab", None) is not None:
             try:
                 self.dlt645_test_tab.restyle_for_theme(self._is_dark_theme())
+            except RuntimeError:
+                pass
+        if getattr(self, "gdw_test_tab", None) is not None:
+            try:
+                self.gdw_test_tab.restyle_for_theme(self._is_dark_theme())
             except RuntimeError:
                 pass
         if getattr(self, "topology_tab", None) is not None:

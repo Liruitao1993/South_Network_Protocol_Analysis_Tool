@@ -574,6 +574,12 @@ engine = self._engine_factory()            # 否则才是发给本虚拟表的�
   上限算不出（未连接 / `mtu_is_unnegotiated` / 放不下 698 帧头）时**不设人为上限**，禁用「开始升级」并把原因写进标签。
   回归段：`test_dl698_upgrade_gui.py` [23]、`test_bluetooth_worker.py` [8]、`test_dl698_upgrade.py` A13、
   `test_dl698_upgrade_tab_wiring.py` [5]/[5b]。
+- **传输完成 ≠ 可以执行升级：必须先过「传输块状态字」闸门**（1.24.2，`PHASE_STATUS`）。最后一块确认后发
+  `GET F00104`（`build_read_block_status`），用 `check_block_status` 判定：DAR=0、位数 ≥ 块数、位序
+  MSB-first/LSB-first 都放行（LSB 要警告）、缺块/补位/多报块一律拒绝并点名缺块号。**不通过只重试该 GET**，
+  重试用尽即 `failed` 且**不得发出执行升级帧**；通过后才按 `自动执行` 开关进入 `PHASE_EXEC` 或 `PHASE_WAIT_RESET`。
+  新增阶段必须同步 `_send_current_step` / `_on_frame` / `_on_ack` / `_step_label` 四处，并让测试的
+  `run_to_end`/`reply_for` 认识它（否则既有全流程用例会在该阶段静默卡住）。
 - **该 tab 标题是「光伏升级」**（1.23.85 改名，索引仍是 `_upgrade_tab_index`、能力仍是 `spec.has_upgrade`）；
   改名后必须同步 `test_dl698_upgrade_tab_wiring.py` 的标题断言与 `test_yw645_gui.py` 的可见性矩阵文案。
 - **按钮宽度一律 `gui_utils.fit_btn_width`**（只设下限、不 `setFixedWidth`，陷阱 63）。
@@ -789,6 +795,38 @@ engine = self._engine_factory()            # 否则才是发给本虚拟表的�
 - **真机几何**：通道行加入后 1280×820 / 1000×700 零重叠、按钮不裁字、状态行可换行（不与按钮抢宽）。
 - **已知边界**：MTU 23（上限 20）下多数 698 帧会超限 ⇒ 给明确原因，让用户到蓝牙页重连（Windows 会异步协商）；
   升级页仍用自己那份 `_BleSendPort`（未收口，后续可换控制器）。
+
+### 7p. 国网「协议测试」页（AFN/Fn 命令树 + EB 扩展，1.24.3）
+
+> 用户 → 「在协议7下，也开发一个协议测试页面，可以参考协议8下的协议测试页面设计……开发的时候需要非常的
+> 全面，有分类树，涉及到扩展命令也一并设计进去」。参考 §7j/§7n 两套协议测试页。
+
+- **分层**：`gdw_test_core.py`（纯逻辑，禁 Qt）+ `gdw_test_widget.py`（Qt）+ `protocol_registry.has_gdw_test`
+  + `main_gui` 第三套懒加载接线（`_gdw_test_placeholder` / `_ensure_gdw_test_tab`）。三套测试页能力位互斥，
+  tab 文案各自独立（协议8「协议测试」、协议6「645协议测试」、协议7「国网协议测试」）。
+- **树与页面是一份映射表**：`AFN_PAGE` 把 21 个 AFN 分到 3 个命令页（读/设置/上报），另有 EB 与自定义页；
+  测试断言「并集 == AFN_MAP」「每页 catalog 叶子数 == 该页命令数」「无重复」。层级 = 功能域 → AFN → Fn，
+  叶子文案必须带 `AFNH Fn 名称（方向）`。
+- **命令与字段只来自 `GDW_AFNFN_SCHEMA`**（122 条，含福建增补与扩展）；表单按 8 种字段类型生成，
+  `enum` 传 int、`bytes` 传 hex 串、`list` 传 list[dict]；派生字段（报文长度 / 数量）由 core 回填。
+- **上行模拟必须用 `extra_data`**：schema 的上行命令没有字段，`build_frame(raw_data=...)` 把用户输入的
+  数据单元附加在 DT 之后（为此给 `GDWFrameGenerator.generate_frame` 增加可选参数 `extra_data=b""`，
+  默认行为不变）。
+- **EB 帧 = 645 帧**：`68 | A(6B,BCD 低字节在前) | 68 | ctrl | L | DI(低字节在前)+数据(逐字节+0x33) | CS | 16`；
+  外层默认 `AFN=02H F1`（`通信协议类型=2`、`报文长度`=内层长度）。判定不当场解析 EB：只看解析器行。
+- **判定顺序**：结构/校验（失败即 `ok=False`）→ AFN 回显 → Fn 回显（DT）→ 错误代码/错误状态字 →
+  00H/50H 的确认否认 → 其余 `ok=None`。新增判定只能消费 `parse_to_table` 的行，不新增协议判据。
+- **发送队列**：`_on_send` 与 `_send_next` **两处**都要有 `_awaiting` 守卫（测试直接调 `_send_next` 覆盖第二处）；
+  重发复用同一帧字节（不重新组帧），避免上一轮定时器把新一轮提前推进。
+- **RX 自组帧**：`frame_deframe.frame_length_for("ft12_68", buf)` + 末字节 `16H` 自证；重同步只跳到下一个
+  `68`/`FE`；半帧分两次交付不得提前出帧。
+- **空间预算**：树 `minimumHeight=160`、日志 `minimumHeight=120`、底部 tabs `maxHeight=200`；
+  1000×700 断言仍需满足（测试覆盖）。
+- **回归**：`test/test_gdw_testbench.py`（90 项）+ `test/test_gdw_test_tab_wiring.py`（26 项）。
+  **变异反证**（均红后还原）：AFN 回显判定失效 1 红；EB 加扰失效 3 红；结构失败不置 `ok=False` 3 红；
+  `_send_next` 守卫失效 4 红。
+- **已知边界**：EB 数据内容只做 HEX/字段编码，不做业务含义二次解释；上行命令需要用户自己填数据单元；
+  协议8/6 页与 `has_test`/`has_dlt645_test` 不变。
 
 ### 8. Qt 陷阱（本项目实测）
 - **offscreen 无字体**：`QT_QPA_PLATFORM=offscreen` 下 `QFontDatabase: Cannot find font directory ...`，绘制出的文字是豆腐块 → 断言只能查尺寸/颜色/像素多样性；**要目视核对文字排版必须用默认平台**（`QApplication([])` 不设 offscreen + `widget.grab()` / `QImage.save()`，不需要窗口真的可见）。

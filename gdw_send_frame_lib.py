@@ -26,7 +26,8 @@ class GDWFrameGenerator:
                        info_config: Dict[str, Any],
                        src_addr: str = "000000000000",
                        dst_addr: str = "000000000000",
-                       relay_addrs: List[str] = None) -> bytes:
+                       relay_addrs: List[str] = None,
+                       extra_data: bytes = b"") -> bytes:
         """通用组帧入口
 
         Args:
@@ -48,6 +49,8 @@ class GDWFrameGenerator:
             src_addr: 源地址A1，12位十进制字符串（BCD编码）
             dst_addr: 目的地址A3，12位十进制字符串（BCD编码）
             relay_addrs: 中继地址A2列表，每项12位十进制字符串
+            extra_data: 追加在数据单元之后的原始字节（测试页模拟**上行应答**时用；
+                        Schema 里上行命令没有字段，需要用户给数据单元 HEX）
 
         Returns:
             完整协议帧字节流
@@ -75,6 +78,8 @@ class GDWFrameGenerator:
 
         # 3. 构建应用数据域
         app_data = self._build_application_data(afn, fn, field_values)
+        if extra_data:
+            app_data += bytes(extra_data)
 
         # 4. 构建控制域
         dir_flag = info_config.get("dir", 0)

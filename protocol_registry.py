@@ -48,6 +48,8 @@ class ProtocolSpec:
     has_test: bool = False
     # 645 协议测试页（按 DI 大类分类的预置命令树 + 地址读写；协议6）
     has_dlt645_test: bool = False
+    # 国网协议测试页（按 AFN/Fn 分类的预置命令树 + EB 扩展；协议7）
+    has_gdw_test: bool = False
     # 解析级别族：None | csg | gw | hdc10（GUI 控件共用/复用）
     parse_level_family: Optional[str] = None
     # ED..EE 监控包装：单帧「ED监控协议」勾选 + 包装头格式下拉 + 字节剔除
@@ -178,6 +180,7 @@ _PROTOS: Tuple[ProtocolSpec, ...] = (
         frame_gen_mode="gdw",
         has_archive=True,
         has_topology=True,
+        has_gdw_test=True,
         preset_mode="gdw",
         extract_strategy="ft12_68",
         validator_class="validator.gdw_validator:GDWValidator",
@@ -397,6 +400,11 @@ def protocols_with_test() -> Tuple[int, ...]:
 def protocols_with_dlt645_test() -> Tuple[int, ...]:
     """有「645 协议测试」页的协议索引（仅协议6）。"""
     return tuple(p.index for p in _PROTOS if p.has_dlt645_test)
+
+
+def protocols_with_gdw_test() -> Tuple[int, ...]:
+    """有「国网协议测试」页的协议索引（仅协议7）。"""
+    return tuple(p.index for p in _PROTOS if p.has_gdw_test)
 
 
 def protocols_with_monitor() -> Tuple[int, ...]:
@@ -661,6 +669,9 @@ __all__ = [
     "protocols_with_sequence_diagram",
     "protocols_with_upgrade",
     "protocols_with_monitor",
+    "protocols_with_test",
+    "protocols_with_dlt645_test",
+    "protocols_with_gdw_test",
     "frame_gen_mode_for",
     "preset_mode_for",
     "make_validator",
