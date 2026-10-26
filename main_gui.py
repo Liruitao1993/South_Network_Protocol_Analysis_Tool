@@ -5465,6 +5465,25 @@ class MainWindow(QMainWindow):
             tip += f"\n{detail}"
         btn.setToolTip(tip)
 
+    @staticmethod
+    def _worker_connected(worker) -> bool:
+        """线程对象的连接状态：优先 ``is_connected()``，退回串口真实的 ``is_open()``。
+
+        **不要**只调用其中一种：`SerialWorker` 的权威方法是 ``is_open()``（历史原因），
+        而蓝牙线程是 ``is_connected()``。只认一个就会在另一种线程上抛 AttributeError，
+        被外层的 except 吞掉 ⇒ 状态栏永远显示「未连接」（现场报障，2026-10-26）。
+        """
+        if worker is None:
+            return False
+        for name in ("is_connected", "is_open"):
+            fn = getattr(worker, name, None)
+            if callable(fn):
+                try:
+                    return bool(fn())
+                except Exception:                  # noqa: BLE001 - 底层对象已失效
+                    return False
+        return False
+
     def _refresh_conn_indicators(self) -> None:
         """刷新状态栏两枚连接指示（连接/断开、换端口、切主题都走这里）。"""
         serial_btn = getattr(self, "_serial_conn_btn", None)
@@ -5477,7 +5496,7 @@ class MainWindow(QMainWindow):
         port = baud = ""
         try:
             worker = getattr(self, "serial_worker", None)
-            serial_ok = bool(worker is not None and worker.is_connected())
+            serial_ok = self._worker_connected(worker)
             port = self.serial_port_combo.currentText() if hasattr(self, "serial_port_combo") else ""
             baud = self.serial_baud_combo.currentText() if hasattr(self, "serial_baud_combo") else ""
         except Exception:  # noqa: BLE001 - 收尾期控件已销毁
@@ -5492,7 +5511,7 @@ class MainWindow(QMainWindow):
         if tab is not None:
             try:
                 worker = tab.bluetooth_worker()
-                if worker is not None and worker.is_connected():
+                if self._worker_connected(worker):
                     bt_ok = True
                     name = worker.device_name() or ""
                     bt_detail = f"设备：{name}" if name else "已连接"

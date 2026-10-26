@@ -160,6 +160,11 @@ def test_conn_indicators():
     w.show()
     app.processEvents()
     w._ui_ready = False          # 本用例会点顶栏开关，禁止顺手写真实 config.json
+    # 配色断言必须与「当前外观」解耦：用户真实 config.json 可能是深色外观，
+    # 那样状态栏取的是 CONN_INDICATOR_COLORS[True]。本用例先固定浅色（④ 再单独测深色）。
+    w._theme_id = "default"
+    w._appearance_mode = "light"
+    w._refresh_conn_indicators()
 
     serial_btn, bt_btn = w._serial_conn_btn, w._bt_conn_btn
     colors = MainWindow.CONN_INDICATOR_COLORS
@@ -191,10 +196,16 @@ def test_conn_indicators():
 
     # ② 未连接 ⇒ 灰
     class FakeSerial:
+        """只提供串口线程**真实**的连接方法 `is_open()`（不提供 is_connected）。
+
+        回归：主窗口曾只调 `worker.is_connected()` 并吞掉 AttributeError ⇒ 状态栏永远显示
+        「未连接」（现场报障 2026-10-26）。这个假对象让「只认 is_connected」的实现直接变红。
+        """
+
         def __init__(self, connected):
             self._c = connected
 
-        def is_connected(self):
+        def is_open(self):
             return self._c
 
     class FakeBtWorker:
@@ -213,6 +224,13 @@ def test_conn_indicators():
     assert near(icon_color(serial_btn), gray), icon_color(serial_btn)
     assert near(icon_color(bt_btn), gray), icon_color(bt_btn)
     assert "未连接" in serial_btn.toolTip() and "未连接" in bt_btn.toolTip()
+
+    # ②b 真实 SerialWorker：is_connected 是 is_open 的别名（未打开时为 False）
+    from serial_worker import SerialWorker
+    real = SerialWorker()
+    assert real.is_open() is False and real.is_connected() is False
+    assert MainWindow._worker_connected(real) is False
+    assert MainWindow._worker_connected(FakeSerial(True)) is True
 
     # ③ 已连接 ⇒ 绿（串口带端口/波特率，蓝牙带设备名）
     w.serial_worker = FakeSerial(True)

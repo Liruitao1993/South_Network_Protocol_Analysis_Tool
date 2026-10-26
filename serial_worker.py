@@ -137,6 +137,15 @@ class SerialWorker(QThread):
     def is_open(self) -> bool:
         return self._ser is not None and self._ser.is_open
 
+    def is_connected(self) -> bool:
+        """连接状态（与蓝牙 ``BluetoothWorker.is_connected`` 同名，供状态栏/通道控制器统一调用）。
+
+        本类是串口线程：``is_open()`` 就是唯一事实来源，这里只做别名 —— **不要**再维护第二份
+        连接标志（曾因主窗口调用不存在的 ``is_connected`` 并吞掉 AttributeError，状态栏永远
+        显示「未连接」，见 AGENTS 陷阱 89 与 test/test_statusbar_stats.py ⑥）。
+        """
+        return self.is_open()
+
     def send_frame(self, frame_bytes: bytes) -> bool:
         """发送一帧字节数据（发送后发 [发送] 日志）"""
         if not self._ser or not self._ser.is_open:
