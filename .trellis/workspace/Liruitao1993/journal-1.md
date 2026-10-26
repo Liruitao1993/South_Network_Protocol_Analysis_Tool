@@ -1619,3 +1619,25 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Status
 
 [OK] **Completed**
+
+
+## Session 50: 645 测试页接入无线模组接口手册 V1.6 扩展 DI
+<!-- trellis-session: v=2 fp=b138943dc95c34c7 -->
+
+**Date**: 2026-10-26
+**Task**: 645 测试页接入无线模组接口手册 V1.6 扩展 DI
+**Branch**: `main`
+
+### Summary
+
+根因：测试页分类树只来自 merge_pv_di_map（基础+附件1 02E6/03E6/04E6），手册 V1.6 的 12 条 DI 在 dlt645_pv_wireless.WIRELESS_DI_MAP（仅组帧页接了）。新增顶层「光伏无线扩展（V1.6）」按手册分组（数据转发/无线参数/拓扑/升级/版本/在网状态）12 叶子；DiItem 增 wireless/note，di_info 回落无线表；04E60001 与附件1 重叠以手册为准（光伏参数 172→171，总数 1776 无重复）；read_request_fields（02EB0000 Z/C/T/DATA、FF00DD01 条目）+ build_read(field_values)，读页动态字段与手册备注；无线应答摘要走 parse_wireless_di；命令页补 06H/1EH。顺带修 schema 写数据 14H 未分派无线编码器（04900105 组不出）。测试 106→132 项（[10] 段）+ 接线树计数 10→11；变异反证 4 条（读字段恒空/取值不分派/不加分类/不去重）；真机核对 11 顶层/12 叶子/字段已绘制/备注可见；release_check --with-gui PASS=172 FAIL=0 WARN=0。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `62efa08` | feat(645): 协议测试页接入无线模组接口手册 V1.6 扩展 DI |
+
+### Status
+
+[OK] **Completed**
