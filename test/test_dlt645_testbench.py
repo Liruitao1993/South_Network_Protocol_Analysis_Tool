@@ -28,7 +28,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QObject, Qt, Signal  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
-from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox  # noqa: E402
 
 import _config_sandbox  # noqa: E402
 
@@ -173,14 +173,20 @@ def test_catalog():
     names = [c.name for c in cats]
     check("顶层分类与顺序",
           names == ["电能量", "最大需量", "电压 / 电流", "功率 / 功率因数 / 谐波",
-                    "参变量", "结算日电能", "记录", "冻结次数", "LME 自定义", "光伏扩展"],
+                    "参变量", "结算日电能", "记录", "冻结次数", "LME 自定义", "光伏扩展",
+                    "光伏无线扩展（V1.6）"],
           str(names))
     total = C.item_count()
     merged = C._load_merged()
     malformed = C.malformed_di_keys()
-    check("叶子数 = 合并 DI − 7 位残键",
-          total == len(merged) - len(malformed) and total == 1765,
-          f"{total} vs {len(merged)}-{len(malformed)}")
+    from dlt645_pv_wireless import WIRELESS_DI_MAP  # noqa: E402
+    overlap = [d for d in WIRELESS_DI_MAP if d in merged]
+    check("叶子数 = 合并 DI − 残键 − 无线重叠 + 无线独有",
+          total == len(merged) - len(malformed) - len(overlap) + len(WIRELESS_DI_MAP)
+          and total == 1776,
+          f"{total} vs {len(merged)}-{len(malformed)}-{len(overlap)}+{len(WIRELESS_DI_MAP)}")
+    check("无线与基础表的重叠只有 04E60001（以无线手册为准）",
+          overlap == ["04E60001"], str(overlap))
     check("16 条残键都是 `0090` 开头的 7 位键",
           len(malformed) == 16 and all(k.startswith("0090") and len(k) == 7
                                       for k in malformed), str(malformed[:3]))
@@ -205,9 +211,9 @@ def test_catalog():
           any(it.di == "05E60100" for s in settle.subgroups for it in s.items))
 
     pv = next(c for c in cats if c.name == "光伏扩展")
-    check("光伏扩展三个子类 77/433/172",
+    check("光伏扩展三个子类 77/433/171（04E60001 归无线手册）",
           [(s.name, len(s.items)) for s in pv.subgroups]
-          == [("光伏变量", 77), ("光伏事件", 433), ("光伏参数", 172)],
+          == [("光伏变量", 77), ("光伏事件", 433), ("光伏参数", 171)],
           str([(s.name, len(s.items)) for s in pv.subgroups]))
     check("光伏叶子 pv=True、常规叶子 pv=False",
           all(it.pv for s in pv.subgroups for it in s.items)
@@ -236,13 +242,18 @@ def test_catalog():
 def test_commands():
     section("[2] 特殊命令库（来自 schema）")
     funcs = {cmd.func for cmd in C.all_commands()}
-    check("覆盖全部请求命令",
-          funcs == {0x13, 0x15, 0x08, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x12},
+    check("覆盖全部请求命令（含无线手册 06H/1EH）",
+          funcs == {0x13, 0x15, 0x08, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x12,
+                    0x06, 0x1E},
           str(sorted(hex(f) for f in funcs)))
     groups = C.command_groups()
-    check("五个分组且非空",
-          len(groups) == 5 and all(g.commands for g in groups),
+    check("六个分组且非空（含无线扩展）",
+          len(groups) == 6 and all(g.commands for g in groups),
           str([g.name for g in groups]))
+    check("最后一组是「无线扩展（V1.6）」（06H/1EH）",
+          groups[-1].name == "无线扩展（V1.6）"
+          and {c.func for c in groups[-1].commands} == {0x06, 0x1E},
+          str([(c.func, c.name) for c in groups[-1].commands]))
     check("读/写通信地址固定地址 AA×6",
           C.find_command(0x13).addr_default == C.BROADCAST_AA
           and C.find_command(0x15).addr_default == C.BROADCAST_AA)
@@ -426,7 +437,7 @@ def test_gui_pages():
         check("初始只构建「读数据」页（其余懒加载）",
               list(widget._pages) == ["read"], str(list(widget._pages)))
         read_tree = widget._pages["read"]["tree"]
-        check("读数据页 10 个顶层分类", read_tree.topLevelItemCount() == 10,
+        check("读数据页 11 个顶层分类", read_tree.topLevelItemCount() == 11,
               str(read_tree.topLevelItemCount()))
 
         leaf = find_leaf(read_tree, lambda t: "02010100" in t)
@@ -480,7 +491,7 @@ def test_gui_pages():
         widget.tabs.setCurrentIndex(2)
         app().processEvents()
         ctree = widget._pages["command"]["tree"]
-        check("特殊命令页 5 个分组", ctree.topLevelItemCount() == 5,
+        check("特殊命令页 6 个分组", ctree.topLevelItemCount() == 6,
               str(ctree.topLevelItemCount()))
         nxt_leaf = find_leaf(ctree, lambda t: "读后续" in t)
         ctree.setCurrentItem(nxt_leaf)
@@ -643,6 +654,165 @@ def test_gui_pages():
     widget2.close()
 
 
+# ── [10] 光伏无线扩展（手册 V1.6）──────────────────────────────────────────
+
+def test_wireless_ext():
+    section("[10] 光伏无线扩展（无线模组接口手册 V1.6）")
+    from dlt645_pv_wireless import WIRELESS_DI_MAP
+
+    cat = next((c for c in C.catalog() if c.name == "光伏无线扩展（V1.6）"), None)
+    check("分类存在", cat is not None)
+    if cat is None:
+        return
+    expect = [
+        ("数据转发", ["02EB0000"]),
+        ("无线参数", ["04E60001", "04E60002"]),
+        ("拓扑", ["04900100"]),
+        ("升级", ["04900101", "04900102", "04900103",
+                  "04900104", "04900105", "04900106"]),
+        ("版本", ["04900107"]),
+        ("在网状态", ["028100FF"]),
+    ]
+    check("子组 = 手册分组与顺序",
+          [(g.name, [it.di for it in g.items]) for g in cat.subgroups] == expect,
+          str([(g.name, [it.di for it in g.items]) for g in cat.subgroups]))
+    check("12 条 DI 名称/格式/长度与 WIRELESS_DI_MAP 一致",
+          len(WIRELESS_DI_MAP) == 12
+          and all(
+              it.name == WIRELESS_DI_MAP[it.di]["name"]
+              and it.data_type == WIRELESS_DI_MAP[it.di]["data_type"]
+              and it.wireless
+              for g in cat.subgroups for it in g.items))
+    item = C.find_di("04900107")
+    check("find_di(04900107)：无线标记/名称/备注",
+          item is not None and item.wireless
+          and item.name == "无线模组版本信息" and "ASCII" in item.note,
+          str(item))
+    check("di_info 回落无线表（04E60002 长度 4 字节）",
+          C.di_info("04E60002").get("length") == 4,
+          str(C.di_info("04E60002")))
+    check("04E60001 只出现在无线分类（不再重复挂在光伏参数）",
+          [c.name for c in C.catalog() for g in c.subgroups
+           for it in g.items if it.di == "04E60001"] == ["光伏无线扩展（V1.6）"])
+
+    # 读请求参数（否则 02EB0000 组不出合法帧）
+    check("02EB0000 读请求字段 = Z/C/T/DATA",
+          [f["name"] for f in C.read_request_fields("02EB0000")]
+          == ["波特率特征字 Z", "校验方式 C", "超时 T（BCD）",
+              "转发数据（逆变器报文）"],
+          str([f["name"] for f in C.read_request_fields("02EB0000")]))
+    check("普通无线 DI 无请求字段", C.read_request_fields("04900107") == [])
+    check("FF00DD01 读请求字段含条目列表",
+          [f["name"] for f in C.read_request_fields("FF00DD01")] == ["条目列表"])
+
+    # 组帧
+    req = C.build_read("02EB0000", field_values={
+        "波特率特征字 Z": "08", "校验方式 C": "02",
+        "超时 T（BCD）": "10", "转发数据（逆变器报文）": "681100",
+    })
+    check("02EB0000 请求 = DI + 08 02 10 + DATA",
+          logical_data(req) == bytes.fromhex("0000EB02" + "080210" + "681100"),
+          logical_data(req).hex(" ").upper())
+    ver = C.build_read("04900107")
+    check("04900107 请求只带 DI（无数据单元）",
+          logical_data(ver) == bytes.fromhex("07019004"),
+          logical_data(ver).hex(" ").upper())
+    check("04900107 帧 CS 自洽", (sum(ver[:-2]) & 0xFF) == ver[-2])
+    online = C.build_read("028100FF")
+    check("028100FF 请求只带 DI", logical_data(online) == bytes.fromhex("FF008102"),
+          logical_data(online).hex(" ").upper())
+    wr = C.build_write("04900105", {
+        "最大升级块大小（字节）": "241", "密码权限 PA": "02",
+        "密码 P0P1P2": "000000", "操作者代码 C0~C3": "00000000",
+    })
+    check("写 04900105：DI + 密码组 + F1 00",
+          logical_data(wr) == bytes.fromhex("05019004" + "02" + "000000"
+                                           + "00000000" + "F100"),
+          logical_data(wr).hex(" ").upper())
+
+    # 判定：无线应答用 parse_wireless_di 出行解码
+    rsp = GEN.generate_frame(("rsp", 0x11),
+                             {"数据标识 DI": "04900107",
+                              "版本信息（ASCII）": "V1.2.3"})
+    out = C.evaluate_response(rsp, {"func": 0x11, "di": "04900107", "kind": "read"})
+    check("版本应答：成功且值含版本串",
+          out["status"] == C.RESULT_OK and "V1.2.3" in out["value_text"],
+          str(out.get("value_text")))
+    check("明细含无线解码行（└ 版本信息）",
+          any("版本信息" in str(row[0]) for row in C.parse_table(rsp)))
+    rsp2 = GEN.generate_frame(("rsp", 0x11),
+                              {"数据标识 DI": "04E60002",
+                               "无线调制方式": "0", "无线信道编号": "32",
+                               "信道协商使能": "1"})
+    out2 = C.evaluate_response(rsp2, {"func": 0x11, "di": "04E60002", "kind": "read"})
+    check("频段应答摘要含信道信息",
+          out2["status"] == C.RESULT_OK and "信道" in out2["summary"],
+          str(out2.get("summary")))
+
+    # 特殊命令：06H / 1EH
+    check("06H/1EH 可组帧",
+          C.build_command(0x06, {"数据标识 DI": "04900107"})[8] == 0x06
+          and C.build_command(0x1E, {"在网状态": "1"})[8] == 0x1E)
+
+    # GUI：树 / 预览 / 请求字段 / 手册备注
+    app()
+    widget = Dlt645TestWidget()
+    worker = FakeWorker()
+    widget.set_serial_worker(worker)
+    force_serial(widget)
+    widget.edit_addr.setText("000000000000")     # 前序用例可能落盘过别的表地址
+    widget.show()
+    app().processEvents()
+    try:
+        tree = widget._pages["read"]["tree"]
+        top = next((tree.topLevelItem(i) for i in range(tree.topLevelItemCount())
+                    if tree.topLevelItem(i).text(0).startswith("光伏无线扩展")), None)
+        check("UI 无线分类存在", top is not None)
+        leaves = []
+        if top is not None:
+            for i in range(top.childCount()):
+                sub = top.child(i)
+                for j in range(sub.childCount()):
+                    leaves.append(sub.child(j))
+        check("UI 无线叶子 12 条", len(leaves) == 12, str(len(leaves)))
+
+        leaf_ver = find_leaf(tree, lambda t: "04900107" in t)
+        tree.setCurrentItem(leaf_ver)
+        app().processEvents()
+        check("04900107 预览为 11H 读该 DI",
+              widget._pages["read"]["preview"].text()
+              == "68 00 00 00 00 00 00 68 11 04 3A 34 C3 37 4D 16",
+              widget._pages["read"]["preview"].text())
+
+        leaf_online = find_leaf(tree, lambda t: "028100FF" in t)
+        tree.setCurrentItem(leaf_online)
+        app().processEvents()
+        labels = [lb.text() for lb in
+                  widget._pages["read"]["detail"].findChildren(QLabel)]
+        check("028100FF 当前项注明手册口径 1EH/9EH",
+              any("1EH" in t and "9EH" in t for t in labels), str(labels)[:200])
+
+        leaf_x = find_leaf(tree, lambda t: "02EB0000" in t)
+        tree.setCurrentItem(leaf_x)
+        app().processEvents()
+        fields = widget._pages["read"]["fields"]
+        check("02EB0000 出现 4 个请求字段",
+              set(fields) == {"波特率特征字 Z", "校验方式 C",
+                              "超时 T（BCD）", "转发数据（逆变器报文）"},
+              str(list(fields)))
+        fields["波特率特征字 Z"].setText("08")
+        fields["校验方式 C"].setText("02")
+        fields["超时 T（BCD）"].setText("10")
+        fields["转发数据（逆变器报文）"].setText("681100")
+        app().processEvents()
+        preview = widget._pages["read"]["preview"].text()
+        check("02EB0000 预览含 Z/C/T/DATA（L=0A）",
+              " 68 11 0A " in preview and preview.endswith("69 16"), preview)
+    finally:
+        widget.cleanup()
+        widget.close()
+
+
 # ── [8] 共享渲染层 ──────────────────────────────────────────────────────────
 
 def test_shared_renderer():
@@ -797,6 +967,7 @@ def main():
         ("[4] 响应判定", test_evaluate),
         ("[4b] 双通道", test_channel_switch),
         ("[5]-[7] 页面/队列/落盘", test_gui_pages),
+        ("[10] 无线扩展", test_wireless_ext),
         ("[8] 共享渲染", test_shared_renderer),
         ("[9] 源码护栏", test_source_guards),
     ]

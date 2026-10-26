@@ -35,6 +35,8 @@ from typing import Dict, List, Optional, Tuple
 
 from dlt645_data_codec import FUNC_NAMES, decode_err, decode_value
 from dlt645_frame_schema import REQ, build_di_fields, get_command
+from dlt645_pv_wireless import WIRELESS_DI_MAP, parse_wireless_di as _parse_wireless_di
+from dlt645_pv_wireless_frame import REQ_WITH_PAYLOAD_DI, wireless_di_info
 from testpage_render import format_table_rows
 
 #: 结果枚举（信息表「结果」列）
@@ -75,7 +77,9 @@ class DiItem:
     unit: str = ""
     data_type: str = ""
     length: int = 0
-    pv: bool = False   #: 光伏扩展 DI（`02E6/03E6/04E6`，可用 build_di_fields 生成结构化写入字段）
+    pv: bool = False        #: 光伏扩展 DI（`02E6/03E6/04E6`）
+    wireless: bool = False  #: 无线模组接口手册 V1.6 的扩展 DI（`WIRELESS_DI_MAP`）
+    note: str = ""          #: 手册备注（读页「当前项」展示方向/控制码/注意事项）
 
 
 @dataclass(frozen=True)
@@ -113,6 +117,10 @@ _DI3_NAMES: Tuple[Tuple[str, str], ...] = (
 
 #: 光伏扩展单独成一层（DI2 == E6），子类按 DI3 语义
 _PV_CATEGORY = "光伏扩展"
+#: 无线模组接口手册 V1.6（`dlt645_pv_wireless.WIRELESS_DI_MAP`）单独成一层
+_WIRELESS_CATEGORY = "光伏无线扩展（V1.6）"
+#: 读请求需要携带数据域的 DI（02EB0000 转发参数 / FF00DD01 LME 条目）
+READ_PAYLOAD_DI = frozenset(REQ_WITH_PAYLOAD_DI) | {"FF00DD01"}
 _PV_SUB_NAMES: Dict[str, str] = {"02": "光伏变量", "03": "光伏事件", "04": "光伏参数"}
 
 #: （DI3, DI2）→ 子类名称；缺省回落「NN 类」
@@ -192,9 +200,13 @@ def _load_merged() -> Dict[str, dict]:
 
 
 def di_info(di: str) -> Dict[str, object]:
-    """单条 DI 的信息（未知 → 空 dict，不抛）。"""
+    """单条 DI 的信息（基础/扩展表查不到时回落无线手册表；未知 → 空 dict）。"""
     key = str(di or "").strip().upper()
-    return dict(_load_merged().get(key) or {})
+    info = _load_merged().get(key)
+    if info:
+        return dict(info)
+    winfo = wireless_di_info(key)
+    return dict(winfo) if winfo else {}
 
 
 #: 光伏扩展 DI 的识别：`02E6/03E6/04E6`（**不能只判 DI2=E6** ——
@@ -274,6 +286,10 @@ def catalog() -> Tuple[Category, ...]:
     for di, info in merged.items():
         if len(di) != 8:
             continue                                  # 见表内残键（malformed_di_keys）
+        if di in WIRELESS_DI_MAP:
+            # 同一 DI 两边都有定义时**以无线手册为准**（04E60001：附件1 长度列 16 与文字
+            # 描述不自洽；手册给 1+6×M 且实测帧自证）⇒ 只挂在「光伏无线扩展」下，避免重复叶子。
+            continue
         di3, di2 = di[:2], di[2:4]
         if _is_pv_di(di):
             top, key = _PV_CATEGORY, f"PV{di3}"
@@ -310,7 +326,35 @@ def catalog() -> Tuple[Category, ...]:
     pv_subs = _subs(_PV_CATEGORY)
     if pv_subs:
         categories.append(Category(_PV_CATEGORY, pv_subs))
+    wireless = _wireless_category()
+    if wireless is not None:
+        categories.append(wireless)
     return tuple(categories)
+
+
+def _wireless_category() -> Optional[Category]:
+    """无线手册 V1.6 分类：子类 = 手册分组，叶子 = `WIRELESS_DI_MAP` 的 12 条 DI。"""
+    groups: Dict[str, List[DiItem]] = {}
+    order: List[str] = []
+    for di, info in WIRELESS_DI_MAP.items():
+        group = str(info.get("group") or "扩展")
+        if group not in groups:
+            groups[group] = []
+            order.append(group)
+        groups[group].append(DiItem(
+            di=di,
+            name=str(info.get("name") or ""),
+            unit=str(info.get("unit") or ""),
+            data_type=str(info.get("data_type") or ""),
+            length=max(0, int(info.get("length") or 0)),
+            wireless=True,
+            note=str(info.get("note") or ""),
+        ))
+    if not groups:
+        return None
+    return Category(_WIRELESS_CATEGORY,
+                    tuple(SubGroup(name, tuple(items)) for name, items in
+                          ((g, groups[g]) for g in order)))
 
 
 def all_items() -> Tuple[DiItem, ...]:
@@ -374,6 +418,8 @@ _COMMAND_GROUPS: Tuple[Tuple[str, Tuple[int, ...]], ...] = (
     ("速率与密码", (0x17, 0x18)),
     ("清零（需编程键）", (0x19, 0x1A, 0x1B)),
     ("后续数据", (0x12,)),
+    # 无线模组接口手册 V1.6 的扩展控制码（DL/T 645 标准里不存在，schema 已定义）
+    ("无线扩展（V1.6）", (0x06, 0x1E)),
 )
 
 
@@ -439,9 +485,25 @@ def address_from_frame(frame: bytes) -> str:
     return data[1:7][::-1].hex().upper()
 
 
-def build_read(di: str, addr: str = DEFAULT_ADDR) -> bytes:
-    """读数据（11H）：数据域仅 DI 4 字节（L=04H）。"""
-    return _gen().generate_frame((REQ, 0x11), {"数据标识 DI": _di(di)}, addr)
+def build_read(di: str, addr: str = DEFAULT_ADDR,
+               field_values: Optional[Dict[str, str]] = None) -> bytes:
+    """读数据（11H）：数据域默认只有 DI；`02EB0000` / `FF00DD01` 需带请求参数。"""
+    fv: Dict[str, object] = dict(field_values or {})
+    fv["数据标识 DI"] = _di(di)
+    return _gen().generate_frame((REQ, 0x11), fv, addr)
+
+
+def read_request_fields(di: str) -> List[dict]:
+    """读请求需要携带数据域时返回字段定义（否则空列表）。
+
+    - `02EB0000` 光伏逆变器数据转发：DI + 波特率Z + 校验C + 超时T(BCD) + 转发数据；
+    - `FF00DD01` LME 查询：DI + 条目列表。
+    字段名/编码全部来自 `dlt645_frame_schema.build_di_fields`（与组帧页同源）。
+    """
+    key = _di(di)
+    if key in READ_PAYLOAD_DI:
+        return list(build_di_fields(key))
+    return []
 
 
 def build_read_next(di: str, addr: str = DEFAULT_ADDR, extra: bytes = b"") -> bytes:
@@ -581,6 +643,37 @@ def parse_hex(text: str) -> bytes:
     return _parse(text)
 
 
+def _wireless_value_text(parsed: dict) -> str:
+    """无线手册 DI 的应答取值：用 `parse_wireless_di` 的行解码拼前 3 个字段。"""
+    di = str(parsed.get("di_code") or "")
+    data = parsed.get("data") or b""
+    if not di or not data:
+        return ""
+    try:
+        rows, _name = _parse_wireless_di(di, int(parsed.get("control") or 0), data)
+    except Exception:                                  # noqa: BLE001 —— 解码失败回落 HEX
+        return ""
+    pairs: List[str] = []
+    for row in rows or ():
+        label = str(row[0]).strip(" └")
+        if not label or "数据块" in label:
+            continue
+        value = str(row[2] or "").strip()
+        if value:
+            pairs.append(f"{label}={value}")
+    return "；".join(pairs[:3])
+
+
+def _read_value_text(parsed: dict) -> str:
+    """读应答的取值文本：无线手册 DI 走无线解码，其余按 DI 的 data_type 解码。"""
+    di = str(parsed.get("di_code") or "")
+    if di and wireless_di_info(di):
+        text = _wireless_value_text(parsed)
+        if text:
+            return text
+    return _value_text(parsed)
+
+
 def _value_text(parsed: dict) -> str:
     """按 DI 的 data_type 把数据域解成可读值（失败回落 HEX）。"""
     data = parsed.get("data") or b""
@@ -672,7 +765,7 @@ def evaluate_response(frame: bytes, expect: Dict[str, object]) -> Dict[str, obje
 
     desc = str(parsed.get("di_desc") or "")
     if kind in ("read", "write"):
-        value = _value_text(parsed) if kind == "read" else ""
+        value = _read_value_text(parsed) if kind == "read" else ""
         out["value_text"] = value
         if kind == "read":
             out["summary"] = (f"{di} {desc or '未知数据标识'}"

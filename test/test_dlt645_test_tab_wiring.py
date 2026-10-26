@@ -107,7 +107,7 @@ def test_wiring():
         check("创建即按当前主题初始化（_dark 已赋值）",
               isinstance(getattr(tab, "_dark", None), bool))
         check("分类树已建出（DI 表可读，非空壳页面）",
-              tab._pages["read"]["tree"].topLevelItemCount() == 10,
+              tab._pages["read"]["tree"].topLevelItemCount() == 11,
               str(tab._pages["read"]["tree"].topLevelItemCount()))
 
         frame_hex = "68 00 00 00 00 00 00 68 11 04 33 34 34 35 B5 16"

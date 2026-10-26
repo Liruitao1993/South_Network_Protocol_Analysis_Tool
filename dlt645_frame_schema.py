@@ -595,7 +595,9 @@ def build_data(cmd_key, fv: Dict) -> bytes:
         return b""
     if func == 0x14:
         di_b, di_code = _di_payload(fv)
-        payload = _value_or_raw(fv, di_code, "写入数据(裸hex)")
+        # 本手册扩展 DI（无线模组接口 V1.6）走专用编码器；其余仍是「写入数据/裸 hex」
+        # —— 与应答侧 `_value_bytes` 同一分派，否则 04900105 这类写数据组不出来。
+        payload = _value_bytes(fv, di_code, "写入数据(裸hex)")
         if not payload:
             raise ValueError("写数据命令必须填写「写入数据」或「写入数据(裸hex)」")
         return pack_write_request(

@@ -522,22 +522,57 @@ class Dlt645TestWidget(QWidget):
     def _show_read_detail(self, di: str) -> None:
         core = _core()
         state = self._pages["read"]
+        state["fields"] = {}
         item = core.find_di(di)
         host = QWidget()
-        form = QFormLayout(host)
-        form.setContentsMargins(0, 0, 0, 0)
-        form.setSpacing(2)
+        lay = QVBoxLayout(host)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(2)
+
+        info_form = QFormLayout()
+        info_form.setSpacing(2)
         name = item.name if item else "（不在 DI 表）"
-        form.addRow("数据标识：", QLabel(f"{di}  {name}"))
+        info_form.addRow("数据标识：", QLabel(f"{di}  {name}"))
         if item:
-            form.addRow("格式 / 长度：",
-                        QLabel(f"{item.data_type or '未声明'} · "
-                               f"{str(item.length) + ' 字节' if item.length else '不定长'}"))
-            form.addRow("单位：", QLabel(item.unit or "—"))
+            info_form.addRow("格式 / 长度：",
+                             QLabel(f"{item.data_type or '未声明'} · "
+                                    f"{str(item.length) + ' 字节' if item.length else '不定长'}"))
+            info_form.addRow("单位：", QLabel(item.unit or "—"))
+        lay.addLayout(info_form)
+
+        # 读请求需要携带数据域的 DI（02EB0000 转发参数 / FF00DD01 LME 条目）：
+        # 字段定义与组帧页同源（build_di_fields），否则帧里缺参数、设备不给应答。
+        request_fields = core.read_request_fields(di)
+        if request_fields:
+            req_form = QFormLayout()
+            req_form.setSpacing(2)
+            for spec in request_fields:
+                edit = QLineEdit(str(spec.get("default") or ""))
+                edit.setPlaceholderText(str(spec.get("hint") or ""))
+                edit.setToolTip(str(spec.get("hint") or ""))
+                edit.textChanged.connect(
+                    lambda _t="", k="read": self._refresh_preview(k))
+                state["fields"][str(spec.get("name"))] = edit
+                req_form.addRow(f"{spec.get('name')}：", edit)
+            lay.addLayout(req_form)
+            tip = QLabel("该 DI 的读请求需要携带上面这些参数（否则组不出合法帧）。")
+            tip.setWordWrap(True)
+            tip.setStyleSheet("color: #B26A00; font-size: 12px;")
+            lay.addWidget(tip)
+
+        if item is not None and getattr(item, "note", ""):
+            note = QLabel(f"手册说明：{item.note}")
+            note.setWordWrap(True)
+            note.setStyleSheet("color: #57606A; font-size: 12px;")
+            lay.addWidget(note)
+
         self._last_values.setdefault(di, "")
         value_label = QLabel(self._last_values.get(di) or "（尚未读到）")
         value_label.setWordWrap(True)
-        form.addRow("最近读数：", value_label)
+        value_form = QFormLayout()
+        value_form.setSpacing(2)
+        value_form.addRow("最近读数：", value_label)
+        lay.addLayout(value_form)
         state["value_label"] = value_label
         self._swap_detail_host("read", host)
 
@@ -637,7 +672,8 @@ class Dlt645TestWidget(QWidget):
             return b"", "请先在左侧树里选择一条命令"
         try:
             if key == "read":
-                return core.build_read(leaf["di"], self._addr()), ""
+                return core.build_read(leaf["di"], self._addr(),
+                                       self._field_values("read")), ""
             if key == "write":
                 fv = dict(self._field_values("write"))
                 fv.update(self._common_params())
@@ -751,7 +787,8 @@ class Dlt645TestWidget(QWidget):
                 entries.append({
                     "label": f"读数据 {di}",
                     "ident": di,
-                    "frame": core.build_read(di, self._addr()),
+                    "frame": core.build_read(di, self._addr(),
+                                             self._field_values("read")),
                     "expect": {"func": 0x11, "di": di, "kind": "read"},
                 })
             elif key == "write":
