@@ -664,6 +664,47 @@ engine = self._engine_factory()            # 否则才是发给本虚拟表的�
 - **仅桌面**：Web 版「报文工具」是独立实现（`reflex_web/reflex_web/web_utils.py` 的 `tool_*`），
   本次未接地址替换 ⇒ 属既有的「缺失」类，下次 Web 同步审计时按该项登记（不要在 Web 侧另写一份偏移/算法表）。
 
+### 7m. 预设命令页「粘贴报文添加按钮 + 一键批量替换地址」（同一引擎第 5 次复用，1.24.1）
+
+> 用户 → 「预设命令页面可以直接添加按钮，通过直接复制报文的方式也是可以进行命令添加的，同样的也支持批量替换地址，
+> 按照协议进行地址的替换，有一个位置可以输入地址的输入框，然后有一键替换地址的按钮，将所有的对应协议的地址一并替换掉」。
+> 与 §7f（蓝牙单按钮发送时替换）/ §7h（串口表内写回）/ §7i（蓝牙批量）/ §7l（报文工具）**同一引擎**：地址字段、
+> 长度、字节序、校验算法全部走 `frame_addr_fix`，报文文本层编排走 `message_tool_widget.replace_frame_address`。
+
+- **Scope / Trigger**：预设库（`*_command.json`）是**页面内自足**的常用帧库 —— 用户在这里增条目、改表号，
+  不该被迫绕到「协议组帧」页或逐条重建帧。触发点是「页面缺少写入入口」+「地址散落在完整 HEX 里」。
+- **协议标识 → 索引只有一个来源**：`preset_buttons.preset_protocol_index()` 遍历
+  `protocol_registry.all_protocols()` 匹配 `preset_mode`（south 0 / dlt645 6 / gdw 7 / dlt698 8 / modular 12 /
+  yw645 13 / csg_uplink 14）。**禁止在预设页另写一张映射表**（注册表加协议时会漂移）。
+- **纯逻辑 / GUI 分层**：`AddrBatchItem` + `batch_fix_presets(commands, protocol_index, values)` 不 import Qt、
+  **不修改入参**、单条失败转 `skipped`（保留**原始** `frame_hex` 与可读 `error`）不中断整批；
+  写回、确认框、落盘、日志只在 GUI 层。`replace_frame_address` / `addr_field_errors` / `hex_text_to_bytes`
+  一律**函数内导入**（`message_tool_widget` 顶层 `import crcmod`；模块级导入会让没装 crcmod 的机器连预设页都打不开）。
+- **作用范围 = 当前协议，且与显示同判据**：`[i for i,c in enumerate(commands) if c.get("protocol", 当前协议) == 当前协议]`。
+  写回必须 `commands[scope[item.index]]`（**`item.index` 是子列表下标**）；直接用相对下标会改到同文件里
+  其它协议的历史混入条目（本任务变异反证 ①）。看不见的条目不该被悄悄改掉。
+- **写盘一次 + 全或无**：只改 `frame_hex` 一个键，`save_commands` 一次 `atomic_write_json`；
+  **0 条成功**或**地址写法非法**时一个字节都不写（本任务变异反证 ②：去掉该守卫会让「全部失败」也弹确认）。
+- **对话框编辑模式**：`AddPresetDialog(..., editable_frame=True)` —— 报文框可编辑、等宽字体、
+  打开时带入剪贴板里的**合法 HEX**（不是 HEX 就静默留空，不打扰）、另有「从剪贴板粘贴」；
+  `_on_ok` 用 `hex_text_to_bytes` 校验并归一化（空格分隔大写），非法/空 → `QMessageBox.warning` 且**不 accept**。
+  默认 `editable_frame=False` ⇒ 组帧页「添加到预设」逐字节不变（本任务变异反证 ③）。
+- **地址区重建方式**：每次 `_sync_addr_group()` 换**整个 host QWidget**（`removeWidget + setParent(None) +
+  deleteLater()`），**不要用 `QFormLayout.removeRow`**（§7l 已记录它会连控件一起删）。
+  切协议按协议**暂存已填值**（`_addr_values_by_protocol`），回切回填；不支持协议（`fields_for` 为空）
+  → 按钮 `setEnabled(False)` + 提示支持范围（**不要静默隐藏**，否则用户以为是 bug）。
+- **失败外显三处**：确认框（成功 N / 跳过 M + 最多 8 条原因）、日志逐条（`[地址替换] 名称：地址域… / 校验和…`
+  或 `跳过（原因）`）、汇总框（同计数）。与陷阱 23/58 同一精神：不静默、不洗白。
+- **按钮宽度**：`添加命令` / `一键替换地址` 都不设固定宽度（陷阱 63）；判据 `width >= sizeHint` 在 `show()` 后量。
+- **回归**：`test/test_preset_paste_addr.py`（**82 项**，`CORE_TESTS`）：协议映射与注册表对拍、南网/645 真帧 oracle
+  （替换后**该协议校验器 0 fail** + 只有地址与校验字节变化 + 前导 FEH 保留）、空帧/坏帧/混合批次/不支持协议、
+  `batch_fix_presets` 不修改入参、对话框归一化/非法拒绝/剪贴板带入/非编辑模式不变、
+  offscreen 端到端（写回 + 落盘 + 刷新 + 日志 + 跳过原因 + 空地址/全失败不写盘 + 按协议暂存 + 按钮不裁字）。
+- **变异反证（本任务已做，均干净变红后逐字节还原）**：① 写回不映射原下标 → 2 项红；
+  ② 全失败仍进确认 → 3 项红；③ 编辑模式跳过 HEX 校验 → 4 项红。
+- **已知边界**：预设页与串口页不同，**不提供撤销**（有确认框；误改可再替换回来）；
+  协议 9/10/11/12 无引擎支持（12 在预设库中存在，按钮禁用并提示）。
+
 ### 8. Qt 陷阱（本项目实测）
 - **offscreen 无字体**：`QT_QPA_PLATFORM=offscreen` 下 `QFontDatabase: Cannot find font directory ...`，绘制出的文字是豆腐块 → 断言只能查尺寸/颜色/像素多样性；**要目视核对文字排版必须用默认平台**（`QApplication([])` 不设 offscreen + `widget.grab()` / `QImage.save()`，不需要窗口真的可见）。
 - **`bytes(image.constBits())` 必须持有 QImage 引用**：`bytes(canvas.render_image(w, h).constBits())`（临时对象上取 buffer）会 **access violation（0xC0000005）**；先 `img = ...` 再 `bytes(img.constBits())`。

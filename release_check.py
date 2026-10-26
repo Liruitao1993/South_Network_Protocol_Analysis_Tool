@@ -159,6 +159,8 @@ CORE_TESTS = [
     "test/test_serial_worker_set_baudrate.py",
     # 串口工具批量替换通信地址（纯逻辑：六协议真帧 oracle + 前导 FE 门控 + 预期响应口径）
     "test/test_serial_addr_fix.py",
+    # 预设命令页：粘贴报文添加 + 按协议一键批量替换地址（纯逻辑真帧 oracle + offscreen GUI 写回/落盘）
+    "test/test_preset_paste_addr.py",
     # 蓝牙工具（core 纯逻辑 / worker 注入假 bleak / widget offscreen 假 worker，均不碰硬件）
     "test/test_bluetooth_core.py",
     "test/test_bluetooth_addr_fix.py",
@@ -221,6 +223,9 @@ GUI_TESTS = [
     "test/test_spectrum_gui.py",
     # 生产测试架（串口助手 + 测试架参数帧）：纯逻辑 golden + GUI + main_gui 接线
     "test/test_production_testbench.py",
+    # 「测试方案」页真实冒烟（替代此前 test/ 下那份产品模块过期副本）+ 防同名遮蔽守卫
+    "test/test_test_plan_widget.py",
+    # 状态栏串口/蓝牙连接指示（图标染色/点击/蓝牙信号同步）—— 见 test_statusbar_stats.py
 ]
 
 # 已知环境失败：不因它挡发布，但会标 WARN
