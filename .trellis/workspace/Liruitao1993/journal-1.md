@@ -1575,3 +1575,25 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Status
 
 [OK] **Completed**
+
+
+## Session 48: 698/645 协议测试页：串口/蓝牙双通道
+<!-- trellis-session: v=2 fp=bba8fc2a8d155f41 -->
+
+**Date**: 2026-10-26
+**Task**: 698/645 协议测试页：串口/蓝牙双通道
+**Branch**: `main`
+
+### Summary
+
+两个协议测试页加「发送通道：串口/蓝牙」：蓝牙复用蓝牙工具页连接（main_gui 注入 provider），整帧一次 ATT 写、超限明确报错不发送；新增共用 channel_link.ChannelController（rx 分流/ready 原因/状态文案含 MTU+上限/send 超限预检/cleanup 只断信号），两页收发改走控制器（删除页内 raw_data_received 直连、RX 改名 _on_rx_data 保留旧别名、通道落盘、showEvent 重绑、cleanup 转交）；698 顶部加通道行（294 项）、645 三行顶栏（106 项）、新增 test_channel_link 49 项、接线注入断言（23/20）；3 条变异反证；真机几何 645@1280x820/1000x700、698@1500x900/1440x880 零重叠不裁字；release_check --with-gui PASS=172 FAIL=0 WARN=0。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c51dda6` | feat(proto-test): 698/645 协议测试页支持串口 / 蓝牙发送通道 |
+
+### Status
+
+[OK] **Completed**
