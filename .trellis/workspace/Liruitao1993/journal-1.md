@@ -1531,3 +1531,25 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Status
 
 [OK] **Completed**
+
+
+## Session 46: 预设命令页：粘贴报文添加按钮 + 按协议一键批量替换地址
+<!-- trellis-session: v=2 fp=0c5851ac304d4fc4 -->
+
+**Date**: 2026-10-26
+**Task**: 预设命令页：粘贴报文添加按钮 + 按协议一键批量替换地址
+**Branch**: `main`
+
+### Summary
+
+预设页新增「添加命令」（弹框可直接粘贴报文，剪贴板合法HEX自动带入，确定前校验/归一化）与「批量替换地址（当前协议）」（地址字段按 frame_addr_fix 动态生成、一键逐条替换并重算校验、确认框+日志+汇总、全失败不写盘）；纯逻辑 preset_protocol_index/AddrBatchItem/batch_fix_presets；新增 test/test_preset_paste_addr.py 82 项入 CORE_TESTS，变异反证3条，真机几何审计零重叠，release_check --with-gui 仅剩3项本机已知 offscreen 退出期 fastfail（HEAD 对照复现同样的3项）。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `81b380c` | feat(preset): 预设页支持粘贴报文添加 + 按协议一键批量替换地址 |
+
+### Status
+
+[OK] **Completed**

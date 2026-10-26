@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 45
-- **Last Active**: 2026-10-24
+- **Total Sessions**: 46
+- **Last Active**: 2026-10-26
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1533 | Active |
+| `journal-1.md` | ~1555 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 46 | 2026-10-26 | 预设命令页：粘贴报文添加按钮 + 按协议一键批量替换地址 | `81b380c` | `main` |
 | 45 | 2026-10-24 | 同步 Web 下载区版本信息到 1.24.0 | `328b665` | `main` |
 | 44 | 2026-10-24 | 发布 1.24.0：编译单文件 exe + GitHub Release | `6dc01b2` | `main` |
 | 42 | 2026-10-16 | 桌面粘性入口：托盘菜单内嵌报文输入框 + 任务栏缩略图按钮 | `6a5afe1` | `main` |
