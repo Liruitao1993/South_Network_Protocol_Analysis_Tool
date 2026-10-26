@@ -820,9 +820,12 @@ engine = self._engine_factory()            # 否则才是发给本虚拟表的�
   重发复用同一帧字节（不重新组帧），避免上一轮定时器把新一轮提前推进。
 - **RX 自组帧**：`frame_deframe.frame_length_for("ft12_68", buf)` + 末字节 `16H` 自证；重同步只跳到下一个
   `68`/`FE`；半帧分两次交付不得提前出帧。
+- **三栏布局与协议8 页一致**：`QSplitter` = 左命令树 / 中参数·预览·发送 / **右收发日志**（日志必须在最右，
+  不要回到底部）；信息表·报文表横跨底部；三栏尺寸落盘 `split_sizes`。几何断言：日志与中栏顶边对齐且在右侧、
+  底部表格在两栏之下。
 - **空间预算**：树 `minimumHeight=160`、日志 `minimumHeight=120`、底部 tabs `maxHeight=200`；
   1000×700 断言仍需满足（测试覆盖）。
-- **回归**：`test/test_gdw_testbench.py`（90 项）+ `test/test_gdw_test_tab_wiring.py`（26 项）。
+- **回归**：`test/test_gdw_testbench.py`（97 项）+ `test/test_gdw_test_tab_wiring.py`（26 项）。
   **变异反证**（均红后还原）：AFN 回显判定失效 1 红；EB 加扰失效 3 红；结构失败不置 `ok=False` 3 红；
   `_send_next` 守卫失效 4 红。
 - **已知边界**：EB 数据内容只做 HEX/字段编码，不做业务含义二次解释；上行命令需要用户自己填数据单元；

@@ -81,8 +81,8 @@ DEFAULTS: Dict[str, Any] = {
     "eb_addr": "000000000001",
     "eb_ctrl": 0x11,
     "eb_wrap": True,
-    "split_left": 340,
-    "split_vert": 380,
+    # 三栏宽度（左树 / 中参数 / 右收发日志）——与 698 协议测试页同布局
+    "split_sizes": [300, 520, 460],
 }
 
 LEAF_KEY_ROLE = Qt.ItemDataRole.UserRole
@@ -202,20 +202,19 @@ class GdwTestWidget(QWidget):
         root.setSpacing(6)
         root.addWidget(self._build_top_bar())
 
+        # 布局对齐协议8「协议测试」页：左 = 命令树，中 = 参数/预览/发送，右 = 收发日志；
+        # 信息表/报文表横跨底部。**日志必须在最右**（用户口径，别放回底部）。
         self.main_split = QSplitter(Qt.Orientation.Horizontal)
         self.main_split.addWidget(self._build_left_panel())
         self.main_split.addWidget(self._build_center())
+        self.main_split.addWidget(self._build_log_panel())
         self.main_split.setStretchFactor(0, 0)
         self.main_split.setStretchFactor(1, 1)
+        self.main_split.setStretchFactor(2, 1)
+        self.main_split.setSizes(DEFAULTS["split_sizes"])
         root.addWidget(self.main_split, 1)
 
-        bottom = QSplitter(Qt.Orientation.Vertical)
-        bottom.addWidget(self._build_log_panel())
-        bottom.addWidget(self._build_detail())
-        bottom.setStretchFactor(0, 3)
-        bottom.setStretchFactor(1, 2)
-        self.vert_split = bottom
-        root.addWidget(bottom, 1)
+        root.addWidget(self._build_detail())
 
     def _vline(self) -> QFrame:
         ln = QFrame()
@@ -460,6 +459,8 @@ class GdwTestWidget(QWidget):
 
     def _build_log_panel(self) -> QWidget:
         box = QGroupBox("收发日志")
+        box.setMinimumWidth(280)
+        self.log_group = box
         lay = QVBoxLayout(box)
         lay.setContentsMargins(4, 4, 4, 4)
         self.log_text = QPlainTextEdit()
@@ -1214,8 +1215,7 @@ class GdwTestWidget(QWidget):
             "eb_ctrl": int(self.combo_eb_ctrl.currentData() or 0x11),
             "eb_wrap": bool(self.combo_eb_wrap.currentData()),
             "checked": {k: list(v) for k, v in self._checked.items() if v},
-            "split_left": self.main_split.sizes()[0] if self.main_split.sizes() else DEFAULTS["split_left"],
-            "split_vert": self.vert_split.sizes()[0] if self.vert_split.sizes() else DEFAULTS["split_vert"],
+            "split_sizes": list(self.main_split.sizes()) or list(DEFAULTS["split_sizes"]),
         }
 
     def _schedule_save(self, *_args) -> None:
@@ -1243,7 +1243,7 @@ class GdwTestWidget(QWidget):
         for k, v in data.items():
             if k in DEFAULTS and v is not None:
                 if k in ("module_flag", "relay_level", "seq", "timeout_ms", "retries",
-                         "eb_ctrl", "split_left", "split_vert"):
+                         "eb_ctrl"):
                     try:
                         v = int(v)
                     except (TypeError, ValueError):
@@ -1275,16 +1275,23 @@ class GdwTestWidget(QWidget):
         checked = merged.get("checked")
         self._checked = {k: list(v) for k, v in checked.items() if isinstance(v, list)} \
             if isinstance(checked, dict) else {}
-        left = max(200, int(merged["split_left"]))
-        vert = max(200, int(merged["split_vert"]))
-        QTimer.singleShot(0, lambda: self._apply_splits(left, vert))
+        sizes = merged.get("split_sizes")
+        if not (isinstance(sizes, list) and len(sizes) == 3):
+            sizes = list(DEFAULTS["split_sizes"])
+        else:
+            try:
+                sizes = [int(v) for v in sizes]
+            except (TypeError, ValueError):
+                sizes = list(DEFAULTS["split_sizes"])
+        QTimer.singleShot(0, lambda: self._apply_splits(sizes))
         self._page = merged["page"]
 
-    def _apply_splits(self, left: int, vert: int) -> None:
-        total = max(left + 400, self.main_split.width())
-        self.main_split.setSizes([left, max(200, total - left)])
-        vtotal = max(vert + 200, self.vert_split.height())
-        self.vert_split.setSizes([vert, max(120, vtotal - vert)])
+    def _apply_splits(self, sizes: Sequence[int]) -> None:
+        total = max(sum(sizes), self.main_split.width())
+        sizes = [max(200, int(v)) for v in sizes[:3]]
+        grow = max(0, total - sum(sizes))
+        sizes[-1] += grow                      # 余量给日志（最右）
+        self.main_split.setSizes(sizes)
 
     # ── 收尾 ────────────────────────────────────────────────────────────
     def cleanup(self) -> None:

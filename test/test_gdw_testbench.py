@@ -315,6 +315,11 @@ def test_widget():
 
     check("五个页签", [w.page_tabs.tabText(i) for i in range(w.page_tabs.count())],
           [label for _k, label in C.PAGES])
+    # 布局对齐 698：左树 / 中参数 / 右日志（日志必须在最右，别放回底部）
+    check("三栏水平分栏", w.main_split.count(), 3)
+    check("第三栏就是收发日志", w.main_split.widget(2) is w.log_group, True)
+    check("收发表格在底部（横跨）",
+          w.detail_tabs.parentWidget() is w and w.main_split.indexOf(w.detail_tabs) == -1, True)
     check("默认在读取数据页", w._page, C.PAGE_READ)
     check("树惰性构建：读取页叶子数", sum(1 for _ in w._iter_leaves(w._trees[C.PAGE_READ])),
           C.leaf_count(C.PAGE_READ))
@@ -423,6 +428,16 @@ def test_widget():
     narrow = [b for b in (w.btn_send, w.btn_stop, w.btn_clear, w.btn_all, w.btn_none)
               if b.width() < b.sizeHint().width()]
     check("按钮宽度 >= sizeHint（不裁字）", narrow, [])
+
+    # 几何：日志与中栏同一行（右侧），底部表格在两者之下
+    app.processEvents()
+    lg, ctr = w.log_group.geometry(), w.center_stack.geometry()
+    dt = w.detail_tabs.geometry()
+    check_true("日志与参数区同一行（顶边对齐）", abs(lg.top() - ctr.top()) <= 2,
+               (lg.top(), ctr.top()))
+    check_true("日志在参数区右侧", lg.left() >= ctr.right(), (lg.left(), ctr.right()))
+    check_true("底部信息/报文表在两栏之下", dt.top() >= max(lg.bottom(), ctr.bottom()) - 2,
+               (dt.top(), lg.bottom(), ctr.bottom()))
 
     # 空间预算（1000×700 类矮窗口也要保住树/日志）
     check_true("分类树高度 >= 树下限", w._trees[C.PAGE_READ].height() >= W.TREE_MIN_HEIGHT,
