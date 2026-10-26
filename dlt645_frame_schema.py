@@ -511,6 +511,11 @@ def _di_payload(fv: Dict) -> tuple:
 #: 结构化值字段的候选名——GUI 用 DI 掩码推导字段时统一叫「数据值」，
 #: 而 schema 的写数据命令叫「写入数据」，两者都要认
 _VALUE_KEYS = ("写入数据", "数据值")
+#: 掩码推导出的**专用**值字段名（`build_di_fields` 的产物）。
+#: `_encode_di_value` 内部按 DI 的 data_type 自己去这些键取输入（日期/时间/通信地址/
+#: 位串/裸字节/需量），因此它们也算「用户已填值」——否则 `写入数据` 为空时会被判成
+#: 「写数据命令必须填写…」而拒绝组帧（日期/时间/位串类 DI 的 14H 帧曾因此无法组出）。
+_DERIVED_VALUE_KEYS = ("日期", "时间", "通信地址", "位串内容", "数据内容")
 
 
 def _value_or_raw(fv: Dict, di_code: str, raw_key: str) -> bytes:
@@ -519,6 +524,9 @@ def _value_or_raw(fv: Dict, di_code: str, raw_key: str) -> bytes:
         if _fv(fv, k):
             return _encode_di_value(di_code, fv, k)
     if _fv(fv, "需量值"):
+        return _encode_di_value(di_code, fv, _VALUE_KEYS[0])
+    if any(_fv(fv, k) for k in _DERIVED_VALUE_KEYS):
+        # 专用字段已填：交给 `_encode_di_value`（它按 data_type 去对应键取值）
         return _encode_di_value(di_code, fv, _VALUE_KEYS[0])
     raw = _fv(fv, raw_key)
     if raw:

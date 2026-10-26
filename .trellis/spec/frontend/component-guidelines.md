@@ -705,6 +705,52 @@ engine = self._engine_factory()            # 否则才是发给本虚拟表的�
 - **已知边界**：预设页与串口页不同，**不提供撤销**（有确认框；误改可再替换回来）；
   协议 9/10/11/12 无引擎支持（12 在预设库中存在，按钮禁用并提示）。
 
+### 7n. 645 协议测试页（DI 大类命令树 + 地址读写，1.24.1）
+
+> 用户 → 「645 协议下也建立一个类似 698 的协议测试页面，有读地址功能，有按协议大项分类的命令树，
+> 可以方便用户发送特定的协议的功能」。参考实现：`dlt645_test_core.py`（纯逻辑）+
+> `dlt645_test_widget.py`（Qt）+ `protocol_registry.has_dlt645_test` + `main_gui` 第二套懒加载接线。
+> 与 §7j（698 光伏升级页）同一套「协议专属懒加载 tab」套路，但**能力位独立**（`has_test` 保持仅 698）。
+
+- **Scope**：协议6 现场最常见的动作是「读某个 DI」「读/写通信地址」「校时/冻结/清零」。
+  把这些做成**预置命令树**，比在组帧页手选 DI/命令快得多；页面必须自足（不跳页、不手拼帧）。
+- **纯逻辑 / GUI 分层**：`dlt645_test_core` **禁止 import Qt**，负责分类库、命令库、组帧、响应判定；
+  `dlt645_test_widget` 只渲染控件、把控件值交给 core、把帧写进**共享串口**（`write_raw` +
+  `raw_data_received`，不建句柄、不关端口）。
+- **分类只按 DI 前缀做，不手写名称**：`catalog()` 从 `merge_pv_di_map`（base 1099 + 光伏 682）生成；
+  顶层 = DI3 大项（名称表 `_DI3_NAMES`），二级 = DI2（`05` 结算日按 20 天分桶，否则 254 个子节点）。
+  **光伏识别必须 `DI2=="E6" 且 DI3 ∈ {02,03,04}`** —— `05E6xxxx` 是第 230 个结算日，只判 DI2 会误分类
+  （本任务变异反证 ①）。
+- **7 位残键不进树**：`dlt645_di.json` 合并后有 16 条 `0090xxx0`（与标准条目同名重复），
+  `malformed_di_keys()` 显式暴露；`catalog()` 跳过 `len(di) != 8` 的键。测试断言「叶子数 = 总键数 − 残键数」。
+- **组帧唯一实现**：一切帧走 `DLT645FrameGenerator.generate_frame((REQ, func), fv, addr)`；
+  字段名必须与 `DLT645_CMD_SCHEMA` **逐字一致**。13H/15H 地址域固定 `AA×6`、08H 固定 `99×6`
+  （`command_effective_addr()`）——页面表地址对它们无效，预览里要写明（本任务变异反证 ③）。
+- **判定顺序固定**（`evaluate_response`）：结构 → 校验和 → 方向位 D7 → 功能码 → 异常位 D6（`decode_err`）
+  → DI 回显 → 取值（`decode_value`）；`08H` 记「已发送」不等应答。**任何一步缺证据都给失败/跳过，
+  不冒充成功**（AGENTS §8 陷阱 23 精神）。
+- **发送队列**：勾选叶子（一个没勾 = 当前选中）→ 逐条 `write_raw` → 等应答（单发 QTimer）→ 判定 → 下一条；
+  `_next_timer` 用 10ms 定时推进，**`_send_next` 必须有 `_awaiting` 守卫**：否则上一轮遗留的定时器会在
+  「已发出、等应答」期间把下一条提前发出去（响应配对全错，实测 3 条变 2 条）。停止/超时都要复位按钮。
+- **RX 自组帧**：`frame_deframe.frame_length_for("dlt645", buf)` + 末字节 `16H` 自证；前导 `FEH`
+  后面必须是 `68H` 才当前导（否则丢掉这段 FE），其余噪声按「找到下一个 68/FE」重同步 ——
+  **不要**只跳「非 68 字节」，否则 `FE FE 99 …` 会让缓冲头永久卡住（本任务变异反证 ④）。
+- **共享渲染**：四列文本走 `test_page_render.py`（698/645 同一实现，698 保留 `_display_width` 等私有别名
+  以兼容既有测试）。**不要再写第二份 `format_table_rows`**。
+- **空间预算（1000×700 实测）**：分类树 `setMinimumHeight(160)`、日志 `setMinimumHeight(120)`、
+  底部 tabs `setMaximumHeight(180)`；不给下限时树只剩 ~98px（4 行）。
+- **回归**：`test/test_dlt645_testbench.py`（**89 项**，`GUI_TESTS`）+ `test/test_dlt645_test_tab_wiring.py`
+  （**19 项**，`GUI_TESTS`）：分类库全覆盖/不重复、命令库覆盖 schema、7 类帧逐字节与 CS 自洽 + 解析器回读、
+  判定矩阵、三页与动态字段、发送队列（顺序/超时/停止/读地址回填）、落盘与 cleanup、RX 自组帧、
+  真机几何审计（1280×820 / 1000×700 零重叠、按钮不裁字）。
+- **变异反证（本任务已做，均干净变红后逐字节还原）**：① 光伏判定只看 DI2 → 4 红；
+  ② 跳过 DI 回显一致性 → 1 红；③ 13H 用页面地址 → 2 红；④ 前导 FE 重同步失效 → 1 红。
+- **顺带修的既有缺陷**：`dlt645_frame_schema._value_or_raw` 原先只认「写入数据/数据值」，
+  而 `build_di_fields` 产出的字段名是「日期/时间/通信地址/位串内容/数据内容」⇒ 这些 DI 的 **14H 帧
+  根本组不出来**（报「写数据命令必须填写…」）。已补 `_DERIVED_VALUE_KEYS` 分派，协议组帧页同时受益。
+- **已知边界**：`04000101 日期` 表内声明 4 字节、实际编码 3 字节（标准就是 3），页面给提示不阻断（§8 陷阱 91）；
+  特殊命令页多选无意义（字段随命令变化）⇒ 只发当前一条；协议测试页不做自动轮询。
+
 ### 8. Qt 陷阱（本项目实测）
 - **offscreen 无字体**：`QT_QPA_PLATFORM=offscreen` 下 `QFontDatabase: Cannot find font directory ...`，绘制出的文字是豆腐块 → 断言只能查尺寸/颜色/像素多样性；**要目视核对文字排版必须用默认平台**（`QApplication([])` 不设 offscreen + `widget.grab()` / `QImage.save()`，不需要窗口真的可见）。
 - **`bytes(image.constBits())` 必须持有 QImage 引用**：`bytes(canvas.render_image(w, h).constBits())`（临时对象上取 buffer）会 **access violation（0xC0000005）**；先 `img = ...` 再 `bytes(img.constBits())`。

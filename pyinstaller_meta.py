@@ -318,6 +318,9 @@ HIDDENIMPORTS = [
     'bluetooth_tool_widget',
     # 生产测试架（main_gui 内**函数级**惰性 import，静态分析扫不到，必须显式声明）
     'production_testbench_core',
+    'testpage_render',  # 测试页四列渲染单源（698/645 core 顶层 import）
+    'dlt645_test_widget',  # 645 协议测试页（main_gui 函数级 import）
+    'dlt645_test_core',  # 645 协议测试纯逻辑（widget 函数级 import）
     'production_testbench_widget',
     # 可选依赖
     'crcmod',

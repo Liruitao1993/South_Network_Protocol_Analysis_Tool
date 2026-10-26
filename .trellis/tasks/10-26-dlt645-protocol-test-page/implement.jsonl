@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "§2/§4/§5 新标签页规范（独立文件、纯逻辑分层、懒加载、协议可见性）+ §8 Qt 陷阱（offscreen、QFormLayout、按钮不裁字）+ §7m 同批次预设页改动口径"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复用 DLT645FrameGenerator / dlt645_frame_schema / DLT645Parser / frame_deframe，禁止第二份封装或 DI 表"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "测试与门禁：脚本式 check()、release_check 登记、变异反证、真实帧 golden"}

@@ -3503,6 +3503,14 @@ class MainWindow(QMainWindow):
         )
         self.tab_widget.setTabVisible(self._test_tab_index, False)
 
+        # 协议6「645协议测试」页（按 DI 大类分类的预置命令树 + 读/写地址；注册表
+        # has_dlt645_test，仅协议6 可见；同样懒加载、创建即隐藏）
+        self._dlt645_test_placeholder = QWidget()
+        self._dlt645_test_tab_index = self.tab_widget.addTab(
+            self._dlt645_test_placeholder, app_icons.load_icon("flask-conical"), "645协议测试"
+        )
+        self.tab_widget.setTabVisible(self._dlt645_test_tab_index, False)
+
         # 实时监控器页面（南网新一代(9)/国网新一代(10) 专用，默认隐藏）
         self.monitor_tab = RealtimeMonitorWidget()
         self.monitor_tab.set_serial_worker(self.serial_worker)
@@ -4800,6 +4808,8 @@ class MainWindow(QMainWindow):
             self._ensure_upgrade_tab()
         elif index == getattr(self, "_test_tab_index", -1):
             self._ensure_test_tab()
+        elif index == getattr(self, "_dlt645_test_tab_index", -1):
+            self._ensure_dlt645_test_tab()
 
     def _ensure_frame_gen_tab(self):
         if hasattr(self, "frame_gen_tab"):
@@ -5021,6 +5031,27 @@ class MainWindow(QMainWindow):
         # 同上：创建即按当前主题初始化（否则深色主题下收发日志 / 帧预览仍是白底）
         tab.restyle_for_theme(self._is_dark_theme())
         self._replace_lazy_tab(self._test_placeholder, self._test_tab_index, tab)
+        apply_chinese_context_menus(tab)
+        return tab
+
+    def _ensure_dlt645_test_tab(self):
+        """懒加载创建 645 协议测试页（仅协议6 可见；复用共享串口）。"""
+        if hasattr(self, "dlt645_test_tab"):
+            return self.dlt645_test_tab
+        from dlt645_test_widget import Dlt645TestWidget
+
+        tab = Dlt645TestWidget()
+        self.dlt645_test_tab = tab
+        # 与其它页同一约定：端口/波特率只在顶部「串口配置」设置，本页只订阅
+        # raw_data_received 经 write_raw 发送，不自建句柄、不关端口。
+        tab.set_serial_worker(self.serial_worker)
+        # 双击报文表 → 单帧解析页（与监控器/698 测试页同一注入点）
+        tab.frame_to_single_parse.connect(self._send_frame_to_single_parse)
+        # 创建即按当前主题初始化（否则深色主题下日志/帧预览仍是白底）
+        tab.restyle_for_theme(self._is_dark_theme())
+        self._replace_lazy_tab(
+            self._dlt645_test_placeholder, self._dlt645_test_tab_index, tab
+        )
         apply_chinese_context_menus(tab)
         return tab
 
@@ -5419,6 +5450,9 @@ class MainWindow(QMainWindow):
         # 协议8 698.45 协议测试（按 OAD 分类的预置测试库）：注册表 has_test
         if hasattr(self, "_test_tab_index"):
             self.tab_widget.setTabVisible(self._test_tab_index, spec.has_test)
+        if hasattr(self, "_dlt645_test_tab_index"):
+            self.tab_widget.setTabVisible(
+                self._dlt645_test_tab_index, spec.has_dlt645_test)
         # 档案管理 / 拓扑信息
         if hasattr(self, "_archive_tab_index"):
             self.tab_widget.setTabVisible(self._archive_tab_index, spec.has_archive)
@@ -9678,6 +9712,14 @@ class MainWindow(QMainWindow):
         if test_tab is not None:
             try:
                 test_tab.cleanup()
+            except Exception:
+                pass
+
+        # 6f) 645 协议测试页：同上（停等待定时器 + 断信号 + 落盘，不关串口）
+        dlt645_test_tab = getattr(self, "dlt645_test_tab", None)
+        if dlt645_test_tab is not None:
+            try:
+                dlt645_test_tab.cleanup()
             except Exception:
                 pass
 
@@ -14516,6 +14558,31 @@ class MainWindow(QMainWindow):
         if getattr(self, "test_tab", None) is not None:
             try:
                 self.test_tab.restyle_for_theme(self._is_dark_theme())
+            except RuntimeError:
+                pass
+        if getattr(self, "dlt645_test_tab", None) is not None:
+            try:
+                self.dlt645_test_tab.restyle_for_theme(self._is_dark_theme())
+            except RuntimeError:
+                pass
+        if getattr(self, "topology_tab", None) is not None:
+            try:
+                self.topology_tab.restyle_for_theme(self._is_dark_theme())
+            except RuntimeError:
+                pass
+        if getattr(self, "test_plan_tab", None) is not None:
+            try:
+                self.test_plan_tab.restyle_for_theme(self._is_dark_theme())
+            except RuntimeError:
+                pass
+        if getattr(self, "tcp_monitor_tab", None) is not None:
+            try:
+                self.tcp_monitor_tab.restyle_for_theme(self._is_dark_theme())
+            except RuntimeError:
+                pass
+        if getattr(self, "_src_viewer", None) is not None:
+            try:
+                self._src_viewer.restyle_for_theme(self._is_dark_theme())
             except RuntimeError:
                 pass
         if getattr(self, "testbench_tab", None) is not None:

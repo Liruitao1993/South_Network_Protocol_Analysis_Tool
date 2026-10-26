@@ -208,6 +208,9 @@ GUI_TESTS = [
     # 协议8 协议测试页（按 OAD 分类的预置测试库）：附录 H 黄金组帧 + offscreen 页面 + 真实 MainWindow 接线
     "test/test_dlt698_testbench.py",
     "test/test_dlt698_test_tab_wiring.py",
+    # 协议6 645 协议测试页（按 DI 大类分类 + 地址读写）：组帧黄金 + 判定矩阵 + offscreen 页面 + 真实接线
+    "test/test_dlt645_testbench.py",
+    "test/test_dlt645_test_tab_wiring.py",
     # 粘性入口：托盘菜单内嵌输入框 + 任务栏缩略图按钮（HICON/降级/WM_COMMAND 路由/按钮分派）
     "test/test_tray_taskbar_entries.py",
     "test/test_csg_sequence_gui.py",
