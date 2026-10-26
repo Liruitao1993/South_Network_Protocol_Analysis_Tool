@@ -735,7 +735,7 @@ engine = self._engine_factory()            # 否则才是发给本虚拟表的�
 - **RX 自组帧**：`frame_deframe.frame_length_for("dlt645", buf)` + 末字节 `16H` 自证；前导 `FEH`
   后面必须是 `68H` 才当前导（否则丢掉这段 FE），其余噪声按「找到下一个 68/FE」重同步 ——
   **不要**只跳「非 68 字节」，否则 `FE FE 99 …` 会让缓冲头永久卡住（本任务变异反证 ④）。
-- **共享渲染**：四列文本走 `test_page_render.py`（698/645 同一实现，698 保留 `_display_width` 等私有别名
+- **共享渲染**：四列文本走 `testpage_render.py`（698/645 同一实现，698 保留 `_display_width` 等私有别名
   以兼容既有测试）。**不要再写第二份 `format_table_rows`**。
 - **空间预算（1000×700 实测）**：分类树 `setMinimumHeight(160)`、日志 `setMinimumHeight(120)`、
   底部 tabs `setMaximumHeight(180)`；不给下限时树只剩 ~98px（4 行）。

@@ -54,7 +54,7 @@
   异常位 D6（`decode_err` 位解释）→ DI 回显一致性 → 13H 回填地址 / 08H 无应答。
   返回 `{status, code, summary, lines, address, di, value_text}`；**不冒充成功**（缺失证据给「无法判定」）。
 - R1.5 **报文渲染**：`parse_table(frame)`（转 `DLT645GuiParser`）、`detail_lines(frame)`、
-  `format_hex`、`parse_hex`、`format_address`；四列格式化抽到共享 `test_page_render.py`
+  `format_hex`、`parse_hex`、`format_address`；四列格式化抽到共享 `testpage_render.py`
   （698 与 645 共用一份，禁止第二份）。
 - R1.6 任何异常转可读 `ValueError`/`dict.error`，**不向 GUI 抛未捕获异常**。
 

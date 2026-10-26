@@ -8,7 +8,7 @@
 
 | 文件 | 角色 | 动作 |
 |---|---|---|
-| `test_page_render.py` | 四列文本渲染（CJK 宽度/截断/`format_table_rows`） | **新增**（698 与 645 共用一份） |
+| `testpage_render.py` | 四列文本渲染（CJK 宽度/截断/`format_table_rows`） | **新增**（698 与 645 共用一份） |
 | `dlt698_test_core.py` | 698 纯逻辑 | 仅把 4 个渲染函数改为从共享模块导入（输出逐字不变，`_display_width` 等名字保留） |
 | `dlt645_test_core.py` | 645 纯逻辑（分类库/命令库/组帧/判定） | **新增** |
 | `dlt645_test_widget.py` | 645 页面（Qt） | **新增** |
