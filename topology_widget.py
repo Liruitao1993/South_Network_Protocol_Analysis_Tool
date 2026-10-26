@@ -26,6 +26,8 @@ from protocol_parser import ProtocolFrameParser
 from gdw10376_parser import GDW10376Parser
 from gui_utils import set_btn, set_btn_icon
 
+import canvas_theme          # 画布配色单源（深浅主题；自绘颜色不走 QSS）
+
 
 @dataclass
 class TopoNode:
@@ -57,10 +59,11 @@ class TopoNodeItem(QGraphicsEllipseItem):
     }
     RADIUS = 18
 
-    def __init__(self, node: TopoNode, x: float, y: float):
+    def __init__(self, node: TopoNode, x: float, y: float, palette=None):
         r = self.RADIUS
         super().__init__(-r, -r, r * 2, r * 2)
         self.node = node
+        self._palette = palette or canvas_theme.palette(False)
         self.setPos(x, y)
         self.setFlags(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
         self.setAcceptHoverEvents(True)
@@ -71,7 +74,7 @@ class TopoNodeItem(QGraphicsEllipseItem):
         else:
             base_color = QColor(self.ROLE_COLORS.get(node.role, "#9E9E9E"))
         self.setBrush(QBrush(base_color))
-        self.setPen(QPen(QColor("#333333"), 2))
+        self.setPen(self.normal_pen())          # 轮廓色随主题（深色下浅轮廓，否则看不见）
 
         # 节点标签：只显示 TEI
         label = str(node.tei)
@@ -82,14 +85,18 @@ class TopoNodeItem(QGraphicsEllipseItem):
         self.text_item.setPos(-br.width() / 2, -br.height() / 2)
 
         # 角色标签（节点下方）
-        role_label = QGraphicsTextItem(node.role, self)
-        role_label.setFont(QFont("Microsoft YaHei", 9))
-        role_label.setDefaultTextColor(QColor("#666666"))
-        rbr = role_label.boundingRect()
-        role_label.setPos(-rbr.width() / 2, r + 2)
+        self.role_label = QGraphicsTextItem(node.role, self)
+        self.role_label.setFont(QFont("Microsoft YaHei", 9))
+        self.role_label.setDefaultTextColor(QColor(self._palette["muted"]))
+        rbr = self.role_label.boundingRect()
+        self.role_label.setPos(-rbr.width() / 2, r + 2)
 
         # 悬停提示
         self.setToolTip(self._build_tooltip())
+
+    def normal_pen(self) -> QPen:
+        """常态轮廓笔（主题相关；高亮清除/悬停离开都复用它）。"""
+        return QPen(QColor(self._palette["text"]), 2)
 
     def _build_tooltip(self) -> str:
         n = self.node
@@ -109,11 +116,11 @@ class TopoNodeItem(QGraphicsEllipseItem):
         return "\n".join(lines)
 
     def hoverEnterEvent(self, event):
-        self.setPen(QPen(QColor("#FF5722"), 3))
+        self.setPen(QPen(QColor(self._palette["hover"]), 3))
         super().hoverEnterEvent(event)
 
     def hoverLeaveEvent(self, event):
-        self.setPen(QPen(QColor("#333333"), 2))
+        self.setPen(self.normal_pen())
         super().hoverLeaveEvent(event)
 
     def mouseDoubleClickEvent(self, event):
@@ -143,7 +150,7 @@ class TopoNodeItem(QGraphicsEllipseItem):
 
 
 class TopologyGraphicsView(QGraphicsView):
-    """拓扑图主视图"""
+    """拓扑图主视图（深浅主题各一套画布/节点配色，见 `canvas_theme`）。"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -154,9 +161,31 @@ class TopologyGraphicsView(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorViewCenter)
         self.setMinimumSize(300, 300)
-        self.setStyleSheet("background-color: #FAFAFA; border: 1px solid #cccccc;")
+        self._dark = False
+        self._palette = canvas_theme.palette(False)
         self._node_items: Dict[int, TopoNodeItem] = {}
         self._highlighted_tei: Optional[int] = None
+        self._last_nodes: Dict[int, TopoNode] = {}   # 切主题时据此重画
+        self._apply_canvas_style()
+
+    # ── 主题 ──────────────────────────────────────────────────────────
+    def _apply_canvas_style(self) -> None:
+        """按当前配色刷视图底色/边框（QGraphicsView 不在 QSS 主题的覆盖范围内）。"""
+        p = self._palette
+        self.setStyleSheet(
+            f"background-color: {p['bg']}; border: 1px solid {p['border']};"
+        )
+
+    def restyle_for_theme(self, dark: bool) -> None:
+        """切深浅主题：换画布配色并按上次的数据重画（节点/连线/文字全是自绘颜色）。"""
+        dark = bool(dark)
+        if dark == self._dark and self._scene.items():
+            return
+        self._dark = dark
+        self._palette = canvas_theme.palette(dark)
+        self._apply_canvas_style()
+        # 重画：节点轮廓、角色名、连线、空态提示都写死了浅色主题的颜色
+        self.build_tree(dict(self._last_nodes))
 
     def wheelEvent(self, event):
         factor = 1.15 if event.angleDelta().y() > 0 else 0.87
@@ -169,6 +198,7 @@ class TopologyGraphicsView(QGraphicsView):
 
     def build_tree(self, nodes: Dict[int, TopoNode]):
         """根据节点字典构建拓扑树"""
+        self._last_nodes = dict(nodes)          # 切主题时据此重画（自绘颜色全在节点/连线里）
         self._scene.clear()
         if not nodes:
             self._draw_empty_hint()
@@ -240,7 +270,7 @@ class TopologyGraphicsView(QGraphicsView):
                     pen = QPen(QColor("#2196F3"), 2.5)
                     pen.setStyle(Qt.PenStyle.SolidLine)
                 else:
-                    pen = QPen(QColor("#999999"), 1.5)
+                    pen = QPen(QColor(self._palette["line"]), 1.5)
                     pen.setStyle(Qt.PenStyle.DashLine)
                 line = QGraphicsLineItem(px, py + TopoNodeItem.RADIUS, cx, cy - TopoNodeItem.RADIUS)
                 line.setPen(pen)
@@ -250,7 +280,7 @@ class TopologyGraphicsView(QGraphicsView):
         self._node_items.clear()
         for tei, pos in positions.items():
             node = nodes[tei]
-            item = TopoNodeItem(node, pos[0], pos[1])
+            item = TopoNodeItem(node, pos[0], pos[1], self._palette)
             self._scene.addItem(item)
             self._node_items[tei] = item
 
@@ -304,7 +334,7 @@ class TopologyGraphicsView(QGraphicsView):
     def _draw_empty_hint(self):
         text = QGraphicsTextItem("暂无拓扑数据\n请点击「查询拓扑」按钮获取")
         text.setFont(QFont("Microsoft YaHei", 14))
-        text.setDefaultTextColor(QColor("#999999"))
+        text.setDefaultTextColor(QColor(self._palette["hint"]))
         br = text.boundingRect()
         text.setPos(-br.width() / 2 + 150, -br.height() / 2 + 150)
         self._scene.addItem(text)
@@ -314,15 +344,15 @@ class TopologyGraphicsView(QGraphicsView):
         """将指定节点设为高亮（红色边框）并取消其他节点高亮"""
         for t, item in self._node_items.items():
             if t == tei:
-                item.setPen(QPen(QColor("#FF0000"), 4))
+                item.setPen(QPen(QColor(self._palette["highlight"]), 4))
             else:
-                item.setPen(QPen(QColor("#333333"), 2))
+                item.setPen(item.normal_pen())
         self._highlighted_tei = tei
 
     def clear_highlight(self):
         """清除所有节点高亮"""
         for item in self._node_items.values():
-            item.setPen(QPen(QColor("#333333"), 2))
+            item.setPen(item.normal_pen())
         self._highlighted_tei = None
 
     def focus_on_node(self, tei: int):
@@ -394,6 +424,7 @@ class TopologyWidget(QWidget):
         self._search_index = 0
         self._search_key: Optional[Tuple[str, str, str]] = None
 
+        self._dark = False        # 当前是否深色主题（restyle_for_theme 的唯一写入点）
         self.setup_ui()
 
     # ------------------------------------------------------------------
@@ -557,7 +588,8 @@ class TopologyWidget(QWidget):
 
         # 统计信息
         self.stats_label = QLabel("节点总数: 0 | CCO: 0 | PCO: 0 | STA: 0")
-        self.stats_label.setStyleSheet("color: #666; font-size: 12px;")
+        self.stats_label.setStyleSheet(
+            "color: #666; font-size: 12px;")   # 初次浅色；切主题由 restyle_for_theme 重设
         layout.addWidget(self.stats_label)
 
         self.formation_label = QLabel("组网状态: 未开始")
@@ -1063,6 +1095,19 @@ class TopologyWidget(QWidget):
             ))
             offset += 11
         return nodes
+
+    # ------------------------------------------------------------------
+    # 主题
+    # ------------------------------------------------------------------
+    def restyle_for_theme(self, dark: bool) -> None:
+        """切深浅主题：画布配色 + 统计行文字（视图里的节点/连线/空态全是自绘颜色）。"""
+        self._dark = bool(dark)
+        try:
+            self.view.restyle_for_theme(self._dark)
+        except RuntimeError:
+            return
+        p = canvas_theme.palette(self._dark)
+        self.stats_label.setStyleSheet(f"color: {p['muted']}; font-size: 12px;")
 
     # ------------------------------------------------------------------
     # Display helpers

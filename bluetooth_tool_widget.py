@@ -41,7 +41,7 @@ import re
 from collections import deque
 from typing import Dict, List, Optional, Tuple
 
-from PySide6.QtCore import QSize, Qt, QTimer
+from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -1356,6 +1356,9 @@ class BluetoothToolWidget(QWidget):
     - :meth:`set_send_to_single_handler` —— 注入「送入单帧解析」回调。
     """
 
+    #: 蓝牙连接状态变化（True = 已连接）；供主窗口状态栏的「蓝牙」指示长期显示
+    connection_state_changed = Signal(bool)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         # 用属性访问（不是 from ... import data_path）：便于测试用
@@ -2367,6 +2370,11 @@ class BluetoothToolWidget(QWidget):
         if connected:
             self._log("[蓝牙] 已连接", "ble")
         self._refresh_status_line()
+        # 主窗口状态栏的「蓝牙」指示（懒加载页可能一直没被打开，靠这条信号保持同步）
+        try:
+            self.connection_state_changed.emit(bool(connected))
+        except Exception:  # noqa: BLE001 - 收尾阶段控件可能已销毁
+            pass
 
     # ── 特征码 ──────────────────────────────────────────────────────────
 

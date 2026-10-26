@@ -89,6 +89,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QFrame,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -97,6 +98,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSpinBox,
     QVBoxLayout,
@@ -124,6 +126,15 @@ RX_BUF_MAX = 262144
 #: 截断反而让现场看不到校验值等尾部字段）；超过则只显示头尾两段、中间用 ``...`` 省略
 #: （600B 起的写文件帧全打出来 ≈1800 字符会淹掉日志）。
 HEX_LOG_LIMIT = 200
+
+#: 「升级参数」分组框区的**最小可视高度**：本页内容（拖入区 / 参数 / 版本区 / 日志）总高
+#: 常大于窗口可用高度，若放任布局压缩，分组框会被压到只剩一行标题（控件被裁）。
+#: 参数区包在滚动容器里并保留这个下限 —— 空间不够时出现滚动条，**不裁控件**。
+PARAMS_MIN_HEIGHT = 132
+
+#: 日志区最小高度：参数区改成分组框后整体变高，必须给日志留下限，
+#: 否则它会先被挤掉（现场看 TX/RX 帧就靠这块）。
+LOG_MIN_HEIGHT = 132
 
 # 状态机的状态名（design §4）；对外经 `Dlt698UpgradeWidget.state` 只读暴露
 STATE_IDLE = "idle"
@@ -404,6 +415,30 @@ LOG_PALETTES = {
 }
 
 
+# ── 参数分组小工具 ───────────────────────────────────────────────────────
+# 升级参数原先是一条条裸 QHBoxLayout 平铺（字段名与控件逐行错位、无归类），
+# 现按用途分组成框、组内用网格对齐（偶数列放字段名、奇数列放控件）。
+
+
+def _param_label(text: str) -> QLabel:
+    """字段名标签：右对齐，让同组内的标签与控件成列对齐。"""
+    lbl = QLabel(text)
+    lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+    return lbl
+
+
+def _param_group(form, title: str) -> QGridLayout:
+    """在参数区追加一个分组框并返回其网格布局（组内紧凑：小边距 + 小行距）。"""
+    box = QGroupBox(title)
+    grid = QGridLayout()
+    grid.setContentsMargins(6, 0, 6, 2)
+    grid.setHorizontalSpacing(8)
+    grid.setVerticalSpacing(2)
+    box.setLayout(grid)
+    form.addWidget(box)
+    return grid
+
+
 # ── 拖放区 ───────────────────────────────────────────────────────────────
 
 
@@ -612,41 +647,26 @@ class Dlt698UpgradeWidget(QWidget):
         self.drop_area.drop_rejected.connect(self._fail_soft)
         outer.addWidget(self.drop_area)
 
-        # ── ② 升级参数（折叠区）──
+        # ── ② 升级参数（折叠区；内部按用途分组成框，便于现场扫读）──
         self.sec_params = CollapsibleSection("升级参数", key="upgrade_params", expanded=True)
         self.sec_params.toggled.connect(lambda _e: self._schedule_save())
-        form = self.sec_params.content_layout()
+        # 分组框让参数区整体变高 ⇒ 包进滚动容器：窗口矮时出滚动条，**不把分组框压成一行标题**
+        self.params_host = QWidget()
+        form = QVBoxLayout(self.params_host)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setSpacing(3)
+        self.params_scroll = QScrollArea()
+        self.params_scroll.setWidgetResizable(True)
+        self.params_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.params_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.params_scroll.setMinimumHeight(PARAMS_MIN_HEIGHT)
+        self.params_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.params_scroll.setWidget(self.params_host)
+        self.sec_params.content_layout().addWidget(self.params_scroll)
 
-        row1 = QHBoxLayout()
-        row1.addWidget(QLabel("每包字节数"))
-        self.spin_block = QSpinBox()
-        self.spin_block.setRange(BLOCK_SIZE_MIN, BLOCK_SIZE_MAX)
-        self.spin_block.setValue(DEFAULTS["block_size"])
-        self.spin_block.setToolTip(
-            f"分包大小（{BLOCK_SIZE_MIN}~{BLOCK_SIZE_MAX}）；"
-            "块大小 >65535 时协议层自动改用长帧 [6] u32")
-        row1.addWidget(self.spin_block)
-        row1.addSpacing(12)
-        row1.addWidget(QLabel("每包超时(ms)"))
-        self.spin_timeout = QSpinBox()
-        self.spin_timeout.setRange(TIMEOUT_MIN, TIMEOUT_MAX)
-        self.spin_timeout.setValue(DEFAULTS["timeout_ms"])
-        self.spin_timeout.setSingleStep(500)
-        self.spin_timeout.setToolTip("等一帧确认的时间；波特率低/包大时调大")
-        row1.addWidget(self.spin_timeout)
-        row1.addSpacing(12)
-        row1.addWidget(QLabel("重试次数"))
-        self.spin_retries = QSpinBox()
-        self.spin_retries.setRange(RETRY_MIN, RETRY_MAX)
-        self.spin_retries.setValue(DEFAULTS["retries"])
-        self.spin_retries.setToolTip("同一包最多重发几次；用尽则整轮失败并停止")
-        row1.addWidget(self.spin_retries)
-        row1.addStretch(1)
-        form.addLayout(row1)
+        # ── 组① 通道与传输：怎么发（通道 / 启动格式 / 提速）＋ 发多快（分包 / 超时 / 重试）──
+        grid_link = _param_group(form, "通道与传输")
 
-        # 发送通道（串口 / 蓝牙；蓝牙复用「蓝牙工具」页的连接，并按其 ATT 上限自动算每包上限）
-        row_ch = QHBoxLayout()
-        row_ch.addWidget(QLabel("发送通道"))
         self.combo_channel = QComboBox()
         for label, key in CHANNELS:
             self.combo_channel.addItem(label, key)
@@ -655,8 +675,21 @@ class Dlt698UpgradeWidget(QWidget):
             "蓝牙：**复用「蓝牙工具」页已建立的连接**（先在那页扫描/连接/选特征码）。\n"
             "选蓝牙时，每包字节数会按「一次 ATT 写能承载的字节数 − 698 帧开销」自动算出上限\n"
             "（例：协商 MTU 512 ⇒ 一次写 509 字节 ⇒ 每包最大 475 字节），超出即自动收敛。")
-        row_ch.addWidget(self.combo_channel)
-        row_ch.addSpacing(12)
+        grid_link.addWidget(_param_label("发送通道"), 0, 0)
+        grid_link.addWidget(self.combo_channel, 0, 1)
+
+        self.combo_start_format = QComboBox()
+        self.combo_start_format.addItem("自动兼容（逐个试）", START_FORMAT_AUTO)
+        for _key, _name in START_FORMATS:
+            self.combo_start_format.addItem(_name, _key)
+        self.combo_start_format.setToolTip(
+            "现场不同厂家对「启动传输」的组帧不同（方法14 的两种标识编码 / 方法7 精简参数）。\n"
+            "自动兼容：按顺序逐个试，哪条回 DAR=0 就用哪种继续下发文件块；\n"
+            "全部不回才判失败。锁定某一种时只发那一条。")
+        self.combo_start_format.currentIndexChanged.connect(lambda *_a: self._schedule_save())
+        grid_link.addWidget(_param_label("启动格式"), 0, 2)
+        grid_link.addWidget(self.combo_start_format, 0, 3)
+
         self.chk_boost_baud = QCheckBox("提升波特率")
         self.chk_boost_baud.setToolTip(
             "勾选：开始升级**之前**先发一条「提升波特率」命令"
@@ -669,9 +702,9 @@ class Dlt698UpgradeWidget(QWidget):
             f"两种速率都读不到才算读不到。\n"
             "中止/失败/清除也一律切回默认速率（本页不把共享串口留在非默认状态）。\n"
             "仅串口通道可选：波特率是串口概念，蓝牙通道没有这一项。")
-        row_ch.addWidget(self.chk_boost_baud)
-        row_ch.addSpacing(6)
-        row_ch.addWidget(QLabel("切换等待(ms)"))
+        grid_link.addWidget(self.chk_boost_baud, 0, 4, 1, 2)
+
+        grid_link.addWidget(_param_label("切换等待(ms)"), 0, 6)
         self.spin_boost_wait = QSpinBox()
         self.spin_boost_wait.setRange(BOOST_WAIT_MS_MIN, BOOST_WAIT_MS_MAX)
         self.spin_boost_wait.setValue(DEFAULTS["boost_wait_ms"])
@@ -680,143 +713,154 @@ class Dlt698UpgradeWidget(QWidget):
             "「提升波特率」命令发出后，先静默等这段时间，再切主机侧速率"
             "（留给设备改自己的 UART；0 = 发送缓冲排空就切）。\n"
             "勾了「提升波特率」才用得上这个等待；设备固件实现不一，现场按实际调。")
-        row_ch.addWidget(self.spin_boost_wait)
-        row_ch.addSpacing(12)
-        self.lbl_channel_state = QLabel("")
-        self.lbl_channel_state.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse)
-        # 允许换行 + 吃剩余宽度：蓝牙那行文字很长（名称/MTU/上限/每包最大），
-        # 窄窗口下若按 sizeHint 硬排会被裁掉尾巴（本项目教训：宁可换行不可截断）
-        self.lbl_channel_state.setWordWrap(True)
-        row_ch.addWidget(self.lbl_channel_state, 1)
-        form.addLayout(row_ch)
+        grid_link.addWidget(self.spin_boost_wait, 0, 7)
 
-        # SA / CA
-        row2 = QHBoxLayout()
-        row2.addWidget(QLabel("SA 类型"))
+        grid_link.addWidget(_param_label("每包字节数"), 1, 0)
+        self.spin_block = QSpinBox()
+        self.spin_block.setRange(BLOCK_SIZE_MIN, BLOCK_SIZE_MAX)
+        self.spin_block.setValue(DEFAULTS["block_size"])
+        self.spin_block.setToolTip(
+            f"分包大小（{BLOCK_SIZE_MIN}~{BLOCK_SIZE_MAX}）；"
+            "块大小 >65535 时协议层自动改用长帧 [6] u32")
+        grid_link.addWidget(self.spin_block, 1, 1)
+
+        grid_link.addWidget(_param_label("每包超时(ms)"), 1, 2)
+        self.spin_timeout = QSpinBox()
+        self.spin_timeout.setRange(TIMEOUT_MIN, TIMEOUT_MAX)
+        self.spin_timeout.setValue(DEFAULTS["timeout_ms"])
+        self.spin_timeout.setSingleStep(500)
+        self.spin_timeout.setToolTip("等一帧确认的时间；波特率低/包大时调大")
+        grid_link.addWidget(self.spin_timeout, 1, 3)
+
+        grid_link.addWidget(_param_label("重试次数"), 1, 4)
+        self.spin_retries = QSpinBox()
+        self.spin_retries.setRange(RETRY_MIN, RETRY_MAX)
+        self.spin_retries.setValue(DEFAULTS["retries"])
+        self.spin_retries.setToolTip("同一包最多重发几次；用尽则整轮失败并停止")
+        grid_link.addWidget(self.spin_retries, 1, 5)
+        grid_link.setColumnStretch(6, 1)
+
+        # ── 组② 地址参数：SA（类型/逻辑地址/长度/地址）/ CA ──
+        grid_addr = _param_group(form, "地址参数（SA / CA）")
+
         self.combo_sa_type = QComboBox()
         for label, value in SA_TYPES:
             self.combo_sa_type.addItem(label, value)
         self.combo_sa_type.setCurrentIndex(1)          # 默认通配
         self.combo_sa_type.setToolTip(
             "默认通配地址（类型1/长度6/AA×6）；doc 示例用单地址，可切「单地址」复现")
-        row2.addWidget(self.combo_sa_type)
-        row2.addSpacing(8)
-        row2.addWidget(QLabel("逻辑地址"))
+        grid_addr.addWidget(_param_label("SA 类型"), 0, 0)
+        grid_addr.addWidget(self.combo_sa_type, 0, 1)
+
         self.combo_sa_logic = QComboBox()
         for v in (0, 1, 2, 3):
             self.combo_sa_logic.addItem(str(v), v)
-        row2.addWidget(self.combo_sa_logic)
-        row2.addSpacing(8)
-        row2.addWidget(QLabel("长度"))
+        grid_addr.addWidget(_param_label("逻辑地址"), 0, 2)
+        grid_addr.addWidget(self.combo_sa_logic, 0, 3)
+
         self.combo_sa_len = QComboBox()
         for v in (1, 2, 3, 4, 5, 6):
             self.combo_sa_len.addItem(str(v), v)
         self.combo_sa_len.setCurrentIndex(5)           # 默认 6
-        row2.addWidget(self.combo_sa_len)
-        row2.addSpacing(8)
-        row2.addWidget(QLabel("地址(HEX)"))
+        grid_addr.addWidget(_param_label("长度"), 0, 4)
+        grid_addr.addWidget(self.combo_sa_len, 0, 5)
+
         self.edit_sa = QLineEdit(DEFAULTS["sa_addr"])
         self.edit_sa.setToolTip("按大端正序书写（线上逆序由协议层处理）；广播类型忽略")
         self.edit_sa.setMinimumWidth(140)
-        row2.addWidget(self.edit_sa)
-        row2.addSpacing(8)
-        row2.addWidget(QLabel("CA"))
+        grid_addr.addWidget(_param_label("地址(HEX)"), 0, 6)
+        grid_addr.addWidget(self.edit_sa, 0, 7)
+
         self.spin_ca = QSpinBox()
         self.spin_ca.setRange(0, 255)
-        row2.addWidget(self.spin_ca)
-        row2.addStretch(1)
-        form.addLayout(row2)
+        grid_addr.addWidget(_param_label("CA"), 0, 8)
+        grid_addr.addWidget(self.spin_ca, 0, 9)
+        grid_addr.setColumnStretch(10, 1)
 
-        # 文件信息
-        row3 = QHBoxLayout()
-        row3.addWidget(QLabel("源文件"))
+        # ── 组③ 文件与校验：文件信息（源/目标/版本/属性/类别）× 大小 × 校验方式/校验值 ──
+        grid_file = _param_group(form, "文件与校验")
+
         self.edit_source = QLineEdit()
         self.edit_source.setMinimumWidth(120)
-        row3.addWidget(self.edit_source)
-        row3.addWidget(QLabel("目标文件"))
+        grid_file.addWidget(_param_label("源文件"), 0, 0)
+        grid_file.addWidget(self.edit_source, 0, 1)
+
         self.edit_target = QLineEdit()
         self.edit_target.setMinimumWidth(120)
-        row3.addWidget(self.edit_target)
-        row3.addWidget(QLabel("版本"))
+        grid_file.addWidget(_param_label("目标文件"), 0, 2)
+        grid_file.addWidget(self.edit_target, 0, 3)
+
         self.edit_version = QLineEdit(DEFAULTS["file_version"])
         self.edit_version.setMinimumWidth(70)
-        row3.addWidget(self.edit_version)
-        row3.addWidget(QLabel("属性(HEX)"))
+        grid_file.addWidget(_param_label("版本"), 0, 4)
+        grid_file.addWidget(self.edit_version, 0, 5)
+
         self.edit_attr = QLineEdit(DEFAULTS["attr"])
         self.edit_attr.setToolTip(
             "文件属性 = bit-string(SIZE(3))，编码固定 `04 03 <字节>`；"
             "默认 E0（读/写/执行全允许）")
         self.edit_attr.setMinimumWidth(56)
-        row3.addWidget(self.edit_attr)
-        row3.addWidget(QLabel("类别"))
+        grid_file.addWidget(_param_label("属性(HEX)"), 0, 6)
+        grid_file.addWidget(self.edit_attr, 0, 7)
+
         self.combo_category = QComboBox()
         for label, value in FILE_CATEGORIES:
             self.combo_category.addItem(label, value)
-        row3.addWidget(self.combo_category)
-        row3.addSpacing(12)
-        row3.addWidget(QLabel("启动格式"))
-        self.combo_start_format = QComboBox()
-        self.combo_start_format.addItem("自动兼容（逐个试）", START_FORMAT_AUTO)
-        for _key, _name in START_FORMATS:
-            self.combo_start_format.addItem(_name, _key)
-        self.combo_start_format.setToolTip(
-            "现场不同厂家对「启动传输」的组帧不同（方法14 的两种标识编码 / 方法7 精简参数）。\n"
-            "自动兼容：按顺序逐个试，哪条回 DAR=0 就用哪种继续下发文件块；\n"
-            "全部不回才判失败。锁定某一种时只发那一条。")
-        self.combo_start_format.currentIndexChanged.connect(lambda *_a: self._schedule_save())
-        row3.addWidget(self.combo_start_format)
-        row3.addStretch(1)
-        form.addLayout(row3)
+        grid_file.addWidget(_param_label("类别"), 0, 8)
+        grid_file.addWidget(self.combo_category, 0, 9)
 
-        row4 = QHBoxLayout()
-        row4.addWidget(QLabel("文件大小(B)"))
         self.spin_size = QSpinBox()
         self.spin_size.setRange(0, 2 ** 31 - 1)
         self.spin_size.setGroupSeparatorShown(True)
         self.spin_size.setToolTip("默认取所选文件的真实字节数；可手工覆盖以复现文档实帧")
         self.spin_size.setMinimumWidth(130)
-        row4.addWidget(self.spin_size)
-        row4.addSpacing(12)
-        row4.addWidget(QLabel("校验"))
+        grid_file.addWidget(_param_label("文件大小(B)"), 1, 0)
+        grid_file.addWidget(self.spin_size, 1, 1)
+
         self.combo_check = QComboBox()
         for label, value, _kind in CHECK_TYPES:
             self.combo_check.addItem(label, value)
-        row4.addWidget(self.combo_check)
+        grid_file.addWidget(_param_label("校验"), 1, 2)
+        grid_file.addWidget(self.combo_check, 1, 3)
+
         self.edit_check = QLineEdit()
         self.edit_check.setPlaceholderText("校验值 HEX，可空/可手工覆盖")
         self.edit_check.setMinimumWidth(150)
-        row4.addWidget(self.edit_check)
-        self.btn_calc = QPushButton("按文件计算")
-        self.btn_calc.clicked.connect(self._on_calc_checksum)
-        row4.addWidget(self.btn_calc)
-        row4.addWidget(QLabel("字节序"))
+        grid_file.addWidget(_param_label("校验值"), 1, 4)
+        grid_file.addWidget(self.edit_check, 1, 5)
+
         self.combo_endian = QComboBox()
         self.combo_endian.addItem("大端", "big")
         self.combo_endian.addItem("小端", "little")
         self.combo_endian.setToolTip("仅 CRC 生效（md5/SHA1 的摘要没有字节序之分）")
-        row4.addWidget(self.combo_endian)
-        row4.addStretch(1)
-        form.addLayout(row4)
+        grid_file.addWidget(_param_label("字节序"), 1, 6)
+        grid_file.addWidget(self.combo_endian, 1, 7)
 
-        # 执行升级
-        row5 = QHBoxLayout()
+        self.btn_calc = QPushButton("按文件计算")
+        self.btn_calc.clicked.connect(self._on_calc_checksum)
+        grid_file.addWidget(self.btn_calc, 1, 8)
+        grid_file.setColumnStretch(10, 1)
+
+        # ── 组④ 执行升级：是否自动执行 × 执行时间 × 软件许可 ──
+        grid_exec = _param_group(form, "执行升级")
+
         self.chk_auto_exec = QCheckBox("传完后自动执行升级")
         self.chk_auto_exec.setChecked(True)
         self.chk_auto_exec.setToolTip("不勾选则只传文件（写文件包全部确认完即结束）")
-        row5.addWidget(self.chk_auto_exec)
-        row5.addSpacing(12)
-        row5.addWidget(QLabel("执行升级时间"))
+        grid_exec.addWidget(self.chk_auto_exec, 0, 0, 1, 2)
+
         self.combo_exec_mode = QComboBox()
         self.combo_exec_mode.addItem("立即执行（全 FF）", "now")
         self.combo_exec_mode.addItem("指定时间", "sched")
-        row5.addWidget(self.combo_exec_mode)
+        grid_exec.addWidget(_param_label("执行升级时间"), 0, 2)
+        grid_exec.addWidget(self.combo_exec_mode, 0, 3)
+
         self.edit_exec_time = QLineEdit()
         self.edit_exec_time.setPlaceholderText("YYYY-MM-DD HH:MM:SS")
         self.edit_exec_time.setMinimumWidth(150)
         self.edit_exec_time.setEnabled(False)
-        row5.addWidget(self.edit_exec_time)
-        row5.addWidget(QLabel("许可(HEX)"))
+        grid_exec.addWidget(self.edit_exec_time, 0, 4)
+
         self.edit_license = QLineEdit()
         self.edit_license.setPlaceholderText("空 = NULL")
         self.edit_license.setMinimumWidth(110)
@@ -824,18 +868,21 @@ class Dlt698UpgradeWidget(QWidget):
             "软件许可 CHOICE{NULL[00], License octet-string [09]}（规范 方法13）：\n"
             "留空 = 发 NULL(00)；填写时请**自带 `09 <长度>` 前缀**"
             "（例：许可 4 字节 `AA BB CC DD` → 填 `09 04 AA BB CC DD`），本页按原样写入、不做包装")
-        row5.addWidget(self.edit_license)
-        row5.addStretch(1)
-        form.addLayout(row5)
+        grid_exec.addWidget(_param_label("许可(HEX)"), 0, 5)
+        grid_exec.addWidget(self.edit_license, 0, 6)
+        grid_exec.setColumnStretch(7, 1)
 
-        # 读版本信息（可选诊断步骤；默认不勾，勾选状态落盘）
-        row6 = QHBoxLayout()
+        # ── 组⑤ 读版本信息（可选诊断步骤；默认不勾，勾选状态落盘）──
+        grid_ver = _param_group(form, "读版本信息（可选）")
+
         self.chk_read_before = QCheckBox("升级前读版本信息")
         self.chk_read_before.setToolTip(
             "勾选：开始升级前先发一帧「读版本信息」（GET-Request Normal，OAD 43 00 03 00 ="
             "电气设备(设备管理类) 属性3 版本信息），把设备回的版本内容写进日志，便于升级前后比对。\n"
             "SA/CA 取本页上方配置（默认通配地址 AA AA AA AA AA AA）；"
             "读版本失败**不阻断**升级（重试用尽后记日志并继续）。")
+        grid_ver.addWidget(self.chk_read_before, 0, 0)
+
         self.chk_read_after = QCheckBox("升级完成后读版本信息")
         self.chk_read_after.setToolTip(
             "勾选：收尾时（等设备复位后）再发一帧「读版本信息」，确认新版本已生效。\n"
@@ -843,11 +890,8 @@ class Dlt698UpgradeWidget(QWidget):
             "② 没勾 ⇒ 最后一包写文件被确认后读（有的设备收全升级包会**自动复位升级**）。\n"
             "读之前会按「升级后等待(s)」等一段时间（默认 10 秒），因为复位期间读不到版本。\n"
             "读版本失败不阻断（此时升级本身已完成，只记日志）。")
-        row6.addWidget(self.chk_read_before)
-        row6.addSpacing(12)
-        row6.addWidget(self.chk_read_after)
-        row6.addSpacing(12)
-        row6.addWidget(QLabel("读版本内容"))
+        grid_ver.addWidget(self.chk_read_after, 0, 1)
+
         self.combo_read_target = QComboBox()
         for label, key, _short in READ_TARGETS:
             self.combo_read_target.addItem(label, key)
@@ -856,18 +900,18 @@ class Dlt698UpgradeWidget(QWidget):
             "「内部版本」= 厂家扩展 OAD FF 10 04 00（厂商自定义对象，内部/内部版本信息）。\n"
             "两者都是 GET-Request Normal（APDU 形如 05 01 <PIID> <OAD> 00），"
             "只差 OAD；升级前/升级后两步共用这个选择。")
-        row6.addWidget(self.combo_read_target)
-        row6.addSpacing(12)
-        row6.addWidget(QLabel("升级后等待(s)"))
+        grid_ver.addWidget(_param_label("读版本内容"), 0, 2)
+        grid_ver.addWidget(self.combo_read_target, 0, 3)
+
         self.spin_read_after_delay = QSpinBox()
         self.spin_read_after_delay.setRange(READ_AFTER_DELAY_MIN, READ_AFTER_DELAY_MAX)
         self.spin_read_after_delay.setToolTip(
             "读「升级完成后」版本信息之前先等设备复位（秒，默认 10；0 = 不等、立即读）。\n"
             "有的设备收全升级包就**自动复位升级**（不依赖执行升级命令），复位期间读不到版本 ⇒ 需要等一会儿再读。\n"
             "勾「升级完成后读版本信息」才用得上这个等待。")
-        row6.addWidget(self.spin_read_after_delay)
-        row6.addStretch(1)
-        form.addLayout(row6)
+        grid_ver.addWidget(_param_label("升级后等待(s)"), 0, 4)
+        grid_ver.addWidget(self.spin_read_after_delay, 0, 5)
+        grid_ver.setColumnStretch(6, 1)
 
         outer.addWidget(self.sec_params)
 
@@ -892,7 +936,8 @@ class Dlt698UpgradeWidget(QWidget):
             box.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
             box.setFont(QFont("Consolas", 9))
             box.setMinimumHeight(112)              # ≥7 行（标题 + 6 字段；9pt Consolas 行距 14px）
-            box.setMaximumHeight(170)
+            # 上限只留 8 行高：参数区改成分组框后整体变高，这框原先能长到 170 把日志挤掉
+            box.setMaximumHeight(124)
             box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
             ver_row.addWidget(box, 1)
         ver_box.addLayout(ver_row)
@@ -931,15 +976,29 @@ class Dlt698UpgradeWidget(QWidget):
         gui_utils.fit_btn_width(self.btn_abort, self.btn_clear, self.btn_browse,
                                 self.btn_calc, extra=6)
 
-        # ── ④ 状态行 + 日志（只读，2000 行封顶）──
+        # ── ④ 状态行（运行状态 + 通道就绪情况）+ 日志（只读，2000 行封顶）──
+        # 通道状态（串口/蓝牙名称、MTU、每包上限）放这里而不是参数分组框里：
+        # 它是**运行时**状态、且文字长，占参数区一整行会把分组框挤高。
+        status_row = QHBoxLayout()
+        status_row.setSpacing(12)
         self.lbl_status = QLabel(f"状态：{STATE_IDLE}")
-        outer.addWidget(self.lbl_status)
+        status_row.addWidget(self.lbl_status)
+        status_row.addStretch(1)
+        self.lbl_channel_state = QLabel("")
+        self.lbl_channel_state.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse)
+        # 允许换行：蓝牙那行文字很长（名称/MTU/上限/每包最大），
+        # 窄窗口下若按 sizeHint 硬排会被裁掉尾巴（本项目教训：宁可换行不可截断）
+        self.lbl_channel_state.setWordWrap(True)
+        status_row.addWidget(self.lbl_channel_state, 3)
+        outer.addLayout(status_row)
 
         self.log_text = QPlainTextEdit()
         self.log_text.setReadOnly(True)
         self.log_text.setMaximumBlockCount(2000)
         self.log_text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self.log_text.setFont(QFont("Consolas", 9))
+        self.log_text.setMinimumHeight(LOG_MIN_HEIGHT)   # 参数区变高后给日志留下限（现场看帧就靠它）
         outer.addWidget(self.log_text, 1)
 
         # 参数联动（改了才落盘；SA/执行时间切换会改控件可用性）

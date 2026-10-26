@@ -1127,6 +1127,17 @@ class TCPMonitorWidget(QWidget):
             self._sniffer.stop()
             self._sniffer.wait(2000)
 
+    # ── 主题 ────────────────────────────────────────────────────────────
+    def restyle_for_theme(self, dark: bool) -> None:
+        """切深浅主题：字节视图（字符格式里显式设过前后景）跟着换，其余颜色由 QSS 负责。"""
+        for view in (getattr(self, "segment_hex", None),
+                     getattr(self, "frame_byte_view", None)):
+            if view is not None:
+                try:
+                    view.restyle_for_theme(dark)
+                except RuntimeError:
+                    pass
+
     def cleanup(self):
         """关闭时统一回收：停 UI 刷新定时器与抓包线程。"""
         try:
