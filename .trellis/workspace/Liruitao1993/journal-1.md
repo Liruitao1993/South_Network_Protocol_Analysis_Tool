@@ -1663,3 +1663,25 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Status
 
 [OK] **Completed**
+
+
+## Session 52: 协议7 国网协议测试页（AFN/Fn 树 + EB 扩展）
+<!-- trellis-session: v=2 fp=0bac8bc2033ce4ce -->
+
+**Date**: 2026-10-26
+**Task**: 协议7 国网协议测试页（AFN/Fn 树 + EB 扩展）
+**Branch**: `main`
+
+### Summary
+
+新增 gdw_test_core/gdw_test_widget：五页签三层分类树覆盖 122 条 AFN/Fn（含福建增补与 F0/F1）、EB 75 条（645 帧 +0x33，可包 AFN02 转发）、动态表单、顺序下发/重试/停止、共享串口蓝牙、落盘；协议注册表 has_gdw_test + main_gui 懒加载接线。release_check --with-gui PASS=174 FAIL=0 WARN=0；4 条变异反证。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a9ca43d` | feat(国网): 新增协议7「国网协议测试」页（AFN/Fn 分类树 + EB 扩展） |
+
+### Status
+
+[OK] **Completed**
