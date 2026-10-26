@@ -786,6 +786,11 @@ engine = self._engine_factory()            # 否则才是发给本虚拟表的�
 - **offscreen 无字体**：`QT_QPA_PLATFORM=offscreen` 下 `QFontDatabase: Cannot find font directory ...`，绘制出的文字是豆腐块 → 断言只能查尺寸/颜色/像素多样性；**要目视核对文字排版必须用默认平台**（`QApplication([])` 不设 offscreen + `widget.grab()` / `QImage.save()`，不需要窗口真的可见）。
 - **`bytes(image.constBits())` 必须持有 QImage 引用**：`bytes(canvas.render_image(w, h).constBits())`（临时对象上取 buffer）会 **access violation（0xC0000005）**；先 `img = ...` 再 `bytes(img.constBits())`。
 - **`QSplitter` 显隐子控件不自动让空间**：新显示的表格会被分到 0 高度 → 显隐后要显式重分配 `setSizes()`（并考虑 `sum(sizes)` 与各子控件 `minimumHeight()`，避免算出负高度）；**未 `show()` 时 `sizes()` 不反映真实布局**，不能用它判定溢出。
+- **行内复选框要用 `QAbstractItemView::indicator`，不是 `QCheckBox::indicator`**（1.24.1 实测）：
+  树/表/列表的行内指示器走 `PE_IndicatorViewItemCheck`，QSS 未覆盖时按调色板画；本项目
+  `background-color` 经 QSS 映射后未选指示器的框线与行底色同色（default 白底白框、现场「看不清楚」）。
+  每套 QSS 都要写基态 + `:checked` + `:indeterminate` 三条；判据必须**渲染取像素算对比度**
+  （`test_theme_settings.py` 1d 节：指示器区域 ≥3:1 像素 ≥20 + 反例自检），静态字符串断言挡不住白底白框。
 - **`QTableWidget` 子控件的 `isVisible()` 在父窗口隐藏时为 False**：测试断言「表格是否显示」用 `isHidden()`。
 - **测试点按钮要用真实信号**：测量类操作至少各覆盖一次 `btn.click()`（+`processEvents()`），只直调 `_on_xxx()` 私有方法会漏掉 `.clicked.connect` 漏挂这类最易回归的缺陷。同样，用鼠标测交互时**每次点击前重新取 `plot_rect()`**——表格显隐会改变画布高度，复用旧矩形会以「布局」而非「逻辑」原因失败。
 

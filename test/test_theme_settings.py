@@ -32,6 +32,8 @@ from PySide6.QtWidgets import (  # noqa: E402
     QListWidget,
     QStyle,
     QStyleFactory,
+    QTreeWidget,
+    QTreeWidgetItem,
 )
 
 from theme_settings import (
@@ -304,6 +306,98 @@ for _t in THEMES:
         _lw.deleteLater()
 app.setPalette(_palette_backup)
 del _palette_backup
+
+# ---------------- 1d. 行内复选框（item view indicator） ----------------
+section("行内复选框可见性 (QAbstractItemView::indicator)")
+
+import re as _re4  # noqa: E402
+
+#: 只匹配基态规则块（`:checked`/`:indeterminate` 不匹配 `indicator\s*{`）
+_IND_BASE_BLOCK = _re4.compile(r"QAbstractItemView::indicator\s*\{[^}]*\}", _re4.S)
+_IND_ANY_BLOCK = _re4.compile(r"QAbstractItemView::indicator[^{]*\{[^}]*\}", _re4.S)
+
+for _t in THEMES:
+    _qss = _theme_qss(_t)
+    # 原生主题（fusion / windows / windowsvista 主体）不写复选框样式 ⇒ 由系统绘制，跳过；
+    # 判据是「该主题是否本来就给 QCheckBox 写了 indicator」，而不是 qss 是否为空
+    # （windowsvista 有一段只修输入框的补充 QSS）。
+    if "QCheckBox::indicator" not in _qss:
+        continue
+    _blocks = _IND_BASE_BLOCK.findall(_qss)
+    check(f"[1d] {_t['id']} 有行内复选框基态规则", len(_blocks) >= 1,
+          f"blocks={len(_blocks)}")
+    check(f"[1d] {_t['id']} 基态含边框与底色",
+          bool(_blocks) and "border:" in _blocks[0]
+          and "background-color:" in _blocks[0],
+          _blocks[0][:80] if _blocks else "")
+    check(f"[1d] {_t['id']} 勾选/部分勾选态齐备",
+          "QAbstractItemView::indicator:checked" in _qss
+          and "QAbstractItemView::indicator:indeterminate" in _qss)
+
+
+def _indicator_metrics(qss: str = ""):
+    """渲染一棵树，返回 (未勾选高对比像素数, 勾选态是否可区分, 勾选高对比像素数)。
+
+    qss 非空时临时覆盖样式表（用于变异自检），仅影响本次渲染。
+    """
+    if qss:
+        app.setStyleSheet(qss)
+    tree = QTreeWidget()
+    tree.setHeaderHidden(True)
+    tree.setRootIsDecorated(False)      # 去掉分支箭头，区域里只剩复选框
+    for text, state in (("未勾选", Qt.CheckState.Unchecked),
+                        ("已勾选", Qt.CheckState.Checked)):
+        item = QTreeWidgetItem([text])
+        item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        item.setCheckState(0, state)
+        tree.addTopLevelItem(item)
+    tree.resize(220, 70)
+    tree.show()
+    app.processEvents()
+    app.processEvents()
+    img = tree.viewport().grab().toImage()
+    dpr = img.devicePixelRatio() or 1.0
+
+    def region(item):
+        rect = tree.visualItemRect(item)
+        x0 = max(0, int((rect.left() + 1) * dpr))
+        x1 = min(img.width() - 1, int((rect.left() + 24) * dpr))
+        y0 = max(0, int((rect.top() + 1) * dpr))
+        y1 = min(img.height() - 1, int((rect.bottom() - 1) * dpr))
+        return [img.pixelColor(x, y).getRgb()[:3]
+                for y in range(y0, y1 + 1) for x in range(x0, x1 + 1)]
+
+    colors_unchecked = region(tree.topLevelItem(0))
+    colors_checked = region(tree.topLevelItem(1))
+    tree.close()
+    tree.deleteLater()
+    if not colors_unchecked or not colors_checked:
+        return 0, False, 0
+    bg_u = Counter(colors_unchecked).most_common(1)[0][0]
+    bg_c = Counter(colors_checked).most_common(1)[0][0]
+    strong_u = sum(1 for c in colors_unchecked if _contrast(c, bg_u) >= 3.0)
+    strong_c = sum(1 for c in colors_checked if _contrast(c, bg_c) >= 3.0)
+    return strong_u, set(colors_unchecked) != set(colors_checked), strong_c
+
+
+for _theme_id in ("default", "dark", "glass", "mica"):
+    ThemeManager.apply(app, _theme_id, "Microsoft YaHei", 10)
+    _su, _distinct, _sc = _indicator_metrics()
+    check(f"[1d] {_theme_id} 未勾选复选框有可见边框（≥3:1 像素 ≥ 20）",
+          _su >= 20, f"strong={_su}")
+    check(f"[1d] {_theme_id} 勾选/未勾选可区分且勾选态可见",
+          bool(_distinct) and _sc >= 20, f"distinct={_distinct} checked={_sc}")
+
+# 反例自检：把行内指示器规则整段删掉后，未勾选「可见边框」判据必须变红
+ThemeManager.apply(app, "default", "Microsoft YaHei", 10)
+_qss_default = _theme_qss(get_theme("default"))
+_stripped = _IND_ANY_BLOCK.sub("", _qss_default)
+check("[1d] 反例自检前提：规则确实被删掉",
+      "QAbstractItemView::indicator" not in _stripped)
+_su_broken, _d_broken, _sc_broken = _indicator_metrics(_stripped)
+check("[1d] 反例自检：删掉规则后未勾选框不可见（判据能抓住回退）",
+      _su_broken < 20, f"strong={_su_broken}")
+ThemeManager.apply(app, "default", "Microsoft YaHei", 10)   # 还原
 
 # 未知主题回退默认（回退到带 QSS 的 default 主题）
 ThemeManager.apply(app, "not_exist_theme")
