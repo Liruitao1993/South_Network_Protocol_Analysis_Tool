@@ -1597,3 +1597,25 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Status
 
 [OK] **Completed**
+
+
+## Session 49: 主题：树/表行内复选框可见性（QAbstractItemView::indicator）
+<!-- trellis-session: v=2 fp=a6aeab9bd31ccf05 -->
+
+**Date**: 2026-10-26
+**Task**: 主题：树/表行内复选框可见性（QAbstractItemView::indicator）
+**Branch**: `main`
+
+### Summary
+
+修复树/表/列表行内复选框未勾选时白底白框（QCheckBox::indicator 管不到 item view 指示器；真实平台 default 实测整块 #ffffff）：4 套 QSS（default/dark/glass/mica）各补 QAbstractItemView::indicator 三态（灰框+底色/强调色/浅强调），tree/table/list 同源生效。回归：test_theme_settings 1d 节 22 项（静态规则 + 渲染取像素算对比度≥3 且像素数≥20 + 勾选可区分 + 反例自检），另做产品代码变异反证（删规则→4 红，还原）；真实平台 645 命令树未选框 60 个高对比像素（修复前 0）、边框对比 7.56:1（dark 5.36），QTableWidget 同 7.56:1；release_check --with-gui PASS=172 FAIL=0 WARN=0。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6869697` | fix(theme): 树/表行内复选框补可见边框（QAbstractItemView::indicator） |
+
+### Status
+
+[OK] **Completed**
