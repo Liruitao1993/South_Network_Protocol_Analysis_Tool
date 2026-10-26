@@ -1553,3 +1553,25 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Status
 
 [OK] **Completed**
+
+
+## Session 47: 645 协议测试页：DI 大类命令树 + 地址读写 + 特殊命令
+<!-- trellis-session: v=2 fp=5dacbc0d074f8c06 -->
+
+**Date**: 2026-10-26
+**Task**: 645 协议测试页：DI 大类命令树 + 地址读写 + 特殊命令
+**Branch**: `main`
+
+### Summary
+
+仿照 698 协议测试页为协议6 新建「645协议测试」页：顶部表地址/读地址(13H 回填)/写入地址(15H)/广播校时(08H)/超时/循环/发送停止；左栏 PA/密码/操作者；中栏读数据(11H)/写数据(14H)/特殊命令三页（筛选+DI 大类树+当前项+帧预览，勾选顺序下发、等应答再发下一条、超时继续）；右栏收发日志+逐字段明细+判定结论；底部信息表/报文表双击送单帧解析。纯逻辑 dlt645_test_core（catalog/command_groups/组帧全走 DLT645FrameGenerator/evaluate_response 不冒充成功/malformed_di_keys 暴露 16 条 7 位残键），共享 testpage_render 与 698 同一份四列渲染。顺带修 dlt645_frame_schema._value_or_raw 不认日期/时间/通信地址等掩码字段导致 14H 组不出的真缺陷。接线：protocol_registry.has_dlt645_test(仅6)+protocols_with_dlt645_test、main_gui 第二套懒加载 tab、pyinstaller_meta hiddenimports、.gitignore 加 dlt645_testbench.json。测试：test_dlt645_testbench 89 项 + test_dlt645_test_tab_wiring 19 项（均 GUI_TESTS），4 条变异反证，真机几何审计 1280x820/1000x700 零重叠；release_check --with-gui PASS=171 FAIL=0 WARN=0（白名单补新 wakeup 消费者后）。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `af045c6` | feat(645): 新增「645协议测试」页（DI 大类命令树 + 地址读写 + 特殊命令） |
+
+### Status
+
+[OK] **Completed**

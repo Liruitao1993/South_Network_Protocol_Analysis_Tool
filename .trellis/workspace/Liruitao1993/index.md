@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 46
+- **Total Sessions**: 47
 - **Last Active**: 2026-10-26
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1555 | Active |
+| `journal-1.md` | ~1577 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 47 | 2026-10-26 | 645 协议测试页：DI 大类命令树 + 地址读写 + 特殊命令 | `af045c6` | `main` |
 | 46 | 2026-10-26 | 预设命令页：粘贴报文添加按钮 + 按协议一键批量替换地址 | `81b380c` | `main` |
 | 45 | 2026-10-24 | 同步 Web 下载区版本信息到 1.24.0 | `328b665` | `main` |
 | 44 | 2026-10-24 | 发布 1.24.0：编译单文件 exe + GitHub Release | `6dc01b2` | `main` |
