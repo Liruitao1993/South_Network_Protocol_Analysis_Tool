@@ -140,6 +140,8 @@ TERMINAL_STATES = (STATE_IDLE, STATE_DONE, STATE_FAILED, STATE_ABORTED)
 #: 三个步骤的名字
 PHASE_START = "start"
 PHASE_BLOCKS = "blocks"
+#: 全部块确认后、执行升级前的闸门：读 OI F001 属性4「传输块状态字」（bit-string）
+PHASE_STATUS = "status"
 PHASE_EXEC = "exec"
 #: 两个**可选**的诊断步骤（用户需求：升级前/升级完成后读版本信息；默认不勾）
 PHASE_VER_PRE = "ver_pre"
@@ -1390,6 +1392,8 @@ class Dlt698UpgradeWidget(QWidget):
         try:
             if self._phase in VER_PHASES:
                 res = upg.check_get_response(frame, self._read_oad(upg))
+            elif self._phase == PHASE_STATUS:
+                res = upg.check_block_status(frame, self._num_blocks())
             else:
                 res = upg.check_action_response(frame, self._expected_omd(upg))
         except Exception as exc:
@@ -1408,6 +1412,14 @@ class Dlt698UpgradeWidget(QWidget):
                 self._record_version_info(self._phase, res)
                 self._log_version_detail(res)
                 self._log_verdict()        # 读完后立刻给「升级成功 / 升级失败 / 无法判定」
+            elif self._phase == PHASE_STATUS:
+                self._log(
+                    f"[RX] {fmt_hex(frame)}  → {res.get('reason') or '状态字校验通过'}"
+                    f"（原始 {res.get('raw') or '-'}，{res.get('bits')} 位）", "rx")
+                if str(res.get("order")) == "lsb":
+                    self._log(
+                        "[警告] 设备状态字按 LSB-first 编码（bit0=首字节最低位）⇒ 已按反向解释通过；"
+                        "如现场核对结果不符请反馈", "warn")
             else:
                 # DAR 可能因 PIID-ACD 位（bit7）带上标志位，判据只在协议层，这里照实显示
                 self._log(f"[RX] {fmt_hex(frame)}  → DAR={self._dar_value(dar)} 成功", "rx")
@@ -1418,6 +1430,11 @@ class Dlt698UpgradeWidget(QWidget):
             self._log(f"[RX] {fmt_hex(frame)}  → 失败 DAR={self._dar_value(dar)}（{reason}）",
                       "fail")
             self._retry_or_fail(f"DAR={self._dar_value(dar)}（{reason}）")
+            return
+        if self._phase == PHASE_STATUS and res.get("matched"):
+            # 是本次状态字响应、但位图未通过（缺块/位数不符/非 bit-string）⇒ 按重试处理
+            self._log(f"[RX] {fmt_hex(frame)}  → {reason}", "fail")
+            self._retry_or_fail(reason)
             return
         # §10：非本步 OMD 的帧 / 解析失败帧 → WARN 并忽略，不计确认
         self._log(f"[RX] {fmt_hex(frame)}  → 忽略（{reason}）", "warn")
@@ -1749,6 +1766,8 @@ class Dlt698UpgradeWidget(QWidget):
             return f"等待设备复位（剩余 {max(0, self._reset_left)} 秒）"
         if self._phase == PHASE_VER_POST:
             return "升级完成后读版本信息"
+        if self._phase == PHASE_STATUS:
+            return "读取传输块状态字"
         if self._phase == PHASE_START:
             return "启动传输"
         if self._phase == PHASE_BLOCKS:
@@ -1939,6 +1958,9 @@ class Dlt698UpgradeWidget(QWidget):
                 # 读版本信息：SA/CA 取页面配置（默认通配 AAAAAA，与升级传输同一份）；
                 # OAD 取「读版本内容」下拉（通用 43000300 / 厂家扩展内部版本 FF100400）
                 frame = upg.build_read_version(sa, ca, piid, oad=self._read_oad(upg))
+            elif self._phase == PHASE_STATUS:
+                # 传输块状态字（F001 属性4）：全部块确认后先校验，通过才允许执行升级
+                frame = upg.build_read_block_status(sa, ca, piid)
             elif self._phase == PHASE_START:
                 frame = self._build_start_frame(upg, sa, ca, piid)
             elif self._phase == PHASE_BLOCKS:
@@ -2032,6 +2054,10 @@ class Dlt698UpgradeWidget(QWidget):
                 self._send_current_step()
                 return
             self._refresh_progress()
+            self._begin_status_gate()
+            return
+        if self._phase == PHASE_STATUS:
+            # 传输块状态字校验通过 ⇒ 才允许执行升级（或按配置直接收尾）
             if self.chk_auto_exec.isChecked():
                 self._phase = PHASE_EXEC
                 self._state = STATE_FINISHING
@@ -2051,6 +2077,17 @@ class Dlt698UpgradeWidget(QWidget):
                                    "升级流程完成（已读升级后版本信息）")
             return
         self._succeed(self._after_read_done_message)
+
+    def _begin_status_gate(self) -> None:
+        """全部块确认 ⇒ 先读「传输块状态字」（F001 属性4），通过后才允许执行升级。
+
+        现场口径：传输完成后设备不一定收全（丢包/写 flash 失败），**先校验位图再执行**
+        能避免「文件不完整就进升级」把设备刷坏；失败按既有重试策略处理，用尽即停止。
+        """
+        self._phase = PHASE_STATUS
+        self._state = STATE_FINISHING
+        self._log("[信息] 全部数据块已确认，先读取传输块状态字（F00104）校验完整性", "info")
+        self._send_current_step()
 
     def _begin_reset_wait(self, why: str, done_message: str,
                           posted_message: str) -> None:
