@@ -409,11 +409,20 @@ def test_retry_delay_honours_retry_after():
 
 
 def test_auto_thread_count_is_default_not_max():
-    """「自动」= DEFAULT_MAX_THREADS（16），不是 MAX_THREADS（32）。"""
-    n = dl.choose_thread_count(1 << 30, None)
+    """「自动」= DEFAULT_MAX_THREADS（16），不是 MAX_THREADS（32）。
+
+    ⚠ **必须显式传 ``cpu_count``**：``choose_thread_count`` 有「CPU 核数 × 4」上界
+    （``by_cpu``），本机 14 核时上限 56 不碍事，但 GitHub Actions 的 windows runner
+    只有 4 核 ⇒ ``by_cpu = 16``，显式配置 32 也会被压成 16，断言 32 > 16 变成
+    **必红**（1.24.2 后 CI 三次连红即此；本地 14 核永远绿，属测试对环境的隐含依赖）。
+    """
+    n = dl.choose_thread_count(1 << 30, None, cpu_count=8)
     assert n <= dl.DEFAULT_MAX_THREADS, (n, dl.DEFAULT_MAX_THREADS)
-    assert dl.choose_thread_count(1 << 30, 32) > dl.DEFAULT_MAX_THREADS, \
+    assert dl.choose_thread_count(1 << 30, 32, cpu_count=8) > dl.DEFAULT_MAX_THREADS, \
         "显式配置 32 时应当多于默认值，说明两者确实不同"
+    # 低核数机器上的真实口径也钉住：上界随核数收敛，但不为 0
+    assert dl.choose_thread_count(1 << 30, 32, cpu_count=4) == 16, \
+        "4 核时 by_cpu 上界 = 16（CI 环境的实际取值）"
 
 
 def test_progress_file_invalidated_when_url_changes():

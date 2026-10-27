@@ -134,6 +134,8 @@ CORE_TESTS = [
     "test/test_top_bar_collapse.py",
     "test/test_menu_wiring.py",
     "test/test_about_github_star.py",
+    # 「关于」的版本号/更新记录只读 APP_VERSION + CHANGELOG（日期静态，不取系统时间）
+    "test/test_about_version.py",
     "test/test_flow_layout_proto_group.py",
     "test/test_hex_dump_view.py",
     "test/test_tcp_monitor_raw_payload.py",

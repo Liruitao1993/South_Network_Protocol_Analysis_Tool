@@ -11,6 +11,7 @@ os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.fonts=false")
 import base64
 import json
 from collections import OrderedDict
+from html import escape as _html_escape
 from pathlib import Path
 from typing import Any
 
@@ -124,8 +125,8 @@ from theme_settings import ThemeManager, ThemeSettingsDialog
 #: 目前只有 698.45（协议8）实现了 parse_to_table(..., verify=False)。
 TOLERANT_PARSE_PROTOCOLS = {8}
 
-APP_VERSION = "1.24.2"
-BUILD_DATE = "2026-10-26"  # 编译日期，每次打包前更新
+APP_VERSION = "1.24.3"
+BUILD_DATE = "2026-10-27"  # 编译日期，每次打包前更新
 
 # 作者 GitHub 仓库地址 —— 「关于」对话框 Star 按钮的**唯一来源**。
 # 改地址只改这一处（按钮文案/提示/跳转都读它，不要在别处再写死一份）。
@@ -166,6 +167,18 @@ _WINDOW_STATE_TABLES = (
 )
 
 CHANGELOG = [
+    (
+        "1.24.3",
+        "2026-10-27",
+        [
+            "**修复「关于」对话框的版本号与日期都是假的（用户反馈：里面版本号有误，且日期随时变）**：对话框原先写死 `版本 2.0`、更新记录只有伪造的 v2.0 / v1.0 两条，日期用 `date.today()` 现取 ⇒ 版本号与实际发行版无关，且**每打开一次「关于」日期都不一样**（该遗留自 1.23.43 起登记）",
+            "**改为单一来源**：版本行 = `APP_VERSION` + `CHANGELOG` 顶部条目自带的发布日期；更新记录由 `CHANGELOG`（全仓唯一版本历史来源）生成 —— 当前版本至多 4 条要点摘要 + 最近 8 个「版本号（日期）」+ 完整记录入口。**日期只取条目自带日期，不再读系统时间**（新增纯函数 `about_release_date()` / `about_version_line()` / `build_about_changelog_html()`，不建窗即可测）",
+            "**修复「关于」标题栏 ✕ 点了没反应（用户反馈：关闭按钮不起作用）**：根因是 `setWindowFlags(windowFlags() & ~WindowContextHelpButtonHint)` —— **PySide6 的 `WindowType` 标志位取反（`~`）会连带把 `WindowCloseButtonHint`(0x08000000) 清掉**（默认 0x08003003 → 0x00003003）。窗口仍有 `WS_SYSMENU`（标题栏照画 ✕），但 Qt 把 `SC_CLOSE` 置灰 ⇒ 点击被系统直接丢弃，只能用「确定」或 Esc。**修法：先 `& ~WindowContextHelpButtonHint` 再 `| WindowCloseButtonHint`（顺序不能反）**；同款写法的「配置 → 系统集成设置」对话框一并修复。真机 Windows 实测：修复前连点两次 ✕ 均无效，修复后一次点击即关闭（`exec()` 返回 0）；打包后 exe 端到端同样验证",
+            "回归：新增 `test/test_about_version.py`（**53 项**，已进 `CORE_TESTS`）—— 版本行 == APP_VERSION + CHANGELOG 日期、两次构造逐字一致、源码守卫（四个生成文案的函数体内不得出现 `date.today()` / `datetime.now()`，docstring 不计）、要点条数与摘要字数上限、`CHANGELOG` 为空/版本漂移两种兜底、**窗口标志位必须含 `WindowCloseButtonHint` 且不含 `ContextHelpButtonHint`**（两处对话框源码守卫 + 旧值 0x3003 负例）",
+            "**顺带修复 CI 唯一失败项**：`test/test_downloader.py` 的线程数用例原先依赖本机 CPU 核数（`choose_thread_count` 的 `by_cpu=cpus*4` 上界，本机 14 核绿、GitHub 4 核 runner 必红），改为显式传 `cpu_count=` 并钉住 4 核口径（42/42 通过）",
+            "配套：`APP_VERSION 1.24.2 → 1.24.3`、`BUILD_DATE 2026-10-27`、两个 `.iss` 同步；AGENTS §8 陷阱 94/95",
+        ],
+    ),
     (
         "1.24.2",
         "2026-10-26",
@@ -2268,6 +2281,80 @@ CHANGELOG = [
         ],
     ),
 ]
+
+
+# ── 「关于」对话框的版本信息（单一来源：APP_VERSION + CHANGELOG）───────────────
+#: 「关于」更新记录里「当前版本」最多列出的要点条数
+ABOUT_NOTE_ITEMS = 4
+#: 「关于」更新记录里每条要点的摘要字数上限
+ABOUT_NOTE_CHARS = 200
+#: 「关于」更新记录里「历史版本」（只列版本号 + 日期）最多列出的条数
+ABOUT_HISTORY_VERSIONS = 8
+
+
+def about_release_date() -> str:
+    """「关于」显示的发布日期 —— **静态值，绝不读系统时间**。
+
+    优先取 ``CHANGELOG`` 顶部条目（与 ``APP_VERSION`` 同版本时）自带的日期；
+    两者不一致（版本已 bump、CHANGELOG 还没补）时回落 ``BUILD_DATE``，
+    免得「关于」里冒出一个比版本还新的日期。
+    """
+    if CHANGELOG and CHANGELOG[0] and CHANGELOG[0][0] == APP_VERSION:
+        return CHANGELOG[0][1]
+    return BUILD_DATE
+
+
+def about_version_line() -> str:
+    """「关于」的版本行，形如 ``版本 1.24.1（2026-10-25 发布）``。"""
+    return f"版本 {APP_VERSION}（{about_release_date()} 发布）"
+
+
+def build_about_changelog_html(
+    note_items: int = ABOUT_NOTE_ITEMS,
+    note_chars: int = ABOUT_NOTE_CHARS,
+    history_versions: int = ABOUT_HISTORY_VERSIONS,
+) -> str:
+    """把 ``CHANGELOG`` 压成「关于」更新记录的 HTML（**唯一数据来源**）。
+
+    - 当前版本：版本号 + 条目自带日期 + 至多 ``note_items`` 条要点
+      （每条压成一行摘要，长度 ≤ ``note_chars``）；
+    - 历史版本：至多 ``history_versions`` 条，只列「版本号（日期）」；
+    - 末尾指明完整记录的查看位置。
+
+    **禁止改用 ``date.today()``**：旧实现写死 ``版本 2.0`` 并用当天日期渲染
+    更新记录 ⇒ 版本号与发行版不符、日期每开一次都变（1.24.1 修复；守卫见
+    ``test/test_about_version.py``）。
+    """
+    from auto_updater import summarize_notes
+
+    entries = [e for e in CHANGELOG if e and len(e) >= 3]
+    if not entries:
+        return "<p>（暂无更新记录）</p>"
+
+    version, release_date, items = entries[0][0], entries[0][1], entries[0][2]
+    bullets = [str(it).strip() for it in items if str(it).strip()]
+    shown = bullets[: max(0, int(note_items))]
+    parts = [
+        f"<b>v{_html_escape(str(version))}（{_html_escape(str(release_date))}）</b><ul>"
+    ]
+    for bullet in shown:
+        parts.append(f"<li>{_html_escape(summarize_notes(bullet, int(note_chars)))}</li>")
+    parts.append("</ul>")
+    if shown and len(bullets) > len(shown):
+        parts.append(
+            f"<p>（本版共 {len(bullets)} 条要点，这里只列前 {len(shown)} 条；"
+            "完整记录见 GitHub Release）</p>"
+        )
+
+    history = entries[1:][: max(0, int(history_versions))]
+    if history:
+        joined = "、".join(
+            f"v{_html_escape(str(v))}（{_html_escape(str(d))}）" for v, d, _ in history
+        )
+        parts.append(f"<p><b>历史版本</b><br>{joined}</p>")
+
+    parts.append("<p>完整更新记录见 GitHub Release，或菜单「帮助 → 检查更新」。</p>")
+    return "".join(parts)
 
 
 def _field_leading(name: str) -> int:
@@ -9316,9 +9403,15 @@ class MainWindow(QMainWindow):
         """构造"关于"对话框并返回（不 exec，便于测试直接检查控件与接线）"""
         dialog = QDialog(self)
         dialog.setWindowTitle("关于")
-        dialog.setMinimumSize(520, 480)
+        dialog.setMinimumSize(560, 540)
+        # ⚠ 关闭按钮必须显式加回：PySide6 的 WindowType 标志位取反（~）会**连
+        # WindowCloseButtonHint(0x08000000) 一起丢掉** —— 只写
+        # `windowFlags() & ~WindowContextHelpButtonHint` 会让标题栏的 ✕ 变成「点了没反应」
+        # 的灰按钮（Windows 上已复现；与「关于」同款的系统集成设置对话框同修）。
+        # 顺序不能反：先去掉上下文帮助，再 OR 回关闭按钮（`(f | CLOSE) & ~HELP` 仍会丢）。
         dialog.setWindowFlags(
-            dialog.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
+            (dialog.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+            | Qt.WindowType.WindowCloseButtonHint
         )
 
         layout = QVBoxLayout(dialog)
@@ -9329,7 +9422,10 @@ class MainWindow(QMainWindow):
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title_label)
 
-        version_label = QLabel("版本 2.0")
+        # 版本行读取 APP_VERSION + CHANGELOG 顶部日期（单一来源；旧实现写死「版本 2.0」，
+        # AGENTS §8 陷阱 89）
+        version_label = QLabel(about_version_line())
+        version_label.setObjectName("about_version_label")
         version_label.setFont(self._ui_font(1))
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         version_label.setStyleSheet("color: #666;")
@@ -9361,23 +9457,11 @@ class MainWindow(QMainWindow):
         layout.addWidget(changelog_label)
 
         changelog_text = QTextEdit()
+        changelog_text.setObjectName("about_changelog_text")
         changelog_text.setReadOnly(True)
         changelog_text.setFont(self._ui_font(-1))
-
-        from datetime import date
-
-        today = date.today().strftime("%Y-%m-%d")
-        html_parts = []
-        html_parts.append(f"<b>v2.0 ({today})</b><ul>")
-        html_parts.append("<li>优化界面布局，提高信息密度</li>")
-        html_parts.append("<li>统一表格字体为7pt，行高压缩至13px</li>")
-        html_parts.append("</ul>")
-        html_parts.append("<b>v1.0</b><ul>")
-        html_parts.append("<li>初始版本发布</li>")
-        html_parts.append("<li>支持南网、PLC RF、HDLC/DLMS、DLT645协议</li>")
-        html_parts.append("</ul>")
-
-        changelog_text.setHtml("".join(html_parts))
+        # 更新记录同样只读 CHANGELOG（版本号/日期都来自条目自带值，不取系统时间）
+        changelog_text.setHtml(build_about_changelog_html())
         layout.addWidget(changelog_text)
 
         btn_layout = QHBoxLayout()
@@ -14802,8 +14886,11 @@ class MainWindow(QMainWindow):
         dialog = QDialog(self)
         dialog.setWindowTitle("系统集成设置")
         dialog.setMinimumWidth(560)
+        # 同「关于」：去掉上下文帮助后必须显式加回关闭按钮，否则标题栏 ✕ 点不动
+        # （PySide6 的 ~WindowType 会连带清掉 WindowCloseButtonHint）
         dialog.setWindowFlags(
-            dialog.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
+            (dialog.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
+            | Qt.WindowType.WindowCloseButtonHint
         )
         layout = QVBoxLayout(dialog)
         panel = SystemIntegrationSettings(dialog)
