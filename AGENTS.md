@@ -1495,6 +1495,11 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
     - **【1.24.2 修】标题栏 ✕ 点不动 = `setWindowFlags` 把 `WindowCloseButtonHint` 弄丢了**：**PySide6 的 `WindowType` 标志位取反（`~`）会连带清掉 `0x08000000`（CloseButtonHint）** —— 实测默认 `QDialog` 的 `flags=0x08003003`，执行 `f & ~WindowContextHelpButtonHint` 后只剩 `0x3003`（`int(f) & ~int(HELP)` 才是对的，PySide6 的 flag 对象运算不行）。此时窗口仍有 `WS_SYSMENU`（标题栏照画 ✕），但 Qt 把 `SC_CLOSE` 置灰 ⇒ 点击被系统丢弃，现场表现为「关闭按钮不起作用」，只能用「确定」或 Esc。**正确写法：先 `& ~WindowContextHelpButtonHint` 再 `| WindowCloseButtonHint`（顺序不能反：`(f | CLOSE) & ~HELP` 仍会被 `~` 清掉）**；`_show_system_settings_dialog` 是同款写法，已同修。回归：`test_about_version.py` 断言 `windowFlags()` 含 CloseButtonHint、不含 ContextHelpHint，并对两处对话框做源码守卫 + 旧值 `0x3003` 负例。
     - 回归：`test/test_about_version.py`（**53 项** offscreen：单一来源、源码守卫（四个生成文案的函数体内不得出现 `date.today`/`datetime.now`，**docstring 不计**否则自我误报）、两次构造一致、要点条数/摘要字数/历史版本条数上限、`CHANGELOG` 为空与版本漂移两种兜底、窗口标志位与关闭按钮守卫、负例自检），已进 `CORE_TESTS`。
 
+90. **测试不要读「本机 CPU 核数」——CI 只有 4 核，本地 14 核（1.24.2 后 CI 连红三次的根因，改 `choose_thread_count` 相关断言前必读）**：
+    - `downloader.choose_thread_count` 的上界是 `min(limit, by_size, by_cpu)`，其中 `by_cpu = min(MAX_THREADS, cpus * 4)`。`test_auto_thread_count_is_default_not_max` 原来写 `choose_thread_count(1<<30, 32) > DEFAULT_MAX_THREADS(16)`：本地 14 核 ⇒ `by_cpu=56` ⇒ 32 > 16 绿；**GitHub runner 4 核 ⇒ `by_cpu=16` ⇒ 32 被压成 16 ⇒ 断言必然失败**（CI 三次运行失败项固定 `test/test_downloader.py`，本地永远复现不出来）。
+    - **规则**：凡是断言线程数具体取值（而不是「≤ 上限」这类不等式），必须显式传 `cpu_count=`（函数本来就留了这个可测参数）；「自动 vs 最大」的语义断言用 `cpu_count=8`，并另钉一条低核数口径（4 核 ⇒ 16），把 CI 环境的真实取值也覆盖住。
+    - 回归：`test/test_downloader.py` 42/42（本机 14 核 + `os.cpu_count=lambda:4` 模拟 CI 两种环境都跑过）。
+
 ## 9. 开发原则
 1. **协议定义优先**：遇到不确定的协议字段、字节序、校验范围，**先查 §5 对应文档**，不要凭记忆或猜测。
 2. **PDF 文档用 pdf skill 检索**：645 补遗、IEC 62056-46、DLT645 原始标准都是 PDF，调用 pdf skill 而非人工翻阅。
