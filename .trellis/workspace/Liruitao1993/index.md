@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 45
-- **Last Active**: 2026-10-24
+- **Total Sessions**: 51
+- **Last Active**: 2026-10-26
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1533 | Active |
+| `journal-1.md` | ~1665 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,12 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 51 | 2026-10-26 | 698光伏升级：传输块状态字门禁（F00104） | `9ca0123` | `main` |
+| 50 | 2026-10-26 | 645 测试页接入无线模组接口手册 V1.6 扩展 DI | `62efa08` | `main` |
+| 49 | 2026-10-26 | 主题：树/表行内复选框可见性（QAbstractItemView::indicator） | `6869697` | `main` |
+| 48 | 2026-10-26 | 698/645 协议测试页：串口/蓝牙双通道 | `c51dda6` | `main` |
+| 47 | 2026-10-26 | 645 协议测试页：DI 大类命令树 + 地址读写 + 特殊命令 | `af045c6` | `main` |
+| 46 | 2026-10-26 | 预设命令页：粘贴报文添加按钮 + 按协议一键批量替换地址 | `81b380c` | `main` |
 | 45 | 2026-10-24 | 同步 Web 下载区版本信息到 1.24.0 | `328b665` | `main` |
 | 44 | 2026-10-24 | 发布 1.24.0：编译单文件 exe + GitHub Release | `6dc01b2` | `main` |
 | 42 | 2026-10-16 | 桌面粘性入口：托盘菜单内嵌报文输入框 + 任务栏缩略图按钮 | `6a5afe1` | `main` |

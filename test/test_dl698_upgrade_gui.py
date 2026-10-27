@@ -294,6 +294,45 @@ def ver_ack_for(tx_frame: bytes, fields=VER_FIELDS, dar: int = 0,
     return GEN._assemble_frame(sa, ca, 0xC3, resp)
 
 
+def status_ack_for(tx_frame: bytes, blocks: int, value: str = "msb",
+                   bits: int = None, raw: bytes = None, dar: int = None) -> bytes:
+    """F00104 状态字响应：`85 01 PIID OAD 01 04 位数 位图`（默认 MSB-first 全成功）。
+
+    ``bits`` 可强制声明位数（测「位数不足」）；``raw`` 可给任意位图字节（测缺块/补位）；
+    ``dar`` 非 None 时改回 Get-Result=错误信息（[0] DAR）分支。
+    """
+    sa, ca, apdu = tx_parts(tx_frame)                 # 05 01 PIID OAD 00
+    oad = apdu[3:7]
+    if dar is not None:
+        body = bytes([0x00, int(dar)])
+    else:
+        nbits = int(bits if bits is not None else blocks)
+        if raw is None:
+            data = bytearray((nbits + 7) // 8)
+            for i in range(int(blocks)):
+                byte_i, bit_i = divmod(i, 8)
+                data[byte_i] |= (1 << (7 - bit_i)) if value == "msb" else (1 << bit_i)
+            raw = bytes(data)
+        body = bytes([0x01, 0x04, nbits]) + bytes(raw)
+    resp = bytes([0x85, 0x01, apdu[2]]) + oad + body
+    return GEN._assemble_frame(sa, ca, 0xC3, resp)
+
+
+def reply_for(tab, tx_frame: bytes) -> bytes:
+    """按页面当前阶段回一张匹配的响应（状态字 / 读版本 / ACTION 确认）。"""
+    if tab._phase == upg_ui.PHASE_STATUS:
+        return status_ack_for(tx_frame, tab._num_blocks())
+    return ack_for(tx_frame)
+
+
+def ack_status(tab, w, dar: int = None, **kwargs) -> None:
+    """单步用例：给「当前这条状态字请求」回响应（默认全成功位图）。"""
+    tx = w.sent[-1]
+    blocks = tab._num_blocks()
+    w.deliver(status_ack_for(tx, blocks, dar=dar, **kwargs))
+    settle()
+
+
 def visible_string(text: str) -> bytes:
     """A-XDR visible-string（`0A <长度> <ASCII>`）—— 内部版本这类非结构载荷用。"""
     raw = text.encode("ascii")
@@ -396,7 +435,7 @@ def run_to_end(tab, w, guard: int = 60) -> None:
             tab._end_reset_wait()                     # 快进倒计时（不等真 10 秒）
             continue
         tx = w.sent[-1]
-        ack = ver_ack_for(tx) if tab._phase in upg_ui.VER_PHASES else ack_for(tx)
+        ack = ver_ack_for(tx) if tab._phase in upg_ui.VER_PHASES else reply_for(tab, tx)
         if tab._phase == "exec":
             w.deliver(bytes.fromhex("FEFEFE") + ack[:12])
             settle()
@@ -550,13 +589,13 @@ def test_happy_path():
     check("状态 done", tab.state == "done", tab.state)
     check("进度 100%", tab.progress.value() == 100, tab.progress.value())
     check("进度文案明确 100%", "100%" in tab.lbl_progress.text(), tab.lbl_progress.text())
-    check("帧数 = 1 启动 + 3 写 + 1 执行 = 5", w.writes == 5, w.writes)
+    check("帧数 = 1 启动 + 3 写 + 1 状态字 + 1 执行 = 6", w.writes == 6, w.writes)
     check("write_raw 次数 == 页内计数 == 记录帧数",
           tab._sent_frames == w.writes == len(w.sent))
     check("写文件 OMD 正确", omd_of(w.sent[1]) == upg.OMD_WRITE)
     check("执行升级 OMD 正确", omd_of(w.sent[-1]) == upg.OMD_EXEC)
-    check("PIID 每帧自增（0..4）",
-          [tx_parts(f)[2][2] for f in w.sent] == [0, 1, 2, 3, 4],
+    check("PIID 每帧自增（0..5）",
+          [tx_parts(f)[2][2] for f in w.sent] == [0, 1, 2, 3, 4, 5],
           [tx_parts(f)[2][2] for f in w.sent])
     check("末包字节数 = 150", len(tab._blocks[-1]) == 150)
     log = log_text(tab)
@@ -576,7 +615,7 @@ def test_happy_path():
           tx_hex_tokens(b_line)[:1] == ["68"] and tx_hex_tokens(b_line)[-1:] == ["16"])
     # 两个读版本开关默认不勾 ⇒ 帧数与日志都不该出现读版本步骤
     check("默认不勾读版本 ⇒ 多一帧都没有、日志无读版本步骤",
-          w.writes == 5 and "(升级前读版本信息)" not in log
+          w.writes == 6 and "(升级前读版本信息)" not in log
           and "(升级完成后读版本信息)" not in log
           and "版本信息（升级前" not in log and "版本信息（升级完成后" not in log,
           f"{w.writes} / {[l for l in log.splitlines() if '版本信息（' in l]}")
@@ -584,7 +623,7 @@ def test_happy_path():
     check("日志含 [信息]", "[信息]" in log)
     check("已确认字节 == 文件字节数", tab._confirmed_bytes == len(payload),
           f"{tab._confirmed_bytes} vs {len(payload)}")
-    check("状态行含帧数", "已发送 5 帧" in tab.lbl_status.text(), tab.lbl_status.text())
+    check("状态行含帧数", "已发送 6 帧" in tab.lbl_status.text(), tab.lbl_status.text())
     check("中止/重试按钮复位", tab.btn_abort.isEnabled() is False
           and tab.spin_block.isEnabled() is True)
     tab.cleanup()
@@ -740,13 +779,14 @@ def test_retry_then_ok():
     check("超时日志含「已重试 1/3」", "已重试 1/3" in log_text(tab), last_log(tab))
     check("重发的 PIID 也自增",
           tx_parts(w.sent[-1])[2][2] == tx_parts(w.sent[-2])[2][2] + 1)
-    w.deliver(ack_for(w.sent[-1]))            # 重发后确认 OK
+    w.deliver(ack_for(w.sent[-1]))            # 重发后确认 OK（末包）→ 进入状态字校验
     settle()
+    ack_status(tab, w)                         # 状态字全成功 → 才发执行升级
     check("重试成功后继续到执行升级", omd_of(w.sent[-1]) == upg.OMD_EXEC, tab.state)
     w.deliver(ack_for(w.sent[-1]))
     settle()
     check("最终 done", tab.state == "done")
-    check("总写入 = 干净轮次 4 + 1 次重试 = 5", w.writes == 5, w.writes)
+    check("总写入 = 启动+2包+1 重试+状态字+执行 = 6", w.writes == 6, w.writes)
     check("重试不重复计进度", tab._confirmed_bytes == 200, tab._confirmed_bytes)
     tab.cleanup()
 
@@ -1207,10 +1247,11 @@ def test_mid_transfer_controls():
           [len(b) for b in tab._blocks])
     check("拒因写进日志", "升级进行中" in log_text(tab), last_log(tab))
     n = w.writes
-    w.deliver(ack_for(w.sent[-1]))             # 旧第 2 包确认 → 自动走执行升级
+    w.deliver(ack_for(w.sent[-1]))             # 旧第 2 包确认 → 进入状态字校验
     settle()
+    ack_status(tab, w)                          # 状态字全成功 → 自动走执行升级
     check("旧计划继续推进（不因换文件越界/发错包）",
-          w.writes == n + 1 and omd_of(w.sent[-1]) == upg.OMD_EXEC
+          w.writes == n + 2 and omd_of(w.sent[-1]) == upg.OMD_EXEC
           and tab.state == "finishing", f"{w.writes} / {tab.state}")
     w.deliver(ack_for(w.sent[-1]))
     settle()
@@ -1339,10 +1380,10 @@ def test_version_read_flow():
     settle()
     check("状态 done", tab.state == "done", tab.state)
     check("进度 100%", tab.progress.value() == 100 and "100%" in tab.lbl_progress.text())
-    check("帧序 = 读版本 + 启动 + 3 包 + 执行 + 读版本 = 7",
-          w.writes == 7 and [omd_of(f) for f in w.sent[1:2]] == [upg.OMD_START], w.writes)
-    check("PIID 每帧自增（0..6）",
-          [resp_apdu(f)[2] for f in w.sent] == [0, 1, 2, 3, 4, 5, 6],
+    check("帧序 = 读版本 + 启动 + 3 包 + 状态字 + 执行 + 读版本 = 8",
+          w.writes == 8 and [omd_of(f) for f in w.sent[1:2]] == [upg.OMD_START], w.writes)
+    check("PIID 每帧自增（0..7）",
+          [resp_apdu(f)[2] for f in w.sent] == [0, 1, 2, 3, 4, 5, 6, 7],
           [resp_apdu(f)[2] for f in w.sent])
     check("末帧是读版本帧（升级完成后）", is_ver_frame(w.sent[-1]))
     check("结束后勾选框恢复可编辑",
@@ -1435,7 +1476,7 @@ def test_version_read_nonblocking():
         if tab._phase in upg_ui.VER_PHASES:
             tab._on_timeout()             # 升级后读版本同样超时 → 仍不阻断
             continue
-        w.deliver(ack_for(w.sent[-1]))
+        w.deliver(reply_for(tab, w.sent[-1]))
     settle()
     check("升级本身照常完成（done，进度 100%）",
           tab.state == "done" and tab.progress.value() == 100, tab.state)
@@ -1554,7 +1595,7 @@ def test_version_read_target_select():
     settle()
     check("全过程完成（done）", tab.state == "done" and tab.progress.value() == 100, tab.state)
     check("升级后那一帧同样是内部版本读命令",
-          is_ver_frame(w.sent[-1], INT_OAD) and w.writes == 5, f"{w.writes}")
+          is_ver_frame(w.sent[-1], INT_OAD) and w.writes == 6, f"{w.writes}")
     check("升级后版本内容也标「·内部」",
           "→ 版本信息（升级完成后·内部）读取成功（6 项）" in log_text(tab),
           [l for l in log_text(tab).splitlines() if "版本信息" in l])
@@ -1630,10 +1671,11 @@ def test_reset_wait_before_post_read():
     settle()
     w.deliver(ack_for(w.sent[-1]))                    # 第 1 包 → 第 2 包（末包）
     settle()
-    w.deliver(ack_for(w.sent[-1]))                    # 末包确认 → 进等待
+    w.deliver(ack_for(w.sent[-1]))                    # 末包确认 → 状态字校验
     settle()
-    check("末包确认后进入「等待设备复位」，且**一帧都没新发**",
-          tab._phase == "wait_reset" and w.writes == 3, f"{tab._phase} / {w.writes}")
+    ack_status(tab, w)                                # 状态字通过 → 进等待
+    check("末包确认后进入「等待设备复位」，且状态字之后无新帧",
+          tab._phase == "wait_reset" and w.writes == 4, f"{tab._phase} / {w.writes}")
     check("等待定时器在跑、剩余 10 秒",
           tab._reset_timer.isActive() and tab._reset_left == 10, tab._reset_left)
     check("状态行显示倒计时",
@@ -1719,8 +1761,9 @@ def test_reset_wait_before_post_read():
     settle()
     w2.deliver(ack_for(w2.sent[-1]))                   # 启动 → 1 包
     settle()
-    w2.deliver(ack_for(w2.sent[-1]))                   # 末包 → 执行升级
+    w2.deliver(ack_for(w2.sent[-1]))                   # 末包 → 状态字校验
     settle()
+    ack_status(tab2, w2)                               # 状态字通过 → 执行升级
     check("勾了自动执行 ⇒ 执行升级帧已发", omd_of(w2.sent[-1]) == upg.OMD_EXEC)
     w2.deliver(ack_for(w2.sent[-1]))                   # 执行升级确认 → 等待 0 秒
     settle()
@@ -1747,8 +1790,9 @@ def test_reset_wait_before_post_read():
     settle()
     w3.deliver(ack_for(w3.sent[-1]))                   # 启动 → 包
     settle()
-    w3.deliver(ack_for(w3.sent[-1]))                   # 末包 → 等待
+    w3.deliver(ack_for(w3.sent[-1]))                   # 末包 → 状态字校验
     settle()
+    ack_status(tab3, w3)                               # 状态字通过 → 等待
     n3 = w3.writes
     tab3._on_abort()
     settle()
@@ -1777,6 +1821,7 @@ def test_reset_wait_before_post_read():
     settle()
     w4.deliver(ack_for(w4.sent[-1]))
     settle()
+    ack_status(tab4, w4)
     n4 = w4.writes
     tab4.btn_clear.click()
     settle()
@@ -1808,8 +1853,9 @@ def test_reset_wait_before_post_read():
     settle()
     w_r.deliver(ack_for(w_r.sent[-1]))                  # 启动 → 1 包
     settle()
-    w_r.deliver(ack_for(w_r.sent[-1]))                  # 末包 → 进等待
+    w_r.deliver(ack_for(w_r.sent[-1]))                  # 末包 → 状态字校验
     settle()
+    ack_status(tab_r, w_r)                              # 状态字通过 → 进等待
     n_r = w_r.writes
     seen = []
     t0 = time.monotonic()
@@ -1853,8 +1899,9 @@ def test_reset_wait_before_post_read():
     settle()
     w_two.deliver(ack_for(w_two.sent[-1]))              # 启动 → 1 包
     settle()
-    w_two.deliver(ack_for(w_two.sent[-1]))              # 末包 → 等待
+    w_two.deliver(ack_for(w_two.sent[-1]))              # 末包 → 状态字校验
     settle()
+    ack_status(tab_two, w_two)                          # 状态字通过 → 等待
     check("第一轮确实停在等待（前置成立，后面的复位断言才有意义）",
           tab_two._phase == "wait_reset" and tab_two._reset_left == 10,
           f"{tab_two._phase} / {tab_two._reset_left}")
@@ -1903,6 +1950,7 @@ def test_reset_wait_before_post_read():
     settle()
     w_cl.deliver(ack_for(w_cl.sent[-1]))
     settle()
+    ack_status(tab_cl, w_cl)                            # 状态字通过 → 等待
     check("⑧ 前置：进了等待且倒计时在跑",
           tab_cl._phase == "wait_reset" and tab_cl._reset_timer.isActive(),
           (tab_cl._phase, tab_cl._reset_timer.isActive()))
@@ -2286,8 +2334,9 @@ def test_baud_boost():
     check("写文件期间没人提前切回去（仍 115200）",
           w.baud == 115200 and tab._boosted is True and tab._phase == "blocks",
           (w.baud, tab._phase))
-    w.deliver(ack_for(w.sent[-1]))                     # 末包确认 → 执行升级帧
+    w.deliver(ack_for(w.sent[-1]))                     # 末包确认 → 状态字校验
     settle()
+    ack_status(tab, w)                                 # 状态字通过 → 执行升级帧
     check("执行升级帧仍在 115200 发出（设备此刻还在高速率）",
           omd_of(w.sent[-1]) == upg.OMD_EXEC and w.baud == 115200, w.baud)
     w.deliver(ack_for(w.sent[-1]))                     # 执行升级确认 → 进「等设备复位」
@@ -2323,16 +2372,17 @@ def test_baud_boost():
     settle()
     w2.deliver(ack_for(w2.sent[-1]))
     settle()
-    w2.deliver(ack_for(w2.sent[-1]))                   # 末包 → 执行升级帧
+    w2.deliver(ack_for(w2.sent[-1]))                   # 末包 → 状态字校验
     settle()
+    ack_status(tab2, w2)                               # 状态字通过 → 执行升级帧
     w2.deliver(ack_for(w2.sent[-1]))                   # 执行升级确认 → 等设备复位
     settle()
     check("进入「等待设备复位」的那一刻就已切回 9600（倒计时还没走）",
           tab2._phase == "wait_reset" and tab2._reset_left == 10 and w2.baud == 9600,
           (tab2._phase, tab2._reset_left, w2.baud))
     n2 = w2.writes
-    check("等待期间一帧都没新发（命令1 + 启动1 + 2包 + 执行1 = 5，切速不带出流量）",
-          n2 == 5, n2)
+    check("等待期间一帧都没新发（命令1 + 启动1 + 2包 + 状态字1 + 执行1 = 6，切速不带出流量）",
+          n2 == 6, n2)
     tab2._end_reset_wait()                             # 快进倒计时
     settle()
     check("倒计时走完才发升级后读版本帧，且仍跑在 9600",
@@ -2495,7 +2545,7 @@ def _run_to_post_read_frame(tab, w, guard: int = 8) -> None:
     for _ in range(guard):
         if tab._phase == "ver_post":
             return
-        w.deliver(ack_for(w.sent[-1]))
+        w.deliver(reply_for(tab, w.sent[-1]))
         settle()
     raise AssertionError(f"没推到升级后读版本：phase={tab._phase} writes={w.writes}")
 
@@ -2702,6 +2752,9 @@ def _verdict_run(pre_fields=VER_FIELDS, post_fields=VER_FIELDS, *,
             else:
                 w.deliver(ver_ack_for(tx, fields=post_fields))
                 settle()
+        elif tab._phase == upg_ui.PHASE_STATUS:
+            w.deliver(status_ack_for(tx, tab._num_blocks()))
+            settle()
         else:
             w.deliver(ack_for(tx))
             settle()

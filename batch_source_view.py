@@ -114,6 +114,8 @@ try:
         QTextCharFormat,
         QTextCursor,
     )
+
+    import canvas_theme
     from PySide6.QtWidgets import (
         QCheckBox,
         QDialog,
@@ -159,6 +161,9 @@ if _QT_AVAILABLE:
             font.setPointSize(10)
             self.setFont(font)
             self._fold_width = 0
+            # 行号槽配色（浅色初值；深色由 restyle_for_theme 覆盖）
+            self._ln_bg = QColor("#F2F2F2")
+            self._ln_fg = QColor("#888888")
 
             self._ln_area = _LineNumberArea(self)
             self.blockCountChanged.connect(self._update_ln_width)
@@ -191,10 +196,17 @@ if _QT_AVAILABLE:
                 )
             )
 
+        def restyle_for_theme(self, dark: bool) -> None:
+            """行号槽配色跟着主题走（QSS 管不到 paintEvent 里 fillRect 的区域）。"""
+            p = canvas_theme.palette(bool(dark))
+            self._ln_bg = QColor(p["bg_alt"])
+            self._ln_fg = QColor(p["muted"])
+            self._ln_area.update()
+
         def line_number_area_paint_event(self, event):
             painter = QPainter(self._ln_area)
-            painter.fillRect(event.rect(), QColor("#F2F2F2"))
-            painter.setPen(QPen(QColor("#888888")))
+            painter.fillRect(event.rect(), self._ln_bg)
+            painter.setPen(QPen(self._ln_fg))
             block = self.firstVisibleBlock()
             block_no = block.blockNumber()
             top = round(self.blockBoundingGeometry(block).translated(self.contentOffset()).top())
@@ -274,10 +286,20 @@ if _QT_AVAILABLE:
 
             # ── 状态行 ──
             self.status_label = QLabel("", self)
-            self.status_label.setStyleSheet(
-                "background:#FAFAFA; border-top:1px solid #DDD; padding:3px 8px;"
-            )
+            self._set_status_style(False)
             layout.addWidget(self.status_label)
+
+        def _set_status_style(self, dark: bool) -> None:
+            p = canvas_theme.palette(bool(dark))
+            self.status_label.setStyleSheet(
+                f"background:{p['bg']}; color:{p['muted']};"
+                f" border-top:1px solid {p['border']}; padding:3px 8px;"
+            )
+
+        def restyle_for_theme(self, dark: bool) -> None:
+            """切深浅主题：行号槽 + 状态行（本对话框是独立窗口，父窗口切换时要一起刷）。"""
+            self.view.restyle_for_theme(dark)
+            self._set_status_style(dark)
 
         # ---------- 内容装载 ----------
 

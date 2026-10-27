@@ -57,7 +57,7 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 | 14 | 南网上行通信规约 | Q/CSG 11109004-2013 | 小端（长度L/地址域/多字节字段） | 8位位组算术和（控制域+地址域+链路用户数据） |
 | 15 | Modbus 协议（RTU/TCP） | Modbus Application Protocol V1.1b3 / Modbus over Serial Line V1.02 | 大端（寄存器内可配字节序/字序） | CRC-16（多项式 0xA001，RTU）/ TCP 靠 MBAP 长度域 |
 
-> 协议覆盖差异：**HDC 1.0（索引 11）在 PySide6 主程序与 Reflex Web 版均支持**（2026-09-15 核实）。Web 版无实时监控器/档案/拓扑；组帧与预设标签页在 Web 存在但协议 9/10/11 均不支持（与桌面一致），协议11 另有「无实时监控器/组帧/预设」的说明见 §8 陷阱 27。**「频谱图」标签页两端都有**（与协议无关，常驻）：桌面 `spectrum_widget.py`（QPainter 自绘），Web `reflex_web/reflex_web/spectrum_web.py`（SVG）——两侧共用同一份纯逻辑层。**Web 另有主题系统**（浅色/深色/跟随系统 + 6 个预设 + 5 个强调色，`reflex_web/reflex_web/theme_web.py`，token 化 CSS）；桌面为 7 套 QSS 主题（`theme_settings.py`，含毛玻璃/云母，Web 无对应）。NiceGUI/TUI 版本已于 2026-08-17 移除。**协议8/6 另有专用页**：协议8 有「光伏升级」标签页（698.45 文件传输升级：启动传输 → 写文件×N → 执行升级，拖入升级包、逐包等确认、进度条，1.23.85 起；另有**可选**的「升级前/升级完成后读版本信息」两步——通用版本 `OAD 43000300` 或厂家扩展内部版本 `OAD FF100400` 二选一，默认不勾、失败不阻断升级，**两次读到的版本会自动比对给出「升级成功（版本已变化）/ 升级失败（版本完全一致）/ 无法判定」结论**（1.23.86 起）；以及仅串口的**可选**「提升波特率」——升级前先发 FT1.2 命令让设备切 115200，传完切回 9600，升级后读版本在两种速率上各试一遍（1.23.86 起）；后端为纯逻辑 `dl_t698_45_upgrade.py`，**Web 无对应**），协议6 有「645虚拟表」（1.23.5 起）。**「生产测试架」也是常驻页**（与协议无关，1.23.88 起）：类串口助手（5 条发送配置，各自 HEX/ASCII + checksum8）+ 一条可配置的测试架参数帧（49 项参数，改动即生成 75 字节整帧），纯逻辑在 `production_testbench_core.py`，**Web 无对应**。**Modbus（协议15，1.23.97 起）仅桌面端支持**：RTU/TCP 自动识别 + 可选「寄存器列表」（`modbus_registers.json`，按品牌记录地址/类型/系数/单位）翻译工程量；未选列表时按通用方式解析（只到功能码、地址/数量与原始值）。
+> 协议覆盖差异：**HDC 1.0（索引 11）在 PySide6 主程序与 Reflex Web 版均支持**（2026-09-15 核实）。Web 版无实时监控器/档案/拓扑；组帧与预设标签页在 Web 存在但协议 9/10/11 均不支持（与桌面一致），协议11 另有「无实时监控器/组帧/预设」的说明见 §8 陷阱 27。**「频谱图」标签页两端都有**（与协议无关，常驻）：桌面 `spectrum_widget.py`（QPainter 自绘），Web `reflex_web/reflex_web/spectrum_web.py`（SVG）——两侧共用同一份纯逻辑层。**Web 另有主题系统**（浅色/深色/跟随系统 + 6 个预设 + 5 个强调色，`reflex_web/reflex_web/theme_web.py`，token 化 CSS）；桌面为 7 套 QSS 主题（`theme_settings.py`，含毛玻璃/云母，Web 无对应）。NiceGUI/TUI 版本已于 2026-08-17 移除。**协议8/6 另有专用页**：协议8 有「光伏升级」标签页（698.45 文件传输升级：启动传输 → 写文件×N → 执行升级，拖入升级包、逐包等确认、进度条，1.23.85 起；另有**可选**的「升级前/升级完成后读版本信息」两步——通用版本 `OAD 43000300` 或厂家扩展内部版本 `OAD FF100400` 二选一，默认不勾、失败不阻断升级，**两次读到的版本会自动比对给出「升级成功（版本已变化）/ 升级失败（版本完全一致）/ 无法判定」结论**（1.23.86 起）；以及仅串口的**可选**「提升波特率」——升级前先发 FT1.2 命令让设备切 115200，传完切回 9600，升级后读版本在两种速率上各试一遍（1.23.86 起）；后端为纯逻辑 `dl_t698_45_upgrade.py`，**Web 无对应**），协议6 有「645虚拟表」（1.23.5 起）与「**645协议测试**」页（1.24.1 起：按 DI 大类分类的命令树 + 读/写通信地址 + 特殊命令，纯逻辑 `dlt645_test_core.py`，**Web 无对应**）。**「生产测试架」也是常驻页**（与协议无关，1.23.88 起）：类串口助手（5 条发送配置，各自 HEX/ASCII + checksum8）+ 一条可配置的测试架参数帧（49 项参数，改动即生成 75 字节整帧），纯逻辑在 `production_testbench_core.py`，**Web 无对应**。**Modbus（协议15，1.23.97 起）仅桌面端支持**：RTU/TCP 自动识别 + 可选「寄存器列表」（`modbus_registers.json`，按品牌记录地址/类型/系数/单位）翻译工程量；未选列表时按通用方式解析（只到功能码、地址/数量与原始值）。
 
 > **Web 路由（1.23.14 起，改链接前必读）**：`/` = **产品首页**（落地页，介绍桌面客户端：Hero/功能卡/协议表/命令行与系统集成/下载区/页脚，实现在 `reflex_web/reflex_web/landing_web.py`）；`/app` = **在线工具**（原主页的 9 个标签页，函数名 `index()` 已更名 `tool_page()`）；`/share`、`/feedback`、`/feedback-admin` 不变。首页数据全部读 `reflex_web/downloads/`（`version.json` 版本、`*.exe` 体积、`client_screenshot.png` 截图，缺图降级占位卡）。**新增/修改站内链接时必须按语义选目标**（回介绍页 `/`、回工具 `/app`），`landing_web.INTERNAL_LINKS` 是落地页侧的唯一来源，`test/test_web_landing.py` 有死链白名单守卫。
 
@@ -283,6 +283,12 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
 │                             #   worker 与详情按需重解析共用；1.23.15 起）
 ├── custom_di_store.py        # 南网自定义DI存储单源（纯逻辑无Qt：custom_di.json 读写/校验/upsert/批量删；main_gui·lookup_pages·protocol_parser 共用）
 ├── production_testbench_core.py # 生产测试架纯逻辑（无 Qt，1.23.88）：FieldSpec/FIELD_GROUPS 字段表（界面与组帧单一来源）、75 字节组帧、checksum8、HEX/ASCII、配置合并与原子写
+├── testpage_render.py          # 测试页四列文本渲染单源（纯逻辑无 Qt，1.24.1）：CJK 宽度/截断/
+│                               #   format_table_rows；698 与 645 测试页共用（禁止第二份）
+├── channel_link.py             # 协议测试页的串口/蓝牙双通道控制器（Qt，无协议细节，1.24.1）：
+│                               #   ChannelController（rx 分流 / ready / send 超限预检 / 状态文案）+
+│                               #   BleSendPort（BluetoothWorker → 整帧一次 ATT 写）；
+│                               #   698/645 两个「协议测试」页共用（升级页另有一套，见 §8 陷阱 92）
 ├── atomic_io.py             # 原子写（纯标准库，1.23.89）：tmp+fsync+os.replace，失败保留旧文件；main_gui 的 config.json 全部走它
 ├── diagnostics.py           # 诊断包（无 Qt，1.23.89）：环境信息 + 配置（递归脱敏）+ 日志尾部 → zip，入口在帮助菜单
 ├── crash_handler.py         # 崩溃兜底（1.23.90）：sys/threading excepthook → logs/crash_*.log（保留 20 份）
@@ -357,12 +363,18 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
 │
 ├── GUI 组件（独立文件，main_gui.py 导入组合）
 │   ├── frame_gen_widget.py         # 帧生成标签页 (FrameGenWidget) - 支持 south/gdw/dlt698 三种模式
-│   ├── preset_buttons.py           # 预设命令按钮 (PresetButtonWidget / PresetButtonManager)
+│   ├── preset_buttons.py           # 预设命令按钮 (PresetButtonWidget / PresetButtonManager / AddPresetDialog)
+│   │                               #   + 页面「添加命令」可直接粘贴报文建按钮（editable_frame 模式）
+│   │                               #   + 「一键批量替换地址」按当前协议改全部预设并重算校验（复用 frame_addr_fix /
+│   │                               #     message_tool_widget.replace_frame_address；1.24.1 起）
 │   ├── test_plan_widget.py         # 测试计划 (TestPlanWidget) - CRUD/顺序发送/超时/结果
 │   ├── serial_worker.py            # 串口通信线程 (SerialWorker)
 │   ├── gui_utils.py                # 中文右键菜单等工具
 │   ├── lookup_pages.py             # 简化版查询页（当前无调用方；create_di_lookup_page 的自定义DI增删与 main_gui 共用 custom_di_store）
-│   ├── app_icons.py                # 图标加载（icons/lucide/*.svg；按钮/窗口图标）
+│   ├── app_icons.py                # 图标加载（icons/lucide/*.svg；按钮/窗口图标）。load_icon 跟随主题前景色；
+│   │                               #   render_pixmap(name, size, color) 按**指定颜色**渲染（状态灯：绿=连接/灰=断开）
+│   ├── canvas_theme.py             # 自绘画布配色单源（纯逻辑无 Qt）：bg/bg_alt/border/text/muted/hint/line/highlight/hover，
+│   │                               #   深浅各一套。QSS 管不到 QGraphicsView 场景、paintEvent、QTextCharFormat 的默认前后景
 │   ├── thread_registry.py          # QThread 登记表（新增 QThread 必须 track；_shutdown_threads 兜底回收依赖）
 │   ├── auto_updater.py             # 自动升级：版本比对/下载/update.bat 替换编排（纯逻辑无Qt；配置在 config.json update 段）
 │   │                               #   更新源默认 **GitHub Release**（owner/repo 由 AUTHOR_GITHUB_URL 解析注入，单一来源）；
@@ -417,6 +429,11 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
 │   │   ├── dynamic_data.py         #   时间/地址/电能量递增/冻结时标/漏点
 │   │   └── engine.py               #   MeterSimEngine.handle_frame(frame) -> 0..n 响应帧
 │   ├── dlt645_meter_sim_widget.py  # 645虚拟表 tab (Dlt645VirtualMeterWidget) - 645 从站模拟 + LME 主站下发（仅协议6，1.23.5 起）
+│   ├── dlt645_test_widget.py       # 645协议测试 tab (Dlt645TestWidget) - 仅协议6（1.24.1 起）：
+│   │                               #   表地址/读·写地址/广播校时 + 读数据·写数据·特殊命令三页 + DI 大类树
+│   │                               #   + 勾选顺序下发（等应答再发下一条）+ 收发日志 + 信息表/报文表
+│   ├── dlt645_test_core.py         #   ↑ 纯逻辑（无 Qt）：catalog() DI 大类树 / command_groups() / 组帧
+│   │                               #   （全走 DLT645FrameGenerator）/ evaluate_response() 判定
 │   ├── dlt645_sim/                 # 645虚拟表核心逻辑包（纯逻辑无 Qt）
 │   │   ├── archive.py              #   档案 DI→可读值（dlt645_sim_data.json 持久化）
 │   │   ├── dynamic_data.py         #   动态数据：RandomEventWord 事件状态字随机源（04001501，1.23.8 起）
@@ -671,6 +688,32 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
   - `国网计量中心电能表全性能试验检测公告-第4号补遗-事件记录采集-远程费控功能和负荷曲线抄读功能.pdf` — 补遗（PDF，需用 pdf skill 检索）
   - `协议文档/6.645协议/附件1：协议转换单元【低压分布式光伏协议转换单元】-技术规范书0625.md` — **光伏协议转换单元 DL/T645-2007 扩展协议**（§D.1 三张 DI 表：变量 `02E6xxxx`/参数 `04E6xxxx`/事件 `03E6xxxx`；附录 I.3.3.1 扩展控制码 `0FH`/`8FH` 透传帧。1.23.21 起支持解析，原 `.docx` 同目录）
   - `协议文档/6.645协议/南网光伏协议转换单元无线接口手册-V1.6.md` — **无线模组接口扩展**（LME V1.6 / 2026-10-08，由同名 PDF 转换）：`02EB0000` 逆变器数据转发（波特率特征字 / 校验 / **超时 T 为 BCD**）、`04E60001` 地址列表（`1+6×M`）、`04E60002` 无线频段、`04900100` 拓扑、`04900101~04900106` 升级、`04900107` 版本、`028100FF` 在网状态；控制码扩展 `86H/06H`（上报 / 确认）、`1EH/9EH`（在网状态）、`D1H`（转发异常，`ERR=0x80` = 未入网）。解析在 `dlt645_pv_wireless.py`，**优先于**附件1 接管 `04E60001`（见 §8 陷阱 88）
+- **「645协议测试」页（1.24.1 新增，`has_dlt645_test`，仅协议6 可见）**：与协议8「协议测试」页同构，
+  但分类维度是 **DI 前缀**而不是 OI：
+  - `dlt645_test_core.py`（纯逻辑无 Qt）—— `catalog()` 顶级按 DI3（`00` 电能量 / `01` 需量 / `02` 电压·电流 /
+    `03` 功率·功率因数·谐波 / `04` 参变量 / `05` 结算日电能 / `06` 记录 / `07` 冻结次数 / `FF` LME），
+    子类按 DI2（`05` 的 254 个结算日按 20 天分桶）；`02E6/03E6/04E6`（光伏）抽到独立顶层「光伏扩展」。
+    **判定光伏必须同时看 DI3**：`05E6xxxx` 是第 230 个结算日，只看 `DI2=="E6"` 会把它误判成光伏。
+  - 组帧一律 `DLT645FrameGenerator.generate_frame((REQ, func), fv, addr)`；特殊命令的字段直接取
+    `DLT645_CMD_SCHEMA`（13H/15H 的地址域固定 `AA×6`、08H 固定 `99×6`，页面表地址对它们无效）。
+  - 判定 `evaluate_response()`：结构/校验 → 方向位 D7 → 功能码 → 异常位 D6（`decode_err` 位解释）→
+    DI 回显 → 取值（`decode_value`）。**不冒充成功**；08H 广播校时记「已发送」而不等应答。
+  - 四列文本渲染与 698 共用 `testpage_render.py`（**唯一实现**，不要再写第二份）。
+  - 两处 DI 表既有瑕疵（**只做展示、不改表**）：`dlt645_di.json` 中 16 条 `0090xxx0` 是 7 位残键
+    （与标准 `0090xxxx` 同名重复，`malformed_di_keys()` 暴露，不进树）；`04000101 日期` 声明 length=4
+    而标准/编码器是 3 字节（`length_warning` 会给提示但**不阻断**）。
+  - `dlt645_frame_schema._value_or_raw` 1.24.1 起认「日期/时间/通信地址/位串内容/数据内容」这些
+    **掩码推导字段名**（此前只有「写入数据/数据值」能触发编码，导致日期类 DI 的 14H 帧组不出来）。
+  - **发送通道（1.24.1 起）**：与 698 测试页共用 `channel_link.ChannelController`（串口/蓝牙、
+    整帧一次 ATT 写、超限报错、两通道 RX 不串味、通道落盘）；蓝牙连接归「蓝牙工具」页。
+  - **光伏无线扩展（手册 V1.6，1.24.1 起）**：树末尾有「光伏无线扩展（V1.6）」分类，12 条 DI
+    （`02EB0000` / `04E60001~2` / `04900100~107` / `028100FF`）**直接取自 `dlt645_pv_wireless.WIRELESS_DI_MAP`**
+    （不要再手写一份）；`02EB0000` 与 `FF00DD01` 的**读请求**要带数据域（`read_request_fields()` →
+    `build_read(..., field_values=)`，字段同源 `build_di_fields`），`028100FF` 手册口径是 `1EH/9EH`
+    （测试页仍可发 11H 读，备注里写明）；无线应答的摘要用 `parse_wireless_di` 行解码。
+    `04E60001` 与附件1 重叠时**以无线手册为准**（只挂在无线分类，光伏参数剩 171 条）。
+  - 回归：`test/test_dlt645_testbench.py`（**106** 项，含 [4b] 双通道段）+
+    `test/test_dlt645_test_tab_wiring.py`（**20** 项，能力位/tab 显隐/懒加载/串口·蓝牙注入/cleanup）。
 
 ### 5.5 国网协议（索引 7）
 
@@ -707,6 +750,16 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
   - **逐字节 golden**（`协议文档/8.698.45协议/代理升级流程.docx`，SA=单地址/6B/书写序 `075506980033`）：启动传输 = `68 3C 00 43 05 33 00 98 06 55 07 00 3C 7F 07 01 00 F0 01 07 00 02 03 02 06 0A 00 0A 00 06 00 04 35 63 04 03 E0 0A 04 76 31 2E 30 16 00 12 07 D0 02 02 16 00 09 04 7F 7E D9 D2 00 54 24 16`（62 字节，字段：文件大小 275811、属性 `E0`、版本 `v1.0`、块大小 2000、校验 CRC `7F7ED9D2`）；响应 `68 1A 00 C3 … 87 01 00 F0 01 07 00 00 00 00 00 AE 11 16`。`test/test_dl698_upgrade.py` A1/A3 断逐字节相等（含 HCS/FCS）
   - **落点**：`dl_t698_45_upgrade.py`（纯逻辑：分包/组帧/确认判定/校验值/读版本，零 Qt）+ `dlt698_upgrade_widget.py`（「**光伏升级**」页，仅协议8 可见）+ `frame_deframe.py`（698 分帧单一来源，见陷阱 77）；页面只用**共享串口**（`write_raw` 发送、`raw_data_received` 收，见陷阱 77）
   - **可选「读版本信息」两步（1.23.85 追加）**：`升级前读版本信息`/`升级完成后读版本信息`（默认**不勾**、落盘、传输中冻结）→ 状态机 `ver_pre`/`ver_post` 阶段；帧 = `build_read_version(sa, ca, piid, oad=…)`（GET-Request Normal + TimeTag `00`；SA/CA 取页面配置）；判定 = `check_get_response(frame, oad)`；**失败不阻断升级**（重试用尽则记日志继续）
+  - **全部块确认后先校验「传输块状态字」（F001 属性4）才允许执行升级（1.24.2 新增，禁止跳过）**：
+    最后一块的确认**不再**直接发执行升级，而是进入 `PHASE_STATUS`（`_begin_status_gate()`）→ GET-Request Normal
+    `05 01 <PIID> F0 01 04 00 00`（`dl_t698_45_upgrade.build_read_block_status(sa, ca, piid)`，与读版本共用组帧）。
+    判定 `check_block_status(frame, blocks)`：DAR 必须 0、bit-string **位数 ≥ 本次块数**、**位序兼容 MSB-first 与 LSB-first**
+    （命中 LSB 时日志给「已按反向解释」警告，两种都放行但**不静默**）、缺块 / 位数不足 / 超出块数的补位被置 1 / 多报块
+    一律 `ok=False` 并点名**缺哪一块（1-based）**。**不通过 ⇒ 按既有超时/重试口径重试状态字请求**（不重传数据块、更不冒充成功）；
+    重试用尽 ⇒ `failed`，且**一帧执行升级都不发**。只有状态字通过后，勾了自动执行才发执行升级；没勾则进 `PHASE_WAIT_RESET`
+    （随后可读升级后版本）。日志在进入闸门与通过时各给一行 `[信息]`（含块数与位序）。
+    回归：`test_dl698_upgrade.py` A15（组帧 golden + 位序/缺块/位数/补位/DAR/OAD/ACTION 矩阵）、
+    `test_dl698_upgrade_gui.py` 全流程（`run_to_end` 已认该阶段）；**块数口径单一来源仍是 `_num_blocks()`**。
   - **「升级完成后读版本」与「是否发执行升级命令」解耦 + 读前先等设备复位（用户纠错追加）**：勾了自动执行 ⇒ 执行升级确认后读；**没勾** ⇒ 最后一包写文件确认后读（有的设备收全包会**自动复位升级**）；两种情形都先走 `PHASE_WAIT_RESET`（「升级后等待(s)」默认 **10 秒**、0~600 可改、落盘，1 秒重复 QTimer 倒计时、状态行显示 `等待设备复位（剩余 N 秒）`，0 秒则立即读）。等待期间状态仍是 `finishing`（不新增 `STATE_*`）、收到的帧记 `忽略（等待设备复位中）`；`中止`/`清除`/`cleanup()`/`_finish_buttons` 都要停这个定时器。**`_retry_or_fail` 必须有等待期守卫**（独立复核 F1 实测）：等待期若被误触发超时槽（`QTimer.stop()` 不撤已投递的 timeout 事件 ⇒ 真实竞态），放行会按 `_expected_omd()` 落到 `OMD_EXEC` **凭空发出「执行升级」帧**（用户可能根本没勾它），重试用尽还会把等待误判成失败 ⇒ 等待期直接忽略超时/重试（记一条 warn）。回归：`test_dl698_upgrade_gui.py` [22]
   - **「读版本内容」两条命令**：通用 `OAD 43 00 03 00`（OI 0x4300 属性3）与**厂家扩展内部版本** `OAD FF 10 04 00`（OI 0xFF00 起的厂商自定义区间，解析器标「未知对象(0xFF10)」）。OAD 字节**只在协议模块一份**（`OAD_VERSION`/`OAD_INTERNAL_VERSION`，页面经 `_read_oad()` 取）；组帧与判定都按所选 OAD ⇒ **两条命令的响应互斥**。两条现场实帧均逐字节复现：read-version 通用 = `68 17 00 43 05 AA×6 00 AA 2A 05 01 01 43 00 03 00 00 6D 5C 16`、内部 = `68 17 00 43 05 03 24 08 04 26 20 00 CD 9A 05 01 2C FF 10 04 00 00 C2 8A 16`（`generate_get_request_normal` 的 TimeTag 走**新增可选参数** `time_tag_none`，默认不补 ⇒ 既有调用方逐字节不变）
   - **tab 标题 = 「光伏升级」**（1.23.85 改名；索引仍是 `_upgrade_tab_index`、能力仍是 `spec.has_upgrade`；改名必须同步 `test_dl698_upgrade_tab_wiring.py` 与 `test_yw645_gui.py` 的文案断言）
@@ -744,7 +797,10 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
   - **收发日志的逐字段解析（1.23.93 追加；用户口径「解析器已经很完备，要详细输出」）**：勾选「详细解析」（`chk_detail`，默认勾、落盘）后，**TX 与 RX 都**打印整帧字段表 —— 数据源是 `DLT69845Parser.parse_to_table`（**就是单帧解析页那张表**），单一实现 `dlt698_test_core.parse_table` / `detail_lines` / `format_table_rows`，**禁止在页面里另写字段拆解**（陷阱 31 的漂移根因）。四列 `字段 | 原始值 | 解析值 | 说明` 按显示宽度对齐（CJK 算 2 列）；长 hex 与结构化值必须压缩（`_compact_hex_like` / `_clip`），否则一行能撑到屏幕外 —— **压缩判据不能要求「长度为偶数」**（解析器偶尔给出被截断的奇数长度编码，早先这样判会整段漏压）。未请求的帧（主动上报）也走同一套明细。双击底部「报文」表任意行 → 送主窗口「单帧解析」页看完整解析树（`frame_to_single_parse` 信号，与监控器共用 `_send_frame_to_single_parse` 注入点）；报文表「行号 → 原字节」映射在裁剪行时必须重建，否则双击会送上一帧
   - **「编辑」= OAD/OMD 覆盖框**（就地改一两个字节；留空回到按属性生成），非法长度在预览与发送处都报 ⚠，**不静默退回**
   - 复用共享串口（`write_raw` + `raw_data_received`，自组帧用 `frame_deframe` 的 `L+2` 判据，见陷阱 77）；落盘 `dlt698_testbench.json`；「远程升级」按钮跳「光伏升级」页
-  - 回归：`test/test_dlt698_testbench.py`（279 项）+ `test/test_dlt698_test_tab_wiring.py`（22 项，接线/显隐/注入/跳转/收尾）
+  - **发送通道（1.24.1 起）**：顶部「发送通道：串口/蓝牙」走共用 `channel_link.ChannelController`；
+    蓝牙复用「蓝牙工具」页连接（`set_bluetooth_provider`），整帧一次 ATT 写、超限报错不发送；
+    收发只经 `controller.rx/send`（页面**不再**直连 `raw_data_received`，见 §8 陷阱 92）。
+  - 回归：`test/test_dlt698_testbench.py`（**294** 项，含 [18] 双通道段）+ `test/test_dlt698_test_tab_wiring.py`（**23** 项，接线/显隐/注入/跳转/收尾）
 - **A-XDR 三处口径（1.23.85 修正，改 `dl_t698_45_axdr.py` 前必读）**：① **`bit-string` 长度域 = 位数**（`04 03 E0` = 3 位、1 字节；旧实现按字节数读 ⇒ 解析上述 doc 帧必崩 `未知类型(0x76)`，因为 0x76 就是 `"v1.0"` 的 `v`）；② **定长类型不带长度域**（`date_time` tag+10 / `date` tag+5 / `time` tag+3 / `date_time_s` tag+7；规范类型表 tag 25/26/27/28 + §7.3.26/7.3.27 + 示例 `1C 07 E0 01 14 00 00 00` = 2016-01-20，**不是**「tag+长度 07+6 字节」）；③ `_encode_bit_string` 只能表达「N 字节 = 8N 位」，而 `bit-string(SIZE(3))` 这种**声明位宽 ≠ 8×字节数**的形态必须由调用方硬编码 `04 03 <byte>`（`build_file_info` 即如此）。改这三处后 `frame_gen_widget` / `reflex_web/frame_gen_utils` 的「A-XDR 自定义」模式已收口为委托 `AXDRCoder.encode`（此前各自手拼、多写长度域）。详见 §8 陷阱 76
 
 - ⚠ **改解析判据前先跑历史版本（1.23.93 现场教训，改 `csg_new_gen_parser` 任何判据前必读）**：现场报「eFC 解析不了」，我在修的过程中把 eFC 判据从 `类型 != 1` 改成 `类型 in (0, 2)`（误读文档中段，认定类型 3 不带 eFC），**把原本正确的类型 3 eFC 解析改坏了**，用户用截图打回「曾经这个帧我是能够解析的」。根因三条：① 只读了文档中段就外推（漏读后面「表29 UL-OFDMA SACK 的 eFC」）；② **动手前没验证历史版本的行为**，不知道「以前能解析」对应的是哪条路径；③ 改判据时没意识到原判据本来就是对的。
@@ -917,6 +973,8 @@ main_gui.py                     # GUI主程序 (PySide6)，应用入口，11000+
 - 通信时序图：`has_sequence_diagram`（9/10/11）
 - 光伏升级（协议8 文件传输升级+可选读版本信息）：`has_upgrade`，仅 698.45(8)；tab 文案 = 「光伏升级」
 - 协议测试（协议8 按 OAD 分类的预置测试库）：`has_test`，仅 698.45(8)；tab 文案 = 「协议测试」，紧随「光伏升级」之后
+- 645协议测试（协议6 按 DI 大类分类的预置命令树 + 读/写地址）：`has_dlt645_test`，仅 DLT645(6)；
+  tab 文案 = 「645协议测试」（紧随「协议测试」之后）；**与 `has_test` 分开**（698 语义与既有断言不变）
 - TCP 监控 / 报文对比 / 报文工具 / 测试方案：始终可见
 
 ---
@@ -1488,14 +1546,70 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
     - **控制码 `06H/86H`、`1EH/9EH` 在标准 645 里不存在**：不能塞进通用 `FUNC_NAMES`（`06H` 与 `86H` 的 `0x1F` 都是 0x06、方向相反）⇒ 用 `control_extra()` 在命中扩展时**整段替换** `control_desc`，否则会显示「未知功能码06H」、甚至把 `1EH` 标成「主站请求」。同理 `D1H + ERR=0x80` 在本手册是「目标无线接口转换器未入网」。
     - 回归：`test/test_dlt645_pv_wireless.py`（**65 项**：6 条 §4.4 原文示例 + 升级类构造帧 + 普通 DI 反例 + 工具函数），已进 `CORE_TESTS`。
 
-89. **「关于」对话框的版本号与日期只有一份来源（1.24.1 起，改 `MainWindow._build_about_dialog` 前必读）**：
-    - **旧实现是假的**：对话框写死 `版本 2.0`、更新记录只有伪造的 v2.0 / v1.0 两条，日期用 `date.today()` 现取 ⇒ 版本号与实际发行版无关，且**每打开一次「关于」日期都不一样**（用户口语：「关于里面版本号有误，并且日期随时变」）。该遗留自 1.23.43 起登记在案，1.24.1 清偿。
+89. **状态栏连接指示 + 光伏升级页参数分组框：命名与空间预算两条硬约束（1.24.0 起）**：
+    - **状态栏「串口 / 蓝牙」指示**（`main_gui._serial_conn_btn` / `_bt_conn_btn`，图标+中文，绿=已连接 / 灰=未连接）的状态**必须从 worker 实况读**，不要靠信号里那个 bool 自己记：串口读 `SerialWorker.is_connected()`（并订阅它的 `connection_changed` 刷新），蓝牙读 **`bluetooth_tool_tab.bluetooth_worker()`**（页面的访问器就叫 `bluetooth_worker()`，**没有 `worker()`** —— 写错会被 `_refresh_conn_indicators` 的 `except` 吞掉、指示永远灰）并订阅页面新增的 `BluetoothToolWidget.connection_state_changed`。蓝牙页是**懒加载**的：没创建过就是「未连接」，所以 `_refresh_conn_indicators` 里全是 `getattr` 兜底。
+    - **染色只能走 `app_icons.render_pixmap(name, size, color)`**：`load_icon` 的引擎只跟随主题前景色，做不到「绿/灰按状态」；高 DPI 要先按 `devicePixelRatioF()` 放大 `size`、再 `pm.setDevicePixelRatio(dpr)`，否则 150% 缩放下发虚。切主题必须重刷（已挂在 `_restyle_for_theme`）。
+    - **「光伏升级」页的空间预算是刻意留的，别当冗余删**：参数区 5 个分组框包在**滚动容器**里（`PARAMS_MIN_HEIGHT=132`）、日志有**最小高度**（`LOG_MIN_HEIGHT=132`）、版本信息两栏上限 **124**。删掉滚动容器或任一下限后，矮窗口（本项目最小 1000×700）下布局会把分组框压到只剩标题行（实测 27px、控件全被裁），日志被版本框挤到 56px。
+    - 回归：`test/test_statusbar_stats.py` 的连接指示用例 + `test/test_dl698_upgrade_gui.py`（523 项）。
+
+93. **QSS 的行内复选框必须用 `QAbstractItemView::indicator`（`QCheckBox::indicator` 管不到，1.24.1 修）**：
+    - **现象**：树/表里的行内复选框（协议测试页命令树、串口工具命令表、归档页等）**未勾选时白底白框**，
+      现场报「好多复选框看不清楚，边框没有颜色」；勾选后只有一个勾/色块，靠位置猜。
+    - **根因**：4 套 QSS 只写了 `QCheckBox::indicator`（独立按钮式复选框），**item view 的行内指示器是
+      另一个绘制路径**（`QStyle::PE_IndicatorViewItemCheck`），QSS 未覆盖时按调色板画；本项目的
+      `background-color` 经 QSS 映射到调色板后，未选指示器的边框与行底色同色 ⇒ default 下实测全 `#ffffff`。
+    - **修法**：每套 QSS 在 `QCheckBox::indicator:indeterminate` 之后追加
+      `QAbstractItemView::indicator` / `:checked` / `:indeterminate` 三条（未选：灰框+底色；已选：强调色底；
+      部分选：浅强调）。抄现有的 `QCheckBox::indicator` 配色即可，**不要**新增图标资源。
+      实测该选择器同时覆盖 `QTreeView/QTreeWidget`、`QTableView/QTableWidget`、`QListView/QListWidget`。
+    - **判据必须是渲染级**：静态断言（QSS 里有 `border:`）挡不住「白底白框」。`test_theme_settings.py` 1d 节
+      的做法：`ThemeManager.apply` 后建一棵 `QTreeWidget`（`setRootIsDecorated(False)` 去掉分支箭头），
+      在 `visualItemRect(...)` 左侧 24px 内统计「与行底色 WCAG 对比度 ≥ 3 的像素数 ≥ 20」，并含
+      **反例自检**（把 indicator 规则整段删掉后该判据必须变红）。新增主题/改配色后跑它。
+    - **附带口径**：原生主题（fusion / windows / windowsvista 主体）不写复选框样式，由系统绘制，
+      测试按「该主题是否本来就有 `QCheckBox::indicator`」决定是否参与断言（`windowsvista` 有一段只修
+      输入框的补充 QSS，不能用「qss 非空」当判据）。
+
+92. **协议测试页的双通道（串口 / 蓝牙）三条硬约束（1.24.1 起，改 `channel_link.py` 或两页收发前必读）**：
+    - **收发只能经 `ChannelController`**：页面直连 `raw_data_received` = 双份 RX；蓝牙通道又订阅
+      `notification_received`，两路字节会混进同一个 `_rx_buf`，半帧跨通道拼接后**判定全错**。
+      控制器按「当前通道」过滤后才 `rx.emit`；切通道必须清页面分帧缓冲（`channel_changed` → `_rx_buf.clear()`）。
+      源码护栏（698 页 [16]）现断言「页面不出现 `raw_data_received.connect`」。
+    - **蓝牙帧必须整帧一次 ATT 写，超限就报错**：`BluetoothWorker.send_data(single_write=True)`
+      超限会拒绝；升级页那句「请调小每包字节数」对测试页是误导 ⇒ `ChannelController.send()`
+      **先按 `single_write_limit()` 预检、不调用 worker**，直接给「一次 ATT 写上限 M 字节，该帧 N 字节」。
+      **不要**改成自动分包（设备会收到被切断的 698/645 帧）。
+    - **连接生命周期归「蓝牙工具」页**：页面只经 `set_bluetooth_provider(MainWindow._upgrade_bluetooth_source)`
+      取 worker；`cleanup()` 只断信号、**不断开**连接；蓝牙页懒加载 ⇒ 先选蓝牙后连接是常态，
+      必须 `showEvent` 里 `rebind_bluetooth()`（否则一直停在「未连接」）。
+    - 回归：`test/test_channel_link.py`（49 项）+ 两页双通道段（698 [18] / 645 [4b]）+ 两个接线测试的注入断言。
+
+91. **645 数据标识表的两处既有瑕疵，不要在解析/组帧层「顺手改表」（1.24.1 记录）**：
+    - `dlt645_di.json` 合并 `dlt645_pv_ext` 后共 1781 键，其中 **16 条是 7 位残键**（`0090000`…`0090F00`，
+      生成「第1象限无功费率 N」时少写一位）。它们与标准条目 `0090xxxx` **同名重复**，`encode_di` 只接受 8 位
+      ⇒ 不能下发。645 测试页用 `dlt645_test_core.malformed_di_keys()` 显式暴露并**不进树**；
+      若将来重生成 DI 表，测试会因「残键集合变化」先变红。
+    - `04000101 日期` 在表里声明 `length=4`，而 DL/T645 与 `encode_value/decode_value` 是 **3 字节**（YY MM DD 低字节在前）。
+      `length_warning` 会给出「声明 4 / 实际 3」提示，但**不阻断组帧**（与既有「长度不符仅提示」口径一致）。
+      **不要**为了消掉提示去改表或改编码器 —— 那会让标准设备的帧变非法。
+    - 645/其它页若需要「读某 DI」，一律用 `dlt645_test_core.build_read(di, addr)`（内部走唯一组帧器），
+      不要手拼 `68 … 16`，也不要另存一份 DI 名称表。
+
+90. **自绘画布与字符格式不会自动跟随主题（1.24.0 起，改任何 QGraphicsView / paintEvent / QTextCharFormat 前必读）**：
+    - **谁需要自己跟**：QSS 只覆盖标准控件。「非 QSS」的三类地方必须自己按主题取色 —— ① `QGraphicsView` 的 viewport（`setStyleSheet("background-color: …")` 或 `setBackgroundBrush`）+ 场景里每个 item 的 `QPen`/`setDefaultTextColor`；② `paintEvent` 里 `fillRect` 的区域（行号槽、自绘网格）；③ `QTextCharFormat`（`setForeground`/`setBackground`，会**盖掉** QSS 给 QTextEdit 的配色）。
+    - **配色单源 = `canvas_theme.py`**（`CANVAS_PALETTES[False/True]` + `palette(dark)`，纯字典、不 import Qt）。深色一套与日志面板 `#1E1E1E` 同族。**不要再在各个 wiget 里各写一份 `#FAFAFA`/`#333`/`#999`**：拓扑图曾写死 `#FAFAFA` 白底 + `#333` 深轮廓 ⇒ 深色主题下整页白底（实测亮底占比 **65.6%**）、节点轮廓与角色名几乎看不见。
+    - **必须同时接三处**：① 组件自己的 `restyle_for_theme(dark)`（拓扑/字节视图/测试方案/原始日志快照/TCP 监控都已实现）；② 主窗口 `_restyle_for_theme` 里对**已创建**实例的调用；③ **懒加载页创建后立刻** `tab.restyle_for_theme(self._is_dark_theme())`（同陷阱 86：只挂回调，先选深色再首开该页就会留浅色）。
+    - **验收手段**：`test_appearance_gui.py::test_dark_canvas_follows_theme` 做**全页像素扫描**（深色下每页亮底占比 < 5%，拓扑修复前 65.6%）+ 逐组件断言（视图底色、节点轮廓、角色名、字节视图字符背景、行号槽、勾选框与徽章）。改这类画布后先跑它，别只靠眼看。
+    - **顺带清掉的一颗地雷**：`test/test_plan_widget.py` 原是**产品模块的过期副本**（2600 行、零断言、无 `__main__`），而 `test/` 常在 `sys.path` 前部 ⇒ 测试里 `import test_plan_widget` 拿到的是这份旧控件（主程序测试假绿）。已删除并换成 `test/test_test_plan_widget.py`（真实冒烟 + 「test/ 下不得有同名副本」守卫）。**新增/重命名测试文件时不要与产品模块同名**。
+
+94. **「关于」对话框的版本号与日期只有一份来源（1.24.3 起，改 `MainWindow._build_about_dialog` 前必读）**：
+    - **旧实现是假的**：对话框写死 `版本 2.0`、更新记录只有伪造的 v2.0 / v1.0 两条，日期用 `date.today()` 现取 ⇒ 版本号与实际发行版无关，且**每打开一次「关于」日期都不一样**（用户口语：「关于里面版本号有误，并且日期随时变」）。该遗留自 1.23.43 起登记在案，1.24.3 清偿。
     - **现在两处都只读单一来源**：版本行 = `about_version_line()`（`APP_VERSION` + `CHANGELOG` 顶部条目日期）；更新记录 = `build_about_changelog_html()`（同一份 `CHANGELOG`：当前版本至多 `ABOUT_NOTE_ITEMS`(=4) 条要点摘要 + 最近 `ABOUT_HISTORY_VERSIONS`(=8) 个「版本号（日期）」+ 完整记录入口）。**不要在对话框里写死任何版本号或日期，也不要把 `date.today()` / `datetime.now()` 加回来** —— 「关于」的文案必须与窗口标题一致、且可重复（同进程两次构造逐字相同）。
     - **版本与 `CHANGELOG` 不一致时的兜底**：`about_release_date()` 回落 `BUILD_DATE`（不冒出比版本还新的日期）；`release_check.py` 另有「`CHANGELOG` 顶部 == `APP_VERSION`」硬校验，两者都要过。
-    - **【1.24.2 修】标题栏 ✕ 点不动 = `setWindowFlags` 把 `WindowCloseButtonHint` 弄丢了**：**PySide6 的 `WindowType` 标志位取反（`~`）会连带清掉 `0x08000000`（CloseButtonHint）** —— 实测默认 `QDialog` 的 `flags=0x08003003`，执行 `f & ~WindowContextHelpButtonHint` 后只剩 `0x3003`（`int(f) & ~int(HELP)` 才是对的，PySide6 的 flag 对象运算不行）。此时窗口仍有 `WS_SYSMENU`（标题栏照画 ✕），但 Qt 把 `SC_CLOSE` 置灰 ⇒ 点击被系统丢弃，现场表现为「关闭按钮不起作用」，只能用「确定」或 Esc。**正确写法：先 `& ~WindowContextHelpButtonHint` 再 `| WindowCloseButtonHint`（顺序不能反：`(f | CLOSE) & ~HELP` 仍会被 `~` 清掉）**；`_show_system_settings_dialog` 是同款写法，已同修。回归：`test_about_version.py` 断言 `windowFlags()` 含 CloseButtonHint、不含 ContextHelpHint，并对两处对话框做源码守卫 + 旧值 `0x3003` 负例。
+    - **【1.24.3 修】标题栏 ✕ 点不动 = `setWindowFlags` 把 `WindowCloseButtonHint` 弄丢了**：**PySide6 的 `WindowType` 标志位取反（`~`）会连带清掉 `0x08000000`（CloseButtonHint）** —— 实测默认 `QDialog` 的 `flags=0x08003003`，执行 `f & ~WindowContextHelpButtonHint` 后只剩 `0x3003`（`int(f) & ~int(HELP)` 才是对的，PySide6 的 flag 对象运算不行）。此时窗口仍有 `WS_SYSMENU`（标题栏照画 ✕），但 Qt 把 `SC_CLOSE` 置灰 ⇒ 点击被系统丢弃，现场表现为「关闭按钮不起作用」，只能用「确定」或 Esc。**正确写法：先 `& ~WindowContextHelpButtonHint` 再 `| WindowCloseButtonHint`（顺序不能反：`(f | CLOSE) & ~HELP` 仍会被 `~` 清掉）**；`_show_system_settings_dialog` 是同款写法，已同修。回归：`test_about_version.py` 断言 `windowFlags()` 含 CloseButtonHint、不含 ContextHelpHint，并对两处对话框做源码守卫 + 旧值 `0x3003` 负例。
     - 回归：`test/test_about_version.py`（**53 项** offscreen：单一来源、源码守卫（四个生成文案的函数体内不得出现 `date.today`/`datetime.now`，**docstring 不计**否则自我误报）、两次构造一致、要点条数/摘要字数/历史版本条数上限、`CHANGELOG` 为空与版本漂移两种兜底、窗口标志位与关闭按钮守卫、负例自检），已进 `CORE_TESTS`。
 
-90. **测试不要读「本机 CPU 核数」——CI 只有 4 核，本地 14 核（1.24.2 后 CI 连红三次的根因，改 `choose_thread_count` 相关断言前必读）**：
+95. **测试不要读「本机 CPU 核数」——CI 只有 4 核，本地 14 核（1.24.3 修 CI 连红三次的根因，改 `choose_thread_count` 相关断言前必读）**：
     - `downloader.choose_thread_count` 的上界是 `min(limit, by_size, by_cpu)`，其中 `by_cpu = min(MAX_THREADS, cpus * 4)`。`test_auto_thread_count_is_default_not_max` 原来写 `choose_thread_count(1<<30, 32) > DEFAULT_MAX_THREADS(16)`：本地 14 核 ⇒ `by_cpu=56` ⇒ 32 > 16 绿；**GitHub runner 4 核 ⇒ `by_cpu=16` ⇒ 32 被压成 16 ⇒ 断言必然失败**（CI 三次运行失败项固定 `test/test_downloader.py`，本地永远复现不出来）。
     - **规则**：凡是断言线程数具体取值（而不是「≤ 上限」这类不等式），必须显式传 `cpu_count=`（函数本来就留了这个可测参数）；「自动 vs 最大」的语义断言用 `cpu_count=8`，并另钉一条低核数口径（4 核 ⇒ 16），把 CI 环境的真实取值也覆盖住。
     - 回归：`test/test_downloader.py` 42/42（本机 14 核 + `os.cpu_count=lambda:4` 模拟 CI 两种环境都跑过）。
@@ -1873,7 +1987,7 @@ python test/test_spectrum_gui.py        # 频谱图 GUI offscreen（含日志块
 - **地址单一来源 `main_gui.AUTHOR_GITHUB_URL`**：按钮 tooltip / 跳转 / 测试都读它，改地址只改一处（`test/test_about_github_star.py` 有「main_gui.py 内 URL 字面量只有一处」守卫）；`QDesktopServices.openUrl` 返回 False（未装浏览器）或地址为空时**弹窗给出可手动复制的地址**，不静默无反应（同 §8 陷阱 23）
 - 「关于」对话框拆出 `_build_about_dialog()`（构造与 `exec()` 分离，便于测试直接检查控件与接线）；菜单接线不变（仍由 `test_menu_wiring.py` 守卫）
 - 新增 `test/test_about_github_star.py`（22 项，offscreen，登记 `release_check.CORE_TESTS`）；**变异反证 2 条**（删 `clicked.connect` / 加第二份 URL 字面量）均实测变红后还原
-- 遗留（**1.24.1 已清偿**）：该对话框内「版本 2.0」与更新记录曾是早期**写死的占位文案**，未读 `APP_VERSION` / `CHANGELOG` —— 现改为单一来源、日期静态，见 §8 陷阱 89
+- 遗留（**1.24.3 已清偿**）：该对话框内「版本 2.0」与更新记录曾是早期**写死的占位文案**，未读 `APP_VERSION` / `CHANGELOG` —— 现改为单一来源、日期静态，见 §8 陷阱 94
 
 ### 1.23.42 — 2026-09-21
 

@@ -140,3 +140,24 @@ def load_icon(name: str) -> QIcon:
     if _svg_bytes(name) is None:
         return QIcon()
     return QIcon(_LucideIconEngine(name))
+
+
+def render_pixmap(name: str, size: int, color: str) -> QPixmap:
+    """按**指定颜色**把 Lucide 图标渲染成 QPixmap（大小 `size` 像素，正方形）。
+
+    `load_icon` 的颜色跟随主题前景色，用于按钮/页签；这里由调用方给定颜色，
+    用于**状态灯**（如状态栏的「串口 / 蓝牙」指示：绿=已连接、灰=未连接）。
+    `color` 接受 `#rrggbb` 或 Qt 颜色名；图标缺失时返回全透明 pixmap。
+    高 DPI 由调用方按 devicePixelRatio 放大 `size` 后 `setDevicePixelRatio`。
+    """
+    size = max(1, int(size))
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    renderer = _renderer(name, QColor(color).name())
+    if renderer is None:
+        return pm
+    painter = QPainter(pm)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    renderer.render(painter, QRectF(0, 0, size, size))
+    painter.end()
+    return pm

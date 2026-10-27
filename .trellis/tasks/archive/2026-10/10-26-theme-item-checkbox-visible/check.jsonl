@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "复核项：QSS 单源、4 套主题一致、渲染级断言可判别"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "复核项：变异自检是否真红、既有主题测试不回归"}

@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "§7j 长流程页通道口径（串口/蓝牙分流、不建/不断连接）+ §7n 645 测试页契约 + §8 Qt 陷阱（按钮不裁字、offscreen）"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复用升级页已跑通的蓝牙通道口径与 bluetooth_worker.send_data(single_write)，禁止第二套分包/状态文案"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "测试要求：脚本式 check、双通道不串味断言、变异反证、门禁登记"}

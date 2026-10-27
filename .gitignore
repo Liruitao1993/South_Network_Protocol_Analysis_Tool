@@ -113,6 +113,8 @@ testfile.txt
 /dlt698_upgrade_config.json
 # 协议8 协议测试页运行时参数（地址/CA/PIID/超时/OAD 覆盖等，随使用变化，不入库）
 /dlt698_testbench.json
+# 协议6 645协议测试页运行时参数（表地址/PA/密码/操作者/超时/循环/当前页，随使用变化，不入库）
+/dlt645_testbench.json
 # 生产测试架页运行时参数（5 条发送框/测试架参数/显示偏好，随使用变化，不入库）
 /production_testbench.json
 # TCP 监控运行时参数（记录目录等，随使用变化，不入库）

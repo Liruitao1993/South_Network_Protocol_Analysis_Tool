@@ -61,6 +61,8 @@ OAD_VERSION = bytes.fromhex("43000300")
 #: 属性 4、索引 0。实帧 golden（用户提供，HCS/FCS 实测通过、本模块可逐字节复现）：
 #: `68 17 00 43 05 03 24 08 04 26 20 00 CD 9A 05 01 2C FF 10 04 00 00 C2 8A 16`。
 OAD_INTERNAL_VERSION = bytes.fromhex("FF100400")
+#: OI F001 属性4「传输块状态字」（只读，bit-string；bitN=1 表示第 N 块传输成功，N 从 0 起）
+OAD_BLOCK_STATUS = bytes.fromhex("F0010400")
 
 DEFAULT_BLOCK_SIZE = 600               # 默认每包字节数（串口缓冲与 698 帧长经验值）
 IMMEDIATE_EXEC_TIME = b"\xFF" * 7      # 执行升级时间 = date_time_s 全 FF ⇒ 立即执行
@@ -504,6 +506,8 @@ def check_action_response(frame: bytes, expect_omd: bytes) -> dict:
                 f"（{link.get('APDU解析错误')}）" if link.get("APDU解析错误") else "")
             return out
 
+        out["apdu"] = apdu                        # 完整 APDU 节点（状态字等取原始数据用）
+        out["data_node"] = apdu.get("数据")       # Get-Result 的 Data（若为数据分支）
         out["apdu_type"] = str(apdu.get("APDU类型", ""))
         if apdu.get("解析状态") != "成功" or str(apdu.get("服务码", "")) != "0x87":
             out["reason"] = f"不是 ACTION-Response（APDU 类型={out['apdu_type'] or '未知'}）"
@@ -672,6 +676,8 @@ def check_get_response(frame: bytes, expect_oad: bytes = OAD_VERSION) -> dict:
                 f"（{link.get('APDU解析错误')}）" if link.get("APDU解析错误") else "")
             return out
 
+        out["apdu"] = apdu                        # 完整 APDU 节点（状态字等取原始数据用）
+        out["data_node"] = apdu.get("数据")       # Get-Result 的 Data（若为数据分支）
         out["apdu_type"] = str(apdu.get("APDU类型", ""))
         if apdu.get("解析状态") != "成功" or str(apdu.get("服务码", "")) != "0x85":
             out["reason"] = f"不是 GET-Response（APDU 类型={out['apdu_type'] or '未知'}）"
@@ -716,6 +722,136 @@ def check_get_response(frame: bytes, expect_oad: bytes = OAD_VERSION) -> dict:
         return out
 
 
+# ─── 传输块状态字（F001 属性4）：全部块确认后、执行升级前的闸门 ──────────────
+# 协议依据（《面向对象的用电信息数据交换协议 20210910》F001 类）：
+#   属性4（传输块状态字，只读）::= bit-string
+#   「按 bit 位标识每个数据块的传输状态。bitN=0 表示未传输，bitN=1 表示传输成功
+#    （N 从 0…总传输块数-1）」
+# 位序按 A-XDR/ASN.1 BER 口径：bit0 = 首字节最高位。同标准的「文件属性 bit-string(SIZE(3))，
+# bit0 读/bit1 写/bit2 执行」实帧是 `04 03 E0`（build_file_info 默认 0xE0）⇒ 自证 bit0=MSB。
+# 为兼容个别反向编码设备，判定时同时尝试低位在前解释（命中则接受并让页面记警告）。
+
+
+def build_read_block_status(sa: bytes, ca: int, piid: int) -> bytes:
+    """组「读传输块状态字」整帧（GET-Request Normal，OAD=F0010400）。
+
+    与「读版本信息」同一实现（`build_read_version` + 指定 OAD），末尾 TimeTag=00。
+    现场实帧（SA=单地址+`11×6`, CA=0x10, PIID=0）逐字节自证：
+    `68 17 00 43 05 11 11 11 11 11 11 10 6A 36 05 01 00 F0 01 04 00 00 B0 8B 16`。
+    """
+    return build_read_version(sa, ca, piid, OAD_BLOCK_STATUS)
+
+
+def _bit_at(raw: bytes, index: int, msb_first: bool) -> int:
+    """取第 index 位（越界按 0）；`msb_first=True` ⇒ bit0 是首字节 bit7。"""
+    if index < 0 or index // 8 >= len(raw):
+        return 0
+    byte = raw[index // 8]
+    shift = (7 - index % 8) if msb_first else (index % 8)
+    return (byte >> shift) & 1
+
+
+def parse_block_status(node) -> dict:
+    """Get-Response 的 Data 节点 → 位图信息 ``{valid, reason, bits, raw, bytes}``。
+
+    只认 A-XDR `bit-string`（数据域为 ``04 <位数> <字节…>``，解析器已按位宽解出）。
+    非 bit-string / 空数据 → ``valid=False`` + 可读原因（不抛）。
+    """
+    import re
+
+    out = {"valid": False, "reason": "", "bits": 0, "raw": "", "bytes": b""}
+    if not isinstance(node, dict):
+        out["reason"] = "响应里没有数据（Get-Result 不是数据分支）"
+        return out
+    if str(node.get("类型") or "") != "bit-string":
+        out["reason"] = f"状态字类型不是 bit-string（{node.get('类型') or '未知'}）"
+        return out
+    raw_hex = str(node.get("原始值") or "").strip().replace(" ", "")
+    try:
+        raw = bytes.fromhex(raw_hex) if raw_hex else b""
+    except ValueError:
+        raw = b""
+    if not raw:
+        out["reason"] = "状态字数据为空"
+        return out
+    match = re.search(r"(\d+)", str(node.get("说明") or ""))
+    bits = int(match.group(1)) if match else len(raw) * 8
+    if bits <= 0:
+        out["reason"] = "状态字位数为 0"
+        return out
+    out.update(valid=True, bits=bits, raw=raw_hex.upper(), bytes=raw)
+    return out
+
+
+def check_block_status(frame: bytes, expect_blocks: int) -> dict:
+    """判定「传输块状态字」响应是否**完整**（所有块都传输成功）。
+
+    - 基础判定复用 `check_get_response(frame, OAD_BLOCK_STATUS)`（解析器 + OAD 回显 + DAR）；
+    - 完整性：``位数 >= 块数``、``0..块数-1`` 全 1、``块数..位数-1`` 全 0（允许按字节补齐）；
+      两种位序（MSB/LSB）任一满足即通过，`order` 标明用了哪种；
+    - ``matched``：是本次状态字响应（OAD 回显正确或带 DAR）⇒ 页面据此「重试」而不是「忽略杂帧」；
+    - 任何异常/坏帧都不抛。
+
+    Returns: ``{ok, matched, reason, dar, bits, raw, order, missing, expect, apdu, data_node}``
+    """
+    base = check_get_response(frame, OAD_BLOCK_STATUS)
+    out = {
+        "ok": False,
+        "matched": bool(base.get("ok")) or base.get("dar") is not None,
+        "reason": str(base.get("reason") or ""),
+        "dar": base.get("dar"),
+        "bits": 0,
+        "raw": "",
+        "order": "",
+        "missing": [],
+        "expect": int(expect_blocks or 0),
+        "apdu": base.get("apdu"),
+        "data_node": base.get("data_node"),
+    }
+    if not base.get("ok"):
+        return out
+
+    parsed = parse_block_status(base.get("data_node"))
+    out["bits"] = parsed["bits"]
+    out["raw"] = parsed["raw"]
+    if not parsed["valid"]:
+        out["reason"] = parsed["reason"]
+        return out
+
+    want = out["expect"]
+    if want <= 0:
+        out["reason"] = f"本地块数无效（{expect_blocks!r}），无法判定状态字"
+        return out
+    if parsed["bits"] < want:
+        out["reason"] = f"状态字位数 {parsed['bits']} 小于本次块数 {want}"
+        return out
+
+    raw, bits = parsed["bytes"], parsed["bits"]
+    candidates = {}
+    for msb in (True, False):
+        missing = [i + 1 for i in range(want) if _bit_at(raw, i, msb) == 0]
+        extra = [i + 1 for i in range(want, bits) if _bit_at(raw, i, msb) == 1]
+        if not missing and not extra:
+            out.update(ok=True, order=("msb" if msb else "lsb"),
+                       reason=(f"状态字 {bits} 位全部成功"
+                               f"（位序 {'MSB-first' if msb else 'LSB-first'}）"))
+            return out
+        candidates[msb] = (missing, extra)
+
+    missing, extra = min(candidates.values(),
+                         key=lambda mv: len(mv[0]) + len(mv[1]))
+    out["missing"] = missing
+    parts = []
+    if missing:
+        shown = "、".join(str(x) for x in missing[:12])
+        parts.append(f"缺块 {shown}" + (f" 等 {len(missing)} 块" if len(missing) > 12 else ""))
+    if extra:
+        shown = "、".join(str(x) for x in extra[:12])
+        parts.append(f"多报块 {shown}" + (f" 等 {len(extra)} 块" if len(extra) > 12 else ""))
+    out["reason"] = "状态位图未通过：" + "；".join(parts or ["位图全 0"])
+    return out
+
+
 __all__ = [
     "OMD_START", "OMD_WRITE", "OMD_EXEC", "OAD_VERSION", "OAD_INTERNAL_VERSION",
     "DEFAULT_BLOCK_SIZE", "IMMEDIATE_EXEC_TIME", "WILDCARD_SA",
@@ -723,5 +859,7 @@ __all__ = [
     "build_file_info", "build_start_transfer", "build_write_block",
     "build_exec_upgrade", "build_read_version", "calc_checksum_value",
     "check_action_response", "check_get_response", "version_rows",
+    "OAD_BLOCK_STATUS", "build_read_block_status", "parse_block_status",
+    "check_block_status",
     "max_block_bytes_for_frame_limit",
 ]

@@ -103,6 +103,10 @@ def main() -> int:
         check("页面已替换占位符",
               win.tab_widget.widget(idx) is tab)
         check("复用主窗口串口线程", tab._serial_worker is win.serial_worker)
+        check("注入蓝牙取值回调（复用蓝牙工具页连接）",
+              callable(getattr(tab, "_bt_provider", None))
+              and tab._bt_provider == win._upgrade_bluetooth_source,
+              str(tab._bt_provider))
         check("未自建串口引用", not hasattr(tab, "serial_port") and
               not hasattr(tab, "serial"))
 

@@ -46,6 +46,8 @@ class ProtocolSpec:
     has_upgrade: bool = False
     # 698 协议测试页（按 OAD 分类的预置测试库；协议8）
     has_test: bool = False
+    # 645 协议测试页（按 DI 大类分类的预置命令树 + 地址读写；协议6）
+    has_dlt645_test: bool = False
     # 解析级别族：None | csg | gw | hdc10（GUI 控件共用/复用）
     parse_level_family: Optional[str] = None
     # ED..EE 监控包装：单帧「ED监控协议」勾选 + 包装头格式下拉 + 字节剔除
@@ -159,6 +161,7 @@ _PROTOS: Tuple[ProtocolSpec, ...] = (
         # 1.22.0 起协议6 组帧/预设已开放；preset set_protocol 需同步 mode
         preset_mode="dlt645",
         has_dlt645_sim=True,
+        has_dlt645_test=True,
         extract_strategy="line",
         validator_class="validator.dlt645_validator:DLT645Validator",
         parser_wrapper="dlt645",
@@ -389,6 +392,11 @@ def protocols_with_upgrade() -> Tuple[int, ...]:
 
 def protocols_with_test() -> Tuple[int, ...]:
     return tuple(p.index for p in _PROTOS if p.has_test)
+
+
+def protocols_with_dlt645_test() -> Tuple[int, ...]:
+    """有「645 协议测试」页的协议索引（仅协议6）。"""
+    return tuple(p.index for p in _PROTOS if p.has_dlt645_test)
 
 
 def protocols_with_monitor() -> Tuple[int, ...]:

@@ -1531,3 +1531,135 @@ filter_batch_summaries 纯函数 + BATCH_STATUS_FILTERS；State 搜索词/状态
 ### Status
 
 [OK] **Completed**
+
+
+## Session 46: 预设命令页：粘贴报文添加按钮 + 按协议一键批量替换地址
+<!-- trellis-session: v=2 fp=0c5851ac304d4fc4 -->
+
+**Date**: 2026-10-26
+**Task**: 预设命令页：粘贴报文添加按钮 + 按协议一键批量替换地址
+**Branch**: `main`
+
+### Summary
+
+预设页新增「添加命令」（弹框可直接粘贴报文，剪贴板合法HEX自动带入，确定前校验/归一化）与「批量替换地址（当前协议）」（地址字段按 frame_addr_fix 动态生成、一键逐条替换并重算校验、确认框+日志+汇总、全失败不写盘）；纯逻辑 preset_protocol_index/AddrBatchItem/batch_fix_presets；新增 test/test_preset_paste_addr.py 82 项入 CORE_TESTS，变异反证3条，真机几何审计零重叠，release_check --with-gui 仅剩3项本机已知 offscreen 退出期 fastfail（HEAD 对照复现同样的3项）。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `81b380c` | feat(preset): 预设页支持粘贴报文添加 + 按协议一键批量替换地址 |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 47: 645 协议测试页：DI 大类命令树 + 地址读写 + 特殊命令
+<!-- trellis-session: v=2 fp=5dacbc0d074f8c06 -->
+
+**Date**: 2026-10-26
+**Task**: 645 协议测试页：DI 大类命令树 + 地址读写 + 特殊命令
+**Branch**: `main`
+
+### Summary
+
+仿照 698 协议测试页为协议6 新建「645协议测试」页：顶部表地址/读地址(13H 回填)/写入地址(15H)/广播校时(08H)/超时/循环/发送停止；左栏 PA/密码/操作者；中栏读数据(11H)/写数据(14H)/特殊命令三页（筛选+DI 大类树+当前项+帧预览，勾选顺序下发、等应答再发下一条、超时继续）；右栏收发日志+逐字段明细+判定结论；底部信息表/报文表双击送单帧解析。纯逻辑 dlt645_test_core（catalog/command_groups/组帧全走 DLT645FrameGenerator/evaluate_response 不冒充成功/malformed_di_keys 暴露 16 条 7 位残键），共享 testpage_render 与 698 同一份四列渲染。顺带修 dlt645_frame_schema._value_or_raw 不认日期/时间/通信地址等掩码字段导致 14H 组不出的真缺陷。接线：protocol_registry.has_dlt645_test(仅6)+protocols_with_dlt645_test、main_gui 第二套懒加载 tab、pyinstaller_meta hiddenimports、.gitignore 加 dlt645_testbench.json。测试：test_dlt645_testbench 89 项 + test_dlt645_test_tab_wiring 19 项（均 GUI_TESTS），4 条变异反证，真机几何审计 1280x820/1000x700 零重叠；release_check --with-gui PASS=171 FAIL=0 WARN=0（白名单补新 wakeup 消费者后）。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `af045c6` | feat(645): 新增「645协议测试」页（DI 大类命令树 + 地址读写 + 特殊命令） |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 48: 698/645 协议测试页：串口/蓝牙双通道
+<!-- trellis-session: v=2 fp=bba8fc2a8d155f41 -->
+
+**Date**: 2026-10-26
+**Task**: 698/645 协议测试页：串口/蓝牙双通道
+**Branch**: `main`
+
+### Summary
+
+两个协议测试页加「发送通道：串口/蓝牙」：蓝牙复用蓝牙工具页连接（main_gui 注入 provider），整帧一次 ATT 写、超限明确报错不发送；新增共用 channel_link.ChannelController（rx 分流/ready 原因/状态文案含 MTU+上限/send 超限预检/cleanup 只断信号），两页收发改走控制器（删除页内 raw_data_received 直连、RX 改名 _on_rx_data 保留旧别名、通道落盘、showEvent 重绑、cleanup 转交）；698 顶部加通道行（294 项）、645 三行顶栏（106 项）、新增 test_channel_link 49 项、接线注入断言（23/20）；3 条变异反证；真机几何 645@1280x820/1000x700、698@1500x900/1440x880 零重叠不裁字；release_check --with-gui PASS=172 FAIL=0 WARN=0。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c51dda6` | feat(proto-test): 698/645 协议测试页支持串口 / 蓝牙发送通道 |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 49: 主题：树/表行内复选框可见性（QAbstractItemView::indicator）
+<!-- trellis-session: v=2 fp=a6aeab9bd31ccf05 -->
+
+**Date**: 2026-10-26
+**Task**: 主题：树/表行内复选框可见性（QAbstractItemView::indicator）
+**Branch**: `main`
+
+### Summary
+
+修复树/表/列表行内复选框未勾选时白底白框（QCheckBox::indicator 管不到 item view 指示器；真实平台 default 实测整块 #ffffff）：4 套 QSS（default/dark/glass/mica）各补 QAbstractItemView::indicator 三态（灰框+底色/强调色/浅强调），tree/table/list 同源生效。回归：test_theme_settings 1d 节 22 项（静态规则 + 渲染取像素算对比度≥3 且像素数≥20 + 勾选可区分 + 反例自检），另做产品代码变异反证（删规则→4 红，还原）；真实平台 645 命令树未选框 60 个高对比像素（修复前 0）、边框对比 7.56:1（dark 5.36），QTableWidget 同 7.56:1；release_check --with-gui PASS=172 FAIL=0 WARN=0。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6869697` | fix(theme): 树/表行内复选框补可见边框（QAbstractItemView::indicator） |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 50: 645 测试页接入无线模组接口手册 V1.6 扩展 DI
+<!-- trellis-session: v=2 fp=b138943dc95c34c7 -->
+
+**Date**: 2026-10-26
+**Task**: 645 测试页接入无线模组接口手册 V1.6 扩展 DI
+**Branch**: `main`
+
+### Summary
+
+根因：测试页分类树只来自 merge_pv_di_map（基础+附件1 02E6/03E6/04E6），手册 V1.6 的 12 条 DI 在 dlt645_pv_wireless.WIRELESS_DI_MAP（仅组帧页接了）。新增顶层「光伏无线扩展（V1.6）」按手册分组（数据转发/无线参数/拓扑/升级/版本/在网状态）12 叶子；DiItem 增 wireless/note，di_info 回落无线表；04E60001 与附件1 重叠以手册为准（光伏参数 172→171，总数 1776 无重复）；read_request_fields（02EB0000 Z/C/T/DATA、FF00DD01 条目）+ build_read(field_values)，读页动态字段与手册备注；无线应答摘要走 parse_wireless_di；命令页补 06H/1EH。顺带修 schema 写数据 14H 未分派无线编码器（04900105 组不出）。测试 106→132 项（[10] 段）+ 接线树计数 10→11；变异反证 4 条（读字段恒空/取值不分派/不加分类/不去重）；真机核对 11 顶层/12 叶子/字段已绘制/备注可见；release_check --with-gui PASS=172 FAIL=0 WARN=0。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `62efa08` | feat(645): 协议测试页接入无线模组接口手册 V1.6 扩展 DI |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 51: 698光伏升级：传输块状态字门禁（F00104）
+<!-- trellis-session: v=2 fp=c505c67eddd6a07a -->
+
+**Date**: 2026-10-26
+**Task**: 698光伏升级：传输块状态字门禁（F00104）
+**Branch**: `main`
+
+### Summary
+
+全部数据块确认后先读传输块状态字（F00104），DAR=0 且位数>=块数且位图全部置位才允许执行升级；位序 MSB/LSB 兼容（LSB 记警告），缺块/补位/多报块拒绝并点名；不通过只重试状态字请求，用尽即 failed 且不发执行升级。core A15 + GUI 523 项全绿。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9ca0123` | feat(698升级): 传输块状态字校验通过后才允许执行升级 |
+
+### Status
+
+[OK] **Completed**

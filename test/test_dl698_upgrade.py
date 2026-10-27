@@ -791,6 +791,71 @@ def test_a13_bt_block_cap_from_write_limit():
           [(n, c) for n, c in zip((40, 100, 200, 509, 1000), caps)])
 
 
+def test_a15_block_status_gate():
+    section("[A15] 传输块状态字（F00104）：组帧 + 位序兼容 + 不通过必须拦下")
+
+    sa = bytes.fromhex("05111111111111")
+    req = up.build_read_block_status(sa, 0x0000, 0x10)
+    gen = DLT69845FrameGenerator()
+    # 帧形：68 L L C SA CA HCS APDU FCS 16 —— 用解析器反查 APDU 最稳
+    parsed = DLT69845Parser().parse(req)
+    check("① 状态字请求是 GET-Request Normal",
+          "GET" in str(parsed.get("APDU类型", "")) or "05 01" in req.hex(" ").upper(),
+          parsed.get("APDU类型"))
+    check("① OAD = F0010400（文件分块传输管理·传输块状态字）",
+          "F0010400" in req.hex(" ").upper().replace(" ", ""), req.hex(" "))
+    check("① 组帧以 16H 结尾且 HCS/FCS 自洽（解析器无错误行）",
+          req[-1] == 0x16 and DLT69845Parser().parse(req).get("valid", True) is not False,
+          DLT69845Parser().parse(req).get("错误信息"))
+    check("① PIID 可配（0x10 原样写入请求）",
+          "050110F0010400" in req.hex(" ").upper().replace(" ", ""), req.hex(" "))
+
+    def resp(body: bytes, piid: int = 0x10, oad: bytes = b"\xF0\x01\x04\x00") -> bytes:
+        apdu = bytes([0x85, 0x01, piid]) + oad + body
+        return gen._assemble_frame(sa, 0x0000, 0xC3, apdu)
+
+    def bitmap(bits, set_idx, value="msb") -> bytes:
+        out = bytearray((bits + 7) // 8)
+        for i in set_idx:
+            b, k = divmod(i, 8)
+            out[b] |= (1 << (7 - k)) if value == "msb" else (1 << k)
+        return bytes(out)
+
+    # ② 位序兼容：3 块全成功，MSB-first(E0) 与 LSB-first(07) 都必须放行
+    r_msb = up.check_block_status(resp(bytes([0x01, 0x04, 0x03]) + bitmap(3, [0, 1, 2])), 3)
+    r_lsb = up.check_block_status(resp(bytes([0x01, 0x04, 0x03]) + bitmap(3, [0, 1, 2], "lsb")), 3)
+    check("② MSB-first 全成功 ⇒ 通过", r_msb["ok"] is True and r_msb["order"] == "msb", r_msb)
+    check("② LSB-first 全成功也通过（并标出 order=lsb）",
+          r_lsb["ok"] is True and r_lsb["order"] == "lsb", r_lsb)
+
+    # ③ 缺块 / 位数不足 / 补位被置：一律不通过（且点名缺哪块）
+    r_miss = up.check_block_status(resp(bytes([0x01, 0x04, 0x03]) + bitmap(3, [0, 2])), 3)
+    check("③ 缺第 2 块(1-based) ⇒ 不通过并点名",
+          r_miss["ok"] is False and r_miss["matched"] is True and r_miss["missing"] == [2], r_miss)
+    r_short = up.check_block_status(resp(bytes([0x01, 0x04, 0x02]) + bitmap(2, [0, 1])), 3)
+    check("③ 声明 2 位 < 3 块 ⇒ 不通过（理由写明位数小）",
+          r_short["ok"] is False and "位数" in str(r_short["reason"]), r_short)
+    padded = bytearray(bitmap(16, [0, 1, 2]))
+    padded[1] |= 0x80                                  # 第 16 位（超出 3 块的补位）置 1
+    r_pad = up.check_block_status(resp(bytes([0x01, 0x04, 0x10]) + bytes(padded)), 3)
+    check("③ 超出块数的位被置 1 ⇒ 不通过（补位/多报块都必须拦下）",
+          r_pad["ok"] is False and ("补位" in str(r_pad["reason"]) or "多报块" in str(r_pad["reason"])),
+          r_pad)
+
+    # ④ DAR 分支 / OAD 不符 / 非 GET 响应
+    r_dar = up.check_block_status(resp(bytes([0x00, 0x01])), 3)
+    check("④ DAR=1 ⇒ 不通过且给可读 DAR 名",
+          r_dar["ok"] is False and "DAR" in str(r_dar["reason"]) and "硬件" in str(r_dar["reason"]), r_dar)
+    r_oad = up.check_block_status(resp(bytes([0x01, 0x04, 0x03]) + bitmap(3, [0, 1, 2]),
+                                       oad=b"\x43\x00\x03\x00"), 3)
+    check("④ OAD 不符 ⇒ matched False（不当成状态字）",
+          r_oad["matched"] is False and "OAD" in str(r_oad["reason"]), r_oad)
+    action = gen._assemble_frame(sa, 0x0000, 0xC3, bytes([0x87, 0x01, 0x10, 0xF0, 0x01, 0x04, 0x00, 0x00, 0x00, 0x00]))
+    r_act = up.check_block_status(action, 3)
+    check("④ ACTION-Response ⇒ matched False（不是 GET-Response）",
+          r_act["matched"] is False, r_act)
+
+
 def main():
     print("=" * 66)
     print("协议8 698.45 文件传输升级 —— 纯逻辑层（dl_t698_45_upgrade）")
@@ -809,6 +874,7 @@ def main():
     test_a12_version_detail_rows()
     test_a14_start_transfer_v14_golden()
     test_a13_bt_block_cap_from_write_limit()
+    test_a15_block_status_gate()
     print(f"\nPASS={PASS} FAIL={FAIL}")
     sys.exit(0 if FAIL == 0 else 1)
 

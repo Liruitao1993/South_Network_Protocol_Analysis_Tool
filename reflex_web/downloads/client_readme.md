@@ -1,13 +1,13 @@
 # 南网协议解析工具
 
-[![Version](https://img.shields.io/badge/version-1.24.0-blue)]()
+[![Version](https://img.shields.io/badge/version-1.24.2-blue)]()
 [![Python](https://img.shields.io/badge/Python-3.8%2B-brightgreen)]()
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey)]()
 [![License](https://img.shields.io/badge/License-MIT-green)]()
 
 一个面向电力通信现场调试的多协议解析工具，基于 Python / PySide6 开发，支持 16 种电力通信协议，覆盖单帧解析、批量解析、协议校验、帧生成、串口通信、测试方案、Lua 脚本、实时监控与 TCP 抓包等工作流。
 
-当前版本为 `1.24.0`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
+当前版本为 `1.24.2`，版本号与编译日期见 `main_gui.py` 中的 `APP_VERSION` 与 `BUILD_DATE`。
 
 ## 功能总览
 
@@ -295,6 +295,15 @@ python test/test_theme_settings.py         # 主题与字体设置
 ## 更新记录
 
 > 完整的逐版本变更见仓库 `main_gui.py` 的 `CHANGELOG` 与 `AGENTS.md` §10；此处只列最近一个大版本，1.15.0~1.23.x 的明细未在此文件回填。
+
+### 1.24.2 — 2026-10-26
+
+- **新增「645 协议测试」页**：按 DI 大类组织的预置命令树（读数据 / 写数据 / 特殊命令），支持读·写通信地址与广播校时；勾选顺序下发、等应答再发下一条，判定区分结构/校验/方向位/功能码/异常位/DI 回显。
+- **协议测试页串口 / 蓝牙双通道**（698 与 645）：蓝牙复用「蓝牙工具」页连接，整帧一次 ATT 写、超限报错不发送，两通道字节严格隔离。
+- **光伏升级先校验传输块状态字**：全部块确认后读 `F00104`，DAR=0 且位数 ≥ 块数且位图全置位才允许执行升级；缺块/补位/多报块拒绝并点名，不通过只重试该请求，用尽即失败且不发执行升级。
+- **预设命令页可粘贴报文建按钮**，并支持按当前协议**一键批量替换地址**（重算校验，失败项保持原样）。
+- **645 无线模组接口 V1.6 扩展 DI** 接入协议测试树（12 条，含地址列表 / 无线频段 / 在网状态等）。
+- **深色主题**：自绘画布配色统一由 `canvas_theme` 提供（拓扑 / 字节视图 / 快照 / 测试方案 / TCP 监控），树表行内复选框补可见边框。
 
 ### 1.24.0 — 2026-10-24
 

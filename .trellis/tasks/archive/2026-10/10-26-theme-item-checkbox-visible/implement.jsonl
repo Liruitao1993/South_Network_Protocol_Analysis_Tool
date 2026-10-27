@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "§8 Qt 陷阱与主题契约（自绘画布/QSS 覆盖范围；本任务新增 item view indicator 契约）"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "测试要求：渲染取像素+对比度、变异自检、门禁登记"}

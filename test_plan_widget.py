@@ -1797,6 +1797,7 @@ class TestPlanWidget(QWidget):
         self._test_end_time: datetime | None = None  # 测试结束时间
         self._test_vars: dict[str, Any] = {}  # Lua 脚本共享变量
         self._lua_engine = None  # 当前运行的 Lua 引擎
+        self._dark = False        # 当前是否深色主题（restyle_for_theme 的唯一写入点）
         self.setup_ui()
 
     # ------------------------------------------------------------------
@@ -1876,13 +1877,7 @@ class TestPlanWidget(QWidget):
 
         self.chk_stop_on_fail = QCheckBox("失败时停止")
         self.chk_stop_on_fail.setChecked(True)
-        self.chk_stop_on_fail.setStyleSheet(
-            "QCheckBox { spacing: 6px; padding: 4px 10px; background-color: #E3F2FD; "
-            "border: 1px solid #90CAF9; border-radius: 4px; font-weight: bold; color: #1565C0; }"
-            "QCheckBox::indicator { width: 16px; height: 16px; }"
-            "QCheckBox::indicator:checked { background-color: #1565C0; border: 2px solid #1565C0; }"
-            "QCheckBox::indicator:unchecked { background-color: #FFFFFF; border: 2px solid #90CAF9; }"
-        )
+        self._apply_stop_on_fail_style()
         toolbar.addWidget(self.chk_stop_on_fail)
 
         toolbar.addStretch()
@@ -1940,13 +1935,8 @@ class TestPlanWidget(QWidget):
                 "响应帧",
             ]
         )
-        # 表格复选框样式
-        self.table.setStyleSheet(
-            "QTableWidget::item { padding: 4px; }"
-            "QCheckBox::indicator { width: 16px; height: 16px; }"
-            "QCheckBox::indicator:checked { background-color: #1565C0; border: 2px solid #1565C0; }"
-            "QCheckBox::indicator:unchecked { background-color: #FFFFFF; border: 2px solid #B0BEC5; }"
-        )
+        # 表格复选框样式（颜色随主题；见 _apply_table_check_style）
+        self._apply_table_check_style()
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(False)
@@ -2918,6 +2908,52 @@ class TestPlanWidget(QWidget):
         ts = datetime.now().strftime("%H:%M:%S")
         self.log_edit.appendPlainText(f"[{ts}] {msg}")
 
+    # ── 主题（勾选框/徽章的浅色硬编码必须跟着主题走）─────────────────
+    def _apply_stop_on_fail_style(self) -> None:
+        """「失败时停止」勾选框的胶囊样式（深色下用深底浅字）。"""
+        if self._dark:
+            box = ("background-color: #1B3A5C; border: 1px solid #3F6E9E; "
+                   "color: #90CAF9;")
+            chk, border = "#1565C0", "#3F6E9E"
+            unchecked = "#1E1E1E"
+        else:
+            box = ("background-color: #E3F2FD; border: 1px solid #90CAF9; "
+                   "color: #1565C0;")
+            chk, border = "#1565C0", "#90CAF9"
+            unchecked = "#FFFFFF"
+        self.chk_stop_on_fail.setStyleSheet(
+            f"QCheckBox {{ spacing: 6px; padding: 4px 10px; {box}"
+            " border-radius: 4px; font-weight: bold; }"
+            "QCheckBox::indicator { width: 16px; height: 16px; }"
+            f"QCheckBox::indicator:checked {{ background-color: {chk};"
+            f" border: 2px solid {chk}; }}"
+            f"QCheckBox::indicator:unchecked {{ background-color: {unchecked};"
+            f" border: 2px solid {border}; }}"
+        )
+
+    def _apply_table_check_style(self) -> None:
+        """表格内勾选框（启用/后台）样式：未勾选底色不能是白块。"""
+        border = "#5B6B7C" if self._dark else "#B0BEC5"
+        unchecked = "#1E1E1E" if self._dark else "#FFFFFF"
+        self.table.setStyleSheet(
+            "QTableWidget::item { padding: 4px; }"
+            "QCheckBox::indicator { width: 16px; height: 16px; }"
+            "QCheckBox::indicator:checked { background-color: #1565C0;"
+            " border: 2px solid #1565C0; }"
+            f"QCheckBox::indicator:unchecked {{ background-color: {unchecked};"
+            f" border: 2px solid {border}; }}"
+        )
+
+    def restyle_for_theme(self, dark: bool) -> None:
+        """切深浅主题：勾选框胶囊/表格勾选框/后台状态徽章（其余交给 QSS）。"""
+        self._dark = bool(dark)
+        try:
+            self._apply_stop_on_fail_style()
+            self._apply_table_check_style()
+            self._update_bg_status()
+        except RuntimeError:
+            pass
+
     def _update_bg_status(self):
         """更新后台状态标签"""
         bg_items = [p for p in self._items if p.get("persistent")]
@@ -2931,9 +2967,14 @@ class TestPlanWidget(QWidget):
             )
         else:
             self.lbl_bg_status.setText("后台: 0 项 | 匹配: 0 次")
+            if self._dark:
+                bg, bd, fg = "#2A2A2A", "#4A4A4A", "#B0BEC5"
+            else:
+                bg, bd, fg = "#F5F5F5", "#BDBDBD", "#757575"
             self.lbl_bg_status.setStyleSheet(
-                "QLabel { background-color: #F5F5F5; border: 1px solid #BDBDBD; border-radius: 3px; "
-                "padding: 4px 10px; font-weight: bold; color: #757575; font-size: 12px; }"
+                f"QLabel {{ background-color: {bg}; border: 1px solid {bd};"
+                f" border-radius: 3px; padding: 4px 10px; font-weight: bold;"
+                f" color: {fg}; font-size: 12px; }}"
             )
 
     def _on_log_context_menu(self, pos):

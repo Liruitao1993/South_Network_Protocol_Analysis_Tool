@@ -147,9 +147,127 @@ def test_cpu_color_threshold():
     print("✓ CPU 着色阈值：<30% 灰、30-60% 橙、≥60% 红")
 
 
+def test_conn_indicators():
+    """状态栏串口/蓝牙连接指示：常驻、图标按状态染色、tooltip 给细节、点击可用。"""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    from main_gui import MainWindow
+
+    w = MainWindow()
+    w.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+    w.show()
+    app.processEvents()
+    w._ui_ready = False          # 本用例会点顶栏开关，禁止顺手写真实 config.json
+
+    serial_btn, bt_btn = w._serial_conn_btn, w._bt_conn_btn
+    colors = MainWindow.CONN_INDICATOR_COLORS
+    gray = colors[False]["off"]
+    green = colors[False]["on"]
+
+    def icon_color(btn):
+        """取图标里出现最多的不透明像素颜色（抗锯齿边缘会偏色，取实心线条处）。"""
+        img = btn.icon().pixmap(btn.iconSize()).toImage()
+        counts = {}
+        for y in range(img.height()):
+            for x in range(img.width()):
+                c = img.pixelColor(x, y)
+                if c.alpha() >= 200:
+                    counts[c.name()] = counts.get(c.name(), 0) + 1
+        return max(counts.items(), key=lambda kv: kv[1])[0] if counts else ""
+
+    def near(a, b, tol=10):
+        if not a or not b:
+            return False
+        return all(
+            abs(int(a[i:i + 2], 16) - int(b[i:i + 2], 16)) <= tol for i in (1, 3, 5)
+        )
+
+    # ① 常驻 + 文案 + 图标来自项目 icons
+    assert serial_btn.parent() is w.statusBar() and bt_btn.parent() is w.statusBar()
+    assert serial_btn.text() == "串口" and bt_btn.text() == "蓝牙"
+    assert not serial_btn.icon().isNull() and not bt_btn.icon().isNull()
+
+    # ② 未连接 ⇒ 灰
+    class FakeSerial:
+        def __init__(self, connected):
+            self._c = connected
+
+        def is_connected(self):
+            return self._c
+
+    class FakeBtWorker:
+        def is_connected(self):
+            return True
+
+        def device_name(self):
+            return "NW-METER-01"
+
+    class FakeBtTab:
+        def bluetooth_worker(self):
+            return FakeBtWorker()
+
+    w.serial_worker = FakeSerial(False)
+    w._refresh_conn_indicators()
+    assert near(icon_color(serial_btn), gray), icon_color(serial_btn)
+    assert near(icon_color(bt_btn), gray), icon_color(bt_btn)
+    assert "未连接" in serial_btn.toolTip() and "未连接" in bt_btn.toolTip()
+
+    # ③ 已连接 ⇒ 绿（串口带端口/波特率，蓝牙带设备名）
+    w.serial_worker = FakeSerial(True)
+    w.bluetooth_tool_tab = FakeBtTab()
+    w._refresh_conn_indicators()
+    assert near(icon_color(serial_btn), green), icon_color(serial_btn)
+    assert near(icon_color(bt_btn), green), icon_color(bt_btn)
+    assert "已连接" in serial_btn.toolTip()
+    assert "NW-METER-01" in bt_btn.toolTip()
+
+    # ④ 深色主题用深色那套绿
+    w._theme_id = "dark"
+    w._appearance_mode = "light"
+    w._refresh_conn_indicators()
+    assert near(icon_color(bt_btn), colors[True]["on"]), icon_color(bt_btn)
+    w._theme_id = "default"
+
+    # ⑤ 断开回落灰
+    w.serial_worker = FakeSerial(False)
+    w.bluetooth_tool_tab = None
+    w._refresh_conn_indicators()
+    assert near(icon_color(serial_btn), gray) and near(icon_color(bt_btn), gray)
+
+    # ⑥ 点串口指示：顶栏折叠时展开（端口/波特率在顶栏）
+    w.topbar_toggle_btn.setChecked(False)
+    w._toggle_top_bar()
+    app.processEvents()
+    assert not w.top_bar_widget.isVisible()
+    w._on_serial_indicator_clicked()
+    app.processEvents()
+    assert w.topbar_toggle_btn.isChecked() and w.top_bar_widget.isVisible()
+
+    # ⑦ 蓝牙页的信号驱动（真页 + 假 worker，走真实接线）
+    del w.bluetooth_tool_tab
+    real_serial, w.serial_worker = w.serial_worker, None
+    tab = w._ensure_bluetooth_tool_tab()
+    tab._worker = FakeBtWorker()
+    tab.connection_state_changed.emit(True)
+    app.processEvents()
+    assert near(icon_color(bt_btn), green), icon_color(bt_btn)
+    tab._worker = None
+    tab.connection_state_changed.emit(False)
+    app.processEvents()
+    assert near(icon_color(bt_btn), gray), icon_color(bt_btn)
+    w.serial_worker = real_serial
+    print(
+        f"✓ 连接指示：串口/蓝牙常驻状态栏，灰={gray} 绿={green}，"
+        f"点串口展开顶栏、蓝牙信号即时同步"
+    )
+
+
 if __name__ == "__main__":
     test_proc_stats_sampler()
     test_gui_statusbar()
     test_thread_detail_menu()
     test_cpu_color_threshold()
+    test_conn_indicators()
     print("\n=== test_statusbar_stats 全部通过 ===")

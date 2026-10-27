@@ -24,6 +24,8 @@
 from PySide6.QtGui import QColor, QFont, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import QTextEdit
 
+import canvas_theme
+
 # 每行字节数（Wireshark 默认 16）
 BYTES_PER_ROW = 16
 # 行内固定前缀：8 位偏移 + 2 空格
@@ -37,7 +39,7 @@ ROW_STRIDE = ROW_LEN + 1  # = 78
 
 # 高亮底色与主窗口 _apply_byte_highlight 保持一致（黄底半透明）
 HIGHLIGHT_COLOR = QColor(255, 235, 59, 160)
-# 默认前景/背景（清除高亮时恢复）
+# 默认前景/背景（清除高亮时恢复；浅色主题的取值，深色走 canvas_theme.palette(True)）
 DEFAULT_FG = QColor("#000000")
 DEFAULT_BG = QColor("#FFFFFF")
 
@@ -58,11 +60,18 @@ def build_dump_text(data: bytes) -> str:
 
 
 class HexDumpView(QTextEdit):
-    """只读字节视图：偏移 + 16 进制 + ASCII，支持按字节范围高亮。"""
+    """只读字节视图：偏移 + 16 进制 + ASCII，支持按字节范围高亮。
+
+    前后景**必须自己跟着主题**：字符格式里显式设过背景色，会盖掉 QSS 给 QTextEdit
+    的底色（深色主题下不清掉就是整块白底）。
+    """
 
     def __init__(self, parent=None, max_height: int | None = None):
         super().__init__(parent)
         self._byte_length = 0
+        self._dark = False
+        self._fg = QColor(DEFAULT_FG)
+        self._bg = QColor(DEFAULT_BG)
         self.setReadOnly(True)
         self.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         font = QFont("Consolas")
@@ -102,14 +111,22 @@ class HexDumpView(QTextEdit):
 
     # ── 高亮 ────────────────────────────────────────────────
 
+    def restyle_for_theme(self, dark: bool) -> None:
+        """切深浅主题：换默认前后景并重刷（深色下不能再用白底黑字）。"""
+        self._dark = bool(dark)
+        p = canvas_theme.palette(self._dark)
+        self._fg = QColor(p["text"])
+        self._bg = QColor(p["bg"])
+        self._apply_default_format()
+
     def _apply_default_format(self) -> None:
         """把全文恢复成默认字体/配色（清除历史高亮）。"""
         cursor = QTextCursor(self.document())
         cursor.select(QTextCursor.SelectionType.Document)
         fmt = QTextCharFormat()
         fmt.setFontFamily("Consolas")
-        fmt.setForeground(DEFAULT_FG)
-        fmt.setBackground(DEFAULT_BG)
+        fmt.setForeground(self._fg)
+        fmt.setBackground(self._bg)
         cursor.setCharFormat(fmt)
 
     def clear_highlight(self) -> None:

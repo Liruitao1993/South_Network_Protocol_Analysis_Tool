@@ -467,6 +467,9 @@ def test_negative_controls_and_single_source():
         # （与串口页同一依据：645 §5.3.1 / 698.45 §6.3.1 b)，见 AGENTS §8 陷阱 75），
         # 走 `wakeup_prefix.strip_wakeup_prefix` 同一实现而不是另写扫描 —— 故与串口页同列白名单。
         "message_tool_widget.py",
+        # 645 协议测试页（1.24.1）：RX 自组帧同样认前导 FEH（645 §5.3.1），噪声重同步时
+        # 用 `wakeup_prefix_len` 判定「FE 后面是不是 68」—— 复用同一实现，不是第二份扫描。
+        "dlt645_test_widget.py",
     }
     import_re = re.compile(r"^\s*(?:from\s+wakeup_prefix\s+import|import\s+wakeup_prefix\b)", re.M)
     # 反例：文档式提及（如 CHANGELOG 文案）不得被判为「第二份实现」

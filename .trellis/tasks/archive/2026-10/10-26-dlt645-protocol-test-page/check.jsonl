@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "检查项：单一来源复用、协议可见性走注册表、懒加载、按钮不裁字、offscreen 弹框需 patch"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "纯逻辑（core）与 GUI/串口分层：组帧/判定可脱 GUI 单测，串口只在 widget"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "复核项：断言判别性、门禁登记、共享渲染抽取不改 698 输出"}

@@ -1225,103 +1225,21 @@ def parse_table(frame: bytes, verify: bool = True) -> list:
         return []
 
 
-def _display_width(text: str) -> int:
-    """字符串显示宽度：CJK/全角算 2 列，用于日志里对齐四列。"""
-    import unicodedata
-
-    width = 0
-    for ch in str(text):
-        width += 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
-    return width
-
-
-def _pad(text: str, width: int) -> str:
-    """按显示宽度左对齐补空格（超宽则原样返回，不截断）。"""
-    text = str(text)
-    gap = width - _display_width(text)
-    return text + (" " * gap if gap > 0 else "")
-
-
-def _cell_text(value) -> str:
-    """「解析值」单元格文本化：dict/list 打成 `k=v, …` / `[a, b]`，其余原样。"""
-    if value is None:
-        return ""
-    if isinstance(value, dict):
-        parts = []
-        for key, val in value.items():
-            if isinstance(val, (dict, list)):
-                continue                     # 嵌套结构交给「说明」列，别把格子撑爆
-            parts.append(f"{key}={val}")
-        return ", ".join(parts)
-    if isinstance(value, (list, tuple)):
-        return "[" + ", ".join(_cell_text(v) for v in value) + "]"
-    text = str(value)
-    return "" if text in ("", "-", "None") else text
-
-
-#: 四列的显示宽度（字段 / 原始值 / 解析值），说明列吃掉剩余
-_COL_FIELD, _COL_RAW, _COL_PARSED = 22, 24, 30
-#: 单元格最大显示宽度：超出截断并标「共 N 字符」（否则结构化数据一行能撑到屏幕外的几千列）
-_CELL_MAX = 72
-
-
-def _compact_hex_like(text: str, keep_chars: int = 32) -> str:
-    """长 hex 串压成「前 N 个字符 …（共 M 字符）」，避免一行撑到屏幕外。
-
-    只对**纯十六进制**下手（解析器把 A-XDR 数据的原始编码直接塞进原始值/解析值列）；
-    文字说明不受影响。**不要求长度为偶数** —— 解析器偶尔给出被截断的奇数长度编码，
-    早先按「偶数才是 hex」判定会整段漏压、一行撑到屏幕外。
-    """
-    text = str(text or "").strip()
-    compact = text.replace(" ", "")
-    if len(compact) < keep_chars + 16:
-        return text
-    if any(c not in "0123456789abcdefABCDEF" for c in compact):
-        return text
-    return f"{compact[:keep_chars].upper()} … （共 {len(compact)} 字符）"
-
-
-def _clip(text: str, limit: int = _CELL_MAX) -> str:
-    """按显示宽度截断（CJK 算 2 列），超出补 `…` 与原始长度。"""
-    text = str(text)
-    if _display_width(text) <= limit:
-        return text
-    kept, width = [], 0
-    for ch in text:
-        w = 2 if _display_width(ch) == 2 else 1
-        if width + w > limit:
-            break
-        kept.append(ch)
-        width += w
-    return "".join(kept) + f"…（共 {len(text)} 字符）"
-
-
-def format_table_rows(rows: Sequence[Sequence], header: str = "") -> List[str]:
-    """解析行 → 对齐的四列文本（`字段 | 原始值 | 解析值 | 说明`）。
-
-    字段名里的前导空格（解析器用它表示层级）保留，因此缩进层次照旧可读。
-    """
-    out: List[str] = []
-    if header:
-        out.append(header)
-    for row in rows:
-        if not row or len(row) < 4:
-            continue
-        field, raw, parsed, desc = row[0], row[1], row[2], row[3]
-        raw = "" if str(raw) in ("", "-", "None") else str(raw)
-        raw = _clip(_compact_hex_like(raw), _COL_RAW + 8)
-        parsed = _cell_text(parsed)
-        desc = "" if str(desc) in ("", "None") else str(desc)
-        parsed = _clip(_compact_hex_like(parsed))
-        desc = _clip(desc, 110)
-        # 解析器对结构化字段（OAD/OMD）把解析值拼成 `{'OI': …}` 字符串；
-        # 「说明」列已经是同一信息的人话版，两列都印等于刷屏 ⇒ 有说明时省略该串。
-        if desc and parsed.startswith(("{'", "['")):
-            parsed = ""
-        line = (f"  {_pad(field, _COL_FIELD)} {_pad(raw, _COL_RAW)}"
-                f" {_pad(parsed, _COL_PARSED)}")
-        out.append((line + " " + desc).rstrip())
-    return out
+# ── 四列文本渲染：与 645 测试页共用 `testpage_render`（唯一实现）─────────────
+# 保留 `_display_width` / `_pad` / `_cell_text` / `_clip` / `_compact_hex_like`
+# 这些私有名：既有测试（`test/test_dlt698_testbench.py` [10b]）直接引用它们。
+from testpage_render import (                       # noqa: E402,F401 —— 渲染层，无协议依赖
+    CELL_MAX as _CELL_MAX,
+    COL_FIELD as _COL_FIELD,
+    COL_PARSED as _COL_PARSED,
+    COL_RAW as _COL_RAW,
+    cell_text as _cell_text,
+    clip as _clip,
+    compact_hex_like as _compact_hex_like,
+    display_width as _display_width,
+    format_table_rows,
+    pad as _pad,
+)
 
 
 def detail_lines(frame: bytes, verify: bool = True,

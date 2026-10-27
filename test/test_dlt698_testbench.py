@@ -33,6 +33,7 @@ from unittest.mock import patch  # noqa: E402
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QObject, Qt, Signal  # noqa: E402
+from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
 import _config_sandbox  # noqa: E402
@@ -600,6 +601,10 @@ def _make_widget():
     widget = W.Dlt698TestWidget()
     worker = FakeSerialWorker()
     widget.set_serial_worker(worker)
+    # 上一段（双通道用例）可能把落盘通道写成蓝牙 ⇒ 这里固定回串口，保证各段互不影响
+    index = widget.combo_channel.findData("serial")
+    if index >= 0:
+        widget.combo_channel.setCurrentIndex(index)
     return widget, worker
 
 
@@ -996,6 +1001,135 @@ def test_theme():
 # 源码护栏
 # ══════════════════════════════════════════════════════════════════════
 
+class FakeBleWorker(QObject):
+    """蓝牙 worker 替身（只实现 ChannelController 用到的接口）。"""
+
+    notification_received = Signal(str, bytes)
+    connection_changed = Signal(bool)
+    mtu_updated = Signal(int, list)
+    error_occurred = Signal(str)
+
+    def __init__(self, limit: int = 200, connected: bool = True,
+                 name: str = "698表计", mtu: int = 247):
+        super().__init__()
+        self.sent = []
+        self.limit = int(limit)
+        self._connected = bool(connected)
+        self._name = name
+        self._mtu = int(mtu)
+
+    def is_connected(self) -> bool:
+        return self._connected
+
+    def device_name(self) -> str:
+        return self._name
+
+    def device_address(self) -> str:
+        return "AA:BB:CC:DD:EE:FF"
+
+    def mtu_size(self) -> int:
+        return self._mtu
+
+    def single_write_limit(self) -> int:
+        return self.limit
+
+    def send_data(self, data: bytes, single_write: bool = False) -> bool:
+        payload = bytes(data)
+        if single_write and len(payload) > self.limit:
+            self.error_occurred.emit("oversize(worker)")
+            return False
+        self.sent.append((payload, bool(single_write)))
+        return True
+
+
+def test_gui_ble_channel():
+    """协议测试页 1.24.1：串口 / 蓝牙双通道。"""
+    _app()
+    import dlt698_test_widget as W
+
+    w, serial = _make_widget()
+    ble = FakeBleWorker(limit=64, connected=False)
+    w.set_bluetooth_provider(lambda: ble)
+    w.show()
+    _app().processEvents()
+    try:
+        index = w.combo_channel.findData("bluetooth")
+        check_true("[18] 下拉里有蓝牙通道", index > 0, str(index))
+        w.combo_channel.setCurrentIndex(index)
+        _app().processEvents()
+        check_true("[18] 未连接时状态行提示先连蓝牙页",
+                   "蓝牙通道" in w.lbl_state.text() and "未连接" in w.lbl_state.text(),
+                   w.lbl_state.text())
+        check_true("[18] 未连接时固定动作置灰", not w.btn_read_addr.isEnabled())
+
+        ble._connected = True
+        ble.connection_changed.emit(True)
+        _app().processEvents()
+        check_true("[18] 连上后固定动作可用 + 文案含一次写上限",
+                   w.btn_read_addr.isEnabled()
+                   and "一次 ATT 写上限" in w.lbl_state.text(),
+                   w.lbl_state.text())
+
+        serial_before = len(serial.sent)
+        w.edit_read_addr.clear()
+        w.edit_write_addr.clear()
+        w._on_read_address()
+        _app().processEvents()
+        check_true("[18] 读地址帧走蓝牙 send_data(single_write=True)",
+                   bool(ble.sent) and ble.sent[-1][1] is True
+                   and len(serial.sent) == serial_before,
+                   f"ble={len(ble.sent)} serial={len(serial.sent)}")
+        ble.notification_received.emit("uuid", _frame_from_apdu(_ADDR_RESP_APDU))
+        QTest.qWait(80)
+        check("[18] 蓝牙通知被页内分帧并回填地址",
+              w.edit_read_addr.text(), "123456789012")
+
+        # 通道隔离
+        rows = w.table_raw.rowCount()
+        serial.deliver(_frame_from_apdu(_ADDR_RESP_APDU))
+        QTest.qWait(40)
+        check("[18] 蓝牙通道下串口字节被丢弃", w.table_raw.rowCount(), rows)
+        w.combo_channel.setCurrentIndex(w.combo_channel.findData("serial"))
+        _app().processEvents()
+        rows = w.table_raw.rowCount()
+        ble.notification_received.emit("uuid", _frame_from_apdu(_ADDR_RESP_APDU))
+        QTest.qWait(40)
+        check("[18] 串口通道下蓝牙通知被丢弃", w.table_raw.rowCount(), rows)
+
+        # 超限：不调用 worker + 信息表失败
+        w.combo_channel.setCurrentIndex(w.combo_channel.findData("bluetooth"))
+        _app().processEvents()
+        sent_before = len(ble.sent)
+        ble.limit = 5
+        w._on_read_address()
+        QTest.qWait(150)
+        row = w.table_info.rowCount() - 1
+        check("[18] 超限帧记失败", w.table_info.item(row, 1).text(), "失败")
+        reason = w.table_info.item(row, 2).text() if w.table_info.item(row, 2) else ""
+        check_true("[18] 超限原因含上限与实际字节",
+                   "上限" in reason and "5" in reason, reason)
+        check("[18] 超限帧未调用 worker", len(ble.sent), sent_before)
+
+        # 落盘
+        w._save_persisted()
+        w2 = W.Dlt698TestWidget()
+        check("[18] 通道落盘往返（蓝牙）", w2.combo_channel.currentData(), "bluetooth")
+        w2.cleanup()
+
+        # cleanup：断订阅、不断开蓝牙
+        w.cleanup()
+        rows = w.table_raw.rowCount()
+        ble.notification_received.emit("uuid", _frame_from_apdu(_ADDR_RESP_APDU))
+        check("[18] cleanup 后蓝牙通知不再进页", w.table_raw.rowCount(), rows)
+        check_true("[18] cleanup 不断开蓝牙", ble.is_connected() is True)
+        check_true("[18] cleanup 摘除串口引用", w._serial_worker is None)
+    finally:
+        w.combo_channel.setCurrentIndex(w.combo_channel.findData("serial"))
+        w._save_persisted()
+        w.cleanup()
+        w.close()
+
+
 def test_source_guards():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     for name in ("dlt698_test_core.py", "dlt698_test_widget.py"):
@@ -1007,7 +1141,12 @@ def test_source_guards():
     check_true("[16] 页面不用 send_frame（避免逐条刷 [发送]）", ".send_frame(" not in src)
     check_true("[16] 页面不订阅 frame_received（698 会被截断）",
                "frame_received.connect" not in src)
-    check_true("[16] 页面订阅 raw_data_received", "raw_data_received.connect" in src)
+    # 1.24.1 起收发统一走 `channel_link.ChannelController`（串口/蓝牙双通道）：
+    # 页面**不得**自己订阅串口信号（否则双份 RX），改为订阅控制器的 `rx`。
+    check_true("[16] 页面经 ChannelController 收发（不直连串口信号）",
+               "import channel_link as ch" in src
+               and "self._channel.rx.connect" in src
+               and "raw_data_received.connect" not in src)
     check_true("[16] 页面不自建串口", "QSerialPort" not in src and "serial.Serial" not in src)
     check_true("[16] 页面惰性 import 逻辑层", "import dlt698_test_core" in src)
     # 逻辑层不 import Qt
@@ -1047,6 +1186,7 @@ def main() -> int:
         ("[14] RX 自组帧", test_gui_rx_deframe),
         ("[15] 主题", test_theme),
         ("[17] OAD 覆盖", test_gui_oad_override),
+        ("[18] 双通道（串口/蓝牙）", test_gui_ble_channel),
         ("[16] 源码护栏", test_source_guards),
     ]
     for name, fn in tests:

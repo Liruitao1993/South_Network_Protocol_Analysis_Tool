@@ -161,6 +161,8 @@ CORE_TESTS = [
     "test/test_serial_worker_set_baudrate.py",
     # 串口工具批量替换通信地址（纯逻辑：六协议真帧 oracle + 前导 FE 门控 + 预期响应口径）
     "test/test_serial_addr_fix.py",
+    # 预设命令页：粘贴报文添加 + 按协议一键批量替换地址（纯逻辑真帧 oracle + offscreen GUI 写回/落盘）
+    "test/test_preset_paste_addr.py",
     # 蓝牙工具（core 纯逻辑 / worker 注入假 bleak / widget offscreen 假 worker，均不碰硬件）
     "test/test_bluetooth_core.py",
     "test/test_bluetooth_addr_fix.py",
@@ -208,6 +210,11 @@ GUI_TESTS = [
     # 协议8 协议测试页（按 OAD 分类的预置测试库）：附录 H 黄金组帧 + offscreen 页面 + 真实 MainWindow 接线
     "test/test_dlt698_testbench.py",
     "test/test_dlt698_test_tab_wiring.py",
+    # 协议6 645 协议测试页（按 DI 大类分类 + 地址读写）：组帧黄金 + 判定矩阵 + offscreen 页面 + 真实接线
+    "test/test_dlt645_testbench.py",
+    "test/test_dlt645_test_tab_wiring.py",
+    # 协议测试页的串口/蓝牙双通道控制器（就绪/文案/整帧单写/超限/双通道 RX 隔离）
+    "test/test_channel_link.py",
     # 粘性入口：托盘菜单内嵌输入框 + 任务栏缩略图按钮（HICON/降级/WM_COMMAND 路由/按钮分派）
     "test/test_tray_taskbar_entries.py",
     "test/test_csg_sequence_gui.py",
@@ -223,6 +230,9 @@ GUI_TESTS = [
     "test/test_spectrum_gui.py",
     # 生产测试架（串口助手 + 测试架参数帧）：纯逻辑 golden + GUI + main_gui 接线
     "test/test_production_testbench.py",
+    # 「测试方案」页真实冒烟（替代此前 test/ 下那份产品模块过期副本）+ 防同名遮蔽守卫
+    "test/test_test_plan_widget.py",
+    # 状态栏串口/蓝牙连接指示（图标染色/点击/蓝牙信号同步）—— 见 test_statusbar_stats.py
 ]
 
 # 已知环境失败：不因它挡发布，但会标 WARN

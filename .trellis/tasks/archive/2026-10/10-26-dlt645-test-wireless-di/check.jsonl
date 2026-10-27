@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "复核项：分类与手册逐条一致、读请求参数同源、UI 不裁字"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "纯逻辑分类/组帧可脱 GUI 断言；请求字段只由 schema 提供"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "复核项：变异是否真红、既有 106 项与 698 页不回归"}

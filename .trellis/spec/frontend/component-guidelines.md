@@ -664,10 +664,141 @@ engine = self._engine_factory()            # 否则才是发给本虚拟表的�
 - **仅桌面**：Web 版「报文工具」是独立实现（`reflex_web/reflex_web/web_utils.py` 的 `tool_*`），
   本次未接地址替换 ⇒ 属既有的「缺失」类，下次 Web 同步审计时按该项登记（不要在 Web 侧另写一份偏移/算法表）。
 
+### 7m. 预设命令页「粘贴报文添加按钮 + 一键批量替换地址」（同一引擎第 5 次复用，1.24.1）
+
+> 用户 → 「预设命令页面可以直接添加按钮，通过直接复制报文的方式也是可以进行命令添加的，同样的也支持批量替换地址，
+> 按照协议进行地址的替换，有一个位置可以输入地址的输入框，然后有一键替换地址的按钮，将所有的对应协议的地址一并替换掉」。
+> 与 §7f（蓝牙单按钮发送时替换）/ §7h（串口表内写回）/ §7i（蓝牙批量）/ §7l（报文工具）**同一引擎**：地址字段、
+> 长度、字节序、校验算法全部走 `frame_addr_fix`，报文文本层编排走 `message_tool_widget.replace_frame_address`。
+
+- **Scope / Trigger**：预设库（`*_command.json`）是**页面内自足**的常用帧库 —— 用户在这里增条目、改表号，
+  不该被迫绕到「协议组帧」页或逐条重建帧。触发点是「页面缺少写入入口」+「地址散落在完整 HEX 里」。
+- **协议标识 → 索引只有一个来源**：`preset_buttons.preset_protocol_index()` 遍历
+  `protocol_registry.all_protocols()` 匹配 `preset_mode`（south 0 / dlt645 6 / gdw 7 / dlt698 8 / modular 12 /
+  yw645 13 / csg_uplink 14）。**禁止在预设页另写一张映射表**（注册表加协议时会漂移）。
+- **纯逻辑 / GUI 分层**：`AddrBatchItem` + `batch_fix_presets(commands, protocol_index, values)` 不 import Qt、
+  **不修改入参**、单条失败转 `skipped`（保留**原始** `frame_hex` 与可读 `error`）不中断整批；
+  写回、确认框、落盘、日志只在 GUI 层。`replace_frame_address` / `addr_field_errors` / `hex_text_to_bytes`
+  一律**函数内导入**（`message_tool_widget` 顶层 `import crcmod`；模块级导入会让没装 crcmod 的机器连预设页都打不开）。
+- **作用范围 = 当前协议，且与显示同判据**：`[i for i,c in enumerate(commands) if c.get("protocol", 当前协议) == 当前协议]`。
+  写回必须 `commands[scope[item.index]]`（**`item.index` 是子列表下标**）；直接用相对下标会改到同文件里
+  其它协议的历史混入条目（本任务变异反证 ①）。看不见的条目不该被悄悄改掉。
+- **写盘一次 + 全或无**：只改 `frame_hex` 一个键，`save_commands` 一次 `atomic_write_json`；
+  **0 条成功**或**地址写法非法**时一个字节都不写（本任务变异反证 ②：去掉该守卫会让「全部失败」也弹确认）。
+- **对话框编辑模式**：`AddPresetDialog(..., editable_frame=True)` —— 报文框可编辑、等宽字体、
+  打开时带入剪贴板里的**合法 HEX**（不是 HEX 就静默留空，不打扰）、另有「从剪贴板粘贴」；
+  `_on_ok` 用 `hex_text_to_bytes` 校验并归一化（空格分隔大写），非法/空 → `QMessageBox.warning` 且**不 accept**。
+  默认 `editable_frame=False` ⇒ 组帧页「添加到预设」逐字节不变（本任务变异反证 ③）。
+- **地址区重建方式**：每次 `_sync_addr_group()` 换**整个 host QWidget**（`removeWidget + setParent(None) +
+  deleteLater()`），**不要用 `QFormLayout.removeRow`**（§7l 已记录它会连控件一起删）。
+  切协议按协议**暂存已填值**（`_addr_values_by_protocol`），回切回填；不支持协议（`fields_for` 为空）
+  → 按钮 `setEnabled(False)` + 提示支持范围（**不要静默隐藏**，否则用户以为是 bug）。
+- **失败外显三处**：确认框（成功 N / 跳过 M + 最多 8 条原因）、日志逐条（`[地址替换] 名称：地址域… / 校验和…`
+  或 `跳过（原因）`）、汇总框（同计数）。与陷阱 23/58 同一精神：不静默、不洗白。
+- **按钮宽度**：`添加命令` / `一键替换地址` 都不设固定宽度（陷阱 63）；判据 `width >= sizeHint` 在 `show()` 后量。
+- **回归**：`test/test_preset_paste_addr.py`（**82 项**，`CORE_TESTS`）：协议映射与注册表对拍、南网/645 真帧 oracle
+  （替换后**该协议校验器 0 fail** + 只有地址与校验字节变化 + 前导 FEH 保留）、空帧/坏帧/混合批次/不支持协议、
+  `batch_fix_presets` 不修改入参、对话框归一化/非法拒绝/剪贴板带入/非编辑模式不变、
+  offscreen 端到端（写回 + 落盘 + 刷新 + 日志 + 跳过原因 + 空地址/全失败不写盘 + 按协议暂存 + 按钮不裁字）。
+- **变异反证（本任务已做，均干净变红后逐字节还原）**：① 写回不映射原下标 → 2 项红；
+  ② 全失败仍进确认 → 3 项红；③ 编辑模式跳过 HEX 校验 → 4 项红。
+- **已知边界**：预设页与串口页不同，**不提供撤销**（有确认框；误改可再替换回来）；
+  协议 9/10/11/12 无引擎支持（12 在预设库中存在，按钮禁用并提示）。
+
+### 7n. 645 协议测试页（DI 大类命令树 + 地址读写，1.24.1）
+
+> 用户 → 「645 协议下也建立一个类似 698 的协议测试页面，有读地址功能，有按协议大项分类的命令树，
+> 可以方便用户发送特定的协议的功能」。参考实现：`dlt645_test_core.py`（纯逻辑）+
+> `dlt645_test_widget.py`（Qt）+ `protocol_registry.has_dlt645_test` + `main_gui` 第二套懒加载接线。
+> 与 §7j（698 光伏升级页）同一套「协议专属懒加载 tab」套路，但**能力位独立**（`has_test` 保持仅 698）。
+
+- **Scope**：协议6 现场最常见的动作是「读某个 DI」「读/写通信地址」「校时/冻结/清零」。
+  把这些做成**预置命令树**，比在组帧页手选 DI/命令快得多；页面必须自足（不跳页、不手拼帧）。
+- **纯逻辑 / GUI 分层**：`dlt645_test_core` **禁止 import Qt**，负责分类库、命令库、组帧、响应判定；
+  `dlt645_test_widget` 只渲染控件、把控件值交给 core、把帧写进**共享串口**（`write_raw` +
+  `raw_data_received`，不建句柄、不关端口）。
+- **分类只按 DI 前缀做，不手写名称**：`catalog()` 从 `merge_pv_di_map`（base 1099 + 光伏 682）生成；
+  顶层 = DI3 大项（名称表 `_DI3_NAMES`），二级 = DI2（`05` 结算日按 20 天分桶，否则 254 个子节点）。
+  **光伏识别必须 `DI2=="E6" 且 DI3 ∈ {02,03,04}`** —— `05E6xxxx` 是第 230 个结算日，只判 DI2 会误分类
+  （本任务变异反证 ①）。
+- **7 位残键不进树**：`dlt645_di.json` 合并后有 16 条 `0090xxx0`（与标准条目同名重复），
+  `malformed_di_keys()` 显式暴露；`catalog()` 跳过 `len(di) != 8` 的键。测试断言「叶子数 = 总键数 − 残键数」。
+- **组帧唯一实现**：一切帧走 `DLT645FrameGenerator.generate_frame((REQ, func), fv, addr)`；
+  字段名必须与 `DLT645_CMD_SCHEMA` **逐字一致**。13H/15H 地址域固定 `AA×6`、08H 固定 `99×6`
+  （`command_effective_addr()`）——页面表地址对它们无效，预览里要写明（本任务变异反证 ③）。
+- **判定顺序固定**（`evaluate_response`）：结构 → 校验和 → 方向位 D7 → 功能码 → 异常位 D6（`decode_err`）
+  → DI 回显 → 取值（`decode_value`）；`08H` 记「已发送」不等应答。**任何一步缺证据都给失败/跳过，
+  不冒充成功**（AGENTS §8 陷阱 23 精神）。
+- **发送队列**：勾选叶子（一个没勾 = 当前选中）→ 逐条 `write_raw` → 等应答（单发 QTimer）→ 判定 → 下一条；
+  `_next_timer` 用 10ms 定时推进，**`_send_next` 必须有 `_awaiting` 守卫**：否则上一轮遗留的定时器会在
+  「已发出、等应答」期间把下一条提前发出去（响应配对全错，实测 3 条变 2 条）。停止/超时都要复位按钮。
+- **RX 自组帧**：`frame_deframe.frame_length_for("dlt645", buf)` + 末字节 `16H` 自证；前导 `FEH`
+  后面必须是 `68H` 才当前导（否则丢掉这段 FE），其余噪声按「找到下一个 68/FE」重同步 ——
+  **不要**只跳「非 68 字节」，否则 `FE FE 99 …` 会让缓冲头永久卡住（本任务变异反证 ④）。
+- **共享渲染**：四列文本走 `testpage_render.py`（698/645 同一实现，698 保留 `_display_width` 等私有别名
+  以兼容既有测试）。**不要再写第二份 `format_table_rows`**。
+- **空间预算（1000×700 实测）**：分类树 `setMinimumHeight(160)`、日志 `setMinimumHeight(120)`、
+  底部 tabs `setMaximumHeight(180)`；不给下限时树只剩 ~98px（4 行）。
+- **回归**：`test/test_dlt645_testbench.py`（**89 项**，`GUI_TESTS`）+ `test/test_dlt645_test_tab_wiring.py`
+  （**19 项**，`GUI_TESTS`）：分类库全覆盖/不重复、命令库覆盖 schema、7 类帧逐字节与 CS 自洽 + 解析器回读、
+  判定矩阵、三页与动态字段、发送队列（顺序/超时/停止/读地址回填）、落盘与 cleanup、RX 自组帧、
+  真机几何审计（1280×820 / 1000×700 零重叠、按钮不裁字）。
+- **变异反证（本任务已做，均干净变红后逐字节还原）**：① 光伏判定只看 DI2 → 4 红；
+  ② 跳过 DI 回显一致性 → 1 红；③ 13H 用页面地址 → 2 红；④ 前导 FE 重同步失效 → 1 红。
+- **顺带修的既有缺陷**：`dlt645_frame_schema._value_or_raw` 原先只认「写入数据/数据值」，
+  而 `build_di_fields` 产出的字段名是「日期/时间/通信地址/位串内容/数据内容」⇒ 这些 DI 的 **14H 帧
+  根本组不出来**（报「写数据命令必须填写…」）。已补 `_DERIVED_VALUE_KEYS` 分派，协议组帧页同时受益。
+- **已知边界**：`04000101 日期` 表内声明 4 字节、实际编码 3 字节（标准就是 3），页面给提示不阻断（§8 陷阱 91）；
+  特殊命令页多选无意义（字段随命令变化）⇒ 只发当前一条；协议测试页不做自动轮询。
+- **光伏无线扩展（手册 V1.6，1.24.1 追加）**：分类树末尾多一层「光伏无线扩展（V1.6）」，
+  叶子 = `dlt645_pv_wireless.WIRELESS_DI_MAP` 的 12 条，**子类名取 `info["group"]`**（数据转发/无线参数/
+  拓扑/升级/版本/在网状态），长度 `-1`（不定长）归一为 0。`04E60001` 与附件1 重叠 ⇒ **以无线手册为准**、
+  只挂无线分类（光伏参数 172→171，叶子总数 1776）。读页对 `read_request_fields(di)` 非空的 DI
+  （`REQ_WITH_PAYLOAD_DI` = `02EB0000`、以及 `FF00DD01`）动态渲染请求字段并传入 `build_read`；
+  无线应答摘要用 `parse_wireless_di` 的行解码（前 3 个 `└` 字段），**不要**再写第二份解码。
+  `0x06/0x1E` 作为「无线扩展（V1.6）」命令组出现在特殊命令页（字段取 schema）。
+  回归：`test_dlt645_testbench.py` [10] 段（分类/参数/组帧/判定/GUI/命令）。
+
+### 7o. 协议测试页的串口 / 蓝牙双通道（`channel_link.ChannelController`，1.24.1）
+
+> 用户 → 「698 和 645 两个协议中的协议测试页面，均需要支持发送通道的选择，可以是蓝牙通道进行交互测试」。
+> 升级页 1.23.85 已跑通同一套蓝牙口径；本任务抽成共用控制器，698/645 两页复用。
+
+- **Scope**：协议测试页是「发一条请求、等一帧应答」的问答式交互，与升级页的长流程不同：
+  每帧都很小（698 读属性 ~24B、645 读 DI 16B），但**必须整帧一次 ATT 写**（否则设备收到被切断的帧）。
+- **分层**：`channel_link.ChannelController`（Qt，无协议细节）负责「选通道 / 取蓝牙 worker / 收发 /
+  状态文案 / 超限预检」；页面的分帧、判定、信息表仍归自己。**不要**在页面里再写 MTU/上限逻辑。
+- **信号契约**：`rx(bytes)`（只转发当前通道）、`state_changed(str, bool)`、
+  `channel_changed(str)`（页面据此清 `_rx_buf`）、`error(str)`（页面记日志）。
+- **页面接入五步**：
+  1. `self._channel = ch.ChannelController(self)` + 连 4 个信号（在 `_build_ui` 之前，控件回调要用）；
+  2. 顶部加「发送通道」下拉（`ch.CHANNELS`）+ 状态行（控制器 `state_text()`，含蓝牙 MTU/一次写上限）；
+  3. `set_serial_worker` / `set_bluetooth_provider` 转交控制器（页面保留 `_serial_worker` 引用供既有断言）；
+  4. 发送走 `controller.send(frame) -> (ok, reason)`；未就绪弹框用 `controller.ready()` 的**原因**
+     （不要再写死「串口未连接」）；单帧发不出去 → 记失败并继续下一条（不静默、不中止整批）；
+  5. `showEvent` → `rebind_bluetooth()`（蓝牙页懒加载，先选蓝牙后连接是常态）；`cleanup` → `controller.cleanup()`。
+- **超限口径**：`len(frame) > single_write_limit()` ⇒ 控制器**直接返回可读错误、不调用 worker**
+  （worker 自带文案是「请调小每包字节数」，对测试页误导）。**不要**改成自动分包。
+- **双通道不串味**：串口 `raw_data_received` 与蓝牙 `notification_received` 都进控制器，只转发当前通道；
+  页面**不得**再自己 `connect(raw_data_received)`（698 页源码护栏已断言）。
+- **连接生命周期**：归「蓝牙工具」页；控制器只断信号，`cleanup` 不得 `disconnect` 蓝牙。
+- **回归**：`test/test_channel_link.py`（**49 项**，`GUI_TESTS`：通道归一化/就绪/文案/provider 延迟出现/
+  `mtu_updated` 刷新/整帧单写/超限不调用 worker/双通道 RX 隔离/cleanup 不断连接）+
+  `test_dlt698_testbench.py` [18]（15 项）+ `test_dlt645_testbench.py` [4b]（17 项）+
+  两个接线测试的注入断言（`tab._bt_provider == win._upgrade_bluetooth_source`）。
+- **真机几何**：通道行加入后 1280×820 / 1000×700 零重叠、按钮不裁字、状态行可换行（不与按钮抢宽）。
+- **已知边界**：MTU 23（上限 20）下多数 698 帧会超限 ⇒ 给明确原因，让用户到蓝牙页重连（Windows 会异步协商）；
+  升级页仍用自己那份 `_BleSendPort`（未收口，后续可换控制器）。
+
 ### 8. Qt 陷阱（本项目实测）
 - **offscreen 无字体**：`QT_QPA_PLATFORM=offscreen` 下 `QFontDatabase: Cannot find font directory ...`，绘制出的文字是豆腐块 → 断言只能查尺寸/颜色/像素多样性；**要目视核对文字排版必须用默认平台**（`QApplication([])` 不设 offscreen + `widget.grab()` / `QImage.save()`，不需要窗口真的可见）。
 - **`bytes(image.constBits())` 必须持有 QImage 引用**：`bytes(canvas.render_image(w, h).constBits())`（临时对象上取 buffer）会 **access violation（0xC0000005）**；先 `img = ...` 再 `bytes(img.constBits())`。
 - **`QSplitter` 显隐子控件不自动让空间**：新显示的表格会被分到 0 高度 → 显隐后要显式重分配 `setSizes()`（并考虑 `sum(sizes)` 与各子控件 `minimumHeight()`，避免算出负高度）；**未 `show()` 时 `sizes()` 不反映真实布局**，不能用它判定溢出。
+- **行内复选框要用 `QAbstractItemView::indicator`，不是 `QCheckBox::indicator`**（1.24.1 实测）：
+  树/表/列表的行内指示器走 `PE_IndicatorViewItemCheck`，QSS 未覆盖时按调色板画；本项目
+  `background-color` 经 QSS 映射后未选指示器的框线与行底色同色（default 白底白框、现场「看不清楚」）。
+  每套 QSS 都要写基态 + `:checked` + `:indeterminate` 三条；判据必须**渲染取像素算对比度**
+  （`test_theme_settings.py` 1d 节：指示器区域 ≥3:1 像素 ≥20 + 反例自检），静态字符串断言挡不住白底白框。
 - **`QTableWidget` 子控件的 `isVisible()` 在父窗口隐藏时为 False**：测试断言「表格是否显示」用 `isHidden()`。
 - **测试点按钮要用真实信号**：测量类操作至少各覆盖一次 `btn.click()`（+`processEvents()`），只直调 `_on_xxx()` 私有方法会漏掉 `.clicked.connect` 漏挂这类最易回归的缺陷。同样，用鼠标测交互时**每次点击前重新取 `plot_rect()`**——表格显隐会改变画布高度，复用旧矩形会以「布局」而非「逻辑」原因失败。
 

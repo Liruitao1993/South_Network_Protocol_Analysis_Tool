@@ -125,8 +125,8 @@ from theme_settings import ThemeManager, ThemeSettingsDialog
 #: 目前只有 698.45（协议8）实现了 parse_to_table(..., verify=False)。
 TOLERANT_PARSE_PROTOCOLS = {8}
 
-APP_VERSION = "1.24.2"
-BUILD_DATE = "2026-10-25"  # 编译日期，每次打包前更新
+APP_VERSION = "1.24.3"
+BUILD_DATE = "2026-10-27"  # 编译日期，每次打包前更新
 
 # 作者 GitHub 仓库地址 —— 「关于」对话框 Star 按钮的**唯一来源**。
 # 改地址只改这一处（按钮文案/提示/跳转都读它，不要在别处再写死一份）。
@@ -168,22 +168,45 @@ _WINDOW_STATE_TABLES = (
 
 CHANGELOG = [
     (
-        "1.24.2",
-        "2026-10-25",
+        "1.24.3",
+        "2026-10-27",
         [
-            "**修复「关于」对话框标题栏的 ✕ 点了没反应（用户反馈：关闭按钮不起作用）**：根因是 `setWindowFlags(windowFlags() & ~WindowContextHelpButtonHint)` —— **PySide6 的 `WindowType` 标志位取反（`~`）会连带把 `WindowCloseButtonHint`(0x08000000) 清掉**（实测 `int(f) & ~int(HELP)` 保留 0x0803003，而 PySide6 的 `f & ~HELP` 只剩 0x3003）。于是窗口仍有 `WS_SYSMENU`（标题栏照画 ✕），但 Qt 把 `SC_CLOSE` 置灰 ⇒ 点击被系统直接丢弃。真机复现：修复前连点两次 ✕ 均无效（只能用「确定」或 Esc 关闭），修复后一次点击即关闭（`exec()` 返回 0）",
-            "**修法**：先 `& ~WindowContextHelpButtonHint` 再 `| WindowCloseButtonHint`（**顺序不能反**：`(f | CLOSE) & ~HELP` 仍会被 `~` 清掉）。同款写法的「配置 → 系统集成设置」对话框一并修复；`test_about_version.py` 增加「窗口标志位必须含 `WindowCloseButtonHint`、且不含 `WindowContextHelpButtonHint`」+ 两处源码守卫（防被改回去）",
-            "配套：`APP_VERSION 1.24.1 → 1.24.2`、两个 `.iss` 同步；AGENTS §8 陷阱 89 追加该坑",
+            "**修复「关于」对话框的版本号与日期都是假的（用户反馈：里面版本号有误，且日期随时变）**：对话框原先写死 `版本 2.0`、更新记录只有伪造的 v2.0 / v1.0 两条，日期用 `date.today()` 现取 ⇒ 版本号与实际发行版无关，且**每打开一次「关于」日期都不一样**（该遗留自 1.23.43 起登记）",
+            "**改为单一来源**：版本行 = `APP_VERSION` + `CHANGELOG` 顶部条目自带的发布日期；更新记录由 `CHANGELOG`（全仓唯一版本历史来源）生成 —— 当前版本至多 4 条要点摘要 + 最近 8 个「版本号（日期）」+ 完整记录入口。**日期只取条目自带日期，不再读系统时间**（新增纯函数 `about_release_date()` / `about_version_line()` / `build_about_changelog_html()`，不建窗即可测）",
+            "**修复「关于」标题栏 ✕ 点了没反应（用户反馈：关闭按钮不起作用）**：根因是 `setWindowFlags(windowFlags() & ~WindowContextHelpButtonHint)` —— **PySide6 的 `WindowType` 标志位取反（`~`）会连带把 `WindowCloseButtonHint`(0x08000000) 清掉**（默认 0x08003003 → 0x00003003）。窗口仍有 `WS_SYSMENU`（标题栏照画 ✕），但 Qt 把 `SC_CLOSE` 置灰 ⇒ 点击被系统直接丢弃，只能用「确定」或 Esc。**修法：先 `& ~WindowContextHelpButtonHint` 再 `| WindowCloseButtonHint`（顺序不能反）**；同款写法的「配置 → 系统集成设置」对话框一并修复。真机 Windows 实测：修复前连点两次 ✕ 均无效，修复后一次点击即关闭（`exec()` 返回 0）；打包后 exe 端到端同样验证",
+            "回归：新增 `test/test_about_version.py`（**53 项**，已进 `CORE_TESTS`）—— 版本行 == APP_VERSION + CHANGELOG 日期、两次构造逐字一致、源码守卫（四个生成文案的函数体内不得出现 `date.today()` / `datetime.now()`，docstring 不计）、要点条数与摘要字数上限、`CHANGELOG` 为空/版本漂移两种兜底、**窗口标志位必须含 `WindowCloseButtonHint` 且不含 `ContextHelpButtonHint`**（两处对话框源码守卫 + 旧值 0x3003 负例）",
+            "**顺带修复 CI 唯一失败项**：`test/test_downloader.py` 的线程数用例原先依赖本机 CPU 核数（`choose_thread_count` 的 `by_cpu=cpus*4` 上界，本机 14 核绿、GitHub 4 核 runner 必红），改为显式传 `cpu_count=` 并钉住 4 核口径（42/42 通过）",
+            "配套：`APP_VERSION 1.24.2 → 1.24.3`、`BUILD_DATE 2026-10-27`、两个 `.iss` 同步；AGENTS §8 陷阱 94/95",
+        ],
+    ),
+    (
+        "1.24.2",
+        "2026-10-26",
+        [
+            "**光伏升级：全部块确认后先校验「传输块状态字」才允许执行升级**（用户 → 「先校验升级后的状态，确认全部写成功之后才执行升级」）：最后一块确认后不再直接发执行升级，而是走新增阶段 `PHASE_STATUS` → `GET F00104`（`dl_t698_45_upgrade.build_read_block_status`），"
+            "响应判定 `check_block_status`：DAR=0、bit-string 位数 ≥ 本次块数、**位序兼容 MSB-first 与 LSB-first**（命中 LSB 给警告）、缺块/位数不足/补位被置 1/多报块一律拒绝并点名缺块号；不通过只重试该 GET，重试用尽即 `failed` 且**一帧执行升级都不发**",
+            "状态字响应按 `Get-Result` CHOICE 解析（数据段必须有 `01` 标签）：此前喂一张 ACTION-Response 或其它 OAD 的 GET 响应会被当成状态字；现在 `matched=False` 一律忽略并说明原因",
+            "回归：`test/test_dl698_upgrade.py` A15（317 项，组帧 golden + 位序/缺块/位数/补位/DAR/OAD/ACTION 矩阵）+ `test/test_dl698_upgrade_gui.py` 523 项（全流程与重试/中止/波特率/双通道用例已接入该阶段）",
         ],
     ),
     (
         "1.24.1",
-        "2026-10-25",
+        "2026-10-26",
         [
-            "**修复「关于」对话框的版本号与日期都是假的（用户反馈：里面版本号有误，且日期随时变）**：对话框里写死 `版本 2.0`、更新记录只有伪造的 v2.0 / v1.0 两条，日期还是 `date.today()` 现取 —— 每次打开「关于」显示的日期都不同，而版本号与实际发行版毫无关系（该遗留自 1.23.43 起登记，本次清偿）",
-            "**改为单一来源**：版本行 = `main_gui.APP_VERSION` + `CHANGELOG` 顶部条目的发布日期；更新记录由 `CHANGELOG`（当前 159 条，全仓唯一版本历史来源）生成 —— 当前版本列要点（每条压成一行摘要，超量时注明「本版共 N 条」），历史版本只列「版本号（日期）」（最近 8 个），末尾提示完整记录见 GitHub Release / 帮助→检查更新。**日期只取条目自带日期，不再读系统时间**（新增纯函数 `about_release_date()` / `build_about_changelog_html()`，不建窗即可测）",
-            "回归：新增 `test/test_about_version.py`（53 项，offscreen）—— 版本行 == APP_VERSION + CHANGELOG 日期、二次构造文案逐字一致、源码守卫（四个生成文案的函数体内不得出现 `date.today()` / `datetime.now()`，docstring 不计）、摘要条数与字数上限、历史版本条数上限、`CHANGELOG` 为空 / 版本漂移两种兜底、**窗口标志位必须含 `WindowCloseButtonHint` 且不含 `ContextHelpButtonHint`（两处对话框源码守卫 + 旧值 0x3003 负例）**、负例自检（旧文案会被判红）；已进 `CORE_TESTS`",
-            "配套：`APP_VERSION 1.24.0 → 1.24.1`、`BUILD_DATE 2026-10-25`、两个 `.iss` 同步；AGENTS §8 陷阱 89",
+            "**预设命令页：直接粘贴报文添加按钮**（用户 → 「预设命令页面可以直接添加按钮，通过直接复制报文的方式也是可以进行命令添加的」）：搜索行左侧新增「添加命令」，`AddPresetDialog` 新增关键字参数 `editable_frame`（默认 `False`，组帧页「添加到预设」逐字节不变）——报文框可编辑、等宽字体、**打开时自动带入剪贴板里的合法 HEX**（复制报文后直接点即可），另有「从剪贴板粘贴」按钮；确定前用 `message_tool_widget.hex_text_to_bytes` 校验并归一化为空格分隔大写 HEX，非法/空报文弹警告并停在对话框（不落盘）",
+            "**预设命令页：一键批量替换地址**（用户 → 「同样的也支持批量替换地址，按照协议进行地址的替换，有一个位置可以输入地址的输入框，然后有一键替换地址的按钮，将所有的对应协议的地址一并替换掉」）：页面新增「批量替换地址（当前协议）」分组，地址字段按 `frame_addr_fix.fields_for()` **动态生成**（南网 源/目的、645 表地址、国网 源/目的、698.45 SA/CA、依瓦 表地址、南网上行 终端地址），切协议按协议**暂存已填值**；「一键替换地址」= 写法级预检（`addr_field_errors`）→ 逐条 `replace_frame_address`（地址定位/字节序/校验算法全部复用 `frame_addr_fix`，协议 6/8 前导 FEH 剥离并原样恢复）→ 确认框（成功/跳过计数 + 最多 8 条跳过原因）→ 只写回**本协议**条目的 `frame_hex` 并**一次原子落盘** → 刷新按钮 + 逐条日志 + 汇总；0 条成功或地址写法非法时**一个字节都不写**并明确告知。协议不支持（模组化）按钮禁用并写明支持范围。作用范围刻意与 `load_buttons` 同一过滤判据，同文件里其它协议的历史混入条目**不会被悄悄改掉**",
+            "纯逻辑：`preset_protocol_index()`（唯一来源 `protocol_registry.preset_mode`）+ `AddrBatchItem` / `batch_fix_presets()`（不修改入参、单条失败不中断整批、`skipped` 保留原值与可读原因）",
+            "回归：新增 `test/test_preset_paste_addr.py` **82 项全过**（南网/645 真帧 oracle：替换后该协议校验器 0 fail + 只有地址与校验字节变化 + 前导 FEH 保留；空帧/坏帧/混合批次/不支持协议；对话框归一化与非法拒绝、剪贴板带入、非编辑模式不变；offscreen 端到端写回/落盘/刷新/日志/跳过原因/空地址与全失败不写盘/按协议暂存；按钮不裁字），已进 `CORE_TESTS`；真机几何审计（1000×640 与 1400×900）零重叠、无裁字，`MainWindow` 切 0/6/7/8/12/13/14 逐协议核对地址字段与按钮启停；`test_dlt698_preset`(31) / `test_yw645_gui`(78) 全过。**变异反证 3 条**（写回不映射原下标 → 2 项红；全失败仍进确认 → 3 项红；编辑模式跳过 HEX 校验 → 4 项红）",
+            "**协议6 新增「645协议测试」页**（用户 →「645 协议下也建立一个类似 698 的协议测试页面，有读地址功能，有按协议大项分类的命令树」）：页内自足——顶部「表地址 + 读地址(13H 地址域 AA×6，收到 93H 自动回填) + 写入地址(15H) + 广播校时(08H 99×6，无需应答) + 串口状态/读取超时/循环发送/发送·停止」；左栏公共参数（PA / P0P1P2 / C0~C3）；中栏三页 **读数据(11H) / 写数据(14H) / 特殊命令**（读·写通信地址、广播校时、冻结、改速率、改密码、最大需量/电表/事件清零、读后续），每页「筛选 + 分类树 + 当前项 + 帧预览」；分类树按**协议大项**（电能量 / 最大需量 / 电压·电流 / 功率·功率因数·谐波 / 参变量 / 结算日电能 / 记录 / 冻结次数 / LME / 光伏扩展）→ 子类 → 具体 DI，叶子可勾选多条顺序下发（等应答再发下一条，超时记「超时」继续）；右栏收发日志（整帧 + 逐字段明细 + 判定结论），底部信息表/报文表（双击送单帧解析）",
+            "纯逻辑 `dlt645_test_core.py`（无 Qt）：`catalog()` 按 DI 前缀分大类（**数据驱动**，1765 条 = 基础 1099 + 光伏 682 − 表中 16 条 7 位残键）、`command_groups()` 取 `DLT645_CMD_SCHEMA`、组帧全部走 `DLT645FrameGenerator`（不手拼 68…16）、`evaluate_response()` 依次判结构/校验 → 方向位 → 功能码 → 异常位(ERR 位解释) → DI 回显 → 取值，缺失证据不冒充成功；四列文本渲染抽到共享 `testpage_render.py`（698/645 同一实现）",
+            "顺带修一处真缺陷：`dlt645_frame_schema._value_or_raw` 原先只认「写入数据/数据值」，而掩码推导出的**日期/时间/通信地址/位串/裸字节**字段名不在其列 ⇒ 日期类 DI 的 14H 帧直接报「写数据命令必须填写…」组不出来；现补 `_DERIVED_VALUE_KEYS` 分派（仍由 `_encode_di_value` 按 data_type 取值，标准与扩展路径共用），协议组帧页同时受益",
+            "回归：新增 `test/test_dlt645_testbench.py`（**89 项**：分类库/命令库/组帧逐字节+CS+解析回读/判定矩阵/offscreen 三页与发送队列·超时·停止·读地址回填·落盘·主题·RX 自组帧/共享渲染/源码护栏）与 `test/test_dlt645_test_tab_wiring.py`（**19 项**：能力位仅协议6、tab 标题与显隐、懒加载、串口与单帧解析注入、cleanup 幂等不关端口），均进 `GUI_TESTS`；真机（1280×820 与 1000×700）几何审计零重叠、按钮不裁字、树/日志/信息表留足高度。**变异反证 4 条**（光伏判定只看 DI2 → 4 红；跳过 DI 回显校验 → 1 红；13H 用页面地址 → 2 红；前导 FE 重同步失效 → 1 红）",
+            "**两个协议测试页（698 / 645）新增「发送通道：串口 / 蓝牙」**（用户 →「均需要支持发送通道的选择，可以是蓝牙通道进行交互测试」）：蓝牙通道**复用「蓝牙工具」页已建立的连接**（注入取值回调，本页不建/不断），整帧一次 ATT 写、页内自己分帧；超过一次 ATT 写上限时**明确报错、不发送**（不静默分包）；通道选择落盘，切通道清空 RX 缓冲且两通道字节互不串味。新增共用 `channel_link.py`（`ChannelController`：串口/蓝牙统一 send + RX 分流 + 状态文案 + 超限预检）供两页复用；状态行给出「串口已连接/未连接」「蓝牙未连接（先连蓝牙工具页）/设备名 + MTU + 一次写上限」；未就绪时点发送给**当前通道**的具体原因（不再固定说「串口未连接」）",
+            "回归：`test/test_channel_link.py` **49 项**（通道归一化/就绪/文案/provider 延迟出现/整帧单写/超限不调用 worker/双通道 RX 隔离/cleanup 不断连接）+ 698 页 **294 项**（新增 [18] 双通道段 15 项）+ 645 页 **106 项**（新增 [4b] 双通道段 17 项）+ 两个接线测试（23/20 项，断言两页都拿到蓝牙取值回调）；真机几何核对 1280×820 与 1000×700 通道行不重叠、按钮不裁字",
+            "**修复树/表行内复选框「白底白框」看不清**（现场 →「有好多的复选框，看不太清楚，可能是复选框的全局配置，边框没有颜色」）：4 套 QSS（default/dark/glass/mica）原先只写 `QCheckBox::indicator`，**管不到 item view 的行内指示器**（`PE_IndicatorViewItemCheck`），未选时由调色板绘制 ⇒ default 主题实测整块全 `#ffffff`。现每套补 `QAbstractItemView::indicator`（未选：灰框 `#4b5563` + 白底；已选：`#2196F3`；部分选：`#90CAF9`，dark/glass/mica 各自同口径），树/表/列表三处同时生效（协议测试命令树、串口工具命令表、归档页等）；实测 645 命令树未选框区域 60 个 ≥3:1 像素（修复前 0），边框对比度 7.56:1（dark 5.36:1）。回归：`test_theme_settings.py` 1d 节（**22 项**：4 套静态规则 + 渲染对比度 + 勾选可区分 + **反例自检**——删掉规则必须变红），既有 73 项全过",
+            "**645 协议测试页接入《南网光伏协议转换单元无线接口手册 V1.6》的扩展 DI**（用户 → 「协议测试页里找不到这份文档的协议扩展」）：分类树末尾新增「光伏无线扩展（V1.6）」——12 条 DI（`02EB0000` 数据转发 / `04E60001` 地址列表 / `04E60002` 无线频段 / `04900100` 拓扑 / `04900101~106` 升级 / `04900107` 版本 / `028100FF` 在网状态）按手册分组（数据转发·无线参数·拓扑·升级·版本·在网状态），名称/格式/长度全部取自 `dlt645_pv_wireless.WIRELESS_DI_MAP`（**单一来源**）；`02EB0000` 的读请求在「当前项」提供 `Z/C/T/DATA` 四个参数（否则帧缺数据域）、`FF00DD01` 提供条目列表，其余读请求只带 DI；`028100FF` 按手册在备注里写明「1EH 上报 / 9EH 确认」；无线应答摘要改走 `parse_wireless_di` 的行解码（版本串、调制/信道直接可读）；特殊命令页补「无线扩展（V1.6）」组（06H 上报确认 / 1EH 在网状态）。顺带修 `dlt645_frame_schema` 写数据 14H 未分派无线编码器（`04900105` 这类写数据此前组不出来）。`04E60001` 与附件1 重叠时以无线手册为准（光伏参数 172→171，叶子总数 1776）",
+            "回归：`test_dlt645_testbench.py` **132 项**（新增 [10] 无线扩展段：分类与手册逐条一致 / `02EB0000` 请求 = DI+`08 02 10`+DATA / `04900107` 只带 DI / 写 `04900105` = DI+密码组+`F1 00` / 版本与频段应答判定与摘要 / 06H·1EH 组帧 / offscreen 树·请求字段·备注）；既有 645 组帧(161)/无线帧(106)/无线解析(65) 全过",
+            "配套：`APP_VERSION 1.24.0 → 1.24.1`；两个 `.iss` 同步",
         ],
     ),
     (
@@ -193,6 +216,11 @@ CHANGELOG = [
             "**南网光伏协议转换单元·无线模组接口手册 V1.6：协议组帧能力扩展（承接上一版的解析扩展）**：① 新增 `dlt645_pv_wireless_frame.py`（纯逻辑，12 个扩展 DI 的字段模板 + 数据域编码器，与解析侧 `dlt645_pv_wireless.parse_wireless_di` 严格互为逆运算）；② `dlt645_frame_schema.py` 按「DI 是否属于本手册」前置分派 —— `get_di_info` / `build_di_fields` / `build_data` / `length_warning` 四处都是无线优先、非无线原样交回，**标准 645 行为零改动**；③ 新增四个扩展控制码命令：`06H` 上报确认应答、`86H` 主动上报（与 06H 的 `ctrl & 0x1F` 同为 0x06 但 DIR 相反，靠方向位区分）、`1EH` 在网状态上报（数据域固定 `028100FF` + 在网状态）、`9EH` 在网状态确认（L=00H）；命令下拉新增「从站上报」分组；④ 组帧页 DI 下拉把 12 个无线 DI **置顶**（原先不在 `dlt645_di.json` 里，只能手输），不定长 DI 长度显示「不定长」；⑤ 读请求特例：`02EB0000` 数据转发要求带 `Z+C+T+DATA`（L=07H+len），其余无线 DI 的 11H 请求只带 DI；⑥ 手册口径统一：超时 T 按 **BCD** 编码（10H→1000ms）、信道 2 字节 BCD **低字节在前**、地址列表 `1+6×M`、执行升级时间 10 位 BCD 低字节在前且全 FF=立即执行、拓扑每条 `地址+信号质量+父节点+保留2`（父节点全 FF 表示未入网）",
             "回归：新增 `test/test_dlt645_pv_wireless_frame.py` **106 项全过** —— 含 §4.4.1 / §4.4.2 / §4.4.3 / §4.4.6 手册原文发送帧**逐字节复现**、12 个 DI 的组帧→解析闭环、关键字节序（BCD/低字节在前）与非法输入中文报错，已进 `CORE_TESTS`；`test_dlt645_frame_gen`(161) 与 `_frame_gen_gui`(74) 的门禁断言随「从站上报」新分组同步更新，其余 645 测试全过",
             "手册内部两处不一致**如实落实现、不臆造**：`04900103` 长度列写 108 但字段累加只有 106，按 108 补 2 字节「尾部保留」与解析侧闭环；`04E60001` 继续按本手册 `1+6×M`（附件1 的「长度列 16」无法自洽切分）",
+            "**单帧解析按钮行一致性**：`校验该帧` 勾选框原先夹在「校验报文 / 添加到测试方案」之间，与右侧 `ED监控协议` / `ED包装格式` / `4字节反转` 脱节（同一行里按钮与勾选交叉，看着乱）；现统一成「7 个操作按钮 → 勾选/下拉选项组」，勾选项连续排在按钮之后（协议0 只有 `校验该帧`，协议9/10/11 再加 ED 三件套）。真机（非 offscreen）核对：11 个控件零几何重叠、无文字裁切；`test_tolerant_parse_gui`(12) / `test_ed_ui_for_gw_hdc10`(25) / `test_btn_width_fit`(66) 全过",
+            "**698.45「光伏升级」页参数区归纳为 5 个分组框**：原先 7 行裸 `QHBoxLayout` 平铺（字段名与控件逐行不对齐、无归类），现按用途分成**通道与传输 / 地址参数（SA/CA）/ 文件与校验 / 执行升级 / 读版本信息（可选）**，组内改用网格对齐（字段名右对齐成列，标签不裁字）；「通道状态」（串口/蓝牙就绪、MTU、每包上限）从参数区移到状态行 —— 它是运行时状态且文字长，占参数区一整行只会把分组框挤高。配套空间预算：参数区包进滚动容器（`PARAMS_MIN_HEIGHT=132`，窗口矮时出滚动条而**不把分组框压成一行标题**；实测改前 1000×700 下分组框被压到 27px、控件全被裁）、日志区最小高度 132（原先会被版本框挤到 56px）、版本信息两栏上限 170→124。实测 1920×1040：参数区 302px 全展开、无滚动条，日志 263px；1568×853：日志 132px + 参数区滚动。回归：`test_dl698_upgrade_gui.py` **523 项全过**",
+            "**状态栏常驻串口 / 蓝牙连接指示（颜色区分连接状态）**：状态栏右下新增两枚按钮（图标 + 中文文字，图标取自 `icons/lucide`：串口 `usb`、蓝牙 `bluetooth`），**绿=已连接（浅色 #2E7D32 / 深色 #66BB6A）、灰=未连接**，tooltip 给细节（端口 · 波特率 / 蓝牙设备名），切主题重新染色；点「串口」在顶栏折叠时展开顶栏，点「蓝牙」直接进「蓝牙工具」页。状态来源：串口订阅**共享** `SerialWorker.connection_changed`；蓝牙新增 `BluetoothToolWidget.connection_state_changed`（连接状态一变即发，懒加载页一直没打开也能同步）。渲染走 `app_icons.render_pixmap(name, size, color)`（按指定颜色渲染，高 DPI 按 devicePixelRatio 放大再标注）。回归：`test_statusbar_stats.py` 新增连接指示用例（常驻 / 灰绿染色 / tooltip / 深色配色 / 点串口展开顶栏 / 蓝牙信号即时同步），全套通过",
+            "**深色主题下自绘画布不跟随主题（拓扑图整页白底）**：拓扑视图写死 `background-color:#FAFAFA` 且节点轮廓 `#333`、角色名 `#666`、连线 `#999` 全是浅色主题取值 ⇒ 深色下整块白底（实测亮底占比 **65.6%**）、轮廓与角色名几乎看不见。新增 `canvas_theme.py`（纯逻辑无 Qt，深浅各一套 bg/bg_alt/border/text/muted/hint/line/highlight/hover）作为自绘画布配色**单源**；`TopologyGraphicsView/ TopoNodeItem` 全部改用它，`TopologyWidget.restyle_for_theme` 切主题后**按上次数据重画**（`_last_nodes`）。同批清掉另外 3 处同类硬编码：`hex_dump_view`（`QTextCharFormat` 显式白底，会盖掉 QSS ⇒ TCP 监控字节视图白底）、`batch_source_view`（行号槽 `#F2F2F2` + 状态行 `#FAFAFA` ⇒ 原始日志快照）、`test_plan_widget`（勾选框未勾选白底 + 后台徽章 `#F5F5F5`）；主窗口 `_restyle_for_theme` 与**懒加载创建点**都已接线（陷阱 86 口径）。验收：`test_appearance_gui.py` 新增**全页像素扫描**（深色下每页亮底 < 5%，改前拓扑 65.6% → 0.3%）+ 逐组件配色断言；TCP 监控/快照/测试方案各自的回归套件全过",
+            "**顺带删掉一颗地雷**：`test/test_plan_widget.py` 原是**产品模块的过期副本**（2600 行、零断言、无 `__main__`，跑起来什么都不做），而 `test/` 目录常被插到 `sys.path` 前面 ⇒ 测试里 `import test_plan_widget` 拿到的是这份旧控件（`MainWindow` 的测试方案页在 offscreen 里一直是旧控件，新增的 `restyle_for_theme` 直接 AttributeError 才暴露）。已删除，换成 `test/test_test_plan_widget.py`（真实冒烟：控件就位 / 深浅两套样式 / `add_item` 进表 / **「test/ 下不得与产品模块同名」守卫**），并登记 `GUI_TESTS`",
             "配套：`APP_VERSION 1.23.99 → 1.24.0`；两个 `.iss` 同步",
         ],
     ),
@@ -3105,6 +3133,27 @@ class MainWindow(QMainWindow):
         )
         self.statusBar().addPermanentWidget(self._serial_statusbar_lbl)
         self._serial_statusbar_lbl.hide()
+
+        # 状态栏常驻：串口 / 蓝牙连接指示（图标按状态染色：绿=已连接、灰=未连接）
+        # 用户口径：连接状态要长期看得见，且不想为看状态去翻配置面板/切页。
+        self._conn_indicator_size = 16
+        self._serial_conn_btn = self._make_conn_indicator(
+            "usb", "串口", "串口连接状态（绿=已连接 / 灰=未连接）\n点击展开顶部「串口配置」")
+        self._bt_conn_btn = self._make_conn_indicator(
+            "bluetooth", "蓝牙",
+            "蓝牙连接状态（绿=已连接 / 灰=未连接）\n点击打开「蓝牙工具」页（连接在那页建立）")
+        self.statusBar().addPermanentWidget(self._serial_conn_btn)
+        self.statusBar().addPermanentWidget(self._bt_conn_btn)
+        self._serial_conn_btn.clicked.connect(self._on_serial_indicator_clicked)
+        self._bt_conn_btn.clicked.connect(self._on_bt_indicator_clicked)
+        # 串口线程先于状态栏创建，这里补订阅；断连/重连都即时刷新
+        try:
+            self.serial_worker.connection_changed.connect(
+                lambda *_a: self._refresh_conn_indicators()
+            )
+        except Exception:  # noqa: BLE001 - 老对象/已断开的极端情况不影响启动
+            pass
+        self._refresh_conn_indicators()
         # 顶栏折叠态/标题在菜单栏图标就绪后套用（见 __init__ 中 _setup_menu_bar 之后）
         self._update_serial_statusbar()
         # 几何在 setup_ui 内已恢复；按最终宽度再算一次协议名居中（showEvent 还会再刷）
@@ -3597,6 +3646,14 @@ class MainWindow(QMainWindow):
         )
         self.tab_widget.setTabVisible(self._test_tab_index, False)
 
+        # 协议6「645协议测试」页（按 DI 大类分类的预置命令树 + 读/写地址；注册表
+        # has_dlt645_test，仅协议6 可见；同样懒加载、创建即隐藏）
+        self._dlt645_test_placeholder = QWidget()
+        self._dlt645_test_tab_index = self.tab_widget.addTab(
+            self._dlt645_test_placeholder, app_icons.load_icon("flask-conical"), "645协议测试"
+        )
+        self.tab_widget.setTabVisible(self._dlt645_test_tab_index, False)
+
         # 实时监控器页面（南网新一代(9)/国网新一代(10) 专用，默认隐藏）
         self.monitor_tab = RealtimeMonitorWidget()
         self.monitor_tab.set_serial_worker(self.serial_worker)
@@ -3681,22 +3738,6 @@ class MainWindow(QMainWindow):
         self.verify_btn.clicked.connect(self.verify_single)
         btn_layout.addWidget(self.verify_btn)
 
-        # 「校验该帧」：勾选=严格解析（默认，帧不完整/校验不过就报错）；
-        # 取消=容错解析，按实收字节能拆多少拆多少，拆不动的原样输出。
-        self.verify_frame_chk = QCheckBox("校验该帧")
-        self.verify_frame_chk.setChecked(
-            bool(self._app_config.get("single_parse", {}).get("verify", True))
-        )
-        self.verify_frame_chk.setToolTip(
-            "勾选（默认）：要求帧结构、长度自洽、HCS/FCS 通过才解析，"
-            "不完整时报「解析失败」。\n"
-            "取消：按实收字节容错解析，能拆到哪算哪，剩余字节以「未解析字节 / 原始报文」原样输出。\n"
-            "目前仅 698.45（协议8）支持容错解析。"
-        )
-        self.verify_frame_chk.setMinimumHeight(32)
-        btn_layout.addWidget(self.verify_frame_chk)
-        self._sync_verify_frame_chk()
-
         self.add_to_test_btn = QPushButton("添加到测试方案")
         set_btn(self.add_to_test_btn, "success", "lg")
         set_btn_icon(self.add_to_test_btn, "apply")
@@ -3735,6 +3776,25 @@ class MainWindow(QMainWindow):
         set_btn_icon(self.fill_crc32_btn, "apply")
         self.fill_crc32_btn.clicked.connect(self._fill_crc32)
         btn_layout.addWidget(self.fill_crc32_btn)
+
+        # === 选项勾选组：统一排在按钮之后 ===
+        # 勾选项不得夹在按钮中间（此前「校验该帧」位于「校验报文 / 添加到测试方案」之间，
+        # 与右侧 ED 相关勾选脱节，同一行里按钮与勾选交叉，一致性差）。
+        # 「校验该帧」：勾选=严格解析（默认，帧不完整/校验不过就报错）；
+        # 取消=容错解析，按实收字节能拆多少拆多少，拆不动的原样输出。
+        self.verify_frame_chk = QCheckBox("校验该帧")
+        self.verify_frame_chk.setChecked(
+            bool(self._app_config.get("single_parse", {}).get("verify", True))
+        )
+        self.verify_frame_chk.setToolTip(
+            "勾选（默认）：要求帧结构、长度自洽、HCS/FCS 通过才解析，"
+            "不完整时报「解析失败」。\n"
+            "取消：按实收字节容错解析，能拆到哪算哪，剩余字节以「未解析字节 / 原始报文」原样输出。\n"
+            "目前仅 698.45（协议8）支持容错解析。"
+        )
+        self.verify_frame_chk.setMinimumHeight(32)
+        btn_layout.addWidget(self.verify_frame_chk)
+        self._sync_verify_frame_chk()
 
         # ED 监控协议勾选项（仅南网新一代协议显示）
         self.ed_monitor_chk = QCheckBox("ED监控协议")
@@ -4894,6 +4954,8 @@ class MainWindow(QMainWindow):
             self._ensure_upgrade_tab()
         elif index == getattr(self, "_test_tab_index", -1):
             self._ensure_test_tab()
+        elif index == getattr(self, "_dlt645_test_tab_index", -1):
+            self._ensure_dlt645_test_tab()
 
     def _ensure_frame_gen_tab(self):
         if hasattr(self, "frame_gen_tab"):
@@ -4937,6 +4999,8 @@ class MainWindow(QMainWindow):
         tab.set_serial_worker(self.serial_worker)
         mode = getattr(self, "_pending_topology_mode", "south")
         tab.set_protocol_mode(mode)
+        # 懒加载创建时按**当前**主题初始化（否则「先选深色、后首开本页」会留浅色画布）
+        tab.restyle_for_theme(self._is_dark_theme())
         self._replace_lazy_tab(
             self._topology_placeholder, self._topology_tab_index, tab
         )
@@ -4958,6 +5022,7 @@ class MainWindow(QMainWindow):
             hdc10_parser=self.hdc10_parser,
             hdc10_summary_fn=self._get_gw_new_gen_summary,
         )
+        tab.restyle_for_theme(self._is_dark_theme())   # 字节视图的字符格式自带前后景
         self._replace_lazy_tab(
             self._tcp_monitor_placeholder, self._tcp_monitor_tab_index, tab
         )
@@ -5046,10 +5111,18 @@ class MainWindow(QMainWindow):
         # 会保留 __init__ 里的 _dark=False 初值（深色界面上出现白色面板）。
         # 与 _ensure_testbench_tab 同一口径。
         tab.restyle_for_theme(self._is_dark_theme())
+        # 状态栏「蓝牙」指示：本页连接/断开即时同步（懒加载页可能一直没被打开过）
+        try:
+            tab.connection_state_changed.connect(
+                lambda *_a: self._refresh_conn_indicators()
+            )
+        except Exception:  # noqa: BLE001
+            pass
         self._replace_lazy_tab(
             self._bluetooth_tool_placeholder, self._bluetooth_tool_tab_index, tab
         )
         apply_chinese_context_menus(tab)
+        self._refresh_conn_indicators()
         return tab
 
     def _bluetooth_protocol_provider(self):
@@ -5104,9 +5177,11 @@ class MainWindow(QMainWindow):
 
         tab = Dlt698TestWidget()
         self.test_tab = tab
-        # 与升级页/组帧页同一约定：端口与波特率只在顶部「串口配置」设置，
-        # 本页只订阅 raw_data_received、经 write_raw 发送，不自建句柄。
+        # 与升级页/组帧页同一约定：端口与波特率只在顶部「串口配置」设置；
+        # 本页经 channel_link 控制器收发（串口/蓝牙二选一），不自建句柄。
         tab.set_serial_worker(self.serial_worker)
+        # 蓝牙通道复用「蓝牙工具」页的连接（取值回调与升级页同一注入点）
+        tab.set_bluetooth_provider(self._upgrade_bluetooth_source)
         # 「远程升级」按钮切到光伏升级页（升级流程只实现一份）
         tab.open_upgrade.connect(
             lambda: self._goto_tab(getattr(self, "_upgrade_tab_index", -1)))
@@ -5118,8 +5193,31 @@ class MainWindow(QMainWindow):
         apply_chinese_context_menus(tab)
         return tab
 
+    def _ensure_dlt645_test_tab(self):
+        """懒加载创建 645 协议测试页（仅协议6 可见；复用共享串口）。"""
+        if hasattr(self, "dlt645_test_tab"):
+            return self.dlt645_test_tab
+        from dlt645_test_widget import Dlt645TestWidget
+
+        tab = Dlt645TestWidget()
+        self.dlt645_test_tab = tab
+        # 与其它页同一约定：端口/波特率只在顶部「串口配置」设置，本页只订阅
+        # raw_data_received 经 write_raw 发送，不自建句柄、不关端口。
+        tab.set_serial_worker(self.serial_worker)
+        # 蓝牙通道复用「蓝牙工具」页的连接（与升级页/698 测试页同一注入点）
+        tab.set_bluetooth_provider(self._upgrade_bluetooth_source)
+        # 双击报文表 → 单帧解析页（与监控器/698 测试页同一注入点）
+        tab.frame_to_single_parse.connect(self._send_frame_to_single_parse)
+        # 创建即按当前主题初始化（否则深色主题下日志/帧预览仍是白底）
+        tab.restyle_for_theme(self._is_dark_theme())
+        self._replace_lazy_tab(
+            self._dlt645_test_placeholder, self._dlt645_test_tab_index, tab
+        )
+        apply_chinese_context_menus(tab)
+        return tab
+
     def _upgrade_bluetooth_source(self):
-        """「光伏升级」页取蓝牙通信线程的唯一入口：蓝牙工具页当前的 worker（没有则 None）。
+        """「光伏升级」与两个「协议测试」页取蓝牙通信线程的唯一入口：蓝牙工具页当前的 worker（没有则 None）。
 
         蓝牙 worker 由蓝牙页**惰性创建**（用户在那页点扫描/连接时才有），所以这里只能按需取；
         升级页不缓存、不创建、不销毁它 —— 连接生命周期完全归蓝牙页。
@@ -5379,8 +5477,104 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    # ── 状态栏：串口 / 蓝牙连接指示（长期常驻，颜色区分连接状态）──────────
+
+    #: 连接指示配色（绿 = 已连接 / 灰 = 未连接；深浅主题各一套）
+    CONN_INDICATOR_COLORS = {
+        False: {"on": "#2E7D32", "off": "#9AA0A6"},
+        True: {"on": "#66BB6A", "off": "#78828C"},
+    }
+
+    def _make_conn_indicator(self, icon_name: str, text: str, tip: str) -> QToolButton:
+        """建一枚状态栏连接指示（图标 + 文字；图标颜色由连接状态决定）。"""
+        btn = QToolButton()
+        btn.setObjectName("ConnIndicator")
+        btn.setText(text)
+        btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        btn.setAutoRaise(True)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setIconSize(QSize(self._conn_indicator_size, self._conn_indicator_size))
+        btn.setToolTip(tip)
+        btn.setProperty("conn_icon", icon_name)
+        return btn
+
+    def _conn_indicator_icon(self, icon_name: str, color: str) -> QIcon:
+        """按指定颜色渲染状态图标（高 DPI 下先放大再标注 devicePixelRatio，免得发虚）。"""
+        dpr = float(self.devicePixelRatioF() or 1.0)
+        size = int(round(self._conn_indicator_size * dpr))
+        pm = app_icons.render_pixmap(icon_name, size, color)
+        pm.setDevicePixelRatio(dpr)
+        return QIcon(pm)
+
+    def _set_conn_indicator(self, btn, connected: bool, detail: str = "") -> None:
+        """按连接状态换图标颜色 + 刷新 tooltip。"""
+        colors = self.CONN_INDICATOR_COLORS[bool(self._is_dark_theme())]
+        icon_name = str(btn.property("conn_icon") or "")
+        btn.setIcon(
+            self._conn_indicator_icon(icon_name, colors["on" if connected else "off"])
+        )
+        state = "已连接" if connected else "未连接"
+        tip = f"{btn.text()}：{state}"
+        if detail:
+            tip += f"\n{detail}"
+        btn.setToolTip(tip)
+
+    def _refresh_conn_indicators(self) -> None:
+        """刷新状态栏两枚连接指示（连接/断开、换端口、切主题都走这里）。"""
+        serial_btn = getattr(self, "_serial_conn_btn", None)
+        bt_btn = getattr(self, "_bt_conn_btn", None)
+        if serial_btn is None or bt_btn is None:
+            return
+
+        # 串口：借用主窗口共享的 SerialWorker 的连接状态
+        serial_ok = False
+        port = baud = ""
+        try:
+            worker = getattr(self, "serial_worker", None)
+            serial_ok = bool(worker is not None and worker.is_connected())
+            port = self.serial_port_combo.currentText() if hasattr(self, "serial_port_combo") else ""
+            baud = self.serial_baud_combo.currentText() if hasattr(self, "serial_baud_combo") else ""
+        except Exception:  # noqa: BLE001 - 收尾期控件已销毁
+            serial_ok = False
+        detail = " · ".join(x for x in (port, baud) if x) or "在顶部「串口配置」里选择端口并打开"
+        self._set_conn_indicator(serial_btn, serial_ok, detail)
+
+        # 蓝牙：连接在「蓝牙工具」页建立；该页懒加载，没打开过就是未连接
+        bt_ok = False
+        bt_detail = "在「蓝牙工具」页扫描并连接设备"
+        tab = getattr(self, "bluetooth_tool_tab", None)
+        if tab is not None:
+            try:
+                worker = tab.bluetooth_worker()
+                if worker is not None and worker.is_connected():
+                    bt_ok = True
+                    name = worker.device_name() or ""
+                    bt_detail = f"设备：{name}" if name else "已连接"
+            except Exception:  # noqa: BLE001
+                bt_ok = False
+        self._set_conn_indicator(bt_btn, bt_ok, bt_detail)
+
+    def _on_serial_indicator_clicked(self) -> None:
+        """点「串口」指示：顶栏折叠时展开它（端口/波特率都在顶栏）。"""
+        btn = getattr(self, "topbar_toggle_btn", None)
+        if btn is None or btn.isChecked():
+            return
+        btn.setChecked(True)
+        self._toggle_top_bar()
+
+    def _on_bt_indicator_clicked(self) -> None:
+        """点「蓝牙」指示：直接跳到「蓝牙工具」页（连接在那里建立）。"""
+        try:
+            tab = self._ensure_bluetooth_tool_tab()
+            self.tab_widget.setCurrentWidget(tab)
+        except Exception as exc:  # noqa: BLE001 - 缺 bleak 等依赖时给可读提示
+            self.statusBar().showMessage(f"打开「蓝牙工具」页失败：{exc}", 5000)
+
     def _update_serial_statusbar(self):
         """顶栏折叠时，在状态栏显示端口/波特率/校验/连接状态；展开时隐藏。"""
+        if hasattr(self, "_serial_conn_btn"):
+            # 顺带刷新连接指示（tooltip 里的端口/波特率要跟着变）
+            self._refresh_conn_indicators()
         lbl = getattr(self, "_serial_statusbar_lbl", None)
         if lbl is None:
             return
@@ -5513,6 +5707,9 @@ class MainWindow(QMainWindow):
         # 协议8 698.45 协议测试（按 OAD 分类的预置测试库）：注册表 has_test
         if hasattr(self, "_test_tab_index"):
             self.tab_widget.setTabVisible(self._test_tab_index, spec.has_test)
+        if hasattr(self, "_dlt645_test_tab_index"):
+            self.tab_widget.setTabVisible(
+                self._dlt645_test_tab_index, spec.has_dlt645_test)
         # 档案管理 / 拓扑信息
         if hasattr(self, "_archive_tab_index"):
             self.tab_widget.setTabVisible(self._archive_tab_index, spec.has_archive)
@@ -9772,6 +9969,14 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
+        # 6f) 645 协议测试页：同上（停等待定时器 + 断信号 + 落盘，不关串口）
+        dlt645_test_tab = getattr(self, "dlt645_test_tab", None)
+        if dlt645_test_tab is not None:
+            try:
+                dlt645_test_tab.cleanup()
+            except Exception:
+                pass
+
         # 7) LLM 预处理线程（取消运行中的请求）
         llm = getattr(self, "llm_preprocess_widget", None)
         if llm is not None:
@@ -12737,6 +12942,8 @@ class MainWindow(QMainWindow):
         v = self._src_viewer
         if v is None:
             v = batch_source_view.SourceViewerDialog(self)
+            # 独立窗口不会自动跟随主题：行号槽/状态行是自绘颜色，建时按当前主题刷一次
+            v.restyle_for_theme(self._is_dark_theme())
             self._src_viewer = v
         return v
 
@@ -14569,6 +14776,11 @@ class MainWindow(QMainWindow):
                 self._update_serial_statusbar()
             except RuntimeError:
                 pass
+        if hasattr(self, "_serial_conn_btn"):
+            try:
+                self._refresh_conn_indicators()   # 连接指示的绿/灰随深色浅色各一套
+            except RuntimeError:
+                pass
         if hasattr(self, "batch_frame_count_label"):
             try:
                 self.batch_frame_count_label.setStyleSheet(self._batch_count_style())
@@ -14607,6 +14819,31 @@ class MainWindow(QMainWindow):
         if getattr(self, "test_tab", None) is not None:
             try:
                 self.test_tab.restyle_for_theme(self._is_dark_theme())
+            except RuntimeError:
+                pass
+        if getattr(self, "dlt645_test_tab", None) is not None:
+            try:
+                self.dlt645_test_tab.restyle_for_theme(self._is_dark_theme())
+            except RuntimeError:
+                pass
+        if getattr(self, "topology_tab", None) is not None:
+            try:
+                self.topology_tab.restyle_for_theme(self._is_dark_theme())
+            except RuntimeError:
+                pass
+        if getattr(self, "test_plan_tab", None) is not None:
+            try:
+                self.test_plan_tab.restyle_for_theme(self._is_dark_theme())
+            except RuntimeError:
+                pass
+        if getattr(self, "tcp_monitor_tab", None) is not None:
+            try:
+                self.tcp_monitor_tab.restyle_for_theme(self._is_dark_theme())
+            except RuntimeError:
+                pass
+        if getattr(self, "_src_viewer", None) is not None:
+            try:
+                self._src_viewer.restyle_for_theme(self._is_dark_theme())
             except RuntimeError:
                 pass
         if getattr(self, "testbench_tab", None) is not None:

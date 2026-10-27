@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "复核项：连接生命周期归蓝牙页、超限不静默分包、cleanup 不断连接、按钮不裁字"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "控制器（Qt 无协议）与页面的边界：分帧/判定留在页面，收发只走控制器"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "复核项：断言可判别（超限不调用 worker、跨通道字节被丢弃）、既有 279/89 项不回归"}

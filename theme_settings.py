@@ -357,6 +357,25 @@ LIGHT_QSS = """
         border: 1px solid black;
     }
 
+    /* 列表 / 表格 / 树 的行内复选框（item view indicator）：
+       `QCheckBox::indicator` 管不到它们；未写规则时由调色板绘制，边框与行底色同色
+       （default 主题实测白底白框 ⇒ 现场「复选框看不清楚」）。见 test_theme_settings 1d 节。 */
+    QAbstractItemView::indicator {
+        width: 14px;
+        height: 14px;
+        border: 1px solid #4b5563;
+        border-radius: 2px;
+        background-color: #ffffff;
+    }
+    QAbstractItemView::indicator:checked {
+        background-color: #2196F3;
+        border: 1px solid #0D47A1;
+    }
+    QAbstractItemView::indicator:indeterminate {
+        background-color: #90CAF9;
+        border: 1px solid #0D47A1;
+    }
+
     /* ========== 文件对话框 ========== */
     QFileDialog {
         background-color: #ffffff;
@@ -708,6 +727,25 @@ DARK_QSS = """
     QCheckBox::indicator:indeterminate {
         background-color: #555555;
         border: 1px solid #888888;
+    }
+
+    /* 列表 / 表格 / 树 的行内复选框（item view indicator）：
+       `QCheckBox::indicator` 管不到它们；未写规则时由调色板绘制，边框与行底色同色
+       （default 主题实测白底白框 ⇒ 现场「复选框看不清楚」）。见 test_theme_settings 1d 节。 */
+    QAbstractItemView::indicator {
+        width: 14px;
+        height: 14px;
+        border: 1px solid #9aa0a6;
+        border-radius: 2px;
+        background-color: #2d2d2d;
+    }
+    QAbstractItemView::indicator:checked {
+        background-color: #42a5f5;
+        border: 1px solid #c7d2fe;
+    }
+    QAbstractItemView::indicator:indeterminate {
+        background-color: #555555;
+        border: 1px solid #c7d2fe;
     }
 
     /* ========== 文件对话框 ========== */
@@ -1098,6 +1136,25 @@ GLASS_QSS = """
         border: 1px solid #2563eb;
     }
     QCheckBox::indicator:indeterminate {
+        background-color: rgba(147, 197, 253, 220);
+        border: 1px solid #2563eb;
+    }
+
+    /* 列表 / 表格 / 树 的行内复选框（item view indicator）：
+       `QCheckBox::indicator` 管不到它们；未写规则时由调色板绘制，边框与行底色同色
+       （default 主题实测白底白框 ⇒ 现场「复选框看不清楚」）。见 test_theme_settings 1d 节。 */
+    QAbstractItemView::indicator {
+        width: 14px;
+        height: 14px;
+        border: 1px solid #64748b;
+        border-radius: 3px;
+        background-color: rgba(255, 255, 255, 220);
+    }
+    QAbstractItemView::indicator:checked {
+        background-color: rgba(59, 130, 246, 220);
+        border: 1px solid #2563eb;
+    }
+    QAbstractItemView::indicator:indeterminate {
         background-color: rgba(147, 197, 253, 220);
         border: 1px solid #2563eb;
     }
@@ -1554,6 +1611,25 @@ MICA_QSS = """
         border: 1px solid #005fb8;
     }
     QCheckBox::indicator:indeterminate {
+        background-color: #84beef;
+        border: 1px solid #005fb8;
+    }
+
+    /* 列表 / 表格 / 树 的行内复选框（item view indicator）：
+       `QCheckBox::indicator` 管不到它们；未写规则时由调色板绘制，边框与行底色同色
+       （default 主题实测白底白框 ⇒ 现场「复选框看不清楚」）。见 test_theme_settings 1d 节。 */
+    QAbstractItemView::indicator {
+        width: 14px;
+        height: 14px;
+        border: 1px solid #8a8a8a;
+        border-radius: 3px;
+        background-color: #fdfdfd;
+    }
+    QAbstractItemView::indicator:checked {
+        background-color: #005fb8;
+        border: 1px solid #005fb8;
+    }
+    QAbstractItemView::indicator:indeterminate {
         background-color: #84beef;
         border: 1px solid #005fb8;
     }
