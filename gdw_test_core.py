@@ -26,6 +26,7 @@ PAGE_WRITE = "write"
 PAGE_REPORT = "report"
 PAGE_EB = "eb"
 PAGE_CUSTOM = "custom"
+PAGE_FLOW = "flow"          # 流程测试：按用例脚本化跑多步（见 gdw_test_flows）
 
 PAGES: Tuple[Tuple[str, str], ...] = (
     (PAGE_READ, "读取数据"),
@@ -33,6 +34,7 @@ PAGES: Tuple[Tuple[str, str], ...] = (
     (PAGE_REPORT, "主动上报"),
     (PAGE_EB, "EB 扩展"),
     (PAGE_CUSTOM, "自定义"),
+    (PAGE_FLOW, "流程测试"),
 )
 PAGE_LABELS: Dict[str, str] = dict(PAGES)
 
@@ -123,6 +125,35 @@ class EbItem:
     def label(self) -> str:
         ln = f"{self.length}B" if self.length else "不定长"
         return f"{self.di} {self.name}（{self.fmt}/{ln}）"
+
+
+@dataclass(frozen=True)
+class FlowItem:
+    """流程测试页的叶子（一个流程用例）。字段名对齐 ``GdwCommand``，供树直接复用。"""
+
+    fid: str
+    name: str
+    desc: str
+    step_count: int
+    needs_slave: bool = False
+    source: str = ""
+
+    @property
+    def key(self) -> str:
+        return self.fid
+
+    @property
+    def direction(self) -> str:
+        return "down"
+
+    @property
+    def label(self) -> str:
+        mark = " ⚙" if self.needs_slave else ""
+        return f"{self.name}（{self.step_count} 步）{mark}"
+
+    @property
+    def doc(self) -> str:
+        return self.desc
 
 
 @dataclass(frozen=True)
@@ -238,8 +269,21 @@ def eb_groups() -> List[Tuple[str, str, List[EbItem]]]:
     return [(p, EB_GROUP_NAMES.get(p, p), grouped[p]) for p in order]
 
 
+def flow_items() -> Tuple[FlowItem, ...]:
+    """流程测试页叶子（来自 ``gdw_test_flows.FLOW_CASES``）。"""
+    import gdw_test_flows as flows
+
+    return tuple(
+        FlowItem(c.fid, c.name, c.desc, len(c.steps), c.needs_slave, c.source)
+        for c in flows.FLOW_CASES
+    )
+
+
 def catalog(page: str) -> List[Category]:
     """按页面生成三级分类树。未知 page 返回空表。"""
+    if page == PAGE_FLOW:
+        items = flow_items()
+        return [Category("流程测试用例", (SubGroup("FLOW", "互换性一致性用例（流程）", items),))] if items else []
     if page == PAGE_EB:
         groups = tuple(SubGroup(key=p, name=f"{p} {name}", items=tuple(items))
                        for p, name, items in eb_groups())
@@ -269,6 +313,8 @@ def catalog(page: str) -> List[Category]:
 
 
 def leaf_count(page: Optional[str] = None) -> int:
+    if page == PAGE_FLOW:
+        return len(flow_items())
     if page == PAGE_EB:
         return len(eb_items())
     if page == PAGE_CUSTOM:

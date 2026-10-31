@@ -553,6 +553,19 @@ def main():
             f"不可识别帧兜底：保持主窗体协议 7（实际 {qp.proto_combo.currentData()}）",
       )
 
+      # 收尾：MainWindow 会起 GlobalHotkeyThread 等后台线程，不停止会在进程退出时
+      # 报「QThread: Destroyed while thread is still running」，退出码变 0xC0000409
+      # （断言全过却看起来失败）。
+      try:
+            w._shutdown_threads()
+      except Exception:
+            pass
+      try:
+            w.close()
+      except Exception:
+            pass
+      app.processEvents()
+
       print(f"\n全部通过：{_passed} 项断言")
 
 

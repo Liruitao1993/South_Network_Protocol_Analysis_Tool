@@ -797,14 +797,19 @@ class CSGNewGenParser:
             if ed_rows is not None:
                 return ed_rows
 
-        # ── 通道识别：MPDU 级输入（接入指示=1）一律按 FC 可变区域结构判别 PLC/HRF。
-        # 批量解析中什么帧类型都会遇到，下拉固定值不能代表每帧信道，故以 FC 判别为准；
-        # 非 MPDU 级输入（MAC/MSDU/APP）无 FC 头，沿用调用方传入的 channel。
+        # ── 通道：**用户选择优先**（用户口径 2026-10-31）。
+        # 显式选了 PLC/HRF 就严格按该通道解析，不再用 FC 结构反推 —— 结构判别只服务
+        # 「自动识别」；否则用户明明选了 PLC，却被结构判成 HRF，字段全按错表解析。
+        # 非 MPDU 级输入（MAC/MSDU/APP）没有 FC 头，本来就沿用调用方传入的 channel。
         if ((frame_bytes[0] >> 3) & 0x01) == 1:
-            self._channel_pinned = (
-                self._channel if channel not in ("auto", None) else None)
-            self._channel = self._detect_channel(frame_bytes, frame_len)
-            self._detected_channel = self._channel
+            pinned = channel if channel not in ("auto", None) else None
+            self._channel_pinned = pinned
+            if pinned:
+                self._channel = pinned
+                self._detected_channel = None      # 没做结构判别，也就没有「判定」结果
+            else:
+                self._channel = self._detect_channel(frame_bytes, frame_len)
+                self._detected_channel = self._channel
         else:
             self._channel_pinned = None
 
@@ -949,12 +954,13 @@ class CSGNewGenParser:
             if parse_level == "fc_efc":
                 return table_data
 
-            # 下拉通道与 FC 结构判别不一致时提示（以 FC 判别为准）
+            # 通道结果：用户显式选了通道 → 就按它解析（不再拿 FC 结构反驳用户）
             pinned = getattr(self, "_channel_pinned", None)
-            if pinned and pinned != self._channel:
+            if pinned:
+                pinned_name = "PLC 载波" if pinned == "plc" else "HRF 高速无线"
                 table_data.append((
-                    "通道判别", pinned, self._channel,
-                    "下拉通道与 FC 可变区域结构判别不一致，以 FC 判别为准",
+                    "通道判定", pinned, pinned_name,
+                    "按解析页所选通道解析（用户选择优先，不做结构判别）",
                     None, None))
             # 信标帧(定界符类型=0)：FC后直接为信标载荷，无物理块头
             if delimiter_type == 0:
@@ -1806,7 +1812,10 @@ class CSGNewGenParser:
 
         # HRF 假设（表45）: 载荷PB大小 = byte6[4-7]（表44: 0=16,1=40,2=72,3=136,4=264,5=520）
         hrf_pb = CSGNewGenParser.HRF_PB_SIZE_TABLE.get((var[5] >> 4) & 0x0F, 136)
-        if hrf_pb == 40:  # 40 字节 PB 仅 HRF 支持（表44 值1）
+        # 40 字节 PB 仅 HRF 支持（表44 值1）—— 但**必须先确认帧里真有 40 字节物理块的位置**：
+        # 只在 FC 就能装下的短帧（如 16 字节的 PLC MIMO 帧）根本没 PB，套「PB=40」会把
+        # 明确的 PLC 帧判成 HRF（用户报障帧 `19 01 20 00 04 0B …`，1.26.19）。
+        if hrf_pb == 40 and frame_len >= 16 + 40:
             return 'hrf'
         hrf_len = 16 + hrf_pb
 
@@ -2035,7 +2044,7 @@ class CSGNewGenParser:
         ))
         offset += 3
 
-        # ── 通道判别结果（MPDU 级输入一律按 FC 判别，下拉通道仅作提示）──
+        # ── 通道判定结果（仅「自动识别」时按 FC 结构判别；显式选通道不走这里）──
         if getattr(self, '_detected_channel', None) is not None:
             ch = self._detected_channel
             ch_name = "PLC 载波" if ch == "plc" else "HRF 高速无线"
@@ -2043,8 +2052,7 @@ class CSGNewGenParser:
                 "通道判定",
                 ch,
                 ch_name,
-                "按FC可变区域结构判别（帧长一致性+PB大小/物理块个数强信号），"
-                "下拉通道仅作提示",
+                "按FC可变区域结构判别（仅「自动识别」使用；显式选通道时以用户选择为准）",
                 0, 15
             ))
 

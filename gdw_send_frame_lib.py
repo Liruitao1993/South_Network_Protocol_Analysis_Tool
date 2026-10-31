@@ -278,6 +278,9 @@ class GDWFrameGenerator:
                 data = bytes.fromhex(value.replace(" ", ""))
             else:
                 data = bytes(value)
+            if field.get("reverse"):
+                # 地址类 BCD 字段：线序低字节在前（§5.2），界面按正序输入
+                data = data[::-1]
             length = field.get("length")
             if length:
                 if len(data) < length:
@@ -319,8 +322,10 @@ class GDWFrameGenerator:
             return value.encode("ascii", errors="ignore")
         elif ftype == "bcd":
             if isinstance(value, str):
-                return bytes.fromhex(value.replace(" ", ""))
-            return bytes(value)
+                data = bytes.fromhex(value.replace(" ", ""))
+            else:
+                data = bytes(value)
+            return data[::-1] if field.get("reverse") else data
         else:
             return self._pack_field(field, value)
 

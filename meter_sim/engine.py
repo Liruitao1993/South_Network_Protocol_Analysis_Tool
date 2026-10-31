@@ -6,8 +6,9 @@ from datetime import datetime
 from typing import List, Optional, Tuple
 
 from . import dynamic_data as dyn
+from . import link_layer
 from .archive import Archive
-from .link_layer import is_wildcard_sa, parse_header
+from .link_layer import classify_address, parse_header
 from .response_builder import (
     DAR_OBJECT_UNDEFINED, assemble_link_frame, build_get_response_normal,
     build_get_response_normal_list, build_get_response_record,
@@ -17,19 +18,23 @@ from .response_builder import (
 
 @dataclass
 class SimOptions:
-    meter_count: int = 3            # 通配地址模拟表数量
+    meter_count: int = 1            # 通配地址响应表数量（1 = 只回本机地址）
+    meter_address: Optional[str] = None  # 虚拟表地址（12 位数字，None 取档案表号）
+    strict_address: bool = False    # True: 单地址请求仅本机地址应答
     blacklist: List[str] = field(default_factory=list)   # SA 反转 hex 串
     whitelist: List[str] = field(default_factory=list)
     energy_increase: bool = False   # 正向有功电能随运行时间递增
     auto_freeze_time: bool = True   # 日/月/曲线冻结自动时标
     leak_window: Optional[Tuple[int, int]] = None  # 曲线漏点时段 (起分, 止分)
     mac_enabled: bool = True        # 明文回复附加 MAC
-    meter_no_base: Optional[int] = None  # 通配表号起始（None 取档案 40020200）
+    meter_no_base: Optional[int] = None  # 通配表号起始（None 取 meter_address/档案）
 
 
 # OAD 常量
 OAD_CURRENT_TIME = bytes.fromhex("40000200")
 OAD_COMM_ADDR = {bytes.fromhex(s) for s in ("40010200", "40020200", "202a0200")}
+#: 组地址（OI 4005 属性 2，array octet-string）—— 默认回 000000000000
+OAD_GROUP_ADDR = bytes.fromhex("40050200")
 OAD_ENERGY_FWD = bytes.fromhex("00100200")
 
 
@@ -46,6 +51,13 @@ class MeterSimEngine:
         self.logs.append(msg)
 
     # ── 数据查询 ──────────────────────────────────────────
+    def own_address(self) -> str:
+        """本机虚拟表地址（12 位数字）：设置优先，其次档案 40020200/202a0200 表号。"""
+        addr = dyn.normalize_address(self.options.meter_address)
+        if addr:
+            return addr
+        return str(self._archive_meter_no()).zfill(12)
+
     def _meter_no(self, archive_no: int, k: int) -> int:
         base = self.options.meter_no_base if self.options.meter_no_base is not None else archive_no
         return base + k
@@ -66,6 +78,9 @@ class MeterSimEngine:
         # 通信地址 / 表号
         if oad in OAD_COMM_ADDR:
             return dyn.comm_address_data(meter_no)
+        # 组地址（OI 4005 属性2 = array octet-string）：默认 000000000000
+        if oad == OAD_GROUP_ADDR:
+            return dyn.group_address_data()
         # 正向有功电能递增
         if oad == OAD_ENERGY_FWD and self.options.energy_increase:
             item = self.archive.lookup_key("00100200")
@@ -217,13 +232,21 @@ class MeterSimEngine:
         return build_get_response_record(piid, frozen_oad, cols, col_data)
 
     def _oad_name(self, oad: bytes) -> str:
+        # 组地址是内置对象（不进档案），单独给个名字，日志别显示「未知数据标识」
+        if oad == OAD_GROUP_ADDR:
+            return "组地址"
         item = self.archive.lookup(oad[0:2].hex(), f"{oad[2]:02x}",
                                    f"{oad[3]:02x}")
         return item["name"] if item else "未知数据标识"
 
     # ── 帧入口 ────────────────────────────────────────────
     def handle_frame(self, frame: bytes) -> List[bytes]:
-        """处理一个完整链路请求帧，返回 0..n 个响应链路帧。"""
+        """处理一个完整链路请求帧，返回 0..n 个响应链路帧。
+
+        寻址规则（用户口径）：通配地址 / 全 99·全 AA 广播地址 / 白名单地址
+        以及本机单地址的请求都要处理，且**回复帧 SA 一律为本机虚拟地址**；
+        组地址按协议无需应答，地址不匹配（严格模式）不回。
+        """
         self.logs = []
         try:
             header = parse_header(frame)
@@ -242,34 +265,44 @@ class MeterSimEngine:
                 return []
             apdu = inner
             secured = True
-        # 名单过滤（用请求 SA 反转 hex 比对）
+
+        own_addr = self.own_address()
+        own_sa = dyn.address_sa(own_addr)
+        own_body = own_sa[1:]
+        kind, answered = classify_address(header, own_body,
+                                          self.options.strict_address)
         sa_key = dyn.sa_body_reversed_hex(header["sa"])
+        if kind == "group":
+            self._log(f"组地址请求（{sa_key}）：协议要求无需应答，已忽略")
+            return []
+        # 名单过滤（用请求 SA 反转 hex 比对；通配/广播不带具体地址，不做名单判定）
         if any(k and k in sa_key for k in self.options.blacklist if k):
             self._log(f"黑名单地址命中，不回复: {sa_key}")
             return []
-        if self.options.whitelist:
-            if not any(k and k in sa_key for k in self.options.whitelist if k):
-                self._log(f"白名单外地址，不回复: {sa_key}")
-                return []
-        archive_no = self._archive_meter_no()
-        # 通配地址：多表序号响应
-        if is_wildcard_sa(header):
-            frames = []
-            for k in range(max(1, self.options.meter_count)):
-                resp_apdu = self._handle_apdu(apdu, self._meter_no(archive_no, k))
-                if resp_apdu is None:
-                    continue
-                if secured and self.options.mac_enabled:
-                    resp_apdu = wrap_security_plain_mac(resp_apdu)
-                sa = dyn.wildcard_sa_bytes(self._meter_no(archive_no, k))
-                frames.append(assemble_link_frame(sa, header["ca"], resp_apdu))
-            self._log(f"通配地址 → {len(frames)} 块表响应")
-            return frames
-        # 单播
-        meter_no = self._meter_no(archive_no, 0)
-        resp_apdu = self._handle_apdu(apdu, meter_no)
-        if resp_apdu is None:
+        wl_hit = any(k and k in sa_key for k in self.options.whitelist if k)
+        is_own = kind == "single" and link_layer.sa_body(header) == own_body
+        if self.options.whitelist and kind == "single" and not (wl_hit or is_own):
+            self._log(f"白名单外地址，不回复: {sa_key}（本机 {own_addr}）")
             return []
-        if secured and self.options.mac_enabled:
-            resp_apdu = wrap_security_plain_mac(resp_apdu)
-        return [assemble_link_frame(header["sa"], header["ca"], resp_apdu)]
+        if kind == "single" and wl_hit:
+            answered = True
+        if not answered:
+            self._log(f"{kind} 地址未覆盖本机 {own_addr}，不回复: {sa_key}")
+            return []
+        # 通配地址：按配置表数量依次回本机地址 +k；广播/单播只回本机一块表
+        count = max(1, self.options.meter_count) if kind == "wildcard" else 1
+        base_no = self._meter_no(int(own_addr), 0)
+        frames: List[bytes] = []
+        for k in range(count):
+            resp_apdu = self._handle_apdu(apdu, base_no + k)
+            if resp_apdu is None:
+                continue
+            if secured and self.options.mac_enabled:
+                resp_apdu = wrap_security_plain_mac(resp_apdu)
+            sa = dyn.address_sa(str(base_no + k).zfill(12))
+            frames.append(assemble_link_frame(sa, header["ca"], resp_apdu))
+        if kind == "wildcard":
+            self._log(f"通配地址 {sa_key} → {len(frames)} 块表响应（起始 {own_addr}）")
+        elif kind == "broadcast":
+            self._log(f"广播地址 {sa_key} → 以本机地址 {own_addr} 应答")
+        return frames

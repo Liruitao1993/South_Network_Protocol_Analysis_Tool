@@ -4074,6 +4074,7 @@ class SpectrumState(rx.State):
     sp_ydivs: str = "8"
     sp_amp_unit: str = "dBm"
     sp_50ohm: bool = False
+    sp_psd: bool = False
     sp_detector: str = "峰值"
     sp_auto_y: bool = False
     sp_rbw: str = "7.2"
@@ -4173,6 +4174,7 @@ class SpectrumState(rx.State):
             rbw_hz=self._sp_opt_hz(self.sp_rbw, self.sp_rbw_unit, "RBW"),
             vbw_hz=self._sp_opt_hz(self.sp_vbw, self.sp_vbw_unit, "VBW"),
             detector=self.sp_detector,
+            psd=bool(self.sp_psd),
         )
 
     # ------------------------------------------------------------------
@@ -4234,11 +4236,13 @@ class SpectrumState(rx.State):
         self._sp_draw_if_ready()
 
     def sp_set_toggle(self, name: str, value: bool):
-        """布尔参数：50Ω 换算 / 纵轴自动适配 / 积分带宽显示。"""
+        """布尔参数：50Ω 换算 / 纵轴自动适配 / 积分带宽显示 / PSD 视图。"""
         if name == "ibw_show":
             self.sp_ibw_show = bool(value)
         elif name == "50ohm":
             self.sp_50ohm = bool(value)
+        elif name == "psd":
+            self.sp_psd = bool(value)
         elif name == "auto_y":
             self.sp_auto_y = bool(value)
         self._sp_draw_if_ready()
@@ -11382,7 +11386,7 @@ def _sp_field(label: str, name: str, value, width: str = "90px") -> rx.Component
 
 def spectrum_tab() -> rx.Component:
     """频谱图：参数 → trace → SVG 网格图 → 测量 → 积分带宽。"""
-    from spectrum_widget import DETECTORS, LEVEL_UNITS, RBW_UNITS
+    from spectrum_widget import DETECTORS, FREQ_UNITS, LEVEL_UNITS, RBW_UNITS
 
     return rx.vstack(
         # ── 参数 ──
@@ -11406,7 +11410,7 @@ def spectrum_tab() -> rx.Component:
                     _sp_field("中心", "center", SpectrumState.sp_center),
                     _sp_field("扫宽", "span", SpectrumState.sp_span),
                     rx.el.select(
-                        *[rx.el.option(u, value=u) for u in ("kHz", "MHz", "GHz")],
+                        *[rx.el.option(u, value=u) for u in FREQ_UNITS],
                         value=SpectrumState.sp_freq_unit,
                         on_change=SpectrumState.sp_set_unit,
                         class_name="app-select",
@@ -11451,6 +11455,12 @@ def spectrum_tab() -> rx.Component:
                         "输入按 dBm，50Ω 换算",
                         checked=SpectrumState.sp_50ohm,
                         on_change=lambda v: SpectrumState.sp_set_toggle("50ohm", v),
+                        size="2",
+                    ),
+                    rx.checkbox(
+                        "功率谱密度（dBm/Hz，需 RBW）",
+                        checked=SpectrumState.sp_psd,
+                        on_change=lambda v: SpectrumState.sp_set_toggle("psd", v),
                         size="2",
                     ),
                     rx.text("检波", size="1", color="gray"),

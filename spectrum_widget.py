@@ -33,14 +33,15 @@ UNIT_DBM = "dBm"
 UNIT_DBUV = "dBμV"
 UNIT_DBMV = "dBmV"
 LEVEL_UNITS: Tuple[str, ...] = (UNIT_DBM, UNIT_DBUV, UNIT_DBMV)
+PSD_SUFFIX = "/Hz"  # 功率谱密度单位后缀（dBm → dBm/Hz）
 # 50Ω 系统下相对 dBm 的偏移（dBμV = dBm + 107，dBmV = dBm + 47）
 UNIT_OFFSET_FROM_DBM = {UNIT_DBM: 0.0, UNIT_DBUV: 107.0, UNIT_DBMV: 47.0}
 
 DETECTORS: Tuple[str, ...] = ("峰值", "准峰值", "平均值", "RMS", "采样")
 DEFAULT_DETECTOR = "峰值"
 
-FREQ_UNITS = {"kHz": 1e3, "MHz": 1e6, "GHz": 1e9}  # 起始/终止/中心/扫宽 共用同一单位
-RBW_UNITS = {"kHz": 1e3, "MHz": 1e6}  # RBW / VBW
+FREQ_UNITS = {"Hz": 1.0, "kHz": 1e3, "MHz": 1e6, "GHz": 1e9}  # 起始/终止/中心/扫宽 共用同一单位
+RBW_UNITS = {"Hz": 1.0, "kHz": 1e3, "MHz": 1e6}  # RBW / VBW
 DEFAULT_FREQ_UNIT = "MHz"
 DEFAULT_RBW_UNIT = "kHz"
 
@@ -141,6 +142,7 @@ class SpectrumParams:
     rbw_hz: Optional[float] = None
     vbw_hz: Optional[float] = None
     detector: str = DEFAULT_DETECTOR
+    psd: bool = False  # 按功率谱密度绘制（dBm/Hz，需 RBW）
 
     @property
     def span_hz(self) -> float:
@@ -169,6 +171,44 @@ class SpectrumTrace:
     @property
     def n_points(self) -> int:
         return len(self.levels)
+
+
+# ── 功率谱密度（PSD）换算 ──
+# 频谱仪读数是「分辨率带宽 RBW 内的功率」，改成谱密度需减掉带宽：
+#     PSD(dBm/Hz) = level(dBm) − 10·log10(RBW/Hz)
+# RBW 未填就无法归一化（不猜默认值），由 validate_params 直接报错。
+
+
+def psd_unit(unit: str) -> str:
+    """幅值单位 → 功率谱密度单位（dBm → dBm/Hz、dBμV → dBμV/Hz）。"""
+    return f"{unit}{PSD_SUFFIX}"
+
+
+def psd_offset_db(rbw_hz: Optional[float]) -> float:
+    """PSD 换算偏移 = −10·log10(RBW/Hz)；RBW 缺失/非正时抛错（不猜默认值）。"""
+    if rbw_hz is None:
+        raise SpectrumInputError("功率谱密度需要 RBW：请在参数区填写 RBW 后重新绘制")
+    if not math.isfinite(rbw_hz) or rbw_hz <= 0:
+        raise SpectrumInputError("功率谱密度需要正的 RBW")
+    return -10.0 * math.log10(rbw_hz)
+
+
+def display_unit(params: SpectrumParams) -> str:
+    """当前显示口径的幅值单位（PSD 视图带 `/Hz` 后缀）。"""
+    return psd_unit(params.unit) if params.psd else params.unit
+
+
+def display_ref_level(params: SpectrumParams) -> float:
+    """纵轴参考电平在当前口径下的值（PSD 视图按 RBW 归一化到 dBm/Hz）。"""
+    if not params.psd:
+        return params.ref_level_db
+    return params.ref_level_db + psd_offset_db(params.rbw_hz)
+
+
+def psd_levels(levels: Sequence[float], rbw_hz: Optional[float]) -> Tuple[float, ...]:
+    """把一组幅值换算成功率谱密度（每个点减同一个 −10·log10(RBW)）。"""
+    offset = psd_offset_db(rbw_hz)
+    return tuple(float(v) + offset for v in levels)
 
 
 def _split_tokens(text: str) -> list:
@@ -318,6 +358,8 @@ def validate_params(params: SpectrumParams) -> None:
             raise SpectrumInputError(f"{name} 必须为正数")
     if params.detector not in DETECTORS:
         raise SpectrumInputError(f"未知检波方式：{params.detector}")
+    if params.psd:
+        psd_offset_db(params.rbw_hz)  # PSD 必须有 RBW（RAISES with user-facing message）
 
 
 def display_levels(
@@ -339,16 +381,23 @@ def freqs_for(params: SpectrumParams, n_points: int) -> Tuple[float, ...]:
 
 
 def build_trace(text: str, params: SpectrumParams) -> SpectrumTrace:
-    """校验参数 + 预处理数值（含日志行清洗）+ 换算单位 + 生成频率轴。"""
+    """校验参数 + 预处理数值（含日志行清洗）+ 换算单位 + 生成频率轴。
+
+    `params.psd` 为真时幅值再按 RBW 归一化成**功率谱密度**（dBm/Hz），
+    下游（纵轴/读数/标记/积分）因此共用同一口径。
+    """
     validate_params(params)
     parsed = preprocess_trace(text)
     raw = parsed.values
     if len(raw) < 2:
         raise SpectrumInputError("至少需要 2 个数值点才能绘制")
+    levels = display_levels(raw, params)
+    if params.psd:
+        levels = psd_levels(levels, params.rbw_hz)
     return SpectrumTrace(
         params=params,
         freqs=freqs_for(params, len(raw)),
-        levels=display_levels(raw, params),
+        levels=levels,
         source=parsed,
     )
 
@@ -360,9 +409,12 @@ def y_range(
 
     auto=False（仪器式）：顶 = 参考电平，底 = 参考电平 − 每格 dB × 格数。
     auto=True：取数据 min/max 并上下各留 5% 余量（无数据时回落仪器式）。
+
+    PSD 视图下参考电平按同一偏移换算到 dBm/Hz（`display_ref_level`），
+    保证「每格 dB/格数」的仪器式口径在两种视图下语义一致。
     """
     if not auto or not levels:
-        top = params.ref_level_db
+        top = display_ref_level(params)
         return top, top - params.db_per_div * params.y_divs
     low = min(levels)
     high = max(levels)
@@ -711,7 +763,7 @@ def marker_note(marker: Marker, unit: str) -> str:
 def extremes_text(trace: SpectrumTrace) -> str:
     """峰值/谷值摘要（基础计算）。"""
     high, low = extreme_points(trace)
-    unit = trace.params.unit
+    unit = display_unit(trace.params)
     return (
         f"峰值 {format_hz(high.freq_hz)} / {format_level(high.level, unit)}"
         f"     谷值 {format_hz(low.freq_hz)} / {format_level(low.level, unit)}"
@@ -819,6 +871,8 @@ def integrate_band(
       未给出则只做求和并在文本中注明原因；
     - 求和用**移位求和**（log-sum-exp）：`peak + 10log10(Σ10^((v-peak)/10))`，
       对极端电平（±数千 dB）不溢出/不下溢（直接 `10**(L/10)` 会抛 OverflowError 或 log10(0) 域错）；
+    - PSD 视图（`params.psd`）下 trace 已是 dBm/Hz，每点视作「密度 × 频率步进」即功率，
+      故按 `10log10(频率步进)` 归一化（**不再**除 RBW）。
     - 带宽超出扫描范围时按交集积分（`clipped=True`），无交集时 `n_points=0`。
     """
     low_hz, high_hz = ibw_edges(center_hz, bandwidth_hz)
@@ -837,7 +891,16 @@ def integrate_band(
         peak = max(inside)
         linear = math.fsum(10.0 ** ((level - peak) / 10.0) for level in inside)
         total_db = peak + 10.0 * math.log10(linear)
-        if rbw_hz and step_hz:
+        if trace.params.psd:
+            if step_hz:
+                total_db += 10.0 * math.log10(step_hz)
+                normalized = True
+                basis = "PSD 密度 × 频率步进"
+                if bandwidth_hz < step_hz:
+                    narrow = True
+            else:
+                basis = "未归一化，点数不足"
+        elif rbw_hz and step_hz:
             total_db += 10.0 * math.log10(step_hz / rbw_hz)
             normalized = True
             basis = "按 RBW 归一化"
@@ -911,7 +974,11 @@ def note_text(params: SpectrumParams, n_points: int) -> str:
     if params.vbw_hz:
         parts.append(f"VBW {format_hz(params.vbw_hz)}")
     parts.append(f"检波 {params.detector}")
-    parts.append(f"参考电平 {format_level(params.ref_level_db, params.unit)}")
+    if params.psd:
+        parts.append(f"功率谱密度 {psd_unit(params.unit)}（按 RBW 归一化）")
+    parts.append(
+        f"参考电平 {format_level(display_ref_level(params), display_unit(params))}"
+    )
     parts.append(f"{format_level(params.db_per_div)} dB/格 × {params.y_divs} 格")
     parts.append(f"点数 {n_points}")
     return "   ".join(parts)
@@ -926,6 +993,8 @@ def status_text(trace: SpectrumTrace) -> str:
     parts.append(f"扫宽 {format_hz(trace.params.span_hz)}")
     if trace.params.rbw_hz:
         parts.append(f"RBW {format_hz(trace.params.rbw_hz)}")
+    if trace.params.psd:
+        parts.append(f"PSD {display_unit(trace.params)}")
     return " · ".join(parts)
 
 
@@ -935,7 +1004,8 @@ def axis_range_text(
     """纵轴范围文本（参数区只读显示 + 测试可断言）。"""
     top, bottom = y_range(params, levels, auto)
     return (
-        f"纵轴 {format_level(top)} ~ {format_level(bottom)} {params.unit}"
+        f"纵轴 {format_level(top)} ~ {format_level(bottom)} {display_unit(params)}"
+        + ("（PSD 视图）" if params.psd else "")
         + ("（自动适配）" if auto and levels else "（参考电平口径）")
     )
 
@@ -1092,7 +1162,7 @@ if _QT_AVAILABLE:
                 labels = [format_fixed(v, decimals) for v in ticks]
             else:
                 labels = [format_level(v) for v in ticks]
-            labels[0] = f"{labels[0]} {params.unit}"
+            labels[0] = f"{labels[0]} {display_unit(params)}"
             return tuple(labels)
 
         def plot_rect(self, rect: Optional[QRect] = None) -> Optional[QRect]:
@@ -1410,7 +1480,7 @@ if _QT_AVAILABLE:
                 metrics = QFontMetrics(note_font)
                 lines = [
                     (
-                        f"{marker.label} {readout_text(marker.freq_hz, marker.level, params.unit)}",
+                        f"{marker.label} {readout_text(marker.freq_hz, marker.level, display_unit(params))}",
                         QColor(marker_color(self._dark, order)),
                     )
                     for order, marker in enumerate(self._markers)
@@ -1471,7 +1541,7 @@ if _QT_AVAILABLE:
                 index, freq, level = self._cursor
                 painter.setFont(note_font)
                 metrics = QFontMetrics(note_font)
-                text = readout_text(freq, level, params.unit)
+                text = readout_text(freq, level, display_unit(params))
                 width = metrics.horizontalAdvance(text) + 16
                 height = metrics.height() + 8
                 x = x_of(index) + 14
@@ -1703,6 +1773,14 @@ if _QT_AVAILABLE:
             self.convert_check = QCheckBox("输入按 dBm，50Ω 换算到所选单位")
             self.convert_check.toggled.connect(self._refresh_axis_label)
             form.addRow("", self.convert_check)
+
+            self.psd_check = QCheckBox("按功率谱密度绘制（dBm/Hz，需 RBW）")
+            self.psd_check.setToolTip(
+                "勾选后整条曲线与全部读数改为功率谱密度：PSD = 幅值 − 10·log10(RBW)，"
+                "纵轴/参考电平/标记/导出同步换算；RBW 留空无法换算（会提示）"
+            )
+            self.psd_check.toggled.connect(self._on_psd_toggled)
+            form.addRow("", self.psd_check)
 
             self.detector_combo = QComboBox()
             self.detector_combo.addItems(list(DETECTORS))
@@ -1939,6 +2017,7 @@ if _QT_AVAILABLE:
                 rbw_hz=self._read_optional_hz(self.rbw_edit, self.rbw_unit_combo, "RBW"),
                 vbw_hz=self._read_optional_hz(self.vbw_edit, self.vbw_unit_combo, "VBW"),
                 detector=self.detector_combo.currentText(),
+                psd=self.psd_check.isChecked(),
             )
             validate_params(params)
             return params
@@ -1995,6 +2074,12 @@ if _QT_AVAILABLE:
             self._refresh_integration()
             self._refresh_axis_label()
             self._set_status("就绪")
+
+        def _on_psd_toggled(self, _checked: bool) -> None:
+            """PSD 视图切换立即生效：已绘制过 trace 就按新口径重建，否则只刷纵轴提示。"""
+            self._refresh_axis_label()
+            if self._trace is not None and self.trace_edit.toPlainText().strip():
+                self._on_draw()
 
         def _on_auto_toggled(self, checked: bool) -> None:
             self.canvas.set_auto_y(checked)
@@ -2109,7 +2194,7 @@ if _QT_AVAILABLE:
             markers = self.canvas.markers()
             if markers:
                 self._set_status(
-                    f"已添加 {marker_note(markers[-1], self._trace.params.unit)}"
+                    f"已添加 {marker_note(markers[-1], display_unit(self._trace.params))}"
                 )
 
         def _selected_marker_row(self) -> int:
@@ -2140,7 +2225,7 @@ if _QT_AVAILABLE:
             target_row = row if row >= 0 else len(markers) - 1
             if 0 <= target_row < len(markers):
                 self._set_status(
-                    f"{note}：{marker_note(markers[target_row], self._trace.params.unit)}"
+                    f"{note}：{marker_note(markers[target_row], display_unit(self._trace.params))}"
                 )
 
         def _on_search_peak(self) -> None:
@@ -2239,7 +2324,7 @@ if _QT_AVAILABLE:
 
         def _fill_marker_table(self, markers: Tuple[Marker, ...]) -> None:
             rows = marker_rows(markers, self._ref_index())
-            unit = self._trace.params.unit if self._trace is not None else ""
+            unit = display_unit(self._trace.params) if self._trace is not None else ""
             self.marker_table.setHorizontalHeaderLabels(
                 [
                     "标记",
@@ -2325,6 +2410,7 @@ if _QT_AVAILABLE:
             old = trace.params
             return (
                 params.unit != old.unit
+                or params.psd != old.psd
                 or params.convert_50ohm != old.convert_50ohm
                 or params.detector != old.detector
                 or abs(params.ref_level_db - old.ref_level_db) > 1e-9
@@ -2355,8 +2441,15 @@ if _QT_AVAILABLE:
 
 
 def _fmt_number(value: float) -> str:
-    """频率输入框回写格式（避免 240.00000000001 这类浮点噪声）。"""
-    text = f"{round(float(value), 9):g}"
+    """频率输入框回写格式（避免 240.00000000001 这类浮点噪声）。
+
+    选 Hz 时字段值是 2.4e8 量级，若用 `:g` 会退化成 `2.4e+08`（不便阅读/编辑），
+    故整数一律按整数输出，非整数去掉尾部多余的 0。
+    """
+    number = round(float(value), 9)
+    if number == 0:
+        return "0"
+    text = f"{number:.9f}".rstrip("0").rstrip(".")
     return text
 
 

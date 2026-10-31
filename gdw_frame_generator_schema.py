@@ -3,7 +3,19 @@
 严格按照协议文档定义，覆盖所有下行命令的数据单元。
 """
 
+from datetime import datetime
 from typing import Dict, Any, Tuple
+
+
+def _bcd_now() -> Tuple[str, str, str, str, str, str]:
+    """当前时间的 6 个 BCD 字节（秒/分/时/日/月/年，年取两位）—— 14H F2 默认值。"""
+    now = datetime.now()
+    return (f"{now.second:02d}", f"{now.minute:02d}", f"{now.hour:02d}",
+            f"{now.day:02d}", f"{now.month:02d}", f"{now.year % 100:02d}")
+
+
+#: 模块加载时刻的 BCD 时钟（秒/分/时/日/月/年）
+_now = _bcd_now()
 
 GDW_AFNFN_SCHEMA: Dict[Tuple[int, int], Dict[str, Any]] = {
 
@@ -11,7 +23,11 @@ GDW_AFNFN_SCHEMA: Dict[Tuple[int, int], Dict[str, Any]] = {
     # AFN=00H 确认/否认 (上行响应，无下行数据单元)
     # =========================================================================
     (0x00, 1): {"name": "确认", "direction": "up", "fields": [],
-                "doc": "<b>AFN=00H F1 确认</b><br>上行响应帧，无下行数据单元。"},
+                "doc": "<b>AFN=00H F1 确认</b><br>上行响应帧。数据单元共 6 字节（表 9）：<br>"
+                       "① BS 4 字节：D0 = 命令状态（0 未处理 / 1 已处理），"
+                       "D1~D31 = 信道 1~31 状态（0 忙 / 1 闲）；<br>"
+                       "② 等待时间 2 字节（BIN，单位 s，<b>应不超过 5s</b>）。<br>"
+                       "<b>不能发空数据单元，也不能只发 4 字节 BS</b> —— 少了等待时间照样是不合规确认帧。"},
     (0x00, 2): {"name": "否认", "direction": "up", "fields": [],
                 "doc": "<b>AFN=00H F2 否认</b><br>上行响应帧，无下行数据单元。"},
 
@@ -79,12 +95,21 @@ GDW_AFNFN_SCHEMA: Dict[Tuple[int, int], Dict[str, Any]] = {
         "name": "通信延时相关广播通信时长",
         "direction": "down",
         "fields": [
-            {"name": "通信协议类型", "type": "enum", "default": 0,
-             "enum_map": {0: "透明传输", 1: "DL/T 645-1997", 2: "DL/T 645-2007", 3: "DL/T 698.45"}},
-            {"name": "报文长度", "type": "uint8", "default": 0},
-            {"name": "报文内容", "type": "bytes", "default": ""},
+            {"name": "通信协议类型", "type": "enum", "default": 2,
+             "enum_map": {0: "透明传输", 1: "DL/T 645-1997", 2: "DL/T 645-2007", 3: "DL/T 698.45"},
+             "description": "00H 透明传输 / 01H 645-1997 / 02H 645-2007 / 03H 698.45"},
+            # L 必须跟着报文内容派生（表 18 b）：写死 0 会被被测当成「没有报文」，
+            # 现场看到的就是「长度 0、内容空」
+            {"name": "报文长度", "type": "uint8", "default": 0, "length_field": "报文内容",
+             "description": "要计算下行延时的原始报文总长度，由报文内容自动派生"},
+            {"name": "报文内容", "type": "bytes", "default": "",
+             "description": "要计算通信下行延时的原始报文，通常是对目标电表的正向有功总电能 645 读帧"},
         ],
-        "doc": "<b>AFN=03H F9</b><br>数据单元：通信协议类型(1B)+报文长度(1B)+报文内容(NB)"
+        "doc": "<b>AFN=03H F9 通信延时相关广播通信时长</b>（表 18）<br>"
+               "数据单元：通信协议类型(1B) + 报文长度 L(1B) + 报文内容(L)<br>"
+               "a) 通信协议类型：00H 透明传输、01H DL/T 645—1997、02H DL/T 645—2007、03H DL/T 698.45；<br>"
+               "b) 报文长度 L：需要计算通信下行延时的报文长度；<br>"
+               "c) 报文内容：需要计算通信下行延时的具体报文内容（一般是正向有功总电能读报文）。"
     },
     (0x03, 10): {"name": "本地通信模块运行模式信息", "direction": "down", "fields": [],
                  "doc": "<b>AFN=03H F10</b><br>无下行数据单元。"},
@@ -127,13 +152,21 @@ GDW_AFNFN_SCHEMA: Dict[Tuple[int, int], Dict[str, Any]] = {
         "fields": [
             {"name": "测试通信速率", "type": "uint8", "default": 0,
              "description": "0表示默认通信速率"},
-            {"name": "目标地址", "type": "bcd", "length": 6, "default": "000000000000"},
+            {"name": "目标地址", "type": "bcd", "length": 6, "reverse": True,
+             "default": "000000000000",
+             "description": "被测节点通信地址，按组网参数自动填"},
             {"name": "通信协议类型", "type": "enum", "default": 0,
              "enum_map": {0: "透明传输", 1: "DL/T 645-1997", 2: "DL/T 645-2007", 3: "DL/T 698.45"}},
-            {"name": "报文长度", "type": "uint8", "default": 0},
-            {"name": "报文内容", "type": "bytes", "default": ""},
+            {"name": "报文长度", "type": "uint8", "default": 0,
+             "length_field": "报文内容",
+             "description": "由报文内容长度自动填"},
+            {"name": "报文内容", "type": "bytes", "default": "",
+             "description": "待测试报文（645/698 帧）"},
         ],
-        "doc": "<b>AFN=04H F3</b><br>数据单元：测试通信速率(1B)+目标地址(6B)+通信协议类型(1B)+报文长度(1B)+报文内容(NB)"
+        "doc": "<b>AFN=04H F3 本地通信模块报文通信测试</b><br>"
+               "数据单元：测试通信速率(1B)+目标地址(6B BCD)+通信协议类型(1B)+报文长度L(1B)+报文内容(LB)"
+               "（表 39）<br>目标地址取被测节点表地址（低字节在前，界面正序输入）；"
+               "报文长度随报文内容自动派生，空内容会让 CCO 判「表号不存在/长度错误」"
     },
 
     # =========================================================================
@@ -160,12 +193,20 @@ GDW_AFNFN_SCHEMA: Dict[Tuple[int, int], Dict[str, Any]] = {
         "name": "启动广播",
         "direction": "down",
         "fields": [
-            {"name": "控制字", "type": "enum", "default": 0,
-             "enum_map": {0: "透明传输", 1: "DL/T 645-1997", 2: "DL/T 645-2007", 3: "相位识别"}},
-            {"name": "报文长度", "type": "uint8", "default": 0},
-            {"name": "报文内容", "type": "bytes", "default": ""},
+            {"name": "控制字", "type": "enum", "default": 2,
+             "enum_map": {0: "透明传输", 1: "DL/T 645-1997", 2: "DL/T 645-2007", 3: "相位识别"},
+             "description": "00H 透明传输 / 01H 645-1997 / 02H 645-2007 / 03H 相位识别功能"},
+            # L 跟着报文内容派生（表 43 b），否则被测会当作「没有报文」
+            {"name": "报文长度", "type": "uint8", "default": 0, "length_field": "报文内容",
+             "description": "通信协议原始报文的总长度，由报文内容自动派生"},
+            {"name": "报文内容", "type": "bytes", "default": "",
+             "description": "通信协议的原始报文数据（按表 43 c），通常是对目标电表的正向有功总电能读帧"},
         ],
-        "doc": "<b>AFN=05H F3</b><br>数据单元：控制字(1B)+报文长度(1B)+报文内容(NB)"
+        "doc": "<b>AFN=05H F3 启动广播</b>（表 43）<br>"
+               "数据单元：控制字(1B) + 报文长度 L(1B) + 报文内容(L)<br>"
+               "a) 控制字：00H 透明传输、01H DL/T 645—1997、02H DL/T 645—2007、03H 相位识别功能，04H~FFH 保留；<br>"
+               "b) 报文长度 L：通信协议原始报文数据总长度（广播前须按 03H F9 的 T1 修正）；<br>"
+               "c) 报文内容：通信协议的原始报文数据。"
     },
     (0x05, 4): {
         "name": "设置从节点监控最大超时时间",
@@ -401,8 +442,25 @@ GDW_AFNFN_SCHEMA: Dict[Tuple[int, int], Dict[str, Any]] = {
         ],
         "doc": "<b>AFN=10H F101</b><br>数据单元：从节点起始序号(2B)+从节点数量(1B)"
     },
-    (0x10, 104): {"name": "查询升级后模块版本信息", "direction": "down", "fields": [],
-                  "doc": "<b>AFN=10H F104</b><br>无下行数据单元。"},
+    (0x10, 104): {
+        "name": "查询升级后模块版本信息",
+        "direction": "down",
+        "fields": [
+            {"name": "节点起始序号", "type": "uint16", "endian": "little", "default": 0,
+             "description": "0=CCO，1=第1个载波从节点，2 以后以此类推"},
+            {"name": "节点数量", "type": "uint8", "default": 1,
+             "description": "本次查询的节点数，建议不超过 15 个"},
+        ],
+        "doc": "<b>AFN=10H F104 查询升级后模块版本信息</b><br>"
+               "依据《HPLC 远程升级方案》（2019-01-30）2.4.2(2)：<br>"
+               "下行：节点起始序号(BIN 2B)+节点数量 n(BIN 1B)；"
+               "<b>序号从 0 开始，0 表示 CCO，1 表示第 1 个载波从节点</b>；"
+               "每次查询数量建议 ≤15。<br>"
+               "上行：节点总数量 m(BIN 2B，含 CCO 与全部 STA)+本次应答数量 n(BIN 1B)"
+               "+n×[节点地址(BCD 6B)+节点信息(9B)]；<br>"
+               "节点信息 = 软件版本号(BCD 2B)+版本日期 日/月/年(BCD 各 1B)"
+               "+模块厂商代码(ASCII 2B)+芯片代码(ASCII 2B)。<br>"
+               "用途：升级后回读 CCO/STA 版本，确认升级是否成功（空网时只会被否认）。"},
     (0x10, 111): {"name": "查询网络信息", "direction": "down", "fields": [],
                   "doc": "<b>AFN=10H F111</b><br>无下行数据单元。"},
     (0x10, 112): {
@@ -520,18 +578,24 @@ GDW_AFNFN_SCHEMA: Dict[Tuple[int, int], Dict[str, Any]] = {
         "name": "监控从节点",
         "direction": "down",
         "fields": [
-            {"name": "通信协议类型", "type": "enum", "default": 0,
-             "enum_map": {0: "透明传输", 1: "DL/T 645-1997", 2: "DL/T 645-2007", 3: "DL/T 698.45"}},
+            {"name": "通信协议类型", "type": "enum", "default": 2,
+             "enum_map": {0: "透明传输", 1: "DL/T 645-1997", 2: "DL/T 645-2007", 3: "DL/T 698.45"},
+             "description": "须与被抄表的协议一致；按组网参数自动填"},
             {"name": "通信延时相关性标志", "type": "enum", "default": 0,
              "enum_map": {0: "无关", 1: "相关"}},
             {"name": "从节点附属节点数量", "type": "uint8", "default": 0},
             {"name": "从节点附属节点列表", "type": "list",
              "count_field": "从节点附属节点数量",
              "item_fields": [
-                 {"name": "从节点附属节点地址", "type": "bcd", "length": 6, "default": "000000000000"},
+                 # 地址线序低字节在前（§5.2）：界面正序输入，打包时逆序
+                 {"name": "从节点附属节点地址", "type": "bcd", "length": 6, "reverse": True,
+                  "default": "000000000000"},
              ]},
-            {"name": "报文长度", "type": "uint8", "default": 0},
-            {"name": "报文内容", "type": "bytes", "default": ""},
+            {"name": "报文长度", "type": "uint8", "default": 0,
+             "length_field": "报文内容",
+             "description": "由报文内容长度自动填"},
+            {"name": "报文内容", "type": "bytes", "default": "",
+             "description": "按从节点协议填抄读报文：645 读正向有功总电能；698 GET OAD=00100200"},
         ],
         "doc": "<b>AFN=13H F1</b><br>数据单元：协议类型(1B)+延时标志(1B)+附属节点数量(1B)+[地址(6B)]*n+报文长度(1B)+报文内容"
     },
@@ -557,33 +621,102 @@ GDW_AFNFN_SCHEMA: Dict[Tuple[int, int], Dict[str, Any]] = {
     },
 
     # =========================================================================
-    # AFN=14H 路由数据抄读 (下行)
+    # AFN=14H 路由数据抄读 (下行应答 / 上行请求)
+    #   §6.5.12：下行 F1~F4 为集中器应答，上行 F1~F4 由路由模块发起
     # =========================================================================
     (0x14, 1): {
         "name": "路由请求抄读内容",
         "direction": "down",
         "fields": [
             {"name": "抄读标志", "type": "enum", "default": 2,
-             "enum_map": {0: "抄读失败", 1: "抄读成功", 2: "可以抄读"}},
+             "enum_map": {0: "抄读失败", 1: "抄读成功", 2: "可以抄读"},
+             "description": "02H 时 L>0；00H/01H 时 L=0、n=0"},
             {"name": "通信延时相关性标志", "type": "enum", "default": 0,
-             "enum_map": {0: "无关", 1: "相关"}},
-            {"name": "路由请求数据长度", "type": "uint8", "default": 0},
-            {"name": "路由请求数据内容", "type": "bytes", "default": ""},
-            {"name": "从节点附属节点数量", "type": "uint8", "default": 0},
+             "enum_map": {0: "无关", 1: "相关"},
+             "description": "仅抄读标志=02H 时有效"},
+            {"name": "路由请求数据长度", "type": "uint8", "default": 0,
+             "length_field": "路由请求数据内容",
+             "description": "由数据内容长度自动填"},
+            {"name": "路由请求数据内容", "type": "bytes", "default": "",
+             "description": "DL/T 645 读数据报文（或 698.45 读请求），如正向有功总电能 "
+                            "68 01 00 00 00 00 00 68 11 04 33 33 34 33 B3 16"},
+            {"name": "从节点附属节点数量", "type": "uint8", "default": 0,
+             "description": "由附属节点列表自动填"},
             {"name": "从节点附属节点列表", "type": "list",
              "count_field": "从节点附属节点数量",
              "item_fields": [
-                 {"name": "从节点附属节点地址", "type": "bcd", "length": 6, "default": "000000000000"},
+                 # 地址线序低字节在前（§5.2）：界面正序输入，打包时逆序
+                 {"name": "从节点附属节点地址", "type": "bcd", "length": 6, "reverse": True,
+                  "default": "000000000000"},
              ]},
         ],
-        "doc": "<b>AFN=14H F1</b><br>数据单元：抄读标志(1B)+延时标志(1B)+数据长度(1B)+数据内容+附属节点数量(1B)+[地址(6B)]*n"
+        "doc": "<b>AFN=14H F1 路由请求抄读内容（下行）</b><br>"
+               "数据单元：抄读标志(1B)+通信延时相关性标志(1B)+路由请求数据长度L(1B)"
+               "+路由请求数据内容(L)+附属节点数量n(1B)+[附属节点地址(6B)]*n<br>"
+               "抄读标志：00H 抄读失败(L=0,n=0)／01H 抄读成功(L=0,n=0)／02H 可以抄读(L&gt;0)；"
+               "延时标志仅 02H 时有效<br>"
+               "数据内容：L&gt;0 时填 DL/T 645 通信数据（也可填 DL/T 698.45 读请求）；<br>"
+               "示例（抄读正向有功总电能，表地址 000000000001，BCD 低字节在前）："
+               "68 01 00 00 00 00 00 68 11 04 33 33 34 33 B3 16<br>"
+               "典型流程：集中器 12H F1 重启（或 11H F102 启动组网）启动抄表 → "
+               "路由上行 14H F1（通信相位+从节点地址+从节点序号）请求抄读 → "
+               "集中器用本下行帧回复「能否抄读」及待抄读报文。<br>"
+               "上行数据单元：通信相位(1B)+从节点地址(6B)+从节点序号(2B)"
     },
-    (0x14, 2): {"name": "路由请求集中器时钟", "direction": "down", "fields": [],
-                "doc": "<b>AFN=14H F2</b><br>无下行数据单元。"},
-    (0x14, 3): {"name": "请求依通信延时修正通信数据", "direction": "down", "fields": [],
-                "doc": "<b>AFN=14H F3</b><br>无下行数据单元。"},
-    (0x14, 4): {"name": "路由请求交采信息", "direction": "down", "fields": [],
-                "doc": "<b>AFN=14H F4</b><br>无下行数据单元。"},
+    (0x14, 2): {
+        "name": "路由请求集中器时钟",
+        "direction": "down",
+        "fields": [
+            {"name": "当前时间 秒", "type": "bcd", "length": 1, "default": _now[0],
+             "description": "BCD"},
+            {"name": "当前时间 分", "type": "bcd", "length": 1, "default": _now[1],
+             "description": "BCD"},
+            {"name": "当前时间 时", "type": "bcd", "length": 1, "default": _now[2],
+             "description": "BCD"},
+            {"name": "当前时间 日", "type": "bcd", "length": 1, "default": _now[3],
+             "description": "BCD"},
+            {"name": "当前时间 月", "type": "bcd", "length": 1, "default": _now[4],
+             "description": "BCD"},
+            {"name": "当前时间 年", "type": "bcd", "length": 1, "default": _now[5],
+             "description": "BCD，低字节年（两位）"},
+        ],
+        "doc": "<b>AFN=14H F2 路由请求集中器时钟（下行）</b><br>"
+               "数据单元：当前时间 秒/分/时/日/月/年各 1B BCD（表 126）<br>"
+               "默认值为程序启动时刻，可逐项手改；<br>"
+               "上行：无数据单元（路由请求，集中器直接下行应答本帧）。"
+    },
+    (0x14, 3): {
+        "name": "请求依通信延时修正通信数据",
+        "direction": "down",
+        "fields": [
+            {"name": "数据长度", "type": "uint8", "default": 0,
+             "length_field": "修正通信数据内容",
+             "description": "由内容长度自动填；L=0 表示放弃本次通信"},
+            {"name": "修正通信数据内容", "type": "bytes", "default": "",
+             "description": "已按预计通信延迟时间修正的 DL/T 645 报文"},
+        ],
+        "doc": "<b>AFN=14H F3 请求依通信延时修正通信数据（下行）</b><br>"
+               "数据单元：数据长度L(1B)+修正通信数据内容(L)，L=0 代表放弃本次通信（表 127）<br>"
+               "上行数据单元：从节点地址(6B)+预计延迟时间(2B)+抄读信息长度L(1B)+抄读数据内容(L)（表 123）"
+    },
+    (0x14, 4): {
+        "name": "路由请求交采信息",
+        "direction": "down",
+        "fields": [
+            {"name": "数据项类型", "type": "enum", "default": 1,
+             "enum_map": {1: "DL/T 645-2007", 2: "DL/T 698.45"},
+             "description": "1=645-2007，2=698.45"},
+            {"name": "交采数据项标识", "type": "bytes", "length": 4, "default": "00000100",
+             "description": "BIN 4B，低字节在前；正向有功总电能 00010000 → 00 00 01 00"},
+            {"name": "交采数据项内容", "type": "bytes", "default": "",
+             "description": "交采数据项内容（N 字节）"},
+        ],
+        "doc": "<b>AFN=14H F4 路由请求交采信息（下行）</b><br>"
+               "数据单元：数据项类型(1B)+交采数据项标识(4B BIN)+交采数据项内容(N)（表 128）<br>"
+               "数据项类型：1 为 DL/T 645—2007 数据项标识，2 为 DL/T 698.45 数据项标识，其他保留；"
+               "标识低字节在前（正向有功总电能 645 DI 00010000 → 00 00 01 00）<br>"
+               "上行数据单元：数据项类型(1B)+交采数据项标识(4B)（表 124）"
+    },
 
     # =========================================================================
     # AFN=15H 文件传输

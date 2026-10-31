@@ -24,6 +24,7 @@ from typing import List, Optional, Tuple
 from dlt645_data_codec import encode_value
 from dlt645_frame_gen import DLT645FrameGenerator, encode_addr, encode_di
 from dlt645_parser import DLT645Parser
+import sta_reset
 
 from .archive import DLT645Archive
 from .dynamic_data import EVENT_WORD_BYTES, EVENT_WORD_DI
@@ -143,6 +144,8 @@ class DLT645MeterSim:
         if func == 0x08:  # 广播校时：从站不应答
             self.last_error = "广播校时 08H 已接收（无应答）"
             return None
+        if func == 0x14:  # 写数据：STA 硬件初始化（复位）走专用处置
+            return self._write_data_response(frame)
         if func != 0x11:
             self.last_error = f"暂不支持功能码 0x{func:02X}"
             return self._error_response(frame, ERR_NO_DATA, func=func)
@@ -267,6 +270,29 @@ class DLT645MeterSim:
             return None
         self.last_note = f"随机事件状态字 {di_code} = {value}"
         return value
+
+    def _write_data_response(self, frame: bytes) -> Optional[bytes]:
+        """14H 写数据：目前只认「STA 硬件初始化（复位）」这条厂家命令。
+
+        - 广播地址（AA×6 / 99×6）：按 645「广播命令不要求从站应答」**静默**，
+          只记 last_note（以前会回 D4H 异常帧，等于在模组复位时往总线上灌错误应答）
+        - 单播地址：回 94H 正常应答（L=00，无数据域）
+        - 其它 DI：沿用异常应答
+        """
+        info = sta_reset.parse_frame(frame)
+        if info is None:
+            self.last_error = "暂不支持写数据 DI"
+            return self._error_response(frame, ERR_NO_DATA, func=0x14)
+        if info["broadcast"]:
+            self.last_note = f"{sta_reset.describe(frame)} → 已接收（广播，不应答）"
+            return None
+        # 应答地址：本机地址优先；本机地址未配置（全 0，如离线模拟）时回显请求地址
+        addr = self.address if self.address.strip("0") else info["address"]
+        ctrl_out = self.gen.build_control(0x14, dir_bit=1, err=False)
+        rsp = self.gen.build_frame(addr, ctrl_out, b"")
+        self.rsp_count += 1
+        self.last_note = f"{sta_reset.describe(frame)} → 已确认（94H）"
+        return rsp
 
     def _read_address_response(self) -> bytes:
         """13H → 93H：数据域 = 表地址 6 字节线上序（build_frame 统一 +33H）。"""

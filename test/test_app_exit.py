@@ -138,6 +138,73 @@ def test_meter_sim_serial_thread_registered():
     print("[OK] 虚拟表串口线程已登记 thread_registry")
 
 
+def test_meter_sim_serial_log_full_frame():
+    """虚拟表串口日志必须整帧打印（含 HCS/FCS 与 16 帧尾），不得截断。
+
+    用户现场：应答 34 字节，日志只到 `1c 07 ea 0a 1b`（`.hex(' ')[:80]` 截断），
+    看不到校验位与帧尾，无法核对回包。
+    """
+    import meter_sim_widget as mw
+    from dl_t698_45_frame_gen import DLT69845FrameGenerator
+
+    app = _get_app()
+    req = DLT69845FrameGenerator().generate_get_request_normal(
+        bytes([0x45]) + b"\xAA" * 6, 0, 0x01, bytes.fromhex("40020200"))
+    written = []
+
+    class _FakeSerial:
+        def __init__(self, *a, **k):
+            self._buf = bytearray(req)
+
+        def open(self):
+            pass
+
+        @property
+        def in_waiting(self):
+            return len(self._buf)
+
+        def read(self, n):
+            out = bytes(self._buf[:n])
+            del self._buf[:n]
+            return out
+
+        def write(self, data):
+            written.append(bytes(data))
+            return len(data)
+
+        def close(self):
+            pass
+
+    real = mw.serial.Serial
+    mw.serial.Serial = _FakeSerial
+    try:
+        from meter_sim import MeterSimEngine, SimOptions, load_archive
+        factory = lambda: MeterSimEngine(load_archive(), SimOptions())
+        logs = []
+        t = mw.SerialSlaveThread("FAKE", 9600, "N", 1, factory)
+        t.log.connect(logs.append)
+        t.start()
+        for _ in range(60):          # 跨线程日志排队，需泵事件循环
+            app.processEvents()
+            time.sleep(0.02)
+        t.stop()
+        t.wait(2000)
+        app.processEvents()
+    finally:
+        mw.serial.Serial = real
+
+    req_lines = [x for x in logs if x.startswith("← 收到请求")]
+    resp_lines = [x for x in logs if x.startswith("→ 回复")]
+    assert req_lines, f"未捕获请求日志: {logs}"
+    assert resp_lines, f"未捕获应答日志: {logs}"
+    assert req_lines[0].split(": ", 1)[1] == req.hex(" "), req_lines[0]
+    resp = written[0]
+    assert resp[-1] == 0x16, f"应答帧尾不是 16: {resp.hex(' ')}"
+    assert resp_lines[0].split(": ", 1)[1] == resp.hex(" "), (
+        f"日志应答被截断: {resp_lines[0]}")
+    print(f"[OK] 虚拟表串口日志整帧打印（{len(resp)}B 含 FCS 与 16 帧尾）")
+
+
 def main():
     print("=" * 50)
     print("主程序退出/线程回收回归测试")
@@ -145,6 +212,7 @@ def main():
     test_tray_exit_quits_event_loop()
     test_x_exit_quits_when_tray_absent()
     test_meter_sim_serial_thread_registered()
+    test_meter_sim_serial_log_full_frame()
     print("=" * 50)
     print("[OK] 全部测试通过 ✓")
 

@@ -636,6 +636,13 @@ class GDW10376Parser:
 
                 fn_desc = "; ".join(fn_desc_list) if fn_desc_list else f"DT1=0x{dt1:02X}, DT2=0x{dt2:02X}"
 
+                # 远程升级文档示例用 DT2=0x12 表示「组 12」（BCD 写法）→ 实际命令仍是 10H F104。
+                # 仅对这一种组合做窄口径兼容，其余 DT 仍按 §6.4.3.2 的二进制编码解释。
+                if afn == 0x10 and dt1 == 0x80 and dt2 == 0x12:
+                    fn_list = [104]
+                    fn_desc = (f"F104={self.get_fn_name(0x10, 104)}"
+                               "（DT2=0x12 按组 12 解释，BCD 写法；协议 §6.4.3.2 要求二进制 0x0C）")
+
                 table_data.append((
                     "数据单元标识(DT)",
                     f"0x{dt1:02X} 0x{dt2:02X}",
@@ -759,6 +766,38 @@ class GDW10376Parser:
         results.append((f"{prefix}通信协议类型", f"0x{b1:02X}", proto_str, f"D11~D13, 0x{proto_type:02X}", 1, 1))
         return results
 
+    def _append_f104_node_info(self, table_data: List[Tuple[str, str, str, str, int, int]],
+                               idx: int, info: bytes, base_off: int) -> None:
+        """10H F104 上行「节点信息」9 字节（《HPLC 远程升级方案》2.4.2(2)）：
+
+        软件版本号(BCD 2B) + 版本日期 日/月/年(BCD 各 1B) + 模块厂商代码(ASCII 2B) + 芯片代码(ASCII 2B)。
+
+        协议注明两个 2 字节子域「倒序传输」，线序即可读 ASCII（示例 ``48 4C``→HL、``31 41``→1A）；
+        正/倒序都给出，厂商实现相反时不至于误读。
+        """
+        def bcd(b: int) -> int:
+            return (b >> 4) * 10 + (b & 0x0F)
+
+        ver = info[0:2]
+        version_text = f"{bcd(ver[0]):02d}.{bcd(ver[1]):02d}"
+        table_data.append((f"  节点{idx}软件版本号", ' '.join(f'{b:02X}' for b in ver), version_text,
+                           f"BCD；倒序读作 {bcd(ver[1]):02d}.{bcd(ver[0]):02d}", base_off, base_off + 1))
+
+        day, month, year = bcd(info[2]), bcd(info[3]), bcd(info[4])
+        table_data.append((f"  节点{idx}版本日期", ' '.join(f'{b:02X}' for b in info[2:5]),
+                           f"20{year:02d}-{month:02d}-{day:02d}",
+                           "日/月/年（BCD，年为两位）", base_off + 2, base_off + 4))
+
+        for name, chunk, off in ((f"  节点{idx}模块厂商代码", info[5:7], 5),
+                                 (f"  节点{idx}芯片代码", info[7:9], 7)):
+            forward = chunk.decode('ascii', errors='replace')
+            backward = chunk[::-1].decode('ascii', errors='replace')
+            printable = all(32 <= b < 127 for b in chunk)
+            shown = forward if printable else (backward if all(32 <= b < 127 for b in chunk[::-1]) else "")
+            table_data.append((name, ' '.join(f'{b:02X}' for b in chunk), shown or backward,
+                               f"ASCII，倒序传输；正序={forward}|倒序={backward}",
+                               base_off + off, base_off + off + 1))
+
     def _parse_topology_info_5byte(self, topo_bytes: bytes, is_dual_mode: bool = True, prefix: str = "") -> List[Tuple[str, str, str, str, int, int]]:
         """解析5字节网络拓扑信息格式（表92/94）
         
@@ -812,31 +851,55 @@ class GDW10376Parser:
             self._parse_fujian_afn(afn, fn, data_bytes, table_data, base_offset, is_upstream)
             return
 
-        # AFN=00H 确认/否认
+        # ══════════════════════════════════════════════════════════════
+        # AFN=00H 确认/否认 —— F1 与 F2 的数据单元结构**完全不同**，
+        # 不能共用解析逻辑（6.5.1.3.1 表 9 vs 6.5.1.3.2 表 10）：
+        #   F1 确认 = 4B BS（D0 命令状态 + D1~D31 信道1~31） + 2B 等待时间  → 共 6B
+        #   F2 否认 = 1B 错误状态字                                          → 共 1B
+        # F1 里**没有**错误状态字；F2 里**没有**信道状态/等待时间。
+        # ══════════════════════════════════════════════════════════════
         if afn == 0x00:
-            if fn == 1 and data_len >= 4:  # F1: 确认
-                status = data_bytes[0]
-                channel_busy = []
-                for i in range(7):
-                    if status & (1 << i):
-                        channel_busy.append(f"信道{i+1}忙")
-                    else:
-                        channel_busy.append(f"信道{i+1}闲")
-                cmd_status = "已处理" if (status & 0x80) else "未处理"
-                table_data.append(("  命令状态", f"0x{status:02X}", cmd_status, "D7=命令状态", base_offset, base_offset))
-                table_data.append(("  信道状态", "-", ", ".join(channel_busy), "D0~D6=信道1~7状态", base_offset, base_offset))
-                offset += 1
-                if data_len >= 2:
-                    err_status = data_bytes[1]
-                    table_data.append(("  错误状态字1", f"0x{err_status:02X}", str(err_status), "", base_offset + 1, base_offset + 1))
-                if data_len >= 4:
-                    wait_time = int.from_bytes(data_bytes[2:4], 'little')
-                    table_data.append(("  等待执行时间", f"0x{data_bytes[2]:02X}{data_bytes[3]:02X}", str(wait_time), "单位: s", base_offset + 2, base_offset + 3))
+            if fn == 1 and data_len >= 4:  # F1 确认：表 9，4B BS + 2B 等待时间
+                # BS 4 字节小端：D0 = 命令状态（0 未处理 / 1 已处理）；
+                # D1~D31 = 信道 1~31 状态（0 忙 / 1 闲）
+                bs = int.from_bytes(data_bytes[0:4], 'little')
+                cmd_status = "已处理" if (bs & 0x01) else "未处理"
+                table_data.append(("  命令状态", f"0x{bs & 0x01:02X}", cmd_status,
+                                   "D0：0=未处理 1=已处理", base_offset, base_offset))
+                busy = [c for c in range(1, 32) if not (bs >> c) & 1]
+                if busy:
+                    shown = "、".join(str(c) for c in busy)
+                    summary = f"忙：信道{shown}（空闲 {31 - len(busy)}/31）"
+                else:
+                    summary = "31 个信道全部空闲"
+                table_data.append(("  信道状态", f"0x{bs:08X}", summary,
+                                   "D1~D31 = 信道1~31，0=忙 1=闲", base_offset, base_offset + 3))
+                for start, end in ((1, 7), (8, 15), (16, 23), (24, 31)):
+                    detail = " ".join(
+                        f"{c}{'闲' if (bs >> c) & 1 else '忙'}" for c in range(start, end + 1))
+                    table_data.append((f"  信道{start}~{end}状态", f"0x{data_bytes[start // 8]:02X}",
+                                       detail, f"D{start}~D{end}", base_offset + start // 8,
+                                       base_offset + start // 8))
+                if data_len >= 6:
+                    wait = int.from_bytes(data_bytes[4:6], 'little')
+                    note = "单位: s" + ("，⚠ 超过协议规定的 5s" if wait > 5 else "")
+                    table_data.append(("  等待时间", f"0x{data_bytes[4]:02X}{data_bytes[5]:02X}",
+                                       str(wait), note, base_offset + 4, base_offset + 5))
+                else:
+                    table_data.append(("  等待时间", "缺失", "缺失",
+                                       "表 9 要求 2 字节等待时间（单位 s，≤5s）",
+                                       base_offset + 4, base_offset + 4))
 
-            elif fn == 2 and data_len >= 1:  # F2: 否认
+            elif fn == 2 and data_len >= 1:  # F2 否认：表 10，仅 1B 错误状态字
                 err = data_bytes[0]
                 err_desc = self._get_deny_error_desc(err)
-                table_data.append(("  错误状态字", f"0x{err:02X}", str(err), err_desc, base_offset, base_offset))
+                table_data.append(("  错误状态字", f"0x{err:02X}", str(err),
+                                   f"表 10：{err_desc}", base_offset, base_offset))
+                if data_len > 1:
+                    table_data.append(("  多余字节", ' '.join(f'{b:02X}' for b in data_bytes[1:]),
+                                       f"{data_len - 1}字节",
+                                       "表 10 的否认数据单元只有 1 字节错误状态字",
+                                       base_offset + 1, base_offset + data_len - 1))
 
         # AFN=02H 数据转发
         elif afn == 0x02 and fn == 1 and data_len >= 2:
@@ -950,7 +1013,10 @@ class GDW10376Parser:
                 status = data_bytes[0]
                 table_data.append(("  干扰状态", f"0x{status:02X}", "有干扰" if status else "没有干扰", "0=无干扰, 1=有干扰", base_offset, base_offset))
 
-            elif fn == 9 and data_len >= 4:  # F9: 通信延时相关广播通信时长 (上行)
+            elif fn == 9 and is_upstream and data_len >= 4:  # F9: 通信延时相关广播通信时长 (上行)
+                # **必须判 is_upstream**：下行是 协议类型(1)+长度(1)+内容(L)（表 18），
+                # 结构完全不同；不判方向会把下行当成「延迟时间+协议+长度」，
+                # 解析成「协议类型=0x10、长度=51」这种鬼值
                 delay = int.from_bytes(data_bytes[0:2], 'little')
                 proto_type = data_bytes[2]
                 msg_len = data_bytes[3]
@@ -1077,6 +1143,24 @@ class GDW10376Parser:
             elif fn == 100 and data_len >= 1:  # F100: 查询场强门限
                 threshold = data_bytes[0]
                 table_data.append(("  场强门限", f"0x{threshold:02X}", str(threshold), "取值50~120，默认96", base_offset, base_offset))
+
+            elif fn == 9 and not is_upstream and data_len >= 2:
+                # F9 下行（表 18）：通信协议类型(1B) + 报文长度 L(1B) + 报文内容(L)
+                # 上行是 延迟时间(2B)+协议(1B)+长度(1B)，结构不同，必须靠 is_upstream 分开
+                proto_map9 = {0x00: "透明传输", 0x01: "DL/T 645-1997",
+                              0x02: "DL/T 645-2007", 0x03: "DL/T 698.45"}
+                proto9 = data_bytes[0]
+                msg_len9 = data_bytes[1]
+                table_data.append(("  通信协议类型", f"0x{proto9:02X}", str(proto9),
+                                   proto_map9.get(proto9, "保留"), base_offset, base_offset))
+                table_data.append(("  报文长度", f"0x{msg_len9:02X}", str(msg_len9),
+                                   "字节（表 18 b：要计算下行延时的报文长度）",
+                                   base_offset + 1, base_offset + 1))
+                if data_len >= 2 + msg_len9:
+                    content9 = data_bytes[2:2 + msg_len9]
+                    table_data.append(("  报文内容", ' '.join(f'{b:02X}' for b in content9),
+                                       f"{msg_len9}字节", "要计算通信下行延时的原始报文",
+                                       base_offset + 2, base_offset + 1 + msg_len9))
 
         # AFN=04H 链路接口检测
         elif afn == 0x04:
@@ -1434,12 +1518,20 @@ class GDW10376Parser:
                 if is_upstream:
                     table_data.append(("  说明", "-", "无数据单元", "路由请求集中器时钟上行", base_offset, base_offset))
                 elif data_len >= 6:
-                    table_data.append(("  秒", f"0x{data_bytes[0]:02X}", str(data_bytes[0]), "BCD", base_offset, base_offset))
-                    table_data.append(("  分", f"0x{data_bytes[1]:02X}", str(data_bytes[1]), "BCD", base_offset + 1, base_offset + 1))
-                    table_data.append(("  时", f"0x{data_bytes[2]:02X}", str(data_bytes[2]), "BCD", base_offset + 2, base_offset + 2))
-                    table_data.append(("  日", f"0x{data_bytes[3]:02X}", str(data_bytes[3]), "BCD", base_offset + 3, base_offset + 3))
-                    table_data.append(("  月", f"0x{data_bytes[4]:02X}", str(data_bytes[4]), "BCD", base_offset + 4, base_offset + 4))
-                    table_data.append(("  年(低字节)", f"0x{data_bytes[5]:02X}", str(data_bytes[5]), "BCD", base_offset + 5, base_offset + 5))
+                    # BCD 解码：高半字节*10 + 低半字节（0x14 → 14）。直接 str(byte) 会把
+                    # 0x14 显示成 20 时 —— 对时链路会看到「差 6 小时」的假象。
+                    def _bcd(b: int) -> str:
+                        hi, lo = b >> 4, b & 0x0F
+                        if hi > 9 or lo > 9:
+                            return f"非法BCD(0x{b:02X})"
+                        return f"{hi * 10 + lo:02d}"
+
+                    table_data.append(("  秒", f"0x{data_bytes[0]:02X}", _bcd(data_bytes[0]), "BCD", base_offset, base_offset))
+                    table_data.append(("  分", f"0x{data_bytes[1]:02X}", _bcd(data_bytes[1]), "BCD", base_offset + 1, base_offset + 1))
+                    table_data.append(("  时", f"0x{data_bytes[2]:02X}", _bcd(data_bytes[2]), "BCD", base_offset + 2, base_offset + 2))
+                    table_data.append(("  日", f"0x{data_bytes[3]:02X}", _bcd(data_bytes[3]), "BCD", base_offset + 3, base_offset + 3))
+                    table_data.append(("  月", f"0x{data_bytes[4]:02X}", _bcd(data_bytes[4]), "BCD", base_offset + 4, base_offset + 4))
+                    table_data.append(("  年(低字节)", f"0x{data_bytes[5]:02X}", _bcd(data_bytes[5]), "BCD，两位年", base_offset + 5, base_offset + 5))
 
             elif fn == 3:
                 if is_upstream and data_len >= 9:
@@ -1486,7 +1578,9 @@ class GDW10376Parser:
                     cmd = data_bytes[2]
                     total_seg = int.from_bytes(data_bytes[3:5], 'little')
                     seg_id = int.from_bytes(data_bytes[5:9], 'little')
-                    file_map = {0x00: "清除下装文件", 0x03: "本地通信模块升级文件", 0x07: "主节点和子节点模块升级", 0x08: "子节点模块升级"}
+                    file_map = {0x00: "清除下装文件", 0x03: "本地通信模块升级文件",
+                                0x07: "主节点和子节点模块升级", 0x08: "子节点模块升级",
+                                0x09: "本地通信模块和子节点模块升级"}
                     attr_map = {0x00: "起始帧/中间帧", 0x01: "结束帧"}
                     cmd_map = {0x00: "报文方式下装"}
                     table_data.append(("  文件标识", f"0x{file_id:02X}", file_map.get(file_id, f"保留({file_id})"), "", base_offset, base_offset))
@@ -1556,12 +1650,17 @@ class GDW10376Parser:
                         offset += 8
 
             elif fn == 4 and data_len >= 16:  # F4: 路由运行状态 (上行)
+                # 运行状态字：D0 路由完成 / D1 工作标志（升级中置 1）/ D2 上报事件 / D7~D4 纠错编码
+                # 工作开关：D7D6 当前状态（00 抄表 / 01 搜表 / 10 升级 / 11 其他）
+                #   见《HPLC 远程升级方案》2.4.2(1)。2024 版协议把 01 写作「报表」，此处按升级方案标 搜表。
                 status = data_bytes[0]
                 route_done = status & 0x01
                 working = (status >> 1) & 0x01
                 event_flag = (status >> 2) & 0x01
                 fec = (status >> 4) & 0x0F
                 table_data.append(("  运行状态字", f"0x{status:02X}", f"路由完成={'是' if route_done else '否'}, 工作中={'是' if working else '否'}, 事件={'有' if event_flag else '无'}", f"纠错编码={fec}", base_offset, base_offset))
+                table_data.append(("  工作标志(D1)", f"0x{status:02X}", "正在工作" if working else "停止工作",
+                                   "升级过程中置 1，升级结束置 0", base_offset, base_offset))
                 
                 total = int.from_bytes(data_bytes[1:3], 'little')
                 copied = int.from_bytes(data_bytes[3:5], 'little')
@@ -1576,7 +1675,12 @@ class GDW10376Parser:
                 event_allow = (switch >> 3) & 0x01
                 district_id = (switch >> 4) & 0x01
                 curr_state = (switch >> 6) & 0x03
-                state_map = {0: "抄表", 1: "报表", 2: "升级", 3: "其他"}
+                state_map = {0: "抄表", 1: "搜表", 2: "升级", 3: "其他"}
+                table_data.append(("  当前状态(D7D6)", f"0x{(switch >> 6) & 0x03:02X}",
+                                   state_map.get(curr_state, "未知"),
+                                   "00 抄表/01 搜表/10 升级/11 其他"
+                                   "（2019 升级方案；2024 版把 01 写作「报表」）",
+                                   base_offset + 7, base_offset + 7))
                 table_data.append(("  工作开关", f"0x{switch:02X}", f"状态={state_map.get(curr_state,'未知')}, 学习={'是' if work_state else '抄表'}, 注册={'允许' if reg_allow else '禁止'}, 台区={'允许' if district_id else '禁止'}", "", base_offset + 7, base_offset + 7))
                 
                 rate = int.from_bytes(data_bytes[8:10], 'little')
@@ -1633,6 +1737,43 @@ class GDW10376Parser:
             elif fn == 9 and data_len >= 2:  # F9: 查询网络规模 (上行)
                 scale = int.from_bytes(data_bytes[0:2], 'little')
                 table_data.append(("  网络规模", f"0x{data_bytes[0]:02X}{data_bytes[1]:02X}", str(scale), "HPLC网络节点数", base_offset, base_offset + 1))
+
+            elif fn == 104 and data_len >= 3:  # F104: 查询 HPLC 载波模块节点信息
+                # 依据《HPLC 远程升级方案》（2019-01-30）2.4.2(2)
+                if is_upstream:
+                    # 上行：节点总数量m(2B) + 本次应答数量n(1B) + n×[节点地址(6B) + 节点信息(9B)]
+                    total = int.from_bytes(data_bytes[0:2], 'little')
+                    count = data_bytes[2]
+                    table_data.append(("  节点总数量", f"0x{data_bytes[0]:02X}{data_bytes[1]:02X}",
+                                       str(total), "含 CCO 与全部 STA", base_offset, base_offset + 1))
+                    table_data.append(("  本次应答数量", f"0x{count:02X}", str(count),
+                                       "每次查询建议 ≤15 个", base_offset + 2, base_offset + 2))
+                    offset = 3
+                    for i in range(count):
+                        if offset + 15 > data_len:
+                            table_data.append((f"  节点{i+1}", "-", "数据不足",
+                                               f"需要 15 字节（地址6+信息9），剩余{data_len - offset}",
+                                               base_offset + offset, base_offset + data_len - 1))
+                            break
+                        addr = self._format_addr(data_bytes[offset:offset + 6])
+                        table_data.append((f"  节点{i+1}地址", addr, addr, "MAC 地址，BCD 低字节在前",
+                                           base_offset + offset, base_offset + offset + 5))
+                        info = data_bytes[offset + 6:offset + 15]
+                        self._append_f104_node_info(table_data, i + 1, info,
+                                                    base_offset + offset + 6)
+                        offset += 15
+                else:
+                    # 下行：节点起始序号(2B) + 节点数量n(1B)；序号 0=CCO，1 起为 STA
+                    start_seq = int.from_bytes(data_bytes[0:2], 'little')
+                    count = data_bytes[2]
+                    note = "0=CCO，1=第1个载波从节点，2 以后以此类推"
+                    table_data.append(("  节点起始序号", f"0x{data_bytes[0]:02X}{data_bytes[1]:02X}",
+                                       str(start_seq),
+                                       note + ("（本次查 CCO）" if start_seq == 0 else ""),
+                                       base_offset, base_offset + 1))
+                    table_data.append(("  节点数量", f"0x{count:02X}", str(count),
+                                       "建议不超过 15 个", base_offset + 2, base_offset + 2))
+
 
             elif fn in (20, 21, 31, 112) and data_len >= 3:  # F20/F21/F31/F112: 拓扑/相线/芯片信息
                 if is_upstream:

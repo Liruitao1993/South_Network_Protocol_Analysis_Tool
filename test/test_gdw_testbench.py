@@ -164,15 +164,18 @@ def test_framing():
     check("05H F1 地址字段写入数据单元",
           bytes.fromhex("123456789012") in frame, True)
 
-    # 上行模拟：附加数据单元
+    # 上行模拟：附加数据单元（表 9：D0=1 已处理 + 信道全闲 + 等待时间 1s）
     cmd0 = C.find_command(0, 1)
     up = C.build_frame(cmd0, {}, src=SRC, dst=DST,
                        info={"通信模块标识": 1, "dir": 1, "prm": 0},
-                       raw_data=bytes([0xC0, 0, 0, 0]))
+                       raw_data=bytes.fromhex("01 FF FF FF 01 00"))
     rows = C.parse_table(up)
     state = next((r for r in rows if r[0] == "  命令状态"), None)
     check_true("上行确认帧带命令状态（附加数据单元生效）",
                state is not None and state[2] == "已处理", state)
+    wait_row = next((r for r in rows if r[0] == "  等待时间"), None)
+    check_true("上行确认帧解析出等待时间（表 9 的 2 字节）",
+               wait_row is not None and wait_row[2] == "1", wait_row)
 
     # 输入校验
     expect_raises("地址非 12 位十进制 → 可读错误",
@@ -182,6 +185,161 @@ def test_framing():
     check("hex 解析容忍分隔符/0x/连续写法",
           C.parse_hex("0x68,12 34-56"), bytes([0x68, 0x12, 0x34, 0x56]))
     expect_raises("hex 奇数位拒绝", lambda: C.parse_hex("68 1"))
+
+
+# ══════════════════════════════════════════════════════════════════════
+def test_route_read_14h():
+    """AFN=14H 路由数据抄读：F1~F4 下行数据单元（§6.5.12 表 122/125~128）。"""
+    section("[2b] 14H 路由数据抄读 F1~F4")
+
+    read_645 = "68 01 00 00 00 00 00 68 11 04 33 33 34 33 B3 16"
+
+    # F1：抄读标志 02H + L>0 + 附属节点地址（线序低字节在前）
+    f1 = C.find_command(0x14, 1)
+    v1 = C.default_values(f1)
+    v1["路由请求数据内容"] = read_645
+    v1["从节点附属节点列表"] = [{"从节点附属节点地址": "000000000002"}]
+    frame1 = C.build_frame(f1, v1, src=SRC, dst=DST, info=INFO)
+    check("14H F1 逐字节 golden", frame1.hex(" ").upper(),
+          "68 35 00 40 04 00 00 00 00 01 12 90 78 56 34 12 01 00 00 00 00 00 "
+          "14 01 00 02 00 10 68 01 00 00 00 00 00 68 11 04 33 33 34 33 B3 16 "
+          "01 02 00 00 00 00 00 A2 16")
+    check("14H F1 抄读标志默认「可以抄读」", C.default_values(f1)["抄读标志"], 2)
+    rows1 = {r[0].strip(): r for r in C.parse_table(frame1)}
+    check("14H F1 数据长度由内容自动派生（16）", rows1["路由请求数据长度"][2], "16")
+    check("14H F1 回读抄读标志", rows1["抄读标志"][2], "可以抄读")
+    check("14H F1 附属节点地址低字节在前（界面正序 000000000002）",
+          rows1["附属节点1地址"][2], "000000000002")
+    check("14H F1 附属节点数量随列表自动填", rows1["从节点附属节点数量"][2], "1")
+
+    # F2：6 字节 BCD 时钟（秒/分/时/日/月/年），默认取程序启动时刻
+    f2 = C.find_command(0x14, 2)
+    v2 = dict(C.default_values(f2))
+    check("14H F2 有 6 个时间字段", len(f2.fields), 6)
+    v2.update({"当前时间 秒": "05", "当前时间 分": "06", "当前时间 时": "07",
+               "当前时间 日": "08", "当前时间 月": "09", "当前时间 年": "25"})
+    frame2 = C.build_frame(f2, v2, src=SRC, dst=DST, info=INFO)
+    check("14H F2 逐字节 golden（BCD 秒分时日月年）", frame2.hex(" ").upper(),
+          "68 21 00 40 04 00 00 00 00 01 12 90 78 56 34 12 01 00 00 00 00 00 "
+          "14 02 00 05 06 07 08 09 25 5A 16")
+    rows2 = {r[0].strip(): r for r in C.parse_table(frame2)}
+    # 1.26.9：BCD 字段要还原成十进制（0x25 → 25 年、0x05 → 05 秒）。
+    # 旧实现直接 str(byte)，0x14 会被显示成「20 时」——对时链路会看成差 6 小时。
+    check("14H F2 回读秒/年（BCD 还原）",
+          (rows2["秒"][2], rows2["年(低字节)"][2]), ("05", "25"))
+    check("14H F2 回读分/时（BCD 还原）",
+          (rows2["分"][2], rows2["时"][2]), ("06", "07"))
+
+    # F3：数据长度 L + 修正通信数据内容（L=0 表示放弃本次通信）
+    f3 = C.find_command(0x14, 3)
+    v3 = dict(C.default_values(f3))
+    v3["修正通信数据内容"] = read_645
+    frame3 = C.build_frame(f3, v3, src=SRC, dst=DST, info=INFO)
+    check("14H F3 逐字节 golden", frame3.hex(" ").upper(),
+          "68 2C 00 40 04 00 00 00 00 01 12 90 78 56 34 12 01 00 00 00 00 00 "
+          "14 04 00 10 68 01 00 00 00 00 00 68 11 04 33 33 34 33 B3 16 A0 16")
+    rows3 = {r[0].strip(): r for r in C.parse_table(frame3)}
+    check("14H F3 回读数据长度", rows3["数据长度"][2], "16")
+    check("14H F3 空内容 → L=0（放弃本次通信）",
+          C.build_frame(f3, C.default_values(f3), src=SRC, dst=DST,
+                        info=INFO).hex(" ").upper(),
+          "68 1C 00 40 04 00 00 00 00 01 12 90 78 56 34 12 01 00 00 00 00 00 14 04 00 00 14 16")
+
+    # F4：数据项类型 + 交采数据项标识(4B) + 交采数据项内容
+    f4 = C.find_command(0x14, 4)
+    v4 = dict(C.default_values(f4))
+    check("14H F4 默认标识为正向有功总电能（低字节在前 00 00 01 00）",
+          v4["交采数据项标识"], "00000100")
+    check("14H F4 默认 5 字节（类型+标识）",
+          C.build_frame(f4, v4, src=SRC, dst=DST, info=INFO).hex(" ").upper(),
+          "68 20 00 40 04 00 00 00 00 01 12 90 78 56 34 12 01 00 00 00 00 00 "
+          "14 08 00 01 00 00 01 00 1A 16")
+    v4["交采数据项内容"] = "11 22 33 44"
+    frame4 = C.build_frame(f4, v4, src=SRC, dst=DST, info=INFO)
+    check("14H F4 带交采内容逐字节 golden", frame4.hex(" ").upper(),
+          "68 24 00 40 04 00 00 00 00 01 12 90 78 56 34 12 01 00 00 00 00 00 "
+          "14 08 00 01 00 00 01 00 11 22 33 44 C4 16")
+    rows4 = {r[0].strip(): r for r in C.parse_table(frame4)}
+    check("14H F4 回读数据项类型/标识",
+          (rows4["数据项类型"][2], rows4["交采数据项标识"][2]),
+          ("DL/T 645-2007", "00 00 01 00"))
+
+
+def test_f104_range():
+    """10H F104 查询升级后模块版本信息：必须带 节点起始序号(2B)+节点数量(1B)。
+
+    文档 2024 版 OCR 缺 F104 小节，现场实测该 CCO 要求给查询范围，否则回
+    「错误状态字=2 长度错」—— 空数据单元等于没告诉 CCO 查哪些节点。
+    """
+    section("[2c] 10H F104 查询范围")
+    cmd_f104 = C.find_command(0x10, 104)
+    check("F104 有起始序号字段", [f["name"] for f in cmd_f104.fields],
+          ["节点起始序号", "节点数量"])
+    check("F104 默认查 CCO（序号 0）", C.default_values(cmd_f104),
+          {"节点起始序号": 0, "节点数量": 1})
+    frame = C.build_frame(cmd_f104, {"节点起始序号": 1, "节点数量": 3},
+                          src=SRC, dst=DST, info=INFO)
+    rows = {r[0].strip(): r for r in C.parse_table(frame)}
+    check("F104 数据单元 = 01 00 03", rows["数据单元"][1], "01 00 03")
+    check("F104 回读起始序号", rows["节点起始序号"][2], "1")
+    check("F104 回读数量", rows["节点数量"][2], "3")
+
+
+def _make_up_frame(afn: int, dt1: int, dt2: int, data_unit: bytes) -> bytes:
+    """造一条上行帧（C=83，R 全 0，无地址域），布局同现场示例。"""
+    payload = bytes([0x83]) + b"\x00" * 6 + bytes([afn, dt1, dt2]) + bytes(data_unit)
+    total = len(payload) + 5          # 68 + L(2) + payload + CS + 16
+    head = bytes([0x68, total & 0xFF, (total >> 8) & 0xFF]) + payload
+    cs = sum(payload) & 0xFF
+    return head + bytes([cs, 0x16])
+
+
+def test_f104_uplink():
+    """10H F104 上行（《HPLC 远程升级方案》2.4.2(2) 定义 + 现场实例）。"""
+    section("[2d] 10H F104 上行解析")
+    up = C.parse_hex(
+        "68 21 00 83 00 00 00 00 00 00 10 80 12 01 00 01 01 00 00 00 00 00 15 01 21 03 19 "
+        "48 4C 31 41 99 16")
+    rows = {r[0].strip(): r for r in C.parse_table(up)}
+    check("示例帧识别为 F104（DT2=0x12 按组 12 解释）",
+          rows["数据单元标识(DT)"][3].split("（")[0], "F104=查询升级后模块版本信息")
+    check("节点总数量", rows["节点总数量"][2], "1")
+    check("本次应答数量", rows["本次应答数量"][2], "1")
+    check("节点地址按线序还原", rows["节点1地址"][2], "000000000001")
+    check("软件版本号 BCD", rows["节点1软件版本号"][2], "15.01")
+    check("版本日期 日/月/年", rows["节点1版本日期"][2], "2019-03-21")
+    check("模块厂商代码", rows["节点1模块厂商代码"][2], "HL")
+    check("芯片代码", rows["节点1芯片代码"][2], "1A")
+    # 示例帧的 CS=0x99 与任何求和对不上（求和应为 0x81），解析器必须如实报错而不是掩盖
+    check("示例 CS 如实报不匹配", rows["校验和(CS)"][2], "0x81")
+
+    # 多节点：两个节点各 15 字节（地址6 + 信息9）
+    node_info_1 = bytes.fromhex("1501210319484C3141")
+    node_info_2 = bytes.fromhex("0A0205032058505830")
+    multi = (bytes([2, 0, 2])
+             + bytes.fromhex("010000000000") + node_info_1
+             + bytes.fromhex("020000000000") + node_info_2)
+    check("测试用多节点数据单元长度 = 3 + 2×15", len(multi), 33)
+    up2 = _make_up_frame(0x10, 0x80, 0x0C, multi)
+    rows2 = {r[0].strip(): r for r in C.parse_table(up2)}
+    check("多节点：总数量 2", rows2["节点总数量"][2], "2")
+    check("多节点：第 2 个地址", rows2["节点2地址"][2], "000000000002")
+    check("多节点：第 2 个厂商/芯片",
+          (rows2["节点2模块厂商代码"][2], rows2["节点2芯片代码"][2]), ("XP", "X0"))
+
+
+def test_f104_down_range():
+    """10H F104 下行：序号从 0 开始（0=CCO），数量建议 ≤15。"""
+    section("[2e] 10H F104 下行查询范围")
+    cmd_f104 = C.find_command(0x10, 104)
+    check("默认查 CCO（序号 0）", C.default_values(cmd_f104)["节点起始序号"], 0)
+    frame = C.build_frame(cmd_f104, {"节点起始序号": 1, "节点数量": 3},
+                          src=SRC, dst=DST, info=INFO)
+    rows = {r[0].strip(): r for r in C.parse_table(frame)}
+    check("数据单元 = 01 00 03", rows["数据单元"][1], "01 00 03")
+    check("起始序号 1（第 1 个 STA）", rows["节点起始序号"][2], "1")
+    check("数量备注含 0=CCO", "0=CCO" in rows["节点起始序号"][3], True)
+    check("数量上限提示 ≤15", "15" in rows["节点数量"][3], True)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -502,6 +660,10 @@ def main():
     print("=" * 74)
     test_sources_and_catalog()
     test_framing()
+    test_route_read_14h()
+    test_f104_range()
+    test_f104_uplink()
+    test_f104_down_range()
     test_eb()
     test_evaluate()
     test_widget()

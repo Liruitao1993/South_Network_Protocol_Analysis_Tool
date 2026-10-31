@@ -32,12 +32,51 @@ def comm_address_data(meter_no: int) -> bytes:
     return bytes([0x55, 0x07, 0x05]) + bcd
 
 
-def wildcard_sa_bytes(meter_no: int) -> bytes:
-    """通配响应 SA：特征字节 0x05（单地址，长度6）+ 反转 BCD 表号（对齐开源）。"""
-    digits = str(meter_no).zfill(12)
+#: 组地址默认 000000000000（用户口径：虚拟表可把组地址设成全 0）
+GROUP_ADDRESS = "000000000000"
+
+
+def group_address_data(addr: str = GROUP_ADDRESS) -> bytes:
+    """OI 4005 属性 02「组地址」——协议定义是 **array octet-string**。
+
+    A-XDR 编码 = `01`(array) + 元素个数 + 每个元素 `09`(octet-string) + 长度 + 数据。
+    默认返回 1 个元素、6 字节 BCD 的 ``000000000000``：
+    ``01 01 09 06 00 00 00 00 00 00``。
+
+    被测 CCO 读组地址（OAD 40050200）时，虚拟表必须能正常应答——不然会回
+    「对象不存在」，CCO 侧拿不到组地址。
+    """
+    from dl_t698_45_axdr import AXDRCoder
+
+    text = "".join(ch for ch in str(addr or "") if ch.isdigit()).rjust(12, "0")[:12]
+    bcd = bytes.fromhex(text)
+    return AXDRCoder().encode([{"tag": 0x09, "value": bcd}], 0x01)
+
+
+def normalize_address(text) -> str:
+    """把用户输入的虚拟表地址规范成 12 位十进制数字串（BCD）。
+
+    非法（含非数字字符、超 12 位）返回空串；不足 12 位左补 0。
+    """
+    raw = "".join(str(text or "").split()).upper()
+    if not raw:
+        return ""
+    if not raw.isdigit() or len(raw) > 12:
+        return ""
+    return raw.zfill(12)
+
+
+def address_sa(addr_str: str) -> bytes:
+    """本机地址 → 响应 SA：特征字节 0x05（单地址，长度 6）+ 反转 BCD 表号。"""
+    digits = normalize_address(addr_str) or "000000000000"
     bcd = list(bytes.fromhex(digits))
     bcd.reverse()
     return bytes([0x05]) + bytes(bcd)
+
+
+def wildcard_sa_bytes(meter_no: int) -> bytes:
+    """通配响应 SA：特征字节 0x05（单地址，长度6）+ 反转 BCD 表号（对齐开源）。"""
+    return address_sa(str(meter_no).zfill(12))
 
 
 def sa_body_reversed_hex(sa: bytes) -> str:

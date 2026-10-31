@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 import app_paths
+import sta_reset
 import thread_registry
 from dlt645_frame_gen import DLT645FrameGenerator, encode_di
 from dlt645_parser import DLT645Parser
@@ -243,6 +244,8 @@ class Dlt645VirtualMeterWidget(QWidget):
 
         layout.addWidget(self._build_lme_group())
 
+        layout.addWidget(self._build_sta_reset_group())
+
         grp2 = QGroupBox("离线模拟（主站请求 hex → 虚拟表响应）")
         gl2 = QVBoxLayout(grp2)
         self.req_input = QPlainTextEdit()
@@ -412,6 +415,67 @@ class Dlt645VirtualMeterWidget(QWidget):
         self._lme_frame: bytes = b""
         self._lme_sync_entry_visibility()
         return grp
+
+    def _build_sta_reset_group(self) -> QGroupBox:
+        """STA 硬件初始化（复位）：广播 645 写数据，代替给模组上下电。"""
+        grp = QGroupBox("被测模组复位（STA 硬件初始化，DL/T 645 广播写数据）")
+        gl = QVBoxLayout(grp)
+        row = QHBoxLayout()
+        self.btn_sta_reset = QPushButton("下发复位")
+        self.btn_sta_reset_copy = QPushButton("复制hex")
+        set_btn(self.btn_sta_reset, "danger", "sm")
+        set_btn(self.btn_sta_reset_copy, "ghost", "sm")
+        set_btn_icon(self.btn_sta_reset, "apply")
+        set_btn_icon(self.btn_sta_reset_copy, "copy")
+        self.btn_sta_reset.setToolTip(
+            "向总线广播：68 AA AA AA AA AA AA 68 14 0C … DA 16\n"
+            "（C=14H 写数据，DI=04A00401，密码 00370AA0，操作者 00000000）\n"
+            "模组固定在工装底座无法断电时，用它代替上下电让其重新初始化。")
+        self.btn_sta_reset_copy.setToolTip("复制复位帧 hex，便于用其它串口工具发送")
+        self.sta_frame_edit = QLineEdit()
+        self.sta_frame_edit.setReadOnly(True)
+        self.sta_frame_edit.setText(sta_reset.build_frame().hex(" ").upper())
+        self.sta_frame_edit.setStyleSheet("font-family: Consolas, monospace;")
+        row.addWidget(self.btn_sta_reset)
+        row.addWidget(self.btn_sta_reset_copy)
+        row.addWidget(self.sta_frame_edit, 1)
+        gl.addLayout(row)
+        hint = QLabel(
+            "本机收到该广播帧时按 645「广播命令不要求从站应答」静默处理"
+            "（只记日志），不再回异常帧；单播到本表地址时回 94H 正常应答。")
+        hint.setWordWrap(True)
+        gl.addWidget(hint)
+        self.btn_sta_reset.clicked.connect(self._sta_reset_send)
+        self.btn_sta_reset_copy.clicked.connect(self._sta_reset_copy)
+        return grp
+
+    def _sta_reset_send(self):
+        """下发（或生成）STA 硬件初始化复位帧。"""
+        frame = sta_reset.build_frame()
+        self.sta_frame_edit.setText(frame.hex(" ").upper())
+        th = self._serial_thread
+        if th is None or not th.isRunning():
+            self.log_view.appendPlainText(
+                "  ⇱ 复位帧已生成（串口未监听，未下发）：" + frame.hex(" ").upper())
+            QMessageBox.information(
+                self, "提示",
+                "串口未监听，未下发。\n\n可先点「开始监听」再下发，"
+                "或复制此帧用其它串口工具发送：\n" + frame.hex(" ").upper())
+            return
+        err = th.write_frame(frame)
+        if err:
+            self.log_view.appendPlainText(f"  ❌ 复位下发失败: {err}")
+            QMessageBox.warning(self, "下发失败", err)
+            return
+        self.log_view.appendPlainText(
+            "  ⇱ 已下发 STA 硬件初始化（复位）:" + frame.hex(" ").upper())
+
+    def _sta_reset_copy(self):
+        from PySide6.QtWidgets import QApplication
+
+        frame = sta_reset.build_frame()
+        QApplication.clipboard().setText(frame.hex(" ").upper())
+        self.log_view.appendPlainText("  ⧉ 复位帧已复制到剪贴板")
 
     def _lme_sync_entry_visibility(self):
         """4.2 无数据单元 → 隐藏并清空条目框；4.6/4.7 显示并更新语义提示。"""

@@ -292,7 +292,7 @@ def test_auto_channel_explicit_unchanged():
 
 
 def test_sack_tail_and_channel_note():
-    """T9: SACK 帧(含尾部字节)不再误报 MAC 长度不足；下拉与 FC 判别不一致时提示"""
+    """T9: SACK 帧(含尾部字节)不再误报 MAC 长度不足；**用户选的通道优先**（1.26.18）"""
     parser = CSGNewGenParser()
     sack = bytes.fromhex("0A10011000000000000000000010EDD22254EE")
     table = parser.parse_to_table(sack, parse_level="auto", channel="plc")
@@ -306,12 +306,90 @@ def test_sack_tail_and_channel_note():
     table2 = parser.parse_to_table(sack[:16], parse_level="auto", channel="plc")
     assert find_field(table2, "定界符类型") is not None, "16字节SACK应识别定界符"
     assert find_field(table2, "尾部字节") is None, "16字节SACK不应有尾部字节行"
-    # 下拉与 FC 判别不一致 → 「通道判别」提示行（以 FC 判别为准）
+
+    # 用户显式选通道必须优先：结构像 PLC 的帧选 hrf 就按 HRF 解析，且不再出现
+    # 「以 FC 判别为准」的反驳提示（用户口径 2026-10-31）
     table3 = parser.parse_to_table(_user_plc_mpdu(), parse_level="fc_pb",
                                    channel="hrf")
-    row = find_field(table3, "通道判别")
-    assert row and row[1] == "hrf" and row[2] == "plc", f"不一致提示行错误: {row}"
-    print("[OK] T9 SACK尾字节与通道提示测试通过")
+    assert find_field(table3, "通道判别") is None, "用户选了通道就不该再有「通道判别」提示行"
+    row = find_field(table3, "通道判定")
+    assert row and row[2] == "HRF 高速无线", f"应按用户选择解析为 HRF: {row}"
+    assert "用户选择优先" in str(row[3]), f"说明应写明用户选择优先: {row}"
+
+    # 反过来：结构像 HRF 的帧选 plc → 按 PLC（表20 字段）解析
+    hrf = _hrf_sof_fc() + _pb136(_single_hop_mac(0x01, bytes.fromhex("1101010000000001")))
+    table4 = parser.parse_to_table(hrf, parse_level="fc_pb", channel="plc")
+    row = find_field(table4, "通道判定")
+    assert row and row[2] == "PLC 载波", f"应按用户选择解析为 PLC: {row}"
+    assert find_field(table4, "物理块个数"), "PLC 通道应出现表20 的物理块个数字段"
+
+    # 自动识别仍按结构判别
+    table5 = parser.parse_to_table(_user_plc_mpdu(), parse_level="fc_pb", channel="auto")
+    row = find_field(table5, "通道判定")
+    assert row and row[2] == "PLC 载波", f"自动识别应按结构判为 PLC: {row}"
+    assert "仅「自动识别」使用" in str(row[3]), f"自动识别行的说明应点明适用范围: {row}"
+    print("[OK] T9 SACK尾字节与通道优先级测试通过")
+
+
+def test_field_frame_plc_mimo():
+    """T10: 现场 PLC MIMO 帧 —— 选了 PLC 就必须按 PLC 解析（用户报障帧，1.26.18）
+
+    帧：`19 01 20 00 04 0B 14 00 E8 03 00 00 20 A4 29 72`
+    旧实现按 FC 结构反判成 hrf，于是字段按表45 解析、还打「以 FC 判别为准」——全错。
+    """
+    parser = CSGNewGenParser()
+    frame = bytes.fromhex("19 01 20 00 04 0B 14 00 E8 03 00 00 20 A4 29 72".replace(" ", ""))
+
+    table = parser.parse_to_table(frame, parse_level="fc_pb", channel="plc")
+    row = find_field(table, "通道判定")
+    assert row and row[2] == "PLC 载波", f"选 PLC 就必须判 PLC: {row}"
+    assert "用户选择优先" in str(row[3]), f"说明应写明用户选择优先: {row}"
+    assert find_field(table, "通道判别") is None, "不应再出现「以 FC 判别为准」的提示行"
+    # 表20（BPLC）字段：物理块个数 / 流数 / TF符号数
+    assert find_field(table, "物理块个数"), "PLC 解析缺少表20 的物理块个数字段"
+    assert find_field(table, "流数"), "PLC 解析缺少流数字段"
+    assert find_field(table, "TF符号数"), "PLC 解析缺少 TF 符号数字段"
+    assert find_field(table, "MCS") is None, "PLC 通道不应出现 HRF 的 MCS 字段"
+
+    # 同一帧选 hrf → 按 HRF 解析（用户选择优先的另一半）
+    table2 = parser.parse_to_table(frame, parse_level="fc_pb", channel="hrf")
+    assert find_field(table2, "MCS") is not None, "HRF 通道应出现 MCS 字段"
+    assert find_field(table2, "载荷PB大小") is not None, "HRF 通道应出现载荷PB大小"
+
+    # 自动识别仍按结构判：这张 PLC MIMO 短帧（16B，无物理块）必须判对 PLC
+    table3 = parser.parse_to_table(frame, parse_level="fc_pb", channel="auto")
+    row = find_field(table3, "通道判定")
+    assert row and row[2] == "PLC 载波", f"自动识别应判为 PLC（不能因 PB=40 强信号误判 HRF）: {row}"
+    assert "仅「自动识别」使用" in str(row[3]), f"auto 行说明不对: {row}"
+    print("[OK] T10 现场 PLC MIMO 帧通道优先级测试通过")
+
+
+def test_batch_params_force_auto():
+    """T11: 批量解析必须逐帧自动识别（不能套单帧页的人工选择，用户口径 1.26.19）"""
+    import main_gui  # noqa: F401 - 只为拿到 MainWindow 的纯逻辑方法
+    from PySide6.QtWidgets import QApplication as _QA
+
+    app = _QA.instance() or _QA([])
+    w = main_gui.MainWindow()
+    try:
+        w.current_protocol = 9
+        w._csg_channel = "hrf"          # 单帧页故意选 HRF
+        w._csg_parse_level = "fc_pb"
+        single = w._current_parse_params()
+        assert single["channel"] == "hrf" and single["parse_level"] == "fc_pb", single
+        batch = w._batch_parse_params_for(single)
+        assert batch["parse_level"] == "auto", batch
+        assert batch["channel"] == "auto", batch
+        assert batch["frame_type"] is None, batch
+        # 协议0（无解析级别/通道概念）不受影响
+        w.current_protocol = 0
+        p0 = w._current_parse_params()
+        b0 = w._batch_parse_params_for(p0)
+        assert b0["index"] == 0, b0
+    finally:
+        w.close()
+        app.processEvents()
+    print("[OK] T11 批量强制 auto 通道/级别测试通过")
 
 
 if __name__ == "__main__":
@@ -324,5 +402,7 @@ if __name__ == "__main__":
     test_auto_channel_pb40_strong_signal()
     test_auto_channel_explicit_unchanged()
     test_sack_tail_and_channel_note()
+    test_field_frame_plc_mimo()
+    test_batch_params_force_auto()
     print("=" * 50)
     print("[OK] 全部测试通过")

@@ -112,6 +112,10 @@ testfile.txt
 # 协议8 升级页运行时参数（SA/每包字节数/超时/文件信息等，随使用变化，不入库）
 /dlt698_upgrade_config.json
 /gdw_testbench.json
+# 协议7 测试页的命令参数存档 + 支持统计（用户运行时数据，不在仓库里）
+/gdw_test_params.json
+# 协议7 测试页的收发日志落盘目录（logs/gdw_test_YYYYMMDD.log）
+/logs/
 # 协议8 协议测试页运行时参数（地址/CA/PIID/超时/OAD 覆盖等，随使用变化，不入库）
 /dlt698_testbench.json
 # 协议6 645协议测试页运行时参数（表地址/PA/密码/操作者/超时/循环/当前页，随使用变化，不入库）

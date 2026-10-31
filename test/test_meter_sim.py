@@ -246,9 +246,167 @@ def test_garbage():
             check(f"畸形帧不崩溃 ({bad[:4].hex()})", False, str(e))
 
 
+# ── 10. 寻址与应答（通配/广播/全99/白名单/本机地址）─────
+SA_BROADCAST = bytes([0xC0, 0xAA])                 # 标准广播：类型3，1 字节 AAH
+SA_ALL99 = bytes([0x05]) + b"\x99" * 6             # 全 99 广播写法
+SA_GROUP = bytes([0x85]) + b"\xAA" * 6             # 组地址：类型2
+
+
+def _resp_sa(frame):
+    return link_layer.parse_header(frame)["sa"]
+
+
+def _resp_apdu(frame):
+    return link_layer.parse_header(frame)["apdu"]
+
+
+def test_address_routing():
+    print("Test: 寻址与应答（虚拟表地址）")
+    from meter_sim import dynamic_data as dyn
+    arc = load_archive()
+    own = str(2100000027).zfill(12)          # 档案 40020200 表号
+    own_body = dyn.address_sa(own)[1:]       # 27 00 00 00 21 00
+    check("本机地址取档案表号", MeterSimEngine(arc, SimOptions()).own_address() == own)
+
+    # ① 通配地址读通信地址 → 回本机地址（默认只回一块表）
+    eng = MeterSimEngine(arc, SimOptions())
+    req = FG.generate_get_request_normal(SA_WILD, 0, 0x01,
+                                        bytes.fromhex("40010200"))
+    resps = eng.handle_frame(req)
+    check("通配读通信地址回1帧", len(resps) == 1, f"实际 {len(resps)}")
+    if resps:
+        check("通配响应SA=本机地址", _resp_sa(resps[0])[1:] == own_body,
+              _resp_sa(resps[0]).hex())
+        check("通配响应数据=本机通信地址",
+              bytes.fromhex("550705" + own) in _resp_apdu(resps[0]),
+              _resp_apdu(resps[0]).hex())
+
+    # ② 部分通配位（AH）命中本机地址
+    pat = bytes([own_body[0], 0xAA, 0xAA, 0xAA, own_body[4], 0xAA])
+    req = FG._assemble_frame(bytes([0x45]) + pat, 0, 0x43,
+                             bytes([0x05, 0x01, 0x01]) + bytes.fromhex("20000200"))
+    resps = MeterSimEngine(arc, SimOptions()).handle_frame(req)
+    check("部分通配位命中本机", len(resps) == 1, f"实际 {len(resps)}")
+
+    # ③ 通配不命中 → 不回复
+    req = FG._assemble_frame(bytes([0x45]) + b"\xFF" * 6, 0, 0x43,
+                             bytes([0x05, 0x01, 0x01]) + bytes.fromhex("20000200"))
+    resps = MeterSimEngine(arc, SimOptions()).handle_frame(req)
+    check("通配不命中不回复", len(resps) == 0, f"实际 {len(resps)}")
+
+    # ④ 广播地址（AA，1B）→ 以本机地址应答
+    for tag, sa in (("广播AA", SA_BROADCAST), ("全99", SA_ALL99)):
+        req = FG._assemble_frame(sa, 0, 0x43,
+                                 bytes([0x05, 0x01, 0x01]) + bytes.fromhex("40020200"))
+        resps = MeterSimEngine(arc, SimOptions()).handle_frame(req)
+        check(f"{tag}有响应", len(resps) == 1, f"实际 {len(resps)}")
+        if resps:
+            check(f"{tag}响应SA=本机地址", _resp_sa(resps[0])[1:] == own_body,
+                  _resp_sa(resps[0]).hex())
+
+    # ⑤ 组地址按协议无需应答
+    req = FG._assemble_frame(SA_GROUP, 0, 0x43,
+                             bytes([0x05, 0x01, 0x01]) + bytes.fromhex("20000200"))
+    resps = MeterSimEngine(arc, SimOptions()).handle_frame(req)
+    check("组地址不应答", len(resps) == 0, f"实际 {len(resps)}")
+
+    # ⑥ 单地址：宽松模式应答且 SA=本机地址（不再回显请求地址）
+    resps = MeterSimEngine(arc, SimOptions()).handle_frame(
+        get_request(bytes.fromhex("20000200")))
+    check("宽松模式单地址应答", len(resps) == 1)
+    if resps:
+        check("单地址响应SA=本机地址", _resp_sa(resps[0])[1:] == own_body,
+              _resp_sa(resps[0]).hex())
+    # 严格模式：非本机地址不回
+    resps = MeterSimEngine(arc, SimOptions(strict_address=True)).handle_frame(
+        get_request(bytes.fromhex("20000200")))
+    check("严格模式非本机地址不回复", len(resps) == 0, f"实际 {len(resps)}")
+
+    # ⑦ 自定义虚拟表地址：通信地址按设置回、本机地址请求严格模式也应答
+    opts = SimOptions(meter_address="000000000123", strict_address=True)
+    eng = MeterSimEngine(arc, opts)
+    check("虚拟表地址生效", eng.own_address() == "000000000123")
+    resps = eng.handle_frame(FG.generate_get_request_normal(
+        bytes([0x05]) + bytes.fromhex("230100000000"), 0, 0x01,
+        bytes.fromhex("40010200")))
+    check("设置地址的单播请求应答", len(resps) == 1, f"实际 {len(resps)}")
+    if resps:
+        check("设置地址的响应数据",
+              bytes.fromhex("550705000000000123") in _resp_apdu(resps[0]),
+              _resp_apdu(resps[0]).hex())
+        check("设置地址的响应SA",
+              _resp_sa(resps[0]) == bytes([0x05]) + bytes.fromhex("230100000000"),
+              _resp_sa(resps[0]).hex())
+
+    # ⑧ 白名单：不挡通配，只挡名单外单地址
+    opts = SimOptions(whitelist=["060504030201"])
+    eng = MeterSimEngine(arc, opts)
+    check("白名单放行名单内单地址",
+          len(eng.handle_frame(get_request(bytes.fromhex("20000200")))) == 1)
+    resps = eng.handle_frame(FG.generate_get_request_normal(
+        SA_WILD, 0, 0x01, bytes.fromhex("40020200")))
+    check("白名单不挡通配", len(resps) == 1, f"实际 {len(resps)}")
+    other = FG.generate_get_request_normal(
+        bytes([0x05]) + bytes.fromhex("0A0B0C0D0E0F"), 0, 0x01,
+        bytes.fromhex("20000200"))
+    check("白名单挡名单外单地址", len(eng.handle_frame(other)) == 0)
+
+    # ⑨ 通配多表仍可用（数量可配）
+    resps = MeterSimEngine(arc, SimOptions(meter_count=3)).handle_frame(
+        FG.generate_get_request_normal(SA_WILD, 0, 0x01, bytes.fromhex("40020200")))
+    check("通配多表数量可配", len(resps) == 3, f"实际 {len(resps)}")
+    if len(resps) == 3:
+        check("多表首帧为本机地址", _resp_sa(resps[0])[1:] == own_body)
+
+
+def test_group_address():
+    """组地址（OAD 40050200）：协议定义属性2 = array octet-string。
+
+    现场 CCO 会主动读组地址，虚拟表不认这个对象就会回「对象不存在」，
+    CCO 侧拿不到组地址。默认值 000000000000。
+    """
+    print("Test: 组地址 40050200（array octet-string）")
+    arc = load_archive()
+    eng = MeterSimEngine(arc, SimOptions())
+    # 直接用现场抓到的请求帧（seq=0x00、OAD 40050200）
+    req = bytes.fromhex("6817004305330000000000005607"
+                        "05010140050200 002A75 16".replace(" ", ""))
+    resps = eng.handle_frame(req)
+    check("组地址请求有应答", len(resps) == 1, f"实际 {len(resps)}")
+    if not resps:
+        return
+    apdu = _resp_apdu(resps[0])
+    check("应答是 GET-Response", bool(apdu) and apdu[0] == 0x85, apdu.hex())
+    check("应答 OAD=40050200", bytes.fromhex("40050200") in apdu, apdu.hex())
+    # 数据 = array(0x01) + 1 个元素 + octet-string(0x09) + 长度6 + 000000000000
+    check("组地址数据 = array<octet-string> 全 0",
+          bytes.fromhex("01010906000000000000") in apdu,
+          apdu.hex())
+    check("引擎没有回「对象不存在」",
+          all("对象不存在" not in line for line in eng.logs), eng.logs)
+    # 解析器回读：成员1 就是 6 个 0 的组地址
+    parsed = table_text(resps[0])
+    check("解析器回读组地址成员=000000000000", "000000000000" in parsed, parsed[-200:])
+
+    # 别的地址（本机地址）读组地址也要回同一份组地址
+    resps2 = MeterSimEngine(arc, SimOptions()).handle_frame(
+        FG.generate_get_request_normal(SA_SINGLE, 0, 0x02,
+                                       bytes.fromhex("40050200")))
+    check("单地址读组地址同样应答", len(resps2) == 1, f"实际 {len(resps2)}")
+
+    # A-XDR 结构自证：用编码器再编一遍，必须与应答里的数据一致
+    from dl_t698_45_axdr import AXDRCoder
+
+    want = AXDRCoder().encode([{"tag": 0x09, "value": bytes.fromhex("000000000000")}], 0x01)
+    check("数据与 AXDRCoder 编码一致（array+octet-string 带 tag）",
+          want.hex() == "01010906000000000000", want.hex())
+    check("应答数据包含该编码", want in apdu, apdu.hex())
+
+
 for fn in [test_archive, test_extract, test_normal_roundtrip, test_unknown_oad_dar,
            test_normal_list, test_record, test_link, test_security,
-           test_wildcard, test_blacklist, test_dynamic, test_garbage]:
+           test_wildcard, test_blacklist, test_dynamic, test_garbage,
+           test_address_routing, test_group_address]:
     fn()
 
 passed = sum(1 for _, ok, _ in results if ok)

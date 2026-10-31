@@ -12,14 +12,16 @@
 from atomic_io import atomic_write_json
 import json
 import time
+from collections import deque
 from typing import Optional
 
 import serial
 import serial.tools.list_ports
+import sta_reset
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QGridLayout, QGroupBox, QHBoxLayout,
-    QLabel, QMessageBox, QPlainTextEdit, QPushButton, QSpinBox,
+    QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton, QSpinBox,
     QTableWidgetItem, QTabWidget, QTimeEdit, QVBoxLayout, QWidget,
 )
 
@@ -27,7 +29,7 @@ import app_paths
 import thread_registry
 from gui_utils import ZoomableTableWidget, set_btn, set_btn_icon
 from meter_sim import MeterSimEngine, SimOptions, load_archive
-from meter_sim import link_layer
+from meter_sim import dynamic_data, link_layer
 from dl_t698_45_parser import DLT69845Parser
 
 SETTINGS_FILE = "meter_sim_settings.json"
@@ -49,13 +51,46 @@ class SerialSlaveThread(QThread):
     frame_exchanged = Signal(str, list)  # 请求hex, 响应帧hex列表
 
     def __init__(self, port: str, baud: int, parity: str, stopbits: float,
-                 engine_factory, parent=None):
+                 engine_factory, options_factory=None, parent=None):
         super().__init__(parent)
         self._port, self._baud = port, baud
         self._parity, self._stopbits = parity, stopbits
         self._engine_factory = engine_factory
+        self._options_factory = options_factory
+        self._engine = None      # 复用引擎，保住 start_time（电能递增按运行时长）
         self._running = False
+        self._tx: "deque[bytes]" = deque()   # 待下发帧（STA 复位等主动命令）
         thread_registry.track(self, "MeterSimSerialSlave")
+
+    def send_frame(self, frame: bytes):
+        """排队一帧由从站线程写入串口（线程独占串口句柄，不能从 GUI 线程直写）。"""
+        self._tx.append(bytes(frame))
+
+    def _handle_645(self, frame: bytes, ser, resps_out: list):
+        """处理 645 帧（与 698 同总线时出现，如「STA 硬件初始化」广播）。"""
+        info = sta_reset.parse_frame(frame)
+        if info is None:
+            self.log.emit(f"← 收到 645 帧({len(frame)}B，非本工具处理类型): "
+                          f"{frame.hex(' ')}")
+            return
+        self.log.emit(f"← 收到 645 帧({len(frame)}B): {frame.hex(' ')}")
+        self.log.emit(f"  {sta_reset.describe(frame)}")
+        if info["broadcast"]:
+            # 645 广播命令不要求从站应答（以前会把这种帧当 698 巨帧卡死收帧）
+            self.log.emit("  → 广播复位命令：按 645「广播不要求应答」静默忽略")
+            return
+        rsp = sta_reset.build_ack_frame(frame)
+        ser.write(rsp)
+        resps_out.append(rsp.hex(" "))
+        self.log.emit(f"→ 回复({len(rsp)}B): {rsp.hex(' ')}")
+
+    def _engine_for_frame(self):
+        """取引擎：首次创建，之后只刷新选项（选项实时生效、运行时长不清零）。"""
+        if self._engine is None:
+            self._engine = self._engine_factory()
+        elif self._options_factory is not None:
+            self._engine.options = self._options_factory()
+        return self._engine
 
     def run(self):
         try:
@@ -81,22 +116,36 @@ class SerialSlaveThread(QThread):
                     else:
                         time.sleep(0.05)
                         # 缓冲无新数据也尝试提帧（处理末尾帧）
+                    while self._tx:
+                        try:
+                            out = self._tx.popleft()
+                            ser.write(out)
+                            self.log.emit(f"⇱ 已下发({len(out)}B): {out.hex(' ')}")
+                        except Exception as e:
+                            self.log.emit(f"❌ 下发失败: {e}")
+                    # 先摘出 645 帧（STA 复位等），否则会被当 698 巨帧卡住收帧
+                    for f645 in link_layer.extract_645_frames(buf):
+                        handled = []
+                        self._handle_645(f645, ser, handled)
+                        buf = buf.replace(f645, b"", 1)
                     frames, consumed, rest = link_layer.extract_frames(buf)
                     if frames:
                         buf = rest if rest is not None else b""
                         for frame in frames:
-                            engine = self._engine_factory()
+                            engine = self._engine_for_frame()
                             resps = engine.handle_frame(frame)
                             for msg in engine.logs:
                                 self.log.emit("  " + msg)
                             req_hex = frame.hex(" ")
-                            self.log.emit(f"← 收到请求: {req_hex[:80]}")
+                            # 整帧完整打印（含 16 帧尾与 FCS/HCS 校验位），不再截断
+                            self.log.emit(f"← 收到请求({len(frame)}B): {req_hex}")
                             resp_hexes = []
                             for r in resps:
                                 try:
                                     ser.write(r)
                                     resp_hexes.append(r.hex(" "))
-                                    self.log.emit(f"→ 回复: {r.hex(' ')[:80]}")
+                                    self.log.emit(
+                                        f"→ 回复({len(r)}B): {r.hex(' ')}")
                                 except Exception as e:
                                     self.log.emit(f"❌ 回复发送失败: {e}")
                             self.frame_exchanged.emit(req_hex, resp_hexes)
@@ -129,6 +178,7 @@ class VirtualMeterWidget(QWidget):
         self._build_ui()
         self._refresh_archive_table()
         self._refresh_ports()
+        self._update_addr_status()
 
     # ── UI 构建 ───────────────────────────────────────────
     def _build_ui(self):
@@ -142,6 +192,42 @@ class VirtualMeterWidget(QWidget):
     def _build_run_tab(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
+
+        # 虚拟表地址区（决定响应帧 SA 与通信地址/表号的回值）
+        grp_addr = QGroupBox("虚拟表地址（响应帧 SA 与通信地址/表号的回值）")
+        gal = QHBoxLayout(grp_addr)
+        self.addr_edit = QLineEdit(self.options.meter_address or "")
+        self.addr_edit.setPlaceholderText("12 位数字，如 000000000123（留空＝用档案表号）")
+        self.addr_edit.setMaximumWidth(180)
+        self.addr_edit.setToolTip(
+            "本机模拟的电表通信地址（12 位十进制数字）。\n"
+            "影响：响应帧 SA、4001/4002/202a 通信地址回值、通配/广播请求的应答地址。\n"
+            "留空则取「档案数据」里 40020200 表号（当前值见右侧提示）。")
+        self.addr_edit.editingFinished.connect(self._apply_address)
+        self.addr_status = QLabel()
+        self.addr_status.setWordWrap(True)
+        gal.addWidget(QLabel("虚拟表地址"))
+        gal.addWidget(self.addr_edit)
+        gal.addWidget(self.addr_status, 1)
+        layout.addWidget(grp_addr)
+
+        # 模组复位（代替上下电）
+        grp_rst = QGroupBox("被测模组复位（STA 硬件初始化，645 广播，用于代替上下电）")
+        grl = QHBoxLayout(grp_rst)
+        self.btn_sta_reset = QPushButton("下发 STA 复位")
+        set_btn(self.btn_sta_reset, "ghost", "sm")
+        set_btn_icon(self.btn_sta_reset, "apply")
+        self.btn_sta_reset.setToolTip(
+            "向总线广播 DL/T 645 写数据命令（DI 04A00401）：\n"
+            "68 AA AA AA AA AA AA 68 14 0C … DA 16\n"
+            "模组固定在工装底座无法断电时，用它代替上下电。")
+        self.btn_sta_reset.clicked.connect(self._send_sta_reset)
+        self.lbl_sta_frame = QLabel(sta_reset.build_frame().hex(" "))
+        self.lbl_sta_frame.setWordWrap(True)
+        self.lbl_sta_frame.setStyleSheet("font-family: Consolas, monospace;")
+        grl.addWidget(self.btn_sta_reset)
+        grl.addWidget(self.lbl_sta_frame, 1)
+        layout.addWidget(grp_rst)
 
         # 串口从站区
         grp = QGroupBox("串口从站（独立串口，建议使用虚拟串口对，如 VSPD/com0com）")
@@ -203,10 +289,11 @@ class VirtualMeterWidget(QWidget):
         layout.addWidget(grp2)
 
         # 日志
-        layout.addWidget(QLabel("收发日志："))
+        layout.addWidget(QLabel("收发日志（整帧完整 hex，含 HCS/FCS 与 16 帧尾）："))
         self.log_view = QPlainTextEdit()
         self.log_view.setReadOnly(True)
         self.log_view.setMaximumHeight(160)
+        self.log_view.setLineWrapMode(QPlainTextEdit.NoWrap)  # 长帧单行 + 横向滚动
         self.log_view.setStyleSheet("font-family: Consolas, monospace;")
         layout.addWidget(self.log_view)
 
@@ -259,6 +346,14 @@ class VirtualMeterWidget(QWidget):
         self.spin_meter_count = QSpinBox()
         self.spin_meter_count.setRange(1, 200)
         self.spin_meter_count.setValue(self.options.meter_count)
+        self.spin_meter_count.setToolTip(
+            "通配地址请求（如 AA×6 读通信地址）回几块表：1 = 只回本机虚拟地址。")
+        self.chk_strict = QCheckBox("仅应答本机地址（关闭则任意单地址请求也应答）")
+        self.chk_strict.setChecked(self.options.strict_address)
+        self.chk_strict.setToolTip(
+            "勾选：单地址请求只有 SA 等于本机虚拟地址（或命中白名单）才回复。\n"
+            "关闭：任意单地址请求都回复，兼容旧行为。\n"
+            "通配地址、全 99 / 全 AA 广播地址、白名单地址无论开关如何都应答。")
         self.chk_energy = QCheckBox("正向有功电能(00100200)随运行时间递增")
         self.chk_energy.setChecked(self.options.energy_increase)
         self.chk_freeze = QCheckBox("日/月/曲线冻结自动时标（按请求 Selector 时间）")
@@ -268,28 +363,30 @@ class VirtualMeterWidget(QWidget):
 
         grid.addWidget(QLabel("通配地址模拟表数量："), 0, 0)
         grid.addWidget(self.spin_meter_count, 0, 1)
-        grid.addWidget(self.chk_energy, 1, 0, 1, 3)
-        grid.addWidget(self.chk_freeze, 2, 0, 1, 3)
-        grid.addWidget(self.chk_mac, 3, 0, 1, 3)
+        grid.addWidget(QLabel("（1 = 只回本机虚拟地址）"), 0, 2, 1, 2)
+        grid.addWidget(self.chk_strict, 1, 0, 1, 4)
+        grid.addWidget(self.chk_energy, 2, 0, 1, 3)
+        grid.addWidget(self.chk_freeze, 3, 0, 1, 3)
+        grid.addWidget(self.chk_mac, 4, 0, 1, 3)
 
-        grid.addWidget(QLabel("名单模式："), 4, 0)
+        grid.addWidget(QLabel("名单模式："), 5, 0)
         self.list_mode = QComboBox()
         self.list_mode.addItems(["未启用", "黑名单", "白名单"])
         if self.options.whitelist:
             self.list_mode.setCurrentIndex(2)
         elif self.options.blacklist:
             self.list_mode.setCurrentIndex(1)
-        grid.addWidget(self.list_mode, 4, 1)
-        grid.addWidget(QLabel("地址表（/ 分隔，反转 hex，如 060504030201）："), 5, 0)
+        grid.addWidget(self.list_mode, 5, 1)
+        grid.addWidget(QLabel("地址表（/ 分隔，反转 hex，如 060504030201）："), 6, 0)
         self.list_edit = QPlainTextEdit()
         self.list_edit.setMaximumHeight(60)
         existing = self.options.blacklist or self.options.whitelist
         self.list_edit.setPlainText("/".join(existing))
-        grid.addWidget(self.list_edit, 5, 1, 1, 2)
+        grid.addWidget(self.list_edit, 6, 1, 1, 2)
 
         self.chk_leak = QCheckBox("曲线冻结漏点时段（时段内曲线记录返回0行）")
         self.chk_leak.setChecked(self.options.leak_window is not None)
-        grid.addWidget(self.chk_leak, 6, 0, 1, 3)
+        grid.addWidget(self.chk_leak, 7, 0, 1, 3)
         self.time_from = QTimeEdit()
         self.time_to = QTimeEdit()
         self.time_from.setDisplayFormat("HH:mm")
@@ -298,27 +395,60 @@ class VirtualMeterWidget(QWidget):
             f, t = self.options.leak_window
             self.time_from.setTime(self.time_from.time().addSecs(f * 60))
             self.time_to.setTime(self.time_to.time().addSecs(t * 60))
-        grid.addWidget(QLabel("从"), 7, 0)
-        grid.addWidget(self.time_from, 7, 1)
-        grid.addWidget(QLabel("到"), 7, 2)
-        grid.addWidget(self.time_to, 7, 3)
+        grid.addWidget(QLabel("从"), 8, 0)
+        grid.addWidget(self.time_from, 8, 1)
+        grid.addWidget(QLabel("到"), 8, 2)
+        grid.addWidget(self.time_to, 8, 3)
 
         btn_save = QPushButton("保存设置")
         set_btn(btn_save, "primary", "sm")
         set_btn_icon(btn_save, "save")
         btn_save.clicked.connect(self._save_settings)
-        grid.addWidget(btn_save, 8, 0)
+        grid.addWidget(btn_save, 9, 0)
         layout.addWidget(box)
         layout.addStretch(1)
         return page
 
     # ── 引擎 ──────────────────────────────────────────────
+    def send_sta_reset_frame(self, frame: bytes) -> bool:
+        """外部（国网协议测试页的流程测试）要求下发 STA 复位。
+
+        只负责把帧排进从站线程的发送队列；串口未监听时返回 False，让调用方退回其它通道。
+        """
+        th = self._serial_thread
+        if th is None or not th.isRunning():
+            return False
+        th.send_frame(frame)
+        self._log(f"⇱ 已排队下发 STA 硬件初始化（复位）: {bytes(frame).hex(' ')}")
+        return True
+
+    def _send_sta_reset(self):
+        """下发 STA 硬件初始化（复位）广播帧，代替给模组上下电。"""
+        frame = sta_reset.build_frame()
+        th = self._serial_thread
+        if th is None or not th.isRunning():
+            self._log("  （串口未监听，未下发；请先点「开始监听」，"
+                      f"或复制此帧到串口工具发送：{frame.hex(' ')}）")
+            QMessageBox.information(
+                self, "提示",
+                "虚拟表串口尚未监听。\n\n可先点「开始监听」再下发，"
+                "或用串口工具直接发送：\n" + frame.hex(" ").upper())
+            return
+        th.send_frame(frame)
+        self._log(f"⇱ 已排队下发 STA 硬件初始化（复位）: {frame.hex(' ')}")
+
+    def _address_value(self) -> Optional[str]:
+        """虚拟表地址设置值（未填/非法返回 None = 用档案表号）。"""
+        return dynamic_data.normalize_address(self.addr_edit.text()) or None
+
     def _current_options(self) -> SimOptions:
         mode = self.list_mode.currentIndex()
         addrs = [a.strip() for a in self.list_edit.toPlainText()
                  .replace("\n", "/").split("/") if a.strip()]
         return SimOptions(
             meter_count=self.spin_meter_count.value(),
+            meter_address=self._address_value(),
+            strict_address=self.chk_strict.isChecked(),
             blacklist=addrs if mode == 1 else [],
             whitelist=addrs if mode == 2 else [],
             energy_increase=self.chk_energy.isChecked(),
@@ -333,6 +463,38 @@ class VirtualMeterWidget(QWidget):
 
     def _make_engine(self) -> MeterSimEngine:
         return MeterSimEngine(self.archive, self._current_options())
+
+    def _apply_address(self):
+        """地址编辑完成：规范成 12 位数字并落盘；非法回退并提示。"""
+        raw = self.addr_edit.text().strip()
+        if not raw:
+            self.options.meter_address = None
+            self._update_addr_status()
+            self._persist_settings()
+            self._log("虚拟表地址已清空：改用档案表号")
+            return
+        addr = dynamic_data.normalize_address(raw)
+        if not addr:
+            QMessageBox.warning(
+                self, "虚拟表地址无效",
+                f"「{raw}」不是 12 位以内的十进制数字地址。\n\n"
+                "请填 12 位数字表地址（如 000000000123）；留空表示用档案表号。")
+            self.addr_edit.setText(self.options.meter_address or "")
+            return
+        self.options.meter_address = addr
+        self.addr_edit.setText(addr)
+        self._update_addr_status()
+        self._persist_settings()
+        self._log(f"● 虚拟表地址已设为 {addr}（响应帧 SA / 通信地址回值同步生效）")
+
+    def _update_addr_status(self):
+        """显示当前实际生效的应答地址（设置值或档案表号）。"""
+        try:
+            addr = self._make_engine().own_address()
+        except Exception:
+            addr = "—"
+        src = "设置值" if self._address_value() else "档案 40020200 表号"
+        self.addr_status.setText(f"当前应答地址：{addr}（{src}）")
 
     # ── 串口 ──────────────────────────────────────────────
     def _refresh_ports(self):
@@ -358,7 +520,7 @@ class VirtualMeterWidget(QWidget):
         self._serial_thread = SerialSlaveThread(
             self.port_combo.currentText(), int(self.baud_combo.currentText()),
             parity_map[self.parity_combo.currentText()], stop,
-            self._make_engine, self)
+            self._make_engine, self._current_options, self)
         self._serial_thread.log.connect(self._log)
         self._serial_thread.frame_exchanged.connect(self._on_exchanged)
         self._serial_thread.start()
@@ -395,7 +557,10 @@ class VirtualMeterWidget(QWidget):
         for f in frames:
             for msg in engine.logs:
                 self._log("  " + msg)
+            self._log(f"← 请求({len(f)}B): {f.hex(' ')}")
             resps = engine.handle_frame(f)
+            for r in resps:
+                self._log(f"→ 响应({len(r)}B): {r.hex(' ')}")
             all_resp.extend(resps)
         if not all_resp:
             self._log("⚠ 引擎未生成响应（名单过滤/不支持服务/未知请求）")
@@ -530,10 +695,13 @@ class VirtualMeterWidget(QWidget):
             p = app_paths.data_path(SETTINGS_FILE)
             if p.exists():
                 d = json.loads(p.read_text(encoding="utf-8"))
-                opts.meter_count = d.get("meter_count", 3)
+                opts.meter_count = d.get("meter_count", 1)
                 opts.energy_increase = d.get("energy_increase", False)
                 opts.auto_freeze_time = d.get("auto_freeze_time", True)
                 opts.mac_enabled = d.get("mac_enabled", True)
+                opts.strict_address = d.get("strict_address", False)
+                addr = dynamic_data.normalize_address(d.get("meter_address"))
+                opts.meter_address = addr or None
                 opts.blacklist = d.get("blacklist", [])
                 opts.whitelist = d.get("whitelist", [])
                 lw = d.get("leak_window")
@@ -543,11 +711,11 @@ class VirtualMeterWidget(QWidget):
             pass
         return opts
 
-    def _save_settings(self):
-        opts = self._current_options()
-        self.options = opts
-        data = {
+    def _settings_payload(self, opts: SimOptions) -> dict:
+        return {
             "meter_count": opts.meter_count,
+            "meter_address": opts.meter_address,
+            "strict_address": opts.strict_address,
             "energy_increase": opts.energy_increase,
             "auto_freeze_time": opts.auto_freeze_time,
             "mac_enabled": opts.mac_enabled,
@@ -555,9 +723,25 @@ class VirtualMeterWidget(QWidget):
             "whitelist": opts.whitelist,
             "leak_window": opts.leak_window,
         }
+
+    def _persist_settings(self):
+        """静默落盘（改地址时即时生效，不弹窗）。"""
+        try:
+            p = app_paths.data_path(SETTINGS_FILE)
+            p.write_text(
+                json.dumps(self._settings_payload(self._current_options()),
+                           ensure_ascii=False, indent=1),
+                encoding="utf-8")
+        except Exception as e:
+            self._log(f"⚠ 设置落盘失败: {e}")
+
+    def _save_settings(self):
+        opts = self._current_options()
+        self.options = opts
         p = app_paths.data_path(SETTINGS_FILE)
-        p.write_text(json.dumps(data, ensure_ascii=False, indent=1),
-                     encoding="utf-8")
+        p.write_text(json.dumps(self._settings_payload(opts), ensure_ascii=False,
+                                indent=1), encoding="utf-8")
+        self._update_addr_status()
         self._log(f"设置已保存: {p}")
         QMessageBox.information(self, "保存成功", "模拟设置已保存")
 
