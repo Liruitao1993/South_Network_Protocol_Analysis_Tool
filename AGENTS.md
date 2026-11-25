@@ -34,7 +34,7 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 
 ## 1. 项目概览
 
-多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.26.31`，请以源码为准，勿在本文件写死）。
+多种电力通信协议的图形化解析工具。单代码库，纯 Python 3.8+，无构建系统，无正式测试框架。当前版本见 `main_gui.py:APP_VERSION`（现 `1.26.32`，请以源码为准，勿在本文件写死）。
 
 **支持的协议（共 16 种，对应 GUI 协议下拉框 `current_protocol` 索引 0–15）：**
 

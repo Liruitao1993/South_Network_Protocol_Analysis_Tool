@@ -128,6 +128,9 @@ testfile.txt
 /tcp_monitor_config.json
 # Modbus 寄存器列表（按品牌保存；运行时生成，内置示例见 modbus_register_store.DEFAULT_PROFILES）
 /modbus_registers.json
+# 收发机控制页配置 + 用例文件（随使用变化，不入库）
+/splc_transceiver.json
+/splc_transceiver_cases/
 # Git worktree 本地隔离区（不入库）
 .worktrees/
 
