@@ -12,7 +12,7 @@
 
 | Problem on site | What this tool does |
 | --- | --- |
-| A hex frame is unreadable without flipping through a 300-page standard | Parses **15 protocols** down to field level (A-XDR, BER-TLV, bit fields, timestamps), with **two-way highlighting** between a parsed row and the exact bytes in the input box |
+| A hex frame is unreadable without flipping through a 300-page standard | Parses **16 protocols** down to field level (A-XDR, BER-TLV, bit fields, timestamps), with **two-way highlighting** between a parsed row and the exact bytes in the input box |
 | A capture log has hundreds of frames to sift by eye | **Batch parsing** from file / clipboard / pcap, automatic frame extraction, filtering, and Excel / CSV / JSON export; click a row to jump back to the source line |
 | Checksums never match and hand-built frames risk wrong bytes | **Protocol validation** (start chars, length field, checksum, CRC — verdict per item) and **frame generators**; a "mimic this frame" mode back-fills every parameter from a real frame and rebuilds the checksum byte-exactly |
 | Too many tools: serial terminal, BLE scanner, packet capture | Serial + **BLE** transceive, BLE⇄serial bridging, **TCP capture with stream reassembly**, and a live monitor — in one program |
@@ -38,8 +38,9 @@
 | 12 | Modular terminal function module interface | Q/GDW | little / big (A-XDR) | CRC-16/PPP FCS |
 | 13 | Yiwa custom 645 | V1.0 | mixed | octet sum (±0x33) |
 | 14 | CSG uplink communication | Q/CSG 11109004-2013 | little | octet sum |
+| 15 | Modbus (RTU / TCP) | Modbus Application Protocol V1.1b3 | big (per-register byte/word order configurable) | CRC-16 (0xA001, RTU) / MBAP length (TCP) |
 
-Rows 2–6 and 8 are relevant if you work with **DLMS/COSEM** or Chinese meter protocols.
+Rows 2–6 and 8 are relevant if you work with **DLMS/COSEM** or Chinese meter protocols. Protocols 12, 14 and 15 are available in the PySide6 desktop app only; the Reflex web build covers 0–11 and 13.
 
 ## Download
 

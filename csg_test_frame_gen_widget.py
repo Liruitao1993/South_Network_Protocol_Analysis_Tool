@@ -667,14 +667,26 @@ class CsgTestFrameGenWidget(QWidget):
             self._attach_link_layer(result)
         return result
 
+    def _manual_payload(self) -> str:
+        """当前该用的手工载荷 HEX：**只有「载荷来源 = 手工 HEX」才认**。
+
+        以前这里无条件读 ④ 区输入框，于是「载荷来源 = 测试模式」时那行虽然被隐藏，
+        残留的旧载荷仍会盖掉按测试模式新组的应用层帧 —— 现场症状就是「选了空间映射，
+        生成结果却是上次的切频帧」（用户报障）。隐藏的输入框不能再有发言权。
+        """
+        if (self.payload_src_combo.currentData() or "mode") != "hex":
+            return ""
+        return self.payload_hex_edit.text().strip()
+
     def _attach_link_layer(self, result: fg.FrameBuildResult) -> None:
         """按 ①~④ 折叠区参数组装链路层，并把各层填进 ``result``。
 
-        MSDU 载荷来源：手工 HEX 优先；否则用应用层帧（端口号+报文标识符+业务报文），
-        这样解析器回读时能展开出「报文端口号 / 控制域 / 测试数据区」等字段。
+        MSDU 载荷来源：手工 HEX 优先（**仅在「载荷来源」选手工时才优先**）；
+        否则用应用层帧（端口号+报文标识符+业务报文），这样解析器回读时能展开出
+        「报文端口号 / 控制域 / 测试数据区」等字段。
         """
         cfg = self._link_config()
-        manual = self.payload_hex_edit.text().strip()
+        manual = self._manual_payload()
         if cfg.frame_kind == "beacon":
             pass                                   # 信标载荷单独给（不走 MSDU）
         elif manual:
@@ -1712,8 +1724,8 @@ class CsgTestFrameGenWidget(QWidget):
         kind = self.frame_kind()
         delim = {"sof": link.DELIM_SOF, "beacon": link.DELIM_BEACON,
                  "sack": link.DELIM_SACK}[kind]
-        # 帧类型决定 MSDU 载荷来源：手工 HEX 优先
-        manual = self.payload_hex_edit.text().strip()
+        # 帧类型决定 MSDU 载荷来源：手工 HEX 优先（仅在「载荷来源=手工 HEX」时）
+        manual = self._manual_payload()
         payload = fg.hex_to_bytes(manual) if manual else b""
         beacon_payload = fg.hex_to_bytes(self.beacon_payload_edit.text())
 

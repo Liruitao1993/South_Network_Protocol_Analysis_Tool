@@ -42,6 +42,8 @@ class ProtocolSpec:
     has_dlt645_sim: bool = False  # DLT645 虚拟表（协议6）
     has_monitor: bool = False
     monitor_wrapper: Optional[str] = None  # plc2 | hplc
+    # 收发机控制页（发射机/接收机双串口 + 用例流程；依《SPLC双模监控器_发射机_接口协议》）
+    has_transceiver: bool = False
     has_sequence_diagram: bool = False
     has_upgrade: bool = False
     # 698 协议测试页（按 OAD 分类的预置测试库；协议8）
@@ -62,7 +64,7 @@ class ProtocolSpec:
     # 校验器类路径（延迟 import）
     validator_class: Optional[str] = None
     # _get_current_parser 包装方式
-    parser_wrapper: str = "direct"  # direct | apdu_guowang | wrapper | apdu | dlt645 | csg | gw | hdc10
+    parser_wrapper: str = "direct"  # direct | apdu_guowang | wrapper | apdu | dlt645 | csg | gw | hdc10 | dl698 | modbus
     # 预设命令 mode（与 frame_gen 对齐；None 表示不参与 preset set_protocol）
     preset_mode: Optional[str] = None
 
@@ -202,7 +204,9 @@ _PROTOS: Tuple[ProtocolSpec, ...] = (
         preset_mode="dlt698",
         extract_strategy="dlt698_45",
         validator_class="validator.dl_t698_45_validator:DLT69845Validator",
-        parser_wrapper="direct",
+        # 解析级别（协议8 输入层次）：auto / frame / apdu / data
+        parse_level_family="dl698",
+        parser_wrapper="dl698",
     ),
     ProtocolSpec(
         index=9,
@@ -217,6 +221,8 @@ _PROTOS: Tuple[ProtocolSpec, ...] = (
         frame_gen_mode="csg",
         has_monitor=True,
         monitor_wrapper="plc2",
+        # 收发机控制页：发射机/接收机双串口 + 用例流程（力合 SPLC 监控器/发射机接口协议）
+        has_transceiver=True,
         has_sequence_diagram=True,
         parse_level_family="csg",
         has_ed_monitor=True,
@@ -568,6 +574,30 @@ class GWGenGuiParser:
         return self.parser.parse_to_table(data, **kwargs)
 
 
+class DL698GuiParser:
+    """698.45（协议8）：把顶栏「解析级别」注入解析器，并透传 `verify`。
+
+    `level=None` 表示「不指定」（旧调用方：TCP 监控 / 批量 / 串口工具），
+    此时解析器按默认 ``frame`` 走，行为与加入级别前**逐字节一致**；
+    用户口径（2026-11-17）：单帧解析页默认「自动识别」，
+    以 OAD 开头的报文不再被硬当 68 帧拆。
+    """
+
+    def __init__(self, parser, level=None):
+        self.parser = parser
+        self.level = level
+
+    def __getattr__(self, name):
+        """其余属性/方法透传给真实解析器（`py_script_engine` 的用户脚本会用到
+        `parse` / `parse_to_table` 等，包装不能把它们挡掉）。"""
+        return getattr(self.__dict__["parser"], name)
+
+    def parse_to_table(self, data, verify: bool = True):
+        return self.parser.parse_to_table(
+            data, verify=verify, parse_level=self.level
+        )
+
+
 class ModbusGuiParser:
     """Modbus（协议15）：每次解析自动带上当前选中的寄存器列表。
 
@@ -630,6 +660,10 @@ def build_gui_parser(
         return GWGenGuiParser(base_parser, parse_level or "auto", frame_type, channel)
     if wrap == "hdc10":
         return HDC10GuiParser(base_parser, parse_level or "auto", frame_type, channel)
+    if wrap == "dl698":
+        # 注意：这里**不用** `or "auto"` —— None 必须原样传下去（= 解析器默认 frame），
+        # 否则 TCP 监控 / 批量 / 串口工具等未选级别的调用方会跟着变成自动判别。
+        return DL698GuiParser(base_parser, parse_level)
     if wrap == "modbus":
         return ModbusGuiParser(base_parser)
     raise ValueError(f"Unknown parser_wrapper: {wrap}")

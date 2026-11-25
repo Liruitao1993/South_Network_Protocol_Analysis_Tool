@@ -127,13 +127,23 @@ def test_di_map_and_merge():
           str(_pv_info))
     check("查询页 search 可按中文检索扩展 DI",
           len(lookup.search("光伏逆变器1的电压")) == 1, str(len(lookup.search("光伏逆变器1的电压"))))
-    check("查询页仍含 1099 条标准 DI 数据", len(lookup.data) == 1099 + total,
-          f"{len(lookup.data)} vs {1099 + total}")
+    # 查询页 = 标准表 + 各扩展（光伏 + 入网信息…）：**不用写死总数**，改为从生成物
+    # 标准条数 + 各扩展映射条数算期望值 —— 再多一个扩展也不会误报（1.26.26 增入网信息时踩过）
+    import json as _json
+
+    from dlt645_net_info_ext import NET_INFO_DI_MAP as _NET_INFO_MAP
+
+    with open(Path(__file__).resolve().parent.parent / "dlt645_di.json", encoding="utf-8") as f:
+        _std_count = len(_json.load(f).get("di_map", {}))
+    expected_page = _std_count + total + len(_NET_INFO_MAP)
+    check("查询页含标准 DI + 全部扩展 DI",
+          len(lookup.data) == expected_page,
+          f"{len(lookup.data)} vs {expected_page}"
+          f"（标准 {_std_count} + 光伏 {total} + 入网信息 {len(_NET_INFO_MAP)}）")
 
     # 扩展 DI 不得写入生成物
-    import json
     with open(Path(__file__).resolve().parent.parent / "dlt645_di.json", encoding="utf-8") as f:
-        raw = json.load(f)
+        raw = _json.load(f)
     leaked = [k for k in raw.get("di_map", {}) if k[:4] in ("02E6", "03E6", "04E6")]
     check("dlt645_di.json（生成物）未被写入扩展 DI", not leaked, str(leaked[:5]))
 

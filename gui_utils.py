@@ -1,7 +1,10 @@
 """GUI通用工具：中文右键菜单、可缩放表格、按钮图标等"""
 
-from PySide6.QtWidgets import QLineEdit, QTextEdit, QTableWidget, QPushButton, QStyle
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtWidgets import (
+    QLineEdit, QTextEdit, QTableWidget, QPushButton, QStyle,
+    QLayout, QSpacerItem, QSizePolicy,
+)
+from PySide6.QtCore import Qt, QSize, QRect, QPoint
 from typing import Optional
 
 
@@ -253,3 +256,191 @@ def apply_chinese_context_menus(parent_widget):
             if wid not in seen:
                 seen.add(wid)
                 setup_chinese_context_menu(widget)
+
+class FlowLayout(QLayout):
+    """自动换行布局：空间不足时把控件排到下一行，永不重叠。
+
+    基于 Qt 官方 FlowLayout 示例实现（原为 ``main_gui.FlowLayout``，1.26.26 迁到本模块
+    供收发机控制页复用；``main_gui`` 仍 ``from gui_utils import FlowLayout``，
+    因此 ``main_gui.FlowLayout`` 与既有测试/猴子补丁继续可用）。
+
+    默认按各自 sizeHint 靠左排（协议组口径）。``stretch=True`` 时把**行内剩余宽度**
+    按权重分给 ``addWidget(w, stretch)`` 指定的子项与 ``addStretch()`` 弹性空隙，
+    于是「宽屏吃满整行」和「窄屏自动折行、永不重叠」能同时成立。
+    """
+
+    def __init__(self, parent=None, margin=0, spacing=-1, stretch=False):
+        super().__init__(parent)
+        if parent is not None:
+            self.setContentsMargins(margin, margin, margin, margin)
+        self.setSpacing(spacing)
+        self._items = []
+        self._stretch = stretch
+        self._weights = {}
+        #: True = 量尺寸/排版时**不跳过不可见子项**。默认 False（协议组按可见性收缩）；
+        #: 收发机控制页的 FlowArea 打开它 —— 那页在 showEvent 里算折行高度时子控件
+        #: 还没真正 visible，跳过就会算出 0 高度、整块参数区被压成一条缝（实测踩过）。
+        self._ignore_visibility = False
+
+    def __del__(self):
+        item = self.takeAt(0)
+        while item:
+            item = self.takeAt(0)
+
+    def addItem(self, item):
+        self._items.append(item)
+
+    def addWidget(self, widget, stretch=0):
+        """加控件；``stretch>0`` 时在 ``stretch=True`` 的布局里按权重分剩余宽度。"""
+        super().addWidget(widget)
+        if stretch:
+            self._weights[self._items[-1]] = stretch
+
+    def addStretch(self, stretch=1):
+        """弹性空隙：吃掉本行剩余宽度（用于把后面的控件顶到行右端）。"""
+        item = QSpacerItem(
+            0, 0, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
+        )
+        self.addItem(item)
+        self._weights[item] = stretch
+
+    def addSpacing(self, spacing):
+        """固定宽度的空白间隔（与 ``QBoxLayout.addSpacing`` 同名同义）。"""
+        item = QSpacerItem(
+            max(0, int(spacing)), 0, QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum
+        )
+        self.addItem(item)
+        return item
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, index):
+        if 0 <= index < len(self._items):
+            return self._items[index]
+        return None
+
+    def takeAt(self, index):
+        if 0 <= index < len(self._items):
+            return self._items.pop(index)
+        return None
+
+    def expandingDirections(self):
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self._do_layout(QRect(0, 0, width, 0), test_only=True)
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._do_layout(rect, test_only=False)
+
+    def sizeHint(self):
+        """单行自然尺寸（各子项 sizeHint 之和）。
+
+        不能返回 minimumSize()：那是「各子项最小尺寸的逐分量最大值」（≈最宽单项），
+        父布局会照这个宽度只给这么宽 → 布局被迫换行 → 高度翻倍并超出父容器高度。
+        """
+        total_w = 0
+        max_h = 0
+        visible = 0
+        for item in self._items:
+            wid = item.widget()
+            if wid is not None and not (self._ignore_visibility or wid.isVisible()):
+                continue
+            hint = item.sizeHint()
+            total_w += hint.width()
+            max_h = max(max_h, hint.height())
+            visible += 1
+        if visible > 1:
+            total_w += self.spacing() * (visible - 1)
+        m = self.contentsMargins()
+        return QSize(total_w + m.left() + m.right(), max_h + m.top() + m.bottom())
+
+    def minimumSize(self):
+        size = QSize()
+        for item in self._items:
+            wid = item.widget()
+            if wid is not None and not (self._ignore_visibility or wid.isVisible()):
+                continue
+            size = size.expandedTo(item.minimumSize())
+        m = self.contentsMargins()
+        size += QSize(m.left() + m.right(), m.top() + m.bottom())
+        return size
+
+    def _row_widths(self, items, avail_width):
+        """一行内各子项的最终宽度（默认就是各自 sizeHint，不做任何拉伸）。"""
+        widths = [hint.width() for _, hint, _, _ in items]
+        if not self._stretch or not widths:
+            return widths
+        used = sum(widths) + self.spacing() * (len(widths) - 1)
+        leftover = avail_width - used
+        if leftover <= 0:
+            return widths
+        weighted = []
+        for i, entry in enumerate(items):
+            weight = self._weights.get(entry[0])
+            if weight:
+                weighted.append((i, weight))
+        if not weighted:
+            return widths
+        total = sum(w for _, w in weighted)
+        given = 0
+        for idx, weight in weighted[:-1]:
+            add = leftover * weight // total
+            widths[idx] += add
+            given += add
+        # 除不尽的余数给最后一个：免得行右端留下 1~2px 缝
+        widths[weighted[-1][0]] += leftover - given
+        return widths
+
+    def _do_layout(self, rect, test_only):
+        m = self.contentsMargins()
+        effective = rect.adjusted(m.left(), m.top(), -m.right(), -m.bottom())
+        x, y = effective.x(), effective.y()
+        line_height = 0
+        row_items = []
+        rows = []
+        for item in self._items:
+            wid = item.widget()
+            if wid is not None and not (self._ignore_visibility or wid.isVisible()):
+                continue
+            hint = item.sizeHint()
+            space_x = self.spacing()
+            space_y = self.spacing()
+            next_x = x + hint.width() + space_x
+            # 弹性空隙不参与换行判定：否则窄屏下它会独占一行、凭空多 6px 高度
+            is_gap = item.spacerItem() is not None
+            if next_x - space_x > effective.right() and line_height > 0 and not is_gap:
+                rows.append((row_items, line_height))
+                x = effective.x()
+                y = y + line_height + space_y
+                next_x = x + hint.width() + space_x
+                line_height = 0
+                row_items = []
+            row_items.append((item, hint, x, y))
+            x = next_x
+            line_height = max(line_height, hint.height())
+        rows.append((row_items, line_height))
+
+        if not test_only:
+            for items, lh in rows:
+                widths = self._row_widths(items, effective.width())
+                # 拉伸只改宽度，x 是按原始 hint 排出来的：被拉宽的项必须把后面
+                # 同一行的项一起往右推，否则宽的下拉框会盖住后面的按钮。
+                shift = 0
+                for (it, hint, ix, iy), w in zip(items, widths):
+                    cy = iy + (lh - hint.height()) // 2
+                    it.setGeometry(
+                        QRect(QPoint(ix + shift, cy), QSize(w, hint.height()))
+                    )
+                    shift += w - hint.width()
+
+        if rows:
+            last_lh = rows[-1][1]
+        else:
+            last_lh = 0
+        return y + last_lh - rect.y() + m.bottom()

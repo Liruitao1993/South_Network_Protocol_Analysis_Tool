@@ -304,7 +304,7 @@ def test_flow_run_order():
     w._set_all_checked(True)
     app.processEvents()
 
-    # 用例集合 = 内置 + 文档补充 + 自定义（1.26.20 起 9 → 16），不要再写死 9
+    # 用例集合 = 内置 + 文档补充 + 自定义（1.26.28 起 9 → 16），不要再写死 9
     try:
         all_cases = F.all_cases()
     except AttributeError:                                # 兼容旧版只有内置用例

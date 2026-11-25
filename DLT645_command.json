@@ -6,7 +6,7 @@
       "group_name": "常用抄读",
       "description": "C=11H，DI=00010000，地址 000000000000",
       "protocol": "dlt645",
-      "frame_hex": "68 00 00 00 00 00 00 68 11 04 33 33 34 33 B2 16",
+      "frame_hex": "68 33 00 00 00 00 00 68 11 04 33 33 34 33 E5 16",
       "config": {
         "protocol_mode": "dlt645",
         "dlt645": {
@@ -27,7 +27,7 @@
       "group_name": "常用抄读",
       "description": "C=11H，DI=02010100（XXX.X，单位 V）",
       "protocol": "dlt645",
-      "frame_hex": "68 00 00 00 00 00 00 68 11 04 33 34 34 35 B5 16",
+      "frame_hex": "68 33 00 00 00 00 00 68 11 04 33 34 34 35 E8 16",
       "config": {
         "protocol_mode": "dlt645",
         "dlt645": {
@@ -48,7 +48,7 @@
       "group_name": "常用抄读",
       "description": "C=13H，地址域 AA×6，数据域空",
       "protocol": "dlt645",
-      "frame_hex": "68 AA AA AA AA AA AA 68 13 00 DF 16",
+      "frame_hex": "68 33 00 00 00 00 00 68 13 00 16 16",
       "config": {
         "protocol_mode": "dlt645",
         "dlt645": {
@@ -67,7 +67,7 @@
       "group_name": "对时与冻结",
       "description": "C=08H，地址 99×6，示例时间 2026-01-01 00:00:00（发送前请改为当前时间）",
       "protocol": "dlt645",
-      "frame_hex": "68 99 99 99 99 99 99 68 08 06 33 33 33 34 34 59 CE 16",
+      "frame_hex": "68 33 00 00 00 00 00 68 08 06 33 33 33 34 34 59 6B 16",
       "config": {
         "protocol_mode": "dlt645",
         "dlt645": {
@@ -88,7 +88,7 @@
       "group_name": "LME 运维",
       "description": "C=11H，DI=FF00DD01，M=0 读取模块全部支持信息（手册 4.6）",
       "protocol": "dlt645",
-      "frame_hex": "68 00 00 00 00 00 00 68 11 06 34 10 33 32 33 33 F6 16",
+      "frame_hex": "68 33 00 00 00 00 00 68 11 06 34 10 33 32 33 33 29 16",
       "config": {
         "protocol_mode": "dlt645",
         "dlt645": {

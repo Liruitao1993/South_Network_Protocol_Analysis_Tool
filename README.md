@@ -1,11 +1,11 @@
 # 电力通信报文解析工具
 
 [![Release](https://img.shields.io/github/v/release/Liruitao1993/South_Network_Protocol_Analysis_Tool?label=release&color=2ea44f)](https://github.com/Liruitao1993/South_Network_Protocol_Analysis_Tool/releases/latest) [![CI](https://github.com/Liruitao1993/South_Network_Protocol_Analysis_Tool/actions/workflows/ci.yml/badge.svg)](https://github.com/Liruitao1993/South_Network_Protocol_Analysis_Tool/actions/workflows/ci.yml) [![Downloads](https://img.shields.io/github/downloads/Liruitao1993/South_Network_Protocol_Analysis_Tool/total?label=downloads&color=orange)](https://github.com/Liruitao1993/South_Network_Protocol_Analysis_Tool/releases) [![Stars](https://img.shields.io/github/stars/Liruitao1993/South_Network_Protocol_Analysis_Tool?label=stars&color=yellow)](https://github.com/Liruitao1993/South_Network_Protocol_Analysis_Tool/stargazers) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/Python-3.8%2B-brightgreen)]() [![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-lightgrey)]() [![Protocols](https://img.shields.io/badge/protocols-15-blue)]() [English](README.en.md)
+[![Python](https://img.shields.io/badge/Python-3.8%2B-brightgreen)]() [![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-lightgrey)]() [![Protocols](https://img.shields.io/badge/protocols-16-blue)]() [English](README.en.md)
 
 **把电力通信报文从「看不懂的一串十六进制」变成「逐字段讲清楚的一张表」。**
 
-面向电力通信**现场调试、联调测试、协议开发与检测验证**的一站式桌面工具：支持 **15 种电力通信协议**，在同一个窗口里走完 **解析 → 校验 → 组帧 → 串口 / 蓝牙收发 → 批量分析 → 时序图 → 测试报告** 全流程。**Windows 双击即用，无需安装 Python、无需联网。**
+面向电力通信**现场调试、联调测试、协议开发与检测验证**的一站式桌面工具：支持 **16 种电力通信协议**，在同一个窗口里走完 **解析 → 校验 → 组帧 → 串口 / 蓝牙收发 → 批量分析 → 时序图 → 测试报告** 全流程。**Windows 双击即用，无需安装 Python、无需联网。**
 
 ![单帧解析：698.45 报文逐字段解析](docs/images/readme-single-frame.png)
 
@@ -50,7 +50,7 @@ python main_gui.py --minimized
 
 | 现场的常见问题 | 这个工具怎么做 |
 | --- | --- |
-| 报文看不懂，翻几百页协议文档逐字节对 | **15 种协议分层解析到字段级**（含 A-XDR / BER-TLV / 位域 / 日期时间），解析行与输入字节**双向高亮联动** |
+| 报文看不懂，翻几百页协议文档逐字节对 | **16 种协议分层解析到字段级**（含 A-XDR / BER-TLV / 位域 / 日期时间），解析行与输入字节**双向高亮联动** |
 | 抓包日志几百行，靠人眼一条条挑 | **批量解析**：文件 / 剪贴板 / pcap 导入，自动从混杂文本里提取完整帧；类型过滤、搜索、Excel / CSV / JSON 导出；点摘要行**回跳原始日志位置** |
 | 校验和总对不上，组帧怕写错字节 | 内置**协议校验**（起始符 / 长度域 / 校验和 / CRC 逐项给结论）+ **组帧模板**；「**仿照报文**」粘一帧现成报文即可回填全部参数，并逐字节重建校验 |
 | 串口、蓝牙、抓包工具来回切 | 串口 + **BLE 蓝牙**收发、**蓝牙 ⇄ 串口虚拟透传**、**TCP 抓包流重组**、实时监控器，全在一个程序里 |
@@ -61,7 +61,7 @@ python main_gui.py --minimized
 
 ## 支持协议
 
-工具支持 15 种电力通信协议，下拉框索引即协议编号：
+工具支持 16 种电力通信协议，下拉框索引即协议编号（0–15，共 16 项）：
 
 | 索引 | 协议 | 标准号 | 字节序 | 校验 |
 | --- | --- | --- | --- | --- |
@@ -82,18 +82,20 @@ python main_gui.py --minimized
 | 14 | 南网上行通信规约 | Q/CSG 11109004-2013 | 小端（长度 L / 地址域 / 多字节字段）；DI 低字节在前 | 8 位位组算术和（控制域 + 地址域 + 链路用户数据） |
 | 15 | Modbus 协议（RTU/TCP） | Modbus Application Protocol V1.1b3 | 大端（寄存器内可配字节序 / 字序） | CRC-16（多项式 0xA001，RTU）；TCP 用 MBAP 长度域 |
 
-> HDC 1.0（11）、模组化终端功能模块接口（12）、依瓦定制645（13）、南网上行通信规约（14）与 Modbus（15）目前仅在 PySide6 主程序支持；Web 版支持索引 0–10。
+> Web 版（Reflex）支持索引 0–11 与 13（依瓦定制645）；**模组化终端功能模块接口（12）、南网上行通信规约（14）与 Modbus（15）仅 PySide6 桌面端支持**。桌面端为功能全集；Web 没有实时监控器、档案、拓扑、协议测试、虚拟表等页，组帧页虽在但协议 9/10/11/13 不支持（协议13 会明确提示改用桌面版）。
 
 ## 功能一览
 
 | 模块 | 一句话 |
 | --- | --- |
-| 单帧解析 | 15 种协议分层解析到字段级，解析行 ⇄ 输入字节双向高亮 |
+| 单帧解析 | 16 种协议分层解析到字段级，解析行 ⇄ 输入字节双向高亮 |
 | 批量解析 | 文件 / 剪贴板 / pcap 导入，自动提帧，导出 Excel / CSV / JSON，可回跳原文 |
 | 协议校验 | 起始符、长度域、校验和、CRC 逐项给「通过 / 失败 / 警告」结论 |
-| 组帧 | 南网、国网、698.45、645、模组化模板；协议9 五层折叠组帧；支持「仿照报文」反解回填 |
+| 组帧 | 南网、645、国网、698.45、模组化、依瓦645、南网上行模板；协议9 五层折叠组帧；支持「仿照报文」反解回填 |
 | 预设命令 | 一键发送常用帧；**粘贴报文直接建按钮**；按当前协议**一键批量替换地址**并重算校验 |
-| 协议测试 | 698 按 OAD 分类的预置测试库；645 按 DI 大类分类的命令树 + 读/写通信地址 + 特殊命令；国网按 AFN/Fn 分类的命令树 + EB 扩展；三页均支持**串口 / 蓝牙**发送通道 |
+| 协议测试 | 698 按 OAD 分类的预置测试库；645 按 DI 大类分类的命令树 + 读/写通信地址 + 特殊命令；国网按 AFN/Fn 分类的命令树 + 文档流程用例（静默观察 / 并发抄表测上限 / STA 域观测）+ EB 扩展；三页均支持**串口 / 蓝牙**发送通道 |
+| 生产测试架 | 类串口助手：5 条发送配置（各自 HEX/ASCII + checksum8）+ 49 项参数的测试架参数帧，改动即生成整帧 |
+| 收发机控制 | 协议9 发射机（PLC2.0 ED..EE）/ 接收机（96..16）双串口 + JSON 用例流程 + 浮动收发日志窗 |
 | 串口通信 | 收发 + 实时解析；4 个断帧超时可调；按协议**批量替换通信地址**并重算校验 |
 | 蓝牙通信 | BLE 扫描连接、特征码自动优选、蓝牙 ⇄ 串口虚拟透传 |
 | 虚拟表 | 698.45 从站模拟器；645 离线应答 / 档案 / 串口从站 |
@@ -104,9 +106,9 @@ python main_gui.py --minimized
 | 报文工具 | ASCII/HEX、DLT645 偏移、字节逆序、Pn/Fn、CRC/校验和、按协议地址替换 |
 | 频谱图 | 仪器式网格频谱图，光标读数 / MARK / 两点 Δ 测量，导出 PNG |
 | 实时监控 / TCP 监控 | 南网与国网新一代串口实时监控；scapy 抓包 + 流重组自动识别 |
-| 查询与档案 | DI、AFN、645 DI、OBIS、PLC RF 命令字、新一代业务标识、HDC 报文 ID、拓扑组网统计 |
+| 查询与档案 | DI、AFN、645 DI、依瓦 DI、OBIS、PLC RF 命令字、Modbus 寄存器、南网上行 DI、新一代业务标识、HDC 报文 ID、拓扑组网统计；档案页按点抄 / 并发抄表 + 可选抄读数据项（645 DI / 698 OAD / STA 模块） |
 | 系统集成 | 托盘、全局热键、剪贴板自动识别、单实例、右键菜单、开机自启、自动更新 |
-| 多端 | PySide6 GUI（主）、Textual TUI、NiceGUI Web、实验性 Reflex Web |
+| 多端 | PySide6 桌面端（功能全集）、Reflex Web（在线工具 + 产品首页，索引 0–11、13） |
 
 完整清单与逐模块用法见 **[docs/使用说明.md](docs/使用说明.md)**。
 

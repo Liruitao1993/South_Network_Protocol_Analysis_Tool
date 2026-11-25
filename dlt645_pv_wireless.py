@@ -563,6 +563,22 @@ def parse_wireless_di(
                      "读数据请求不带数据单元，应答应含对应数据块"))
         return rows, name
 
+    if dir_bit == 0 and func == 0x14:
+        # 写数据请求（DL/T645-2007 §7.5）：DI + 密码 PA P0P1P2(4) + 操作者代码 C0~C3(4) + 写入值。
+        # **必须先剥掉这 8 字节**，否则密码/操作者代码会被当成本手册的数据块首字段
+        # （现场报障：14H 写 04900103 升级文件信息，升级文件名解成了半截乱码）。
+        # 行口径与光伏扩展 `parse_pv_di` 保持一致（同一份协议结构，不改既有文案）。
+        if len(body) < 8:
+            rows.append(("  └ ⚠ 数据域不足", _hex(body), f"{len(body)} 字节",
+                         "写数据请求应含 4 字节密码 + 4 字节操作者代码"))
+            return rows, name
+        rows.append(("  └ 密码与操作者代码",
+                     _hex(body[0:8]),
+                     f"PA={body[0]:02X}，密码={' '.join(f'{b:02X}' for b in body[1:4])}，"
+                     f"操作者={' '.join(f'{b:02X}' for b in body[4:8])}",
+                     "写数据请求：DI 之后 4 字节密码 + 4 字节操作者代码，其后为写入值"))
+        body = body[8:]
+
     handler = _HANDLERS.get(code)
     if handler:
         handler(body, rows)

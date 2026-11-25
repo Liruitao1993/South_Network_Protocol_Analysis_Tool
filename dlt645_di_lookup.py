@@ -14,6 +14,7 @@ from typing import List, Tuple, Optional
 
 from app_paths import data_path
 from dlt645_pv_ext import merge_pv_di_map
+from dlt645_net_info_ext import merge_net_info_di_map
 
 
 
@@ -43,7 +44,8 @@ class DLT645DILookup:
             print("DLT645 DI 映射表不存在，仅加载光伏扩展协议 DI")
 
         # 并入光伏协议转换单元 DL/T645-2007 扩展协议 DI（dlt645_pv_ext.PV_DI_MAP）
-        standard_dis = merge_pv_di_map(standard_dis)
+        # 与入网信息 DI（dlt645_net_info_ext.NET_INFO_DI_MAP）—— 与解析器同一份来源
+        standard_dis = merge_net_info_di_map(merge_pv_di_map(standard_dis))
 
         # 加载自定义DI
         custom_dis = self._load_custom_di()

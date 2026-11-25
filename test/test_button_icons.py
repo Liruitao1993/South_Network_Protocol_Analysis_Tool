@@ -67,6 +67,15 @@ def main():
     set_btn_icon(probe, "definitely-not-a-key")
     check("set_btn_icon 未知键安全跳过", probe.icon().isNull() == before_null)
 
+    # 收尾：MainWindow 的全局热键线程不收会「QThread: Destroyed while thread is still
+    # running」→ 退出码 0xC0000409（断言全过却看起来失败，AGENTS §8 陷阱 62 同款）
+    try:
+        win._shutdown_threads()
+    except Exception:
+        pass
+    win.close()
+    app.processEvents()
+
     print("=" * 50)
     if FAILURES:
         print(f"[FAIL] {len(FAILURES)} 项失败: {FAILURES}")

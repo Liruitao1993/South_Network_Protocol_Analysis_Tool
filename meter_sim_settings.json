@@ -1,9 +1,13 @@
 {
  "meter_count": 1,
+ "meter_address": "000000000033",
+ "strict_address": false,
  "energy_increase": true,
  "auto_freeze_time": true,
  "mac_enabled": true,
  "blacklist": [],
- "whitelist": [],
+ "whitelist": [
+  "330000000000"
+ ],
  "leak_window": null
 }

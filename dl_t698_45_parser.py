@@ -21,6 +21,20 @@ class DLT69845Parser:
     START_CHAR = 0x68
     END_CHAR = 0x16
 
+    #: 解析级别（与协议9/10/11 的「解析级别」同口径，用户可强制指定输入层次）：
+    #: - ``auto``  ：按首字节判别（68 → 链路层帧；已知 APDU 服务码 → 仅APDU；
+    #:               能解出 A-XDR 数据项 → 仅数据域 OAD+数据；其余按链路层帧）
+    #: - ``frame`` ：完整链路层帧 68…16（默认，与既有行为一致）
+    #: - ``apdu``  ：输入即 APDU（应用层报文，不含帧头）
+    #: - ``data``  ：输入即数据域 = OAD(4B) + A-XDR 数据（不含帧头/APDU 服务码）
+    PARSE_LEVELS = ("auto", "frame", "apdu", "data")
+    PARSE_LEVEL_LABELS = {
+        "auto": "自动识别",
+        "frame": "完整链路层帧(68…16)",
+        "apdu": "仅APDU(应用层报文)",
+        "data": "仅数据域(OAD+数据)",
+    }
+
     # 功能码映射
     FUNC_CODE_MAP = {
         0: "保留",
@@ -293,17 +307,35 @@ class DLT69845Parser:
 
         return result
 
-    def parse_to_table(self, frame_bytes: bytes, verify: bool = True) -> list:
+    def parse_to_table(
+        self,
+        frame_bytes: bytes,
+        verify: bool = True,
+        parse_level: str = "frame",
+    ) -> list:
         """解析为 GUI 表格格式
 
         ``verify=False`` 时走容错表格（`_build_tolerant_table`）：能拆多少拆多少，
         末尾始终给出「原始报文」，拆不动的字节单独列「未解析字节」。
+
+        ``parse_level`` 指定输入层次（见 `PARSE_LEVELS`）：
+        - ``frame``（默认）：完整链路层帧 68…16，与历史行为完全一致；
+        - ``apdu``：输入即 APDU，走 `_build_apdu_table`；
+        - ``data``：输入即数据域 OAD+数据，走 `_build_data_table`；
+        - ``auto``：先 `detect_parse_level` 判别再分派。
 
         Returns: [(字段名, 原始值, 解析值, 说明, byte_start, byte_end), ...]
 
         带 FE 前导时：首行给出「唤醒前导字节」，其后**所有帧内行的偏移整体 +skip**，
         使高亮始终与用户输入的原始报文（含 FE）对齐。
         """
+        level = self.normalize_parse_level(parse_level)
+        if level == "auto":
+            level = self.detect_parse_level(frame_bytes)
+        if level == "apdu":
+            return self._build_apdu_table(frame_bytes)
+        if level == "data":
+            return self._build_data_table(frame_bytes)
         if not verify:
             return self._build_tolerant_table(frame_bytes)
 
@@ -409,6 +441,153 @@ class DLT69845Parser:
             ))
 
         return table_data
+
+    # ------------------------------------------------------------------
+    # 解析级别（自动判别 / 仅APDU / 仅数据域）
+    # ------------------------------------------------------------------
+    def normalize_parse_level(self, parse_level: Optional[str]) -> str:
+        """级别取值归一：非法/空 → ``frame``（保持历史行为）。"""
+        level = (parse_level or "frame").strip().lower()
+        return level if level in self.PARSE_LEVELS else "frame"
+
+    def detect_parse_level(self, frame_bytes: bytes) -> str:
+        """``auto`` 级别的判别（返回值恒为 frame/apdu/data 之一）。
+
+        判据优先级：
+        1. 剥 FE 前导后首字节 ``0x68`` → 链路层帧；
+        2. 首字节是 698.45 APDU 服务码（见 ``APDU_TYPE_MAP``）→ 仅APDU；
+        3. OAD(4B) 之后能解出完整 A-XDR 数据项 → 仅数据域；
+        4. 其余 → 仍按链路层帧（保持既有的失败/容错诊断口径，不臆测层次）。
+        """
+        data, _ = strip_wakeup_prefix(frame_bytes)
+        if not data:
+            return "frame"
+        if data[0] == self.START_CHAR:
+            return "frame"
+        from dl_t698_45_apdu_parser import DLT69845APDUParser
+
+        if data[0] in DLT69845APDUParser.APDU_TYPE_MAP:
+            return "apdu"
+        if self._looks_like_data_domain(data):
+            return "data"
+        return "frame"
+
+    def _looks_like_data_domain(self, data: bytes) -> bool:
+        """输入是否像「OAD(4B) + A-XDR 数据」：OAD 之后确实解得出数据项。"""
+        if len(data) < 5:
+            return False
+        try:
+            # AXDRCoder.decode 的第二个返回值是**消耗字节数**（非绝对偏移）
+            _, consumed = self.apdu_parser.axdr.decode(data, 4)
+        except Exception:  # noqa: BLE001 - 解不动就当不是数据域
+            return False
+        return consumed > 0
+
+    def _build_apdu_table(self, raw: bytes) -> list:
+        """「仅APDU」级别的表格：输入即 APDU，不含链路层帧头。"""
+        table: list = []
+        data, skip = strip_wakeup_prefix(raw)
+        table.append(("解析级别", "-", self.PARSE_LEVEL_LABELS["apdu"],
+                      "输入即 APDU（应用层报文），不含 68…16 链路层帧", None, None))
+        if not data:
+            table.append(("❌ 解析失败", "-", "-", "没有可解析的字节", None, None))
+            return self._finish_standalone(table, raw, skip)
+
+        table.append(("APDU原始字节", self._short_hex(data.hex().upper()),
+                      f"{len(data)}字节", "", 0, len(data) - 1))
+        try:
+            res = self.apdu_parser.parse(data)
+        except Exception as exc:  # noqa: BLE001
+            table.append(("❌ APDU解析异常", "-", "-", str(exc), None, None))
+            return self._finish_standalone(table, raw, skip)
+
+        type_name = str(res.get("APDU类型", "-"))
+        table.append(("APDU类型", str(res.get("服务码", "-")), type_name,
+                      str(res.get("APDU说明", "") or ""), 0, 0))
+        if res.get("解析状态") == "成功":
+            self._add_apdu_to_table(res, table, level=1)
+        else:
+            note = res.get("错误信息") or res.get("说明") or "该服务类型解析器尚未实现"
+            table.append(("⚠ 解析提示", "-", "-", str(note), None, None))
+            if type_name.startswith("未知"):
+                table.append((
+                    "  建议", "-", "-",
+                    "首字节不是 698.45 APDU 服务码；若这是以 OAD 开头的报文，"
+                    "请把「解析级别」切到「仅数据域(OAD+数据)」",
+                    None, None,
+                ))
+        return self._finish_standalone(table, raw, skip)
+
+    def _build_data_table(self, raw: bytes) -> list:
+        """「仅数据域」级别的表格：输入即 OAD(4B) + A-XDR 数据。"""
+        table: list = []
+        data, skip = strip_wakeup_prefix(raw)
+        table.append(("解析级别", "-", self.PARSE_LEVEL_LABELS["data"],
+                      "输入即数据域：OAD(4B) + A-XDR 数据，不含链路层帧/APDU 服务码",
+                      None, None))
+        n = len(data)
+        if n < 4:
+            table.append(("❌ 解析失败", "-", "-",
+                          f"数据域至少需要 4 字节 OAD，实收 {n} 字节", None, None))
+            return self._finish_standalone(table, raw, skip)
+
+        # OAD
+        oad = None
+        try:
+            oad = self.apdu_parser.parse_oad(data, 0)
+        except Exception as exc:  # noqa: BLE001
+            table.append(("❌ OAD解析失败", self._short_hex(data[:4].hex().upper()),
+                          "-", str(exc), 0, 3))
+        if oad:
+            pv = oad.get("解析值") or {}
+            table.append((
+                "OAD",
+                " ".join(f"{b:02X}" for b in data[:4]),
+                f"OI={pv.get('OI', '-')} 属性={pv.get('属性编号', '-')} 索引={pv.get('元素索引', '-')}",
+                str(oad.get("语义说明") or oad.get("说明") or ""),
+                0, 3,
+            ))
+
+        # 数据域（A-XDR）：逐个数据项解码，解不动就原样保留剩余字节
+        offset = 4
+        idx = 0
+        if offset >= n:
+            table.append(("⚠ 数据域", "-", "-", "OAD 之后没有数据字节", None, None))
+        while offset < n:
+            try:
+                # 返回值是**消耗字节数**（相对 offset），须自行累加
+                item, consumed = self.apdu_parser.axdr.decode(data, offset)
+            except Exception as exc:  # noqa: BLE001
+                table.append(("⚠ 数据项解析失败", self._short_hex(data[offset:].hex().upper()),
+                              "-", str(exc), offset, n - 1))
+                break
+            if consumed <= 0:  # 防御：解码不前进时避免死循环
+                table.append(("⚠ 数据项解析失败", self._short_hex(data[offset:].hex().upper()),
+                              "-", "A-XDR 解码未前进，剩余字节原样保留", offset, n - 1))
+                break
+            idx += 1
+            self._add_axdr_item_rows(item, table, level=1, idx=idx)
+            offset += consumed
+        if idx and offset >= n:
+            table.append(("数据域", f"{idx} 个数据项", "已完整解码", "OAD 之后的 A-XDR 数据",
+                          4, n - 1))
+        elif idx and offset < n:
+            table.append(("未解析字节", self._short_hex(data[offset:].hex().upper()),
+                          f"{n - offset}字节", "A-XDR 解不动的尾部字节，原样输出",
+                          offset, n - 1))
+        return self._finish_standalone(table, raw, skip)
+
+    def _finish_standalone(self, table: list, raw: bytes, skip: int) -> list:
+        """非链路层级别（apdu/data）的收尾：末尾给原始报文，并处理 FE 前导偏移。"""
+        table.append(("原始报文", self._short_hex(raw.hex().upper()), f"{len(raw)}字节",
+                      "按当前「解析级别」指定的层次解析（无链路层帧头）", None, None))
+        if skip:
+            table = shift_row_offsets(table, skip)
+            table.insert(0, make_wakeup_row(
+                skip,
+                "规范 §6.3.1 b) 前导码（FEH），非帧内容，解析已跳过",
+            ))
+        return table
 
     # ------------------------------------------------------------------
     # 容错解析（勾掉「校验该帧」时使用）
@@ -722,7 +901,9 @@ class DLT69845Parser:
         elif isinstance(parsed, dict):
             table_data.append((f"{indent}{name}", str(raw), str(parsed), desc, None, None))
         else:
-            table_data.append((f"{indent}{name}", str(raw), str(parsed), desc, None, None))
+            # None 的 A-XDR 项（null 类型）解析值就是「无」——别让表格里出现 "None"
+            parsed_text = "-" if parsed is None else str(parsed)
+            table_data.append((f"{indent}{name}", str(raw), parsed_text, desc, None, None))
 
     def _add_apdu_to_table(self, apdu_result: dict, table_data: list, level: int = 0):
         """递归添加 APDU 解析结果到表格"""

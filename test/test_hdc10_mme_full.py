@@ -99,6 +99,63 @@ def test_associate_cnf_reject_result():
     assert d["结果"][2] == "站点不在白名单中"
 
 
+# ── 2b. 关联确认的路由表信息（表74 头 8B + 表75 条目） ─────────────
+
+def test_associate_cnf_routing_table():
+    """完整路由表：2 直连站点 + 1 直连代理（其下 2 子站点）逐条解出。"""
+    payload = bytearray(40)
+    payload[0:6] = bytes.fromhex("000000001117")
+    payload[6:12] = bytes.fromhex("004129862891")
+    payload[12] = 0x0A
+    payload[13] = 1
+    payload[14:16] = bytes.fromhex("0200")
+    payload[16:18] = bytes.fromhex("0100")
+    payload[18] = 1          # 总分包数
+    payload[19] = 1          # 分包序号
+    # 表74 头：直连站点2 + 直连代理1 + 路由表12B + 保留2B
+    tbl = (bytes.fromhex("1100") + bytes.fromhex("1200")
+           + bytes.fromhex("3100") + (2).to_bytes(2, "little")
+           + bytes.fromhex("4100") + bytes.fromhex("4200"))
+    routing = ((2).to_bytes(2, "little") + (1).to_bytes(2, "little")
+               + len(tbl).to_bytes(2, "little") + bytes(2) + tbl)
+    rows = _mme(0x0001, bytes(payload) + routing)
+    names = [r[0].strip() for r in rows]
+    d = {r[0].strip(): r for r in rows}
+
+    assert "路由表信息" in names, names
+    assert "直连站点2个" in d["路由表信息"][3] and "路由表12字节" in d["路由表信息"][3], d["路由表信息"][3]
+    assert d["直连站点1"][2] == "TEI=17"
+    assert d["直连站点2"][2] == "TEI=18"
+    assert d["直连代理1"][2] == "TEI=49, 子站点2个", d["直连代理1"][2]
+    sub = [r[2] for r in rows if r[0].strip() == "子站点TEI"]
+    assert sub == ["TEI=65", "TEI=66"], sub
+
+    # 表70 的固定保留 4 字节要单独成行（别和路由表信息混为一谈）
+    assert "保留" in names
+    assert any(r[0].strip() == "保留" and "路由表信息从偏移 40 开始" in r[3] for r in rows), names
+
+    # 路由表条目的偏移必须落在 MME 内且首尾自洽
+    rt_row = next(r for r in rows if r[0].strip() == "路由表信息")
+    first = next(r for r in rows if r[0].strip() == "直连站点1")
+    assert first[4] == rt_row[4] + 8, (first[4], rt_row[4])
+    last = [r for r in rows if r[0].strip() == "子站点TEI"][-1]
+    assert last[5] == rt_row[5], (last[5], rt_row[5])
+
+
+def test_associate_cnf_routing_incomplete():
+    """现场帧：路由信息只有 4 字节（MSDU 48 = 表70 体 40 + 4）→
+    必须给出已解出的部分 + 明确指出该字段提前结束，而不是一句「需8字节」。"""
+    payload = bytearray(40)
+    rows = _mme(0x0001, bytes(payload) + bytes(4))
+    names = [r[0].strip() for r in rows]
+    assert "路由表信息(不完整)" in names, names
+    row = next(r for r in rows if r[0].strip() == "路由表信息(不完整)")
+    assert "4字节" in row[2], row[2]
+    assert "直连站点=0个" in row[2] and "直连代理=0个" in row[2], row[2]
+    assert "需 8 字节" in row[3] and "提前结束" in row[3], row[3]
+    assert "路由表信息" not in names, names     # 不该同时给「完整」那行
+
+
 # ── 3. 关联汇总指示 0x0002（表76/78） ───────────────────────────
 
 def test_associate_summary():

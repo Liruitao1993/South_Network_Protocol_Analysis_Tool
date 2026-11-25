@@ -118,6 +118,37 @@ def strip_csg_monitor_prefix(text: str) -> StripResult:
     return StripResult("\n".join(out_lines), tuple(out_map))
 
 
+def quoted_payload_hex(line: str) -> str:
+    """取一行里**成对引号之间**的 hex（``setAttenuVal: 'FEFE…AA0D0A'`` 这类日志）。
+
+    返回清洗后的 hex（大写）；**不是 hex 负载**时返回空串，让调用方走既有逻辑。
+
+    为什么需要：现场日志把帧当字符串打出来，常见形态是
+    ``2026-11-11 07:00:01.123 setAttenuVal: 'FEFEFE05010300000000000004AA0D0A'O"``。
+    旧逻辑「取最后一个冒号后、再截到第一个引号」在这种行上得到**空串**，
+    整行被丢弃 ⇒ 批量解析里看不到这条台体控制帧（用户报障）。
+    ``fc_payload_data := '…'`` 早有专门分支，但其它 ``key: '…'`` 写法没有。
+
+    判定宽松度刻意收紧：引号内去掉常用分隔符后必须**全是 hex 字符**且为偶数长度、
+    至少 4 字节 —— 否则（如 ``'setAttenuVal'`` 这类文本）一律返回空串，不猜。
+    """
+    for quote in ("'", '"'):
+        start = line.find(quote)
+        if start < 0:
+            continue
+        end = line.find(quote, start + 1)
+        if end < 0:
+            continue
+        inner = line[start + 1:end]
+        stripped = re.sub(r"[\s,;:_\-\.]", "", inner)
+        if not stripped or not re.fullmatch(r"[0-9A-Fa-f]+", stripped):
+            continue
+        if len(stripped) % 2 or len(stripped) < 8:
+            continue
+        return stripped.upper()
+    return ""
+
+
 def _split_hex_frames_with_lines(text: str) -> list:
     """按行提取「完整 hex 帧」，支持 ``fc_payload_data := '…'`` 跨行引号包裹。
 
@@ -169,9 +200,14 @@ def _split_hex_frames_with_lines(text: str) -> list:
                 payload_start_idx = line_idx
             continue
 
-        # ── 普通行：取最后一个冒号后的 hex ──
-        last_colon = line_s.rfind(":")
-        hex_part = line_s[last_colon + 1 :].strip() if last_colon >= 0 else line_s
+        # ── 普通行：**引号内的 hex 优先**（`setAttenuVal: 'FE…AA0D0A'` 这类日志），
+        #    否则取最后一个冒号/等号后的 hex（兼容 "Line XXX: ...: hex"）──
+        quoted = quoted_payload_hex(line_s)
+        if quoted:
+            hex_frames.append((quoted, line_idx))
+            continue
+        sep = max(line_s.rfind(":"), line_s.rfind("="))
+        hex_part = line_s[sep + 1 :].strip() if sep >= 0 else line_s
         # 若行内含引号（闭合引号残留），只取引号前
         quote_pos = -1
         for q in ("'", '"'):
@@ -589,8 +625,11 @@ def is_test_device_table(table_data: list) -> bool:
 def test_device_summary(table_data: list) -> str:
     """测试装置控制帧摘要：``命令名 | 命令专属解析值…``（非该类报文返回空串）。
 
-    例：功能驱动板「控制衰减器」→ ``衰减器C | 衰减器C衰减值=20 dB``；
-    工装板引脚控制 → ``设置引脚状态/衰减器A | CCO仓引脚控制=…；STA仓引脚控制=…``。
+    例：功能驱动板「控制衰减器」→ ``设置衰减器C的衰减值 | 衰减器C衰减值=20 dB``；
+    工装板引脚控制 → ``设置模块SET/RESET/EVENT引脚状态 | CCO仓引脚控制=…；STA仓引脚控制=…``。
+
+    命令名按**板类型**取（``CSGNewGenParser.test_device_command_name``），A/B/C 与工装板
+    的 0x03/0x04/0x05 语义不同，所以同一摘要格式在不同板上文案不同（见 AGENTS 陷阱）。
 
     **ED..EE 包装帧不在此接管**：那类表里既有包装头行又有控制行，既有 ED 摘要分支
     已经给出「包装名 + 业务帧核心值」，抢过来反而丢掉包装上下文（回归见
@@ -606,7 +645,7 @@ def test_device_summary(table_data: list) -> str:
             continue
         name = str(row[0])
         if name == "命令码":
-            # 命令名本身即核心信息（如「衰减器C」）：取解析值而非 name=value
+            # 命令名本身即核心信息（如「设置衰减器C的衰减值」）：取解析值而非 name=value
             cmd = str(row[2] or "")
             if cmd:
                 parts.append(cmd)
@@ -1452,6 +1491,11 @@ def gw_app_biz_summary(table_data) -> tuple:
     return biz_name, fields
 
 
+# 2.0 扩展测试帧里「区分具体档位」的字段名：摘要随解析器输出自动跟随，
+# 解析器改名这里跟着改（协议9 空间映射 = 映射模式，文档 1.6.3 表7）。
+_CSG_EXT_VALUE_FIELDS = ("映射模式",)
+
+
 def extract_test_mode_content(table_data: list) -> str:
     """测试帧/检测扩展命令 → 摘要片段（非测试类报文返回空串）。
 
@@ -1548,6 +1592,16 @@ def extract_test_mode_content(table_data: list) -> str:
             text = _name_of(ext_id)
             if text:
                 parts.append(f"扩展ID:{text}")
+            # 2.0 扩展只给「空间映射测试模式」看不出实际选的是哪一档，
+            # 把扩展里的关键取值一并带出（现场核对「选的是不是 4」必需）。
+            # 文档 1.6.3 表7：映射模式 1 字节，无取值枚举 ⇒ 直接给数值。
+            for key in _CSG_EXT_VALUE_FIELDS:
+                value_item = fs.get(key)
+                if value_item is None:
+                    continue
+                value = _value_of(value_item)
+                if value:
+                    parts.append(f"{key}:{value}")
 
     data_item = fs.get("测试数据区")
     if data_item is not None:

@@ -205,11 +205,28 @@ def test_upgrade_dis():
     r = PARSER.parse(build("031288600000", 0x91, bytes.fromhex("07019004") + b"V1.6"))
     check(row_value(r, "版本信息") == "V1.6", "版本信息 ASCII 解析")
 
-    # 04900104 块序号 + 数据
+    # 04900104 块序号 + 数据（写数据请求：DI + 密码(4) + 操作者代码(4) + 数据项）
+    pwd_opc = bytes([0x02, 0x02, 0x02, 0x02, 0x00, 0x00, 0x00, 0x44])
     r = PARSER.parse(build("031288600000", 0x14,
-                           bytes.fromhex("04019004") + bytes([0x03, 0x00, 0xAA, 0xBB])))
+                           bytes.fromhex("04019004") + pwd_opc
+                           + bytes([0x03, 0x00, 0xAA, 0xBB])))
+    check("写数据请求先解出密码/操作者代码",
+          row_value(r, "密码与操作者代码").startswith("PA=02"))
     check(row_value(r, "升级块序号") == "3", "块序号 0x0003 → 3")
     check(row_raw(r, "升级块数据") == "AABB", "块数据原样展示")
+
+    # 现场报障帧（14H 写 04900103 升级文件信息）：密码/操作者 8 字节不能当成升级文件名
+    fname = "fw_v16.bin".encode().ljust(32, b"\x00")
+    payload = (fname + (65536).to_bytes(4, "little")
+               + bytes([0x78, 0x56, 0x34, 0x12]) + (240).to_bytes(2, "little")
+               + b"\x00" * 64)
+    r = PARSER.parse(build("031288600000", 0x14,
+                           bytes.fromhex("03019004") + pwd_opc + payload))
+    check("14H 升级文件信息先出密码/操作者行",
+          row_value(r, "密码与操作者代码").startswith("PA=02"))
+    check("14H 升级文件名从数据项起点解（不再含密码/操作者字节）",
+          row_value(r, "升级文件名") == "fw_v16.bin")
+    check("14H 升级文件大小 = 65536", row_value(r, "文件大小").startswith("65536"))
 
 
 # ── [10] 反例：普通 645 DI 不走本模块 ───────────────────────────────

@@ -36,6 +36,9 @@ from app_paths import app_data_dir
 # **两处必须共用**，否则改了截断长度后取宽失真、按钮又开始裁字。
 _BTN_TEXT_MAX = 6
 
+# 摘要列颜色：与收发机控制页收发日志里的绿色摘要同色（现场先扫摘要）
+SUMMARY_COLOR = "#1B8A3A"
+
 
 def _short_label(name: str) -> str:
     """按钮上的单项文案（截断到 `_BTN_TEXT_MAX`，与菜单项全名区分）。"""
@@ -55,6 +58,9 @@ class RealtimeMonitorWidget(QWidget):
         self._serial_worker = None
         # 监控包装格式：hplc=96..16(国网新一代) / plc2=ED..EE(新一代通感一体化/PLC2.0收发机)
         self._wrapper_format = "hplc"
+        # 协议类型=4（南网SPLC）时是否剥离监控数据头（帧类型+数据头内容）。
+        # 默认 False ⇒ 既有 96..16 行为逐字节不变；收发机控制页显式打开。
+        self._splc_header_split = False
 
         self._frames: deque = deque(maxlen=self.MAX_FRAMES)  # 帧记录环形缓冲
         self._rx_buffer = bytearray()                        # 未组帧字节缓冲
@@ -128,6 +134,18 @@ class RealtimeMonitorWidget(QWidget):
             self.snid_nid_label.setText("NID:")
             self.snid_nid_edit.setPlaceholderText("如 1,100 (空=不过滤)")
             self.snid_nid_edit.setToolTip("保留显示的网络标识(NID)，范围 1~65535，逗号分隔，空表示不过滤")
+
+    def set_splc_header_split(self, enabled: bool):
+        """是否按《SPLC双模监控器_发射机_接口协议》剥离协议类型=4 的监控数据头。
+
+        ``协议类型=4（南网SPLC）`` 的 DATA 域在 MPDU 帧控制之前还有「帧类型 + 数据头内容」
+        （SOF 帧带 帧类型1/用户数/4×TMI/4×数据长度）。不剥离就直接把整段丢给解析器，
+        MPDU 帧控制会从错误偏移开始读 ⇒ 满屏「❌ 解析失败」。
+
+        默认为 ``False``（既有 96..16 行为不变）；收发机控制页显式打开。
+        剥离失败时**原样保留**整段（不猜、不吞字节）。
+        """
+        self._splc_header_split = bool(enabled)
 
     def set_send_to_single_handler(self, fn: Callable[[str], None]):
         """注入"送入单帧解析"回调（参数为空格分隔的 hex 字符串）"""
@@ -436,21 +454,31 @@ class RealtimeMonitorWidget(QWidget):
             data = bytes(buf[i + 8:i + 8 + length])
             cs = buf[i + 8 + length]
             calc_cs = sum(buf[i:i + 8 + length]) & 0xFF
+            proto_type = (b7 >> 4) & 0x07
             meta = {
                 "rssi": buf[i + 1],
                 "ntb": int.from_bytes(bytes(buf[i + 2:i + 6]), "little"),
                 "len": length,
-                "proto_type": (b7 >> 4) & 0x07,
+                "proto_type": proto_type,
                 "channel": (b7 >> 7) & 0x01,
                 "cs": cs,
                 "cs_ok": calc_cs == cs,
             }
+            # 协议类型=4（南网SPLC）：DATA 在 MPDU 帧控制前还有「帧类型 + 数据头内容」
+            if self._splc_header_split and proto_type == 4:
+                from splc_transceiver_core import split_splc_header
+
+                splc_info, rest = split_splc_header(data)
+                if splc_info is not None:
+                    meta["splc"] = splc_info
+                    data = rest
             packets.append((meta, data))
             i += total
         return packets, i
 
     _PROTO_TYPE_NAMES = {
         0: "国网HPLC", 1: "南网宽带", 2: "IEEE1901", 3: "国网HPLC双模块",
+        4: "南网SPLC双模",
     }
 
     def _build_hplc_meta_rows(self, meta: dict) -> list:
@@ -458,16 +486,36 @@ class RealtimeMonitorWidget(QWidget):
         ch = "RF" if meta["channel"] else "HPLC"
         cs_txt = "✓ 正确" if meta["cs_ok"] else "✗ 错误"
         proto = self._PROTO_TYPE_NAMES.get(meta["proto_type"], f"保留({meta['proto_type']})")
-        return [
+        rows = [
             ("── 监控包装 ──", "", "", "监控设备附加信息（不属于业务帧）", None, None),
             ("信号强度(RSSI)", str(meta["rssi"]), str(meta["rssi"]), "监控点接收信号强度", None, None),
             ("NTB", f"0x{meta['ntb']:08X}", str(meta["ntb"]), "接收NTB值(低字节在前)", None, None),
             ("帧长度(LEN)", str(meta["len"]), f"{meta['len']} 字节", "DATA长度(12bit低字节在前)", None, None),
-            ("协议类型", str(meta["proto_type"]), proto, "0-国网HPLC 1-南网宽带 2-IEEE1901 3-国网HPLC双模块", None, None),
+            ("协议类型", str(meta["proto_type"]), proto,
+             "0-国网HPLC 1-南网宽带 2-IEEE1901 3-国网HPLC双模块 4-南网SPLC双模", None, None),
             ("信道(CHANNEL)", str(meta["channel"]), ch, "0:HPLC 1:RF", None, None),
             ("校验和(CS)", f"0x{meta['cs']:02X}", cs_txt, "帧头到CS前累加和 & 0xFF", None, None),
-            ("── 业务帧(DATA) ──", "", "", "以下为载波业务帧解析结果", None, None),
         ]
+        splc = meta.get("splc")
+        if isinstance(splc, dict):
+            rows.append(("── SPLC 数据头 ──", "", "", "协议类型=4 的监控数据头（已剥离）",
+                         None, None))
+            rows.append(("帧类型", str(splc.get("frame_type", "")),
+                         str(splc.get("frame_type_name", "")),
+                         "0-信标帧 1-SOF帧 2-ACK帧(外扩) 3-网间协调", None, None))
+            if splc.get("sof_kind") is not None:
+                rows.append(("SOF帧类型1", str(splc.get("sof_kind", "")),
+                             str(splc.get("sof_kind_name", "")),
+                             "1-MIMO 2-bitloading 3-OFDMA", None, None))
+            if splc.get("users") is not None:
+                rows.append(("用户数", str(splc.get("users", "")),
+                             f"TMI={splc.get('tmi')} 数据长度={splc.get('user_lens')}",
+                             "OFDMA 多用户信息", None, None))
+            rows.append(("数据头长度", str(splc.get("header_len", "")),
+                         str(splc.get("layout", "帧类型 1 字节")),
+                         "剥离后剩余部分才是 MPDU 帧控制 + 载荷", None, None))
+        rows.append(("── 业务帧(DATA) ──", "", "", "以下为载波业务帧解析结果", None, None))
+        return rows
 
     # ================================================================
     # PLC2.0 收发机包装（ED..EE，新一代通感一体化/PLC2.0）
@@ -798,6 +846,9 @@ class RealtimeMonitorWidget(QWidget):
             item = QTableWidgetItem(val)
             if not record["ok"]:
                 item.setForeground(QColor("#C00000"))
+            elif col == 4:
+                # 摘要列绿色：现场在一串帧里先扫摘要（与收发日志的「摘要」同色口径）
+                item.setForeground(QColor(SUMMARY_COLOR))
             self.frame_table.setItem(row, col, item)
 
         if self.auto_scroll_chk.isChecked():

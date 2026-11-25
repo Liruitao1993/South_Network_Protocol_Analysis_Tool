@@ -264,14 +264,30 @@ class CSGNewGenParser:
     PROTOCOL_NAME = "新一代载波协议 (通感一体化)"
     PROTOCOL_VERSION = "1.0"
 
-    # 测试装置工装板控制协议（《通信控制协议V1.1》，可能封装在 ED..EE 数据域中）
-    TEST_DEVICE_CMD_NAMES = {
+    # 测试装置控制协议（《通信控制协议V1.1》，可能封装在 ED..EE 数据域中）
+    #
+    # ⚠ 命令码 0x03/0x04/0x05 在**两块板**上语义完全不同，必须分表命名
+    #   （用户 2026-11-11 报障：同是设置衰减值，A/B 与 C 的摘要格式不一致）：
+    #   - 工装板（V1.1 §1.1.2 / §1.1.3）：0x03 = 设置模块 SET/RESET/EVENT 引脚状态，
+    #     0x04 = 设置模块工装板 220V 电源状态，**没有 0x05**；
+    #   - 功能驱动板（V1.1 §3.3 / §3.4 / §3.5）：0x03/0x04/0x05 = 设置衰减器 A/B/C 的衰减值。
+    #   旧实现只有一张表，且 0x05 写成「衰减器C」⇒ 摘要里 A/B 显示「设置引脚状态/衰减器A」
+    #   而 C 只显示「衰减器C」，三种写法并存。
+    TEST_DEVICE_FIXTURE_CMD_NAMES = {
         0x01: "设置印制板控制单元地址",
-        0x02: "模块上下电/8762A连接方式",
-        0x03: "设置引脚状态/衰减器A",
-        0x04: "设置220V电源/衰减器B",
-        0x05: "衰减器C",
+        0x02: "设置模块上下电/8762A连接方式",
+        0x03: "设置模块SET/RESET/EVENT引脚状态",
+        0x04: "设置模块工装板220V电源状态",
     }
+    TEST_DEVICE_FUNCTION_CMD_NAMES = {
+        0x01: "设置印制板控制单元地址",
+        0x02: "设置8762A连接方式",
+        0x03: "设置衰减器A的衰减值",
+        0x04: "设置衰减器B的衰减值",
+        0x05: "设置衰减器C的衰减值",
+    }
+    #: 向后兼容：旧代码按单表取（等价于工装板口径）
+    TEST_DEVICE_CMD_NAMES = TEST_DEVICE_FIXTURE_CMD_NAMES
     TEST_DEVICE_CCO_MODULE_NAMES = {
         0x01: "三相表模块",
         0x02: "CCO2模块",
@@ -280,6 +296,13 @@ class CSGNewGenParser:
         0x05: "STA1模块",
         0x06: "STA3模块",
     }
+
+    @classmethod
+    def test_device_command_name(cls, command: int, board_type: str = "fixture") -> str:
+        """命令名按**板类型**取（两块板的 0x03/0x04/0x05 语义不同，见上）。"""
+        table = (cls.TEST_DEVICE_FUNCTION_CMD_NAMES if board_type == "function"
+                 else cls.TEST_DEVICE_FIXTURE_CMD_NAMES)
+        return table.get(command, f"未知命令(0x{command:02X})")
 
     # ── 公共工具函数 ──
 
@@ -430,7 +453,7 @@ class CSGNewGenParser:
             "00=广播预留，01=工装板默认地址",
             hdr_base + 1, hdr_base + 1))
 
-        cmd_name = self.TEST_DEVICE_CMD_NAMES.get(command, f"未知命令(0x{command:02X})")
+        cmd_name = self.test_device_command_name(command, board_type)
         rows.append((
             "命令码", f"0x{command:02X}", cmd_name,
             "测试装置通信控制协议 V1.1",

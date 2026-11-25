@@ -1,22 +1,15 @@
 [
   {
-    "meter_id": "000006881225",
-    "module_id": "",
+    "meter_id": "000006881138",
+    "module_id": "000006881138",
     "comm_type": "电力载波",
     "protocol": "DL/T 645-2007",
-    "phase": "A相",
+    "phase": "无",
     "meter_type": "电能表",
     "remark": "",
-    "status": "在线"
-  },
-  {
-    "meter_id": "000000000022",
-    "module_id": "",
-    "comm_type": "电力载波",
-    "protocol": "DL/T 698.45",
-    "phase": "A相",
-    "meter_type": "电能表",
-    "remark": "",
-    "status": "在线"
+    "status": "在线",
+    "relay": "0",
+    "signal": "3",
+    "extra": "中继级别=0，侦听信号品质=3"
   }
 ]

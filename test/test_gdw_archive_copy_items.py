@@ -254,6 +254,21 @@ def test_copy_test_sends_items():
 
     w._copy_items = items_with("sta_version", "645_total_active")
     w.copy_count_input.setText("1")
+    # 输入框宽度必须随位数增长：现场填 1000 只显示成 "100"（固定 40px 装不下）
+    for _digits_text in ("1", "10", "100", "1000", "10000"):
+        w.copy_count_input.setText(_digits_text)
+        app.processEvents()
+        _need = w.copy_count_input.fontMetrics().horizontalAdvance(_digits_text) + 16
+        check_true(f"抄读次数 {_digits_text} 完整可见",
+                   w.copy_count_input.width() >= _need,
+                   f"宽={w.copy_count_input.width()} 需={_need}")
+    w.copy_timeout_input.setText("10000")
+    app.processEvents()
+    check_true("超时 10000 完整可见",
+               w.copy_timeout_input.width()
+               >= w.copy_timeout_input.fontMetrics().horizontalAdvance("10000") + 16,
+               f"宽={w.copy_timeout_input.width()}")
+    w.copy_count_input.setText("1")
     w._start_copy_test([0], "sequential")
     app.processEvents()
     # 645 表：版本信息 + 正向有功 = 2 帧，先发第 1 帧
@@ -417,6 +432,60 @@ def test_copy_content_column():
     check_true("载波接收信息转成 RSSI/SNR 可读口径",
                "信号强度RSSI=" in short and "信噪比SNR=" in short, short)
     check_true("明细逐条给全", "外部版本日期: 261026" in full, full[:120])
+
+    # ── 崩溃回归：645 普通 DI（行是 3/4 元组，不是 6 元组）──────────────
+    # 现场：勾选「正向有功」等 645 数据项后点抄读测试 → ValueError:
+    #   not enough values to unpack (expected 6, got 3)
+    # 根因：_copy_content_from_inner 硬解 6 元组，而 645 parser 给 3 元组。
+    from archive_widget import _field_triple
+    check("_field_triple 兼容 3 元组", _field_triple(("n", "r", "p")), ("n", "r", "p"))
+    check("_field_triple 兼容 4 元组", _field_triple(("n", "r", "p", "c")), ("n", "r", "p"))
+    check("_field_triple 兼容 6 元组", _field_triple(("n", "r", "p", "c", 1, 2)), ("n", "r", "p"))
+    check("_field_triple 兼容 1 元组", _field_triple(("only",)), ("only", "", ""))
+    check("_field_triple 兼容 0 元组", _field_triple(()), ("", "", ""))
+
+    # 645 正向有功总电能读应答（校验和正确）：DI=00010000，值 0.00 kWh
+    zone645 = bytes.fromhex("680100000000006891063333343333339B16")
+    short645, full645 = w._copy_content_from_inner(zone645, 2)
+    check_true("645 正向有功不再崩溃且摘要取业务值",
+               short645 == "当前正向有功总电能:0.00 kWh", short645)
+    check_true("645 摘要不再取到「结束符」", "结束符" not in short645, short645)
+    check_true("645 明细含数据值行", "数据值: 0.00 kWh" in full645, full645[:120])
+
+    # LME 分支（DI=FF00DD01）仍正常：紧邻崩溃点，防「修 A 坏 B」
+    short_lme, _ = w._copy_content_from_inner(bytes.fromhex(inner.replace(" ", "")), 2)
+    check_true("LME 分支未受影响", "外部厂商代码:LH" in short_lme, short_lme)
+
+    # ── 成功率判定回归：内层 645 带 FE 前导时旧实现判 False（成功率 0%）──────
+    # 现场：抄读内容能解出（645 解析器支持 FE 前导），但成功率恒 0%
+    inner_fe = ("FE 68 38 11 88 06 00 00 68 91 08 33 33 34 33 BC 54 33 33 83 16")
+    inner_no_fe = inner_fe.replace("FE ", "")
+    check("控制码定位跳过 FE 前导", w._dlt645_ctrl_of(bytes.fromhex(inner_fe.replace(" ", ""))), 0x91)
+    check("控制码定位（无前导）", w._dlt645_ctrl_of(bytes.fromhex(inner_no_fe.replace(" ", ""))), 0x91)
+    check("异常应答控制码 0xD1 可定位",
+          w._dlt645_ctrl_of(bytes.fromhex("FE 68 38 11 88 06 00 00 68 D1".replace(" ", "")) + bytes(6)),
+          0xD1)
+    check("多级 FE 前导全跳过",
+          A.ArchiveWidget._skip_prefix(bytes.fromhex("FEFEFE68"), (0xFE,)).hex().upper(), "68")
+
+    class _FakeGdwParser:
+        """只回放一行「报文内容」（模拟国网解析器 AFN=13 F1 上行）"""
+        def __init__(self, content_hex):
+            self._content = content_hex
+
+        def parse_to_table(self, _frame):
+            return [("  报文内容", self._content, "21字节", "原始报文数据", 10, 30)]
+
+    judge = A.ArchiveWidget._parse_copy_inner_success
+    w.gdw_parser = _FakeGdwParser(inner_fe)
+    check("带 FE 前导 → 判成功（修复点）", judge(w, b"\x00" * 40, "645"), True)
+    w.gdw_parser = _FakeGdwParser(inner_no_fe)
+    check("无前导 → 判成功", judge(w, b"\x00" * 40, "645"), True)
+    w.gdw_parser = _FakeGdwParser(
+        "68 38 11 88 06 00 00 68 D1 08 33 33 34 33 BC 54 33 33 83 16")
+    check("异常应答 D6=1 → 判失败（不再虚高）", judge(w, b"\x00" * 40, "645"), False)
+    w.gdw_parser = _FakeGdwParser("")
+    check("报文内容为空 → 判失败", judge(w, b"\x00" * 40, "645"), False)
 
     # 载入到表格：内容列写摘要 + tooltip 给明细
     w._copy_test_content["000000000001"] = short

@@ -3443,33 +3443,113 @@ class HDC10Parser:
         ))
 
         # 解析公共字段
-        if msg_id == 0x030 and len(data) >= 20:
-            # 开始升级: 20字节头
+        if msg_id == 0x030 and len(data) >= 8:
+            # 开始升级：下行(表37, 20B) / 上行应答(表44, 8B)
+            # 表37/44 公共头相同：协议版本号(6b) + 报文头长度(6b) + 保留(4b, 字节1 bit4-7)
+            self._upgrade_common_header(data, offset, table)
+            if len(data) >= 20:
+                table.append(("    方向", "", "下行(CCO→STA)",
+                              "开始升级(表37)", offset, offset + 3))
+                upgrade_id = int.from_bytes(data[4:8], 'little')
+                time_win = int.from_bytes(data[8:10], 'little')
+                blk_size = int.from_bytes(data[10:12], 'little')
+                file_size = int.from_bytes(data[12:16], 'little')
+                file_crc = int.from_bytes(data[16:20], 'little')
+                table.append(("    升级ID", f"0x{upgrade_id:08X}", str(upgrade_id),
+                              "每次升级唯一且非 0；停止升级可不带具体值（0=通用）",
+                              offset + 4, offset + 7))
+                table.append(("    升级时间窗", f"0x{time_win:04X}", f"{time_win}分钟",
+                              "升级过程最长时间，超时未收全则本次升级自动放弃",
+                              offset + 8, offset + 9))
+                table.append(("    升级块大小", f"0x{blk_size:04X}", f"{blk_size}字节",
+                              "每个数据帧只传一个数据块；允许 100/200/300/400 字节"
+                              + ("" if blk_size in (100, 200, 300, 400)
+                                 else "（⚠ 不在允许取值内）"),
+                              offset + 10, offset + 11))
+                table.append(("    升级文件大小", f"0x{file_size:08X}", f"{file_size}字节",
+                              "升级文件包含的字节数", offset + 12, offset + 15))
+                table.append(("    文件CRC校验", f"0x{file_crc:08X}", f"0x{file_crc:08X}",
+                              "文件全部内容的 CRC-32", offset + 16, offset + 19))
+                if len(data) > 20:
+                    table.append(("    ⚠ 尾部多余字节",
+                                  ' '.join(f"{b:02X}" for b in data[20:36])
+                                  + ("..." if len(data) - 20 > 36 else ""),
+                                  f"{len(data) - 20}字节",
+                                  "表37 下行固定 20 字节，多余字节不属于本报文",
+                                  offset + 20, offset + len(data) - 1))
+            else:
+                # 表44 上行：字节2(8b) + 开始升级结果码(1B) + 升级ID(4B)
+                result_code = data[3]
+                upgrade_id = int.from_bytes(data[4:8], 'little')
+                table.append(("    方向", "", "上行(STA→CCO)",
+                              "开始升级应答(表44)", offset, offset + 3))
+                table.append(("    开始升级结果码", f"0x{result_code:02X}",
+                              "成功" if result_code == 0 else f"失败({result_code})",
+                              "0=成功，其他值表示失败（文档未给枚举）",
+                              offset + 3, offset + 3))
+                table.append(("    升级ID", f"0x{upgrade_id:08X}", str(upgrade_id),
+                              "STA 当前所处的升级流程 ID（空闲态回 0）",
+                              offset + 4, offset + 7))
+                if len(data) > 8:
+                    table.append(("    ⚠ 尾部多余字节",
+                                  ' '.join(f"{b:02X}" for b in data[8:24])
+                                  + ("..." if len(data) - 8 > 24 else ""),
+                                  f"{len(data) - 8}字节",
+                                  "表44 上行固定 8 字节，多余字节不属于本报文",
+                                  offset + 8, offset + len(data) - 1))
+
+        elif msg_id == 0x031 and len(data) >= 8:
+            # 停止升级下行(表38)，8 字节，**上行无应答**：
+            # 公共头 + 保留(字节1 bit4-7 延续到字节 2~3) + 升级ID(4~7)
+            self._upgrade_common_header(data, offset, table)
+            table.append(("    方向", "", "下行(CCO→STA)",
+                          "停止升级(表38)；上行无应答", offset, offset + 3))
             upgrade_id = int.from_bytes(data[4:8], 'little')
-            time_win = int.from_bytes(data[8:10], 'little')
-            blk_size = int.from_bytes(data[10:12], 'little')
-            file_size = int.from_bytes(data[12:16], 'little')
-            file_crc = int.from_bytes(data[16:20], 'little')
-            table.append(("    升级ID", f"0x{upgrade_id:08X}", str(upgrade_id), f"升级标识: {upgrade_id}", offset + 4, offset + 7))
-            table.append(("    升级时间窗", f"0x{time_win:04X}", f"{time_win}分钟", f"升级窗口: {time_win}分钟", offset + 8, offset + 9))
-            table.append(("    升级块大小", f"0x{blk_size:04X}", f"{blk_size}字节", f"每块大小: {blk_size}字节", offset + 10, offset + 11))
-            table.append(("    升级文件大小", f"0x{file_size:08X}", f"{file_size}字节", f"文件总长度: {file_size}字节", offset + 12, offset + 15))
-            table.append(("    文件CRC校验", f"0x{file_crc:08X}", str(file_crc), f"文件CRC-32: 0x{file_crc:08X}", offset + 16, offset + 19))
+            table.append(("    升级ID", f"0x{upgrade_id:08X}", str(upgrade_id),
+                          "要终止的升级流程 ID；不知道具体值时用 0（通用升级ID，终止本次升级）"
+                          if upgrade_id == 0 else "要终止的升级流程 ID（与开始升级报文一致）",
+                          offset + 4, offset + 7))
+            if len(data) > 8:
+                table.append(("    ⚠ 尾部多余字节",
+                              ' '.join(f"{b:02X}" for b in data[8:24])
+                              + ("..." if len(data) - 8 > 24 else ""),
+                              f"{len(data) - 8}字节",
+                              "表38 固定 8 字节，多余字节不属于本报文",
+                              offset + 8, offset + len(data) - 1))
 
         elif msg_id in (0x032, 0x033) and len(data) >= 12:
-            # 传输文件数据
+            # 传输文件数据(单播 0x032 / 单播转本地广播 0x033)，表39：
+            # 公共头 + 数据块大小(2~3) + 升级ID(4~7) + 数据块编号(8~11) + 数据块内容(12~)
+            self._upgrade_common_header(data, offset, table)
+            table.append(("    方向", "", "下行(CCO→STA)",
+                          "传输文件数据(表39)" if msg_id == 0x032
+                          else "传输文件数据·单播转本地广播(表39)", offset, offset + 3))
             blk_size = int.from_bytes(data[2:4], 'little')
             upgrade_id = int.from_bytes(data[4:8], 'little')
             blk_num = int.from_bytes(data[8:12], 'little')
-            table.append(("    数据块大小", f"0x{blk_size:04X}", f"{blk_size}字节", f"数据块长度: {blk_size}字节", offset + 2, offset + 3))
-            table.append(("    升级ID", f"0x{upgrade_id:08X}", str(upgrade_id), f"升级标识: {upgrade_id}", offset + 4, offset + 7))
-            table.append(("    数据块编号", f"0x{blk_num:08X}", str(blk_num), f"块号: {blk_num}", offset + 8, offset + 11))
-            if len(data) > 12:
-                blk_data = data[12:12 + blk_size] if 12 + blk_size <= len(data) else data[12:]
-                table.append(("    数据块",
-                              ' '.join(f'{b:02X}' for b in blk_data[:16]) + ("..." if len(blk_data) > 16 else ""),
-                              f"{len(blk_data)}字节", "文件数据块内容",
-                              offset + 12, offset + 12 + len(blk_data) - 1))
+            table.append(("    数据块大小", f"0x{blk_size:04X}", f"{blk_size}字节",
+                          "该帧携带的数据块长度（除末块外各块应等长）",
+                          offset + 2, offset + 3))
+            table.append(("    升级ID", f"0x{upgrade_id:08X}", str(upgrade_id),
+                          "与开始升级报文中的升级ID一致", offset + 4, offset + 7))
+            table.append(("    数据块编号", f"0x{blk_num:08X}", str(blk_num),
+                          "块序号（用于对端按号落盘/重传）", offset + 8, offset + 11))
+            body = data[12:]
+            if body:
+                shown = body[:16]
+                declared = blk_size if blk_size else len(body)
+                table.append(("    数据块内容",
+                              ' '.join(f"{b:02X}" for b in shown)
+                              + ("..." if len(body) > 16 else ""),
+                              f"{len(body)}字节",
+                              f"实际 {len(body)} 字节 / 声明 {declared} 字节"
+                              + ("" if len(body) == declared
+                                 else "（⚠ 与数据块大小不符）"),
+                              offset + 12, offset + len(data) - 1))
+            else:
+                table.append(("    ⚠ 无数据块内容", "", "0字节",
+                              "表39 应携带数据块内容，本帧在数据块大小之后即结束",
+                              offset + 11, offset + 11))
 
         elif msg_id == 0x034 and len(data) >= 12:
             # 查询站点升级状态: 下行(表40, 12字节) / 上行(表45, 12字节+接收位图)
@@ -3555,14 +3635,183 @@ class HDC10Parser:
                               f"升级标识: {upgrade_id}", offset + 8, offset + 11))
 
         elif msg_id == 0x035 and len(data) >= 12:
-            # 执行升级
+            # 执行升级下行(表41)：公共头 + 等待复位时间(2~3) + 升级ID(4~7) + 试运行时间(8~11)
+            self._upgrade_common_header(data, offset, table)
+            table.append(("    方向", "", "下行(CCO→STA)",
+                          "执行升级(表41)；上行无应答", offset, offset + 3))
             wait_time = int.from_bytes(data[2:4], 'little')
             upgrade_id = int.from_bytes(data[4:8], 'little')
             trial_time = int.from_bytes(data[8:12], 'little')
-            table.append(("    等待复位时间", f"0x{wait_time:04X}", f"{wait_time}秒", f"等待复位: {wait_time}秒", offset + 2, offset + 3))
-            table.append(("    升级ID", f"0x{upgrade_id:08X}", str(upgrade_id), f"升级标识: {upgrade_id}", offset + 4, offset + 7))
-            table.append(("    试运行时间", f"0x{trial_time:08X}", f"{trial_time}秒", f"试运行: {trial_time}秒", offset + 8, offset + 11))
+            table.append(("    等待复位时间", f"0x{wait_time:04X}", f"{wait_time}秒",
+                          "通知 STA 重启前的等待时间", offset + 2, offset + 3))
+            table.append(("    升级ID", f"0x{upgrade_id:08X}", str(upgrade_id),
+                          "与开始升级报文中的升级ID一致", offset + 4, offset + 7))
+            table.append(("    试运行时间", f"0x{trial_time:08X}", f"{trial_time}秒",
+                          "新程序试运行时长，0=不需要试运行", offset + 8, offset + 11))
+            if len(data) > 12:
+                table.append(("    ⚠ 尾部多余字节",
+                              ' '.join(f"{b:02X}" for b in data[12:28])
+                              + ("..." if len(data) - 12 > 28 else ""),
+                              f"{len(data) - 12}字节",
+                              "表41 固定 12 字节，多余字节不属于本报文",
+                              offset + 12, offset + len(data) - 1))
 
+        elif msg_id == 0x036 and len(data) >= 4:
+            # 查询站点信息：下行(表42) 元素 ID 列表 / 上行(表46+表47) 元素 ID+长度+数据
+            table.extend(self._parse_query_site_info(data, offset))
+
+        return table
+
+    # 查询站点信息元素 ID（表42/表47 的元素 ID 取值表，协议10 同表以此为准）
+    _SITE_INFO_ELEM = {
+        0x00: ("厂商编号", "2 字节 ASCII"),
+        0x01: ("版本信息", "2 字节 BCD（硬件版本号 + 软件版本号各 1 字节）"),
+        0x02: ("Bootloader", "1 字节 BIN"),
+        0x03: ("CRC 32", "4 字节"),
+        0x04: ("文件长度", "4 字节"),
+        0x05: ("产品类型", "参照产品类型取值表"),
+    }
+
+    @staticmethod
+    def _site_elem_value(elem_id: int, value: bytes) -> str:
+        """元素原始字节 → 可读值（表42「元素 ID 取值」表定义的固定长度类型）。"""
+        if not value:
+            return ""
+        if elem_id == 0x00:
+            return value.decode("ascii", "replace").strip("\x00 ") or "（空）"
+        if elem_id == 0x01:
+            # 表42：硬件版本号 + 软件版本号各 1 字节 BCD。**不是合法 BCD 就照原样给十六进制**，
+            # 不硬按十进制解（现场常见厂商自编码，如 0C C3）。
+            def _bcd_ok(b: int) -> bool:
+                return (b >> 4) <= 9 and (b & 0x0F) <= 9
+
+            if len(value) >= 2 and _bcd_ok(value[0]) and _bcd_ok(value[1]):
+                hw = (value[0] >> 4) * 10 + (value[0] & 0x0F)
+                sw = (value[1] >> 4) * 10 + (value[1] & 0x0F)
+                return f"硬件版本 {hw}，软件版本 {sw}"
+            return ("非 BCD 编码，原样保留："
+                    + "，".join(f"0x{b:02X}" for b in value[:2]))
+        if elem_id == 0x02:
+            return str(value[0])
+        if elem_id == 0x03:
+            return f"0x{int.from_bytes(value[:4], 'little'):08X}"
+        if elem_id == 0x04:
+            size = int.from_bytes(value[:4], "little")
+            return f"{size} 字节"
+        if elem_id == 0x05:
+            return str(int.from_bytes(value, "little"))
+        return "" if not value else f"{len(value)} 字节"
+
+    def _upgrade_common_header(self, data: bytes, offset: int, table: List[Tuple]) -> None:
+        """升级报文（0x030/0x032/0x033/0x035）的公共头（表37/39/41/44 前 2 字节）。
+
+        结构（四张表一致）：
+          字节0 bit0-5  协议版本号（本版本固定 1）
+          字节0 bit6-7 + 字节1 bit0-3  报文头长度（6bit，值=报文头字节数）
+          字节1 bit4-7  保留（表37/41 里该保留还延伸到字节 2~3）
+
+        这段以前四条分支都没打，页面上只能看到从「升级ID」开始的字段。
+        """
+        if len(data) < 2:
+            return
+        b0, b1 = data[0], data[1]
+        version = b0 & 0x3F
+        hdr_len = ((b1 & 0x0F) << 2) | ((b0 >> 6) & 0x03)
+        table.append(("    协议版本号", f"0x{version:02X}", str(version),
+                      "本版本固定为1" + _bit_span_note((0, 5, 0, b0)),
+                      offset, offset))
+        hdr_raw, hdr_note = _hdr_len_cells(b0, b1, hdr_len)
+        table.append(("    报文头长度", hdr_raw, f"{hdr_len}字节",
+                      "报文头(除数据域外)长度；" + hdr_note, offset, offset + 1))
+        resv = (b1 >> 4) & 0x0F
+        table.append(("    保留", f"0b{resv:04b}", "全 0" if resv == 0 else str(resv),
+                      "字节1 bit4-7（表37/41 该保留还延伸到字节 2~3）", offset + 1, offset + 1))
+
+    def _parse_query_site_info(self, data: bytes, offset: int) -> List[Tuple]:
+        """0x036 查询站点信息：下行(表42) / 上行(表46、表47)。
+
+        两者**公共头相同**（4 字节），差别在 4 之后：
+        - 下行(表42)：``信息列表元素个数(1B)`` + 元素 ID 列表（各 1 字节）
+        - 上行(表46)：``信息数据列表元素个数(1B)`` + ``升级ID(4B)`` + 元素列表
+          （表47：每项 = ID(1B) + 长度(1B) + 数据）
+        方向用**结构自证**：能从偏移 8 起按「ID+长度+数据」正好切完即判定上行，
+        否则按下行（只有 ID）解析；判不出来的坏帧不硬猜，直接给提示行。
+        """
+        table: List[Tuple] = []
+        b0, b1 = data[0], data[1]
+        version = b0 & 0x3F
+        hdr_len = ((b1 & 0x0F) << 2) | ((b0 >> 6) & 0x03)   # 6bit
+        elem_count = data[3]
+        table.append(("    协议版本号", f"0x{version:02X}", str(version), "固定为1",
+                      offset, offset))
+        table.append(("    报文头长度", f"0x{hdr_len:X}", f"{hdr_len}字节",
+                      "报文头(除数据域外)长度", offset, offset + 1))
+        table.append(("    信息列表元素个数", f"0x{elem_count:02X}", str(elem_count),
+                      "本帧携带的元素个数", offset + 3, offset + 3))
+
+        # ---- 上行结构自证：offset 8 起逐项 ID(1B)+长度(1B)+数据(len) 恰好切完 ----
+        def _walk_uplink() -> Optional[List[Tuple[int, bytes, int]]]:
+            pos = 8
+            items: List[Tuple[int, bytes, int]] = []
+            for _ in range(elem_count):
+                if pos + 2 > len(data):
+                    return None
+                elem_id, elem_len = data[pos], data[pos + 1]
+                pos += 2
+                if pos + elem_len > len(data):
+                    return None
+                items.append((elem_id, data[pos:pos + elem_len], pos - 2))
+                pos += elem_len
+            # 允许末尾 0 字节余量；有多余字节说明不是本结构
+            return items if pos == len(data) else None
+
+        uplink = _walk_uplink() if elem_count and len(data) >= 8 else None
+        if uplink:
+            upgrade_id = int.from_bytes(data[4:8], "little")
+            table.append(("    方向", "", "上行(STA→CCO)", "查询站点信息应答（表46）",
+                          offset, offset + 3))
+            table.append(("    升级ID", f"0x{upgrade_id:08X}", str(upgrade_id),
+                          f"升级标识: {upgrade_id}", offset + 4, offset + 7))
+            for i, (elem_id, value, rel) in enumerate(uplink, 1):
+                name, desc = self._SITE_INFO_ELEM.get(
+                    elem_id, (f"保留(0x{elem_id:02X})", "文档未定义"))
+                pretty = self._site_elem_value(elem_id, value)
+                table.append((
+                    f"      元素{i} {name}",
+                    ' '.join(f"{b:02X}" for b in value),
+                    pretty or f"{len(value)} 字节",
+                    f"ID=0x{elem_id:02X} 长度={len(value)}；{desc}",
+                    offset + rel, offset + rel + 1 + len(value) - 1,
+                ))
+            return table
+
+        # ---- 下行(表42)：元素 ID 列表（没有元素值）----
+        table.append(("    方向", "", "下行(CCO→STA)", "查询站点信息（表42）",
+                      offset, offset + 3))
+        reserved = ((b1 >> 4) & 0x0F) << 8 | data[2]
+        table.append(("    保留", f"0x{reserved:03X}", "", "保留位", offset + 1, offset + 2))
+        pos = 4
+        ids: List[int] = []
+        for i in range(elem_count):
+            if pos >= len(data):
+                table.append(("    ⚠ 元素计数与数据不符", f"已读到 {len(ids)} 个",
+                              f"声明 {elem_count} 个", "数据域不足，后续元素缺失",
+                              offset + pos, offset + len(data) - 1))
+                break
+            elem_id = data[pos]
+            name, desc = self._SITE_INFO_ELEM.get(
+                elem_id, (f"保留(0x{elem_id:02X})", "文档未定义"))
+            table.append((f"      元素{i + 1} ID", f"0x{elem_id:02X}", name,
+                          f"查询项：{desc}", offset + pos, offset + pos))
+            ids.append(elem_id)
+            pos += 1
+        if pos < len(data):
+            rest = data[pos:]
+            table.append(("    ⚠ 尾部多余字节", ' '.join(f"{b:02X}" for b in rest[:16])
+                          + ("..." if len(rest) > 16 else ""),
+                          f"{len(rest)} 字节",
+                          "下行(表42)只带元素 ID；出现多余字节说明不是该结构（可能是上行应答）",
+                          offset + pos, offset + len(data) - 1))
         return table
 
     def _parse_phase_ident(self, data: bytes, offset: int) -> List[Tuple]:

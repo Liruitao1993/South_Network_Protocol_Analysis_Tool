@@ -94,6 +94,15 @@ def main():
     check("DATAS 含 app_icon.ico",
           ('app_icon.ico', '.') in pyinstaller_meta.DATAS)
 
+    # 收尾：MainWindow 的全局热键线程不收会「QThread: Destroyed while thread is still
+    # running」→ 退出码 0xC0000409（断言全过却看起来失败，AGENTS §8 陷阱 62 同款）
+    try:
+        win._shutdown_threads()
+    except Exception:
+        pass
+    win.close()
+    app.processEvents()
+
     print("=" * 50)
     if FAILURES:
         print(f"[FAIL] {len(FAILURES)} 项失败: {FAILURES}")

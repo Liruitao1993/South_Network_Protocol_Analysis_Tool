@@ -1134,6 +1134,10 @@ class DLT69845APDUParser:
                 result["时间标签"] = {"类型": "TimeTag", "原始值": f"0x{time_tag:02X}", "解析值": time_tag, "说明": "有时间标签"}
         return offset
 
+    def parse_oad(self, data: bytes, offset: int = 0) -> dict:
+        """解析 4 字节 OAD（公开入口，供「仅数据域」等外部调用）。"""
+        return self._parse_oad_raw(data, offset)
+
     def _parse_oad_raw(self, data: bytes, offset: int) -> dict:
         """解析原始字节 OAD (4字节: OI+attr+index)"""
         if offset + 4 > len(data):

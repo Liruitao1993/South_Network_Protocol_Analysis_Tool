@@ -15,6 +15,7 @@
 
 import _path_setup  # noqa: E402
 
+import json
 import os
 import re
 import sys
@@ -272,6 +273,63 @@ def test_source_guards():
     )
 
 
+# ═══════════════════════════════════════════════════════════════
+# 5. 版本元数据（version.json + 本地 exe 的优先级）
+# ═══════════════════════════════════════════════════════════════
+
+def test_download_meta():
+    print("\n[5] 下载元数据（版本号 / 体积 / 日期 / 可下载性）")
+    vj = json.loads((WEB / "downloads" / "version.json").read_text(encoding="utf-8"))
+
+    meta = wu.resolve_download_meta(vj)
+    check("本地无 exe：名字取 version.json 的 exe_name",
+          meta["exe_name"] == vj["exe_name"], meta)
+    check("本地无 exe：体积取发布资产大小（100.62 MB）", meta["size_mb"] == "100.62", meta)
+    check("本地无 exe：日期取 published_at", meta["date"] == vj["published_at"], meta)
+    check("本地无 exe：有 url 即视为可下载（不再要求本地有文件）", meta["available"] is True, meta)
+
+    same = wu.resolve_download_meta(vj, local_name=vj["exe_name"],
+                                    local_size=int(vj["exe_size_bytes"]),
+                                    local_mtime=1762300000.0)
+    check("本地就是这个版本：体积仍与资产一致", same["size_mb"] == "100.62", same)
+    check("本地就是这个版本：日期用文件 mtime",
+          same["date"] == __import__("time").strftime("%Y-%m-%d", __import__("time").localtime(1762300000.0)),
+          same)
+
+    stale = wu.resolve_download_meta(vj, local_name="南网协议解析工具1.14.13.exe",
+                                     local_size=103498191, local_mtime=1755700000.0)
+    check("本地是旧版本文件：不采信它的名字", stale["exe_name"] == vj["exe_name"], stale)
+    check("本地是旧版本文件：不采信它的体积", stale["size_mb"] == "100.62", stale)
+    check("本地是旧版本文件：不采信它的 mtime", stale["date"] == vj["published_at"], stale)
+
+    legacy = wu.resolve_download_meta(None, local_name="a.exe",
+                                      local_size=50 * 1024 * 1024, local_mtime=1762300000.0)
+    check("无 version.json（老部署）：退回本地文件", legacy["exe_name"] == "a.exe"
+          and legacy["size_mb"] == "50.0" and legacy["available"] is True, legacy)
+
+    empty = wu.resolve_download_meta({})
+    check("什么都没有：不可下载、名字/体积/日期为空",
+          empty["available"] is False and empty["exe_name"] == ""
+          and empty["size_mb"] == "" and empty["date"] == "", empty)
+
+    # version.json 自身的一致性（发布数据完整性）
+    for key in ("version", "url", "sha256", "exe_name", "exe_size_bytes", "published_at"):
+        check(f"version.json 含 {key}", bool(vj.get(key)), vj)
+    check("version.json 的 url 指向 exe_name",
+          str(vj.get("url", "")).endswith("/" + str(vj.get("exe_name", ""))), vj.get("url"))
+    check("version.json 的 sha256 是 64 位十六进制",
+          bool(re.fullmatch(r"[0-9a-f]{64}", str(vj.get("sha256", "")))), vj.get("sha256"))
+    check("version.json 的 exe_name 带版本号",
+          vj["version"].replace(".", "") in str(vj["exe_name"]).replace(".", ""),
+          (vj["version"], vj["exe_name"]))
+
+    # 源码守卫：State 必须走这个单一实现，不许再各自 stat() 算体积
+    src = (WEB / "reflex_web" / "reflex_web.py").read_text(encoding="utf-8")
+    check("State 走 resolve_download_meta", "resolve_download_meta" in src)
+    check("不再用「扫到的第一个 exe」的名称当显示名",
+          "self.download_exe_name = primary_exe.name" not in src)
+
+
 def main():
     print("=" * 62)
     print("下载地址与主机/端口解耦 回归测试")
@@ -280,6 +338,7 @@ def main():
     test_same_origin_flag()
     test_state_download_client()
     test_source_guards()
+    test_download_meta()
     print("\n" + "=" * 62)
     if FAILURES:
         print(f"失败 {len(FAILURES)} 项 / 通过 {PASS} 项")

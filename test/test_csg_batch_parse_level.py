@@ -286,7 +286,8 @@ def test_strip_test_device_end_to_end_parse():
     t = CSGNewGenParser().parse_to_table(bytes.fromhex(out), parse_level="auto")
     assert _find(t, "── 测试装置功能驱动板控制协议 ──") is not None, "应识别为功能驱动板协议"
     cmd = _find(t, "命令码")
-    assert cmd is not None and cmd[2] == "衰减器C", f"命令码应为衰减器C, 实际: {cmd}"
+    assert cmd is not None and cmd[2] == "设置衰减器C的衰减值", \
+        f"命令码应为「设置衰减器C的衰减值」, 实际: {cmd}"
     assert _find(t, "结束符") is not None, "功能驱动板帧应有 AA 0D 0A 结束符"
     print("[OK] 预处理 测试装置控制帧端到端解析通过")
 

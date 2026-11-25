@@ -63,6 +63,48 @@ def _fmt_elapsed(seconds: float) -> str:
 
 
 
+def _spin_width_for(digits: int, minimum: int = 3, line_edit=None) -> int:
+    """数字输入框按「位数」算宽度（字体实测数字宽 + 内边距 + 一位余量）。
+
+    为什么不用固定宽度：现场把「抄读次数」填成 1000 时只显示成 `100`（QLineEdit
+    固定 40px 装不下 4~5 位数字 + 内边距），看起来像输入没生效。这里按位数给宽度，
+    并留出一位余量（编辑时先多显示一位，光标不会把数字挤出可视区）。
+    """
+    digits = max(int(minimum), int(digits) + 1)
+    per_digit = 9
+    try:
+        metrics = (line_edit.fontMetrics() if line_edit is not None else None)
+        if metrics is None:
+            from PySide6.QtGui import QFontMetrics
+            metrics = QFontMetrics(QFont())
+        per_digit = max(7, metrics.horizontalAdvance("0"))
+    except Exception:                                      # noqa: BLE001
+        per_digit = 9
+    # +16：左右内边距与光标留白
+    return max(44, per_digit * digits + 16)
+
+
+def _field_triple(row) -> Tuple[str, str, str]:
+    """把解析器的「字段行」规整成 ``(名称, 原始值, 解析值)``。
+
+    **各解析器的行长度并不统一**（这是本次崩溃的根因）：645 的 fields 常见
+    3 元组 ``(名称, 原始值, 解析值)``，带说明的行是 4 元组；而 698/国网等用
+    6 元组 ``(名称, 原始值, 解析值, 说明, 起, 止)``。以前这里硬解 6 元组，
+    只要来一行 3 元组就直接 ``ValueError: not enough values to unpack``，
+    整个「抄读测试」收到应答就崩。
+
+    这里按位取值、缺位补空串，任何长度都不抛异常。
+    """
+    try:
+        cells = tuple(row)
+    except TypeError:
+        return str(row), "", ""
+    name = str(cells[0]) if len(cells) > 0 and cells[0] is not None else ""
+    raw = str(cells[1]) if len(cells) > 1 and cells[1] is not None else ""
+    parsed = str(cells[2]) if len(cells) > 2 and cells[2] is not None else ""
+    return name, raw, parsed
+
+
 def _crc16_x25(data: bytes) -> int:
     """X-25 CRC16 (多项式0x1021, 初始值0xFFFF, 输入/输出反转, 输出异或0xFFFF)"""
     crc = 0xFFFF
@@ -654,11 +696,26 @@ class ArchiveWidget(QWidget):
         copy_config_layout.setSpacing(6)
         copy_config_layout.addWidget(QLabel("抄读次数:"))
         self.copy_count_input = QLineEdit("3")
-        self.copy_count_input.setFixedWidth(40)
+        # 宽度按位数自适应：固定 40px 时 4~5 位数字会被裁掉（现场填 1000 只看到 "100"）
+        self.copy_count_input.setFixedWidth(
+            _spin_width_for(3, line_edit=self.copy_count_input))
+        self.copy_count_input.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.copy_count_input.setToolTip("每个表各抄读几次（点抄 / 并发 / 版本查询共用）")
+        self.copy_count_input.textChanged.connect(
+            lambda _t: self.copy_count_input.setFixedWidth(
+                _spin_width_for(len(self.copy_count_input.text()),
+                                line_edit=self.copy_count_input)))
         copy_config_layout.addWidget(self.copy_count_input)
         copy_config_layout.addWidget(QLabel("超时(ms):"))
         self.copy_timeout_input = QLineEdit("3000")
-        self.copy_timeout_input.setFixedWidth(50)
+        # 同上：超时也可能填 4~5 位（如 10000ms）
+        self.copy_timeout_input.setFixedWidth(
+            _spin_width_for(4, line_edit=self.copy_timeout_input))
+        self.copy_timeout_input.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.copy_timeout_input.textChanged.connect(
+            lambda _t: self.copy_timeout_input.setFixedWidth(
+                _spin_width_for(len(self.copy_timeout_input.text()),
+                                line_edit=self.copy_timeout_input)))
         copy_config_layout.addWidget(self.copy_timeout_input)
         copy_config_layout.addWidget(QLabel("|"))
         self.copy_summary_label = QLabel("总成功率: -")
@@ -1924,12 +1981,24 @@ class ArchiveWidget(QWidget):
                 short = " ".join(picked[:5]) or format_lme_info_detail(entries)[:80]
                 return short, "\n".join(
                     f"{n}: {self._lme_value_readable(n, v)}" for n, v in entries)
-        # 普通 DI：取第一个有解析值的字段
-        vals = [str(p) for (_n, _r, p, _c, _b, _e) in
-                (res.get("fields") or []) if str(p).strip()]
-        short = f"{res.get('di_desc', '')}:{vals[-1]}" if vals else (res.get("di_desc") or "")
-        return short[:80], "\n".join(
-            f"{n}: {p}" for (n, _r, p, _c, _b, _e) in (res.get("fields") or []))
+        # 普通 DI：取业务数据值
+        # ⚠ 行长度各家不同（645=3/4 元，698/国网=6 元）⇒ 一律走 _field_triple，
+        #   不要在这里硬解元组（曾导致抄读测试崩溃，见函数注释）
+        triples = [_field_triple(row) for row in (res.get("fields") or [])]
+        # 摘要取「业务值」而不是「最后一个有值的字段」：645 的 fields 末尾是
+        # 校验和/结束符（解析值恰为「CS校验」「结束符」），取末尾会显示成
+        # 「当前正向有功总电能:结束符」。优先「数据值」行，其次 DI 行之后
+        # 第一个非结构行（跳过帧起始符/控制码/数据长度/校验和/结束符）。
+        _structural = ("帧起始符", "从站地址", "控制码", "数据长度", "数据标识 DI",
+                       "校验和", "帧结束符", "数据域")
+        value = next((p for (n, _r, p) in triples
+                      if n.startswith("数据值") and p.strip()), "")
+        if not value:
+            value = next((p for (n, _r, p) in triples
+                          if p.strip() and not n.startswith(_structural)), "")
+        short = (f"{res.get('di_desc', '')}:{value}" if value
+                 else (res.get("di_desc") or ""))
+        return short[:80], "\n".join(f"{n}: {p}" for (n, _r, p) in triples)
 
     def _update_copy_test_result(self, row: int, addr: str):
         """更新抄读结果（成功率）+ 抄读内容 + 耗时到表格"""
@@ -2594,28 +2663,96 @@ class ArchiveWidget(QWidget):
         except Exception:
             return False
         inner_frame = None
-        for name, raw, parsed, comment, bs, be in table_data:
+        for row in table_data:
+            cells = tuple(row)
+            name = str(cells[0]) if len(cells) > 0 else ""
+            comment = str(cells[3]) if len(cells) > 3 else ""
             if "报文内容" in name and "原始报文数据" in comment:
                 try:
-                    inner_frame = bytes.fromhex(raw.replace(" ", ""))
+                    inner_frame = bytes.fromhex(str(cells[1]).replace(" ", ""))
                 except ValueError:
                     pass
                 break
         if not inner_frame or len(inner_frame) < 10:
+            # 表格口径拿不到时，直接按 376.1 的「上行时长(2)+协议(1)+长度(1)+内容」兜底，
+            # 免得解析器分支变化又把成功率判成 0（现场 0% 故障即此类耦合）
+            inner_frame = self._scan_inner_frame(frame) or inner_frame
+        if not inner_frame or len(inner_frame) < 10:
             return False
-        # DLT645: 控制码应答位bit3=1表示成功 (0x91等)
+        # ---- DLT645：先跳过前导码 0xFE，再按 68 A0..A5 68 C 定位控制码 ----
+        # 现场帧的内层报文以 **0xFE 前导** 开头（645 允许 FE FE .. 68），旧实现直接
+        # 取 inner_frame[0]==0x68 判定 → 一见到 FE 就判失败：抄读内容明明解出来了
+        # （645 解析器支持前导），成功率却是 0%（用户报障）。这里统一跳过前导、
+        # 按结构找第二个 0x68 的下一字节作控制码，不依赖固定下标。
         if "645" in proto:
-            if inner_frame[0] == 0x68 and len(inner_frame) >= 8:
-                ctrl = inner_frame[8]
-                return (ctrl & 0x80) != 0
+            ctrl = self._dlt645_ctrl_of(inner_frame)
+            if ctrl is not None:
+                # D7=1 从站应答；D6=1 异常应答（带错误码，抄读并未成功）
+                # 旧实现只看 D7，把异常应答也算成功 ⇒ 成功率虚高；这里两者都要判。
+                return (ctrl & 0x80) != 0 and (ctrl & 0x40) == 0
         # DLT698: 看APDU第一个字节是否为应答类型
         if "698" in proto:
-            if inner_frame[0] == 0x68 and len(inner_frame) > 14:
-                apdu_offset = 14
-                if apdu_offset < len(inner_frame):
-                    apdu_tag = inner_frame[apdu_offset]
-                    return (apdu_tag & 0x80) != 0
+            frame_698 = self._skip_prefix(inner_frame, (0xFE,))
+            if frame_698 and frame_698[0] == 0x68 and len(frame_698) > 14:
+                apdu_tag = frame_698[14]
+                return (apdu_tag & 0x80) != 0
         return False
+
+    @staticmethod
+    def _skip_prefix(data: bytes, prefixes: Tuple[int, ...]) -> bytes:
+        """跳过报文前导字节（645/698 的 0xFE 前导可重复出现）。"""
+        pos = 0
+        while pos < len(data) and data[pos] in prefixes:
+            pos += 1
+        return data[pos:]
+
+    @staticmethod
+    def _dlt645_ctrl_of(data: bytes) -> Optional[int]:
+        """从（可能带 FE 前导的）645 帧里取控制码；结构不符返回 None。
+
+        帧结构：``68 A0..A5 68 C ...`` ⇒ 控制码 = 第 2 个 ``0x68`` 之后 1 字节。
+        """
+        start = 0
+        while start < len(data) and data[start] == 0xFE:
+            start += 1
+        if start + 9 >= len(data):
+            return None
+        if data[start] != 0x68:
+            return None
+        if data[start + 7] != 0x68:          # 地址 6 字节之后必须还是 68
+            return None
+        return data[start + 8]
+
+    def _scan_inner_frame(self, frame: bytes) -> bytes:
+        """从 376.1 上行帧里直接按「上行时长(2)+协议类型(1)+长度(1)+内容」取内层报文。
+
+        只在表格取不到「报文内容」时兜底；数据单元位置由 AFN/DT 定位，
+        找不到返回 ``b""``（不猜）。
+        """
+        try:
+            afn, fn = self._extract_gdw_afn_fn(frame)
+        except Exception:                                      # noqa: BLE001
+            return b""
+        if afn != 0x13 or fn not in (1, 2):
+            return b""
+        # 数据单元起点：AFN(1) + DT(2) 之前的部分按 376.1 头长度推算
+        # 直接用解析器已识别到的「数据单元」行取原始 HEX 更稳（表格结构见 gdw 解析器）
+        try:
+            table_data = self.gdw_parser.parse_to_table(frame)
+        except Exception:                                      # noqa: BLE001
+            return b""
+        for row in table_data:
+            cells = tuple(row)
+            if len(cells) > 1 and str(cells[0]).strip() == "数据单元":
+                try:
+                    unit = bytes.fromhex(str(cells[1]).replace(" ", ""))
+                except ValueError:
+                    return b""
+                if fn == 1 and len(unit) >= 4:
+                    msg_len = unit[3]
+                    content = unit[4:4 + msg_len]
+                    return content if len(content) == msg_len else b""
+        return b""
 
     def _set_version_query_result(self, text: str, col: Optional[int] = None):
         """设置当前查询行的回读信息并继续下一个（收到应答即记一次成功）"""

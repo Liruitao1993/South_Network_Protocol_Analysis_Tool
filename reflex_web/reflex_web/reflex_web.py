@@ -3459,16 +3459,27 @@ class State(rx.State):
                     if exes:
                         primary_exe = exes[0]
 
+                # 显示用的名字/体积/日期/可下载性：交给 web_utils.resolve_download_meta 单一实现
+                # （本地没有该版本 exe 时用 version.json 的发布资产大小与发布日期，避免
+                #  「版本号 1.26.x、元信息却是本地 1.14.x 旧文件」的自相矛盾）
+                local_size = 0
+                local_mtime = 0.0
                 if primary_exe is not None:
-                    self.download_exe_available = True
-                    self.download_exe_name = primary_exe.name
                     try:
-                        self.download_exe_size_mb = str(
-                            round(primary_exe.stat().st_size / 1024 / 1024, 2)
-                        )
+                        stat = primary_exe.stat()
+                        local_size = int(stat.st_size)
+                        local_mtime = float(stat.st_mtime)
                     except Exception:
-                        self.download_exe_size_mb = ""
-                # 无 exe 时无需复位：三个字段已在函数开头统一清空
+                        local_size, local_mtime = 0, 0.0
+                meta = web_utils.resolve_download_meta(
+                    vj_data,
+                    local_name=(primary_exe.name if primary_exe is not None else ""),
+                    local_size=local_size,
+                    local_mtime=local_mtime,
+                )
+                self.download_exe_available = bool(meta["available"])
+                self.download_exe_name = str(meta["exe_name"])
+                self.download_exe_size_mb = str(meta["size_mb"])
                 # 界面截图：数据根优先，缺失时回落「随包资源」（部署产物不含运行时 exe，
                 # 但这两样静态资源要随包走，否则新部署的首页 Hero 与客户端说明永久缺失）
                 ss_file = app_data.resolve_download_asset("client_screenshot.png")
@@ -3499,13 +3510,8 @@ class State(rx.State):
                         self.download_version = vj_data.get("version", "")
                         self.download_version_notes = vj_data.get("notes", "")
                         self.download_version_url = vj_data.get("url", "")
-                        # 用 exe 的修改时间作发布日期
-                        if primary_exe is not None:
-                            import time as _time
-
-                            self.download_version_date = _time.strftime(
-                                "%Y-%m-%d", _time.localtime(primary_exe.stat().st_mtime)
-                            )
+                        # 发布日期：本地该版本 exe 在 → 文件 mtime；不在 → version.json 的 published_at
+                        self.download_version_date = str(meta["date"])
                     except Exception:
                         pass
                 # 读取归档目录中的历史版本（公开，不含下载链接）

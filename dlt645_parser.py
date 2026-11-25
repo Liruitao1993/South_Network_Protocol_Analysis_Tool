@@ -8,6 +8,7 @@ from dlt645_data_codec import (
     split_write_request, split_change_password, split_clear_command,
 )
 from dlt645_pv_ext import merge_pv_di_map, is_pv_di, parse_pv_di
+from dlt645_net_info_ext import merge_net_info_di_map, is_net_info_di, parse_net_info
 from dlt645_pv_wireless import (
     merge_wireless_di_map, is_wireless_di, parse_wireless_di,
     control_extra, err_bits_text,
@@ -34,14 +35,15 @@ class DLT645Parser:
         try:
             with open(json_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                return merge_wireless_di_map(merge_pv_di_map(data.get('di_map', {})))
+                return merge_net_info_di_map(
+                    merge_wireless_di_map(merge_pv_di_map(data.get('di_map', {}))))
         except Exception as e:
             print(f"加载 DLT645 DI 映射表失败: {e}")
             # 返回基本 DI 映射作为后备
-            return merge_wireless_di_map(merge_pv_di_map({
+            return merge_net_info_di_map(merge_wireless_di_map(merge_pv_di_map({
                 "00010000": {"name": "当前正向有功总电能", "unit": "kWh", "data_type": "XXXXXX.XX", "length": 4},
                 "00020000": {"name": "当前反向有功总电能", "unit": "kWh", "data_type": "XXXXXX.XX", "length": 4},
-            }))
+            })))
 
     @staticmethod
     def check_structure(data: bytes) -> Tuple[bool, str]:
@@ -262,6 +264,17 @@ class DLT645Parser:
             except Exception as e:
                 wl_rows = [('  └ ⚠ 无线扩展解析异常', str(e), '已回退显示原始数据')]
 
+        # 入网信息（DI FFAA0001，双模/中继模块；厂家字段定义 + 现场报文自证）
+        net_info_rows = None
+        if is_net_info_di(result['di_code']):
+            try:
+                net_info_rows, net_info_name = parse_net_info(
+                    result['di_code'], ctrl, result['data'])
+                if net_info_name:
+                    result['di_desc'] = net_info_name
+            except Exception as e:
+                net_info_rows = [('  └ ⚠ 入网信息解析异常', str(e), '已回退显示原始数据')]
+
         # 光伏协议转换单元 DL/T645-2007 扩展协议（附件1 §D.1 三张表）：按 DI 分派深度解析
         pv_rows = None
         if is_pv_di(result['di_code']) and not is_wireless_di(result['di_code']):
@@ -377,6 +390,12 @@ class DLT645Parser:
             elif pv_rows is not None:
                 # 光伏协议转换单元扩展协议：逐字段深度解析（契约同 LME 行列表）
                 result['fields'].extend(pv_rows)
+                if body:
+                    result['fields'].append(('数据内容(原始)', body.hex().upper(),
+                                             '减33H后原始数据（备查）'))
+            elif net_info_rows is not None:
+                # 入网信息：逐字段深度解析（契约同 LME 行列表）
+                result['fields'].extend(net_info_rows)
                 if body:
                     result['fields'].append(('数据内容(原始)', body.hex().upper(),
                                              '减33H后原始数据（备查）'))

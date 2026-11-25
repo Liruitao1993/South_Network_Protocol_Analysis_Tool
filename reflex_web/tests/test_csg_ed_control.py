@@ -81,7 +81,7 @@ def test_web_bare_test_device_frame_end_to_end():
 
     table = CSGNewGenParser().parse_to_table(bytes.fromhex(frames[0]))
     fields = {row[0]: row for row in table}
-    assert "命令码" in fields and fields["命令码"][2] == "衰减器C"
+    assert "命令码" in fields and fields["命令码"][2] == "设置衰减器C的衰减值"
 
 
 def test_web_bare_test_device_summary_has_core_value():

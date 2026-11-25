@@ -543,6 +543,11 @@ def _parse_associate_cnf(data: bytes, offset: int) -> List[Tuple]:
         pseq = int.from_bytes(data[32:36], "little")
         _r("路径序号", " ".join(f"{b:02X}" for b in data[32:36]),
            str(pseq), "路径通知序列号, 递增", 32, 35)
+    if end >= 40:
+        # 表70：路径序号之后还有 4 字节「保留」，路由表信息从 40 开始。
+        # 显式列出这行，避免把 36~39 的 4 个 0 误当成路由信息。
+        _r("保留", " ".join(f"{b:02X}" for b in data[36:40]), "全 0",
+           "表70 固定保留 4 字节；路由表信息从偏移 40 开始", 36, 39)
 
     # 路由表信息（表74: 直连站点数2B + 直连代理数2B + 路由表大小2B + 保留2B + 路由表）
     if end > 40:
@@ -585,15 +590,29 @@ def _parse_associate_cnf(data: bytes, offset: int) -> List[Tuple]:
                     if pos + 2 > len(rt):
                         break
                     stei2 = _tei12(rt, pos)
-                    table.append((f"        子站点TEI",
+                    table.append(("        子站点TEI",
                                   " ".join(f"{b:02X}" for b in rt[pos:pos + 2]),
                                   f"TEI={stei2}", "该PCO下子站点(12b)",
                                   offset + 40 + pos, offset + 40 + pos + 1))
                     pos += 2
         else:
-            _r("路由表信息(过短)",
-               " ".join(f"{b:02X}" for b in rt), f"{len(rt)}字节",
-               "表74路由信息头需8字节", 40, end - 1)
+            # 表74 头本身不完整（<8 字节）：不报一句「需8字节」了事 —— 已到的字节
+            # 按表74 顺序尽量解（2B 直连站点数 / 4B 直连代理数 / 6B 路由表大小），
+            # 并明确说明这是「帧内该字段提前结束」，用户据此判断是抓包截断还是设备未填。
+            # 现场（用户帧）就是 4 字节：MSDU 48 = 表70 体 40 + 路由信息 4（不足 8）。
+            partial: List[str] = []
+            if len(rt) >= 2:
+                partial.append(f"直连站点={int.from_bytes(rt[0:2], 'little')}个")
+            if len(rt) >= 4:
+                partial.append(f"直连代理={int.from_bytes(rt[2:4], 'little')}个")
+            if len(rt) >= 6:
+                partial.append(f"路由表={int.from_bytes(rt[4:6], 'little')}字节")
+            _r("路由表信息(不完整)", " ".join(f"{b:02X}" for b in rt),
+               f"{len(rt)}字节" + ("；" + "，".join(partial) if partial else ""),
+               f"表74 路由信息头需 8 字节（直连站点数2+直连代理数2+路由表大小2+保留2），"
+               f"本帧只到 {len(rt)} 字节 ⇒ 该字段在帧内提前结束（多为抓包/发送端截断，"
+               f"或对端未填路由表）；路由条目无数据可展开",
+               40, end - 1)
     return table
 
 

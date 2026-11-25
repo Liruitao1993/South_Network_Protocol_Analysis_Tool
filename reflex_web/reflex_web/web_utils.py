@@ -289,13 +289,16 @@ def strip_csg_new_gen_prefix(text: str, parse_level: str = "auto") -> str:
         line = line.strip()
         if not line:
             continue
-        # 取最后一个冒号后的 hex
-        last_colon = line.rfind(':')
-        if last_colon >= 0:
-            hex_part = line[last_colon + 1:].strip()
-        else:
-            hex_part = line
-        hex_clean = re.sub(r'[^0-9A-Fa-f]', '', hex_part).upper()
+        # 引号内的 hex 优先（`setAttenuVal: 'FE…AA0D0A'` 这类日志）；
+        # 判据单一来源 = 共享 batch_core.quoted_payload_hex（三处同源副本，禁止各写一份）
+        from batch_core import quoted_payload_hex
+
+        hex_clean = quoted_payload_hex(line)
+        if not hex_clean:
+            # 取最后一个冒号/等号后的 hex
+            last_sep = max(line.rfind(':'), line.rfind('='))
+            hex_part = line[last_sep + 1:].strip() if last_sep >= 0 else line
+            hex_clean = re.sub(r'[^0-9A-Fa-f]', '', hex_part).upper()
         if len(hex_clean) < 4:
             continue
         if len(hex_clean) % 2 != 0:
@@ -909,6 +912,10 @@ _GW_APP_META_FIELDS = (
     "发送类型",
     "MSDU类型",
     "⚠ 安全保护",
+    # 升级报文（协议11 表37/38/39/41/44）公共头解出的行：属于结构信息，不是业务字段，
+    # 不排掉会占满 2 个关键字段位（与桌面 `main_gui._GW_APP_META_FIELDS` 必须同步）
+    "保留",
+    "方向",
 )
 _GW_APP_SUMMARY_KEY_FIELDS = 2
 
@@ -1663,3 +1670,72 @@ def resolve_download_target(
     if same_origin_serving or not current_host:
         return path
     return f"http://{host.strip()}{path}"
+
+def _to_int(value) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def resolve_download_meta(
+    version_json,
+    *,
+    local_name: str = "",
+    local_size: int = 0,
+    local_mtime: float = 0.0,
+) -> dict:
+    """决定首页/下载页要显示的下载元数据（**单一实现**，供 State 与测试共用）。
+
+    为什么不直接「扫 downloads/ 里第一个 exe」：发布到 GitHub Release 后本地通常**没有**
+    那个 exe（部署包也不带 exe，见 AGENTS 陷阱 39），此时用本地旧文件的名字/体积/日期会
+    与 `version.json` 的版本号自相矛盾（实测：版本显示 1.26.19，元信息却是 1.14.13 的文件）。
+
+    优先级（每项独立判断，缺哪项就退回哪项）：
+
+    - ``exe_name``：`version.json` 的 ``exe_name`` → 本地扫描到的文件名；
+    - ``size_mb``：本地文件**就是**这个 exe → 真实体积；否则用 ``exe_size_bytes``（发布资产大小）；
+    - ``date``：本地文件存在 → 文件 mtime（本机发布事实）；否则用 ``published_at``（Release 发布日期）；
+    - ``available``：本地有该 exe **或** `version.json` 给了 ``url``（托管在 GitHub 等外部主机也能下）。
+
+    返回 ``{"exe_name","size_mb","date","available","url","sha256"}``（``size_mb`` 为字符串，
+    空串表示未知；``date`` 为 ``YYYY-MM-DD`` 或空串）。
+    """
+    vj = version_json if isinstance(version_json, dict) else {}
+    vj_name = str(vj.get("exe_name") or "").strip()
+    url = str(vj.get("url") or "").strip()
+    sha = str(vj.get("sha256") or "").strip()
+
+    local = str(local_name or "").strip()
+    # 本地文件「就是这个版本」才采信它的体积/日期
+    same_file = bool(local) and (not vj_name or local == vj_name)
+
+    exe_name = vj_name or local
+    size_mb = ""
+    if same_file and _to_int(local_size) > 0:
+        size_mb = str(round(_to_int(local_size) / 1024 / 1024, 2))
+    else:
+        size_bytes = _to_int(vj.get("exe_size_bytes"))
+        if size_bytes > 0:
+            size_mb = str(round(size_bytes / 1024 / 1024, 2))
+
+    date = ""
+    if same_file and local_mtime:
+        try:
+            import time as _time
+
+            date = _time.strftime("%Y-%m-%d", _time.localtime(float(local_mtime)))
+        except (TypeError, ValueError, OSError):
+            date = ""
+    if not date:
+        date = str(vj.get("published_at") or "").strip()
+
+    available = bool((same_file and _to_int(local_size) > 0) or url or (local and not vj_name))
+    return {
+        "exe_name": exe_name,
+        "size_mb": size_mb,
+        "date": date,
+        "available": available,
+        "url": url,
+        "sha256": sha,
+    }

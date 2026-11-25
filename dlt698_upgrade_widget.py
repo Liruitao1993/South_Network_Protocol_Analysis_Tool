@@ -224,14 +224,51 @@ BAUD_BOOST_COMMAND = bytes.fromhex(BAUD_BOOST_COMMAND_HEX.replace(" ", ""))
 BOOST_WAIT_MS_DEFAULT = 300
 BOOST_WAIT_MS_MIN, BOOST_WAIT_MS_MAX = 0, 10000
 
+#: 「发包间隔(ms)」（用户 2026-11-11 需求）：**文件传输阶段**每包之间（上一包被确认之后、
+#: 下一包发出之前）额外静默等待的时间。
+#: 现场口径：模块 / 分布式设备收包后要写 flash，**写盘可能比链路慢** —— 上一包刚确认完就
+#: 立刻砸下一包，设备来不及把数据落盘，表现为「偶发写失败 / 升级后校验不过 / 复位异常」。
+#: 默认 **0**（不额外等待，与旧行为逐字一致）；现场按设备能力调大。
+PKT_GAP_MS_DEFAULT = 0
+PKT_GAP_MS_MIN, PKT_GAP_MS_MAX = 0, 10000
+
 #: 「读版本内容」候选：`(下拉文案, 持久化键, 日志短名)`。**OAD 字节不在此处** ——
 #: 一律经 `_read_oad()` 取协议模块的常量（`OAD_VERSION` / `OAD_INTERNAL_VERSION`），
 #: 避免同一份协议事实写两遍（协议模块按需惰性 import，顶层拿不到它）。
+#: 仅**光伏设备**对象使用；**模块**对象下这条命中的是 :data:`MODULE_VERSION_COMMAND`
+#: （645 公司扩展 FF00DD01），下拉被禁用并写明原因。
 READ_TARGETS = (
     ("通用版本信息（OAD 43000300）", "common", "通用"),
     ("内部版本（厂家扩展，OAD FF100400）", "internal", "内部"),
 )
 DEFAULT_READ_TARGET = "common"
+
+# ── 升级对象（用户 2026-11-11 需求）──────────────────────────────────────
+#: 「升级对象」候选：`(下拉文案, 持久化键, 日志短名)`。
+#: - ``pv``：**光伏设备**（默认，既有口径）—— 升级前后读版本走 698 GET OAD；
+#: - ``module``：**模块**（场景里的无线/载波模组）—— 升级前后读版本改为下发
+#:   **645 模块版本读取命令**（DI=FF00DD01，LME 4.6 双模 STA 内部详细信息查询），
+#:   应答按 645 帧解析、复用 ``lme_info_entry_parser`` 的条目解析把版本号解出来。
+#: **升级包的文件传输两种对象都走既有 698 文件传输流程**（用户确认：本次只改版本读取）。
+UPGRADE_TARGETS = (
+    ("光伏设备", "pv", "光伏"),
+    ("模块", "module", "模块"),
+)
+DEFAULT_UPGRADE_TARGET = "pv"
+
+#: 模块版本读取命令（用户提供的现场实帧，**原样下发**）：
+#: ``68 AAAAAA AAAAAA 68 11 3A | DI=FF00DD01 + 条目信息(1B=0) + M(1B=26) + 26×2B 请求头 | CS 16``
+#: 数据域整体 +33H 是 645 惯例（故线上字节是 ``34 10 33 …``，减 33H 后才是
+#: ``01 DD 00 FF``=DI 小端 + ``00`` + ``1A``=26）。
+MODULE_VERSION_COMMAND_HEX = (
+    "68 AA AA AA AA AA AA 68 11 3A 34 10 33 32 33 4D 34 33 35 33 36 33 37 33 38 33 39 "
+    "33 74 33 75 33 76 33 77 33 78 33 79 33 7A 33 7B 33 7C 33 7D 33 7E 33 7F 33 80 33 81 "
+    "33 87 33 88 33 89 33 8A 33 8B 33 91 33 A6 16"
+)
+MODULE_VERSION_COMMAND = bytes.fromhex(MODULE_VERSION_COMMAND_HEX.replace(" ", ""))
+
+#: 模块版本读取命令的 DI（645 公司扩展，LME 4.6「查询双模 STA 内部详细信息」）
+MODULE_VERSION_DI = "FF00DD01"
 
 #: 每包字节数上限：与串口页 `_sane_frame_len` 同族判据（design §13-5）
 BLOCK_SIZE_MIN, BLOCK_SIZE_MAX = 1, 8192
@@ -268,10 +305,12 @@ DEFAULTS = {
     "read_before": False,               # 升级前读版本信息（可选诊断步骤，默认不勾）
     "read_after": False,                # 升级完成后读版本信息（同上）
     "read_target": DEFAULT_READ_TARGET,  # 读版本内容：common=通用 43000300 / internal=厂家扩展 FF100400
+    "upgrade_target": DEFAULT_UPGRADE_TARGET,  # 升级对象：pv=光伏设备（698 读版本）/ module=模块（645 读版本）
     "read_after_delay_s": 10,            # 读「升级后」版本前先等设备复位（秒）；0 = 立即读
     "channel": DEFAULT_CHANNEL,          # 发送通道：serial / bluetooth
     "boost_baud": False,                 # 升级前先发「提升波特率」命令（仅串口通道；默认不勾）
     "boost_wait_ms": BOOST_WAIT_MS_DEFAULT,  # 命令发出到主机切速之间的静默等待（ms）
+    "pkt_gap_ms": PKT_GAP_MS_DEFAULT,   # 文件传输阶段每包之间的额外间隔（ms；0=不等待）
     "sa_type": 1,                       # 通配
     "sa_logic": 0,
     "sa_len": 6,
@@ -376,6 +415,134 @@ def normalize_hex_address(text: str, addr_len: int) -> bytes:
     if len(raw) < addr_len:
         return raw + b"\x00" * (addr_len - len(raw))
     return raw[:addr_len]
+
+
+def build_module_version_frame(sa: Optional[bytes] = None) -> bytes:
+    """模块（无线/载波模组）版本读取命令 —— 645 帧，**数据域固定、原样下发**。
+
+    结构（用户提供的现场实帧，逐字节对齐）::
+
+        68 | SA(6B) | 68 | 11H 读数据 | L=3AH | DI(FF00DD01 线序) + 00 + 1A + 26×2B 请求头 | CS | 16H
+
+    ``sa`` 为 ``None`` 时**原样**用 :data:`MODULE_VERSION_COMMAND`（地址 6×AAH，用户实帧）；
+    传入 6 字节地址时替换地址域并**重算 CS**（L 与内容无关，恒 0x3A）。
+
+    CS = ``sum(68H 起始符 … 数据域末字节) & 0xFF``（645-2007 §5.3，**含起始符**；
+    与 :meth:`DLT645Parser.calc_checksum` 同口径 —— 用户给的实帧就是这个口径：
+    不含首字节 68H 时算得 3EH，含起始符才是帧内的 A6H）。
+    """
+    if sa is None:
+        return MODULE_VERSION_COMMAND
+    sa = bytes(sa)[:6].ljust(6, b"\x00")
+    cmd = MODULE_VERSION_COMMAND
+    # 原帧：68 + SA(1..6) + 68(@7) + C(@8) + L(@9) + 数据域(@10..@-2) + CS + 16
+    data = cmd[10:-2]
+    body = sa + bytes([cmd[7], cmd[8], len(data)]) + data
+    cs = (0x68 + sum(body)) & 0xFF
+    return bytes([0x68]) + body + bytes([cs, 0x16])
+
+
+def parse_module_version_response(frame: bytes) -> dict:
+    """解析**模块版本读取命令的 645 应答帧** → ``{ok, rows, version, reason}``。
+
+    ``rows`` 与 698 侧读版本同形（``{"名称", "值", "原始"}``），因此既有的
+    「升级前 vs 升级完成后」比对/判定/展示机制**不用改**就能用。
+
+    解析链**全部复用既有 645 实现**（不重写协议）：645 帧结构 → 数据域减 33H →
+    DI 分派到 :func:`lme_info_entry_parser.parse_lme_dlt645`（LME 4.6 双模 STA 内部
+    详细信息，条目 TLV 解码）→ 条目行。
+
+    失败一律给中文 ``reason``（不抛异常、不臆造版本号）：非 645 结构 / 控制码不是
+    应答读数据 / 校验错 / DAR 异常 / DI 不符 / 条目解不出来。
+    """
+    # 延迟 import：本模块顶层不引入 645 解析栈（页面所属协议是 698，模块对象才用得上）
+    from dlt645_parser import DLT645Parser
+    from lme_info_entry_parser import parse_lme_dlt645
+
+    raw = bytes(frame or b"")
+    result = {"ok": False, "rows": [], "version": "", "reason": ""}
+
+    # ── ① 帧结构自证（645-2007 §5.3：68 A6 68 C L … CS 16，整帧 = L + 12） ──
+    base = 0
+    while base < len(raw) and raw[base] == 0xFE:      # 容忍唤醒前导 FEH
+        base += 1
+    body = raw[base:]
+    if len(body) < 12 or body[0] != 0x68:
+        result["reason"] = "不是 645 帧（缺少起始符 68H）"
+        return result
+    if body[7] != 0x68:
+        result["reason"] = "不是 645 帧（第 8 字节不是第二个 68H）"
+        return result
+    if body[-1] != 0x16:
+        result["reason"] = "不是完整 645 帧（末字节不是 16H）"
+        return result
+    length = body[9]
+    if len(body) != length + 12:
+        result["reason"] = (f"645 帧长度不符：数据长度域 L={length} 应为 {length + 12} 字节，"
+                            f"实际 {len(body)} 字节")
+        return result
+    ctrl = body[8]
+    if not (ctrl & 0x80):
+        result["reason"] = f"控制码 0x{ctrl:02X} 不是应答帧（D7=1 才是从站应答）"
+        return result
+    if (ctrl & 0x1F) != 0x11:
+        result["reason"] = f"控制码 0x{ctrl:02X} 不是「读数据应答」（功能码应为 11H）"
+        return result
+    calc = sum(body[:-2]) & 0xFF
+    if calc != body[-2]:
+        result["reason"] = (f"校验和错误：帧内 0x{body[-2]:02X}，按「起始符 68H…数据域末字节」"
+                            f"计算应为 0x{calc:02X}")
+        return result
+
+    # ── ② 交给既有 645 解析器（DI 分派、数据域减 33H、DI 合法性都由它判定） ──
+    try:
+        parsed = DLT645Parser().parse(raw[base:])
+    except Exception as exc:                            # noqa: BLE001 - 解析失败只报原因
+        result["reason"] = f"645 解析异常：{type(exc).__name__}: {exc}"
+        return result
+    if not isinstance(parsed, dict) or not parsed.get("success", True):
+        why = ""
+        if isinstance(parsed, dict):
+            why = str(parsed.get("error") or parsed.get("message") or "")
+        result["reason"] = f"645 解析失败{('：' + why) if why else ''}"
+        return result
+
+    di_code = str(parsed.get("di_code") or "").upper()
+    if di_code and di_code != MODULE_VERSION_DI:
+        result["reason"] = f"应答 DI={di_code} 与模块版本命令 {MODULE_VERSION_DI} 不符"
+        return result
+
+    lme_rows, lme_name = parse_lme_dlt645(di_code or MODULE_VERSION_DI, ctrl,
+                                          parsed.get("data") or b"")
+    if not lme_rows:
+        result["reason"] = ("645 应答里没有可解析的版本条目（DI=FF00DD01 应答为空或格式不符）")
+        return result
+
+    rows = []
+    for item in lme_rows:
+        if not item:
+            continue
+        name = str(item[0] if len(item) > 0 else "").strip()
+        raw_hex = str(item[1] if len(item) > 1 else "").strip()
+        value = str(item[2] if len(item) > 2 else "").strip()
+        if not name or name.startswith("──"):
+            continue            # 标题行/分隔行不算版本字段
+        # 「条目数 M」「条目信息字节」是解析器的**说明行**（不是版本字段）：
+        # 留着会让 M=0 的空应答看起来「解出了东西」，也会混进前后比对里。
+        if "条目数" in name or "条目信息" in name:
+            continue
+        rows.append({"名称": name, "值": value, "原始": raw_hex})
+    if not rows:
+        result["reason"] = ("645 应答里没有可解析的版本条目（DI=FF00DD01 应答为空或格式不符）")
+        return result
+
+    result.update({
+        "ok": True,
+        "rows": rows,
+        "version": f"{lme_name}（{len(rows)} 项）",
+        "reason": lme_name,
+    })
+    return result
 
 
 def check_package_file(path: str) -> str:
@@ -566,6 +733,12 @@ class Dlt698UpgradeWidget(QWidget):
         self._boost_timer = QTimer(self)
         self._boost_timer.setSingleShot(True)
         self._boost_timer.timeout.connect(self._on_boost_ready)
+
+        # 文件传输阶段的「发包间隔」：上一包确认 → 静默 N ms → 再发下一包（见 `PKT_GAP_MS_*`）
+        self._pkt_gap_timer = QTimer(self)
+        self._pkt_gap_timer.setSingleShot(True)
+        self._pkt_gap_timer.timeout.connect(self._on_pkt_gap_ready)
+
         # `_boosted` = **主机端口此刻被本页设在非默认速率**（收尾要切回；只在切回成功时清）
         self._boosted = False
         # `_boost_used` = **本轮真的提升过波特率**（比 `_boosted` 黏：切回后仍为 True）。
@@ -738,6 +911,20 @@ class Dlt698UpgradeWidget(QWidget):
         self.spin_retries.setValue(DEFAULTS["retries"])
         self.spin_retries.setToolTip("同一包最多重发几次；用尽则整轮失败并停止")
         grid_link.addWidget(self.spin_retries, 1, 5)
+
+        grid_link.addWidget(_param_label("发包间隔(ms)"), 1, 6)
+        self.spin_pkt_gap = QSpinBox()
+        self.spin_pkt_gap.setRange(PKT_GAP_MS_MIN, PKT_GAP_MS_MAX)
+        self.spin_pkt_gap.setValue(DEFAULTS["pkt_gap_ms"])
+        self.spin_pkt_gap.setSingleStep(50)
+        self.spin_pkt_gap.setToolTip(
+            "**文件传输阶段**每包之间（上一包被确认之后、下一包发出之前）额外等待的时间，"
+            f"范围 {PKT_GAP_MS_MIN}~{PKT_GAP_MS_MAX} ms，默认 {PKT_GAP_MS_DEFAULT}（不额外等待）。\n"
+            "为什么要它：模块 / 分布式设备收到一包后要**写 flash**，写盘可能比链路慢 —— "
+            "上一包刚确认就立刻发下一包，设备可能尚未落盘，现场表现为写失败、升级后校验不过、"
+            "复位异常。适当加大间隔可让设备喘口气。\n"
+            "只作用在文件传输（写文件块）阶段；启动传输、执行升级、读版本不受影响。")
+        grid_link.addWidget(self.spin_pkt_gap, 1, 7)
         grid_link.setColumnStretch(6, 1)
 
         # ── 组② 地址参数：SA（类型/逻辑地址/长度/地址）/ CA ──
@@ -875,13 +1062,34 @@ class Dlt698UpgradeWidget(QWidget):
         # ── 组⑤ 读版本信息（可选诊断步骤；默认不勾，勾选状态落盘）──
         grid_ver = _param_group(form, "读版本信息（可选）")
 
+        # 第 0 行：升级对象（光伏设备 / 模块）。模块对象下读版本改为 645 模块版本命令，
+        # 故「读版本内容」(OAD) 下拉在该对象下禁用并写明原因（见 `_update_target_ui`）。
+        self.combo_upgrade_target = QComboBox()
+        for label, key, _short in UPGRADE_TARGETS:
+            self.combo_upgrade_target.addItem(label, key)
+        self.combo_upgrade_target.setToolTip(
+            "升级对象：\n"
+            "「光伏设备」= 升级前后读版本走 698 GET-Request（OAD 43000300 / FF100400）。\n"
+            "「模块」= 升级前后读版本改发 **645 模块版本读取命令**（DI=FF00DD01，LME 4.6\n"
+            "双模 STA 内部详细信息查询，数据域固定），应答按 645 帧解析、复用 645 的 LME\n"
+            "条目解析器把版本号解出来。\n"
+            "升级包的文件传输两种对象都走本页既有 698 文件传输流程。")
+        grid_ver.addWidget(_param_label("升级对象"), 0, 0)
+        grid_ver.addWidget(self.combo_upgrade_target, 0, 1)
+
+        self.lbl_target_hint = QLabel()
+        self.lbl_target_hint.setTextFormat(Qt.TextFormat.PlainText)
+        self.lbl_target_hint.setWordWrap(True)
+        grid_ver.addWidget(self.lbl_target_hint, 0, 2, 1, 5)
+
         self.chk_read_before = QCheckBox("升级前读版本信息")
         self.chk_read_before.setToolTip(
             "勾选：开始升级前先发一帧「读版本信息」（GET-Request Normal，OAD 43 00 03 00 ="
             "电气设备(设备管理类) 属性3 版本信息），把设备回的版本内容写进日志，便于升级前后比对。\n"
             "SA/CA 取本页上方配置（默认通配地址 AA AA AA AA AA AA）；"
-            "读版本失败**不阻断**升级（重试用尽后记日志并继续）。")
-        grid_ver.addWidget(self.chk_read_before, 0, 0)
+            "读版本失败**不阻断**升级（重试用尽后记日志并继续）。\n"
+            "升级对象=模块时，这一帧换成 645 模块版本读取命令（DI=FF00DD01）。")
+        grid_ver.addWidget(self.chk_read_before, 1, 0)
 
         self.chk_read_after = QCheckBox("升级完成后读版本信息")
         self.chk_read_after.setToolTip(
@@ -890,7 +1098,7 @@ class Dlt698UpgradeWidget(QWidget):
             "② 没勾 ⇒ 最后一包写文件被确认后读（有的设备收全升级包会**自动复位升级**）。\n"
             "读之前会按「升级后等待(s)」等一段时间（默认 10 秒），因为复位期间读不到版本。\n"
             "读版本失败不阻断（此时升级本身已完成，只记日志）。")
-        grid_ver.addWidget(self.chk_read_after, 0, 1)
+        grid_ver.addWidget(self.chk_read_after, 1, 1)
 
         self.combo_read_target = QComboBox()
         for label, key, _short in READ_TARGETS:
@@ -899,9 +1107,10 @@ class Dlt698UpgradeWidget(QWidget):
             "「通用版本信息」= 标准 OAD 43 00 03 00（电气设备类 属性3）。\n"
             "「内部版本」= 厂家扩展 OAD FF 10 04 00（厂商自定义对象，内部/内部版本信息）。\n"
             "两者都是 GET-Request Normal（APDU 形如 05 01 <PIID> <OAD> 00），"
-            "只差 OAD；升级前/升级后两步共用这个选择。")
-        grid_ver.addWidget(_param_label("读版本内容"), 0, 2)
-        grid_ver.addWidget(self.combo_read_target, 0, 3)
+            "只差 OAD；升级前/升级后两步共用这个选择。\n"
+            "**升级对象=模块时本项不生效**（改用 645 DI=FF00DD01 固定命令）。")
+        grid_ver.addWidget(_param_label("读版本内容"), 1, 2)
+        grid_ver.addWidget(self.combo_read_target, 1, 3)
 
         self.spin_read_after_delay = QSpinBox()
         self.spin_read_after_delay.setRange(READ_AFTER_DELAY_MIN, READ_AFTER_DELAY_MAX)
@@ -909,8 +1118,8 @@ class Dlt698UpgradeWidget(QWidget):
             "读「升级完成后」版本信息之前先等设备复位（秒，默认 10；0 = 不等、立即读）。\n"
             "有的设备收全升级包就**自动复位升级**（不依赖执行升级命令），复位期间读不到版本 ⇒ 需要等一会儿再读。\n"
             "勾「升级完成后读版本信息」才用得上这个等待。")
-        grid_ver.addWidget(_param_label("升级后等待(s)"), 0, 4)
-        grid_ver.addWidget(self.spin_read_after_delay, 0, 5)
+        grid_ver.addWidget(_param_label("升级后等待(s)"), 1, 4)
+        grid_ver.addWidget(self.spin_read_after_delay, 1, 5)
         grid_ver.setColumnStretch(6, 1)
 
         outer.addWidget(self.sec_params)
@@ -1018,7 +1227,10 @@ class Dlt698UpgradeWidget(QWidget):
         self.chk_read_after.toggled.connect(lambda _c: self._schedule_save())
         self.chk_boost_baud.toggled.connect(lambda _c: self._schedule_save())
         self.spin_boost_wait.valueChanged.connect(lambda *_a: self._schedule_save())
+        self.spin_pkt_gap.valueChanged.connect(lambda *_a: self._schedule_save())
         self.combo_read_target.currentIndexChanged.connect(lambda *_a: self._schedule_save())
+        self.combo_upgrade_target.currentIndexChanged.connect(
+            lambda *_a: self._on_upgrade_target_changed())
         self.combo_channel.currentIndexChanged.connect(lambda *_a: self._on_channel_changed())
         # SA/CA 变了 ⇒ 蓝牙通道下的每包上限要重算（698 帧开销随地址域长度变）
         for _w in (self.combo_sa_type, self.combo_sa_logic, self.combo_sa_len):
@@ -1362,12 +1574,13 @@ class Dlt698UpgradeWidget(QWidget):
     # ======================================================================
 
     def _complete_frame_len(self, buf) -> int:
-        """``buf`` 首部是否为一段**完整且末字节自证**的 698.45 帧；是则返回整帧长度，否则 0。
+        """``buf`` 首部是否为一段**完整且末字节自证**的帧；是则返回整帧长度，否则 0。
 
-        判据全部来自分帧单一来源 :mod:`frame_deframe`（``L + 2`` + 前导 FEH 容忍），
-        末字节 ``16H`` 自证在此补齐（分帧族只算长度、自证在调用方，与串口页同一约定）。
+        判据全部来自分帧单一来源 :mod:`frame_deframe`（``L + 2`` / 645 的 ``L + 12``
+        + 前导 FEH 容忍），末字节 ``16H`` 自证在此补齐（分帧族只算长度、自证在调用方，
+        与串口页同一约定）。策略随「升级对象」切换，见 :meth:`_deframe_strategy`。
         """
-        need = frame_deframe.frame_length_for(DEFRAME_STRATEGY, buf)
+        need = frame_deframe.frame_length_for(self._deframe_strategy(), buf)
         if need and len(buf) >= need and buf[need - 1] == 0x16:
             return need
         return 0
@@ -1394,7 +1607,7 @@ class Dlt698UpgradeWidget(QWidget):
             break                 # 既无完整帧、又无从重同步 ⇒ 等更多字节
         # 缓冲治理：只有「没有半截帧在等」时才丢噪声，正在等的必须留着续帧
         if len(self._rx_buf) > RX_BUF_MAX and not frame_deframe.frame_incomplete(
-                DEFRAME_STRATEGY, self._rx_buf):
+                self._deframe_strategy(), self._rx_buf):
             dropped = len(self._rx_buf)
             self._rx_buf.clear()
             self._log(f"[信息] 丢弃 {dropped} 字节无法组帧的数据（缓冲上限 {RX_BUF_MAX}）",
@@ -1423,12 +1636,14 @@ class Dlt698UpgradeWidget(QWidget):
                 continue
             rest = buf[k:]                # 首字节候选 ⇒ 交给分帧单一来源判定
             if self._complete_frame_len(rest) or frame_deframe.frame_incomplete(
-                    DEFRAME_STRATEGY, rest):
+                    self._deframe_strategy(), rest):
                 break
             k += 1
         if k:
             del buf[:k]
-            self._log(f"[信息] 丢弃 {k} 字节非帧起点数据（错帧/噪声重同步：698.45 帧以 "
+            family = ("645 帧（68 A6 68 C L … CS 16H）" if self._is_module_target()
+                      else "698.45 帧（68 L L C … 16H）")
+            self._log(f"[信息] 丢弃 {k} 字节非帧起点数据（错帧/噪声重同步：{family} 以 "
                       "68H 开头，FEH 前导后须紧跟 68H）", "info")
         return k
 
@@ -1436,6 +1651,13 @@ class Dlt698UpgradeWidget(QWidget):
         """一帧完整 698.45 帧 → 判定是否为**本步**的确认（design §5 判定 + §10）。"""
         if self._state in TERMINAL_STATES:
             return                          # 不在传输中：不打扰（别的页也在看同一口）
+        if self._pkt_gap_timer.isActive():
+            # 「发包间隔」等待中：下一包**还没发**，本步没有在飞的请求 ⇒ 任何帧都不当确认。
+            # 不挡的话，设备重发的上一条确认会在 `_on_ack` 里把「还没发的那一包」记成已确认
+            # （间隔越长这个窗口越大）。与 `PHASE_WAIT_RESET` / `PHASE_BAUD_BOOST` 同一口径。
+            self._log(f"[RX] {fmt_hex(frame)}  → 忽略（发包间隔等待中，本步没有在飞的请求）",
+                      "info")
+            return
         if self._phase == PHASE_WAIT_RESET:
             # 等设备复位期间没有在飞的请求 ⇒ 任何帧都不当确认（设备复位时可能吐杂帧/上报）
             self._log(f"[RX] {fmt_hex(frame)}  → 忽略（等待设备复位中）", "warn")
@@ -1447,6 +1669,10 @@ class Dlt698UpgradeWidget(QWidget):
             return
         upg = self._upgrade_module()
         if upg is None:
+            return
+        if self._phase in VER_PHASES and self._is_module_target():
+            # 升级对象=模块 ⇒ 本步发的是 645 模块版本命令，应答按 645 解析
+            self._on_module_version_frame(frame)
             return
         try:
             if self._phase in VER_PHASES:
@@ -1498,14 +1724,31 @@ class Dlt698UpgradeWidget(QWidget):
         # §10：非本步 OMD 的帧 / 解析失败帧 → WARN 并忽略，不计确认
         self._log(f"[RX] {fmt_hex(frame)}  → 忽略（{reason}）", "warn")
 
+    def _on_module_version_frame(self, frame: bytes) -> None:
+        """升级对象=模块：一帧 **645 应答** → 解析条目 → 记结果 / 明细 / 判定 → 推进。
+
+        解析与判定都在纯函数 :func:`parse_module_version_response` 里（复用 645 的
+        LME 条目解析器）；这里只做「成功就推进、失败就按重试」的状态机接线。
+        非本次请求的回帧（例如设备主动上报）解析不出 DI 就按 WARN 忽略，不计确认。
+        """
+        res = parse_module_version_response(frame)
+        if res.get("ok"):
+            self._log(f"[RX] {fmt_hex(frame)}", "rx")
+            self._record_version_info(self._phase, res)
+            self._log_version_detail(res)
+            self._log_verdict()
+            self._on_ack()
+            return
+        # 帧已完整切出、但不是我们要的 645 版本应答 ⇒ 只提示、不计确认（等重试/超时）
+        self._log(f"[RX] {fmt_hex(frame)}  → 忽略（{res.get('reason') or '非模块版本应答'}）",
+                  "warn")
+
     @staticmethod
     def _dar_value(dar) -> object:
         """DAR 显示值：剥掉 PIID-ACD 之类可能混入的标志位（仅影响显示，判定在协议层）。"""
         if isinstance(dar, int):
             return dar & 0x7F
         return dar
-
-    # ======================================================================
     # 版本信息展示区（逐字段明细；日志只放「帧一行 + 明细若干行」）
     # ======================================================================
 
@@ -2014,9 +2257,13 @@ class Dlt698UpgradeWidget(QWidget):
         self._piid = (self._piid + 1) & 0x7F
         try:
             if self._phase in VER_PHASES:
-                # 读版本信息：SA/CA 取页面配置（默认通配 AAAAAA，与升级传输同一份）；
-                # OAD 取「读版本内容」下拉（通用 43000300 / 厂家扩展内部版本 FF100400）
-                frame = upg.build_read_version(sa, ca, piid, oad=self._read_oad(upg))
+                if self._is_module_target():
+                    # 升级对象=模块：645 模块版本读取命令（数据域固定、按用户给的实帧原样下发）
+                    frame = build_module_version_frame()
+                else:
+                    # 读版本信息：SA/CA 取页面配置（默认通配 AAAAAA，与升级传输同一份）；
+                    # OAD 取「读版本内容」下拉（通用 43000300 / 厂家扩展内部版本 FF100400）
+                    frame = upg.build_read_version(sa, ca, piid, oad=self._read_oad(upg))
             elif self._phase == PHASE_STATUS:
                 # 传输块状态字（F001 属性4）：全部块确认后先校验，通过才允许执行升级
                 frame = upg.build_read_block_status(sa, ca, piid)
@@ -2110,24 +2357,14 @@ class Dlt698UpgradeWidget(QWidget):
             if self._block_idx + 1 < self._num_blocks():
                 self._block_idx += 1
                 self._refresh_progress()      # 先推进再刷：显示**在飞**的那一包
-                self._send_current_step()
+                self._send_with_gap()
                 return
             self._refresh_progress()
             self._begin_status_gate()
             return
         if self._phase == PHASE_STATUS:
             # 传输块状态字校验通过 ⇒ 才允许执行升级（或按配置直接收尾）
-            if self.chk_auto_exec.isChecked():
-                self._phase = PHASE_EXEC
-                self._state = STATE_FINISHING
-                self._send_current_step()
-            else:
-                # **不发**执行升级命令：某些设备收全包会**自动复位升级** ⇒ 勾了「升级后读版本」时
-                # 同样要读（先等设备复位），不是「没发执行升级就不读」（用户口径）。
-                self._begin_reset_wait(
-                    "文件传输完成（未发送执行升级命令）",
-                    "文件传输完成（未发送执行升级命令）",
-                    "文件传输完成（未发送执行升级命令，已读升级后版本信息）")
+            self._after_blocks_ready()
             return
         if self._phase == PHASE_EXEC:
             # 执行升级已确认 ⇒ 同样先等设备复位再读升级后版本
@@ -2142,11 +2379,69 @@ class Dlt698UpgradeWidget(QWidget):
 
         现场口径：传输完成后设备不一定收全（丢包/写 flash 失败），**先校验位图再执行**
         能避免「文件不完整就进升级」把设备刷坏；失败按既有重试策略处理，用尽即停止。
+
+        **升级对象=模块时跳过这一步**（用户 2026-11-11 口径）：模块是**点对点发包升级**，
+        不支持回复「传输块状态字」位图，也不存在「文件传输流程走完还会丢包」的情形 ——
+        发了只会白等一个超时。跳过后直接走 :meth:`_after_blocks_ready`（与位图校验通过
+        后的路径**完全同一条**，不另立分支）。
         """
+        if self._is_module_target():
+            self._log("[信息] 升级对象=模块：跳过「查询传输块状态字」（F00104）—— "
+                      "模块为点对点发包升级，不回复位图，也不存在传完仍丢包的情形", "info")
+            self._after_blocks_ready()
+            return
         self._phase = PHASE_STATUS
         self._state = STATE_FINISHING
         self._log("[信息] 全部数据块已确认，先读取传输块状态字（F00104）校验完整性", "info")
         self._send_current_step()
+
+    def _send_with_gap(self) -> None:
+        """按「发包间隔」决定下一包是立刻发还是等一会儿再发。
+
+        **只用在文件传输阶段**（写文件块之间）：上一包已被确认，但设备可能还在写 flash ——
+        现场口径是「上一包刚确认就砸下一包，模块/分布式设备来不及落盘」会导致偶发写失败、
+        升级后校验不过、复位异常。间隔为 0 时**直接同步发**（与旧行为逐字一致，不多一次
+        事件循环往返，也不受「无事件循环」的测试环境影响）。
+
+        等待期间仍可被 **中止/清除** 打断：`_finish_buttons` 会停掉 ``_pkt_gap_timer``
+        （见 AGENTS 的收尾兜底清单），不会在终止后冒出一帧。
+        """
+        gap = max(0, int(self.spin_pkt_gap.value()))
+        if gap <= 0:
+            self._send_current_step()
+            return
+        self._log(f"[信息] 发包间隔 {gap}ms：等设备写盘后再发第 "
+                  f"{self._block_idx + 1}/{self._num_blocks()} 包", "info")
+        self._pkt_gap_timer.start(gap)
+
+    def _on_pkt_gap_ready(self) -> None:
+        """「发包间隔」到点 ⇒ 发下一包。
+
+        与 :meth:`_on_timeout` 同一口径：**定时器槽必须自己挡终态**（收尾路径已各自
+        `stop()`，但将来新增路径漏停时，这里也绝不能在中止/失败/完成后冒出帧）。
+        """
+        if self._state in TERMINAL_STATES:
+            return
+        self._send_current_step()
+
+    def _after_blocks_ready(self) -> None:
+        """「块已全部就绪」（位图校验通过，或模块对象跳过位图）⇒ 执行升级或直接收尾。
+
+        两条入口共用这一份：① :meth:`_begin_status_gate` 的 ``PHASE_STATUS`` 确认分支；
+        ② 模块对象在 :meth:`_begin_status_gate` 里**跳过位图**直接进来。
+        分开写会让「模块跳过」与「位图通过」的后续行为漂移（漏读升级后版本等）。
+        """
+        if self.chk_auto_exec.isChecked():
+            self._phase = PHASE_EXEC
+            self._state = STATE_FINISHING
+            self._send_current_step()
+            return
+        # **不发**执行升级命令：某些设备收全包会**自动复位升级** ⇒ 勾了「升级后读版本」时
+        # 同样要读（先等设备复位），不是「没发执行升级就不读」（用户口径）。
+        self._begin_reset_wait(
+            "文件传输完成（未发送执行升级命令）",
+            "文件传输完成（未发送执行升级命令）",
+            "文件传输完成（未发送执行升级命令，已读升级后版本信息）")
 
     def _begin_reset_wait(self, why: str, done_message: str,
                           posted_message: str) -> None:
@@ -2579,9 +2874,11 @@ class Dlt698UpgradeWidget(QWidget):
                   f"（{self._total_bytes():,} B → {self._num_blocks()} 包，"
                   f"每包超时 {self.spin_timeout.value()}ms，"
                   f"重试用尽 {self.spin_retries.value()} 次；"
+                  f"发包间隔 {self.spin_pkt_gap.value()}ms；"
                   f"升级前读版本={'是' if self.chk_read_before.isChecked() else '否'}，"
                   f"升级后读版本={'是' if self.chk_read_after.isChecked() else '否'}；"
-                  f"读版本内容={self._read_target_label()}；"
+                  f"升级对象={self._upgrade_target_label()}；"
+                  f"读版本内容={self._read_target_label() if not self._is_module_target() else '（模块：645 FF00DD01 固定命令）'}；"
                   f"提升波特率={'是' if boost else '否'}）", "info")
         if boost:
             self._send_boost_command()
@@ -2599,11 +2896,14 @@ class Dlt698UpgradeWidget(QWidget):
         self.spin_block.setEnabled(not frozen)
         self.chk_read_before.setEnabled(not frozen)
         self.chk_read_after.setEnabled(not frozen)
-        self.combo_read_target.setEnabled(not frozen)
+        # 升级对象决定读版本走哪条协议 ⇒ 传输中冻结，避免在飞的帧与后续帧不同源
+        self.combo_upgrade_target.setEnabled(not frozen)
         self.spin_read_after_delay.setEnabled(not frozen)
         self.combo_channel.setEnabled(not frozen)
         self.chk_boost_baud.setEnabled(not frozen and self._channel() == "serial")
         self.spin_boost_wait.setEnabled(not frozen)
+        self.spin_pkt_gap.setEnabled(not frozen)
+        self._update_target_ui()            # 模块对象下 OAD 下拉仍须保持禁用
 
     def _read_target_key(self) -> str:
         """当前「读版本内容」键（`common` / `internal`）；未知值回落默认。"""
@@ -2612,6 +2912,67 @@ class Dlt698UpgradeWidget(QWidget):
             if k == key:
                 return k
         return DEFAULT_READ_TARGET
+
+    # ── 升级对象（光伏设备 / 模块）──────────────────────────────────────────
+
+    def _upgrade_target_key(self) -> str:
+        """当前「升级对象」键（``pv`` / ``module``）；未知值回落默认（光伏设备）。"""
+        combo = getattr(self, "combo_upgrade_target", None)
+        key = combo.currentData() if combo is not None else None
+        for _label, k, _short in UPGRADE_TARGETS:
+            if k == key:
+                return k
+        return DEFAULT_UPGRADE_TARGET
+
+    def _is_module_target(self) -> bool:
+        """升级对象是否为**模块**（模块 ⇒ 读版本走 645 命令、分帧走 645 结构）。"""
+        return self._upgrade_target_key() == "module"
+
+    def _upgrade_target_label(self) -> str:
+        """「升级对象」下拉文案（开始日志用）。"""
+        for label, key, _short in UPGRADE_TARGETS:
+            if key == self._upgrade_target_key():
+                return label
+        return UPGRADE_TARGETS[0][0]
+
+    def _deframe_strategy(self) -> str:
+        """本页当前使用的分帧策略（**按「升级对象 × 当前阶段」**决定）。
+
+        **升级对象=模块时，只有读版本的两个阶段（``PHASE_VER_PRE`` / ``PHASE_VER_POST``）
+        切到 ``dlt645``**：那两步发的是 645 模块版本命令，应答是
+        ``68 A6 68 C L … CS 16H``（整帧 = ``L + 12``），而 698 口径按 ``L + 2``
+        （L 取第 1~2 字节）会把它算成上万字节 ⇒ 永远切不出来、当噪声重同步丢掉。
+        其余阶段（启动传输 / 写文件块 / 状态字 / 执行升级）模块对象与光伏设备一样
+        仍是 **698 文件传输**（用户确认本次只改版本读取）⇒ 必须继续用 ``dlt698_45``，
+        否则那些 698 应答会被按 645 口径切坏、整轮升级超时。
+
+        一句话：策略跟随**本步在飞的那一帧**的协议，而不是跟随对象。
+        """
+        if self._is_module_target() and self._phase in VER_PHASES:
+            return "dlt645"
+        return DEFRAME_STRATEGY
+
+    def _on_upgrade_target_changed(self) -> None:
+        """升级对象变了 ⇒ 刷新联动（OAD 下拉可用性 + 提示文案）并落盘。"""
+        self._update_target_ui()
+        self._schedule_save()
+
+    def _update_target_ui(self) -> None:
+        """按升级对象刷新控件可用性与提示（不碰状态机）。"""
+        module = self._is_module_target()
+        frozen = getattr(self, "_frozen", False)
+        combo_rt = getattr(self, "combo_read_target", None)
+        if combo_rt is not None:
+            # 模块对象下发的是**固定** 645 命令（DI=FF00DD01），OAD 选择无意义 ⇒ 禁用
+            combo_rt.setEnabled(not frozen and not module)
+        hint = getattr(self, "lbl_target_hint", None)
+        if hint is not None:
+            if module:
+                hint.setText("读版本：645 模块版本命令（DI=FF00DD01，固定条目，"
+                            "应答按 645 解析、复用 LME 条目解析器；「读版本内容」不生效）；"
+                            "块传完「跳过」查询传输块状态字位图（模块点对点发包、不回复位图）")
+            else:
+                hint.setText("读版本：698 GET-Request（OAD 由「读版本内容」决定）")
 
     def _read_oad(self, upg) -> bytes:
         """当前「读版本内容」对应的 OAD —— **协议常量只在 :mod:`dl_t698_45_upgrade` 一份**。"""
@@ -2627,7 +2988,9 @@ class Dlt698UpgradeWidget(QWidget):
         return READ_TARGETS[0][0]
 
     def _read_target_short(self) -> str:
-        """日志短名（`通用` / `内部`）。"""
+        """日志短名（`通用` / `内部`；模块对象给 `模块`）。"""
+        if self._is_module_target():
+            return UPGRADE_TARGETS[1][2]
         for _label, key, short in READ_TARGETS:
             if key == self._read_target_key():
                 return short
@@ -2753,6 +3116,7 @@ class Dlt698UpgradeWidget(QWidget):
 
     def _finish_buttons(self) -> None:
         self._boost_timer.stop()            # 还在「等设备切速」就被收尾 ⇒ 不再动共享串口速率
+        self._pkt_gap_timer.stop()          # 正在「等设备写盘」就被中止/清除 ⇒ 不再冒出一帧
         self._restore_baud("本轮已结束")    # 终态兜底：中止/失败/清除也要切回默认速率
         self._reset_timer.stop()            # 等待设备复位的倒计时一并在收尾/中止/失败时停掉
         self._reset_left = 0
@@ -2779,10 +3143,12 @@ class Dlt698UpgradeWidget(QWidget):
             "read_before": self.chk_read_before.isChecked(),
             "read_after": self.chk_read_after.isChecked(),
             "read_target": self._read_target_key(),
+            "upgrade_target": self._upgrade_target_key(),
             "read_after_delay_s": self.spin_read_after_delay.value(),
             "channel": self._channel(),
             "boost_baud": self.chk_boost_baud.isChecked(),
             "boost_wait_ms": self.spin_boost_wait.value(),
+            "pkt_gap_ms": self.spin_pkt_gap.value(),
             "sa_type": int(self.combo_sa_type.currentData()),
             "sa_logic": int(self.combo_sa_logic.currentData()),
             "sa_len": int(self.combo_sa_len.currentData()),
@@ -2855,6 +3221,8 @@ class Dlt698UpgradeWidget(QWidget):
              READ_AFTER_DELAY_MIN, READ_AFTER_DELAY_MAX),
             (self.spin_boost_wait, "boost_wait_ms", DEFAULTS["boost_wait_ms"],
              BOOST_WAIT_MS_MIN, BOOST_WAIT_MS_MAX),
+            (self.spin_pkt_gap, "pkt_gap_ms", DEFAULTS["pkt_gap_ms"],
+             PKT_GAP_MS_MIN, PKT_GAP_MS_MAX),
         ):
             spin.blockSignals(True)
             spin.setValue(_bounded_int(s[key], default, lo, hi))
@@ -2897,6 +3265,10 @@ class Dlt698UpgradeWidget(QWidget):
         target = s["read_target"] if s["read_target"] in \
             [k for _l, k, _s in READ_TARGETS] else DEFAULT_READ_TARGET
         _set_combo(self.combo_read_target, target)
+        upg_target = s["upgrade_target"] if s["upgrade_target"] in \
+            [k for _l, k, _s in UPGRADE_TARGETS] else DEFAULT_UPGRADE_TARGET
+        _set_combo(self.combo_upgrade_target, upg_target)
+        self._update_target_ui()            # 恢复后按对象刷新 OAD 下拉可用性/提示
         _set_combo(self.combo_channel,
                    s["channel"] if s["channel"] in [k for _l, k in CHANNELS]
                    else DEFAULT_CHANNEL)
@@ -2922,7 +3294,7 @@ class Dlt698UpgradeWidget(QWidget):
         # 115200 而顶部「串口配置」按默认速率说话 —— 先切回**再**摘 worker（切速要 worker 在手）。
         self._restore_baud("升级页关闭")
         for timer in (self._wait_timer, self._save_timer, self._reset_timer,
-                      self._boost_timer):
+                      self._boost_timer, self._pkt_gap_timer):
             try:
                 timer.stop()
             except RuntimeError:

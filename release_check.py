@@ -48,6 +48,10 @@ CORE_TESTS = [
     # P0 加固：原子写 / 升级回滚脚本 / 诊断包（纯逻辑 + 主程序静态守卫）
     "test/test_p0_hardening.py",
     "test/test_dl698_tolerant_parse.py",
+    # 协议8 解析级别（auto/frame/apdu/data）：OAD 开头的报文不再被硬当 68 帧拆
+    "test/test_dl698_parse_level.py",
+    # 批量导出后台线程化（62,999 帧导出 Excel 曾把主线程堵死 → 未响应）
+    "test/test_batch_export_async.py",
     "test/test_crash_handler.py",
     "test/test_github_issue.py",
     "test/test_downloader.py",
@@ -72,6 +76,8 @@ CORE_TESTS = [
     "test/test_csg_summary.py",
     "test/test_csg_batch_prefix.py",
     "test/test_csg_batch_parse_level.py",
+    # 协议9 批量：日志里 setAttenuVal: 'FE…AA0D0A' 这类测试装置控制帧必须被保留并解析
+    "test/test_csg_batch_attenu_frame.py",
     "test/test_csg_hrf_mac.py",
     "test/test_csg_link_frame_gen.py",
     "test/test_csg_frame_reverse.py",
@@ -98,6 +104,8 @@ CORE_TESTS = [
     "test/test_dlt645_status_word_bits.py",
     "test/test_dlt645_lme.py",
     "test/test_dlt645_pv_ext.py",
+    # 入网信息扩展 DI FFAA0001（双模/中继模块：入网状态/STA 地址/本节点与代理 TEI/通道角色层级/CCO 地址）
+    "test/test_dlt645_net_info_ext.py",
     # 南网光伏无线模组接口手册 V1.6（无线模组扩展 DI/控制码：频段/地址列表/拓扑/升级/在网状态）
     "test/test_dlt645_pv_wireless.py",
     # 同一手册的**组帧**方向（12 个扩展 DI 的字段模板 + 06H/86H/1EH/9EH 命令 + 组帧↔解析闭环）
@@ -180,6 +188,8 @@ CORE_TESTS = [
     "test/test_sack_fix.py",
     "test/test_monitor_deframe.py",
     "test/test_monitor_plc2_deframe.py",
+    # 协议9 收发机控制页：命令/数据帧编解码、解帧、用例 JSON、页面+流程执行（offscreen）
+    "test/test_splc_transceiver.py",
     "test/test_spectrum_model.py",
     "test/test_yw645_wire.py",
     "test/test_yw645_parse.py",
@@ -204,6 +214,7 @@ GUI_TESTS = [
     "test/test_modbus_gui.py",
     # 协议8 文件传输升级页（offscreen 假串口：逐包确认/重试/超时/中止/进度/拖放/不裁字）+ 真实 MainWindow 接线
     "test/test_dl698_upgrade_gui.py",
+    "test/test_dl698_upgrade_module_version.py",
     "test/test_dl698_upgrade_tab_wiring.py",
     # 协议8 协议测试页（按 OAD 分类的预置测试库）：附录 H 黄金组帧 + offscreen 页面 + 真实 MainWindow 接线
     "test/test_dlt698_testbench.py",

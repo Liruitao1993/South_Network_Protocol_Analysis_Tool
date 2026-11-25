@@ -112,6 +112,45 @@ def test_predicate_rejects_non_frames():
     print("[OK] 判据反例（业务帧/残片/非法入参）通过")
 
 
+def test_command_name_split_by_board_type():
+    """命令名必须按**板类型**取：两块板 0x03/0x04/0x05 语义完全不同（用户 2026-11-11 报障）。
+
+    报障现象：同是「设置衰减值」，A/B 显示「设置引脚状态/衰减器A」「设置220V电源/衰减器B」，
+    C 却只显示「衰减器C」—— 三种写法并存。根因是旧实现只有**一张**命令名表
+    （按工装板口径命名，再把 0x05 硬塞成「衰减器C」），而功能驱动板的 0x03/0x04/0x05
+    分别是设置衰减器 A/B/C 的衰减值（《通信控制协议V1.1》§3.3/§3.4/§3.5）。
+    """
+    ctor = CSGNewGenParser
+
+    # 功能驱动板 0x03/0x04/0x05 必须是同构的「设置衰减器X的衰减值」
+    names = [ctor.test_device_command_name(cmd, "function") for cmd in (0x03, 0x04, 0x05)]
+    assert names == ["设置衰减器A的衰减值", "设置衰减器B的衰减值", "设置衰减器C的衰减值"], names
+
+    # 工装板 0x03/0x04 是引脚/220V，且**没有** 0x05
+    assert ctor.test_device_command_name(0x03, "fixture") == "设置模块SET/RESET/EVENT引脚状态"
+    assert ctor.test_device_command_name(0x04, "fixture") == "设置模块工装板220V电源状态"
+    assert ctor.test_device_command_name(0x05, "fixture").startswith("未知命令")
+
+    # 不传板类型按工装板口径（向后兼容旧调用）
+    assert ctor.test_device_command_name(0x04) == ctor.test_device_command_name(0x04, "fixture")
+
+    # 端到端：功能驱动板 A/B/C 三帧的「命令名 + 摘要格式」必须同构
+    frames = {
+        "A": "FEFEFE0501030800000000000CAA0D0A",
+        "B": "FEFEFE0501040A00000000000FAA0D0A",
+        "C": "FEFEFE0501051400000000001AAA0D0A",
+    }
+    import batch_core
+    for letter, hex_frame in frames.items():
+        table = CSGNewGenParser().parse_to_table(bytes.fromhex(hex_frame))
+        cmd_row = find_field(table, "命令码")
+        assert cmd_row is not None and cmd_row[2] == f"设置衰减器{letter}的衰减值", cmd_row
+        summary = batch_core.test_device_summary(table)
+        assert summary.split(" | ")[0] == f"设置衰减器{letter}的衰减值", summary
+        assert f"衰减器{letter}衰减值=" in summary, summary
+    print("[OK] 命令名按板类型分表通过（A/B/C 摘要同构）")
+
+
 TESTS = [
     test_fixture_cco_power,
     test_fixture_220v_power,
@@ -121,6 +160,7 @@ TESTS = [
     test_reject_non_test_payload,
     test_predicate_accepts_bytes_and_hex_str,
     test_predicate_rejects_non_frames,
+    test_command_name_split_by_board_type,
 ]
 
 
